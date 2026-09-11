@@ -116,7 +116,7 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
     .getByRole("button", { name: "Approve & activate requirement" })
     .click();
   await page
-    .getByRole("button", { name: "Audit center NEW", exact: true })
+    .getByRole("button", { name: "Audit center", exact: true })
     .click();
   await page.getByLabel("Program site").selectOption("Maple House");
   await page
