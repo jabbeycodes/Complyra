@@ -1,11 +1,25 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+async function signIn(
+  page: Page,
+  email = "sarah.mitchell@evergreen.example",
+  password = "Evergreen!demo1",
+) {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
+    timeout: 10_000,
+  });
+}
 
 test("priorities open their source, require evidence, and persist completion", async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await signIn(page);
   await expect(
     page.getByRole("heading", { name: "What needs your attention 3" }),
   ).toBeVisible();
@@ -48,7 +62,7 @@ test("priorities open their source, require evidence, and persist completion", a
 test("plan approval keeps earlier versions in the document history", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await page
     .getByRole("button", { name: "Review queue 2", exact: true })
     .click();
@@ -76,7 +90,7 @@ test("plan approval keeps earlier versions in the document history", async ({
 test("new requirement is reviewed, assigned, approved, and exportable", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await page.getByRole("button", { name: "Requirements", exact: true }).click();
   await page
     .getByRole("button", { name: "Add requirement", exact: true })
@@ -131,7 +145,7 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
 test("sample plan upload creates an indexed draft without storing document bytes", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await page.getByRole("button", { name: "Documents", exact: true }).click();
   await page.getByRole("button", { name: "Add document", exact: true }).click();
   const dialog = page.getByRole("dialog");
@@ -156,7 +170,7 @@ test("sample plan upload creates an indexed draft without storing document bytes
     .click();
   await expect(page.getByRole("dialog")).toContainText("v4 draft");
   const localData = await page.evaluate(() =>
-    localStorage.getItem("complyra-demo-v1"),
+    localStorage.getItem("complyra-v2-meta"),
   );
   expect(localData).not.toContain("%PDF");
 });
@@ -164,7 +178,7 @@ test("sample plan upload creates an indexed draft without storing document bytes
 test("search and copilot answers lead to the correct sample records", async ({
   page,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await page.getByLabel("Search all requirements").fill("medication");
   await page
     .locator(".search-results")
@@ -190,7 +204,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await signIn(page);
   await page.getByLabel("Filter by site").selectOption("Cedar House");
   await expect(
     page.getByRole("heading", { name: "No overdue requirements" }),
@@ -212,4 +226,35 @@ test("site scope updates readiness and mobile navigation remains usable", async 
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("acknowledgment sheet lists assigned staff and exports one PDF", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("button", { name: /Acknowledgments/ }).click();
+  await page.getByRole("button", { name: "Jodie Williams", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "PCSP acknowledgment sheet" });
+  await expect(sheet).toContainText("Alex Morgan");
+  await expect(sheet).toContainText("Pending");
+  await expect(sheet).toContainText("Sarah Mitchell");
+  const download = page.waitForEvent("download");
+  await sheet
+    .getByRole("button", { name: "Export acknowledgment sheet" })
+    .click();
+  expect((await download).suggestedFilename()).toMatch(
+    /complyra-acknowledgment-jodie-williams/,
+  );
+});
+
+test("a DSP cannot add or approve requirements", async ({ page }) => {
+  await signIn(page, "alex.morgan@evergreen.example");
+  await expect(
+    page.getByRole("button", { name: "Add requirement", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /Acknowledgments/ }).click();
+  await page.getByRole("button", { name: "Jodie Williams", exact: true }).click();
+  await expect(
+    page.getByRole("dialog"),
+  ).toContainText("Your signature");
 });

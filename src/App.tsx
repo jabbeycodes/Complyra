@@ -33,6 +33,8 @@ import {
   ChevronRight,
   RotateCcw,
   ExternalLink,
+  PenLine,
+  LogOut,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import {
@@ -47,46 +49,16 @@ import {
   formatDate,
 } from "./components";
 import {
-  approveRequirement,
   categories,
-  completeRequirement,
   exportCsv,
-  individuals,
   metrics,
-  seedActivity,
-  seedPlans,
-  seedRequirements,
-  sites,
-  staff,
 } from "./domain";
-import type { Activity, Plan, Requirement } from "./domain";
-const STORAGE = "complyra-demo-v1";
-type Stored = {
-  requirements: Requirement[];
-  plans: Plan[];
-  activity: Activity[];
-};
-function initialState(): Stored {
-  try {
-    const raw = localStorage.getItem(STORAGE);
-    if (raw) {
-      const d = JSON.parse(raw);
-      if (
-        Array.isArray(d.requirements) &&
-        Array.isArray(d.plans) &&
-        Array.isArray(d.activity)
-      )
-        return d;
-    }
-  } catch {
-    /* Start from sample data when storage is unavailable. */
-  }
-  return {
-    requirements: seedRequirements,
-    plans: seedPlans,
-    activity: seedActivity,
-  };
-}
+import type { Plan, Requirement } from "./domain";
+import LoginScreen from "./auth/LoginScreen";
+import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
+import { useData } from "./data/DataProvider";
+import { isPrivileged } from "./data/status";
+import type { PacketDetail } from "./data/types";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
@@ -96,18 +68,26 @@ function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export default function App() {
-  const [data, setData] = useState<Stored>(initialState);
+  const {
+    session,
+    workspace,
+    loading,
+    api,
+    refresh,
+    signOut,
+    usingHostedBackend,
+  } = useData();
   const [page, setPage] = useState("Overview");
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Requirement | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
   const [toast, setToast] = useState("");
-  const [storageError, setStorageError] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [evidence, setEvidence] = useState("");
@@ -122,14 +102,6 @@ export default function App() {
   const [auditOwner, setAuditOwner] = useState("All staff");
   const [auditFrom, setAuditFrom] = useState("2026-09-01");
   const [auditTo, setAuditTo] = useState("2026-09-30");
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE, JSON.stringify(data));
-      setStorageError(false);
-    } catch {
-      setStorageError(true);
-    }
-  }, [data]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 4500);
@@ -149,6 +121,24 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  if (loading) {
+    return <div className="login-shell">Loading workspace…</div>;
+  }
+  if (!session || !workspace) {
+    return <LoginScreen />;
+  }
+  const sites = workspace.sites;
+  const individuals = workspace.individuals;
+  const staff = workspace.staff;
+  const data = {
+    requirements: workspace.requirements,
+    plans: workspace.plans,
+    activity: workspace.activity,
+  };
+  const selected = selectedId
+    ? (data.requirements.find((r) => r.id === selectedId) ?? null)
+    : null;
+  const canManage = isPrivileged(session.role);
   const scoped = data.requirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -174,24 +164,6 @@ export default function App() {
       r.due >= auditFrom &&
       r.due <= auditTo,
   );
-  const log = (
-    text: string,
-    detail: string,
-    kind: Activity["kind"],
-    d: Stored,
-  ) => ({
-    ...d,
-    activity: [
-      {
-        id: crypto.randomUUID(),
-        text,
-        detail,
-        kind,
-        time: new Date().toISOString(),
-      },
-      ...d.activity,
-    ],
-  });
   function navigate(next: string, nextStatus = "All statuses") {
     setPage(next);
     setStatus(nextStatus);
@@ -200,83 +172,30 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function selectRequirement(r: Requirement) {
-    setSelected(r);
+    setSelectedId(r.id);
     setEvidence("");
     setFormError("");
   }
   function notify(message: string) {
     setToast(message);
   }
-  function finishRequirement() {
+  async function finishRequirement() {
     if (!selected) return;
     try {
-      const requirements = completeRequirement(
-        data.requirements,
-        selected.id,
-        evidence,
-      );
-      setData(
-        log(
-          "Completion evidence recorded",
-          `${selected.owner} · ${selected.title} · ${selected.site}`,
-          "complete",
-          { ...data, requirements },
-        ),
-      );
-      setSelected(requirements.find((r) => r.id === selected.id)!);
+      await api.completeRequirement(selected.id, evidence);
+      await refresh();
       setEvidence("");
       notify("Completion saved. Your compliance overview is up to date.");
     } catch (e) {
       setFormError((e as Error).message);
     }
   }
-  function approve() {
+  async function approve() {
     if (!selected) return;
     try {
-      const requirements = approveRequirement(data.requirements, selected.id);
-      const doc = data.plans.find(
-        (p) => `${p.name} · ${p.version}` === selected.source,
-      );
-      const stillPending = requirements.some(
-        (r) => r.source === selected.source && r.status === "Pending review",
-      );
-      const plans =
-        doc && !stillPending
-          ? data.plans.map((p) =>
-              p.id === doc.id
-                ? {
-                    ...p,
-                    status: "Active" as const,
-                    version: p.version.replace(" draft", ""),
-                  }
-                : p.name === doc.name && p.status === "Active"
-                  ? { ...p, status: "Archived" as const }
-                  : p,
-            )
-          : data.plans;
-      setData(
-        log(
-          "Requirement approved",
-          `${selected.title} · Approved by Sarah Mitchell · Assigned to ${selected.owner}`,
-          "review",
-          {
-            ...data,
-            requirements:
-              doc && !stillPending
-                ? requirements.map((r) =>
-                    r.source === selected.source
-                      ? {
-                          ...r,
-                          source: `${doc.name} · ${doc.version.replace(" draft", "")}`,
-                        }
-                      : r,
-                  )
-                : requirements,
-            plans,
-          },
-        ),
-      );
-      setSelected(null);
+      await api.approveRequirement(selected.id);
+      await refresh();
+      setSelectedId(null);
       notify(
         "Requirement approved and activated. Earlier plan versions are retained.",
       );
@@ -346,6 +265,7 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
+        ["Acknowledgments", PenLine],
         ["Activity log", History],
       ],
     },
@@ -376,8 +296,8 @@ export default function App() {
             <Building2 size={20} />
           </span>
           <span>
-            <strong>Evergreen Care</strong>
-            <small>Agency workspace</small>
+            <strong>{session.agencyName}</strong>
+            <small>{usingHostedBackend ? "Hosted workspace" : "Local workspace"}</small>
           </span>
           <ChevronDown size={15} />
         </button>
@@ -400,9 +320,18 @@ export default function App() {
                         {metrics(data.requirements).review}
                       </span>
                     )}
-                  {name === "Audit center" && (
-                    <span className="nav-new">NEW</span>
-                  )}
+                  {name === "Acknowledgments" &&
+                    workspace.packets.some((p) =>
+                      p.rows.some((row) => !row.signedAt && p.packet.status === "open"),
+                    ) && (
+                      <span className="nav-count">
+                        {
+                          workspace.packets.filter((p) =>
+                            p.rows.some((row) => !row.signedAt),
+                          ).length
+                        }
+                      </span>
+                    )}
                 </button>
               ))}
             </div>
@@ -440,10 +369,10 @@ export default function App() {
             <ExternalLink size={13} />
           </button>
           <button className="profile" onClick={() => setModal("profile")}>
-            <Avatar name="Sarah Mitchell" color="peach" />
+            <Avatar name={session.fullName} color="peach" />
             <span>
-              <strong>Sarah Mitchell</strong>
-              <small>Agency administrator</small>
+              <strong>{session.fullName}</strong>
+              <small>{session.jobTitle}</small>
             </span>
             <ChevronDown size={14} />
           </button>
@@ -519,20 +448,16 @@ export default function App() {
               <Bell size={19} />
               <i />
             </button>
-            <Avatar name="Sarah Mitchell" color="peach" small />
+            <Avatar name={session.fullName} color="peach" small />
           </div>
         </header>
         <main>
-          {storageError && (
-            <div className="storage-alert">
-              Your browser couldn’t save changes. Keep this tab open to retain
-              your work.
-            </div>
-          )}
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
               activity={data.activity}
+              sites={sites}
+              individuals={individuals}
               site={site}
               onSite={setSite}
               onNavigate={navigate}
@@ -568,12 +493,14 @@ export default function App() {
                         : "Know what needs to happen, who owns it, and what proves it’s done."
                     }
                   >
-                    <button
-                      className="button primary"
-                      onClick={() => setModal("new")}
-                    >
-                      <Plus size={16} /> Add requirement
-                    </button>
+                    {canManage && (
+                      <button
+                        className="button primary"
+                        onClick={() => setModal("new")}
+                      >
+                        <Plus size={16} /> Add requirement
+                      </button>
+                    )}
                   </PageHeading>
                   <div className="tabs">
                     <button
@@ -633,12 +560,14 @@ export default function App() {
                     title="Every person. One connected record."
                     description="Care plans, responsibilities, and evidence, organized around the people you support."
                   >
+                    {canManage && (
                     <button
                       className="button"
                       onClick={() => setModal("upload")}
                     >
                       <Upload size={16} /> Add a plan
                     </button>
+                    )}
                   </PageHeading>
                   <div className="list-controls">
                     <div className="input-search">
@@ -882,12 +811,14 @@ export default function App() {
                     title="Plans change. History stays."
                     description="A connected library of current plans, draft updates, and earlier versions."
                   >
+                    {canManage && (
                     <button
                       className="button primary"
                       onClick={() => setModal("upload")}
                     >
                       <Upload size={16} /> Add document
                     </button>
+                    )}
                   </PageHeading>
                   <div className="tabs">
                     {[
@@ -1115,16 +1046,8 @@ export default function App() {
                           "complyra-sample-audit-register.csv",
                           exportCsv(auditItems),
                         );
-                        setData((d) =>
-                          log(
-                            "Audit register exported",
-                            `${site} · ${auditItems.length} requirements · ${auditFrom} to ${auditTo}`,
-                            "document",
-                            d,
-                          ),
-                        );
                         notify(
-                          "Your filtered sample audit register has been downloaded.",
+                          "Your filtered audit register has been downloaded.",
                         );
                       }}
                     >
@@ -1141,6 +1064,85 @@ export default function App() {
                       items={auditItems}
                       onSelect={selectRequirement}
                     />
+                  </section>
+                </>
+              )}
+              {page === "Acknowledgments" && (
+                <>
+                  <PageHeading
+                    eyebrow="ONE SHEET. EVERY SIGNATURE."
+                    title="PCSP acknowledgment sheets"
+                    description="Every assigned staff member appears on one sheet. Export includes blanks for anyone who has not signed."
+                  />
+                  <section className="panel">
+                    {workspace.packets.length ? (
+                      <div className="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Individual</th>
+                              <th>Document</th>
+                              <th>Signed</th>
+                              <th>Pending</th>
+                              <th>Status</th>
+                              <th />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {workspace.packets
+                              .filter(
+                                (item) =>
+                                  site === "All sites" ||
+                                  item.site.name === site,
+                              )
+                              .map((item) => (
+                                <tr key={item.packet.id}>
+                                  <td>
+                                    <button
+                                      className="table-title"
+                                      onClick={() => setPacket(item)}
+                                    >
+                                      {item.individual.fullName}
+                                    </button>
+                                    <span className="cell-sub">
+                                      DOB {formatDate(item.individual.dateOfBirth)}
+                                    </span>
+                                  </td>
+                                  <td>{item.packet.whatAcknowledging}</td>
+                                  <td>
+                                    {item.rows.filter((row) => row.signedAt).length}
+                                  </td>
+                                  <td>
+                                    {item.rows.filter((row) => !row.signedAt).length}
+                                  </td>
+                                  <td>
+                                    <Badge
+                                      status={
+                                        item.packet.status === "open"
+                                          ? "Open"
+                                          : "Archived"
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <button
+                                      className="text-button"
+                                      onClick={() => setPacket(item)}
+                                    >
+                                      Open sheet <ArrowRight size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <Empty
+                        title="No acknowledgment sheets yet"
+                        text="Approve an uploaded PCSP to build a roster from assigned staff."
+                      />
+                    )}
                   </section>
                 </>
               )}
@@ -1194,21 +1196,32 @@ export default function App() {
                     description="Agency details and the boundaries of this product preview."
                   />
                   <section className="panel settings-panel">
-                    <h2>Evergreen Care</h2>
-                    <p>Sample agency · 6 sites · 24 individuals · 18 staff</p>
+                    <h2>{session.agencyName}</h2>
+                    <p>
+                      {sites.length} sites · {individuals.length} individuals ·{" "}
+                      {staff.length} staff · {session.role.replaceAll("_", " ")}
+                    </p>
                     <div className="settings-row">
                       <span>
                         <strong>Workspace mode</strong>
-                        <small>Changes are saved only in this browser.</small>
+                        <small>
+                          {usingHostedBackend
+                            ? "Hosted Supabase Auth, RLS, and private storage."
+                            : "Schema-faithful local workspace. Add VITE_SUPABASE_URL to connect hosted backend."}
+                        </small>
                       </span>
-                      <Badge status="Demo workspace" />
+                      <Badge
+                        status={
+                          usingHostedBackend ? "Hosted backend" : "Local workspace"
+                        }
+                      />
                     </div>
                     <div className="settings-row">
                       <span>
                         <strong>Access and permissions</strong>
                         <small>
-                          Administrator preview. Authentication and role
-                          enforcement are not connected.
+                          Signed in as {session.fullName}. Role enforcement is
+                          active for this workspace.
                         </small>
                       </span>
                       <LockKeyhole size={20} />
@@ -1272,7 +1285,7 @@ export default function App() {
               ? "Review requirement"
               : "Requirement details"
           }
-          onClose={() => setSelected(null)}
+          onClose={() => setSelectedId(null)}
         >
           <div className="detail-status">
             <Badge status={selected.status} />
@@ -1322,30 +1335,35 @@ export default function App() {
                   </p>
                 </div>
               </div>
-              {!auditMode && (
+              {!auditMode && canManage && (
                 <>
                   <label className="form-label">
                     Assign responsibility
                     <select
-                      value={selected.owner}
-                      onChange={(e) => {
-                        const owner = e.target.value;
-                        const role =
-                          staff.find((s) => s.name === owner)?.role ||
-                          selected.role;
-                        setSelected({ ...selected, owner, role });
-                        setData((d) => ({
-                          ...d,
-                          requirements: d.requirements.map((r) =>
-                            r.id === selected.id ? { ...r, owner, role } : r,
-                          ),
-                        }));
+                      value={
+                        staff.find((s) => s.name === selected.owner)?.id ?? ""
+                      }
+                      onChange={async (e) => {
+                        try {
+                          await api.reassignRequirement(
+                            selected.id,
+                            e.target.value,
+                          );
+                          await refresh();
+                        } catch (err) {
+                          setFormError((err as Error).message);
+                        }
                       }}
                     >
                       {staff
-                        .filter((s) => s.site === selected.site)
+                        .filter(
+                          (s) =>
+                            s.site === selected.site || s.site === "Agency-wide",
+                        )
                         .map((s) => (
-                          <option key={s.name}>{s.name}</option>
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
                         ))}
                     </select>
                   </label>
@@ -1403,8 +1421,12 @@ export default function App() {
             <div>
               <h2>{person}</h2>
               <p>
-                {individuals.find((p) => p.name === person)?.site} · Sample
-                individual
+                {individuals.find((p) => p.name === person)?.site} · DOB{" "}
+                {individuals.find((p) => p.name === person)?.dateOfBirth
+                  ? formatDate(
+                      individuals.find((p) => p.name === person)!.dateOfBirth,
+                    )
+                  : "—"}
               </p>
             </div>
             <span className="profile-score">
@@ -1429,6 +1451,26 @@ export default function App() {
                     </small>
                   </span>
                   <Badge status={p.status} />
+                </button>
+              ))}
+          </div>
+          <h3 className="section-label">Acknowledgment sheets</h3>
+          <div className="plan-list">
+            {workspace.packets
+              .filter((item) => item.individual.fullName === person)
+              .map((item) => (
+                <button key={item.packet.id} onClick={() => setPacket(item)}>
+                  <PenLine size={18} />
+                  <span>
+                    {item.packet.whatAcknowledging}
+                    <small>
+                      {item.rows.filter((row) => row.signedAt).length}/
+                      {item.rows.length} signed
+                    </small>
+                  </span>
+                  <Badge
+                    status={item.packet.status === "open" ? "Open" : "Archived"}
+                  />
                 </button>
               ))}
           </div>
@@ -1494,26 +1536,42 @@ export default function App() {
         <CreateForm
           upload={modal === "upload"}
           onClose={() => setModal(null)}
-          onSave={(newRequirement, newPlan) => {
-            setData((d) =>
-              log(
-                newPlan ? "Document draft added" : "Requirement draft created",
-                `${newRequirement.title} · ${newRequirement.person} · Pending manager approval`,
-                "document",
-                {
-                  ...d,
-                  requirements: [newRequirement, ...d.requirements],
-                  plans: newPlan ? [newPlan, ...d.plans] : d.plans,
-                },
-              ),
-            );
+          individuals={individuals}
+          staff={staff}
+          plans={data.plans}
+          onSave={async (payload) => {
+            if (payload.file) {
+              await api.uploadDocument({
+                individualId: payload.individualId,
+                file: payload.file,
+                pageCount: payload.pageCount,
+                effectiveOn: payload.dueOn,
+                requirementTitle: payload.title,
+                category: payload.category,
+                ownerUserId: payload.ownerUserId,
+                dueOn: payload.dueOn,
+                frequency: payload.frequency,
+                sourcePage: payload.sourcePage,
+              });
+            } else {
+              await api.createRequirementDraft({
+                individualId: payload.individualId,
+                title: payload.title,
+                category: payload.category,
+                ownerUserId: payload.ownerUserId,
+                source: payload.source,
+                sourcePage: payload.sourcePage,
+                dueOn: payload.dueOn,
+                frequency: payload.frequency,
+              });
+            }
+            await refresh();
             setModal(null);
             navigate("Review queue");
             notify(
               "Draft created. Review and approve it before it becomes active.",
             );
           }}
-          plans={data.plans}
         />
       )}
       {modal === "source" && selected && (
@@ -1688,10 +1746,10 @@ export default function App() {
             </div>
           </div>
           <div className="quiet-note">
-            This is an interactive product preview using fictional data.
-            Authentication, secure storage, AI document analysis, electronic
-            signatures, and automated delivery of reminders require production
-            services. Do not enter real care or employee records.
+            This workspace uses signed-in roles, retained PDF uploads, human
+            review, and a PCSP acknowledgment sheet. AI document analysis and
+            email reminders are not connected. Do not enter real care or
+            employee records until a hosted backend with RLS is verified.
           </div>
         </Modal>
       )}
@@ -1702,20 +1760,23 @@ export default function App() {
               <Building2 size={27} />
             </span>
             <div>
-              <h2>Evergreen Care</h2>
-              <p>Fictional demonstration agency</p>
+              <h2>{session.agencyName}</h2>
+              <p>
+                {usingHostedBackend
+                  ? "Hosted agency workspace"
+                  : "Fictional demonstration agency"}
+              </p>
             </div>
             <Check size={20} />
           </div>
           <div className="agency-details">
-            <span>6 program sites</span>
-            <span>24 individuals</span>
-            <span>18 team members</span>
+            <span>{sites.length} program sites</span>
+            <span>{individuals.length} individuals</span>
+            <span>{staff.length} team members</span>
           </div>
           <p className="form-help">
-            This preview contains one sample agency. Production workspaces will
-            isolate each agency’s data and enforce access by role and assigned
-            site.
+            Each agency’s records are isolated. Access is limited by role and
+            assignment.
           </p>
           <button
             className="button full"
@@ -1732,16 +1793,18 @@ export default function App() {
       {modal === "profile" && (
         <Modal title="Your profile" onClose={() => setModal(null)}>
           <div className="profile-heading">
-            <Avatar name="Sarah Mitchell" color="peach" />
+            <Avatar name={session.fullName} color="peach" />
             <div>
-              <h2>Sarah Mitchell</h2>
-              <p>Agency administrator · Sample profile</p>
+              <h2>{session.fullName}</h2>
+              <p>
+                {session.jobTitle} · {session.email}
+              </p>
             </div>
           </div>
           <p>
-            You are exploring the administrator experience for Evergreen Care.
-            This sample account can review drafts, record completion evidence,
-            and export compliance registers.
+            You are signed in to {session.agencyName}. Your role controls who
+            you can see, what you can approve, and which acknowledgment rows you
+            may sign.
           </p>
           <button
             className="button full"
@@ -1751,6 +1814,14 @@ export default function App() {
             }}
           >
             <Settings size={16} /> Workspace settings
+          </button>
+          <button
+            className="button full"
+            onClick={async () => {
+              await signOut();
+            }}
+          >
+            <LogOut size={16} /> Sign out
           </button>
         </Modal>
       )}
@@ -1766,21 +1837,32 @@ export default function App() {
             </button>
             <button
               className="button danger"
-              onClick={() => {
-                setData({
-                  requirements: seedRequirements,
-                  plans: seedPlans,
-                  activity: seedActivity,
-                });
+              onClick={async () => {
+                await api.resetWorkspace();
+                await signOut();
                 setModal(null);
                 setSite("All sites");
-                navigate("Overview");
                 notify("The original sample workspace has been restored.");
               }}
             >
               Reset sample data
             </button>
           </div>
+        </Modal>
+      )}
+      {packet && (
+        <Modal
+          title="PCSP acknowledgment sheet"
+          onClose={() => setPacket(null)}
+          wide
+        >
+          <AcknowledgmentSheet
+            detail={
+              workspace.packets.find((item) => item.packet.id === packet.packet.id) ??
+              packet
+            }
+            onClose={() => setPacket(null)}
+          />
         </Modal>
       )}
     </div>
@@ -1790,98 +1872,92 @@ function CreateForm({
   upload,
   onClose,
   onSave,
-  plans,
+  individuals,
+  staff,
 }: {
   upload: boolean;
   onClose: () => void;
-  onSave: (r: Requirement, p?: Plan) => void;
+  individuals: { id: string; name: string; site: string }[];
+  staff: { id: string; name: string; site: string }[];
   plans: Plan[];
+  onSave: (payload: {
+    individualId: string;
+    title: string;
+    category: Requirement["category"];
+    ownerUserId: string;
+    source: string;
+    sourcePage: number;
+    dueOn: string;
+    frequency: string;
+    file?: File;
+    pageCount: number;
+  }) => Promise<void>;
 }) {
-  const [person, setPerson] = useState(individuals[0].name);
-  const p = individuals.find((p) => p.name === person)!;
+  const [personId, setPersonId] = useState(individuals[0]?.id ?? "");
+  const person = individuals.find((row) => row.id === personId) ?? individuals[0];
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [category, setCategory] = useState<Requirement["category"]>(
     "PCSP acknowledgments",
   );
   return (
     <Modal
-      title={upload ? "Add a sample plan" : "Create a requirement draft"}
+      title={upload ? "Upload a PCSP" : "Create a requirement draft"}
       onClose={onClose}
     >
       <p className="form-help">
         {upload
-          ? "Add a fictional document and describe one requirement to review. This preview records file metadata only; document analysis is not connected."
+          ? "The PDF is retained as a versioned source document. Describe one requirement for human review. AI extraction is not connected."
           : "Create a traceable draft. A manager must review and approve it before staff can record completion."}
       </p>
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
           if (upload && !file) {
-            setError("Choose a sample PDF document first.");
+            setError("Choose a PDF document first.");
             return;
           }
-          const name = `${person} · PCSP 2026`;
-          const number =
-            Math.max(
-              0,
-              ...plans
-                .filter((d) => d.name === name)
-                .map((d) => parseInt(d.version.replace("v", "")) || 0),
-            ) + 1;
-          const version = `v${number} draft`;
-          const source = upload
-            ? `${name} · ${version}`
-            : String(f.get("source"));
-          const due = String(f.get("due"));
-          const owner = String(f.get("owner"));
           const title = String(f.get("title")).trim();
+          const source = upload
+            ? `${person.name} · PCSP upload`
+            : String(f.get("source"));
           if (!title || !source.trim()) {
             setError("Enter a requirement title and source reference.");
             return;
           }
-          const requirement: Requirement = {
-            id: `REQ-${crypto.randomUUID().slice(0, 8)}`,
-            title,
-            person,
-            site: p.site,
-            category,
-            owner,
-            role: staff.find((s) => s.name === owner)?.role || "House Manager",
-            due,
-            status: "Pending review",
-            source,
-            page: Number(f.get("page")),
-            frequency: String(f.get("frequency")),
-            evidence: "",
-          };
-          const plan: Plan | undefined = upload
-            ? {
-                id: `DOC-${crypto.randomUUID().slice(0, 8)}`,
-                name,
-                person,
-                site: p.site,
-                version,
-                effective: due,
-                status: "Pending review",
-                pages: Number(f.get("pages")),
-              }
-            : undefined;
-          if (plan && requirement.page > plan.pages) {
-            setError(
-              "The source page cannot exceed the document’s page count.",
-            );
+          const pageCount = Number(f.get("pages") || 1);
+          const sourcePage = Number(f.get("page"));
+          if (upload && sourcePage > pageCount) {
+            setError("The source page cannot exceed the document’s page count.");
             return;
           }
-          onSave(requirement, plan);
+          setBusy(true);
+          try {
+            await onSave({
+              individualId: person.id,
+              title,
+              category,
+              ownerUserId: String(f.get("owner")),
+              source,
+              sourcePage,
+              dueOn: String(f.get("due")),
+              frequency: String(f.get("frequency")),
+              file: file ?? undefined,
+              pageCount,
+            });
+          } catch (err) {
+            setError((err as Error).message);
+            setBusy(false);
+          }
         }}
       >
         {upload && (
           <label className="upload-zone">
             <Upload size={25} />
-            <strong>{file ? file.name : "Choose a sample PDF"}</strong>
-            <span>Fictional documents only · PDF up to 10 MB</span>
+            <strong>{file ? file.name : "Choose a PDF"}</strong>
+            <span>Fictional documents only · PDF up to 10 MB · file is stored</span>
             <input
               aria-label="Choose sample PDF"
               type="file"
@@ -1907,9 +1983,11 @@ function CreateForm({
         )}
         <label className="form-label">
           Individual
-          <select value={person} onChange={(e) => setPerson(e.target.value)}>
-            {individuals.map((p) => (
-              <option key={p.id}>{p.name}</option>
+          <select value={personId} onChange={(e) => setPersonId(e.target.value)}>
+            {individuals.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name}
+              </option>
             ))}
           </select>
         </label>
@@ -1938,11 +2016,15 @@ function CreateForm({
           </label>
           <label className="form-label">
             Responsible person
-            <select name="owner" key={person}>
+            <select name="owner" key={personId}>
               {staff
-                .filter((s) => s.site === p.site)
+                .filter(
+                  (s) => s.site === person.site || s.site === "Agency-wide",
+                )
                 .map((s) => (
-                  <option key={s.name}>{s.name}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
             </select>
           </label>
@@ -1965,7 +2047,6 @@ function CreateForm({
               name="due"
               required
               defaultValue="2026-09-18"
-              min="2026-09-11"
             />
           </label>
           <label className="form-label">
@@ -2011,7 +2092,7 @@ function CreateForm({
             {error}
           </p>
         )}
-        <button className="button primary full" type="submit">
+        <button className="button primary full" type="submit" disabled={busy}>
           <ClipboardCheck size={17} /> Save draft for review
         </button>
       </form>

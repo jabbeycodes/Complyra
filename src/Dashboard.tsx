@@ -16,12 +16,14 @@ import {
   Activity as ActivityIcon,
   CircleCheck,
 } from "lucide-react";
-import { categories, metrics, sites, individuals } from "./domain";
+import { categories, metrics } from "./domain";
 import type { Requirement, Activity } from "./domain";
 import { Avatar, Badge, Empty } from "./components";
 interface Props {
   items: Requirement[];
   activity: Activity[];
+  sites: { name: string; address: string; color?: string }[];
+  individuals: { name: string; site: string }[];
   site: string;
   onSite: (s: string) => void;
   onNavigate: (page: string, status?: string) => void;
@@ -33,6 +35,8 @@ interface Props {
 export default function Dashboard({
   items,
   activity,
+  sites,
+  individuals,
   site,
   onSite,
   onNavigate,
@@ -82,7 +86,12 @@ export default function Dashboard({
           </label>
           <span className="scope-divider" />
           <span className="date-label">
-            <CalendarDays size={15} /> September 11, 2026
+            <CalendarDays size={15} />{" "}
+            {new Date().toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}
           </span>
         </div>
         <span className="snapshot-label">
@@ -357,7 +366,7 @@ export default function Dashboard({
                             onNavigate("Sites & programs");
                           }}
                         >
-                          <span className={`house-icon ${s.color}`}>
+                          <span className="house-icon purple">
                             <Building2 size={17} />
                           </span>
                           <span>
