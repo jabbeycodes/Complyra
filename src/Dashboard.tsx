@@ -1,0 +1,473 @@
+import {
+  ArrowUpRight,
+  ArrowRight,
+  ShieldCheck,
+  Clock3,
+  CircleAlert,
+  Files,
+  ChevronRight,
+  Sparkles,
+  Check,
+  Building2,
+  MoreHorizontal,
+  CalendarDays,
+  Download,
+  FileText,
+  Activity as ActivityIcon,
+  CircleCheck,
+} from "lucide-react";
+import { categories, metrics, sites, individuals } from "./domain";
+import type { Requirement, Activity } from "./domain";
+import { Avatar, Badge, Empty } from "./components";
+interface Props {
+  items: Requirement[];
+  activity: Activity[];
+  site: string;
+  onSite: (s: string) => void;
+  onNavigate: (page: string, status?: string) => void;
+  onRequirement: (r: Requirement) => void;
+  onExport: () => void;
+  onCopilot: () => void;
+  onActivity: () => void;
+}
+export default function Dashboard({
+  items,
+  activity,
+  site,
+  onSite,
+  onNavigate,
+  onRequirement,
+  onExport,
+  onCopilot,
+  onActivity,
+}: Props) {
+  const m = metrics(items);
+  const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
+  const visibleSites =
+    site === "All sites" ? sites : sites.filter((s) => s.name === site);
+  return (
+    <>
+      <div className="dashboard-heading">
+        <div className="eyebrow">YOUR AGENCY, AT A GLANCE</div>
+        <div className="heading-row">
+          <div>
+            <h1>
+              A little clarity. A lot of confidence
+              <span className="purple-dot">.</span>
+            </h1>
+            <p>
+              Here’s where things stand—and where you can make a difference
+              today.
+            </p>
+          </div>
+          <button className="button" onClick={onExport}>
+            <Download size={16} /> Export report
+          </button>
+        </div>
+      </div>
+      <div className="scope-row">
+        <div className="scope-controls">
+          <label className="select-shell">
+            <Building2 size={16} />
+            <select
+              aria-label="Filter by site"
+              value={site}
+              onChange={(e) => onSite(e.target.value)}
+            >
+              <option>All sites</option>
+              {sites.map((s) => (
+                <option key={s.name}>{s.name}</option>
+              ))}
+            </select>
+          </label>
+          <span className="scope-divider" />
+          <span className="date-label">
+            <CalendarDays size={15} /> September 11, 2026
+          </span>
+        </div>
+        <span className="snapshot-label">
+          <span /> Sample agency snapshot
+        </span>
+      </div>
+      <div className="readiness-banner">
+        <div className="readiness-symbol">
+          <ShieldCheck size={25} />
+        </div>
+        <div>
+          <strong>You’re building a more audit-ready agency.</strong>
+          <p>
+            {m.overdue
+              ? `${m.overdue} items need attention today. Let’s close the gaps, together.`
+              : "No overdue items in this view. Keep up the good work."}
+          </p>
+        </div>
+        <button onClick={() => onNavigate("Requirements", "Overdue")}>
+          Review priorities <ArrowRight size={16} />
+        </button>
+      </div>
+      <div className="stat-grid">
+        <button
+          className="stat-card"
+          onClick={() => onNavigate("Requirements")}
+        >
+          <div className="stat-label">
+            Overall compliance{" "}
+            <span className="stat-icon purple">
+              <ShieldCheck size={17} />
+            </span>
+          </div>
+          <div className="stat-value">
+            {m.score}
+            <span>%</span>
+            <svg
+              className="sparkline"
+              viewBox="0 0 112 36"
+              aria-label="Illustrative sample compliance trend"
+            >
+              <path d="M2 32 16 26 28 29 42 18 53 21 66 12 79 15 95 5 108 3" />
+            </svg>
+          </div>
+          <div className="stat-foot">
+            <span className="positive">
+              <Check size={13} /> {m.done} complete
+            </span>
+            <span>of {m.total} active requirements</span>
+          </div>
+        </button>
+        <button
+          className="stat-card"
+          onClick={() => onNavigate("Requirements", "Overdue")}
+        >
+          <div className="stat-label">
+            Needs attention{" "}
+            <span className="stat-icon red">
+              <CircleAlert size={17} />
+            </span>
+          </div>
+          <div className="stat-value">
+            {m.overdue.toString().padStart(2, "0")}
+            <span className="stat-descriptor">items</span>
+          </div>
+          <div className="stat-foot">
+            <span className="priority-dot" /> Overdue or expired{" "}
+            <ArrowUpRight size={14} />
+          </div>
+        </button>
+        <button
+          className="stat-card"
+          onClick={() => onNavigate("Requirements", "Due soon")}
+        >
+          <div className="stat-label">
+            Due in the next 7 days{" "}
+            <span className="stat-icon amber">
+              <Clock3 size={17} />
+            </span>
+          </div>
+          <div className="stat-value">
+            {m.dueSoon.toString().padStart(2, "0")}
+            <span className="stat-descriptor">requirements</span>
+          </div>
+          <div className="stat-foot">
+            A little action now, peace of mind later <ArrowUpRight size={14} />
+          </div>
+        </button>
+        <button
+          className="stat-card"
+          onClick={() => onNavigate("Review queue", "Pending review")}
+        >
+          <div className="stat-label">
+            Ready for your review{" "}
+            <span className="stat-icon blue">
+              <Files size={17} />
+            </span>
+          </div>
+          <div className="stat-value">
+            {m.review.toString().padStart(2, "0")}
+            <span className="stat-descriptor">requirements</span>
+          </div>
+          <div className="stat-foot">
+            <span className="review-dot" /> Your approval makes it official{" "}
+            <ArrowUpRight size={14} />
+          </div>
+        </button>
+      </div>
+      <div className="dashboard-middle">
+        <section className="panel priorities-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>
+                What needs your attention{" "}
+                <span className="count-pill">{risks.length}</span>
+              </h2>
+              <p>Small gaps today. Bigger peace of mind tomorrow.</p>
+            </div>
+            <button
+              className="text-button"
+              onClick={() => onNavigate("Requirements", "Overdue")}
+            >
+              View all <ArrowRight size={14} />
+            </button>
+          </div>
+          <div className="risk-list">
+            {risks.length ? (
+              risks.map((r, i) => (
+                <button
+                  className="risk-row"
+                  key={r.id}
+                  onClick={() => onRequirement(r)}
+                >
+                  <div className={`risk-icon ${i === 1 ? "amber" : "red"}`}>
+                    {i === 1 ? (
+                      <Clock3 size={19} />
+                    ) : i === 2 ? (
+                      <Building2 size={19} />
+                    ) : (
+                      <FileText size={19} />
+                    )}
+                  </div>
+                  <div className="risk-copy">
+                    <strong>{r.title}</strong>
+                    <span>
+                      {r.person === "Site-wide" ? r.site : r.person}{" "}
+                      <span className="dot-separator">·</span>{" "}
+                      {r.person === "Site-wide" ? r.owner : r.site}
+                    </span>
+                    <span className="risk-meta">
+                      {r.category} <span>·</span> Assigned to{" "}
+                      {r.owner.split(" ")[0]}
+                    </span>
+                  </div>
+                  <div className="risk-end">
+                    <Badge status={r.status} />
+                    <ChevronRight size={17} />
+                  </div>
+                </button>
+              ))
+            ) : (
+              <Empty
+                title="No overdue requirements"
+                text="Your team is up to date in this view."
+              />
+            )}
+          </div>
+          <div className="priority-footer">
+            <ShieldCheck size={14} /> Every action brings your agency closer to
+            audit-ready.
+          </div>
+        </section>
+        <section className="panel category-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Compliance by category</h2>
+              <p>The bigger picture, broken down.</p>
+            </div>
+            <span className="subtle-icon">
+              <ShieldCheck size={18} />
+            </span>
+          </div>
+          <div className="category-list">
+            {categories.map((category, i) => {
+              const group = items.filter((r) => r.category === category);
+              const cm = metrics(group);
+              return (
+                <button
+                  key={category}
+                  className="category-row"
+                  onClick={() => onNavigate(category)}
+                >
+                  <div>
+                    <span>{category}</span>
+                    <strong>{cm.score}%</strong>
+                  </div>
+                  <div className="progress-track">
+                    <span
+                      style={{
+                        width: `${cm.score}%`,
+                        background:
+                          i === 4
+                            ? "#daa968"
+                            : cm.score === 100
+                              ? "#69aa96"
+                              : "#9d8cce",
+                      }}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="category-key">
+            <span>
+              <i />
+              Completed
+            </span>
+            <span>
+              <i />
+              Remaining
+            </span>
+            <span>{m.total} active requirements</span>
+          </div>
+        </section>
+      </div>
+      <div className="dashboard-bottom">
+        <section className="panel sites-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>
+                A closer look at your sites{" "}
+                <span className="neutral-count">{visibleSites.length}</span>
+              </h2>
+              <p>Connected care. Consistent compliance.</p>
+            </div>
+            <button
+              className="text-button"
+              onClick={() => onNavigate("Sites & programs")}
+            >
+              View all sites <ArrowRight size={14} />
+            </button>
+          </div>
+          <div className="table-scroll">
+            <table className="sites-table">
+              <thead>
+                <tr>
+                  <th>Program site</th>
+                  <th>Individuals</th>
+                  <th>Compliance</th>
+                  <th>Attention needed</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleSites.slice(0, 4).map((s) => {
+                  const sm = metrics(items.filter((r) => r.site === s.name));
+                  return (
+                    <tr
+                      key={s.name}
+                      onClick={() => {
+                        onSite(s.name);
+                        onNavigate("Sites & programs");
+                      }}
+                    >
+                      <td>
+                        <button
+                          className="site-name"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSite(s.name);
+                            onNavigate("Sites & programs");
+                          }}
+                        >
+                          <span className={`house-icon ${s.color}`}>
+                            <Building2 size={17} />
+                          </span>
+                          <span>
+                            <strong>{s.name}</strong>
+                            <small>{s.address}</small>
+                          </span>
+                        </button>
+                      </td>
+                      <td>
+                        {individuals.filter((p) => p.site === s.name).length}{" "}
+                        individuals
+                      </td>
+                      <td>
+                        <div className="inline-progress">
+                          <span>{sm.score}%</span>
+                          <div className="progress-track">
+                            <i style={{ width: `${sm.score}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        {sm.overdue ? (
+                          <span className="site-attention">
+                            {sm.overdue} {sm.overdue === 1 ? "item" : "items"}
+                          </span>
+                        ) : (
+                          <span className="all-good">
+                            <Check size={14} /> All clear
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <ChevronRight size={15} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="panel activity-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Recent activity</h2>
+              <p>A record of care in action.</p>
+            </div>
+            <button
+              className="icon-button"
+              aria-label="View full activity timeline"
+              onClick={onActivity}
+            >
+              <MoreHorizontal size={20} />
+            </button>
+          </div>
+          <div className="activity-list">
+            {activity.slice(0, 3).map((a, i) => (
+              <div className="activity-row" key={a.id}>
+                <span
+                  className={`activity-icon ${a.kind === "complete" ? "green" : a.kind === "alert" ? "red" : "purple"}`}
+                >
+                  {a.kind === "complete" ? (
+                    <Check size={14} />
+                  ) : a.kind === "document" ? (
+                    <FileText size={14} />
+                  ) : (
+                    <ActivityIcon size={14} />
+                  )}
+                </span>
+                <div>
+                  <strong>{a.text}</strong>
+                  <p>{a.detail}</p>
+                  <small>
+                    {i === 0
+                      ? "Most recent"
+                      : new Date(a.time).toLocaleTimeString("en-US", {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                  </small>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="activity-link" onClick={onActivity}>
+            View activity log <ArrowRight size={14} />
+          </button>
+        </section>
+      </div>
+      <button className="copilot-banner" onClick={onCopilot}>
+        <span className="copilot-banner-icon">
+          <Sparkles size={21} />
+        </span>
+        <span>
+          <strong>A clearer answer is one question away.</strong>
+          <small>
+            Ask Complyra what to prioritize, what’s missing, or where to find
+            it.
+          </small>
+        </span>
+        <span className="copilot-banner-action">
+          Ask Complyra <ArrowUpRight size={17} />
+        </span>
+      </button>
+      <div className="page-footer">
+        <span>
+          <CircleCheck size={13} /> Clear responsibilities. Confident care.
+        </span>
+        <span>Made for the people who care for people.</span>
+      </div>
+    </>
+  );
+}
