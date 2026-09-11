@@ -117,7 +117,9 @@ Deno.serve(async (req) => {
     agency_id: agency.id,
     user_id: created.user.id,
     role: "administrator",
+    role_key: "administrator",
     site_id: null,
+    expires_on: null,
   });
   if (memberError) {
     return json({ error: memberError.message }, 400);

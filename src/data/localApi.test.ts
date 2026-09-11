@@ -8,6 +8,7 @@ import {
   DEMO_DSP_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE } from "./types";
+import { defaultPermissions } from "./permissions";
 import { buildAcknowledgmentPdf } from "../pdf/acknowledgmentPdf";
 
 function store() {
@@ -119,7 +120,7 @@ test("login uses agency code and username, and invited members must change the t
     fullName: "Jordan Blake",
     username: "jordan.blake",
     tempPassword: "TempPass!1",
-    role: "dsp",
+    roleKey: "dsp",
     jobTitle: "DSP",
   });
   assert.equal(invited.agencyCode, "evergreen-mo");
@@ -165,4 +166,81 @@ test("a new agency uses a state code and cannot see another tenant’s records",
   assert.equal(workspace.individuals.length, 0);
   assert.equal(workspace.staff.length, 1);
   assert.equal(workspace.staff[0].name, "Casey Nguyen");
+});
+
+test("HR does not receive individual care records", async () => {
+  const api = new LocalApi(store());
+  await api.signIn(adminLogin());
+  await api.inviteMember({
+    fullName: "Riley Hart",
+    username: "riley.hart",
+    tempPassword: "TempPass!1",
+    roleKey: "hr",
+    jobTitle: "HR coordinator",
+  });
+  await api.signOut();
+  const hr = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "riley.hart",
+    password: "TempPass!1",
+  });
+  assert.equal(hr.role, "hr");
+  assert.equal(hr.permissions["individuals.view"], false);
+  assert.equal(hr.permissions["members.invite"], true);
+  const workspace = await api.loadWorkspace(hr);
+  assert.equal(workspace.individuals.length, 0);
+  assert.equal(workspace.packets.length, 0);
+  assert.equal(workspace.plans.length, 0);
+});
+
+test("an auditor cannot approve requirements", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Jodie"),
+  )!;
+  await api.createRequirementDraft({
+    individualId: jodie.id,
+    title: "Review medication storage",
+    category: "PCSP acknowledgments",
+    ownerUserId: admin.userId,
+    source: "Jodie Williams · PCSP 2026 · v2",
+    sourcePage: 4,
+    dueOn: "2026-09-20",
+    frequency: "On plan update",
+  });
+  await api.inviteMember({
+    fullName: "Quinn Auditor",
+    username: "quinn.auditor",
+    tempPassword: "TempPass!1",
+    roleKey: "auditor",
+    expiresOn: "2026-12-31",
+  });
+  await api.signOut();
+  const auditor = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "quinn.auditor",
+    password: "TempPass!1",
+  });
+  assert.equal(auditor.permissions["audit.export"], true);
+  const draft = (await api.loadWorkspace(auditor)).requirements.find(
+    (r) => r.title === "Review medication storage",
+  )!;
+  await assert.rejects(() => api.approveRequirement(draft.id), /permission/);
+});
+
+test("an administrator can edit template access and cannot demote the last admin", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  await api.updateAgencyRole("dsp", {
+    ...defaultPermissions("dsp"),
+    "members.invite": true,
+  });
+  const workspace = await api.loadWorkspace(admin);
+  const dspRole = workspace.roles.find((row) => row.key === "dsp");
+  assert.equal(dspRole?.permissions["members.invite"], true);
+  await assert.rejects(
+    () => api.assignMemberRole(admin.userId, "dsp"),
+    /at least one agency administrator/,
+  );
 });

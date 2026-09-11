@@ -33,6 +33,16 @@ import {
   normalizeAgencyCode,
   normalizeUsername,
 } from "./types";
+import {
+  ROLE_TEMPLATES,
+  capabilityForRoleKey,
+  defaultPermissions,
+  hasPermission,
+  isRoleKey,
+  type AgencyRole,
+  type PermissionKey,
+  type PermissionMap,
+} from "./permissions";
 
 const BUCKET = "agency-documents";
 
@@ -45,7 +55,10 @@ function asRole(value: string): AppRole {
     value === "administrator" ||
     value === "compliance_admin" ||
     value === "manager" ||
-    value === "dsp"
+    value === "dsp" ||
+    value === "nurse" ||
+    value === "hr" ||
+    value === "auditor"
   ) {
     return value;
   }
@@ -143,8 +156,8 @@ export class HostedApi implements ComplyraApi {
 
   async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
     const session = await this.requireSession();
-    if (session.role !== "administrator" && session.role !== "compliance_admin") {
-      throw new Error("Only administrators can add members.");
+    if (!session.permissions["members.invite"]) {
+      throw new Error("You do not have permission to add members.");
     }
     const username = normalizeUsername(input.username);
     if (!USERNAME_PATTERN.test(username)) {
@@ -155,9 +168,10 @@ export class HostedApi implements ComplyraApi {
         username,
         tempPassword: input.tempPassword,
         fullName: input.fullName.trim(),
-        role: input.role,
+        roleKey: input.roleKey,
         jobTitle: input.jobTitle,
         siteId: input.siteId ?? null,
+        expiresOn: input.expiresOn ?? null,
       },
     });
     if (error) {
@@ -172,8 +186,78 @@ export class HostedApi implements ComplyraApi {
       username: result.username ?? username,
       agencyCode: result.agencyCode ?? session.agencyCode,
       fullName: result.fullName ?? input.fullName.trim(),
-      role: result.role ?? input.role,
+      role: result.role ?? capabilityForRoleKey(input.roleKey),
     };
+  }
+
+  async assignMemberRole(
+    userId: string,
+    roleKey: string,
+    siteId?: string | null,
+    expiresOn?: string | null,
+  ) {
+    const session = await this.requireSession();
+    if (!session.permissions["members.assign_roles"]) {
+      throw new Error("Only administrators can assign roles.");
+    }
+    if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
+    const { data: membership, error } = await this.client
+      .from("memberships")
+      .select("id, role_key, site_id")
+      .eq("user_id", userId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "Staff member not found.");
+    if (membership!.role_key === "administrator" && roleKey !== "administrator") {
+      const { count } = await this.client
+        .from("memberships")
+        .select("id", { count: "exact", head: true })
+        .eq("agency_id", session.agencyId)
+        .eq("role_key", "administrator");
+      if ((count ?? 0) < 2) {
+        throw new Error("Keep at least one agency administrator.");
+      }
+    }
+    const { error: updateError } = await this.client
+      .from("memberships")
+      .update({
+        role: capabilityForRoleKey(roleKey),
+        role_key: roleKey,
+        site_id: siteId === undefined ? membership!.site_id : siteId,
+        expires_on: expiresOn ?? null,
+      })
+      .eq("id", membership!.id);
+    throwIf(updateError, "Could not assign that role.");
+    await this.audit(
+      session,
+      "member.role_assigned",
+      `${roleLabel(roleKey)} assigned`,
+      "membership",
+      membership!.id,
+    );
+  }
+
+  async updateAgencyRole(roleKey: string, permissions: PermissionMap) {
+    const session = await this.requireSession();
+    if (!session.permissions["members.assign_roles"]) {
+      throw new Error("Only administrators can edit role access.");
+    }
+    if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
+    if (roleKey === "administrator" && !permissions["members.assign_roles"]) {
+      throw new Error("The administrator role must keep role-assignment access.");
+    }
+    const { error } = await this.client
+      .from("agency_roles")
+      .update({ permissions })
+      .eq("agency_id", session.agencyId)
+      .eq("template_key", roleKey);
+    throwIf(error, "Could not update that role.");
+    await this.audit(
+      session,
+      "role.updated",
+      `${roleLabel(roleKey)} access levels updated`,
+      "agency_role",
+    );
   }
 
   async loadWorkspace(session: SessionUser): Promise<WorkspaceView> {
@@ -190,6 +274,7 @@ export class HostedApi implements ComplyraApi {
       packetsRes,
       rowsRes,
       auditRes,
+      rolesRes,
     ] = await Promise.all([
       this.client.from("sites").select("*").eq("agency_id", agencyId),
       this.client.from("programs").select("*").eq("agency_id", agencyId),
@@ -207,6 +292,7 @@ export class HostedApi implements ComplyraApi {
         .eq("agency_id", agencyId)
         .order("created_at", { ascending: false })
         .limit(40),
+      this.client.from("agency_roles").select("*").eq("agency_id", agencyId),
     ]);
 
     for (const result of [
@@ -221,20 +307,33 @@ export class HostedApi implements ComplyraApi {
       packetsRes,
       rowsRes,
       auditRes,
+      rolesRes,
     ]) {
       throwIf(result.error, "Could not load the agency workspace.");
     }
 
+    const canViewPeople = hasPermission(session, "individuals.view");
+    const canReadAudit = hasPermission(session, "audit.read") || canViewPeople;
     const sites = (sitesRes.data ?? []).map(mapSite);
     const programs = programsRes.data ?? [];
-    const individuals = (individualsRes.data ?? []).map(mapIndividual);
+    const individuals = canViewPeople
+      ? (individualsRes.data ?? []).map(mapIndividual)
+      : [];
     const profiles = (profilesRes.data ?? []).map(mapProfile);
     const memberships = membershipsRes.data ?? [];
-    const documents = (documentsRes.data ?? []).map(mapDocument);
-    const versions = (versionsRes.data ?? []).map(mapVersion);
-    const requirements = (requirementsRes.data ?? []).map(mapRequirementRow);
-    const packets = (packetsRes.data ?? []).map(mapPacket);
-    const rows = (rowsRes.data ?? []).map(mapAckRow);
+    const documents = canViewPeople
+      ? (documentsRes.data ?? []).map(mapDocument)
+      : [];
+    const versions = canViewPeople
+      ? (versionsRes.data ?? []).map(mapVersion)
+      : [];
+    const requirements = canViewPeople
+      ? (requirementsRes.data ?? []).map(mapRequirementRow)
+      : [];
+    const packets = canViewPeople
+      ? (packetsRes.data ?? []).map(mapPacket)
+      : [];
+    const rows = canViewPeople ? (rowsRes.data ?? []).map(mapAckRow) : [];
     const profileById = Object.fromEntries(profiles.map((p) => [p.id, p]));
     const membershipByUser = Object.fromEntries(
       memberships.map((m) => [m.user_id as string, m]),
@@ -296,11 +395,19 @@ export class HostedApi implements ComplyraApi {
         return {
           id: membership.user_id as string,
           name: profile?.fullName ?? "Unknown",
-          role: roleLabel(asRole(membership.role as string), profile?.jobTitle),
+          role: roleLabel(
+            String(membership.role_key ?? membership.role),
+            profile?.jobTitle,
+          ),
           site: site?.name ?? "Agency-wide",
           email: profile?.email ?? "",
           username: profile?.username ?? "",
           appRole: asRole(membership.role as string),
+          roleKey: String(membership.role_key ?? membership.role),
+          siteId: (membership.site_id as string | null) ?? null,
+          expiresOn: membership.expires_on
+            ? String(membership.expires_on).slice(0, 10)
+            : null,
         };
       }),
       requirements: requirements.map((row) => {
@@ -351,7 +458,7 @@ export class HostedApi implements ComplyraApi {
           } satisfies Plan,
         ];
       }),
-      activity: (auditRes.data ?? []).map((event) => ({
+      activity: (canReadAudit ? auditRes.data ?? [] : []).map((event) => ({
         id: event.id as string,
         text: String(event.action).replaceAll(".", " "),
         detail: (event.detail as string) ?? "",
@@ -383,11 +490,13 @@ export class HostedApi implements ComplyraApi {
           } satisfies PacketDetail,
         ];
       }),
+      roles: mapAgencyRoles(agencyId, rolesRes.data ?? []),
     };
   }
 
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = await this.requirePrivileged();
+    this.requirePermission(session, "requirements.approve");
     const { data: individual, error: personError } = await this.client
       .from("individuals")
       .select("id, site_id, full_name")
@@ -419,6 +528,7 @@ export class HostedApi implements ComplyraApi {
 
   async approveRequirement(id: string) {
     const session = await this.requirePrivileged();
+    this.requirePermission(session, "requirements.approve");
     const { data: item, error } = await this.client
       .from("requirement_definitions")
       .select("*")
@@ -469,6 +579,7 @@ export class HostedApi implements ComplyraApi {
 
   async completeRequirement(id: string, evidence: string) {
     const session = await this.requireSession();
+    this.requirePermission(session, "requirements.complete");
     if (!evidence.trim()) throw new Error("A completion record is required.");
     const { data: item, error } = await this.client
       .from("requirement_definitions")
@@ -506,7 +617,8 @@ export class HostedApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    await this.requirePrivileged();
+    const session = await this.requirePrivileged();
+    this.requirePermission(session, "requirements.approve");
     const { error } = await this.client
       .from("requirement_definitions")
       .update({ owner_user_id: ownerUserId })
@@ -516,6 +628,7 @@ export class HostedApi implements ComplyraApi {
 
   async uploadDocument(input: UploadDocumentInput) {
     const session = await this.requirePrivileged();
+    this.requirePermission(session, "documents.upload");
     if (!input.file.name.toLowerCase().endsWith(".pdf") || input.file.size > 10 * 1024 * 1024) {
       throw new Error("Choose a PDF smaller than 10 MB.");
     }
@@ -670,6 +783,7 @@ export class HostedApi implements ComplyraApi {
 
   async addPacketSigner(packetId: string, userId: string, reason: string) {
     const session = await this.requirePrivileged();
+    this.requirePermission(session, "acknowledgments.manage");
     if (!reason.trim()) throw new Error("Add a reason for this one-off signer.");
     const { data: packet, error } = await this.client
       .from("acknowledgment_packets")
@@ -793,6 +907,12 @@ export class HostedApi implements ComplyraApi {
     return session;
   }
 
+  private requirePermission(session: SessionUser, key: PermissionKey) {
+    if (!hasPermission(session, key)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
   private async sessionFromUser(
     userId: string,
     email: string,
@@ -804,15 +924,28 @@ export class HostedApi implements ComplyraApi {
       .maybeSingle();
     const { data: membership } = await this.client
       .from("memberships")
-      .select("agency_id, role, site_id")
+      .select("agency_id, role, role_key, site_id, expires_on")
       .eq("user_id", userId)
       .maybeSingle();
     if (!profile || !membership) return null;
+    if (
+      membership.expires_on &&
+      String(membership.expires_on).slice(0, 10) < new Date().toISOString().slice(0, 10)
+    ) {
+      return null;
+    }
     const { data: agency } = await this.client
       .from("agencies")
       .select("id, name, agency_code")
       .eq("id", membership.agency_id)
       .single();
+    const roleKey = String(membership.role_key ?? membership.role);
+    const { data: agencyRole } = await this.client
+      .from("agency_roles")
+      .select("permissions")
+      .eq("agency_id", membership.agency_id)
+      .eq("template_key", roleKey)
+      .maybeSingle();
     return {
       userId: profile.id,
       email: profile.email || email,
@@ -820,11 +953,14 @@ export class HostedApi implements ComplyraApi {
       fullName: profile.full_name,
       jobTitle: profile.job_title,
       role: asRole(membership.role),
+      roleKey,
       agencyId: membership.agency_id,
       agencyName: agency?.name ?? "Agency",
       agencyCode: agency?.agency_code ?? "",
       siteId: membership.site_id,
       mustChangePassword: Boolean(profile.must_change_password),
+      expiresOn: membership.expires_on ? String(membership.expires_on).slice(0, 10) : null,
+      permissions: (agencyRole?.permissions as PermissionMap) ?? defaultPermissions(roleKey),
     };
   }
 
@@ -964,6 +1100,26 @@ function mapPacket(row: Record<string, unknown>): AcknowledgmentPacket {
     endsOn: row.ends_on ? String(row.ends_on).slice(0, 10) : null,
     status: row.status as AcknowledgmentPacket["status"],
   };
+}
+
+function mapAgencyRoles(agencyId: string, rows: Record<string, unknown>[]): AgencyRole[] {
+  if (!rows.length) {
+    return ROLE_TEMPLATES.map((template) => ({ ...template, agencyId }));
+  }
+  return rows.map((row) => {
+    const key = String(row.template_key);
+    const template = ROLE_TEMPLATES.find((item) => item.key === key);
+    return {
+      agencyId,
+      key: (template?.key ?? key) as AgencyRole["key"],
+      name: String(row.name ?? template?.name ?? key),
+      shortCode: String(row.short_code ?? template?.shortCode ?? ""),
+      description: template?.description ?? "",
+      defaultScope: (row.scope as AgencyRole["defaultScope"]) ?? template?.defaultScope ?? "assigned",
+      capability: template?.capability ?? "dsp",
+      permissions: (row.permissions as PermissionMap) ?? defaultPermissions(key),
+    };
+  });
 }
 
 function mapAckRow(row: Record<string, unknown>): AcknowledgmentRow {

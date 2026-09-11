@@ -7,6 +7,16 @@ import {
   reviewStatusLabel,
   roleLabel,
 } from "./status";
+import {
+  ROLE_TEMPLATES,
+  capabilityForRoleKey,
+  defaultPermissions,
+  hasPermission,
+  isRoleKey,
+  type AgencyRole,
+  type PermissionKey,
+  type PermissionMap,
+} from "./permissions";
 import type {
   AcknowledgmentPacket,
   AppRole,
@@ -43,6 +53,13 @@ export interface ComplyraApi {
   changePassword(currentPassword: string, nextPassword: string): Promise<void>;
   createAgency(input: CreateAgencyInput): Promise<CreateAgencyResult>;
   inviteMember(input: InviteMemberInput): Promise<InviteMemberResult>;
+  assignMemberRole(
+    userId: string,
+    roleKey: string,
+    siteId?: string | null,
+    expiresOn?: string | null,
+  ): Promise<void>;
+  updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
     individualId: string;
@@ -91,10 +108,14 @@ export interface WorkspaceView {
     name: string;
     role: string;
     site: string;
+    siteId: string | null;
     email: string;
     username: string;
     appRole: AppRole;
+    roleKey: string;
+    expiresOn: string | null;
   }[];
+  roles: AgencyRole[];
   requirements: Requirement[];
   plans: Plan[];
   activity: Activity[];
@@ -198,6 +219,15 @@ async function hydrate() {
     if (parsed?.db?.agencies?.length) {
       browserStore.db = parsed.db;
       browserStore.sessionUserId = parsed.sessionUserId;
+      for (const membership of browserStore.db.memberships) {
+        membership.roleKey = membership.roleKey ?? membership.role;
+        membership.expiresOn = membership.expiresOn ?? null;
+      }
+      if (!browserStore.db.agencyRoles?.length) {
+        browserStore.db.agencyRoles = browserStore.db.agencies.flatMap((agency) =>
+          ROLE_TEMPLATES.map((template) => ({ ...template, agencyId: agency.id })),
+        );
+      }
     }
   } catch {
     /* Keep the fictional seed if stored state cannot be read. */
@@ -220,12 +250,28 @@ function currentSession(store: MemoryStore): SessionUser | null {
     fullName: profile.fullName,
     jobTitle: profile.jobTitle,
     role: membership.role,
+    roleKey: membership.roleKey ?? membership.role,
     agencyId: agency.id,
     agencyName: agency.name,
     agencyCode: agency.agencyCode,
     siteId: membership.siteId,
     mustChangePassword: profile.mustChangePassword,
+    expiresOn: membership.expiresOn ?? null,
+    permissions: permissionsFor(store, membership.agencyId, membership.roleKey ?? membership.role),
   };
+}
+
+function permissionsFor(store: MemoryStore, agencyId: string, roleKey: string): PermissionMap {
+  const configured = (store.db.agencyRoles ?? []).find(
+    (row) => row.agencyId === agencyId && row.key === roleKey,
+  );
+  return { ...(configured?.permissions ?? defaultPermissions(roleKey)) };
+}
+
+function rolesFor(store: MemoryStore, agencyId: string): AgencyRole[] {
+  const existing = (store.db.agencyRoles ?? []).filter((row) => row.agencyId === agencyId);
+  if (existing.length) return existing;
+  return ROLE_TEMPLATES.map((template) => ({ ...template, agencyId }));
 }
 
 function assertSession(store: MemoryStore): SessionUser {
@@ -236,6 +282,12 @@ function assertSession(store: MemoryStore): SessionUser {
 
 function assertPrivileged(session: SessionUser) {
   if (!isPrivileged(session.role)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+function assertCan(session: SessionUser, key: PermissionKey) {
+  if (!hasPermission(session, key)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -427,13 +479,28 @@ function packetDetail(store: MemoryStore, packet: AcknowledgmentPacket): PacketD
 }
 
 function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
+  const canViewPeople = hasPermission(session, "individuals.view");
+  const canReadAudit =
+    hasPermission(session, "audit.read") || canViewPeople;
   const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId);
-  const individuals = store.db.individuals.filter((row) => row.agencyId === session.agencyId);
+  const individuals = canViewPeople
+    ? store.db.individuals.filter((row) => row.agencyId === session.agencyId)
+    : [];
   const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId);
-  const requirements = store.db.requirements.filter((row) => row.agencyId === session.agencyId);
-  const versions = store.db.versions.filter((row) => row.agencyId === session.agencyId);
-  const packets = store.db.packets.filter((row) => row.agencyId === session.agencyId);
-  const audit = store.db.audit.filter((row) => row.agencyId === session.agencyId);
+  const requirements = canViewPeople
+    ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)
+    : [];
+  const versions = canViewPeople
+    ? store.db.versions.filter((row) => row.agencyId === session.agencyId)
+    : [];
+  const packets = canViewPeople
+    ? store.db.packets.filter((row) => row.agencyId === session.agencyId)
+    : [];
+  const audit = canReadAudit
+    ? store.db.audit.filter((row) => row.agencyId === session.agencyId)
+    : store.db.audit.filter(
+        (row) => row.agencyId === session.agencyId && row.actorId === session.userId,
+      );
   const managerBySite = Object.fromEntries(
     memberships
       .filter((m) => m.role === "manager" && m.siteId)
@@ -484,11 +551,14 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
       return {
         id: profile.id,
         name: profile.fullName,
-        role: roleLabel(membership.role, profile.jobTitle),
+        role: roleLabel(membership.roleKey ?? membership.role, profile.jobTitle),
         site: site?.name ?? "Agency-wide",
+        siteId: membership.siteId,
         email: profile.email,
         username: profile.username,
         appRole: membership.role,
+        roleKey: membership.roleKey ?? membership.role,
+        expiresOn: membership.expiresOn ?? null,
       };
     }),
     requirements: requirements.map((row) => mapRequirement(store, row)),
@@ -508,6 +578,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
               : "document",
     })),
     packets: packets.map((packet) => packetDetail(store, packet)),
+    roles: rolesFor(store, session.agencyId),
   };
 }
 
@@ -606,12 +677,18 @@ export class LocalApi implements ComplyraApi {
       homeAgencyId: agencyId,
       mustChangePassword: true,
     });
+    this.store.db.agencyRoles = [
+      ...(this.store.db.agencyRoles ?? []),
+      ...ROLE_TEMPLATES.map((template) => ({ ...template, agencyId })),
+    ];
     this.store.db.memberships.push({
       id: crypto.randomUUID(),
       agencyId,
       userId,
       role: "administrator",
+      roleKey: "administrator",
       siteId: null,
+      expiresOn: null,
     });
     this.store.db.credentials.push({
       userId,
@@ -628,8 +705,8 @@ export class LocalApi implements ComplyraApi {
 
   async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
     const session = assertSession(this.store);
-    if (session.role !== "administrator" && session.role !== "compliance_admin") {
-      throw new Error("Only administrators can add members.");
+    if (!session.permissions["members.invite"]) {
+      throw new Error("You do not have permission to add members.");
     }
     const username = normalizeUsername(input.username);
     if (!USERNAME_PATTERN.test(username)) {
@@ -641,6 +718,7 @@ export class LocalApi implements ComplyraApi {
     if (!input.fullName.trim()) {
       throw new Error("Enter the staff member’s name.");
     }
+    if (!isRoleKey(input.roleKey)) throw new Error("Choose a valid role.");
     const taken = this.store.db.profiles.some(
       (row) =>
         row.homeAgencyId === session.agencyId &&
@@ -653,11 +731,12 @@ export class LocalApi implements ComplyraApi {
     if (!agency) throw new Error("Agency not found.");
     const userId = crypto.randomUUID();
     const email = `${username}@${agency.agencyCode.toLowerCase()}.complyra.user`;
+    const capability = capabilityForRoleKey(input.roleKey);
     this.store.db.profiles.push({
       id: userId,
       fullName: input.fullName.trim(),
       email,
-      jobTitle: input.jobTitle?.trim() || (input.role === "dsp" ? "DSP" : "Staff"),
+      jobTitle: input.jobTitle?.trim() || roleLabel(input.roleKey),
       username,
       homeAgencyId: session.agencyId,
       mustChangePassword: true,
@@ -666,8 +745,10 @@ export class LocalApi implements ComplyraApi {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
       userId,
-      role: input.role,
+      role: capability,
+      roleKey: input.roleKey,
       siteId: input.siteId ?? null,
+      expiresOn: input.expiresOn ?? null,
     });
     this.store.db.credentials.push({
       userId,
@@ -678,7 +759,7 @@ export class LocalApi implements ComplyraApi {
       this.store,
       session,
       "member.invited",
-      `${input.fullName.trim()} invited as ${input.role} · username ${username}`,
+      `${input.fullName.trim()} invited as ${input.roleKey} · username ${username}`,
       "profile",
       userId,
     );
@@ -687,8 +768,69 @@ export class LocalApi implements ComplyraApi {
       username,
       agencyCode: agency.agencyCode,
       fullName: input.fullName.trim(),
-      role: input.role,
+      role: capability,
     };
+  }
+
+  async assignMemberRole(
+    userId: string,
+    roleKey: string,
+    siteId?: string | null,
+    expiresOn?: string | null,
+  ) {
+    const session = assertSession(this.store);
+    if (!session.permissions["members.assign_roles"]) {
+      throw new Error("Only administrators can assign roles.");
+    }
+    if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
+    const membership = this.store.db.memberships.find(
+      (row) => row.userId === userId && row.agencyId === session.agencyId,
+    );
+    if (!membership) throw new Error("Staff member not found.");
+    if (
+      membership.roleKey === "administrator" &&
+      roleKey !== "administrator" &&
+      this.store.db.memberships.filter(
+        (row) => row.agencyId === session.agencyId && row.roleKey === "administrator",
+      ).length < 2
+    ) {
+      throw new Error("Keep at least one agency administrator.");
+    }
+    membership.role = capabilityForRoleKey(roleKey);
+    membership.roleKey = roleKey;
+    membership.siteId = siteId ?? membership.siteId;
+    membership.expiresOn = expiresOn ?? null;
+    log(
+      this.store,
+      session,
+      "member.role_assigned",
+      `${roleLabel(roleKey)} assigned`,
+      "membership",
+      membership.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async updateAgencyRole(roleKey: string, permissions: PermissionMap) {
+    const session = assertSession(this.store);
+    if (!session.permissions["members.assign_roles"]) {
+      throw new Error("Only administrators can edit role access.");
+    }
+    if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
+    if (roleKey === "administrator" && !permissions["members.assign_roles"]) {
+      throw new Error("The administrator role must keep role-assignment access.");
+    }
+    this.store.db.agencyRoles = rolesFor(this.store, session.agencyId).map((row) =>
+      row.key === roleKey ? { ...row, permissions: { ...permissions } } : row,
+    );
+    log(
+      this.store,
+      session,
+      "role.updated",
+      `${roleLabel(roleKey)} access levels updated`,
+      "agency_role",
+    );
+    await persistMeta(this.store);
   }
 
   async loadWorkspace(session: SessionUser) {
@@ -699,6 +841,7 @@ export class LocalApi implements ComplyraApi {
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = assertSession(this.store);
     assertPrivileged(session);
+    assertCan(session, "requirements.approve");
     const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
     if (!individual) throw new Error("Individual not found.");
     const version = this.store.db.versions.find((v) => {
@@ -733,6 +876,7 @@ export class LocalApi implements ComplyraApi {
   async approveRequirement(id: string) {
     const session = assertSession(this.store);
     assertPrivileged(session);
+    assertCan(session, "requirements.approve");
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item || item.status !== "Pending review") {
       throw new Error("Only draft requirements can be approved.");
@@ -763,6 +907,7 @@ export class LocalApi implements ComplyraApi {
 
   async completeRequirement(id: string, evidence: string) {
     const session = assertSession(this.store);
+    assertCan(session, "requirements.complete");
     if (!evidence.trim()) throw new Error("A completion record is required.");
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item) throw new Error("Requirement not found.");
@@ -793,6 +938,7 @@ export class LocalApi implements ComplyraApi {
   async reassignRequirement(id: string, ownerUserId: string) {
     const session = assertSession(this.store);
     assertPrivileged(session);
+    assertCan(session, "requirements.approve");
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item) throw new Error("Requirement not found.");
     item.ownerUserId = ownerUserId;
@@ -802,6 +948,7 @@ export class LocalApi implements ComplyraApi {
   async uploadDocument(input: UploadDocumentInput) {
     const session = assertSession(this.store);
     assertPrivileged(session);
+    assertCan(session, "documents.upload");
     if (!input.file.name.toLowerCase().endsWith(".pdf") || input.file.size > 10 * 1024 * 1024) {
       throw new Error("Choose a PDF smaller than 10 MB.");
     }
@@ -920,6 +1067,7 @@ export class LocalApi implements ComplyraApi {
   async addPacketSigner(packetId: string, userId: string, reason: string) {
     const session = assertSession(this.store);
     assertPrivileged(session);
+    assertCan(session, "acknowledgments.manage");
     if (!reason.trim()) throw new Error("Add a reason for this one-off signer.");
     const packet = this.store.db.packets.find((p) => p.id === packetId);
     if (!packet || packet.status !== "open") throw new Error("Packet not found.");

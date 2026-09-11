@@ -1,14 +1,8 @@
 import { useState } from "react";
 import { useData } from "../data/DataProvider";
-import type { AppRole, InviteMemberResult } from "../data/types";
+import { ROLE_TEMPLATES, type RoleKey } from "../data/permissions";
+import type { InviteMemberResult } from "../data/types";
 import { USERNAME_PATTERN, normalizeUsername } from "../data/types";
-
-const ROLES: { value: AppRole; label: string }[] = [
-  { value: "dsp", label: "DSP" },
-  { value: "manager", label: "House manager" },
-  { value: "compliance_admin", label: "Compliance administrator" },
-  { value: "administrator", label: "Agency administrator" },
-];
 
 export default function InviteMemberForm({
   onCreated,
@@ -19,14 +13,17 @@ export default function InviteMemberForm({
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [tempPassword, setTempPassword] = useState("");
-  const [role, setRole] = useState<AppRole>("dsp");
-  const [jobTitle, setJobTitle] = useState("DSP");
+  const [roleKey, setRoleKey] = useState<RoleKey>("dsp");
+  const [jobTitle, setJobTitle] = useState("Direct support professional");
   const [siteId, setSiteId] = useState("");
+  const [expiresOn, setExpiresOn] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<
     (InviteMemberResult & { tempPassword: string }) | null
   >(null);
+
+  const template = ROLE_TEMPLATES.find((row) => row.key === roleKey)!;
 
   if (created) {
     return (
@@ -68,6 +65,10 @@ export default function InviteMemberForm({
           setError("Username must be 3–40 characters: letters, numbers, or dots.");
           return;
         }
+        if (roleKey === "auditor" && !expiresOn) {
+          setError("Auditors need an access end date.");
+          return;
+        }
         setBusy(true);
         setError("");
         try {
@@ -75,9 +76,10 @@ export default function InviteMemberForm({
             fullName,
             username: nextUsername,
             tempPassword,
-            role,
+            roleKey,
             jobTitle,
             siteId: siteId || null,
+            expiresOn: roleKey === "auditor" ? expiresOn : null,
           });
           await refresh();
           const payload = { ...result, tempPassword };
@@ -133,14 +135,23 @@ export default function InviteMemberForm({
       </label>
       <label className="form-label">
         Role
-        <select value={role} onChange={(e) => setRole(e.target.value as AppRole)}>
-          {ROLES.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
+        <select
+          value={roleKey}
+          onChange={(e) => {
+            const next = e.target.value as RoleKey;
+            setRoleKey(next);
+            const nextTemplate = ROLE_TEMPLATES.find((row) => row.key === next);
+            if (nextTemplate) setJobTitle(nextTemplate.name);
+          }}
+        >
+          {ROLE_TEMPLATES.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.shortCode} · {option.name}
             </option>
           ))}
         </select>
       </label>
+      <p className="form-help">{template.description}</p>
       <label className="form-label">
         Job title
         <input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} />
@@ -156,6 +167,17 @@ export default function InviteMemberForm({
           ))}
         </select>
       </label>
+      {roleKey === "auditor" && (
+        <label className="form-label">
+          Access ends
+          <input
+            type="date"
+            value={expiresOn}
+            onChange={(e) => setExpiresOn(e.target.value)}
+            required
+          />
+        </label>
+      )}
       {error && (
         <p className="inline-error" role="alert">
           {error}
