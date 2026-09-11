@@ -2,17 +2,37 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
 import { createEvergreenSeed } from "./seed";
-import { DEMO_ADMIN_EMAIL, DEMO_DSP_EMAIL } from "./seed";
-import { DEMO_PASSWORD } from "./types";
+import {
+  DEMO_ADMIN_USERNAME,
+  DEMO_AGENCY_CODE,
+  DEMO_DSP_USERNAME,
+} from "./seed";
+import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE } from "./types";
 import { buildAcknowledgmentPdf } from "../pdf/acknowledgmentPdf";
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));
 }
 
+function adminLogin() {
+  return {
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  };
+}
+
+function dspLogin() {
+  return {
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  };
+}
+
 test("assigned staff appear on one acknowledgment sheet and unsigned rows stay visible", async () => {
   const api = new LocalApi(store());
-  const session = await api.signIn(DEMO_ADMIN_EMAIL, DEMO_PASSWORD);
+  const session = await api.signIn(adminLogin());
   const workspace = await api.loadWorkspace(session);
   const packet = workspace.packets.find((p) =>
     p.individual.fullName.includes("Jodie"),
@@ -30,7 +50,7 @@ test("assigned staff appear on one acknowledgment sheet and unsigned rows stay v
 
 test("staff must open the document before signing their own row", async () => {
   const api = new LocalApi(store());
-  const dsp = await api.signIn(DEMO_DSP_EMAIL, DEMO_PASSWORD);
+  const dsp = await api.signIn(dspLogin());
   const workspace = await api.loadWorkspace(dsp);
   const packet = workspace.packets.find((p) =>
     p.rows.some((row) => row.userId === dsp.userId && !row.signedAt),
@@ -52,7 +72,7 @@ test("staff must open the document before signing their own row", async () => {
 test("a DSP cannot approve a draft or sign another person's row", async () => {
   const memory = store();
   const api = new LocalApi(memory);
-  const admin = await api.signIn(DEMO_ADMIN_EMAIL, DEMO_PASSWORD);
+  const admin = await api.signIn(adminLogin());
   const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
     p.name.includes("Jodie"),
   )!;
@@ -67,7 +87,7 @@ test("a DSP cannot approve a draft or sign another person's row", async () => {
     frequency: "On plan update",
   });
   await api.signOut();
-  const dsp = await api.signIn(DEMO_DSP_EMAIL, DEMO_PASSWORD);
+  const dsp = await api.signIn(dspLogin());
   const draft = (await api.loadWorkspace(dsp)).requirements.find(
     (r) => r.title === "Review transport instructions",
   )!;
@@ -79,4 +99,45 @@ test("a DSP cannot approve a draft or sign another person's row", async () => {
     () => api.signRow(foreign.id, "No", "data:image/png;base64,aaa"),
     /own acknowledgment/,
   );
+});
+
+test("login uses agency code and username, and invited members must change the temp password", async () => {
+  const api = new LocalApi(store());
+  await assert.rejects(
+    () =>
+      api.signIn({
+        agencyCode: "EVERGREEN",
+        username: "sarah.mitchell",
+        password: "wrong",
+      }),
+    new RegExp(LOGIN_FAILED_MESSAGE),
+  );
+  const admin = await api.signIn(adminLogin());
+  assert.equal(admin.mustChangePassword, false);
+  assert.equal(admin.agencyCode, "EVERGREEN");
+  const invited = await api.inviteMember({
+    fullName: "Jordan Blake",
+    username: "jordan.blake",
+    tempPassword: "TempPass!1",
+    role: "dsp",
+    jobTitle: "DSP",
+  });
+  assert.equal(invited.agencyCode, "EVERGREEN");
+  await api.signOut();
+  const first = await api.signIn({
+    agencyCode: invited.agencyCode,
+    username: invited.username,
+    password: "TempPass!1",
+  });
+  assert.equal(first.mustChangePassword, true);
+  await api.changePassword("TempPass!1", "Jordan!own2");
+  const after = await api.getSession();
+  assert.equal(after?.mustChangePassword, false);
+  await api.signOut();
+  const again = await api.signIn({
+    agencyCode: invited.agencyCode,
+    username: invited.username,
+    password: "Jordan!own2",
+  });
+  assert.equal(again.fullName, "Jordan Blake");
 });

@@ -34,6 +34,10 @@ export function isPrivileged(role: string) {
   );
 }
 
+export function isAgencyAdmin(role: string) {
+  return role === "administrator" || role === "compliance_admin";
+}
+
 export function roleLabel(role: string, jobTitle?: string) {
   if (role === "administrator") return "Agency administrator";
   if (role === "compliance_admin") return "Compliance administrator";

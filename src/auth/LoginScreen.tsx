@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useData } from "../data/DataProvider";
-import { DEMO_ADMIN_EMAIL, DEMO_DSP_EMAIL } from "../data/seed";
+import {
+  DEMO_ADMIN_USERNAME,
+  DEMO_AGENCY_CODE,
+  DEMO_DSP_USERNAME,
+} from "../data/seed";
 import { DEMO_PASSWORD } from "../data/types";
 import { roleLabel } from "../data/status";
 
 export default function LoginScreen() {
   const { signIn, usingHostedBackend } = useData();
-  const [email, setEmail] = useState(DEMO_ADMIN_EMAIL);
+  const [agencyCode, setAgencyCode] = useState(DEMO_AGENCY_CODE);
+  const [username, setUsername] = useState(DEMO_ADMIN_USERNAME);
   const [password, setPassword] = useState(DEMO_PASSWORD);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -24,7 +29,7 @@ export default function LoginScreen() {
         <h1>Sign in to your agency workspace</h1>
         <p>
           {usingHostedBackend
-            ? "You are connected to the hosted Complyra backend."
+            ? "Use the agency code, username, and password your administrator gave you."
             : "This environment is using the schema-faithful Evergreen Care workspace. Connect VITE_SUPABASE_URL to use hosted Auth, RLS, and private storage."}
         </p>
         <form
@@ -33,7 +38,7 @@ export default function LoginScreen() {
             setBusy(true);
             setError("");
             try {
-              await signIn(email, password);
+              await signIn({ agencyCode, username, password });
             } catch (err) {
               setError((err as Error).message);
             } finally {
@@ -42,12 +47,22 @@ export default function LoginScreen() {
           }}
         >
           <label className="form-label">
-            Email
+            Agency code
             <input
-              type="email"
+              type="text"
+              autoComplete="organization"
+              value={agencyCode}
+              onChange={(e) => setAgencyCode(e.target.value.toUpperCase())}
+              required
+            />
+          </label>
+          <label className="form-label">
+            Username
+            <input
+              type="text"
               autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               required
             />
           </label>
@@ -75,22 +90,24 @@ export default function LoginScreen() {
           <button
             type="button"
             onClick={() => {
-              setEmail(DEMO_ADMIN_EMAIL);
+              setAgencyCode(DEMO_AGENCY_CODE);
+              setUsername(DEMO_ADMIN_USERNAME);
               setPassword(DEMO_PASSWORD);
             }}
           >
-            {roleLabel("administrator")} · {DEMO_ADMIN_EMAIL}
+            {roleLabel("administrator")} · {DEMO_AGENCY_CODE} / {DEMO_ADMIN_USERNAME}
           </button>
           <button
             type="button"
             onClick={() => {
-              setEmail(DEMO_DSP_EMAIL);
+              setAgencyCode(DEMO_AGENCY_CODE);
+              setUsername(DEMO_DSP_USERNAME);
               setPassword(DEMO_PASSWORD);
             }}
           >
-            DSP · {DEMO_DSP_EMAIL}
+            DSP · {DEMO_AGENCY_CODE} / {DEMO_DSP_USERNAME}
           </button>
-          <small>Password for sample accounts: {DEMO_PASSWORD}</small>
+          <small>Sample password: {DEMO_PASSWORD}</small>
         </div>
       </div>
     </div>

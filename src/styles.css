@@ -3977,6 +3977,13 @@ th {
 .login-demo strong {
   color: var(--muted);
 }
+.invite-success {
+  display: grid;
+  gap: 14px;
+}
+.invite-success dd {
+  margin: 4px 0 0;
+}
 .ack-sheet {
   display: grid;
   gap: 16px;

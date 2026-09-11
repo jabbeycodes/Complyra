@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --import tsx --test src/domain.test.ts src/data/localApi.test.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "seed:evergreen": "tsx scripts/seed-evergreen.ts",
+    "supabase:link": "bash scripts/link-and-push.sh"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

@@ -15,6 +15,7 @@ import {
   Bell,
   Sparkles,
   Plus,
+  UserPlus,
   ArrowRight,
   ArrowUpRight,
   Download,
@@ -55,9 +56,11 @@ import {
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
 import LoginScreen from "./auth/LoginScreen";
+import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
+import InviteMemberForm from "./features/InviteMemberForm";
 import { useData } from "./data/DataProvider";
-import { isPrivileged } from "./data/status";
+import { isAgencyAdmin, isPrivileged } from "./data/status";
 import type { PacketDetail } from "./data/types";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
@@ -124,8 +127,14 @@ export default function App() {
   if (loading) {
     return <div className="login-shell">Loading workspace…</div>;
   }
-  if (!session || !workspace) {
+  if (!session) {
     return <LoginScreen />;
+  }
+  if (session.mustChangePassword) {
+    return <ChangePasswordScreen />;
+  }
+  if (!workspace) {
+    return <div className="login-shell">Loading workspace…</div>;
   }
   const sites = workspace.sites;
   const individuals = workspace.individuals;
@@ -368,7 +377,11 @@ export default function App() {
             <span>Help & resources</span>
             <ExternalLink size={13} />
           </button>
-          <button className="profile" onClick={() => setModal("profile")}>
+          <button
+            className="profile"
+            aria-label="Your profile"
+            onClick={() => setModal("profile")}
+          >
             <Avatar name={session.fullName} color="peach" />
             <span>
               <strong>{session.fullName}</strong>
@@ -732,7 +745,16 @@ export default function App() {
                     eyebrow="SUPPORTED TEAMS. CONSISTENT CARE."
                     title="Your people make it possible."
                     description="Keep every staff member connected to their assigned responsibilities."
-                  />
+                  >
+                    {isAgencyAdmin(session.role) && (
+                      <button
+                        className="button primary"
+                        onClick={() => setModal("invite")}
+                      >
+                        <UserPlus size={16} /> Add member
+                      </button>
+                    )}
+                  </PageHeading>
                   <section className="panel">
                     <div className="filter-bar">
                       <div className="input-search">
@@ -751,6 +773,7 @@ export default function App() {
                         <thead>
                           <tr>
                             <th>Team member</th>
+                            <th>Username</th>
                             <th>Role</th>
                             <th>Assigned site</th>
                             <th>Open requirements</th>
@@ -774,6 +797,7 @@ export default function App() {
                                     <strong>{s.name}</strong>
                                   </span>
                                 </td>
+                                <td>{s.username || s.email}</td>
                                 <td>{s.role}</td>
                                 <td>{s.site}</td>
                                 <td>
@@ -1198,8 +1222,9 @@ export default function App() {
                   <section className="panel settings-panel">
                     <h2>{session.agencyName}</h2>
                     <p>
-                      {sites.length} sites · {individuals.length} individuals ·{" "}
-                      {staff.length} staff · {session.role.replaceAll("_", " ")}
+                      Agency code {session.agencyCode} · {sites.length} sites ·{" "}
+                      {individuals.length} individuals · {staff.length} staff ·{" "}
+                      {session.role.replaceAll("_", " ")}
                     </p>
                     <div className="settings-row">
                       <span>
@@ -1220,11 +1245,20 @@ export default function App() {
                       <span>
                         <strong>Access and permissions</strong>
                         <small>
-                          Signed in as {session.fullName}. Role enforcement is
-                          active for this workspace.
+                          Signed in as {session.fullName} ({session.username}).
+                          Role enforcement is active for this workspace.
                         </small>
                       </span>
-                      <LockKeyhole size={20} />
+                      {isAgencyAdmin(session.role) ? (
+                        <button
+                          className="button"
+                          onClick={() => setModal("invite")}
+                        >
+                          <UserPlus size={16} /> Add member
+                        </button>
+                      ) : (
+                        <LockKeyhole size={20} />
+                      )}
                     </div>
                     <div className="settings-row">
                       <span>
@@ -1246,12 +1280,14 @@ export default function App() {
                       </span>
                       <ShieldCheck size={20} />
                     </div>
-                    <button
-                      className="button danger"
-                      onClick={() => setModal("reset")}
-                    >
-                      <RotateCcw size={16} /> Reset sample workspace
-                    </button>
+                    {!usingHostedBackend && (
+                      <button
+                        className="button danger"
+                        onClick={() => setModal("reset")}
+                      >
+                        <RotateCcw size={16} /> Reset sample workspace
+                      </button>
+                    )}
                   </section>
                 </>
               )}
@@ -1797,7 +1833,7 @@ export default function App() {
             <div>
               <h2>{session.fullName}</h2>
               <p>
-                {session.jobTitle} · {session.email}
+                {session.jobTitle} · {session.username}
               </p>
             </div>
           </div>
@@ -1823,6 +1859,15 @@ export default function App() {
           >
             <LogOut size={16} /> Sign out
           </button>
+        </Modal>
+      )}
+      {modal === "invite" && (
+        <Modal title="Add a member" onClose={() => setModal(null)}>
+          <InviteMemberForm
+            onCreated={() =>
+              notify("Member account created. Share the credentials only once.")
+            }
+          />
         </Modal>
       )}
       {modal === "reset" && (

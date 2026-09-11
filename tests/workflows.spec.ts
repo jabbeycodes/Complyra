@@ -2,11 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function signIn(
   page: Page,
-  email = "sarah.mitchell@evergreen.example",
+  username = "sarah.mitchell",
   password = "Evergreen!demo1",
+  agencyCode = "EVERGREEN",
 ) {
   await page.goto("/");
-  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Agency code").fill(agencyCode);
+  await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
@@ -248,7 +250,7 @@ test("acknowledgment sheet lists assigned staff and exports one PDF", async ({
 });
 
 test("a DSP cannot add or approve requirements", async ({ page }) => {
-  await signIn(page, "alex.morgan@evergreen.example");
+  await signIn(page, "alex.morgan");
   await expect(
     page.getByRole("button", { name: "Add requirement", exact: true }),
   ).toHaveCount(0);
@@ -257,4 +259,36 @@ test("a DSP cannot add or approve requirements", async ({ page }) => {
   await expect(
     page.getByRole("dialog"),
   ).toContainText("Your signature");
+});
+
+test("an administrator adds a member who must change the temporary password", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Staff", exact: true }).click();
+  await page.getByRole("button", { name: "Add member" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a member" });
+  await dialog.getByLabel("Full name").fill("Jordan Blake");
+  await dialog.getByLabel("Username").fill("jordan.blake");
+  await dialog.getByLabel("Temporary password").fill("TempPass!1");
+  await dialog.getByRole("button", { name: "Create member account" }).click();
+  await expect(dialog).toContainText("EVERGREEN");
+  await expect(dialog).toContainText("jordan.blake");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Your profile" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Agency code").fill("EVERGREEN");
+  await page.getByLabel("Username").fill("jordan.blake");
+  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your own password" }),
+  ).toBeVisible();
+  await page.getByLabel("Temporary password").fill("TempPass!1");
+  await page.getByLabel("New password", { exact: true }).fill("Jordan!own2");
+  await page.getByLabel("Confirm new password").fill("Jordan!own2");
+  await page.getByRole("button", { name: "Save new password" }).click();
+  await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
+    timeout: 10_000,
+  });
 });

@@ -12,10 +12,19 @@ import type {
   AppRole,
   DocumentVersion,
   IndividualRecord,
+  InviteMemberInput,
+  InviteMemberResult,
+  LoginInput,
   PacketDetail,
   RequirementRecord,
   SessionUser,
   UploadDocumentInput,
+} from "./types";
+import {
+  LOGIN_FAILED_MESSAGE,
+  USERNAME_PATTERN,
+  normalizeAgencyCode,
+  normalizeUsername,
 } from "./types";
 
 const META_KEY = "complyra-v2-meta";
@@ -23,8 +32,10 @@ const FILE_PREFIX = "complyra-v2-file:";
 
 export interface ComplyraApi {
   getSession(): Promise<SessionUser | null>;
-  signIn(email: string, password: string): Promise<SessionUser>;
+  signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
+  changePassword(currentPassword: string, nextPassword: string): Promise<void>;
+  inviteMember(input: InviteMemberInput): Promise<InviteMemberResult>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
     individualId: string;
@@ -74,6 +85,7 @@ export interface WorkspaceView {
     role: string;
     site: string;
     email: string;
+    username: string;
     appRole: AppRole;
   }[];
   requirements: Requirement[];
@@ -196,12 +208,15 @@ function currentSession(store: MemoryStore): SessionUser | null {
   return {
     userId: profile.id,
     email: profile.email,
+    username: profile.username,
     fullName: profile.fullName,
     jobTitle: profile.jobTitle,
     role: membership.role,
     agencyId: agency.id,
     agencyName: agency.name,
+    agencyCode: agency.agencyCode,
     siteId: membership.siteId,
+    mustChangePassword: profile.mustChangePassword,
   };
 }
 
@@ -306,7 +321,7 @@ function assignedUserIds(store: MemoryStore, individual: IndividualRecord) {
       assignment.startsOn <= new Date().toISOString().slice(0, 10) &&
       (!assignment.endsOn || assignment.endsOn >= new Date().toISOString().slice(0, 10));
     if (!active) continue;
-    if (assignment.individualId === individual.id || assignment.siteId === individual.siteId) {
+    if (assignment.individualId === individual.id) {
       ids.add(assignment.userId);
     }
   }
@@ -454,6 +469,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         role: roleLabel(membership.role, profile.jobTitle),
         site: site?.name ?? "Agency-wide",
         email: profile.email,
+        username: profile.username,
         appRole: membership.role,
       };
     }),
@@ -485,13 +501,23 @@ export class LocalApi implements ComplyraApi {
     return currentSession(this.store);
   }
 
-  async signIn(email: string, password: string) {
+  async signIn(input: LoginInput) {
     await hydrate();
-    const credential = this.store.db.credentials.find(
-      (row) => row.email.toLowerCase() === email.trim().toLowerCase(),
+    const agencyCode = normalizeAgencyCode(input.agencyCode);
+    const username = normalizeUsername(input.username);
+    const agency = this.store.db.agencies.find(
+      (row) => row.agencyCode === agencyCode,
     );
-    if (!credential || credential.password !== password) {
-      throw new Error("That email or password is not recognized.");
+    const profile = this.store.db.profiles.find(
+      (row) =>
+        row.homeAgencyId === agency?.id &&
+        normalizeUsername(row.username) === username,
+    );
+    const credential = profile
+      ? this.store.db.credentials.find((row) => row.userId === profile.id)
+      : undefined;
+    if (!agency || !profile || !credential || credential.password !== input.password) {
+      throw new Error(LOGIN_FAILED_MESSAGE);
     }
     this.store.sessionUserId = credential.userId;
     await persistMeta(this.store);
@@ -501,6 +527,91 @@ export class LocalApi implements ComplyraApi {
   async signOut() {
     this.store.sessionUserId = null;
     await persistMeta(this.store);
+  }
+
+  async changePassword(currentPassword: string, nextPassword: string) {
+    const session = assertSession(this.store);
+    const credential = this.store.db.credentials.find(
+      (row) => row.userId === session.userId,
+    );
+    if (!credential || credential.password !== currentPassword) {
+      throw new Error("Current password is not correct.");
+    }
+    if (nextPassword.length < 8) {
+      throw new Error("New password must be at least 8 characters.");
+    }
+    if (nextPassword === currentPassword) {
+      throw new Error("Choose a new password that is different from the temporary one.");
+    }
+    credential.password = nextPassword;
+    const profile = this.store.db.profiles.find((row) => row.id === session.userId);
+    if (profile) profile.mustChangePassword = false;
+    await persistMeta(this.store);
+  }
+
+  async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
+    const session = assertSession(this.store);
+    if (session.role !== "administrator" && session.role !== "compliance_admin") {
+      throw new Error("Only administrators can add members.");
+    }
+    const username = normalizeUsername(input.username);
+    if (!USERNAME_PATTERN.test(username)) {
+      throw new Error("Username must be 3–40 characters: letters, numbers, or dots.");
+    }
+    if (input.tempPassword.length < 8) {
+      throw new Error("Temporary password must be at least 8 characters.");
+    }
+    if (!input.fullName.trim()) {
+      throw new Error("Enter the staff member’s name.");
+    }
+    const taken = this.store.db.profiles.some(
+      (row) =>
+        row.homeAgencyId === session.agencyId &&
+        normalizeUsername(row.username) === username,
+    );
+    if (taken) {
+      throw new Error("That username is already used in this agency.");
+    }
+    const agency = this.store.db.agencies.find((row) => row.id === session.agencyId);
+    if (!agency) throw new Error("Agency not found.");
+    const userId = crypto.randomUUID();
+    const email = `${username}@${agency.agencyCode.toLowerCase()}.complyra.user`;
+    this.store.db.profiles.push({
+      id: userId,
+      fullName: input.fullName.trim(),
+      email,
+      jobTitle: input.jobTitle?.trim() || (input.role === "dsp" ? "DSP" : "Staff"),
+      username,
+      homeAgencyId: session.agencyId,
+      mustChangePassword: true,
+    });
+    this.store.db.memberships.push({
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      userId,
+      role: input.role,
+      siteId: input.siteId ?? null,
+    });
+    this.store.db.credentials.push({
+      userId,
+      email,
+      password: input.tempPassword,
+    });
+    log(
+      this.store,
+      session,
+      "member.invited",
+      `${input.fullName.trim()} invited as ${input.role} · username ${username}`,
+      "profile",
+      userId,
+    );
+    await persistMeta(this.store);
+    return {
+      username,
+      agencyCode: agency.agencyCode,
+      fullName: input.fullName.trim(),
+      role: input.role,
+    };
   }
 
   async loadWorkspace(session: SessionUser) {

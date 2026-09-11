@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { createApi, type ComplyraApi, type WorkspaceView } from "./index";
-import type { SessionUser } from "./types";
+import { createApi, isSupabaseConfigured, type ComplyraApi, type WorkspaceView } from "./index";
+import type { LoginInput, SessionUser } from "./types";
 
 interface DataContextValue {
   api: ComplyraApi;
@@ -10,7 +10,8 @@ interface DataContextValue {
   loading: boolean;
   error: string;
   usingHostedBackend: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (input: LoginInput) => Promise<void>;
+  changePassword: (currentPassword: string, nextPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -19,9 +20,7 @@ const DataContext = createContext<DataContextValue | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const api = useMemo(() => createApi(), []);
-  const usingHostedBackend = Boolean(
-    import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY,
-  );
+  const usingHostedBackend = isSupabaseConfigured();
   const [session, setSession] = useState<SessionUser | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +28,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   async function refresh(nextSession?: SessionUser | null) {
     const active = nextSession === undefined ? session : nextSession;
-    if (!active) {
+    if (!active || active.mustChangePassword) {
       setWorkspace(null);
       return;
     }
@@ -44,7 +43,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const existing = await api.getSession();
         if (cancelled) return;
         setSession(existing);
-        if (existing) {
+        if (existing && !existing.mustChangePassword) {
           setWorkspace(await api.loadWorkspace(existing));
         }
       } finally {
@@ -65,11 +64,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         usingHostedBackend,
-        signIn: async (email, password) => {
+        signIn: async (input) => {
           setError("");
-          const next = await api.signIn(email, password);
+          const next = await api.signIn(input);
           setSession(next);
           await refresh(next);
+        },
+        changePassword: async (currentPassword, nextPassword) => {
+          await api.changePassword(currentPassword, nextPassword);
+          const next = session
+            ? { ...session, mustChangePassword: false }
+            : await api.getSession();
+          setSession(next);
+          if (next) await refresh(next);
         },
         signOut: async () => {
           await api.signOut();

@@ -71,6 +71,9 @@ export function createEvergreenSeed(): LocalDatabase {
     fullName: member.name,
     email: emailFor(member.name),
     jobTitle: member.role,
+    username: emailFor(member.name).split("@")[0],
+    homeAgencyId: AGENCY_ID,
+    mustChangePassword: false,
   }));
   const profileByName = Object.fromEntries(
     profiles.map((p) => [p.fullName, p]),
@@ -229,7 +232,7 @@ export function createEvergreenSeed(): LocalDatabase {
   }));
 
   return {
-    agencies: [{ id: AGENCY_ID, name: "Evergreen Care" }],
+    agencies: [{ id: AGENCY_ID, name: "Evergreen Care", agencyCode: "EVERGREEN" }],
     programs,
     sites,
     profiles,
@@ -250,5 +253,8 @@ export function createEvergreenSeed(): LocalDatabase {
   };
 }
 
+export const DEMO_AGENCY_CODE = "EVERGREEN";
 export const DEMO_ADMIN_EMAIL = emailFor("Sarah Mitchell");
 export const DEMO_DSP_EMAIL = emailFor("Alex Morgan");
+export const DEMO_ADMIN_USERNAME = DEMO_ADMIN_EMAIL.split("@")[0];
+export const DEMO_DSP_USERNAME = DEMO_DSP_EMAIL.split("@")[0];

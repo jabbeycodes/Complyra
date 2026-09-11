@@ -1,10 +1,16 @@
 -- Fictional Evergreen Care tenant for local development only.
--- Staff/auth users are created by the application seed in local mode, or in Studio for hosted Supabase.
+-- Staff Auth users are created by scripts/seed-evergreen.ts for hosted projects.
 -- Do not replace this with real individual or employee records.
 
-insert into public.agencies (id, name)
-values ('00000000-0000-4000-8000-000000000001', 'Evergreen Care')
-on conflict (id) do nothing;
+insert into public.agencies (id, name, agency_code)
+values (
+  '00000000-0000-4000-8000-000000000001',
+  'Evergreen Care',
+  'EVERGREEN'
+)
+on conflict (id) do update
+  set name = excluded.name,
+      agency_code = excluded.agency_code;
 
 insert into public.programs (id, agency_id, name)
 values

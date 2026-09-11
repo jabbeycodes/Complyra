@@ -13,6 +13,7 @@ export type PacketStatus = "open" | "archived";
 export interface Agency {
   id: string;
   name: string;
+  agencyCode: string;
 }
 
 export interface Program {
@@ -34,6 +35,9 @@ export interface Profile {
   fullName: string;
   email: string;
   jobTitle: string;
+  username: string;
+  homeAgencyId: string;
+  mustChangePassword: boolean;
 }
 
 export interface Membership {
@@ -140,12 +144,37 @@ export interface AuditEvent {
 export interface SessionUser {
   userId: string;
   email: string;
+  username: string;
   fullName: string;
   jobTitle: string;
   role: AppRole;
   agencyId: string;
   agencyName: string;
+  agencyCode: string;
   siteId: string | null;
+  mustChangePassword: boolean;
+}
+
+export interface LoginInput {
+  agencyCode: string;
+  username: string;
+  password: string;
+}
+
+export interface InviteMemberInput {
+  fullName: string;
+  username: string;
+  tempPassword: string;
+  role: AppRole;
+  jobTitle?: string;
+  siteId?: string | null;
+}
+
+export interface InviteMemberResult {
+  username: string;
+  agencyCode: string;
+  fullName: string;
+  role: AppRole;
 }
 
 export interface PacketDetail {
@@ -174,3 +203,16 @@ export interface UploadDocumentInput {
 }
 
 export const DEMO_PASSWORD = "Evergreen!demo1";
+
+export const USERNAME_PATTERN = /^[a-z0-9.]{3,40}$/;
+
+export const LOGIN_FAILED_MESSAGE =
+  "That agency code, username, or password is not recognized.";
+
+export function normalizeUsername(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function normalizeAgencyCode(value: string) {
+  return value.trim().toUpperCase();
+}
