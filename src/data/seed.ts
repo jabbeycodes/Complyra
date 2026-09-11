@@ -232,7 +232,15 @@ export function createEvergreenSeed(): LocalDatabase {
   }));
 
   return {
-    agencies: [{ id: AGENCY_ID, name: "Evergreen Care", agencyCode: "EVERGREEN" }],
+    agencies: [
+      {
+        id: AGENCY_ID,
+        name: "Evergreen Care",
+        agencyCode: "evergreen-mo",
+        stateCode: "MO",
+        provisionedBy: "platform",
+      },
+    ],
     programs,
     sites,
     profiles,
@@ -253,7 +261,7 @@ export function createEvergreenSeed(): LocalDatabase {
   };
 }
 
-export const DEMO_AGENCY_CODE = "EVERGREEN";
+export const DEMO_AGENCY_CODE = "evergreen-mo";
 export const DEMO_ADMIN_EMAIL = emailFor("Sarah Mitchell");
 export const DEMO_DSP_EMAIL = emailFor("Alex Morgan");
 export const DEMO_ADMIN_USERNAME = DEMO_ADMIN_EMAIL.split("@")[0];

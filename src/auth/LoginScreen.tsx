@@ -7,13 +7,24 @@ import {
   DEMO_DSP_USERNAME,
 } from "../data/seed";
 import { DEMO_PASSWORD } from "../data/types";
+import type { CreateAgencyResult } from "../data/types";
 import { roleLabel } from "../data/status";
 
-export default function LoginScreen() {
+export default function LoginScreen({
+  onSetup,
+  prefill,
+}: {
+  onSetup?: () => void;
+  prefill?: CreateAgencyResult | null;
+}) {
   const { signIn, usingHostedBackend } = useData();
-  const [agencyCode, setAgencyCode] = useState(DEMO_AGENCY_CODE);
-  const [username, setUsername] = useState(DEMO_ADMIN_USERNAME);
-  const [password, setPassword] = useState(DEMO_PASSWORD);
+  const [agencyCode, setAgencyCode] = useState(
+    prefill?.agencyCode ?? DEMO_AGENCY_CODE,
+  );
+  const [username, setUsername] = useState(
+    prefill?.username ?? DEMO_ADMIN_USERNAME,
+  );
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -29,8 +40,8 @@ export default function LoginScreen() {
         <h1>Sign in to your agency workspace</h1>
         <p>
           {usingHostedBackend
-            ? "Use the agency code, username, and password your administrator gave you."
-            : "This environment is using the schema-faithful Evergreen Care workspace. Connect VITE_SUPABASE_URL to use hosted Auth, RLS, and private storage."}
+            ? "Use your agency code (for example evergreen-mo), username, and password."
+            : "Local Evergreen demo is available. Hosted agencies use the same agency-code + username sign-in."}
         </p>
         <form
           onSubmit={async (e) => {
@@ -52,7 +63,8 @@ export default function LoginScreen() {
               type="text"
               autoComplete="organization"
               value={agencyCode}
-              onChange={(e) => setAgencyCode(e.target.value.toUpperCase())}
+              onChange={(e) => setAgencyCode(e.target.value.toLowerCase())}
+              placeholder="evergreen-mo"
               required
             />
           </label>
@@ -85,6 +97,11 @@ export default function LoginScreen() {
             <ShieldCheck size={17} /> {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        {onSetup && (
+          <button className="button full setup-link" type="button" onClick={onSetup}>
+            Set up an agency
+          </button>
+        )}
         <div className="login-demo">
           <strong>Fictional Evergreen Care accounts</strong>
           <button

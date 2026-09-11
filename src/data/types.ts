@@ -10,10 +10,14 @@ export type DocumentKind = "pcsp" | "isp" | "policy" | "other";
 export type ReviewStatus = "pending_review" | "active" | "archived";
 export type PacketStatus = "open" | "archived";
 
+export type AgencyProvisionedBy = "self" | "platform";
+
 export interface Agency {
   id: string;
   name: string;
   agencyCode: string;
+  stateCode: string;
+  provisionedBy?: AgencyProvisionedBy;
 }
 
 export interface Program {
@@ -177,6 +181,22 @@ export interface InviteMemberResult {
   role: AppRole;
 }
 
+export interface CreateAgencyInput {
+  name: string;
+  stateCode: string;
+  slug: string;
+  adminFullName: string;
+  adminUsername: string;
+  adminTempPassword: string;
+  provisionedBy?: AgencyProvisionedBy;
+}
+
+export interface CreateAgencyResult {
+  agencyCode: string;
+  username: string;
+  fullName: string;
+}
+
 export interface PacketDetail {
   packet: AcknowledgmentPacket;
   individual: IndividualRecord;
@@ -213,6 +233,4 @@ export function normalizeUsername(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function normalizeAgencyCode(value: string) {
-  return value.trim().toUpperCase();
-}
+export { normalizeAgencyCode } from "./agencyCode";

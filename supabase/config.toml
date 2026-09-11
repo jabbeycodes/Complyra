@@ -358,3 +358,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.invite-member]
 verify_jwt = true
+
+[functions.create-agency]
+verify_jwt = false

@@ -106,7 +106,7 @@ test("login uses agency code and username, and invited members must change the t
   await assert.rejects(
     () =>
       api.signIn({
-        agencyCode: "EVERGREEN",
+        agencyCode: "evergreen-mo",
         username: "sarah.mitchell",
         password: "wrong",
       }),
@@ -114,7 +114,7 @@ test("login uses agency code and username, and invited members must change the t
   );
   const admin = await api.signIn(adminLogin());
   assert.equal(admin.mustChangePassword, false);
-  assert.equal(admin.agencyCode, "EVERGREEN");
+  assert.equal(admin.agencyCode, "evergreen-mo");
   const invited = await api.inviteMember({
     fullName: "Jordan Blake",
     username: "jordan.blake",
@@ -122,7 +122,7 @@ test("login uses agency code and username, and invited members must change the t
     role: "dsp",
     jobTitle: "DSP",
   });
-  assert.equal(invited.agencyCode, "EVERGREEN");
+  assert.equal(invited.agencyCode, "evergreen-mo");
   await api.signOut();
   const first = await api.signIn({
     agencyCode: invited.agencyCode,
@@ -140,4 +140,29 @@ test("login uses agency code and username, and invited members must change the t
     password: "Jordan!own2",
   });
   assert.equal(again.fullName, "Jordan Blake");
+});
+
+test("a new agency uses a state code and cannot see another tenant’s records", async () => {
+  const api = new LocalApi(store());
+  const created = await api.createAgency({
+    name: "Longhorn Premier Medical Management",
+    stateCode: "CA",
+    slug: "lpmm",
+    adminFullName: "Casey Nguyen",
+    adminUsername: "casey.nguyen",
+    adminTempPassword: "TempPass!1",
+    provisionedBy: "self",
+  });
+  assert.equal(created.agencyCode, "lpmm-ca");
+  const admin = await api.signIn({
+    agencyCode: "LPMM-CA",
+    username: "casey.nguyen",
+    password: "TempPass!1",
+  });
+  assert.equal(admin.mustChangePassword, true);
+  assert.equal(admin.agencyCode, "lpmm-ca");
+  const workspace = await api.loadWorkspace(admin);
+  assert.equal(workspace.individuals.length, 0);
+  assert.equal(workspace.staff.length, 1);
+  assert.equal(workspace.staff[0].name, "Casey Nguyen");
 });

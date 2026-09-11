@@ -16,6 +16,8 @@ import type {
   DocumentRecord,
   DocumentVersion,
   IndividualRecord,
+  CreateAgencyInput,
+  CreateAgencyResult,
   InviteMemberInput,
   InviteMemberResult,
   LoginInput,
@@ -110,6 +112,33 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Could not update the password.");
     const { error: flagError } = await this.client.rpc("complete_password_change");
     throwIf(flagError, "Password was updated, but the account flag could not be cleared.");
+  }
+
+  async createAgency(input: CreateAgencyInput): Promise<CreateAgencyResult> {
+    const { data, error } = await this.client.functions.invoke("create-agency", {
+      body: {
+        name: input.name.trim(),
+        stateCode: input.stateCode,
+        slug: input.slug,
+        adminFullName: input.adminFullName.trim(),
+        adminUsername: input.adminUsername,
+        adminTempPassword: input.adminTempPassword,
+        provisionedBy: input.provisionedBy ?? "self",
+      },
+    });
+    if (error) {
+      const body = (data as { error?: string } | null)?.error;
+      throw new Error(body || error.message || "Could not create that agency.");
+    }
+    if ((data as { error?: string } | null)?.error) {
+      throw new Error((data as { error: string }).error);
+    }
+    const result = data as CreateAgencyResult;
+    return {
+      agencyCode: result.agencyCode,
+      username: result.username,
+      fullName: result.fullName,
+    };
   }
 
   async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {

@@ -4,7 +4,7 @@ async function signIn(
   page: Page,
   username = "sarah.mitchell",
   password = "Evergreen!demo1",
-  agencyCode = "EVERGREEN",
+  agencyCode = "evergreen-mo",
 ) {
   await page.goto("/");
   await page.getByLabel("Agency code").fill(agencyCode);
@@ -272,12 +272,12 @@ test("an administrator adds a member who must change the temporary password", as
   await dialog.getByLabel("Username").fill("jordan.blake");
   await dialog.getByLabel("Temporary password").fill("TempPass!1");
   await dialog.getByRole("button", { name: "Create member account" }).click();
-  await expect(dialog).toContainText("EVERGREEN");
+  await expect(dialog).toContainText("evergreen-mo");
   await expect(dialog).toContainText("jordan.blake");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByLabel("Agency code").fill("EVERGREEN");
+  await page.getByLabel("Agency code").fill("evergreen-mo");
   await page.getByLabel("Username").fill("jordan.blake");
   await page.getByLabel("Password").fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -291,4 +291,27 @@ test("an administrator adds a member who must change the temporary password", as
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
   });
+});
+
+test("an agency can set itself up with a state agency code", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Set up an agency" }).click();
+  await page.getByLabel("Agency name").fill("Maplewood Homes");
+  await page.getByLabel("Home state").selectOption("MO");
+  await page.getByLabel("Short name for the agency code").fill("maplewood");
+  await page.getByLabel("First administrator name").fill("Pat Okonkwo");
+  await page.getByLabel("Username").fill("pat.okonkwo");
+  await page.getByLabel("Temporary password").fill("TempPass!1");
+  await page.getByRole("button", { name: "Create agency" }).click();
+  await expect(page.getByRole("heading", { name: "Agency is ready" })).toBeVisible();
+  await expect(page.getByText("maplewood-mo", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Continue to sign in" }).click();
+  await expect(page.getByLabel("Agency code")).toHaveValue("maplewood-mo");
+  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your own password" }),
+  ).toBeVisible();
 });

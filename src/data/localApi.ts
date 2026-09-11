@@ -12,6 +12,8 @@ import type {
   AppRole,
   DocumentVersion,
   IndividualRecord,
+  CreateAgencyInput,
+  CreateAgencyResult,
   InviteMemberInput,
   InviteMemberResult,
   LoginInput,
@@ -26,6 +28,10 @@ import {
   normalizeAgencyCode,
   normalizeUsername,
 } from "./types";
+import {
+  buildAgencyCode,
+  validateAgencyCodeParts,
+} from "./agencyCode";
 
 const META_KEY = "complyra-v2-meta";
 const FILE_PREFIX = "complyra-v2-file:";
@@ -35,6 +41,7 @@ export interface ComplyraApi {
   signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
   changePassword(currentPassword: string, nextPassword: string): Promise<void>;
+  createAgency(input: CreateAgencyInput): Promise<CreateAgencyResult>;
   inviteMember(input: InviteMemberInput): Promise<InviteMemberResult>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
@@ -203,8 +210,9 @@ function currentSession(store: MemoryStore): SessionUser | null {
   const membership = store.db.memberships.find(
     (m) => m.userId === store.sessionUserId,
   );
-  const agency = store.db.agencies[0];
-  if (!profile || !membership || !agency) return null;
+  if (!profile || !membership) return null;
+  const agency = store.db.agencies.find((row) => row.id === membership.agencyId);
+  if (!agency) return null;
   return {
     userId: profile.id,
     email: profile.email,
@@ -419,38 +427,48 @@ function packetDetail(store: MemoryStore, packet: AcknowledgmentPacket): PacketD
 }
 
 function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId);
+  const individuals = store.db.individuals.filter((row) => row.agencyId === session.agencyId);
+  const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId);
+  const requirements = store.db.requirements.filter((row) => row.agencyId === session.agencyId);
+  const versions = store.db.versions.filter((row) => row.agencyId === session.agencyId);
+  const packets = store.db.packets.filter((row) => row.agencyId === session.agencyId);
+  const audit = store.db.audit.filter((row) => row.agencyId === session.agencyId);
   const managerBySite = Object.fromEntries(
-    store.db.memberships
+    memberships
       .filter((m) => m.role === "manager" && m.siteId)
       .map((m) => {
         const profile = store.db.profiles.find((p) => p.id === m.userId)!;
         return [m.siteId as string, profile.fullName];
       }),
   );
-  const sarah = store.db.profiles.find((p) => p.fullName === "Sarah Mitchell");
+  const fallbackManager =
+    store.db.profiles.find(
+      (p) => memberships.find((m) => m.userId === p.id)?.role === "administrator",
+    )?.fullName ?? session.fullName;
   const colors = ["purple", "green", "peach", "blue"];
   return {
     session,
-    sites: store.db.sites.map((site, i) => ({
+    sites: sites.map((site, i) => ({
       id: site.id,
       name: site.name,
       address: site.address,
       program: store.db.programs.find((p) => p.id === site.programId)?.name ?? "",
-      manager: managerBySite[site.id] ?? sarah?.fullName ?? "Unassigned",
+      manager: managerBySite[site.id] ?? fallbackManager,
       color: ["purple", "green", "peach", "blue", "pink", "green"][i % 6],
-      initials: (managerBySite[site.id] ?? "SM")
+      initials: (managerBySite[site.id] ?? fallbackManager)
         .split(" ")
         .map((part) => part[0])
         .join(""),
     })),
-    individuals: store.db.individuals.map((person, i) => {
-      const site = store.db.sites.find((s) => s.id === person.siteId)!;
+    individuals: individuals.map((person, i) => {
+      const site = sites.find((s) => s.id === person.siteId)!;
       return {
         id: person.id,
         name: person.fullName,
-        site: site.name,
+        site: site?.name ?? "Unknown site",
         dateOfBirth: person.dateOfBirth,
-        manager: managerBySite[person.siteId] ?? sarah?.fullName ?? "Unassigned",
+        manager: managerBySite[person.siteId] ?? fallbackManager,
         initials: person.fullName
           .split(" ")
           .map((part) => part[0])
@@ -458,10 +476,10 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         color: colors[i % 4],
       };
     }),
-    staff: store.db.profiles.map((profile) => {
-      const membership = store.db.memberships.find((m) => m.userId === profile.id)!;
+    staff: memberships.map((membership) => {
+      const profile = store.db.profiles.find((p) => p.id === membership.userId)!;
       const site = membership.siteId
-        ? store.db.sites.find((s) => s.id === membership.siteId)
+        ? sites.find((s) => s.id === membership.siteId)
         : undefined;
       return {
         id: profile.id,
@@ -473,9 +491,9 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         appRole: membership.role,
       };
     }),
-    requirements: store.db.requirements.map((row) => mapRequirement(store, row)),
-    plans: store.db.versions.map((version) => mapPlan(store, version)),
-    activity: store.db.audit.map((event) => ({
+    requirements: requirements.map((row) => mapRequirement(store, row)),
+    plans: versions.map((version) => mapPlan(store, version)),
+    activity: audit.map((event) => ({
       id: event.id,
       text: event.action.replaceAll(".", " "),
       detail: event.detail,
@@ -489,7 +507,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
               ? "alert"
               : "document",
     })),
-    packets: store.db.packets.map((packet) => packetDetail(store, packet)),
+    packets: packets.map((packet) => packetDetail(store, packet)),
   };
 }
 
@@ -547,6 +565,65 @@ export class LocalApi implements ComplyraApi {
     const profile = this.store.db.profiles.find((row) => row.id === session.userId);
     if (profile) profile.mustChangePassword = false;
     await persistMeta(this.store);
+  }
+
+  async createAgency(input: CreateAgencyInput): Promise<CreateAgencyResult> {
+    await hydrate();
+    const name = input.name.trim();
+    if (!name) throw new Error("Enter the agency name.");
+    const invalid = validateAgencyCodeParts(input.slug, input.stateCode);
+    if (invalid) throw new Error(invalid);
+    const agencyCode = buildAgencyCode(input.slug, input.stateCode);
+    if (this.store.db.agencies.some((row) => row.agencyCode === agencyCode)) {
+      throw new Error("That agency code is already in use. Try a different short name.");
+    }
+    const username = normalizeUsername(input.adminUsername);
+    if (!USERNAME_PATTERN.test(username)) {
+      throw new Error("Username must be 3–40 characters: letters, numbers, or dots.");
+    }
+    if (input.adminTempPassword.length < 8) {
+      throw new Error("Temporary password must be at least 8 characters.");
+    }
+    if (!input.adminFullName.trim()) {
+      throw new Error("Enter the first administrator’s name.");
+    }
+    const agencyId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const email = `${username}@${agencyCode}.complyra.user`;
+    this.store.db.agencies.push({
+      id: agencyId,
+      name,
+      agencyCode,
+      stateCode: input.stateCode.trim().toUpperCase(),
+      provisionedBy: input.provisionedBy ?? "self",
+    });
+    this.store.db.profiles.push({
+      id: userId,
+      fullName: input.adminFullName.trim(),
+      email,
+      jobTitle: "Agency administrator",
+      username,
+      homeAgencyId: agencyId,
+      mustChangePassword: true,
+    });
+    this.store.db.memberships.push({
+      id: crypto.randomUUID(),
+      agencyId,
+      userId,
+      role: "administrator",
+      siteId: null,
+    });
+    this.store.db.credentials.push({
+      userId,
+      email,
+      password: input.adminTempPassword,
+    });
+    await persistMeta(this.store);
+    return {
+      agencyCode,
+      username,
+      fullName: input.adminFullName.trim(),
+    };
   }
 
   async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {

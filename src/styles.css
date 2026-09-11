@@ -3977,6 +3977,28 @@ th {
 .login-demo strong {
   color: var(--muted);
 }
+.setup-who {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px 14px;
+  margin-bottom: 16px;
+  display: grid;
+  gap: 8px;
+}
+.setup-who legend {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.setup-who label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 14px;
+}
+.setup-link {
+  margin-top: 12px;
+}
 .invite-success {
   display: grid;
   gap: 14px;

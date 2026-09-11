@@ -55,7 +55,7 @@ import {
   metrics,
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
-import LoginScreen from "./auth/LoginScreen";
+import AuthEntry from "./auth/AuthEntry";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -135,7 +135,7 @@ export default function App() {
     return <div className="login-shell">Loading workspace…</div>;
   }
   if (!session) {
-    return <LoginScreen />;
+    return <AuthEntry />;
   }
   if (session.mustChangePassword) {
     return <ChangePasswordScreen />;
@@ -1233,6 +1233,16 @@ export default function App() {
                       {individuals.length} individuals · {staff.length} staff ·{" "}
                       {session.role.replaceAll("_", " ")}
                     </p>
+                    <div className="settings-row">
+                      <span>
+                        <strong>Agency code</strong>
+                        <small>
+                          {session.agencyCode} is how every staff member signs
+                          in. It cannot be changed after setup.
+                        </small>
+                      </span>
+                      <Badge status={session.agencyCode} />
+                    </div>
                     <div className="settings-row">
                       <span>
                         <strong>Workspace mode</strong>
