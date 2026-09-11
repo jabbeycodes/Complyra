@@ -111,6 +111,13 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
   useEffect(() => {
+    setModal(null);
+    setPacket(null);
+    setSelectedId(null);
+    setPerson(null);
+    setPlan(null);
+  }, [session?.userId]);
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
