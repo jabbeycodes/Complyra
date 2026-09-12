@@ -305,6 +305,7 @@ export default function Dashboard({
                       type="button"
                       key={s.id || s.name}
                       className={`site-score-card ${scoreTone(sm.score, sm.overdue)}${selected ? " selected" : ""}`}
+                      aria-label={`${s.name} compliance ${sm.score} percent`}
                       onClick={() => onSite(selected ? "All sites" : s.name)}
                     >
                       <div className="site-score-top">
