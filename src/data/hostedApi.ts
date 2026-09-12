@@ -1000,6 +1000,9 @@ export class HostedApi implements ComplyraApi {
   async signTrainingChecklist() {
     throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
   }
+  async initialTrainingLine() {
+    throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
+  }
   async createSite(): Promise<{ id: string }> {
     throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");
   }

@@ -62,6 +62,7 @@ import {
   type PlanStackView,
 } from "./planStack";
 import {
+  allLinesInitialed,
   applyDailyMedDrop,
   canLogPrnDose,
   canRecordDelivery,
@@ -200,6 +201,7 @@ export interface ComplyraApi {
     role: "staff" | "hm",
     signatureName: string,
   ): Promise<void>;
+  initialTrainingLine(checklistId: string, lineId: string): Promise<void>;
   resetWorkspace(): Promise<void>;
   createSite(input: {
     name: string;
@@ -611,19 +613,26 @@ async function saveChartFile(
   return id;
 }
 
-function homeStaff(store: MemoryStore, person: IndividualRecord) {
-  const assigned = store.db.assignments
-    .filter((row) => row.individualId === person.id && !row.endsOn)
-    .map((row) => row.userId);
-  const hm = store.db.memberships
-    .filter(
-      (row) =>
-        row.agencyId === person.agencyId &&
-        row.siteId === person.siteId &&
-        (row.roleKey === "house_manager" || row.role === "manager"),
-    )
-    .map((row) => row.userId);
-  return [...new Set([...assigned, ...hm])];
+function siteTrainingRoster(store: MemoryStore, person: IndividualRecord) {
+  const ids = new Set<string>();
+  const today = todayIso();
+  for (const assignment of store.db.assignments) {
+    const active =
+      assignment.startsOn <= today &&
+      (!assignment.endsOn || assignment.endsOn >= today);
+    if (!active) continue;
+    if (
+      assignment.individualId === person.id ||
+      assignment.siteId === person.siteId
+    ) {
+      ids.add(assignment.userId);
+    }
+  }
+  for (const membership of store.db.memberships) {
+    if (membership.agencyId !== person.agencyId) continue;
+    if (membership.siteId === person.siteId) ids.add(membership.userId);
+  }
+  return [...ids];
 }
 
 function ensureTrainingChecklists(store: MemoryStore) {
@@ -638,7 +647,7 @@ function ensureTrainingChecklists(store: MemoryStore) {
     const lines = trainingLinesFromObligations(
       store.db.obligations.filter((item) => item.individualId === person.id),
     );
-    for (const userId of homeStaff(store, person)) {
+    for (const userId of siteTrainingRoster(store, person)) {
       const profile = store.db.profiles.find((row) => row.id === userId);
       if (!profile) continue;
       const existing = store.db.trainingChecklists.find(
@@ -765,11 +774,26 @@ function mapPlanStack(
       .filter((row) => row.individualId === person.id)
       .filter((row) => canSeeRenewals(session.roleKey) || row.staffUserId === session.userId)
       .map((checklist) => ({ checklist, status: trainingStatus(checklist) })),
+    myTraining: (() => {
+      const checklist = store.db.trainingChecklists.find(
+        (row) =>
+          row.individualId === person.id && row.staffUserId === session.userId,
+      );
+      return checklist ? { checklist, status: trainingStatus(checklist) } : null;
+    })(),
     mySubmissionAt: submission?.submittedAt ?? null,
     canSubmit:
       mustSign.length > 0 &&
       myRequired.every((row) => row?.signedAt) &&
-      !submission,
+      !submission &&
+      (() => {
+        const checklist = store.db.trainingChecklists.find(
+          (row) =>
+            row.individualId === person.id && row.staffUserId === session.userId,
+        );
+        if (!checklist) return true;
+        return allLinesInitialed(checklist) && Boolean(checklist.staffSignedAt);
+      })(),
   };
 }
 
@@ -1565,6 +1589,7 @@ export class LocalApi implements ComplyraApi {
     )) {
       syncObligationRoster(this.store, item);
     }
+    ensureTrainingChecklists(this.store);
     log(
       this.store,
       session,
@@ -2074,12 +2099,11 @@ export class LocalApi implements ComplyraApi {
         throw new Error("Staff must sign their own training sheet.");
       }
       if (row.staffSignedAt) throw new Error("This sheet is already signed by staff.");
+      if (!allLinesInitialed(row)) {
+        throw new Error("Check off every training item before you sign.");
+      }
       row.staffSignedAt = now;
       row.staffSignatureName = signatureName.trim();
-      row.items = row.items.map((line) => ({
-        ...line,
-        initialedAt: line.initialedAt ?? now,
-      }));
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
@@ -2099,6 +2123,23 @@ export class LocalApi implements ComplyraApi {
       "training_checklist",
       row.id,
     );
+    await persistMeta(this.store);
+  }
+
+  async initialTrainingLine(checklistId: string, lineId: string) {
+    const session = assertSession(this.store);
+    const row = this.store.db.trainingChecklists.find((item) => item.id === checklistId);
+    if (!row) throw new Error("Training checklist not found.");
+    if (row.staffUserId !== session.userId) {
+      throw new Error("Staff must check off their own training items.");
+    }
+    if (row.staffSignedAt) {
+      throw new Error("This sheet is already signed.");
+    }
+    const line = row.items.find((item) => item.id === lineId);
+    if (!line) throw new Error("Training item not found.");
+    if (line.initialedAt) return;
+    line.initialedAt = new Date().toISOString();
     await persistMeta(this.store);
   }
 
@@ -2259,6 +2300,7 @@ export class LocalApi implements ComplyraApi {
       "individual",
       person.id,
     );
+    ensureTrainingChecklists(this.store);
     await persistMeta(this.store);
     if (input.file) {
       await this.uploadDocument({

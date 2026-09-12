@@ -94,6 +94,16 @@ test("staff sign each required document then submit the packet", async () => {
     await client.markObligationOpened(row.id);
     await client.signObligation(row.id, dsp.fullName, "data:image/png;base64,aaa");
   }
+  const training = stack.myTraining;
+  assert.ok(training);
+  await assert.rejects(
+    () => client.signTrainingChecklist(training.checklist.id, "staff", dsp.fullName),
+    /Check off every/,
+  );
+  for (const line of training.checklist.items) {
+    await client.initialTrainingLine(training.checklist.id, line.id);
+  }
+  await client.signTrainingChecklist(training.checklist.id, "staff", dsp.fullName);
   await client.submitPlanPacket(stack.individualId);
   const after = (await client.loadWorkspace(dsp)).planStacks.find(
     (item) => item.individualId === stack.individualId,

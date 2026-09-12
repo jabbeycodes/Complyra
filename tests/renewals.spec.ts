@@ -76,7 +76,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
     path: shot("vision_date_reset.png"),
   });
 
-  const delegation = chart.locator(".plan-stack .obligation-card").filter({
+  const delegation = chart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await delegation.getByRole("button", { name: "Turn delegation on" }).click();
@@ -97,7 +97,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   );
   const dspChart = await openJodie(page);
   await expect(dspChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
-  const dspDelegation = dspChart.locator(".plan-stack .obligation-card").filter({
+  const dspDelegation = dspChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await expect(dspDelegation).toContainText("Waiting for RN");
@@ -108,7 +108,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   await signIn(page, "cameron.price");
   const rnChart = await openJodie(page);
   await expect(rnChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
-  const rnDelegation = rnChart.locator(".plan-stack .obligation-card").filter({
+  const rnDelegation = rnChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await rnDelegation.getByRole("button", { name: "Sign as delegating RN" }).click();
@@ -124,7 +124,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   await signOut(page);
   await signIn(page, "alex.morgan");
   const after = await openJodie(page);
-  const afterDelegation = after.locator(".plan-stack .obligation-card").filter({
+  const afterDelegation = after.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await expect(afterDelegation).toContainText("Delegating RN signed");

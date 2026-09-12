@@ -229,6 +229,54 @@ test("chart seed includes Jodie meds and Alex training", async () => {
   assert.ok(nurseStack.renewals.length >= 4);
 });
 
+test("first site assignment gives every home staff a check-off sheet", async () => {
+  const client = api();
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(admin);
+  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
+  const outsider = workspace.staff.find((s) => s.site !== jodie.site)!;
+  await client.assignStaff(jodie.id, outsider.id);
+  const after = await client.loadWorkspace(admin);
+  const maplePeople = after.individuals.filter((p) => p.site === jodie.site);
+  for (const person of maplePeople) {
+    const stack = after.planStacks.find((item) => item.individualId === person.id)!;
+    assert.equal(
+      stack.staffTraining.some((row) => row.checklist.staffUserId === outsider.id),
+      true,
+      `missing training for ${person.name}`,
+    );
+  }
+});
+
+test("staff check off each training line before they can sign", async () => {
+  const client = api();
+  const dsp = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const stack = (await client.loadWorkspace(dsp)).planStacks.find((item) =>
+    item.individualName.includes("Jodie"),
+  )!;
+  assert.ok(stack.myTraining);
+  assert.equal(stack.canSubmit, false);
+  const [first] = stack.myTraining.checklist.items;
+  await client.initialTrainingLine(stack.myTraining.checklist.id, first.id);
+  const mid = (await client.loadWorkspace(dsp)).planStacks.find(
+    (item) => item.individualId === stack.individualId,
+  )!;
+  assert.ok(mid.myTraining?.checklist.items[0].initialedAt);
+  await assert.rejects(
+    () =>
+      client.signTrainingChecklist(mid.myTraining!.checklist.id, "staff", dsp.fullName),
+    /Check off every/,
+  );
+});
+
 test("training lines come from required obligations", () => {
   const lines = trainingLinesFromObligations([
     {

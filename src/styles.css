@@ -4469,6 +4469,38 @@ th {
   background: #efe4d4;
   color: #6f4a2e;
 }
+.kind-pill.training {
+  background: #d7e2cc;
+  color: #2f4630;
+}
+.training-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.training-lines label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: start;
+  color: #241e18;
+  font-size: 15px;
+}
+.training-lines input {
+  margin-top: 3px;
+}
+.training-lines label.done span {
+  color: #2f4630;
+}
+.training-lines small {
+  color: #2f4630;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
 .med-card p,
 .chart-widget > p {
   color: #241e18;

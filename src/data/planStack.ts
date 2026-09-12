@@ -125,6 +125,7 @@ export interface PlanStackView {
   carePlan: import("./chart").CarePlanView | null;
   medications: import("./chart").MedicationView[];
   staffTraining: import("./chart").TrainingRowView[];
+  myTraining: import("./chart").TrainingRowView | null;
   mySubmissionAt: string | null;
   canSubmit: boolean;
 }

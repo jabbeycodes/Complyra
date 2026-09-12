@@ -35,6 +35,7 @@ test("Jodie opens as a full chart with widgets, download, and med count", async 
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Medication board" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Assigned staff" })).toBeVisible();
+  await expect(chart.getByRole("heading", { name: "In-home training checklist" }).first()).toBeVisible();
   await expect(chart).toContainText("Alex Morgan");
   await expect(chart).toContainText("days left");
   await page.screenshot({ path: shot("individual_chart.png"), fullPage: true });
@@ -71,5 +72,10 @@ test("DSP sees meds and their training row, not annuals", async ({ page }) => {
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
   await expect(chart.getByRole("heading", { name: "Delegations" })).toHaveCount(0);
   await expect(chart).toContainText("Alex Morgan");
-  await expect(chart.getByRole("button", { name: "Sign as staff" })).toBeVisible();
+  await expect(chart.getByRole("heading", { name: "In-home training checklist" }).first()).toBeVisible();
+  const training = chart.locator(".training-card").first();
+  await expect(training.getByRole("button", { name: "Sign as staff" })).toBeDisabled();
+  await training.getByRole("checkbox").first().check();
+  await expect(training).toContainText("1/");
+  await expect(training.getByRole("button", { name: "Sign as staff" })).toBeDisabled();
 });

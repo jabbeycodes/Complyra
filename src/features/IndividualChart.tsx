@@ -28,6 +28,7 @@ import {
 } from "../data/planStack";
 import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
+import TrainingSignCard from "./TrainingSignCard";
 
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
@@ -294,86 +295,47 @@ export default function IndividualChart({
         <section className="chart-widget" aria-labelledby="staff-heading">
           <h2 id="staff-heading">Assigned staff</h2>
           <p className="stack-help">
-            Each assigned staff member has an in-home training checklist. Staff
-            sign first; the house manager counter-signs. The sheet downloads and
-            prints.
+            Every staff member assigned to this home gets an in-home training
+            checklist the first time they are assigned. They check off each
+            item, then sign. House manager countersigns.
           </p>
           {stack.staffTraining.length === 0 && (
             <p>No assigned staff training sheets yet.</p>
           )}
           {stack.staffTraining.map((row) => (
-            <article key={row.checklist.id} className="obligation-card">
-              <header>
-                <h3>{row.checklist.staffName}</h3>
-                <Badge
-                  status={
-                    row.status === "complete"
-                      ? "Signed"
-                      : row.status === "staff_signed"
-                        ? "Waiting for RN"
-                        : "Needs signature"
-                  }
-                />
-              </header>
-              <p>
-                {row.checklist.items.length} training lines
-                {row.checklist.staffSignedAt
-                  ? ` · Staff signed ${formatDate(row.checklist.staffSignedAt)}`
-                  : " · Staff has not signed"}
-                {row.checklist.hmSignedAt
-                  ? ` · HM signed ${formatDate(row.checklist.hmSignedAt)}`
-                  : ""}
-              </p>
-              <div className="chart-actions">
-                <button
-                  className="button"
-                  onClick={() => openFile("training", row.checklist.id, "download")}
-                >
-                  <Download size={16} /> Download
-                </button>
-                <button
-                  className="button"
-                  onClick={() => openFile("training", row.checklist.id, "print")}
-                >
-                  <Printer size={16} /> Print
-                </button>
-                {session.userId === row.checklist.staffUserId &&
-                  !row.checklist.staffSignedAt && (
-                    <button
-                      className="button primary"
-                      onClick={() =>
-                        run(() =>
-                          api.signTrainingChecklist(
-                            row.checklist.id,
-                            "staff",
-                            session.fullName,
-                          ),
-                        )
-                      }
-                    >
-                      Sign as staff
-                    </button>
-                  )}
-                {canSignTrainingAsHm(session.roleKey) &&
-                  row.checklist.staffSignedAt &&
-                  !row.checklist.hmSignedAt && (
-                    <button
-                      className="button primary"
-                      onClick={() =>
-                        run(() =>
-                          api.signTrainingChecklist(
-                            row.checklist.id,
-                            "hm",
-                            session.fullName,
-                          ),
-                        )
-                      }
-                    >
-                      Sign as house manager
-                    </button>
-                  )}
-              </div>
-            </article>
+            <TrainingSignCard
+              key={row.checklist.id}
+              row={row}
+              canCheck={
+                session.userId === row.checklist.staffUserId &&
+                !row.checklist.staffSignedAt
+              }
+              canSignStaff={session.userId === row.checklist.staffUserId}
+              canSignHm={canSignTrainingAsHm(session.roleKey)}
+              onInitial={(lineId) =>
+                run(() => api.initialTrainingLine(row.checklist.id, lineId))
+              }
+              onSignStaff={() =>
+                run(() =>
+                  api.signTrainingChecklist(
+                    row.checklist.id,
+                    "staff",
+                    session.fullName,
+                  ),
+                )
+              }
+              onSignHm={() =>
+                run(() =>
+                  api.signTrainingChecklist(
+                    row.checklist.id,
+                    "hm",
+                    session.fullName,
+                  ),
+                )
+              }
+              onDownload={() => openFile("training", row.checklist.id, "download")}
+              onPrint={() => openFile("training", row.checklist.id, "print")}
+            />
           ))}
         </section>
       </div>

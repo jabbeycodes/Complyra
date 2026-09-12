@@ -3,6 +3,8 @@ import { Check, FileText, LockKeyhole, PenLine } from "lucide-react";
 import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
+import { canSignTrainingAsHm } from "../data/chart";
+import { openPrintable } from "../data/openFile";
 import {
   canEditCover,
   canEditExtraction,
@@ -17,7 +19,9 @@ import {
   type IndividualProfile,
   type ObligationView,
 } from "../data/planStack";
+import type { TrainingRowView } from "../data/chart";
 import SignaturePad from "./SignaturePad";
+import TrainingSignCard from "./TrainingSignCard";
 
 type Tab = "required" | "checked";
 
@@ -180,6 +184,7 @@ export default function AssignedDocsPanel({
       {tab === "required" ? (
         <RequiredList
           items={stack.required}
+          training={stack.myTraining}
           signingId={signingId}
           rnSigningId={rnSigningId}
           legalName={legalName}
@@ -238,6 +243,39 @@ export default function AssignedDocsPanel({
             })
           }
           onSubmit={() => run(() => api.submitPlanPacket(individualId))}
+          onInitialLine={(checklistId, lineId) =>
+            run(() => api.initialTrainingLine(checklistId, lineId))
+          }
+          onSignTraining={(role) =>
+            stack.myTraining
+              ? run(() =>
+                  api.signTrainingChecklist(
+                    stack.myTraining!.checklist.id,
+                    role,
+                    session.fullName,
+                  ),
+                )
+              : Promise.resolve()
+          }
+          onOpenTraining={async (mode) => {
+            if (!stack.myTraining) return;
+            const file = await api.getChartFile({
+              type: "training",
+              id: stack.myTraining.checklist.id,
+            });
+            if (!file) throw new Error("That file is not stored yet.");
+            await openPrintable(file.name, file.blob, mode);
+          }}
+          canCheckTraining={
+            Boolean(stack.myTraining) &&
+            stack.myTraining!.checklist.staffUserId === session.userId &&
+            !stack.myTraining!.checklist.staffSignedAt
+          }
+          canSignTrainingStaff={
+            Boolean(stack.myTraining) &&
+            stack.myTraining!.checklist.staffUserId === session.userId
+          }
+          canSignTrainingHm={canSignTrainingAsHm(session.roleKey)}
         />
       ) : (
         <CheckedList
@@ -440,6 +478,13 @@ function RequiredList({
   onDiscontinueTitle,
   onDiscontinueFile,
   onDiscontinue,
+  training,
+  onInitialLine,
+  onSignTraining,
+  onOpenTraining,
+  canCheckTraining,
+  canSignTrainingStaff,
+  canSignTrainingHm,
 }: {
   items: ObligationView[];
   signingId: string | null;
@@ -467,6 +512,13 @@ function RequiredList({
   onDiscontinueTitle: (value: string) => void;
   onDiscontinueFile: (file?: File) => void;
   onDiscontinue: (id: string) => void;
+  training: TrainingRowView | null;
+  onInitialLine: (checklistId: string, lineId: string) => void;
+  onSignTraining: (role: "staff" | "hm") => void;
+  onOpenTraining: (mode: "download" | "print") => Promise<void>;
+  canCheckTraining: boolean;
+  canSignTrainingStaff: boolean;
+  canSignTrainingHm: boolean;
 }) {
   const visible = items.filter(
     (view) => view.item.enabled || view.item.kind === "delegation",
@@ -474,9 +526,26 @@ function RequiredList({
   return (
     <div className="obligation-list">
       <p className="stack-help">
-        Sign each required document. Submit the packet when every item on your
-        list is signed.
+        The first time you are assigned to this home, check off every in-home
+        training item. Then sign the other required documents and submit.
       </p>
+      {training && (
+        <TrainingSignCard
+          row={training}
+          canCheck={canCheckTraining}
+          canSignStaff={canSignTrainingStaff}
+          canSignHm={canSignTrainingHm}
+          onInitial={(lineId) => onInitialLine(training.checklist.id, lineId)}
+          onSignStaff={() => onSignTraining("staff")}
+          onSignHm={() => onSignTraining("hm")}
+          onDownload={() => {
+            void onOpenTraining("download");
+          }}
+          onPrint={() => {
+            void onOpenTraining("print");
+          }}
+        />
+      )}
       {visible.map((view) => {
         const mine = view.mySignature;
         const waitingOnRn =

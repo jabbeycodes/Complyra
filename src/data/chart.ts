@@ -168,10 +168,19 @@ export function toMedicationView(med: Medication, today = todayIso()): Medicatio
   };
 }
 
+export function allLinesInitialed(row: TrainingChecklist) {
+  return row.items.length > 0 && row.items.every((line) => Boolean(line.initialedAt));
+}
+
 export function trainingStatus(row: TrainingChecklist): TrainingRowView["status"] {
   if (row.staffSignedAt && row.hmSignedAt) return "complete";
   if (row.staffSignedAt) return "staff_signed";
   return "unsigned";
+}
+
+export function trainingProgress(row: TrainingChecklist) {
+  const done = row.items.filter((line) => line.initialedAt).length;
+  return { done, total: row.items.length };
 }
 
 export function trainingLinesFromObligations(items: ObligationItem[]): TrainingLine[] {
@@ -180,7 +189,7 @@ export function trainingLinesFromObligations(items: ObligationItem[]): TrainingL
       (item) =>
         item.mode === "required" &&
         (item.enabled || item.kind === "delegation") &&
-        ["pcsp", "protocol", "delegation"].includes(item.kind),
+        ["pcsp", "protocol"].includes(item.kind),
     )
     .map((item) => ({
       id: item.id,
