@@ -28,6 +28,7 @@ import {
 } from "../data/planStack";
 import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
+import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
 
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
@@ -291,6 +292,8 @@ export default function IndividualChart({
             ))}
           </section>
         )}
+
+        <MonthlyEquipmentCard individualId={individualId} />
 
         <section className="chart-widget" aria-labelledby="staff-heading">
           <h2 id="staff-heading">Assigned staff</h2>

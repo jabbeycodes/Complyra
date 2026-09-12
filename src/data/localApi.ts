@@ -78,6 +78,27 @@ import {
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
 import {
+  canCompleteMonthly,
+  canManageEquipment,
+  drillComplete,
+  ensureMonthlyCycles,
+  equipmentViewForPerson,
+  safetyComplete,
+  type AdaptiveEquipment,
+  type EmergencyDrill,
+  type EquipmentMonthLog,
+  type HomeSafetyReport,
+  type SafetyLine,
+} from "./monthlyChecks";
+import {
+  buildDrillsMonthPdf,
+  buildEquipmentMonthPdf,
+  buildSafetyMonthPdf,
+  drillsFileName,
+  equipmentFileName,
+  safetyFileName,
+} from "../pdf/monthlyChecksPdf";
+import {
   LOGIN_FAILED_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
@@ -202,6 +223,30 @@ export interface ComplyraApi {
     signatureName: string,
   ): Promise<void>;
   initialTrainingLine(checklistId: string, lineId: string): Promise<void>;
+  addAdaptiveEquipment(individualId: string, name: string): Promise<void>;
+  removeAdaptiveEquipment(equipmentId: string): Promise<void>;
+  checkEquipmentLog(input: {
+    equipmentId: string;
+    monthKey: string;
+    checkedOn: string;
+    initials: string;
+    comments?: string;
+  }): Promise<void>;
+  recordEmergencyDrill(input: {
+    id: string;
+    date: string;
+    time: string;
+    evacTime?: string;
+    leaderName: string;
+    participants: string;
+    awakeOrSleep?: "awake" | "sleep" | "";
+  }): Promise<void>;
+  recordHomeSafety(input: { id: string; lines: SafetyLine[] }): Promise<void>;
+  downloadMonthlyCheck(input: {
+    kind: "equipment" | "drills" | "safety";
+    id: string;
+    monthKey: string;
+  }): Promise<{ blob: Blob; name: string }>;
   resetWorkspace(): Promise<void>;
   createSite(input: {
     name: string;
@@ -259,6 +304,12 @@ export interface WorkspaceView {
     overdue: number;
     dueSoon: number;
     review: number;
+  };
+  monthly: {
+    equipment: AdaptiveEquipment[];
+    equipmentLogs: EquipmentMonthLog[];
+    drills: EmergencyDrill[];
+    safetyReports: HomeSafetyReport[];
   };
 }
 
@@ -381,6 +432,10 @@ async function hydrate() {
       browserStore.db.medications = browserStore.db.medications ?? [];
       browserStore.db.medicationDeliveries = browserStore.db.medicationDeliveries ?? [];
       browserStore.db.trainingChecklists = browserStore.db.trainingChecklists ?? [];
+      browserStore.db.adaptiveEquipment = browserStore.db.adaptiveEquipment ?? [];
+      browserStore.db.equipmentMonthLogs = browserStore.db.equipmentMonthLogs ?? [];
+      browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
+      browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
         item.rnSignedAt = item.rnSignedAt ?? null;
@@ -576,6 +631,10 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.medications = store.db.medications ?? [];
   store.db.medicationDeliveries = store.db.medicationDeliveries ?? [];
   store.db.trainingChecklists = store.db.trainingChecklists ?? [];
+  store.db.adaptiveEquipment = store.db.adaptiveEquipment ?? [];
+  store.db.equipmentMonthLogs = store.db.equipmentMonthLogs ?? [];
+  store.db.emergencyDrills = store.db.emergencyDrills ?? [];
+  store.db.homeSafetyReports = store.db.homeSafetyReports ?? [];
 }
 
 function ensureClinicalRenewals(store: MemoryStore) {
@@ -941,6 +1000,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensurePlanCollections(store);
   ensureClinicalRenewals(store);
   ensureTrainingChecklists(store);
+  ensureMonthlyCycles(store.db, todayIso());
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit =
@@ -1047,6 +1107,16 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     planStacks: individuals.map((person) => mapPlanStack(store, session, person)),
     roles: rolesFor(store, session.agencyId),
     scorecard,
+    monthly: {
+      equipment: store.db.adaptiveEquipment.filter((row) => row.agencyId === session.agencyId),
+      equipmentLogs: store.db.equipmentMonthLogs.filter((log) =>
+        store.db.adaptiveEquipment.some(
+          (item) => item.id === log.equipmentId && item.agencyId === session.agencyId,
+        ),
+      ),
+      drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId),
+      safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId),
+    },
   };
 }
 
@@ -2172,6 +2242,243 @@ export class LocalApi implements ComplyraApi {
       individualId,
     );
     await persistMeta(this.store);
+  }
+
+  async addAdaptiveEquipment(individualId: string, name: string) {
+    const session = assertSession(this.store);
+    if (!canManageEquipment(session.roleKey)) {
+      throw new Error("Only a DPM or house manager can add adaptive equipment.");
+    }
+    const person = this.store.db.individuals.find((row) => row.id === individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("Name the adaptive equipment.");
+    if (
+      this.store.db.adaptiveEquipment.some(
+        (row) =>
+          row.individualId === individualId &&
+          row.active &&
+          row.name.toLowerCase() === trimmed.toLowerCase(),
+      )
+    ) {
+      throw new Error("That equipment is already on this chart.");
+    }
+    const item: AdaptiveEquipment = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      name: trimmed,
+      source: "manual",
+      active: true,
+    };
+    this.store.db.adaptiveEquipment.push(item);
+    ensureMonthlyCycles(this.store.db, todayIso());
+    log(
+      this.store,
+      session,
+      "equipment.added",
+      `${trimmed} added for ${person.fullName}`,
+      "adaptive_equipment",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async removeAdaptiveEquipment(equipmentId: string) {
+    const session = assertSession(this.store);
+    if (!canManageEquipment(session.roleKey)) {
+      throw new Error("Only a DPM or house manager can remove adaptive equipment.");
+    }
+    const item = this.store.db.adaptiveEquipment.find((row) => row.id === equipmentId);
+    if (!item || item.agencyId !== session.agencyId) {
+      throw new Error("Equipment not found.");
+    }
+    item.active = false;
+    log(
+      this.store,
+      session,
+      "equipment.removed",
+      `${item.name} removed from monthly checks`,
+      "adaptive_equipment",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async checkEquipmentLog(input: {
+    equipmentId: string;
+    monthKey: string;
+    checkedOn: string;
+    initials: string;
+    comments?: string;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCompleteMonthly(session.roleKey)) {
+      throw new Error("You cannot complete monthly equipment checks.");
+    }
+    const item = this.store.db.adaptiveEquipment.find((row) => row.id === input.equipmentId);
+    if (!item || !item.active || item.agencyId !== session.agencyId) {
+      throw new Error("Equipment not found.");
+    }
+    let entry = this.store.db.equipmentMonthLogs.find(
+      (row) => row.equipmentId === item.id && row.monthKey === input.monthKey,
+    );
+    if (!entry) {
+      entry = {
+        id: crypto.randomUUID(),
+        equipmentId: item.id,
+        monthKey: input.monthKey,
+        checkedOn: null,
+        initials: null,
+        checkedByUserId: null,
+        comments: "",
+      };
+      this.store.db.equipmentMonthLogs.push(entry);
+    }
+    const initials = input.initials.trim();
+    if (!input.checkedOn || !initials) {
+      throw new Error("Enter the date checked and your initials.");
+    }
+    entry.checkedOn = input.checkedOn;
+    entry.initials = initials;
+    entry.checkedByUserId = session.userId;
+    entry.comments = input.comments?.trim() ?? "";
+    const person = this.store.db.individuals.find((row) => row.id === item.individualId);
+    log(
+      this.store,
+      session,
+      "equipment.checked",
+      `${item.name} checked for ${person?.fullName ?? "individual"} · ${input.monthKey}`,
+      "equipment_log",
+      entry.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async recordEmergencyDrill(input: {
+    id: string;
+    date: string;
+    time: string;
+    evacTime?: string;
+    leaderName: string;
+    participants: string;
+    awakeOrSleep?: "awake" | "sleep" | "";
+  }) {
+    const session = assertSession(this.store);
+    if (!canCompleteMonthly(session.roleKey)) {
+      throw new Error("You cannot record emergency drills.");
+    }
+    const drill = this.store.db.emergencyDrills.find((row) => row.id === input.id);
+    if (!drill || drill.agencyId !== session.agencyId) {
+      throw new Error("Drill not found.");
+    }
+    if (!input.date || !input.time || !input.leaderName.trim() || !input.participants.trim()) {
+      throw new Error("Enter the date, time, drill leader, and participants.");
+    }
+    drill.date = input.date;
+    drill.time = input.time;
+    drill.evacTime = input.evacTime?.trim() || null;
+    drill.leaderName = input.leaderName.trim();
+    drill.participants = input.participants.trim();
+    drill.awakeOrSleep = input.awakeOrSleep ?? "";
+    const site = this.store.db.sites.find((row) => row.id === drill.siteId);
+    log(
+      this.store,
+      session,
+      "drill.recorded",
+      `${drill.drillType} drill recorded at ${site?.name ?? "site"} · ${drill.monthKey}`,
+      "emergency_drill",
+      drill.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async recordHomeSafety(input: { id: string; lines: SafetyLine[] }) {
+    const session = assertSession(this.store);
+    if (!canCompleteMonthly(session.roleKey)) {
+      throw new Error("You cannot complete the home safety report.");
+    }
+    const report = this.store.db.homeSafetyReports.find((row) => row.id === input.id);
+    if (!report || report.agencyId !== session.agencyId) {
+      throw new Error("Safety report not found.");
+    }
+    report.lines = input.lines;
+    const site = this.store.db.sites.find((row) => row.id === report.siteId);
+    log(
+      this.store,
+      session,
+      "safety.recorded",
+      `Home safety report updated for ${site?.name ?? "site"} · ${report.monthKey}`,
+      "home_safety",
+      report.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async downloadMonthlyCheck(input: {
+    kind: "equipment" | "drills" | "safety";
+    id: string;
+    monthKey: string;
+  }) {
+    const session = assertSession(this.store);
+    if (input.kind === "equipment") {
+      const person = this.store.db.individuals.find((row) => row.id === input.id);
+      if (!person || person.agencyId !== session.agencyId) {
+        throw new Error("Individual not found.");
+      }
+      const view = equipmentViewForPerson(this.store.db, person.id, input.monthKey, todayIso());
+      if (!view.items.length) {
+        throw new Error("This person has no adaptive equipment on file.");
+      }
+      if (!view.complete) {
+        throw new Error("Check every piece of equipment before downloading this month.");
+      }
+      const doc = buildEquipmentMonthPdf({
+        agencyName: session.agencyName,
+        individualName: person.fullName,
+        dmhId: person.profile?.dmhId ?? "",
+        monthKey: input.monthKey,
+        items: view.items,
+      });
+      return {
+        blob: doc.output("blob"),
+        name: equipmentFileName(person.fullName, input.monthKey),
+      };
+    }
+    const site = this.store.db.sites.find((row) => row.id === input.id);
+    if (!site || site.agencyId !== session.agencyId) {
+      throw new Error("Site not found.");
+    }
+    if (input.kind === "drills") {
+      const drills = this.store.db.emergencyDrills.filter(
+        (row) => row.siteId === site.id && row.monthKey === input.monthKey,
+      );
+      if (!drills.length || !drills.every(drillComplete)) {
+        throw new Error("Finish every required drill before downloading this month.");
+      }
+      const doc = buildDrillsMonthPdf({
+        agencyName: session.agencyName,
+        siteName: site.name,
+        monthKey: input.monthKey,
+        drills,
+      });
+      return { blob: doc.output("blob"), name: drillsFileName(site.name, input.monthKey) };
+    }
+    const report = this.store.db.homeSafetyReports.find(
+      (row) => row.siteId === site.id && row.monthKey === input.monthKey,
+    );
+    if (!report || !safetyComplete(report)) {
+      throw new Error("Finish every safety line before downloading this month.");
+    }
+    const doc = buildSafetyMonthPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      monthKey: input.monthKey,
+      report,
+    });
+    return { blob: doc.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
 
   async createSite(input: {
