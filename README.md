@@ -1,8 +1,10 @@
-# Complyra
+# Complyrer
 
 **The compliance operating system for care agencies.**
 
-Complyra turns care plans, policies, and regulatory requirements into trackable responsibilities, helping agency leaders understand what is required, who owns it, what is missing, and where audit risk exists.
+Complyrer turns care plans, policies, and regulatory requirements into trackable responsibilities, helping agency leaders understand what is required, who owns it, what is missing, and where audit risk exists.
+
+The product domain is [complyrer.com](https://complyrer.com).
 
 ## Run locally
 
@@ -27,8 +29,9 @@ npx playwright test
 
 Password for all sample accounts: `Evergreen!demo1`
 
-- `sarah.mitchell@evergreen.example` — Agency administrator
-- `alex.morgan@evergreen.example` — DSP
+- Provider code `EVERGREEN-MO` / `sarah.mitchell` — Agency administrator
+- Provider code `EVERGREEN-MO` / `alex.morgan` — DSP
+- Provider code `COMPLYRER-MO` / `platform.owner` — Complyrer operator
 
 ### Hosted Supabase
 
@@ -48,7 +51,7 @@ The migration enables deny-by-default RLS, append-only `audit_events`, and a pri
 - PCSP acknowledgment packets: one sheet per document version listing every assigned employee, with signature, date, and pending rows.
 - Staff must open/review before signing. Managers cannot silently sign another person’s row. One-off signers can be added with a reason.
 - Single-sheet PDF export with agency name, individual, DOB, what is being acknowledged, start/end dates, and the staff roster sorted by signed date.
-- Audit register CSV export, activity timeline, and keyword “Ask Complyra” lookups against workspace records.
+- Audit register CSV export, activity timeline, and keyword “Ask Complyrer” lookups against workspace records.
 
 Evergreen Care remains a fictional seed tenant.
 

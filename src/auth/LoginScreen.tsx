@@ -5,9 +5,12 @@ import {
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
+  PLATFORM_AGENCY_CODE,
+  PLATFORM_USERNAME,
 } from "../data/seed";
 import { DEMO_PASSWORD } from "../data/types";
 import type { CreateAgencyResult } from "../data/types";
+import { normalizeAgencyCode } from "../data/agencyCode";
 import { roleLabel } from "../data/status";
 
 export default function LoginScreen({
@@ -34,14 +37,14 @@ export default function LoginScreen({
         <div className="login-brand">
           <img src="/favicon.svg" alt="" />
           <span>
-            complyra<span className="brand-period">.</span>
+            complyrer<span className="brand-period">.</span>
           </span>
         </div>
         <h1>Sign in to your agency workspace</h1>
         <p>
           {usingHostedBackend
-            ? "Use your agency code (for example evergreen-mo), username, and password."
-            : "Local Evergreen demo is available. Hosted agencies use the same agency-code + username sign-in."}
+            ? "Use your provider code (for example EVERGREEN-MO), username, and password."
+            : "Local Evergreen demo is available. Hosted agencies use the same provider-code + username sign-in."}
         </p>
         <form
           onSubmit={async (e) => {
@@ -58,13 +61,13 @@ export default function LoginScreen({
           }}
         >
           <label className="form-label">
-            Agency code
+            Provider code
             <input
               type="text"
               autoComplete="organization"
               value={agencyCode}
-              onChange={(e) => setAgencyCode(e.target.value.toLowerCase())}
-              placeholder="evergreen-mo"
+              onChange={(e) => setAgencyCode(normalizeAgencyCode(e.target.value))}
+              placeholder="EVERGREEN-MO"
               required
             />
           </label>
@@ -123,6 +126,16 @@ export default function LoginScreen({
             }}
           >
             DSP · {DEMO_AGENCY_CODE} / {DEMO_DSP_USERNAME}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAgencyCode(PLATFORM_AGENCY_CODE);
+              setUsername(PLATFORM_USERNAME);
+              setPassword(DEMO_PASSWORD);
+            }}
+          >
+            Complyrer operator · {PLATFORM_AGENCY_CODE} / {PLATFORM_USERNAME}
           </button>
           <small>Sample password: {DEMO_PASSWORD}</small>
         </div>

@@ -42,8 +42,6 @@ Deno.serve(async (req) => {
   const adminFullName = String(body.adminFullName ?? "").trim();
   const username = String(body.adminUsername ?? "").trim().toLowerCase();
   const tempPassword = String(body.adminTempPassword ?? "");
-  const provisionedBy = body.provisionedBy === "platform" ? "platform" : "self";
-
   if (!name) return json({ error: "Enter the agency name." }, 400);
   if (!SLUG.test(slug)) {
     return json({ error: "Agency code should be 2–20 letters or numbers, then the state." }, 400);
@@ -57,7 +55,30 @@ Deno.serve(async (req) => {
     return json({ error: "Temporary password must be at least 8 characters." }, 400);
   }
 
-  const agencyCode = `${slug}-${stateCode.toLowerCase()}`;
+  let platformAdmin = false;
+  const authHeader = req.headers.get("Authorization");
+  const anon = Deno.env.get("SUPABASE_ANON_KEY");
+  if (authHeader && anon) {
+    const caller = createClient(url, anon, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const {
+      data: { user },
+    } = await caller.auth.getUser();
+    if (user) {
+      const { data: profile } = await admin
+        .from("profiles")
+        .select("platform_admin")
+        .eq("id", user.id)
+        .maybeSingle();
+      platformAdmin = Boolean(profile?.platform_admin);
+    }
+  }
+
+  const provisionedBy =
+    platformAdmin && body.provisionedBy === "platform" ? "platform" : "self";
+  const status = provisionedBy === "platform" ? "active" : "pending";
+  const agencyCode = `${slug.toUpperCase()}-${stateCode}`;
   const { data: existing } = await admin
     .from("agencies")
     .select("id")
@@ -77,6 +98,7 @@ Deno.serve(async (req) => {
       agency_code: agencyCode,
       state_code: stateCode,
       provisioned_by: provisionedBy,
+      status,
     })
     .select("id, agency_code")
     .single();
@@ -84,7 +106,7 @@ Deno.serve(async (req) => {
     return json({ error: agencyError?.message ?? "Could not create the agency." }, 400);
   }
 
-  const email = `${username}@${agencyCode}.complyra.user`;
+  const email = `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
     password: tempPassword,
@@ -138,5 +160,6 @@ Deno.serve(async (req) => {
     agencyCode,
     username,
     fullName: adminFullName,
+    status,
   });
 });

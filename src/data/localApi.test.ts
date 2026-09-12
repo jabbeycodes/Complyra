@@ -107,7 +107,7 @@ test("login uses agency code and username, and invited members must change the t
   await assert.rejects(
     () =>
       api.signIn({
-        agencyCode: "evergreen-mo",
+        agencyCode: "evergreen-mo", // accepted in any case, stored as EVERGREEN-MO
         username: "sarah.mitchell",
         password: "wrong",
       }),
@@ -115,7 +115,7 @@ test("login uses agency code and username, and invited members must change the t
   );
   const admin = await api.signIn(adminLogin());
   assert.equal(admin.mustChangePassword, false);
-  assert.equal(admin.agencyCode, "evergreen-mo");
+  assert.equal(admin.agencyCode, "EVERGREEN-MO");
   const invited = await api.inviteMember({
     fullName: "Jordan Blake",
     username: "jordan.blake",
@@ -123,7 +123,7 @@ test("login uses agency code and username, and invited members must change the t
     roleKey: "dsp",
     jobTitle: "DSP",
   });
-  assert.equal(invited.agencyCode, "evergreen-mo");
+  assert.equal(invited.agencyCode, "EVERGREEN-MO");
   await api.signOut();
   const first = await api.signIn({
     agencyCode: invited.agencyCode,
@@ -154,14 +154,16 @@ test("a new agency uses a state code and cannot see another tenant’s records",
     adminTempPassword: "TempPass!1",
     provisionedBy: "self",
   });
-  assert.equal(created.agencyCode, "lpmm-ca");
+  assert.equal(created.agencyCode, "LPMM-CA");
+  assert.equal(created.status, "pending");
   const admin = await api.signIn({
-    agencyCode: "LPMM-CA",
+    agencyCode: "lpmm-ca",
     username: "casey.nguyen",
     password: "TempPass!1",
   });
   assert.equal(admin.mustChangePassword, true);
-  assert.equal(admin.agencyCode, "lpmm-ca");
+  assert.equal(admin.agencyCode, "LPMM-CA");
+  assert.equal(admin.agencyStatus, "pending");
   const workspace = await api.loadWorkspace(admin);
   assert.equal(workspace.individuals.length, 0);
   assert.equal(workspace.staff.length, 1);
@@ -191,6 +193,8 @@ test("HR does not receive individual care records", async () => {
   assert.equal(workspace.individuals.length, 0);
   assert.equal(workspace.packets.length, 0);
   assert.equal(workspace.plans.length, 0);
+  assert.equal(typeof workspace.scorecard.score, "number");
+  assert.ok(workspace.scorecard.total > 0);
 });
 
 test("an auditor cannot approve requirements", async () => {
@@ -243,4 +247,95 @@ test("an administrator can edit template access and cannot demote the last admin
     () => api.assignMemberRole(admin.userId, "dsp"),
     /at least one agency administrator/,
   );
+});
+
+test("a house manager can upload but cannot approve", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Jodie"),
+  )!;
+  await api.createRequirementDraft({
+    individualId: jodie.id,
+    title: "House-created plan item",
+    category: "PCSP acknowledgments",
+    ownerUserId: admin.userId,
+    source: "Jodie Williams · PCSP 2026 · v2",
+    sourcePage: 4,
+    dueOn: "2026-09-20",
+    frequency: "On plan update",
+  });
+  await api.signOut();
+  const hm = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "james.wilson",
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(hm.permissions["documents.upload"], true);
+  assert.equal(hm.permissions["requirements.approve"], false);
+  const draft = (await api.loadWorkspace(hm)).requirements.find(
+    (r) => r.title === "House-created plan item",
+  )!;
+  await assert.rejects(() => api.approveRequirement(draft.id), /permission/);
+});
+
+test("a DPM can reset another staff member’s password", async () => {
+  const api = new LocalApi(store());
+  await api.signIn(adminLogin());
+  await api.inviteMember({
+    fullName: "Dana Qidp",
+    username: "dana.qidp",
+    tempPassword: "TempPass!1",
+    roleKey: "degreed_professional_manager",
+  });
+  await api.signOut();
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "dana.qidp",
+    password: "TempPass!1",
+  });
+  await api.changePassword("TempPass!1", "Dana!own2");
+  const dsp = (await api.loadWorkspace((await api.getSession())!)).staff.find(
+    (row) => row.username === DEMO_DSP_USERNAME,
+  )!;
+  const reset = await api.resetMemberPassword(dsp.id);
+  assert.match(reset.tempPassword, /^Reset!/);
+  await api.signOut();
+  const next = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: reset.tempPassword,
+  });
+  assert.equal(next.mustChangePassword, true);
+});
+
+test("the platform owner can approve a pending agency", async () => {
+  const api = new LocalApi(store());
+  const created = await api.createAgency({
+    name: "Cedar Ridge",
+    stateCode: "MO",
+    slug: "cedarridge",
+    adminFullName: "Pat Admin",
+    adminUsername: "pat.admin",
+    adminTempPassword: "TempPass!1",
+    provisionedBy: "self",
+  });
+  assert.equal(created.status, "pending");
+  const owner = await api.signIn({
+    agencyCode: "COMPLYRER-MO",
+    username: "platform.owner",
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(owner.platformAdmin, true);
+  const pending = await api.listPendingAgencies();
+  const cedar = pending.find((row) => row.agencyCode === "CEDARRIDGE-MO");
+  assert.ok(cedar);
+  await api.setAgencyStatus(cedar.id, "active");
+  await api.signOut();
+  const admin = await api.signIn({
+    agencyCode: "CEDARRIDGE-MO",
+    username: "pat.admin",
+    password: "TempPass!1",
+  });
+  assert.equal(admin.agencyStatus, "active");
 });

@@ -14,6 +14,7 @@ export type ReviewStatus = "pending_review" | "active" | "archived";
 export type PacketStatus = "open" | "archived";
 
 export type AgencyProvisionedBy = "self" | "platform";
+export type AgencyStatus = "pending" | "active" | "rejected";
 
 export interface Agency {
   id: string;
@@ -21,6 +22,7 @@ export interface Agency {
   agencyCode: string;
   stateCode: string;
   provisionedBy?: AgencyProvisionedBy;
+  status: AgencyStatus;
 }
 
 export interface Program {
@@ -45,6 +47,7 @@ export interface Profile {
   username: string;
   homeAgencyId: string;
   mustChangePassword: boolean;
+  platformAdmin?: boolean;
 }
 
 export interface Membership {
@@ -165,6 +168,8 @@ export interface SessionUser {
   mustChangePassword: boolean;
   expiresOn: string | null;
   permissions: Record<string, boolean>;
+  platformAdmin: boolean;
+  agencyStatus: AgencyStatus;
 }
 
 export interface LoginInput {
@@ -204,6 +209,16 @@ export interface CreateAgencyResult {
   agencyCode: string;
   username: string;
   fullName: string;
+  status: AgencyStatus;
+}
+
+export interface PendingAgency {
+  id: string;
+  name: string;
+  agencyCode: string;
+  stateCode: string;
+  provisionedBy: AgencyProvisionedBy;
+  status: AgencyStatus;
 }
 
 export interface PacketDetail {

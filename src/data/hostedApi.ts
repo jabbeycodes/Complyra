@@ -16,12 +16,14 @@ import type {
   DocumentRecord,
   DocumentVersion,
   IndividualRecord,
+  AgencyStatus,
   CreateAgencyInput,
   CreateAgencyResult,
   InviteMemberInput,
   InviteMemberResult,
   LoginInput,
   PacketDetail,
+  PendingAgency,
   RequirementRecord,
   SessionUser,
   SiteRecord,
@@ -33,6 +35,7 @@ import {
   normalizeAgencyCode,
   normalizeUsername,
 } from "./types";
+import { generateTempPassword } from "./agencyCode";
 import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
@@ -151,6 +154,7 @@ export class HostedApi implements ComplyraApi {
       agencyCode: result.agencyCode,
       username: result.username,
       fullName: result.fullName,
+      status: result.status ?? "pending",
     };
   }
 
@@ -260,6 +264,59 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+  async resetMemberPassword(userId: string) {
+    const session = await this.requireSession();
+    this.requirePermission(session, "members.reset_password");
+    const { data, error } = await this.client.functions.invoke(
+      "reset-member-password",
+      { body: { userId } },
+    );
+    if (error) {
+      const body = (data as { error?: string } | null)?.error;
+      throw new Error(body || error.message || "Could not reset that password.");
+    }
+    if ((data as { error?: string } | null)?.error) {
+      throw new Error((data as { error: string }).error);
+    }
+    return {
+      tempPassword:
+        (data as { tempPassword?: string }).tempPassword || generateTempPassword(),
+    };
+  }
+
+  async listPendingAgencies(): Promise<PendingAgency[]> {
+    const session = await this.requireSession();
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can review agency setups.");
+    }
+    const { data, error } = await this.client
+      .from("agencies")
+      .select("id, name, agency_code, state_code, provisioned_by, status")
+      .eq("status", "pending")
+      .order("name");
+    throwIf(error, "Could not load pending agencies.");
+    return (data ?? []).map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      agencyCode: String(row.agency_code),
+      stateCode: String(row.state_code),
+      provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
+      status: "pending",
+    }));
+  }
+
+  async setAgencyStatus(agencyId: string, status: AgencyStatus) {
+    const session = await this.requireSession();
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can approve agency setups.");
+    }
+    const { error } = await this.client
+      .from("agencies")
+      .update({ status })
+      .eq("id", agencyId);
+    throwIf(error, "Could not update that agency.");
+  }
+
   async loadWorkspace(session: SessionUser): Promise<WorkspaceView> {
     const agencyId = session.agencyId;
     const [
@@ -275,6 +332,7 @@ export class HostedApi implements ComplyraApi {
       rowsRes,
       auditRes,
       rolesRes,
+      scoreRes,
     ] = await Promise.all([
       this.client.from("sites").select("*").eq("agency_id", agencyId),
       this.client.from("programs").select("*").eq("agency_id", agencyId),
@@ -293,6 +351,7 @@ export class HostedApi implements ComplyraApi {
         .order("created_at", { ascending: false })
         .limit(40),
       this.client.from("agency_roles").select("*").eq("agency_id", agencyId),
+      this.client.rpc("agency_scorecard", { p_agency_id: agencyId }),
     ]);
 
     for (const result of [
@@ -491,12 +550,20 @@ export class HostedApi implements ComplyraApi {
         ];
       }),
       roles: mapAgencyRoles(agencyId, rolesRes.data ?? []),
+      scorecard: {
+        score: Number((scoreRes.data as { score?: number } | null)?.score ?? 100),
+        total: Number((scoreRes.data as { total?: number } | null)?.total ?? 0),
+        done: Number((scoreRes.data as { done?: number } | null)?.done ?? 0),
+        overdue: Number((scoreRes.data as { overdue?: number } | null)?.overdue ?? 0),
+        dueSoon: Number((scoreRes.data as { dueSoon?: number } | null)?.dueSoon ?? 0),
+        review: Number((scoreRes.data as { review?: number } | null)?.review ?? 0),
+      },
     };
   }
 
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
-    const session = await this.requirePrivileged();
-    this.requirePermission(session, "requirements.approve");
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.upload");
     const { data: individual, error: personError } = await this.client
       .from("individuals")
       .select("id, site_id, full_name")
@@ -527,7 +594,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async approveRequirement(id: string) {
-    const session = await this.requirePrivileged();
+    const session = await this.requireSession();
     this.requirePermission(session, "requirements.approve");
     const { data: item, error } = await this.client
       .from("requirement_definitions")
@@ -617,7 +684,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    const session = await this.requirePrivileged();
+    const session = await this.requireSession();
     this.requirePermission(session, "requirements.approve");
     const { error } = await this.client
       .from("requirement_definitions")
@@ -627,7 +694,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async uploadDocument(input: UploadDocumentInput) {
-    const session = await this.requirePrivileged();
+    const session = await this.requireSession();
     this.requirePermission(session, "documents.upload");
     if (!input.file.name.toLowerCase().endsWith(".pdf") || input.file.size > 10 * 1024 * 1024) {
       throw new Error("Choose a PDF smaller than 10 MB.");
@@ -782,7 +849,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async addPacketSigner(packetId: string, userId: string, reason: string) {
-    const session = await this.requirePrivileged();
+    const session = await this.requireSession();
     this.requirePermission(session, "acknowledgments.manage");
     if (!reason.trim()) throw new Error("Add a reason for this one-off signer.");
     const { data: packet, error } = await this.client
@@ -919,7 +986,7 @@ export class HostedApi implements ComplyraApi {
   ): Promise<SessionUser | null> {
     const { data: profile } = await this.client
       .from("profiles")
-      .select("id, full_name, email, job_title, username, must_change_password, home_agency_id")
+      .select("id, full_name, email, job_title, username, must_change_password, home_agency_id, platform_admin")
       .eq("id", userId)
       .maybeSingle();
     const { data: membership } = await this.client
@@ -936,7 +1003,7 @@ export class HostedApi implements ComplyraApi {
     }
     const { data: agency } = await this.client
       .from("agencies")
-      .select("id, name, agency_code")
+      .select("id, name, agency_code, status")
       .eq("id", membership.agency_id)
       .single();
     const roleKey = String(membership.role_key ?? membership.role);
@@ -961,6 +1028,11 @@ export class HostedApi implements ComplyraApi {
       mustChangePassword: Boolean(profile.must_change_password),
       expiresOn: membership.expires_on ? String(membership.expires_on).slice(0, 10) : null,
       permissions: (agencyRole?.permissions as PermissionMap) ?? defaultPermissions(roleKey),
+      platformAdmin: Boolean(profile.platform_admin),
+      agencyStatus:
+        agency?.status === "pending" || agency?.status === "rejected"
+          ? agency.status
+          : "active",
     };
   }
 

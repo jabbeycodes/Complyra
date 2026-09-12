@@ -70,6 +70,7 @@ async function main() {
       agency_code: row.agencyCode,
       state_code: row.stateCode,
       provisioned_by: row.provisionedBy ?? "platform",
+      status: row.status ?? "active",
     })),
   );
 
@@ -93,6 +94,7 @@ async function main() {
       username: row.username,
       home_agency_id: row.homeAgencyId,
       must_change_password: false,
+      platform_admin: Boolean(row.platformAdmin),
       active: true,
     })),
   );
@@ -225,7 +227,7 @@ async function main() {
   );
 
   console.log(
-    `Seeded Evergreen Care (${AGENCY_ID}). Demo login: agency evergreen-mo / sarah.mitchell / ${DEMO_PASSWORD}`,
+    `Seeded Evergreen Care (${AGENCY_ID}). Demo login: agency EVERGREEN-MO / sarah.mitchell / ${DEMO_PASSWORD}`,
   );
   console.log("A second agency can be added later with a different agency_code.");
 }

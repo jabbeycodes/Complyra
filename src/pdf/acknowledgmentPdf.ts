@@ -128,7 +128,7 @@ export function buildAcknowledgmentPdf(
 }
 
 export function packetFileName(detail: PacketDetail) {
-  return `complyra-acknowledgment-${detail.individual.fullName
+  return `complyrer-acknowledgment-${detail.individual.fullName
     .toLowerCase()
     .replaceAll(" ", "-")}-${detail.version.versionLabel.replaceAll(" ", "-")}.pdf`;
 }

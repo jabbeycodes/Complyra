@@ -361,3 +361,6 @@ verify_jwt = true
 
 [functions.create-agency]
 verify_jwt = false
+
+[functions.reset-member-password]
+verify_jwt = true

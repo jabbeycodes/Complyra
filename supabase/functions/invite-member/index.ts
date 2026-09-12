@@ -15,7 +15,7 @@ function json(body: unknown, status = 200) {
 }
 
 function internalEmail(username: string, agencyCode: string) {
-  return `${username.toLowerCase()}@${agencyCode.toLowerCase()}.complyra.user`;
+  return `${username.toLowerCase()}@${agencyCode.toLowerCase()}.complyrer.user`;
 }
 
 Deno.serve(async (req) => {
@@ -92,6 +92,7 @@ Deno.serve(async (req) => {
     compliance_admin: "compliance_admin",
     house_manager: "manager",
     degreed_professional_manager: "manager",
+    program_manager: "manager",
     dsp: "dsp",
     nurse: "nurse",
     hr: "hr",
