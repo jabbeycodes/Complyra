@@ -1,4 +1,4 @@
-# From Complyra preview to a production service
+# From Complyrer preview to a production service
 
 This document describes the intended architecture, not security controls implemented in the preview. Real care records must remain outside this build.
 

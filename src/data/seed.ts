@@ -25,6 +25,8 @@ import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
+export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
+export const PLATFORM_USER_ID = "00000000-0000-4000-8000-000000000091";
 const RESIDENTIAL_ID = "00000000-0000-4000-8000-000000000002";
 const SUPPORTED_ID = "00000000-0000-4000-8000-000000000003";
 
@@ -248,21 +250,66 @@ export function createEvergreenSeed(): LocalDatabase {
       {
         id: AGENCY_ID,
         name: "Evergreen Care",
-        agencyCode: "evergreen-mo",
+        agencyCode: "EVERGREEN-MO",
         stateCode: "MO",
         provisionedBy: "platform",
+        status: "active",
+      },
+      {
+        id: PLATFORM_AGENCY_ID,
+        name: "Complyrer",
+        agencyCode: "COMPLYRER-MO",
+        stateCode: "MO",
+        provisionedBy: "platform",
+        status: "active",
       },
     ],
     programs,
     sites,
-    profiles,
-    memberships,
-    agencyRoles,
-    credentials: profiles.map((profile) => ({
-      userId: profile.id,
-      email: profile.email,
-      password: DEMO_PASSWORD,
-    })),
+    profiles: [
+      ...profiles,
+      {
+        id: PLATFORM_USER_ID,
+        fullName: "Complyrer operator",
+        email: "platform.owner@complyrer.com",
+        jobTitle: "Platform owner",
+        username: "platform.owner",
+        homeAgencyId: PLATFORM_AGENCY_ID,
+        mustChangePassword: false,
+        platformAdmin: true,
+      },
+    ],
+    memberships: [
+      ...memberships,
+      {
+        id: padId(390),
+        agencyId: PLATFORM_AGENCY_ID,
+        userId: PLATFORM_USER_ID,
+        role: "administrator",
+        roleKey: "administrator",
+        siteId: null,
+        expiresOn: null,
+      },
+    ],
+    agencyRoles: [
+      ...agencyRoles,
+      ...ROLE_TEMPLATES.map((template) => ({
+        ...template,
+        agencyId: PLATFORM_AGENCY_ID,
+      })),
+    ],
+    credentials: [
+      ...profiles.map((profile) => ({
+        userId: profile.id,
+        email: profile.email,
+        password: DEMO_PASSWORD,
+      })),
+      {
+        userId: PLATFORM_USER_ID,
+        email: "platform.owner@complyrer.com",
+        password: DEMO_PASSWORD,
+      },
+    ],
     individuals,
     assignments,
     documents,
@@ -274,7 +321,9 @@ export function createEvergreenSeed(): LocalDatabase {
   };
 }
 
-export const DEMO_AGENCY_CODE = "evergreen-mo";
+export const DEMO_AGENCY_CODE = "EVERGREEN-MO";
+export const PLATFORM_AGENCY_CODE = "COMPLYRER-MO";
+export const PLATFORM_USERNAME = "platform.owner";
 export const DEMO_ADMIN_EMAIL = emailFor("Sarah Mitchell");
 export const DEMO_DSP_EMAIL = emailFor("Alex Morgan");
 export const DEMO_ADMIN_USERNAME = DEMO_ADMIN_EMAIL.split("@")[0];

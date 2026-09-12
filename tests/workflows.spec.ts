@@ -4,10 +4,10 @@ async function signIn(
   page: Page,
   username = "sarah.mitchell",
   password = "Evergreen!demo1",
-  agencyCode = "evergreen-mo",
+  agencyCode = "EVERGREEN-MO",
 ) {
   await page.goto("/");
-  await page.getByLabel("Agency code").fill(agencyCode);
+  await page.getByLabel("Provider code").fill(agencyCode);
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -128,7 +128,7 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   await page.getByRole("button", { name: "Export audit register" }).click();
   const download = await dl;
   expect(download.suggestedFilename()).toBe(
-    "complyra-sample-audit-register.csv",
+    "complyrer-sample-audit-register.csv",
   );
   await page
     .getByRole("button", {
@@ -245,7 +245,7 @@ test("acknowledgment sheet lists assigned staff and exports one PDF", async ({
     .getByRole("button", { name: "Export acknowledgment sheet" })
     .click();
   expect((await download).suggestedFilename()).toMatch(
-    /complyra-acknowledgment-jodie-williams/,
+    /complyrer-acknowledgment-jodie-williams/,
   );
 });
 
@@ -272,12 +272,12 @@ test("an administrator adds a member who must change the temporary password", as
   await dialog.getByLabel("Username").fill("jordan.blake");
   await dialog.getByLabel("Temporary password").fill("TempPass!1");
   await dialog.getByRole("button", { name: "Create member account" }).click();
-  await expect(dialog).toContainText("evergreen-mo");
+  await expect(dialog).toContainText("EVERGREEN-MO");
   await expect(dialog).toContainText("jordan.blake");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByLabel("Agency code").fill("evergreen-mo");
+  await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("jordan.blake");
   await page.getByLabel("Password").fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -315,7 +315,7 @@ test("an administrator can open role templates and invite HR without care record
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByLabel("Agency code").fill("evergreen-mo");
+  await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("riley.hart");
   await page.getByLabel("Password").fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -345,18 +345,42 @@ test("an agency can set itself up with a state agency code", async ({
   await page.getByRole("button", { name: "Set up an agency" }).click();
   await page.getByLabel("Agency name").fill("Maplewood Homes");
   await page.getByLabel("Home state").selectOption("MO");
-  await page.getByLabel("Short name for the agency code").fill("maplewood");
+  await page.getByLabel("Short name for the provider code").fill("maplewood");
   await page.getByLabel("First administrator name").fill("Pat Okonkwo");
   await page.getByLabel("Username").fill("pat.okonkwo");
   await page.getByLabel("Temporary password").fill("TempPass!1");
-  await page.getByRole("button", { name: "Create agency" }).click();
-  await expect(page.getByRole("heading", { name: "Agency is ready" })).toBeVisible();
-  await expect(page.getByText("maplewood-mo", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Submit agency" }).click();
+  await expect(page.getByRole("heading", { name: "Submitted for review" })).toBeVisible();
+  await expect(page.getByText("MAPLEWOOD-MO", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(page.getByLabel("Agency code")).toHaveValue("maplewood-mo");
+  await expect(page.getByLabel("Provider code")).toHaveValue("MAPLEWOOD-MO");
   await page.getByLabel("Password").fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
   ).toBeVisible();
+  await page.getByLabel("Temporary password").fill("TempPass!1");
+  await page.getByLabel("New password", { exact: true }).fill("Pat!own2");
+  await page.getByLabel("Confirm new password").fill("Pat!own2");
+  await page.getByRole("button", { name: "Save new password" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Waiting for Complyrer review" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Provider code").fill("COMPLYRER-MO");
+  await page.getByLabel("Username").fill("platform.owner");
+  await page.getByLabel("Password").fill("Evergreen!demo1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Platform", exact: true }).click();
+  await expect(page.getByText("MAPLEWOOD-MO")).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await page.getByRole("button", { name: "Your profile" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Provider code").fill("MAPLEWOOD-MO");
+  await page.getByLabel("Username").fill("pat.okonkwo");
+  await page.getByLabel("Password").fill("Pat!own2");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
+    timeout: 10_000,
+  });
 });

@@ -32,6 +32,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setWorkspace(null);
       return;
     }
+    if (!active.platformAdmin && active.agencyStatus !== "active") {
+      setWorkspace(null);
+      return;
+    }
     const view = await api.loadWorkspace(active);
     setWorkspace(view);
   }
@@ -43,7 +47,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const existing = await api.getSession();
         if (cancelled) return;
         setSession(existing);
-        if (existing && !existing.mustChangePassword) {
+        if (
+          existing &&
+          !existing.mustChangePassword &&
+          (existing.platformAdmin || existing.agencyStatus === "active")
+        ) {
           setWorkspace(await api.loadWorkspace(existing));
         }
       } finally {

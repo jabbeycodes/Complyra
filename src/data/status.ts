@@ -70,9 +70,11 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Acknowledgments") {
     return (
       can(session, "acknowledgments.manage") ||
-      can(session, "acknowledgments.sign_own")
+      can(session, "acknowledgments.sign_own") ||
+      can(session, "audit.read")
     );
   }
+  if (page === "Platform") return Boolean(session.platformAdmin);
   if (page === "Activity log") {
     return can(session, "audit.read") || can(session, "individuals.view");
   }

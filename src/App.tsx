@@ -58,9 +58,12 @@ import {
 import type { Plan, Requirement } from "./domain";
 import AuthEntry from "./auth/AuthEntry";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
+import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import PlatformConsole from "./features/PlatformConsole";
+import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { can, pageVisible } from "./data/status";
@@ -149,6 +152,9 @@ export default function App() {
   if (session.mustChangePassword) {
     return <ChangePasswordScreen />;
   }
+  if (!session.platformAdmin && session.agencyStatus !== "active") {
+    return <PendingAgencyScreen />;
+  }
   if (!workspace) {
     return <div className="login-shell">Loading workspace…</div>;
   }
@@ -169,6 +175,7 @@ export default function App() {
   const canAssign = can(session, "members.assign_roles");
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
+  const canResetPassword = can(session, "members.reset_password");
   const scoped = data.requirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -283,6 +290,7 @@ export default function App() {
       title: "WORKSPACE",
       items: [
         ["Overview", LayoutDashboard],
+        ["Platform", ShieldCheck],
         ["Individuals", Users],
         ["Sites & programs", Building2],
         ["Staff", Users],
@@ -314,11 +322,11 @@ export default function App() {
         <button
           className="brand"
           onClick={() => navigate("Overview")}
-          aria-label="Complyra home"
+          aria-label="Complyrer home"
         >
           <img src="/favicon.svg" alt="" />
           <span>
-            complyra<span className="brand-period">.</span>
+            complyrer<span className="brand-period">.</span>
           </span>
         </button>
         <div className="brand-tagline">COMPLIANCE, CONNECTED.</div>
@@ -390,7 +398,7 @@ export default function App() {
               compliance records.
             </span>
             <b>
-              Ask Complyra <ArrowUpRight size={15} />
+              Ask Complyrer <ArrowUpRight size={15} />
             </b>
           </button>
           <button
@@ -496,6 +504,7 @@ export default function App() {
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
+              scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
               individuals={individuals}
@@ -505,7 +514,7 @@ export default function App() {
               onRequirement={selectRequirement}
               onExport={() => {
                 download(
-                  "complyra-sample-compliance-report.csv",
+                  "complyrer-sample-compliance-report.csv",
                   exportCsv(scoped),
                 );
                 notify("Your sample compliance report has been downloaded.");
@@ -806,6 +815,7 @@ export default function App() {
                             <th>Assigned site</th>
                             <th>Open requirements</th>
                             {canAssign && <th>Assign role</th>}
+                            {canResetPassword && <th>Password</th>}
                             <th />
                           </tr>
                         </thead>
@@ -846,6 +856,15 @@ export default function App() {
                                       siteId={s.siteId}
                                       expiresOn={s.expiresOn}
                                       onAssigned={notify}
+                                    />
+                                  </td>
+                                )}
+                                {canResetPassword && (
+                                  <td>
+                                    <ResetPasswordControl
+                                      userId={s.id}
+                                      name={s.name}
+                                      onReset={notify}
                                     />
                                   </td>
                                 )}
@@ -1108,7 +1127,7 @@ export default function App() {
                       disabled={!auditItems.length || auditFrom > auditTo}
                       onClick={() => {
                         download(
-                          "complyra-sample-audit-register.csv",
+                          "complyrer-sample-audit-register.csv",
                           exportCsv(auditItems),
                         );
                         notify(
@@ -1255,6 +1274,9 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Platform" && (
+                <PlatformConsole onSaved={notify} />
+              )}
               {page === "Roles & access" && (
                 <RolesAccessPage onSaved={notify} />
               )}
@@ -1267,13 +1289,13 @@ export default function App() {
                   <section className="panel settings-panel">
                     <h2>{session.agencyName}</h2>
                     <p>
-                      Agency code {session.agencyCode} · {sites.length} sites ·{" "}
+                      Provider code {session.agencyCode} · {sites.length} sites ·{" "}
                       {individuals.length} individuals · {staff.length} staff ·{" "}
                       {session.jobTitle}
                     </p>
                     <div className="settings-row">
                       <span>
-                        <strong>Agency code</strong>
+                        <strong>Provider code</strong>
                         <small>
                           {session.agencyCode} is how every staff member signs
                           in. It cannot be changed after setup.
@@ -1704,7 +1726,7 @@ export default function App() {
         </Modal>
       )}
       {modal === "copilot" && (
-        <Modal title="Ask Complyra" onClose={() => setModal(null)}>
+        <Modal title="Ask Complyrer" onClose={() => setModal(null)}>
           <div className="copilot-welcome">
             <span>
               <Sparkles size={26} />
@@ -1811,13 +1833,13 @@ export default function App() {
         </Modal>
       )}
       {modal === "help" && (
-        <Modal title="Welcome to Complyra" onClose={() => setModal(null)}>
+        <Modal title="Welcome to Complyrer" onClose={() => setModal(null)}>
           <div className="help-brand">
             <img src="/favicon.svg" alt="" />
             <h2>Compliance, connected.</h2>
           </div>
           <p>
-            Complyra turns care plans, policies, and requirements into clear,
+            Complyrer turns care plans, policies, and requirements into clear,
             trackable responsibilities—so your agency can focus on care with
             confidence.
           </p>

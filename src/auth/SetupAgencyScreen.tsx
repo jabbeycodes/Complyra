@@ -3,7 +3,7 @@ import { Building2 } from "lucide-react";
 import { useData } from "../data/DataProvider";
 import { buildAgencyCode, suggestAgencySlug } from "../data/agencyCode";
 import { US_STATES } from "../data/usStates";
-import type { AgencyProvisionedBy, CreateAgencyResult } from "../data/types";
+import type { CreateAgencyResult } from "../data/types";
 
 export default function SetupAgencyScreen({
   onBack,
@@ -20,7 +20,6 @@ export default function SetupAgencyScreen({
   const [adminFullName, setAdminFullName] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
   const [adminTempPassword, setAdminTempPassword] = useState("");
-  const [provisionedBy, setProvisionedBy] = useState<AgencyProvisionedBy>("self");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<
@@ -33,23 +32,25 @@ export default function SetupAgencyScreen({
   );
 
   if (created) {
+    const pending = created.status === "pending";
     return (
       <div className="login-shell">
         <div className="login-card">
           <div className="login-brand">
             <img src="/favicon.svg" alt="" />
             <span>
-              complyra<span className="brand-period">.</span>
+              complyrer<span className="brand-period">.</span>
             </span>
           </div>
-          <h1>Agency is ready</h1>
+          <h1>{pending ? "Submitted for review" : "Agency is ready"}</h1>
           <p>
-            Give these credentials to the first administrator once. They must
-            change the temporary password at first sign-in.
+            {pending
+              ? "Complyrer will review this agency before staff can open care records. Save these first-administrator credentials."
+              : "Give these credentials to the first administrator once. They must change the temporary password at first sign-in."}
           </p>
           <dl className="ack-meta">
             <div>
-              <dt>Agency code</dt>
+              <dt>Provider code</dt>
               <dd>
                 <strong>{created.agencyCode}</strong>
               </dd>
@@ -85,14 +86,13 @@ export default function SetupAgencyScreen({
         <div className="login-brand">
           <img src="/favicon.svg" alt="" />
           <span>
-            complyra<span className="brand-period">.</span>
+            complyrer<span className="brand-period">.</span>
           </span>
         </div>
         <h1>Set up an agency</h1>
         <p>
-          Same path Therap uses: create the agency code and the first
-          administrator. Staff are added later with a username and temporary
-          password.
+          Create the provider code and the first administrator. Complyrer reviews
+          self-serve setups before the workspace opens.
         </p>
         <form
           onSubmit={async (e) => {
@@ -107,7 +107,7 @@ export default function SetupAgencyScreen({
                 adminFullName,
                 adminUsername,
                 adminTempPassword,
-                provisionedBy,
+                provisionedBy: "self",
               });
               setCreated({ ...result, tempPassword: adminTempPassword });
             } catch (err) {
@@ -117,27 +117,6 @@ export default function SetupAgencyScreen({
             }
           }}
         >
-          <fieldset className="setup-who">
-            <legend>Who is completing this?</legend>
-            <label>
-              <input
-                type="radio"
-                name="provisionedBy"
-                checked={provisionedBy === "self"}
-                onChange={() => setProvisionedBy("self")}
-              />
-              The agency is setting itself up
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="provisionedBy"
-                checked={provisionedBy === "platform"}
-                onChange={() => setProvisionedBy("platform")}
-              />
-              Complyra is setting this up for the agency
-            </label>
-          </fieldset>
           <label className="form-label">
             Agency name
             <input
@@ -163,7 +142,7 @@ export default function SetupAgencyScreen({
             </select>
           </label>
           <label className="form-label">
-            Short name for the agency code
+            Short name for the provider code
             <input
               value={slug}
               onChange={(e) => {
@@ -175,7 +154,7 @@ export default function SetupAgencyScreen({
           </label>
           <p className="form-help">
             Staff will sign in with{" "}
-            <strong>{agencyCode || "shortname-st"}</strong>. This cannot change
+            <strong>{agencyCode || "SHORTNAME-ST"}</strong>. This cannot change
             later.
           </p>
           <label className="form-label">
@@ -221,7 +200,7 @@ export default function SetupAgencyScreen({
             </p>
           )}
           <button className="button primary full" type="submit" disabled={busy}>
-            <Building2 size={17} /> {busy ? "Creating agency…" : "Create agency"}
+            <Building2 size={17} /> {busy ? "Submitting…" : "Submit agency"}
           </button>
         </form>
         <div className="login-demo">

@@ -1,5 +1,6 @@
 import type { Activity, Plan, Requirement } from "../domain";
 import { createEvergreenSeed, type LocalDatabase } from "./seed";
+import { metrics } from "../domain";
 import {
   computeRequirementStatus,
   isPrivileged,
@@ -8,6 +9,7 @@ import {
   roleLabel,
 } from "./status";
 import {
+  PLAN_SIGNER_ROLE_KEYS,
   ROLE_TEMPLATES,
   capabilityForRoleKey,
   defaultPermissions,
@@ -17,6 +19,7 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
+import { generateTempPassword } from "./agencyCode";
 import type {
   AcknowledgmentPacket,
   AppRole,
@@ -24,10 +27,12 @@ import type {
   IndividualRecord,
   CreateAgencyInput,
   CreateAgencyResult,
+  AgencyStatus,
   InviteMemberInput,
   InviteMemberResult,
   LoginInput,
   PacketDetail,
+  PendingAgency,
   RequirementRecord,
   SessionUser,
   UploadDocumentInput,
@@ -60,6 +65,9 @@ export interface ComplyraApi {
     expiresOn?: string | null,
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
+  resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  listPendingAgencies(): Promise<PendingAgency[]>;
+  setAgencyStatus(agencyId: string, status: AgencyStatus): Promise<void>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
     individualId: string;
@@ -120,6 +128,14 @@ export interface WorkspaceView {
   plans: Plan[];
   activity: Activity[];
   packets: PacketDetail[];
+  scorecard: {
+    score: number;
+    total: number;
+    done: number;
+    overdue: number;
+    dueSoon: number;
+    review: number;
+  };
 }
 
 function cloneSeed(): LocalDatabase {
@@ -223,6 +239,10 @@ async function hydrate() {
         membership.roleKey = membership.roleKey ?? membership.role;
         membership.expiresOn = membership.expiresOn ?? null;
       }
+      for (const agency of browserStore.db.agencies) {
+        agency.status = agency.status ?? "active";
+        agency.agencyCode = normalizeAgencyCode(agency.agencyCode);
+      }
       if (!browserStore.db.agencyRoles?.length) {
         browserStore.db.agencyRoles = browserStore.db.agencies.flatMap((agency) =>
           ROLE_TEMPLATES.map((template) => ({ ...template, agencyId: agency.id })),
@@ -258,6 +278,8 @@ function currentSession(store: MemoryStore): SessionUser | null {
     mustChangePassword: profile.mustChangePassword,
     expiresOn: membership.expiresOn ?? null,
     permissions: permissionsFor(store, membership.agencyId, membership.roleKey ?? membership.role),
+    platformAdmin: Boolean(profile.platformAdmin),
+    agencyStatus: agency.status ?? "active",
   };
 }
 
@@ -385,6 +407,15 @@ function assignedUserIds(store: MemoryStore, individual: IndividualRecord) {
       ids.add(assignment.userId);
     }
   }
+  for (const membership of store.db.memberships) {
+    if (membership.agencyId !== individual.agencyId) continue;
+    const roleKey = membership.roleKey ?? membership.role;
+    if (!PLAN_SIGNER_ROLE_KEYS.includes(roleKey as (typeof PLAN_SIGNER_ROLE_KEYS)[number])) {
+      continue;
+    }
+    if (membership.siteId && membership.siteId !== individual.siteId) continue;
+    ids.add(membership.userId);
+  }
   return [...ids];
 }
 
@@ -487,9 +518,11 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     ? store.db.individuals.filter((row) => row.agencyId === session.agencyId)
     : [];
   const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId);
-  const requirements = canViewPeople
-    ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)
-    : [];
+  const allRequirements = store.db.requirements.filter(
+    (row) => row.agencyId === session.agencyId,
+  );
+  const scorecard = metrics(allRequirements.map((row) => mapRequirement(store, row)));
+  const requirements = canViewPeople ? allRequirements : [];
   const versions = canViewPeople
     ? store.db.versions.filter((row) => row.agencyId === session.agencyId)
     : [];
@@ -579,6 +612,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     })),
     packets: packets.map((packet) => packetDetail(store, packet)),
     roles: rolesFor(store, session.agencyId),
+    scorecard,
   };
 }
 
@@ -660,13 +694,19 @@ export class LocalApi implements ComplyraApi {
     }
     const agencyId = crypto.randomUUID();
     const userId = crypto.randomUUID();
-    const email = `${username}@${agencyCode}.complyra.user`;
+    const email = `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
+    const provisionedBy =
+      input.provisionedBy === "platform" && currentSession(this.store)?.platformAdmin
+        ? "platform"
+        : "self";
+    const status = provisionedBy === "platform" ? "active" : "pending";
     this.store.db.agencies.push({
       id: agencyId,
       name,
       agencyCode,
       stateCode: input.stateCode.trim().toUpperCase(),
-      provisionedBy: input.provisionedBy ?? "self",
+      provisionedBy,
+      status,
     });
     this.store.db.profiles.push({
       id: userId,
@@ -700,6 +740,7 @@ export class LocalApi implements ComplyraApi {
       agencyCode,
       username,
       fullName: input.adminFullName.trim(),
+      status,
     };
   }
 
@@ -730,7 +771,7 @@ export class LocalApi implements ComplyraApi {
     const agency = this.store.db.agencies.find((row) => row.id === session.agencyId);
     if (!agency) throw new Error("Agency not found.");
     const userId = crypto.randomUUID();
-    const email = `${username}@${agency.agencyCode.toLowerCase()}.complyra.user`;
+    const email = `${username}@${agency.agencyCode.toLowerCase()}.complyrer.user`;
     const capability = capabilityForRoleKey(input.roleKey);
     this.store.db.profiles.push({
       id: userId,
@@ -833,6 +874,67 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
+  async resetMemberPassword(userId: string) {
+    const session = assertSession(this.store);
+    assertCan(session, "members.reset_password");
+    const membership = this.store.db.memberships.find(
+      (row) => row.userId === userId && row.agencyId === session.agencyId,
+    );
+    if (!membership) throw new Error("Staff member not found.");
+    const profile = this.store.db.profiles.find((row) => row.id === userId);
+    const credential = this.store.db.credentials.find((row) => row.userId === userId);
+    if (!profile || !credential) throw new Error("Staff member not found.");
+    const tempPassword = generateTempPassword();
+    credential.password = tempPassword;
+    profile.mustChangePassword = true;
+    log(
+      this.store,
+      session,
+      "member.password_reset",
+      `Temporary password issued for ${profile.fullName}`,
+      "profile",
+      userId,
+    );
+    await persistMeta(this.store);
+    return { tempPassword };
+  }
+
+  async listPendingAgencies(): Promise<PendingAgency[]> {
+    const session = assertSession(this.store);
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can review agency setups.");
+    }
+    return this.store.db.agencies
+      .filter((row) => row.status === "pending")
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        agencyCode: row.agencyCode,
+        stateCode: row.stateCode,
+        provisionedBy: row.provisionedBy ?? "self",
+        status: row.status,
+      }));
+  }
+
+  async setAgencyStatus(agencyId: string, status: AgencyStatus) {
+    const session = assertSession(this.store);
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can approve agency setups.");
+    }
+    const agency = this.store.db.agencies.find((row) => row.id === agencyId);
+    if (!agency) throw new Error("Agency not found.");
+    agency.status = status;
+    log(
+      this.store,
+      session,
+      "agency.status",
+      `${agency.name} marked ${status}`,
+      "agency",
+      agency.id,
+    );
+    await persistMeta(this.store);
+  }
+
   async loadWorkspace(session: SessionUser) {
     await hydrate();
     return toWorkspace(this.store, session);
@@ -840,8 +942,7 @@ export class LocalApi implements ComplyraApi {
 
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = assertSession(this.store);
-    assertPrivileged(session);
-    assertCan(session, "requirements.approve");
+    assertCan(session, "documents.upload");
     const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
     if (!individual) throw new Error("Individual not found.");
     const version = this.store.db.versions.find((v) => {
@@ -875,7 +976,6 @@ export class LocalApi implements ComplyraApi {
 
   async approveRequirement(id: string) {
     const session = assertSession(this.store);
-    assertPrivileged(session);
     assertCan(session, "requirements.approve");
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item || item.status !== "Pending review") {
@@ -937,7 +1037,6 @@ export class LocalApi implements ComplyraApi {
 
   async reassignRequirement(id: string, ownerUserId: string) {
     const session = assertSession(this.store);
-    assertPrivileged(session);
     assertCan(session, "requirements.approve");
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item) throw new Error("Requirement not found.");
@@ -947,7 +1046,6 @@ export class LocalApi implements ComplyraApi {
 
   async uploadDocument(input: UploadDocumentInput) {
     const session = assertSession(this.store);
-    assertPrivileged(session);
     assertCan(session, "documents.upload");
     if (!input.file.name.toLowerCase().endsWith(".pdf") || input.file.size > 10 * 1024 * 1024) {
       throw new Error("Choose a PDF smaller than 10 MB.");
@@ -1066,7 +1164,6 @@ export class LocalApi implements ComplyraApi {
 
   async addPacketSigner(packetId: string, userId: string, reason: string) {
     const session = assertSession(this.store);
-    assertPrivileged(session);
     assertCan(session, "acknowledgments.manage");
     if (!reason.trim()) throw new Error("Add a reason for this one-off signer.");
     const packet = this.store.db.packets.find((p) => p.id === packetId);

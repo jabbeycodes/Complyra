@@ -21,6 +21,14 @@ import type { Requirement, Activity } from "./domain";
 import { Avatar, Badge, Empty } from "./components";
 interface Props {
   items: Requirement[];
+  scorecard?: {
+    score: number;
+    total: number;
+    done: number;
+    overdue: number;
+    dueSoon: number;
+    review: number;
+  };
   activity: Activity[];
   sites: { name: string; address: string; color?: string }[];
   individuals: { name: string; site: string }[];
@@ -34,6 +42,7 @@ interface Props {
 }
 export default function Dashboard({
   items,
+  scorecard,
   activity,
   sites,
   individuals,
@@ -45,7 +54,7 @@ export default function Dashboard({
   onCopilot,
   onActivity,
 }: Props) {
-  const m = metrics(items);
+  const m = scorecard ?? metrics(items);
   const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
   const visibleSites =
     site === "All sites" ? sites : sites.filter((s) => s.name === site);
@@ -463,12 +472,12 @@ export default function Dashboard({
         <span>
           <strong>A clearer answer is one question away.</strong>
           <small>
-            Ask Complyra what to prioritize, what’s missing, or where to find
+            Ask Complyrer what to prioritize, what’s missing, or where to find
             it.
           </small>
         </span>
         <span className="copilot-banner-action">
-          Ask Complyra <ArrowUpRight size={17} />
+          Ask Complyrer <ArrowUpRight size={17} />
         </span>
       </button>
       <div className="page-footer">

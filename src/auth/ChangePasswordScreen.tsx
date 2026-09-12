@@ -16,7 +16,7 @@ export default function ChangePasswordScreen() {
         <div className="login-brand">
           <img src="/favicon.svg" alt="" />
           <span>
-            complyra<span className="brand-period">.</span>
+            complyrer<span className="brand-period">.</span>
           </span>
         </div>
         <h1>Choose your own password</h1>

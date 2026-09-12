@@ -34,7 +34,7 @@ export default function InviteMemberForm({
         </p>
         <dl className="ack-meta">
           <div>
-            <dt>Agency code</dt>
+            <dt>Provider code</dt>
             <dd>
               <strong>{created.agencyCode}</strong>
             </dd>
