@@ -38,6 +38,19 @@ import type {
   UploadDocumentInput,
 } from "./types";
 import {
+  canEditCover,
+  canEditExtraction,
+  canToggleDelegation,
+  emptyProfile,
+  isObligationActive,
+  proposeFromPcsp,
+  requiredForSigning,
+  sortObligations,
+  type IndividualProfile,
+  type ObligationItem,
+  type PlanStackView,
+} from "./planStack";
+import {
   LOGIN_FAILED_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
@@ -96,6 +109,38 @@ export interface ComplyraApi {
     signatureName: string,
     signatureMark: string,
   ): Promise<void>;
+  updateIndividualProfile(
+    individualId: string,
+    profile: IndividualProfile,
+  ): Promise<void>;
+  updateObligation(
+    obligationId: string,
+    patch: Partial<
+      Pick<
+        ObligationItem,
+        | "title"
+        | "detail"
+        | "mode"
+        | "enabled"
+        | "frequency"
+        | "shiftPeriods"
+        | "inventoryState"
+        | "proposed"
+      >
+    >,
+  ): Promise<void>;
+  addProtocol(individualId: string, title: string, detail?: string): Promise<void>;
+  promoteToShiftTask(
+    obligationId: string,
+    shiftPeriods: string[],
+  ): Promise<void>;
+  markObligationOpened(signatureId: string): Promise<void>;
+  signObligation(
+    signatureId: string,
+    signatureName: string,
+    signatureMark: string,
+  ): Promise<void>;
+  submitPlanPacket(individualId: string): Promise<void>;
   resetWorkspace(): Promise<void>;
 }
 
@@ -110,6 +155,7 @@ export interface WorkspaceView {
     manager: string;
     initials: string;
     color: string;
+    profile: IndividualProfile | null;
   }[];
   staff: {
     id: string;
@@ -128,6 +174,7 @@ export interface WorkspaceView {
   plans: Plan[];
   activity: Activity[];
   packets: PacketDetail[];
+  planStacks: PlanStackView[];
   scorecard: {
     score: number;
     total: number;
@@ -248,6 +295,10 @@ async function hydrate() {
           ROLE_TEMPLATES.map((template) => ({ ...template, agencyId: agency.id })),
         );
       }
+      browserStore.db.obligations = browserStore.db.obligations ?? [];
+      browserStore.db.obligationSignatures =
+        browserStore.db.obligationSignatures ?? [];
+      browserStore.db.packetSubmissions = browserStore.db.packetSubmissions ?? [];
     }
   } catch {
     /* Keep the fictional seed if stored state cannot be read. */
@@ -419,6 +470,84 @@ function assignedUserIds(store: MemoryStore, individual: IndividualRecord) {
   return [...ids];
 }
 
+function ensurePlanCollections(store: MemoryStore) {
+  store.db.obligations = store.db.obligations ?? [];
+  store.db.obligationSignatures = store.db.obligationSignatures ?? [];
+  store.db.packetSubmissions = store.db.packetSubmissions ?? [];
+}
+
+function syncObligationRoster(store: MemoryStore, item: ObligationItem) {
+  if (item.mode !== "required" || !isObligationActive(item)) return;
+  const individual = store.db.individuals.find((p) => p.id === item.individualId);
+  if (!individual) return;
+  const existing = new Set(
+    store.db.obligationSignatures
+      .filter((row) => row.obligationId === item.id)
+      .map((row) => row.userId),
+  );
+  for (const userId of assignedUserIds(store, individual)) {
+    if (existing.has(userId)) continue;
+    const profile = store.db.profiles.find((p) => p.id === userId);
+    if (!profile) continue;
+    store.db.obligationSignatures.push({
+      id: crypto.randomUUID(),
+      agencyId: item.agencyId,
+      obligationId: item.id,
+      userId,
+      staffName: profile.fullName,
+      openedAt: null,
+      signedAt: null,
+      signatureName: null,
+      signatureMark: null,
+    });
+  }
+}
+
+function mapPlanStack(
+  store: MemoryStore,
+  session: SessionUser,
+  person: IndividualRecord,
+): PlanStackView {
+  const items = (store.db.obligations ?? []).filter(
+    (item) => item.individualId === person.id,
+  );
+  const views = sortObligations(items).map((item) => {
+    const rows = store.db.obligationSignatures.filter(
+      (row) => row.obligationId === item.id,
+    );
+    return {
+      item,
+      mySignature: rows.find((row) => row.userId === session.userId) ?? null,
+      signedCount: rows.filter((row) => row.signedAt).length,
+      assignedCount: rows.length,
+    };
+  });
+  const required = views.filter((view) => view.item.mode === "required");
+  const checked = views.filter((view) => view.item.mode === "checked");
+  const mustSign = requiredForSigning(items);
+  const myRequired = mustSign.map((item) =>
+    store.db.obligationSignatures.find(
+      (row) => row.obligationId === item.id && row.userId === session.userId,
+    ),
+  );
+  const submission =
+    store.db.packetSubmissions.find(
+      (row) => row.individualId === person.id && row.userId === session.userId,
+    ) ?? null;
+  return {
+    individualId: person.id,
+    individualName: person.fullName,
+    profile: person.profile ?? emptyProfile(person),
+    required,
+    checked,
+    mySubmissionAt: submission?.submittedAt ?? null,
+    canSubmit:
+      mustSign.length > 0 &&
+      myRequired.every((row) => row?.signedAt) &&
+      !submission,
+  };
+}
+
 function syncPacketRoster(store: MemoryStore, packet: AcknowledgmentPacket) {
   const individual = store.db.individuals.find((p) => p.id === packet.individualId)!;
   const existing = new Set(
@@ -483,6 +612,52 @@ function activateVersion(
     store.db.packets.unshift(packet);
   }
   syncPacketRoster(store, packet);
+  ensurePlanCollections(store);
+  const existingPcsp = store.db.obligations.filter(
+    (item) =>
+      item.individualId === document.individualId && item.kind === "pcsp",
+  );
+  const firstStack = existingPcsp.length === 0;
+  for (const item of existingPcsp) {
+    if (item.documentVersionId !== version.id) {
+      item.expiresOn = version.effectiveOn;
+    }
+  }
+  if (firstStack) {
+    const proposed = proposeFromPcsp({
+      agencyId: version.agencyId,
+      individualId: document.individualId,
+      documentVersionId: version.id,
+      expiresOn: version.expiresOn,
+      personName: personName(store, document.individualId),
+      effectiveOn: version.effectiveOn,
+    });
+    store.db.obligations.push(...proposed);
+  } else if (!existingPcsp.some((item) => item.documentVersionId === version.id)) {
+    store.db.obligations.push({
+      id: crypto.randomUUID(),
+      agencyId: version.agencyId,
+      individualId: document.individualId,
+      kind: "pcsp",
+      mode: "required",
+      title: `PCSP for ${personName(store, document.individualId)}`,
+      detail: `I have read and understood the PCSP that started on ${version.effectiveOn}. I had the opportunity to ask questions.`,
+      sourcePage: 1,
+      documentVersionId: version.id,
+      enabled: true,
+      frequency: "On plan update",
+      shiftPeriods: [],
+      expiresOn: version.expiresOn,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    });
+  }
+  for (const item of store.db.obligations.filter(
+    (row) => row.individualId === document.individualId,
+  )) {
+    syncObligationRoster(store, item);
+  }
   log(
     store,
     session,
@@ -510,6 +685,7 @@ function packetDetail(store: MemoryStore, packet: AcknowledgmentPacket): PacketD
 }
 
 function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
+  ensurePlanCollections(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit =
     hasPermission(session, "audit.read") || canViewPeople;
@@ -574,6 +750,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           .map((part) => part[0])
           .join(""),
         color: colors[i % 4],
+        profile: person.profile ?? emptyProfile(person),
       };
     }),
     staff: memberships.map((membership) => {
@@ -611,6 +788,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
               : "document",
     })),
     packets: packets.map((packet) => packetDetail(store, packet)),
+    planStacks: individuals.map((person) => mapPlanStack(store, session, person)),
     roles: rolesFor(store, session.agencyId),
     scorecard,
   };
@@ -1152,6 +1330,12 @@ export class LocalApi implements ComplyraApi {
     )) {
       syncPacketRoster(this.store, packet);
     }
+    ensurePlanCollections(this.store);
+    for (const item of this.store.db.obligations.filter(
+      (row) => row.individualId === individualId,
+    )) {
+      syncObligationRoster(this.store, item);
+    }
     log(
       this.store,
       session,
@@ -1243,6 +1427,165 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} signed ${packet.whatAcknowledging}`,
       "acknowledgment_row",
       row.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
+    const session = assertSession(this.store);
+    if (!canEditCover(session.roleKey)) {
+      throw new Error("Only a DPM or compliance admin can edit cover-page fields.");
+    }
+    const person = this.store.db.individuals.find((p) => p.id === individualId);
+    if (!person) throw new Error("Individual not found.");
+    person.profile = profile;
+    if (profile.legalName.trim()) person.fullName = profile.legalName.trim();
+    await persistMeta(this.store);
+  }
+
+  async updateObligation(
+    obligationId: string,
+    patch: Parameters<ComplyraApi["updateObligation"]>[1],
+  ) {
+    const session = assertSession(this.store);
+    const item = this.store.db.obligations.find((row) => row.id === obligationId);
+    if (!item) throw new Error("Item not found.");
+    const turningOnDelegation = item.kind === "delegation" && patch.enabled === true;
+    if (turningOnDelegation) {
+      if (!canToggleDelegation(session.roleKey, session.role, hasPermission(session, "requirements.approve"))) {
+        throw new Error("Only a DPM or nurse can turn a delegation on.");
+      }
+    } else if (!canEditExtraction(session.roleKey, hasPermission(session, "requirements.approve"))) {
+      throw new Error("Only a DPM can edit extracted items.");
+    }
+    Object.assign(item, patch);
+    if (item.enabled && item.mode === "required") {
+      item.proposed = false;
+      syncObligationRoster(this.store, item);
+    }
+    await persistMeta(this.store);
+  }
+
+  async addProtocol(individualId: string, title: string, detail = "") {
+    const session = assertSession(this.store);
+    if (!canEditExtraction(session.roleKey, hasPermission(session, "requirements.approve"))) {
+      throw new Error("Only a DPM can add a protocol.");
+    }
+    if (!title.trim()) throw new Error("Name the protocol.");
+    const person = this.store.db.individuals.find((p) => p.id === individualId);
+    if (!person) throw new Error("Individual not found.");
+    const item: ObligationItem = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      kind: "protocol",
+      mode: "required",
+      title: title.trim(),
+      detail: detail.trim() || "Staff acknowledge this protocol.",
+      sourcePage: null,
+      documentVersionId: null,
+      enabled: true,
+      frequency: "On protocol update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "manual",
+      inventoryState: "present",
+      proposed: false,
+    };
+    this.store.db.obligations.push(item);
+    syncObligationRoster(this.store, item);
+    await persistMeta(this.store);
+  }
+
+  async promoteToShiftTask(obligationId: string, shiftPeriods: string[]) {
+    const session = assertSession(this.store);
+    if (!canEditExtraction(session.roleKey, hasPermission(session, "requirements.approve"))) {
+      throw new Error("Only a DPM can add a daily shift requirement.");
+    }
+    const item = this.store.db.obligations.find((row) => row.id === obligationId);
+    if (!item) throw new Error("Item not found.");
+    item.kind = "shift_task";
+    item.mode = "required";
+    item.enabled = true;
+    item.proposed = false;
+    item.frequency = "Daily";
+    item.shiftPeriods = shiftPeriods.map((part) => part.trim()).filter(Boolean);
+    syncObligationRoster(this.store, item);
+    await persistMeta(this.store);
+  }
+
+  async markObligationOpened(signatureId: string) {
+    const session = assertSession(this.store);
+    const row = this.store.db.obligationSignatures.find((r) => r.id === signatureId);
+    if (!row) throw new Error("Signature row not found.");
+    if (row.userId !== session.userId && !isPrivileged(session.role)) {
+      throw new Error("You can only open your assigned documents.");
+    }
+    if (!row.openedAt) row.openedAt = new Date().toISOString();
+    await persistMeta(this.store);
+  }
+
+  async signObligation(
+    signatureId: string,
+    signatureName: string,
+    signatureMark: string,
+  ) {
+    const session = assertSession(this.store);
+    assertCan(session, "acknowledgments.sign_own");
+    const row = this.store.db.obligationSignatures.find((r) => r.id === signatureId);
+    if (!row) throw new Error("Signature row not found.");
+    if (row.userId !== session.userId) {
+      throw new Error("Staff must sign their own row.");
+    }
+    const item = this.store.db.obligations.find((r) => r.id === row.obligationId);
+    if (!item || !isObligationActive(item)) {
+      throw new Error("This document is not open for signature.");
+    }
+    if (!row.openedAt) {
+      throw new Error("Open and review the document before signing.");
+    }
+    if (row.signedAt) throw new Error("Already signed.");
+    if (!signatureName.trim() || !signatureMark) {
+      throw new Error("Type your legal name and add a signature mark.");
+    }
+    row.signatureName = signatureName.trim();
+    row.signatureMark = signatureMark;
+    row.signedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "obligation.signed",
+      `${session.fullName} signed ${item.title}`,
+      "obligation_signature",
+      row.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async submitPlanPacket(individualId: string) {
+    const session = assertSession(this.store);
+    const stack = mapPlanStack(
+      this.store,
+      session,
+      this.store.db.individuals.find((p) => p.id === individualId)!,
+    );
+    if (!stack.canSubmit) {
+      throw new Error("Sign every required document before submitting.");
+    }
+    this.store.db.packetSubmissions.push({
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      userId: session.userId,
+      submittedAt: new Date().toISOString(),
+    });
+    log(
+      this.store,
+      session,
+      "plan_packet.submitted",
+      `${session.fullName} submitted the required-document packet`,
+      "individual",
+      individualId,
     );
     await persistMeta(this.store);
   }
