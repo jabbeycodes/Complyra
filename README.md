@@ -25,6 +25,16 @@ npx playwright install chromium
 npx playwright test
 ```
 
+### iOS and Android
+
+The store apps wrap this same website. They do not replace it. See [docs/mobile.md](docs/mobile.md).
+
+```sh
+npx cap add ios
+npx cap add android
+npm run mobile:sync
+```
+
 ### Sample accounts (local workspace)
 
 Password for all sample accounts: `Evergreen!demo1`

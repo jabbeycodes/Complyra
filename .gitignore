@@ -7,3 +7,13 @@ playwright-report
 test-results
 .DS_Store
 *.tsbuildinfo
+ios/App/Pods
+ios/App/build
+android/.gradle
+android/app/build
+android/build
+android/local.properties
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
