@@ -432,7 +432,10 @@ function permissionsFor(store: MemoryStore, agencyId: string, roleKey: string): 
   const configured = (store.db.agencyRoles ?? []).find(
     (row) => row.agencyId === agencyId && row.key === roleKey,
   );
-  return { ...(configured?.permissions ?? defaultPermissions(roleKey)) };
+  return {
+    ...defaultPermissions(roleKey),
+    ...(configured?.permissions ?? {}),
+  };
 }
 
 function rolesFor(store: MemoryStore, agencyId: string): AgencyRole[] {
@@ -2178,7 +2181,7 @@ export class LocalApi implements ComplyraApi {
     managerUserId?: string | null;
   }) {
     const session = assertSession(this.store);
-    if (!canCreateSite(session.roleKey)) {
+    if (!hasPermission(session, "sites.create")) {
       throw new Error("Only a DPM or administrator can add a program site.");
     }
     const name = input.name.trim();

@@ -70,7 +70,7 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
-import { canCreateIndividual, canCreateSite } from "./data/permissions";
+import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -178,7 +178,7 @@ export default function App() {
     : null;
   const canManage = can(session, "requirements.approve");
   const canUpload = can(session, "documents.upload");
-  const canAddSite = canCreateSite(session.roleKey);
+  const canAddSite = can(session, "sites.create");
   const canAddPerson = canCreateIndividual(session.roleKey);
   const canInvite = can(session, "members.invite");
   const canAssign = can(session, "members.assign_roles");
@@ -750,16 +750,7 @@ export default function App() {
                     eyebrow="ONE AGENCY. CONNECTED CARE."
                     title="A home for every detail."
                     description="See how each site is doing and give your team the support it needs."
-                  >
-                    {canAddSite && (
-                      <button
-                        className="button primary"
-                        onClick={() => setModal("add-site")}
-                      >
-                        <Building2 size={16} /> Add a site
-                      </button>
-                    )}
-                  </PageHeading>
+                  />
                   <div className="list-controls">
                     <span>
                       {sites.length} program sites · {individuals.length}{" "}
@@ -778,6 +769,20 @@ export default function App() {
                     </select>
                   </div>
                   <div className="site-grid">
+                    {canAddSite && (
+                      <button
+                        type="button"
+                        className="panel add-site-tile"
+                        aria-label="Add a site"
+                        onClick={() => setModal("add-site")}
+                      >
+                        <span className="add-site-plus" aria-hidden="true">
+                          <Plus size={56} strokeWidth={3} />
+                        </span>
+                        <strong>Add a site</strong>
+                        <span>Open a new program home as you grow</span>
+                      </button>
+                    )}
                     {sites
                       .filter((s) => site === "All sites" || s.name === site)
                       .map((s) => {

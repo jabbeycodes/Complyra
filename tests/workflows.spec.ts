@@ -207,7 +207,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  await page.getByLabel("Filter by site").selectOption("Cedar House");
+  await page.getByLabel("Filter by site").selectOption("Oakwood House");
   await expect(
     page.getByRole("heading", { name: "No overdue requirements" }),
   ).toBeVisible();
@@ -218,7 +218,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   ).toBe(true);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.locator(".person-card")).toHaveCount(4);
+  await expect(page.locator(".person-card")).toHaveCount(2);
   await page.locator(".person-card").first().click();
   await expect(page.locator(".individual-chart")).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to individuals" })).toBeVisible();

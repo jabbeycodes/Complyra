@@ -15,6 +15,7 @@ export const PERMISSION_KEYS = [
   "clinical.view",
   "audit.read",
   "audit.export",
+  "sites.create",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -110,6 +111,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      "sites.create",
     ]),
   },
   {
@@ -241,6 +243,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "clinical.view": "View clinical / delegation records",
   "audit.read": "Open Audit center",
   "audit.export": "Export audit packets",
+  "sites.create": "Add program sites",
 };
 
 export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [
@@ -250,17 +253,15 @@ export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [
 ];
 
 export function canCreateSite(roleKey: string) {
-  return [
-    "administrator",
-    "compliance_admin",
-    "degreed_professional_manager",
-    "program_manager",
-  ].includes(roleKey);
+  return Boolean(
+    isRoleKey(roleKey) && ROLE_TEMPLATE_BY_KEY[roleKey].permissions["sites.create"],
+  );
 }
 
 export function canCreateIndividual(roleKey: string) {
   return (
     canCreateSite(roleKey) ||
+    roleKey === "program_manager" ||
     roleKey === "house_manager" ||
     roleKey === "nurse"
   );

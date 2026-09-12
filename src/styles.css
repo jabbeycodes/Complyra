@@ -1476,6 +1476,39 @@ td > svg {
   grid-template-columns: repeat(3, 1fr);
   gap: 20px;
 }
+.add-site-tile {
+  min-height: 280px;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+  border: 2px dashed #2f4630;
+  background: #d7e2cc;
+  color: #2f4630;
+  cursor: pointer;
+}
+.add-site-tile:hover {
+  background: #c8d6b8;
+}
+.add-site-plus {
+  width: 88px;
+  height: 88px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: #2f4630;
+  color: #faf6ef;
+  display: grid;
+  place-content: center;
+}
+.add-site-tile strong {
+  font-size: 22px;
+}
+.add-site-tile > span:last-child {
+  font-size: 15px;
+  color: #241e18;
+  max-width: 16ch;
+  margin: 0 auto;
+}
 .location-card {
   padding: 23px;
 }
