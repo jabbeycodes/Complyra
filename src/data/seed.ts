@@ -40,6 +40,13 @@ import {
 } from "./chart";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
+import {
+  blankSafetyLines,
+  type AdaptiveEquipment,
+  type EmergencyDrill,
+  type EquipmentMonthLog,
+  type HomeSafetyReport,
+} from "./monthlyChecks";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -79,6 +86,10 @@ export interface LocalDatabase {
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
   trainingChecklists: TrainingChecklist[];
+  adaptiveEquipment: AdaptiveEquipment[];
+  equipmentMonthLogs: EquipmentMonthLog[];
+  emergencyDrills: EmergencyDrill[];
+  homeSafetyReports: HomeSafetyReport[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -322,6 +333,7 @@ export function createEvergreenSeed(): LocalDatabase {
         stateCode: "MO",
         provisionedBy: "platform",
         status: "active",
+        monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
       },
       {
         id: PLATFORM_AGENCY_ID,
@@ -405,7 +417,107 @@ export function createEvergreenSeed(): LocalDatabase {
         return { userId: profile.id, staffName: profile.fullName };
       }),
     ),
+    ...buildMonthlySeed(sites, individuals),
   };
+}
+
+function buildMonthlySeed(
+  sites: SiteRecord[],
+  people: IndividualRecord[],
+): {
+  adaptiveEquipment: AdaptiveEquipment[];
+  equipmentMonthLogs: EquipmentMonthLog[];
+  emergencyDrills: EmergencyDrill[];
+  homeSafetyReports: HomeSafetyReport[];
+} {
+  const byName = Object.fromEntries(people.map((row) => [row.fullName, row]));
+  const adaptiveEquipment: AdaptiveEquipment[] = [
+    {
+      id: padId(1301),
+      agencyId: AGENCY_ID,
+      individualId: byName["Jodie Williams"].id,
+      name: "Wheelchair",
+      source: "pcsp",
+      active: true,
+    },
+    {
+      id: padId(1302),
+      agencyId: AGENCY_ID,
+      individualId: byName["Jodie Williams"].id,
+      name: "Shower chair",
+      source: "pcsp",
+      active: true,
+    },
+    {
+      id: padId(1303),
+      agencyId: AGENCY_ID,
+      individualId: byName["Brandon Miller"].id,
+      name: "Gait belt",
+      source: "manual",
+      active: true,
+    },
+    {
+      id: padId(1304),
+      agencyId: AGENCY_ID,
+      individualId: byName["Maya Johnson"].id,
+      name: "Shower chair",
+      source: "pcsp",
+      active: true,
+    },
+  ];
+  const equipmentMonthLogs: EquipmentMonthLog[] = adaptiveEquipment.map((item, i) => ({
+    id: padId(1311 + i),
+    equipmentId: item.id,
+    monthKey: "2026-08",
+    checkedOn: "2026-08-04",
+    initials: item.individualId === byName["Maya Johnson"].id ? "JW" : "AM",
+    checkedByUserId: null,
+    comments: "",
+  }));
+  const emergencyDrills: EmergencyDrill[] = [];
+  const homeSafetyReports: HomeSafetyReport[] = [];
+  let n = 1321;
+  for (const site of sites) {
+    for (const drillType of ["fire", "tornado", "earthquake"] as const) {
+      emergencyDrills.push({
+        id: padId(n++),
+        agencyId: AGENCY_ID,
+        siteId: site.id,
+        monthKey: "2026-08",
+        drillType,
+        date: "2026-08-05",
+        time: "14:20",
+        evacTime: "2:05",
+        leaderName: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
+        participants:
+          site.name === "Maple House"
+            ? "Alex Morgan, Taylor Reed, Jodie Williams, Brandon Miller"
+            : "James Wilson, Jordan Lee, Sylvester Jones, Maya Johnson",
+        awakeOrSleep: drillType === "fire" ? "awake" : "",
+      });
+    }
+    homeSafetyReports.push({
+      id: padId(n++),
+      agencyId: AGENCY_ID,
+      siteId: site.id,
+      monthKey: "2026-08",
+      lines: blankSafetyLines().map((line) => ({
+        ...line,
+        dateChecked: "2026-08-03",
+        location:
+          line.key.includes("smoke") || line.key === "co_1"
+            ? "Hallway"
+            : line.key.includes("faucet")
+              ? "Kitchen"
+              : "",
+        temp: line.key.includes("faucet") ? "116 F" : "",
+        extra: line.key === "fire_extinguisher" ? "2027-03 / full" : "",
+        checkedBy: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
+        signature: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
+      })),
+    });
+  }
+  return { adaptiveEquipment, equipmentMonthLogs, emergencyDrills, homeSafetyReports };
 }
 
 function buildTrainingChecklists(
@@ -579,6 +691,31 @@ function buildJodieStack(
       documentVersionId: versionId,
       enabled: true,
       frequency: "On plan update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
+    },
+    {
+      id: padId(1108),
+      agencyId,
+      individualId: jodieId,
+      kind: "inventory",
+      mode: "checked",
+      title: "Adaptive equipment",
+      detail: "Wheelchair, shower chair, and other listed equipment.",
+      sourcePage: 6,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "Monthly",
       shiftPeriods: [],
       expiresOn: null,
       createdFrom: "extraction",

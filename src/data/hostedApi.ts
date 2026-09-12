@@ -560,6 +560,13 @@ export class HostedApi implements ComplyraApi {
         dueSoon: Number((scoreRes.data as { dueSoon?: number } | null)?.dueSoon ?? 0),
         review: Number((scoreRes.data as { review?: number } | null)?.review ?? 0),
       },
+      monthly: {
+        equipment: [],
+        equipmentLogs: [],
+        drills: [],
+        safetyReports: [],
+      },
+      monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
     };
   }
 
@@ -1002,6 +1009,27 @@ export class HostedApi implements ComplyraApi {
   }
   async initialTrainingLine() {
     throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
+  }
+  async updateMonthlyDueSettings() {
+    throw new Error("Monthly due dates are on the local workspace until the hosted schema is migrated.");
+  }
+  async addAdaptiveEquipment() {
+    throw new Error("Monthly equipment logs are on the local workspace until the hosted schema is migrated.");
+  }
+  async removeAdaptiveEquipment() {
+    throw new Error("Monthly equipment logs are on the local workspace until the hosted schema is migrated.");
+  }
+  async checkEquipmentLog() {
+    throw new Error("Monthly equipment logs are on the local workspace until the hosted schema is migrated.");
+  }
+  async recordEmergencyDrill() {
+    throw new Error("Emergency drills are on the local workspace until the hosted schema is migrated.");
+  }
+  async recordHomeSafety() {
+    throw new Error("Home safety reports are on the local workspace until the hosted schema is migrated.");
+  }
+  async downloadMonthlyCheck(): Promise<{ blob: Blob; name: string }> {
+    throw new Error("Monthly check downloads are on the local workspace until the hosted schema is migrated.");
   }
   async createSite(): Promise<{ id: string }> {
     throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");

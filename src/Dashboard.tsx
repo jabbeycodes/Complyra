@@ -98,6 +98,11 @@ export default function Dashboard({
       onOpenPerson(item.personName);
       return;
     }
+    if (item.siteName) {
+      onSite(item.siteName);
+      onNavigate("Sites & programs");
+      return;
+    }
     if (item.kind === "review") onNavigate("Review queue", "Pending review");
   }
 
@@ -376,6 +381,8 @@ export default function Dashboard({
                     <PenLine size={17} />
                   ) : item.kind === "review" ? (
                     <ClipboardCheck size={17} />
+                  ) : item.kind === "monthly" ? (
+                    <Building2 size={17} />
                   ) : (
                     <CircleAlert size={17} />
                   )}

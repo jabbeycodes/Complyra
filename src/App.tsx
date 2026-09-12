@@ -64,6 +64,8 @@ import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
+import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
+import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -202,6 +204,10 @@ export default function App() {
     packets: workspace.packets,
     planStacks: workspace.planStacks,
     canApprove: canManage,
+    monthly: workspace.monthly,
+    monthlyDue: workspace.monthlyDue,
+    individuals,
+    sites,
   });
   const m = metrics(scoped);
   const isCategory = categories.includes(page as (typeof categories)[number]);
@@ -864,6 +870,12 @@ export default function App() {
                                 </button>
                               )}
                               <button
+                                className="button"
+                                onClick={() => setSite(s.name)}
+                              >
+                                This month’s checks
+                              </button>
+                              <button
                                 className="button full"
                                 onClick={() => {
                                   setSite(s.name);
@@ -877,6 +889,12 @@ export default function App() {
                         );
                       })}
                   </div>
+                  {site !== "All sites" &&
+                    sites
+                      .filter((row) => row.name === site)
+                      .map((row) => (
+                        <SiteMonthlyChecks key={row.id} siteId={row.id} />
+                      ))}
                 </>
               )}
               {page === "Staff" && (
@@ -1448,6 +1466,7 @@ export default function App() {
                         <LockKeyhole size={20} />
                       )}
                     </div>
+                    <MonthlyDueSettings onSaved={notify} />
                     <div className="settings-row">
                       <span>
                         <strong>Document intelligence</strong>

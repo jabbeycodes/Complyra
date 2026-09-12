@@ -4803,3 +4803,120 @@ th {
     overflow-x: auto;
   }
 }
+.monthly-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.monthly-toolbar h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #5f5145;
+}
+.monthly-toolbar label,
+.monthly-add,
+.monthly-form label,
+.safety-line label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #4a4036;
+}
+.monthly-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.monthly-form .monthly-span,
+.monthly-form .button {
+  grid-column: 1 / -1;
+}
+.monthly-add {
+  grid-template-columns: 1fr auto;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: end;
+}
+.monthly-card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.site-monthly {
+  margin-top: 20px;
+}
+.monthly-site-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 0 20px 20px;
+}
+.safety-form {
+  display: grid;
+  gap: 12px;
+}
+.safety-line {
+  border: 1px solid #e6ddd0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  background: #fffdf8;
+}
+.safety-line legend {
+  padding: 0 6px;
+  font-size: 13px;
+  color: #5f5145;
+}
+.monthly-people-summary {
+  padding: 0 20px 20px;
+  color: #4a4036;
+}
+@media (max-width: 900px) {
+  .monthly-site-grid,
+  .monthly-form,
+  .safety-line {
+    grid-template-columns: 1fr;
+  }
+}
+.monthly-due-settings {
+  align-items: flex-start;
+}
+.monthly-due-form {
+  display: grid;
+  grid-template-columns: repeat(3, 72px) auto;
+  gap: 8px;
+  align-items: end;
+}
+.monthly-due-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #4a4036;
+}
+.monthly-due-form input {
+  width: 72px;
+}
+.monthly-due-form .form-error {
+  grid-column: 1 / -1;
+}
+.monthly-due-readonly {
+  font-size: 13px;
+  color: #4a4036;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .monthly-due-form {
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .monthly-due-form .button {
+    grid-column: 1 / -1;
+  }
+}

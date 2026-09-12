@@ -2,6 +2,18 @@ import type { Requirement } from "../domain";
 import type { PacketDetail, SessionUser } from "./types";
 import type { PlanStackView } from "./planStack";
 import { staffCanSignDelegation } from "./planStack";
+import { todayIso } from "./chart";
+import {
+  asMonthlyCollections,
+  drillComplete,
+  equipmentViewForPerson,
+  monthDueOn,
+  monthKeyFrom,
+  safetyComplete,
+  DEFAULT_MONTHLY_DUE,
+  type MonthlyDueSettings,
+  type MonthlyWorkspace,
+} from "./monthlyChecks";
 
 export const AGENCY_WIDE_ROLE_KEYS = [
   "administrator",
@@ -51,12 +63,13 @@ export function sitesVisibleTo<T extends { id: string }>(
 
 export type PersonalWorkItem = {
   id: string;
-  kind: "requirement" | "acknowledgment" | "training" | "review";
+  kind: "requirement" | "acknowledgment" | "training" | "review" | "monthly";
   title: string;
   detail: string;
   tone: "overdue" | "due" | "review";
   requirementId?: string;
   personName?: string;
+  siteName?: string;
 };
 
 function obligationLabel(kind: string, title: string) {
@@ -72,9 +85,13 @@ export function personalQueue(input: {
   packets: PacketDetail[];
   planStacks: PlanStackView[];
   canApprove: boolean;
+  monthly?: MonthlyWorkspace;
+  individuals?: { id: string; name: string; site: string }[];
+  sites?: { id: string; name: string }[];
+  monthlyDue?: MonthlyDueSettings;
   limit?: number;
 }): PersonalWorkItem[] {
-  const limit = input.limit ?? 8;
+  const limit = input.limit ?? 12;
   const out: PersonalWorkItem[] = [];
   const seen = new Set<string>();
 
@@ -98,6 +115,62 @@ export function personalQueue(input: {
       requirementId: item.id,
       personName: item.person === "Site-wide" ? undefined : item.person,
     });
+  }
+
+  const today = todayIso();
+  const key = monthKeyFrom(today);
+  const due = input.monthlyDue ?? DEFAULT_MONTHLY_DUE;
+  if (input.monthly && input.individuals && input.sites) {
+    const collections = asMonthlyCollections(input.monthly);
+    for (const person of input.individuals) {
+      const view = equipmentViewForPerson(
+        collections,
+        person.id,
+        key,
+        today,
+        due.equipmentDay,
+      );
+      if (!view.items.length || view.complete) continue;
+      const dueOn = monthDueOn(key, due.equipmentDay);
+      push({
+        id: `eq-${person.id}-${key}`,
+        kind: "monthly",
+        title: "Check adaptive equipment",
+        detail: `${person.name} · due ${dueOn}`,
+        tone: today <= dueOn ? "due" : "overdue",
+        personName: person.name,
+      });
+    }
+    for (const site of input.sites) {
+      const drills = collections.emergencyDrills.filter(
+        (row) => row.siteId === site.id && row.monthKey === key,
+      );
+      if (drills.length && !drills.every(drillComplete)) {
+        const dueOn = monthDueOn(key, due.drillDay);
+        push({
+          id: `drill-${site.id}-${key}`,
+          kind: "monthly",
+          title: "Record this month’s emergency drills",
+          detail: `${site.name} · due ${dueOn}`,
+          tone: today <= dueOn ? "due" : "overdue",
+          siteName: site.name,
+        });
+      }
+      const safety = collections.homeSafetyReports.find(
+        (row) => row.siteId === site.id && row.monthKey === key,
+      );
+      if (safety && !safetyComplete(safety)) {
+        const dueOn = monthDueOn(key, due.safetyDay);
+        push({
+          id: `safety-${site.id}-${key}`,
+          kind: "monthly",
+          title: "Complete the home safety report",
+          detail: `${site.name} · due ${dueOn}`,
+          tone: today <= dueOn ? "due" : "overdue",
+          siteName: site.name,
+        });
+      }
+    }
   }
 
   for (const stack of input.planStacks) {
