@@ -655,8 +655,10 @@ export default function App() {
                         );
                         const renewals =
                           session && canSeeRenewals(session.roleKey)
-                            ? workspace.planStacks.find((stack) => stack.individualId === p.id)
-                                ?.renewals ?? []
+                            ? (
+                                workspace.planStacks.find((stack) => stack.individualId === p.id)
+                                  ?.renewals ?? []
+                              ).filter((row) => row.status !== "current")
                             : [];
                         return (
                           <button

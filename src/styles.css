@@ -4292,16 +4292,20 @@ th {
   margin: 8px 0 4px;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   text-align: left;
 }
 .person-renewals li {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   align-items: center;
-  font-size: 13px;
+  font-size: 12px;
   color: #4a4036;
+}
+.person-renewals li span:first-child {
+  flex: 1;
+  min-width: 0;
 }
 .kind-pill.renewal.overdue {
   background: #f3e6dc;
