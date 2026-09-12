@@ -60,6 +60,7 @@ import AuthEntry from "./auth/AuthEntry";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
+import AssignedDocsPanel from "./features/AssignedDocsPanel";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -1531,75 +1532,14 @@ export default function App() {
           )}
         </Modal>
       )}
-      {person && (
+      {person && individuals.find((p) => p.name === person) && (
         <Modal
-          title="Individual compliance profile"
+          title="Required documents"
           onClose={() => setPerson(null)}
           wide
         >
-          <div className="profile-heading">
-            <Avatar name={person} />
-            <div>
-              <h2>{person}</h2>
-              <p>
-                {individuals.find((p) => p.name === person)?.site} · DOB{" "}
-                {individuals.find((p) => p.name === person)?.dateOfBirth
-                  ? formatDate(
-                      individuals.find((p) => p.name === person)!.dateOfBirth,
-                    )
-                  : "—"}
-              </p>
-            </div>
-            <span className="profile-score">
-              {
-                metrics(data.requirements.filter((r) => r.person === person))
-                  .score
-              }
-              %<small>readiness</small>
-            </span>
-          </div>
-          <h3 className="section-label">Plans & version history</h3>
-          <div className="plan-list">
-            {data.plans
-              .filter((p) => p.person === person)
-              .map((p) => (
-                <button key={p.id} onClick={() => setPlan(p)}>
-                  <FileText size={18} />
-                  <span>
-                    {p.name}
-                    <small>
-                      {p.version} · Effective {formatDate(p.effective)}
-                    </small>
-                  </span>
-                  <Badge status={p.status} />
-                </button>
-              ))}
-          </div>
-          <h3 className="section-label">Acknowledgment sheets</h3>
-          <div className="plan-list">
-            {workspace.packets
-              .filter((item) => item.individual.fullName === person)
-              .map((item) => (
-                <button key={item.packet.id} onClick={() => setPacket(item)}>
-                  <PenLine size={18} />
-                  <span>
-                    {item.packet.whatAcknowledging}
-                    <small>
-                      {item.rows.filter((row) => row.signedAt).length}/
-                      {item.rows.length} signed
-                    </small>
-                  </span>
-                  <Badge
-                    status={item.packet.status === "open" ? "Open" : "Archived"}
-                  />
-                </button>
-              ))}
-          </div>
-          <h3 className="section-label">Assigned requirements</h3>
-          <RequirementTable
-            items={data.requirements.filter((r) => r.person === person)}
-            onSelect={selectRequirement}
-            compact
+          <AssignedDocsPanel
+            individualId={individuals.find((p) => p.name === person)!.id}
           />
         </Modal>
       )}

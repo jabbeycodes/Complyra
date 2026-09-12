@@ -4131,3 +4131,128 @@ th {
     grid-template-columns: 1fr;
   }
 }
+.plan-stack {
+  display: grid;
+  gap: 18px;
+}
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+.cover-grid label,
+.add-protocol label,
+.obligation-list > label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #4a4036;
+}
+.cover-grid input,
+.add-protocol input,
+.obligation-list > label input,
+.sign-box input {
+  border: 1px solid var(--border);
+  background: #faf6ef;
+  color: #241e18;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.stack-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid #c9b48a;
+}
+.stack-tabs button {
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #4a4036;
+  border-radius: 8px 8px 0 0;
+}
+.stack-tabs button.active {
+  background: #d7e2cc;
+  color: #2f4630;
+}
+.stack-help {
+  color: #4a4036;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.obligation-list {
+  display: grid;
+  gap: 12px;
+}
+.obligation-card {
+  background: #faf6ef;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+}
+.obligation-card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.obligation-card h3 {
+  flex: 1;
+  font-size: 17px;
+}
+.kind-pill {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #efe4d4;
+  color: #6f4a2e;
+}
+.kind-pill.pcsp {
+  background: #d7e2cc;
+  color: #2f4630;
+}
+.kind-pill.protocol {
+  background: #efe4d4;
+}
+.kind-pill.delegation {
+  background: #f3e6dc;
+  color: #8a5340;
+}
+.obligation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.signed-flag,
+.shift-periods {
+  color: #2f4630;
+  font-size: 13px;
+}
+.sign-box {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+}
+.add-protocol {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+}
+.add-protocol label {
+  flex: 1;
+}
+.form-error {
+  color: #8a5340;
+  font-weight: 600;
+}
+@media (max-width: 700px) {
+  .cover-grid {
+    grid-template-columns: 1fr;
+  }
+}

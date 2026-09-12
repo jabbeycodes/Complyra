@@ -444,6 +444,7 @@ export class HostedApi implements ComplyraApi {
             .map((part) => part[0])
             .join(""),
           color: colors[i % 4],
+          profile: null,
         };
       }),
       staff: memberships.map((membership) => {
@@ -550,6 +551,7 @@ export class HostedApi implements ComplyraApi {
         ];
       }),
       roles: mapAgencyRoles(agencyId, rolesRes.data ?? []),
+      planStacks: [],
       scorecard: {
         score: Number((scoreRes.data as { score?: number } | null)?.score ?? 100),
         total: Number((scoreRes.data as { total?: number } | null)?.total ?? 0),
@@ -954,6 +956,28 @@ export class HostedApi implements ComplyraApi {
       "acknowledgment_row",
       rowId,
     );
+  }
+
+  async updateIndividualProfile() {
+    throw new Error("Cover-page editing is on the local workspace until the hosted schema is migrated.");
+  }
+  async updateObligation() {
+    throw new Error("Plan-stack editing is on the local workspace until the hosted schema is migrated.");
+  }
+  async addProtocol() {
+    throw new Error("Adding protocols is on the local workspace until the hosted schema is migrated.");
+  }
+  async promoteToShiftTask() {
+    throw new Error("Shift requirements are on the local workspace until the hosted schema is migrated.");
+  }
+  async markObligationOpened() {
+    throw new Error("Required-document signing is on the local workspace until the hosted schema is migrated.");
+  }
+  async signObligation() {
+    throw new Error("Required-document signing is on the local workspace until the hosted schema is migrated.");
+  }
+  async submitPlanPacket() {
+    throw new Error("Packet submit is on the local workspace until the hosted schema is migrated.");
   }
 
   async resetWorkspace() {

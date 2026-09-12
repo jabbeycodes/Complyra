@@ -21,6 +21,12 @@ import type {
   SiteRecord,
   StaffAssignment,
 } from "./types";
+import type {
+  IndividualProfile,
+  ObligationItem,
+  ObligationSignature,
+  PacketSubmission,
+} from "./planStack";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 
@@ -54,6 +60,9 @@ export interface LocalDatabase {
   packets: AcknowledgmentPacket[];
   rows: AcknowledgmentRow[];
   audit: AuditEvent[];
+  obligations: ObligationItem[];
+  obligationSignatures: ObligationSignature[];
+  packetSubmissions: PacketSubmission[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -201,6 +210,30 @@ export function createEvergreenSeed(): LocalDatabase {
   });
 
   const jodie = individualByName["Jodie Williams"];
+  const jodieProfile: IndividualProfile = {
+    legalName: "Jodie Williams",
+    goesBy: "Jodie",
+    dmhId: "110245",
+    diagnosis: "Unspecified intellectual disability",
+    waiver: "Comprehensive Residential",
+    address: "3201 Pompey Drive",
+    phone: "573-555-0144",
+    language: "English",
+    implementationStart: "2026-01-15",
+    implementationEnd: "2027-01-14",
+    serviceCoordinator: "Ashley Allen",
+    guardians: [
+      {
+        name: "Jonathan Williams",
+        relationship: "Brother",
+        phone: "573-555-0199",
+        email: "guardian@example.com",
+        preferredContact: "Phone",
+      },
+    ],
+  };
+  const jodieRecord = individuals.find((p) => p.id === jodie.id);
+  if (jodieRecord) jodieRecord.profile = jodieProfile;
   const jodieV2 = versions.find((v) => {
     const doc = documents.find((d) => d.id === v.documentId);
     return doc?.title === "Jodie Williams · PCSP 2026" && v.versionLabel === "v2";
@@ -233,6 +266,21 @@ export function createEvergreenSeed(): LocalDatabase {
       signatureMark: signed ? "signed" : null,
     };
   });
+
+  const { obligations: jodieObligations, obligationSignatures: jodieObligationSignatures } =
+    buildJodieStack(
+      AGENCY_ID,
+      jodie.id,
+      jodieV2.id,
+      jodieStaff.map((assignment) => {
+        const profile = profiles.find((p) => p.id === assignment.userId)!;
+        return {
+          userId: profile.id,
+          staffName: profile.fullName,
+          signedPcsp: profile.fullName === "Sarah Mitchell",
+        };
+      }),
+    );
 
   const audit: AuditEvent[] = seedActivity.map((event, i) => ({
     id: padId(1001 + i),
@@ -318,7 +366,171 @@ export function createEvergreenSeed(): LocalDatabase {
     packets: [packet],
     rows,
     audit,
+    obligations: jodieObligations,
+    obligationSignatures: jodieObligationSignatures,
+    packetSubmissions: [],
   };
+}
+
+function buildJodieStack(
+  agencyId: string,
+  jodieId: string,
+  versionId: string,
+  staff: { userId: string; staffName: string; signedPcsp: boolean }[],
+): {
+  obligations: ObligationItem[];
+  obligationSignatures: ObligationSignature[];
+} {
+  const obligations: ObligationItem[] = [
+    {
+      id: padId(1101),
+      agencyId,
+      individualId: jodieId,
+      kind: "pcsp",
+      mode: "required",
+      title: "PCSP for Jodie Williams",
+      detail:
+        "I have read and understood the PCSP that started on 1/15/2026. I had the opportunity to ask questions.",
+      sourcePage: 1,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "On plan update",
+      shiftPeriods: [],
+      expiresOn: "2027-01-14",
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    },
+    {
+      id: padId(1102),
+      agencyId,
+      individualId: jodieId,
+      kind: "protocol",
+      mode: "required",
+      title: "Seizure protocol",
+      detail: "Follow the seizure protocol on file and give PRN medication when needed.",
+      sourcePage: 5,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "On protocol update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    },
+    {
+      id: padId(1103),
+      agencyId,
+      individualId: jodieId,
+      kind: "protocol",
+      mode: "required",
+      title: "Behavioral support strategies",
+      detail: "Use the positive support plan when Jodie is upset or wants space.",
+      sourcePage: 7,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "On protocol update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    },
+    {
+      id: padId(1104),
+      agencyId,
+      individualId: jodieId,
+      kind: "delegation",
+      mode: "required",
+      title: "RN delegation of specified nursing task",
+      detail: "Injectable medication administration. DPM/RN can turn this on for assigned staff.",
+      sourcePage: null,
+      documentVersionId: null,
+      enabled: false,
+      frequency: "As delegated",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "unchecked",
+      proposed: true,
+    },
+    {
+      id: padId(1105),
+      agencyId,
+      individualId: jodieId,
+      kind: "shift_task",
+      mode: "required",
+      title: "Daily body / skin checks",
+      detail: "Complete head-to-toe skin checks on shift and report breakdown early.",
+      sourcePage: 12,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "Daily",
+      shiftPeriods: ["7a–3p", "3p–11p"],
+      expiresOn: null,
+      createdFrom: "manual",
+      inventoryState: "present",
+      proposed: false,
+    },
+    {
+      id: padId(1106),
+      agencyId,
+      individualId: jodieId,
+      kind: "inventory",
+      mode: "checked",
+      title: "HRST support needs",
+      detail: "Eating, ambulation, transfer, toileting, seizures, and skin integrity.",
+      sourcePage: 5,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "On plan update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    },
+    {
+      id: padId(1107),
+      agencyId,
+      individualId: jodieId,
+      kind: "inventory",
+      mode: "checked",
+      title: "Physician orders / equipment renewals",
+      detail: "Wheelchair and shower chair orders. Staff do not sign. DPM tracks renewal.",
+      sourcePage: 6,
+      documentVersionId: versionId,
+      enabled: true,
+      frequency: "Annually",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+    },
+  ];
+
+  const obligationSignatures: ObligationSignature[] = [];
+  let n = 1201;
+  for (const item of obligations) {
+    if (item.mode !== "required" || !item.enabled) continue;
+    for (const member of staff) {
+      const signed = member.signedPcsp && item.kind === "pcsp";
+      obligationSignatures.push({
+        id: padId(n++),
+        agencyId,
+        obligationId: item.id,
+        userId: member.userId,
+        staffName: member.staffName,
+        openedAt: signed ? "2026-07-02T15:00:00.000Z" : null,
+        signedAt: signed ? "2026-07-02T15:04:00.000Z" : null,
+        signatureName: signed ? member.staffName : null,
+        signatureMark: signed ? "signed" : null,
+      });
+    }
+  }
+  return { obligations, obligationSignatures };
 }
 
 export const DEMO_AGENCY_CODE = "EVERGREEN-MO";

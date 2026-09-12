@@ -66,6 +66,7 @@ export interface IndividualRecord {
   siteId: string;
   fullName: string;
   dateOfBirth: string;
+  profile?: import("./planStack").IndividualProfile;
 }
 
 export interface StaffAssignment {
