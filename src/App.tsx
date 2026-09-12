@@ -70,6 +70,7 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
+import { personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -129,6 +130,7 @@ export default function App() {
     setSelectedId(null);
     setPerson(null);
     setPlan(null);
+    setSite("All sites");
   }, [session?.userId]);
   useEffect(() => {
     if (!session) return;
@@ -165,8 +167,10 @@ export default function App() {
   if (!workspace) {
     return <div className="login-shell">Loading workspace…</div>;
   }
-  const sites = workspace.sites;
-  const individuals = workspace.individuals;
+  const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);
+  const individuals = workspace.individuals.filter((person) =>
+    sites.some((row) => row.name === person.site),
+  );
   const staff = workspace.staff;
   const data = {
     requirements: workspace.requirements,
@@ -185,9 +189,20 @@ export default function App() {
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
-  const scoped = data.requirements.filter(
+  const visibleSiteNames = new Set(sites.map((row) => row.name));
+  const visibleRequirements = data.requirements.filter((r) =>
+    visibleSiteNames.has(r.site),
+  );
+  const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
+  const personalItems = personalQueue({
+    session,
+    items: visibleRequirements,
+    packets: workspace.packets,
+    planStacks: workspace.planStacks,
+    canApprove: canManage,
+  });
   const m = metrics(scoped);
   const isCategory = categories.includes(page as (typeof categories)[number]);
   const auditMode = page === "Audit center";
@@ -521,14 +536,17 @@ export default function App() {
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
+              allItems={visibleRequirements}
               scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
               individuals={individuals}
               site={site}
+              personalItems={personalItems}
               onSite={setSite}
               onNavigate={navigate}
               onRequirement={selectRequirement}
+              onOpenPerson={openPersonChart}
               onExport={() => {
                 download(
                   "complyrer-sample-compliance-report.csv",
