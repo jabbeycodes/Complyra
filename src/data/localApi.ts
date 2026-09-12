@@ -79,11 +79,13 @@ import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
 import {
   canCompleteMonthly,
+  canConfigureMonthlyDue,
   canManageEquipment,
   drillComplete,
   ensureMonthlyCycles,
   equipmentViewForPerson,
   safetyComplete,
+  normalizeMonthlyDue,
   type AdaptiveEquipment,
   type EmergencyDrill,
   type EquipmentMonthLog,
@@ -242,6 +244,11 @@ export interface ComplyraApi {
     awakeOrSleep?: "awake" | "sleep" | "";
   }): Promise<void>;
   recordHomeSafety(input: { id: string; lines: SafetyLine[] }): Promise<void>;
+  updateMonthlyDueSettings(input: {
+    equipmentDay: number;
+    drillDay: number;
+    safetyDay: number;
+  }): Promise<void>;
   downloadMonthlyCheck(input: {
     kind: "equipment" | "drills" | "safety";
     id: string;
@@ -311,6 +318,7 @@ export interface WorkspaceView {
     drills: EmergencyDrill[];
     safetyReports: HomeSafetyReport[];
   };
+  monthlyDue: import("./monthlyChecks").MonthlyDueSettings;
 }
 
 function cloneSeed(): LocalDatabase {
@@ -417,6 +425,7 @@ async function hydrate() {
       for (const agency of browserStore.db.agencies) {
         agency.status = agency.status ?? "active";
         agency.agencyCode = normalizeAgencyCode(agency.agencyCode);
+        agency.monthlyDue = normalizeMonthlyDue(agency.monthlyDue);
       }
       if (!browserStore.db.agencyRoles?.length) {
         browserStore.db.agencyRoles = browserStore.db.agencies.flatMap((agency) =>
@@ -1117,6 +1126,9 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
       drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId),
       safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId),
     },
+    monthlyDue: normalizeMonthlyDue(
+      store.db.agencies.find((row) => row.id === session.agencyId)?.monthlyDue,
+    ),
   };
 }
 
@@ -1211,6 +1223,7 @@ export class LocalApi implements ComplyraApi {
       stateCode: input.stateCode.trim().toUpperCase(),
       provisionedBy,
       status,
+      monthlyDue: normalizeMonthlyDue(),
     });
     this.store.db.profiles.push({
       id: userId,
@@ -2240,6 +2253,29 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} submitted the required-document packet`,
       "individual",
       individualId,
+    );
+    await persistMeta(this.store);
+  }
+
+  async updateMonthlyDueSettings(input: {
+    equipmentDay: number;
+    drillDay: number;
+    safetyDay: number;
+  }) {
+    const session = assertSession(this.store);
+    if (!canConfigureMonthlyDue(session.roleKey)) {
+      throw new Error("Only a DPM or administrator can set monthly due dates.");
+    }
+    const agency = this.store.db.agencies.find((row) => row.id === session.agencyId);
+    if (!agency) throw new Error("Agency not found.");
+    agency.monthlyDue = normalizeMonthlyDue(input);
+    log(
+      this.store,
+      session,
+      "monthly_due.updated",
+      `Monthly checks due by day ${agency.monthlyDue.equipmentDay}/${agency.monthlyDue.drillDay}/${agency.monthlyDue.safetyDay}`,
+      "agency",
+      agency.id,
     );
     await persistMeta(this.store);
   }

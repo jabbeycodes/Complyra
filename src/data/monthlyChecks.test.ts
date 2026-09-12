@@ -11,11 +11,13 @@ import { DEMO_PASSWORD } from "./types";
 import { todayIso } from "./chart";
 import {
   DRILLS_BY_MONTH,
+  clampDueDay,
   drillsForMonth,
   equipmentFromInventoryDetail,
   monthDueOn,
   monthKeyFrom,
   monthlyTone,
+  normalizeMonthlyDue,
 } from "./monthlyChecks";
 
 function api() {
@@ -31,12 +33,20 @@ test("equipment names split out of a PCSP inventory line", () => {
   );
 });
 
-test("monthly tone is due soon through the 7th and overdue after", () => {
+test("monthly tone is due soon through the configured day and overdue after", () => {
   assert.equal(monthKeyFrom("2026-09-11"), "2026-09");
   assert.equal(monthDueOn("2026-09"), "2026-09-07");
+  assert.equal(monthDueOn("2026-09", 15), "2026-09-15");
   assert.equal(monthlyTone(true, "2026-09-11", "2026-09"), "current");
   assert.equal(monthlyTone(false, "2026-09-07", "2026-09"), "due_soon");
   assert.equal(monthlyTone(false, "2026-09-11", "2026-09"), "overdue");
+  assert.equal(monthlyTone(false, "2026-09-11", "2026-09", 15), "due_soon");
+  assert.equal(clampDueDay(40), 28);
+  assert.deepEqual(normalizeMonthlyDue({ equipmentDay: 12 }), {
+    equipmentDay: 12,
+    drillDay: 7,
+    safetyDay: 7,
+  });
 });
 
 test("September requires fire, tornado, and severe weather", () => {
@@ -203,4 +213,41 @@ test("a new month does not clear last month’s completed log", async () => {
   );
   assert.equal(august?.checkedOn, "2026-08-03");
   assert.equal(october?.checkedOn, null);
+});
+
+test("a DPM or admin can change monthly due days; a DSP cannot", async () => {
+  const client = api();
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  let workspace = await client.loadWorkspace(admin);
+  assert.equal(workspace.monthlyDue.equipmentDay, 7);
+  await client.updateMonthlyDueSettings({
+    equipmentDay: 15,
+    drillDay: 10,
+    safetyDay: 5,
+  });
+  workspace = await client.loadWorkspace(admin);
+  assert.deepEqual(workspace.monthlyDue, {
+    equipmentDay: 15,
+    drillDay: 10,
+    safetyDay: 5,
+  });
+
+  await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  await assert.rejects(
+    () =>
+      client.updateMonthlyDueSettings({
+        equipmentDay: 1,
+        drillDay: 1,
+        safetyDay: 1,
+      }),
+    /DPM or administrator/,
+  );
 });

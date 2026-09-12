@@ -333,6 +333,7 @@ export function createEvergreenSeed(): LocalDatabase {
         stateCode: "MO",
         provisionedBy: "platform",
         status: "active",
+        monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
       },
       {
         id: PLATFORM_AGENCY_ID,

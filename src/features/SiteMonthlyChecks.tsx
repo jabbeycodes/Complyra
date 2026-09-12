@@ -6,6 +6,7 @@ import {
   asMonthlyCollections,
   availableMonths,
   canCompleteMonthly,
+  dayOrdinal,
   drillComplete,
   DRILL_LABELS,
   equipmentViewForPerson,
@@ -41,6 +42,8 @@ export default function SiteMonthlyChecks({
   if (!session || !workspace) return null;
 
   const site = workspace.sites.find((row) => row.id === siteId);
+  const drillDay = workspace.monthlyDue.drillDay;
+  const safetyDay = workspace.monthlyDue.safetyDay;
   const collections = asMonthlyCollections(workspace.monthly);
   const drills = siteDrillsView(collections, siteId, monthKey);
   const safety = siteSafetyView(collections, siteId, monthKey);
@@ -51,14 +54,14 @@ export default function SiteMonthlyChecks({
   const drillTone: MonthlyTone = drills.length
     ? drillsDone
       ? "current"
-      : today <= monthDueOn(monthKey)
+      : today <= monthDueOn(monthKey, drillDay)
         ? "due_soon"
         : "overdue"
     : "current";
   const safetyTone: MonthlyTone = safety
     ? safetyDone
       ? "current"
-      : today <= monthDueOn(monthKey)
+      : today <= monthDueOn(monthKey, safetyDay)
         ? "due_soon"
         : "overdue"
     : "current";
@@ -83,8 +86,10 @@ export default function SiteMonthlyChecks({
         <div>
           <h2 id="site-monthly-heading">Monthly home checks · {site.name}</h2>
           <p>
-            Emergency drills and the home safety report are due by the 7th.
-            They reset when the month ends. Finished months stay downloadable.
+            Emergency drills are due by the {dayOrdinal(drillDay)}. The home
+            safety report is due by the {dayOrdinal(safetyDay)}. A DPM sets
+            those days in Settings. They reset when the month ends. Finished
+            months stay downloadable.
           </p>
         </div>
         <label>
@@ -108,7 +113,7 @@ export default function SiteMonthlyChecks({
         <div>
           <div className="monthly-toolbar">
             <h3>Emergency drills</h3>
-            <DueChip date={monthDueOn(monthKey)} status={badgeFor(drillTone)} />
+            <DueChip date={monthDueOn(monthKey, drillDay)} status={badgeFor(drillTone)} />
             <Badge status={badgeFor(drillTone)} />
             <button
               className="button"
@@ -139,7 +144,7 @@ export default function SiteMonthlyChecks({
         <div>
           <div className="monthly-toolbar">
             <h3>Home safety report</h3>
-            <DueChip date={monthDueOn(monthKey)} status={badgeFor(safetyTone)} />
+            <DueChip date={monthDueOn(monthKey, safetyDay)} status={badgeFor(safetyTone)} />
             <Badge status={badgeFor(safetyTone)} />
             <button
               className="button"
@@ -181,6 +186,7 @@ export default function SiteMonthlyChecks({
                 person.id,
                 monthKey,
                 today,
+                workspace.monthlyDue.equipmentDay,
               );
               if (!view.items.length) return null;
               return (

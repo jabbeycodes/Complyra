@@ -65,6 +65,7 @@ import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
+import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -204,6 +205,7 @@ export default function App() {
     planStacks: workspace.planStacks,
     canApprove: canManage,
     monthly: workspace.monthly,
+    monthlyDue: workspace.monthlyDue,
     individuals,
     sites,
   });
@@ -1464,6 +1466,7 @@ export default function App() {
                         <LockKeyhole size={20} />
                       )}
                     </div>
+                    <MonthlyDueSettings onSaved={notify} />
                     <div className="settings-row">
                       <span>
                         <strong>Document intelligence</strong>

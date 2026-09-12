@@ -58,6 +58,22 @@ test("monthly equipment, drills, and safety are due by the 7th and downloadable 
   );
 });
 
+test("DPM can change monthly due days in settings", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(
+    page.getByText("Monthly check due dates"),
+  ).toBeVisible();
+  await page.getByLabel("Adaptive equipment due day").fill("15");
+  await page.getByLabel("Emergency drills due day").fill("10");
+  await page.getByLabel("Home safety report due day").fill("5");
+  await page.getByRole("button", { name: "Save due dates" }).click();
+  await expect(page.getByRole("status")).toContainText("Monthly due dates saved");
+  await page.getByRole("button", { name: "Individuals", exact: true }).click();
+  await page.getByRole("heading", { name: "Jodie Williams" }).click();
+  await expect(page.getByText(/checked by the 15th of each month/)).toBeVisible();
+});
+
 test("people without equipment do not get an equipment log unless DPM adds one", async ({
   page,
 }) => {

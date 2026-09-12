@@ -7,6 +7,7 @@ import {
   availableMonths,
   canCompleteMonthly,
   canManageEquipment,
+  dayOrdinal,
   equipmentViewForPerson,
   monthDueOn,
   monthKeyFrom,
@@ -35,8 +36,15 @@ export default function MonthlyEquipmentCard({
   if (!session || !workspace) return null;
 
   const person = workspace.individuals.find((row) => row.id === individualId);
+  const dueDay = workspace.monthlyDue.equipmentDay;
   const collections = asMonthlyCollections(workspace.monthly);
-  const view = equipmentViewForPerson(collections, individualId, monthKey, today);
+  const view = equipmentViewForPerson(
+    collections,
+    individualId,
+    monthKey,
+    today,
+    dueDay,
+  );
   const months = availableMonths(collections).filter((key) =>
     workspace.monthly.equipmentLogs.some((log) =>
       view.items.some((item) => item.id === log.equipmentId && log.monthKey === key),
@@ -63,8 +71,9 @@ export default function MonthlyEquipmentCard({
     <section className="chart-widget" aria-labelledby="equipment-log-heading">
       <h2 id="equipment-log-heading">Adaptive equipment log</h2>
       <p className="stack-help">
-        Anyone with equipment on file must be checked in the first 7 days of
-        each month. A date with no comment means the item is in good order. The
+        Anyone with equipment on file must be checked by the{" "}
+        {dayOrdinal(dueDay)} of each month. A DPM can change that day in
+        Settings. A date with no comment means the item is in good order. The
         log resets on the 1st; finished months stay downloadable.
       </p>
       <div className="monthly-toolbar">
@@ -82,7 +91,7 @@ export default function MonthlyEquipmentCard({
             ))}
           </select>
         </label>
-        <DueChip date={monthDueOn(monthKey)} status={badgeFor(view.tone)} />
+        <DueChip date={monthDueOn(monthKey, dueDay)} status={badgeFor(view.tone)} />
         <Badge status={badgeFor(view.tone)} />
         <button
           className="button"

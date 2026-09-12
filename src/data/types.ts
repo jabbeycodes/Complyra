@@ -30,6 +30,7 @@ export interface Agency {
   stateCode: string;
   provisionedBy?: AgencyProvisionedBy;
   status: AgencyStatus;
+  monthlyDue?: import("./monthlyChecks").MonthlyDueSettings;
 }
 
 export interface Program {

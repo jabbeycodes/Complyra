@@ -2,6 +2,61 @@ import type { IndividualRecord, SiteRecord } from "./types";
 import type { ObligationItem } from "./planStack";
 
 export const MONTHLY_DUE_DAY = 7;
+export const MONTHLY_DUE_DAY_MIN = 1;
+export const MONTHLY_DUE_DAY_MAX = 28;
+
+export type MonthlyDueKind = "equipment" | "drills" | "safety";
+
+export type MonthlyDueSettings = {
+  equipmentDay: number;
+  drillDay: number;
+  safetyDay: number;
+};
+
+export const DEFAULT_MONTHLY_DUE: MonthlyDueSettings = {
+  equipmentDay: MONTHLY_DUE_DAY,
+  drillDay: MONTHLY_DUE_DAY,
+  safetyDay: MONTHLY_DUE_DAY,
+};
+
+export function clampDueDay(day: number) {
+  if (!Number.isFinite(day)) return MONTHLY_DUE_DAY;
+  return Math.min(MONTHLY_DUE_DAY_MAX, Math.max(MONTHLY_DUE_DAY_MIN, Math.round(day)));
+}
+
+export function normalizeMonthlyDue(
+  value?: Partial<MonthlyDueSettings> | null,
+): MonthlyDueSettings {
+  return {
+    equipmentDay: clampDueDay(value?.equipmentDay ?? MONTHLY_DUE_DAY),
+    drillDay: clampDueDay(value?.drillDay ?? MONTHLY_DUE_DAY),
+    safetyDay: clampDueDay(value?.safetyDay ?? MONTHLY_DUE_DAY),
+  };
+}
+
+export function dueDayFor(settings: MonthlyDueSettings, kind: MonthlyDueKind) {
+  if (kind === "equipment") return settings.equipmentDay;
+  if (kind === "drills") return settings.drillDay;
+  return settings.safetyDay;
+}
+
+export function dayOrdinal(day: number) {
+  const n = clampDueDay(day);
+  const rem = n % 100;
+  if (rem >= 11 && rem <= 13) return `${n}th`;
+  if (n % 10 === 1) return `${n}st`;
+  if (n % 10 === 2) return `${n}nd`;
+  if (n % 10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+export function canConfigureMonthlyDue(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "degreed_professional_manager",
+  ].includes(roleKey);
+}
 
 export type DrillType =
   | "fire"
@@ -77,7 +132,7 @@ export interface HomeSafetyReport {
   lines: SafetyLine[];
 }
 
-/** LifePath schedule: drills due by the 7th, fire every month. */
+/** LifePath default schedule: fire every month. Due day is agency-configurable. */
 export const DRILLS_BY_MONTH: Record<number, DrillType[]> = {
   1: ["fire", "intruder"],
   2: ["fire", "earthquake"],
@@ -130,8 +185,8 @@ export function monthKeyFrom(isoDate: string) {
   return isoDate.slice(0, 7);
 }
 
-export function monthDueOn(key: string) {
-  return `${key}-${String(MONTHLY_DUE_DAY).padStart(2, "0")}`;
+export function monthDueOn(key: string, day = MONTHLY_DUE_DAY) {
+  return `${key}-${String(clampDueDay(day)).padStart(2, "0")}`;
 }
 
 export function monthLabel(key: string) {
@@ -148,9 +203,14 @@ export function drillsForMonth(key: string): DrillType[] {
   return DRILLS_BY_MONTH[month] ?? ["fire"];
 }
 
-export function monthlyTone(complete: boolean, today: string, key: string): MonthlyTone {
+export function monthlyTone(
+  complete: boolean,
+  today: string,
+  key: string,
+  day = MONTHLY_DUE_DAY,
+): MonthlyTone {
   if (complete) return "current";
-  return today <= monthDueOn(key) ? "due_soon" : "overdue";
+  return today <= monthDueOn(key, day) ? "due_soon" : "overdue";
 }
 
 export function blankSafetyLines(): SafetyLine[] {
@@ -345,6 +405,7 @@ export function equipmentViewForPerson(
   individualId: string,
   monthKey: string,
   today: string,
+  dueDay = MONTHLY_DUE_DAY,
 ): EquipmentPersonView {
   const items = collections.adaptiveEquipment
     .filter((row) => row.individualId === individualId && row.active)
@@ -359,7 +420,7 @@ export function equipmentViewForPerson(
     individualId,
     items,
     complete,
-    tone: items.length ? monthlyTone(complete, today, monthKey) : "current",
+    tone: items.length ? monthlyTone(complete, today, monthKey, dueDay) : "current",
   };
 }
 

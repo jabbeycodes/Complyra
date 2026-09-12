@@ -4885,3 +4885,38 @@ th {
     grid-template-columns: 1fr;
   }
 }
+.monthly-due-settings {
+  align-items: flex-start;
+}
+.monthly-due-form {
+  display: grid;
+  grid-template-columns: repeat(3, 72px) auto;
+  gap: 8px;
+  align-items: end;
+}
+.monthly-due-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #4a4036;
+}
+.monthly-due-form input {
+  width: 72px;
+}
+.monthly-due-form .form-error {
+  grid-column: 1 / -1;
+}
+.monthly-due-readonly {
+  font-size: 13px;
+  color: #4a4036;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .monthly-due-form {
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .monthly-due-form .button {
+    grid-column: 1 / -1;
+  }
+}

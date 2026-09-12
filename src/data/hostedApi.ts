@@ -566,6 +566,7 @@ export class HostedApi implements ComplyraApi {
         drills: [],
         safetyReports: [],
       },
+      monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
     };
   }
 
@@ -1008,6 +1009,9 @@ export class HostedApi implements ComplyraApi {
   }
   async initialTrainingLine() {
     throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
+  }
+  async updateMonthlyDueSettings() {
+    throw new Error("Monthly due dates are on the local workspace until the hosted schema is migrated.");
   }
   async addAdaptiveEquipment() {
     throw new Error("Monthly equipment logs are on the local workspace until the hosted schema is migrated.");

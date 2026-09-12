@@ -10,6 +10,8 @@ import {
   monthDueOn,
   monthKeyFrom,
   safetyComplete,
+  DEFAULT_MONTHLY_DUE,
+  type MonthlyDueSettings,
   type MonthlyWorkspace,
 } from "./monthlyChecks";
 
@@ -86,6 +88,7 @@ export function personalQueue(input: {
   monthly?: MonthlyWorkspace;
   individuals?: { id: string; name: string; site: string }[];
   sites?: { id: string; name: string }[];
+  monthlyDue?: MonthlyDueSettings;
   limit?: number;
 }): PersonalWorkItem[] {
   const limit = input.limit ?? 12;
@@ -116,17 +119,25 @@ export function personalQueue(input: {
 
   const today = todayIso();
   const key = monthKeyFrom(today);
+  const due = input.monthlyDue ?? DEFAULT_MONTHLY_DUE;
   if (input.monthly && input.individuals && input.sites) {
     const collections = asMonthlyCollections(input.monthly);
     for (const person of input.individuals) {
-      const view = equipmentViewForPerson(collections, person.id, key, today);
+      const view = equipmentViewForPerson(
+        collections,
+        person.id,
+        key,
+        today,
+        due.equipmentDay,
+      );
       if (!view.items.length || view.complete) continue;
+      const dueOn = monthDueOn(key, due.equipmentDay);
       push({
         id: `eq-${person.id}-${key}`,
         kind: "monthly",
         title: "Check adaptive equipment",
-        detail: `${person.name} · due ${monthDueOn(key)}`,
-        tone: today <= monthDueOn(key) ? "due" : "overdue",
+        detail: `${person.name} · due ${dueOn}`,
+        tone: today <= dueOn ? "due" : "overdue",
         personName: person.name,
       });
     }
@@ -135,12 +146,13 @@ export function personalQueue(input: {
         (row) => row.siteId === site.id && row.monthKey === key,
       );
       if (drills.length && !drills.every(drillComplete)) {
+        const dueOn = monthDueOn(key, due.drillDay);
         push({
           id: `drill-${site.id}-${key}`,
           kind: "monthly",
           title: "Record this month’s emergency drills",
-          detail: `${site.name} · due ${monthDueOn(key)}`,
-          tone: today <= monthDueOn(key) ? "due" : "overdue",
+          detail: `${site.name} · due ${dueOn}`,
+          tone: today <= dueOn ? "due" : "overdue",
           siteName: site.name,
         });
       }
@@ -148,12 +160,13 @@ export function personalQueue(input: {
         (row) => row.siteId === site.id && row.monthKey === key,
       );
       if (safety && !safetyComplete(safety)) {
+        const dueOn = monthDueOn(key, due.safetyDay);
         push({
           id: `safety-${site.id}-${key}`,
           kind: "monthly",
           title: "Complete the home safety report",
-          detail: `${site.name} · due ${monthDueOn(key)}`,
-          tone: today <= monthDueOn(key) ? "due" : "overdue",
+          detail: `${site.name} · due ${dueOn}`,
+          tone: today <= dueOn ? "due" : "overdue",
           siteName: site.name,
         });
       }
