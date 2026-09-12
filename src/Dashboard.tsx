@@ -303,10 +303,10 @@ export default function Dashboard({
                         width: `${cm.score}%`,
                         background:
                           i === 4
-                            ? "#daa968"
+                            ? "#c4a06a"
                             : cm.score === 100
-                              ? "#69aa96"
-                              : "#9d8cce",
+                              ? "#5d7a52"
+                              : "#8b5e3c",
                       }}
                     />
                   </div>
