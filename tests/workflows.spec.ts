@@ -301,8 +301,8 @@ test("an administrator can open role templates and invite HR without care record
   await expect(
     page.getByRole("heading", { name: "Roles and access levels" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /House manager/ }).click();
-  await expect(page.getByText("Runs one home")).toBeVisible();
+  await page.getByRole("button", { name: /HM House manager/ }).click();
+  await expect(page.getByRole("heading", { name: "House manager" })).toBeVisible();
   await page.getByRole("button", { name: "Staff", exact: true }).click();
   await page.getByRole("button", { name: "Add member" }).click();
   const dialog = page.getByRole("dialog", { name: "Add a member" });
