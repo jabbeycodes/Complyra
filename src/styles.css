@@ -4251,8 +4251,86 @@ th {
   color: #8a5340;
   font-weight: 600;
 }
+.clinical-renewals {
+  display: grid;
+  gap: 10px;
+}
+.renewal-upload {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+.renewal-upload label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #4a4036;
+}
+.renewal-upload select,
+.renewal-upload input[type="text"],
+.renewal-upload input:not([type="file"]) {
+  border: 1px solid var(--border);
+  background: #faf6ef;
+  color: #241e18;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.renewal-upload button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.rn-gate {
+  background: #f3e6dc;
+  color: #6f3f2e;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+.person-renewals {
+  list-style: none;
+  margin: 8px 0 4px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+.person-renewals li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: #4a4036;
+}
+.kind-pill.renewal.overdue {
+  background: #f3e6dc;
+  color: #8a5340;
+}
+.kind-pill.renewal.due_soon {
+  background: #efe4d4;
+  color: #6f4a2e;
+}
+.kind-pill.renewal.current {
+  background: #d7e2cc;
+  color: #2f4630;
+}
+.badge.waiting-for-rn {
+  background: #f3e6dc;
+  color: #6f3f2e;
+}
+.badge.current {
+  background: #d7e2cc;
+  color: #2f4630;
+}
 @media (max-width: 700px) {
   .cover-grid {
+    grid-template-columns: 1fr;
+  }
+  .renewal-upload {
+    grid-template-columns: 1fr;
+  }
+  .person-renewals li {
     grid-template-columns: 1fr;
   }
 }

@@ -9,7 +9,14 @@ export type AppRole =
   | "hr"
   | "auditor";
 
-export type DocumentKind = "pcsp" | "isp" | "policy" | "other";
+export type DocumentKind =
+  | "pcsp"
+  | "isp"
+  | "policy"
+  | "consultation"
+  | "doctor_notes"
+  | "physician_orders"
+  | "other";
 export type ReviewStatus = "pending_review" | "active" | "archived";
 export type PacketStatus = "open" | "archived";
 

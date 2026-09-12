@@ -68,6 +68,7 @@ import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { can, pageVisible } from "./data/status";
+import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
@@ -652,6 +653,11 @@ export default function App() {
                         const pm = metrics(
                           data.requirements.filter((r) => r.person === p.name),
                         );
+                        const renewals =
+                          session && canSeeRenewals(session.roleKey)
+                            ? workspace.planStacks.find((stack) => stack.individualId === p.id)
+                                ?.renewals ?? []
+                            : [];
                         return (
                           <button
                             className="panel person-card"
@@ -667,6 +673,17 @@ export default function App() {
                               <Building2 size={14} />
                               {p.site}
                             </p>
+                            {renewals.length > 0 && (
+                              <ul className="person-renewals">
+                                {renewals.map((row) => (
+                                  <li key={row.id}>
+                                    <span>{row.title}</span>
+                                    <span>{formatDate(row.nextDueOn)}</span>
+                                    <Badge status={renewalBadge(row.status)} />
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                             <div className="person-card-progress">
                               <span>Compliance readiness</span>
                               <strong>{pm.score}%</strong>
