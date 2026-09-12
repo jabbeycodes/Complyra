@@ -13,7 +13,7 @@ export default function SignaturePad({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.strokeStyle = "#34363e";
+    ctx.strokeStyle = "#3a3228";
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
   }, []);
