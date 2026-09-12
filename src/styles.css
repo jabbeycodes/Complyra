@@ -1,20 +1,20 @@
 :root {
   font-family: "DM Sans Variable", sans-serif;
   color: #3a3228;
-  background: #f4efe6;
+  background: #e8dcc8;
   font-synthesis: none;
   font-weight: 400;
   /* --purple stays the primary token name so existing var() calls keep working. */
-  --purple: #4f6f4a;
-  --purple-dark: #3e583a;
-  --moss: #4f6f4a;
-  --sage: #7d8f6e;
+  --purple: #3f5c3b;
+  --purple-dark: #2f4630;
+  --moss: #3f5c3b;
+  --sage: #6f815c;
   --clay: #8b5e3c;
   --sand: #e8dcc8;
-  --muted: #7a7166;
-  --border: #ddd2c2;
+  --muted: #6e6256;
+  --border: #d2c2a8;
   --text: #3a3228;
-  --green: #5d7a52;
+  --green: #4d6b42;
   --red: #b56a4e;
   --sidebar: 236px;
 }
@@ -24,7 +24,7 @@
 html,
 body {
   margin: 0;
-  background: #f4efe6;
+  background: #e8dcc8;
   color: #3a3228;
 }
 button,
@@ -103,8 +103,8 @@ button:hover:not(:disabled) {
   height: 100dvh;
   position: fixed;
   inset: 0 auto 0 0;
-  background: #faf6ef;
-  border-right: 1px solid #ddd2c2;
+  background: #f3ead8;
+  border-right: 1px solid #d2c2a8;
   padding: 30px 16px 0;
   display: flex;
   flex-direction: column;
@@ -207,7 +207,7 @@ button:hover:not(:disabled) {
   color: #887463;
 }
 .nav-item.active {
-  background: #e8eee0;
+  background: #d7e2cc;
   color: var(--moss);
   font-weight: 600;
 }
@@ -215,7 +215,7 @@ button:hover:not(:disabled) {
   color: var(--moss);
 }
 .nav-item:hover {
-  background: #f3eadc;
+  background: #efe4d4;
 }
 .nav-item > span:nth-child(2) {
   flex: 1;
@@ -356,8 +356,8 @@ button:hover:not(:disabled) {
 }
 .topbar {
   height: 73px;
-  background: #faf6efeb;
-  border-bottom: 1px solid #ddd2c2;
+  background: #f3ead8f2;
+  border-bottom: 1px solid #d2c2a8;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3938,9 +3938,9 @@ th {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at top left, #e8eee0, transparent 42%),
-    radial-gradient(circle at bottom right, #efe4d4, transparent 46%),
-    #f4efe6;
+    radial-gradient(circle at top left, #c5d4b8, transparent 42%),
+    radial-gradient(circle at bottom right, #e6d3b4, transparent 46%),
+    #e8dcc8;
 }
 .login-card {
   width: min(460px, 100%);
