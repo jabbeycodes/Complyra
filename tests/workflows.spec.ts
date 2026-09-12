@@ -220,9 +220,8 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await expect(page.locator(".person-card")).toHaveCount(4);
   await page.locator(".person-card").first().click();
-  await expect(
-    page.getByRole("dialog", { name: "Individual compliance profile" }),
-  ).toBeVisible();
+  await expect(page.locator(".individual-chart")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to individuals" })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

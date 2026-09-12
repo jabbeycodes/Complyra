@@ -23,6 +23,9 @@ const rnBlank = {
   rnSignedAt: null,
   rnSignatureName: null,
   rnSignatureMark: null,
+  discontinuedAt: null,
+  discontinueFileId: null,
+  discontinueTitle: null,
 } as const;
 
 function item(partial: Partial<ObligationItem> & Pick<ObligationItem, "id" | "kind" | "mode" | "title">): ObligationItem {
@@ -247,6 +250,7 @@ test("uploading evidence resets the next due date by the interval", () => {
       nextDueOn: "2026-09-01",
       lastDocumentTitle: null,
       lastEvidenceKind: null,
+      fileId: null,
     },
     {
       uploadedOn: "2026-09-12",

@@ -55,6 +55,9 @@ export interface ObligationItem {
   rnSignedAt: string | null;
   rnSignatureName: string | null;
   rnSignatureMark: string | null;
+  discontinuedAt: string | null;
+  discontinueFileId: string | null;
+  discontinueTitle: string | null;
 }
 
 export interface ObligationSignature {
@@ -107,6 +110,7 @@ export interface ClinicalRenewal {
   nextDueOn: string;
   lastDocumentTitle: string | null;
   lastEvidenceKind: ClinicalEvidenceKind | null;
+  fileId: string | null;
 }
 
 export type RenewalStatus = "current" | "due_soon" | "overdue";
@@ -118,6 +122,9 @@ export interface PlanStackView {
   required: ObligationView[];
   checked: ObligationView[];
   renewals: ClinicalRenewalView[];
+  carePlan: import("./chart").CarePlanView | null;
+  medications: import("./chart").MedicationView[];
+  staffTraining: import("./chart").TrainingRowView[];
   mySubmissionAt: string | null;
   canSubmit: boolean;
 }
@@ -139,6 +146,9 @@ export const blankRnFields = {
   rnSignedAt: null as string | null,
   rnSignatureName: null as string | null,
   rnSignatureMark: null as string | null,
+  discontinuedAt: null as string | null,
+  discontinueFileId: null as string | null,
+  discontinueTitle: null as string | null,
 };
 
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
@@ -206,6 +216,9 @@ export function proposeFromPcsp(input: {
     rnSignedAt: null as string | null,
     rnSignatureName: null as string | null,
     rnSignatureMark: null as string | null,
+    discontinuedAt: null as string | null,
+    discontinueFileId: null as string | null,
+    discontinueTitle: null as string | null,
   };
 
   const pcsp: ObligationItem = {
@@ -317,18 +330,20 @@ export function canToggleDelegation(roleKey: string, role: string, canApprove: b
   return role === "nurse" || roleKey === "nurse" || canEditExtraction(roleKey, canApprove);
 }
 
-/** RN, DPM, and House Manager see clinical due dates. Admin can too. */
+/** RN, DPM, HM, admin, and auditor see clinical due dates on the chart. */
 export function canSeeRenewals(roleKey: string) {
   return [
     "administrator",
+    "compliance_admin",
     "house_manager",
     "degreed_professional_manager",
     "nurse",
+    "auditor",
   ].includes(roleKey);
 }
 
 export function canUploadRenewal(roleKey: string) {
-  return canSeeRenewals(roleKey);
+  return canSeeRenewals(roleKey) && roleKey !== "auditor";
 }
 
 export function canSignAsDelegatingRn(roleKey: string, role: string) {
@@ -379,6 +394,7 @@ export function defaultRenewals(
     nextDueOn,
     lastDocumentTitle: null,
     lastEvidenceKind: null,
+    fileId: null,
   }));
 }
 
@@ -394,6 +410,7 @@ export function applyRenewalUpload(
     uploadedOn: string;
     documentTitle: string;
     evidenceKind: ClinicalEvidenceKind;
+    fileId?: string | null;
   },
 ): ClinicalRenewal {
   return {
@@ -402,5 +419,6 @@ export function applyRenewalUpload(
     nextDueOn: addMonths(input.uploadedOn, row.intervalMonths),
     lastDocumentTitle: input.documentTitle,
     lastEvidenceKind: input.evidenceKind,
+    fileId: input.fileId ?? row.fileId,
   };
 }

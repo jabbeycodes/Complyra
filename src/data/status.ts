@@ -54,7 +54,11 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Overview" || page === "Settings" || page === "Sites & programs") {
     return true;
   }
-  if (page === "Individuals" || page === "Requirements") {
+  if (
+    page === "Individuals" ||
+    page === "Requirements" ||
+    page === "Individual chart"
+  ) {
     return can(session, "individuals.view");
   }
   if (page === "Staff") {

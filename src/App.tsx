@@ -63,7 +63,7 @@ import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
-import AssignedDocsPanel from "./features/AssignedDocsPanel";
+import IndividualChart from "./features/IndividualChart";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -211,8 +211,16 @@ export default function App() {
       r.due <= auditTo,
   );
   function navigate(next: string, nextStatus = "All statuses") {
+    if (next !== "Individual chart") setPerson(null);
     setPage(next);
     setStatus(nextStatus);
+    setQuery("");
+    setMobileOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function openPersonChart(name: string) {
+    setPerson(name);
+    setPage("Individual chart");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -679,7 +687,7 @@ export default function App() {
                           <button
                             className="panel person-card"
                             key={p.id}
-                            onClick={() => setPerson(p.name)}
+                            onClick={() => openPersonChart(p.name)}
                           >
                             <div className="person-card-top">
                               <Avatar name={p.name} color={p.color} />
@@ -727,6 +735,14 @@ export default function App() {
                       })}
                   </div>
                 </>
+              )}
+              {page === "Individual chart" && person && (
+                <IndividualChart
+                  individualId={
+                    individuals.find((p) => p.name === person)?.id ?? ""
+                  }
+                  onBack={() => navigate("Individuals")}
+                />
               )}
               {page === "Sites & programs" && (
                 <>
@@ -1595,17 +1611,6 @@ export default function App() {
           )}
         </Modal>
       )}
-      {person && individuals.find((p) => p.name === person) && (
-        <Modal
-          title="Required documents"
-          onClose={() => setPerson(null)}
-          wide
-        >
-          <AssignedDocsPanel
-            individualId={individuals.find((p) => p.name === person)!.id}
-          />
-        </Modal>
-      )}
       {plan && (
         <Modal title="Document record & history" onClose={() => setPlan(null)}>
           <div className="detail-status">
@@ -1685,7 +1690,7 @@ export default function App() {
             onCreated={(name, uploaded) => {
               setAddPersonSiteId(null);
               setModal(null);
-              setPerson(name);
+              openPersonChart(name);
               notify(
                 uploaded
                   ? `${name} was added. The PCSP is in Review queue.`

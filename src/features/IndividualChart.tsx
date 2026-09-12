@@ -1,0 +1,575 @@
+import { useState } from "react";
+import {
+  ArrowLeft,
+  Download,
+  FileText,
+  Pill,
+  Printer,
+  ShieldAlert,
+} from "lucide-react";
+import { Badge, DueChip, formatDate, PageHeading } from "../components";
+import { useData } from "../data/DataProvider";
+import {
+  canLogPrnDose,
+  canRecordDelivery,
+  canSeeChartWidgets,
+  canSeeMeds,
+  canSignTrainingAsHm,
+  countdownLabel,
+} from "../data/chart";
+import { openPrintable } from "../data/openFile";
+import {
+  canSeeRenewals,
+  canToggleDelegation,
+  canUploadRenewal,
+  isObligationActive,
+  renewalBadge,
+  type ClinicalEvidenceKind,
+} from "../data/planStack";
+import { can } from "../data/status";
+import AssignedDocsPanel from "./AssignedDocsPanel";
+
+const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
+  { value: "consultation", label: "Consultation note" },
+  { value: "doctor_notes", label: "Doctor's notes" },
+  { value: "physician_orders", label: "Physician orders" },
+  { value: "pdf", label: "PDF / other" },
+];
+
+export default function IndividualChart({
+  individualId,
+  onBack,
+}: {
+  individualId: string;
+  onBack: () => void;
+}) {
+  const { api, session, workspace, refresh } = useData();
+  const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
+  const person = workspace?.individuals.find((item) => item.id === individualId);
+  const [error, setError] = useState("");
+
+  if (!session || !stack || !person) return null;
+
+  const widgets = canSeeChartWidgets(session.roleKey);
+  const showAnnuals = canSeeRenewals(session.roleKey);
+  const showMeds = canSeeMeds(session.roleKey);
+  const profile = stack.profile;
+  const delegations = stack.required.filter((view) => view.item.kind === "delegation");
+
+  async function run(action: () => Promise<void>) {
+    setError("");
+    try {
+      await action();
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function openFile(
+    type: "renewal" | "discontinue" | "training" | "version",
+    id: string,
+    mode: "download" | "print",
+  ) {
+    await run(async () => {
+      const file = await api.getChartFile({ type, id });
+      if (!file) throw new Error("That file is not stored yet.");
+      await openPrintable(file.name, file.blob, mode);
+    });
+  }
+
+  return (
+    <div className="individual-chart">
+      <PageHeading
+        eyebrow="INDIVIDUAL CHART"
+        title={person.name}
+        description={`${person.site}${
+          profile.dmhId ? ` · DMH ${profile.dmhId}` : ""
+        }${person.dateOfBirth ? ` · DOB ${formatDate(person.dateOfBirth)}` : ""} · ${
+          profile.legalName
+        }`}
+      >
+        <button className="button" onClick={onBack}>
+          <ArrowLeft size={16} /> Back to individuals
+        </button>
+      </PageHeading>
+
+      {error && <p className="form-error">{error}</p>}
+
+      <div className="chart-grid">
+        {stack.carePlan && (
+          <section className="chart-widget" aria-labelledby="care-plan-heading">
+            <h2 id="care-plan-heading">Care plan</h2>
+            <p>{stack.carePlan.title}</p>
+            <p>
+              {stack.carePlan.versionLabel ? `${stack.carePlan.versionLabel} · ` : ""}
+              {stack.carePlan.signedCount}/{stack.carePlan.assignedCount} assigned
+              staff signed
+            </p>
+            {stack.carePlan.documentVersionId && (
+              <div className="chart-actions">
+                <button
+                  className="button"
+                  onClick={() =>
+                    openFile("version", stack.carePlan!.documentVersionId!, "download")
+                  }
+                >
+                  <Download size={16} /> Download
+                </button>
+                <button
+                  className="button"
+                  onClick={() =>
+                    openFile("version", stack.carePlan!.documentVersionId!, "print")
+                  }
+                >
+                  <Printer size={16} /> Print
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {widgets && (
+          <section className="chart-widget" aria-labelledby="delegations-heading">
+            <h2 id="delegations-heading">Delegations</h2>
+            <p className="stack-help">
+              Delegations do not expire. Turn one off only after a discontinuation
+              order is uploaded. The order stays on the chart.
+            </p>
+            {delegations.length === 0 && <p>No delegations on this chart.</p>}
+            {delegations.map((view) => (
+              <DelegationBlock
+                key={view.item.id}
+                title={view.item.title}
+                enabled={view.item.enabled && isObligationActive(view.item)}
+                discontinueTitle={view.item.discontinueTitle}
+                discontinueFileId={view.item.discontinueFileId}
+                canDiscontinue={canToggleDelegation(
+                  session.roleKey,
+                  session.role,
+                  can(session, "requirements.approve"),
+                )}
+                onOpen={(mode) =>
+                  view.item.discontinueFileId
+                    ? openFile("discontinue", view.item.discontinueFileId, mode)
+                    : Promise.resolve()
+                }
+                onDiscontinue={(title, file) =>
+                  run(() =>
+                    api.discontinueDelegation({
+                      obligationId: view.item.id,
+                      title,
+                      file,
+                    }),
+                  )
+                }
+              />
+            ))}
+          </section>
+        )}
+
+        {showAnnuals && (
+          <section className="chart-widget" aria-labelledby="annuals-heading">
+            <h2 id="annuals-heading">Upcoming clinical renewals</h2>
+            <p className="stack-help">
+              Date completed plus days until the exam expires. Uploading a new
+              document resets the due date to 12 months later.
+            </p>
+            {stack.renewals.map((row) => (
+              <article key={row.id} className="obligation-card renewal-card">
+                <header>
+                  <DueChip date={row.nextDueOn} status={renewalBadge(row.status)} />
+                  <div>
+                    <span className={`kind-pill renewal ${row.status}`}>
+                      {row.kind.replace("_", " ")}
+                    </span>
+                    <h3>{row.title}</h3>
+                  </div>
+                  <Badge status={renewalBadge(row.status)} />
+                </header>
+                <p>
+                  {row.lastUploadedOn
+                    ? `Date done ${formatDate(row.lastUploadedOn)} · `
+                    : "No exam on file · "}
+                  {countdownLabel(row.nextDueOn)} · Next due {formatDate(row.nextDueOn)}
+                  {row.lastDocumentTitle ? ` · ${row.lastDocumentTitle}` : ""}
+                </p>
+                {row.fileId && (
+                  <div className="chart-actions">
+                    <button
+                      className="button"
+                      onClick={() => openFile("renewal", row.fileId!, "download")}
+                    >
+                      <Download size={16} /> Download
+                    </button>
+                    <button
+                      className="button"
+                      onClick={() => openFile("renewal", row.fileId!, "print")}
+                    >
+                      <Printer size={16} /> Print
+                    </button>
+                  </div>
+                )}
+                {canUploadRenewal(session.roleKey) && (
+                  <RenewalUpload
+                    defaultTitle={row.title}
+                    onUpload={(evidenceKind, documentTitle, file) =>
+                      run(() =>
+                        api.uploadRenewalEvidence({
+                          renewalId: row.id,
+                          evidenceKind,
+                          documentTitle,
+                          file,
+                        }),
+                      )
+                    }
+                  />
+                )}
+              </article>
+            ))}
+          </section>
+        )}
+
+        {showMeds && (
+          <section className="chart-widget" aria-labelledby="meds-heading">
+            <h2 id="meds-heading">Medication board</h2>
+            <p className="stack-help">
+              After a delivery, set remaining pills to the counted bottle.
+              Scheduled meds drop by pills-per-day each calendar day. PRN does
+              not auto-drop.
+            </p>
+            {stack.medications.length === 0 && <p>No medications on this chart.</p>}
+            {stack.medications.map((med) => (
+              <article key={med.id} className="obligation-card med-card">
+                <header>
+                  <span className={`kind-pill ${med.kind}`}>{med.kind}</span>
+                  {med.controlled && (
+                    <span className="kind-pill control">
+                      <ShieldAlert size={12} /> Control
+                    </span>
+                  )}
+                  <h3>{med.name}</h3>
+                  {med.low && <Badge status="Due soon" />}
+                </header>
+                <p>
+                  {med.strength} · {med.remainingPills} pills left
+                  {med.kind === "scheduled"
+                    ? ` · ${med.pillsPerDay} per day · ${
+                        med.daysLeft === null ? "—" : `${med.daysLeft} days left`
+                      }`
+                    : " · PRN, no automatic drop"}
+                  {med.lastDeliveryOn
+                    ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
+                    : ""}
+                </p>
+                {canRecordDelivery(session.roleKey) && (
+                  <DeliveryForm
+                    defaultRemaining={med.remainingPills}
+                    defaultPerDay={med.pillsPerDay}
+                    scheduled={med.kind === "scheduled"}
+                    onSave={(remainingPills, pillsPerDay) =>
+                      run(() =>
+                        api.recordMedDelivery({
+                          medicationId: med.id,
+                          remainingPills,
+                          pillsPerDay,
+                        }),
+                      )
+                    }
+                  />
+                )}
+                {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
+                  <button
+                    className="button"
+                    onClick={() => run(() => api.logPrnDose(med.id, 1))}
+                  >
+                    <Pill size={16} /> PRN given
+                  </button>
+                )}
+              </article>
+            ))}
+          </section>
+        )}
+
+        <section className="chart-widget" aria-labelledby="staff-heading">
+          <h2 id="staff-heading">Assigned staff</h2>
+          <p className="stack-help">
+            Each assigned staff member has an in-home training checklist. Staff
+            sign first; the house manager counter-signs. The sheet downloads and
+            prints.
+          </p>
+          {stack.staffTraining.length === 0 && (
+            <p>No assigned staff training sheets yet.</p>
+          )}
+          {stack.staffTraining.map((row) => (
+            <article key={row.checklist.id} className="obligation-card">
+              <header>
+                <h3>{row.checklist.staffName}</h3>
+                <Badge
+                  status={
+                    row.status === "complete"
+                      ? "Signed"
+                      : row.status === "staff_signed"
+                        ? "Waiting for RN"
+                        : "Needs signature"
+                  }
+                />
+              </header>
+              <p>
+                {row.checklist.items.length} training lines
+                {row.checklist.staffSignedAt
+                  ? ` · Staff signed ${formatDate(row.checklist.staffSignedAt)}`
+                  : " · Staff has not signed"}
+                {row.checklist.hmSignedAt
+                  ? ` · HM signed ${formatDate(row.checklist.hmSignedAt)}`
+                  : ""}
+              </p>
+              <div className="chart-actions">
+                <button
+                  className="button"
+                  onClick={() => openFile("training", row.checklist.id, "download")}
+                >
+                  <Download size={16} /> Download
+                </button>
+                <button
+                  className="button"
+                  onClick={() => openFile("training", row.checklist.id, "print")}
+                >
+                  <Printer size={16} /> Print
+                </button>
+                {session.userId === row.checklist.staffUserId &&
+                  !row.checklist.staffSignedAt && (
+                    <button
+                      className="button primary"
+                      onClick={() =>
+                        run(() =>
+                          api.signTrainingChecklist(
+                            row.checklist.id,
+                            "staff",
+                            session.fullName,
+                          ),
+                        )
+                      }
+                    >
+                      Sign as staff
+                    </button>
+                  )}
+                {canSignTrainingAsHm(session.roleKey) &&
+                  row.checklist.staffSignedAt &&
+                  !row.checklist.hmSignedAt && (
+                    <button
+                      className="button primary"
+                      onClick={() =>
+                        run(() =>
+                          api.signTrainingChecklist(
+                            row.checklist.id,
+                            "hm",
+                            session.fullName,
+                          ),
+                        )
+                      }
+                    >
+                      Sign as house manager
+                    </button>
+                  )}
+              </div>
+            </article>
+          ))}
+        </section>
+      </div>
+
+      <AssignedDocsPanel
+        individualId={individualId}
+        hideIdentity
+        hideRenewals
+      />
+    </div>
+  );
+}
+
+function DelegationBlock({
+  title,
+  enabled,
+  discontinueTitle,
+  discontinueFileId,
+  canDiscontinue,
+  onOpen,
+  onDiscontinue,
+}: {
+  title: string;
+  enabled: boolean;
+  discontinueTitle: string | null;
+  discontinueFileId: string | null;
+  canDiscontinue: boolean;
+  onOpen: (mode: "download" | "print") => void;
+  onDiscontinue: (title: string, file: File) => void;
+}) {
+  const [titleDraft, setTitleDraft] = useState("");
+  const [file, setFile] = useState<File | undefined>();
+  return (
+    <article className="obligation-card">
+      <header>
+        <span className="kind-pill delegation">delegation</span>
+        <h3>{title}</h3>
+        <Badge status={enabled ? "Current" : "Off"} />
+      </header>
+      {discontinueFileId && (
+        <p>
+          <FileText size={14} /> {discontinueTitle || "Discontinuation order"} on
+          file
+        </p>
+      )}
+      <div className="chart-actions">
+        {discontinueFileId && (
+          <>
+            <button className="button" onClick={() => onOpen("download")}>
+              <Download size={16} /> Download order
+            </button>
+            <button className="button" onClick={() => onOpen("print")}>
+              <Printer size={16} /> Print order
+            </button>
+          </>
+        )}
+      </div>
+      {enabled && canDiscontinue && (
+        <form
+          className="renewal-upload"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (file) onDiscontinue(titleDraft || file.name, file);
+          }}
+        >
+          <label>
+            Discontinuation order title
+            <input
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              placeholder="Physician discontinue order"
+            />
+          </label>
+          <label>
+            File
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+              onChange={(e) => setFile(e.target.files?.[0])}
+            />
+          </label>
+          <button className="button" type="submit" disabled={!file}>
+            Upload order and turn off
+          </button>
+        </form>
+      )}
+    </article>
+  );
+}
+
+function RenewalUpload({
+  defaultTitle,
+  onUpload,
+}: {
+  defaultTitle: string;
+  onUpload: (
+    evidenceKind: ClinicalEvidenceKind,
+    documentTitle: string,
+    file?: File,
+  ) => void;
+}) {
+  const [kind, setKind] = useState<ClinicalEvidenceKind>("consultation");
+  const [title, setTitle] = useState("");
+  const [file, setFile] = useState<File | undefined>();
+  return (
+    <form
+      className="renewal-upload"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onUpload(kind, title || file?.name || defaultTitle, file);
+      }}
+    >
+      <label>
+        Evidence type
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as ClinicalEvidenceKind)}
+        >
+          {EVIDENCE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Document title
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Consultation note, doctor's notes, or PDF"
+        />
+      </label>
+      <label>
+        File
+        <input
+          type="file"
+          accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+          onChange={(e) => {
+            const next = e.target.files?.[0];
+            setFile(next);
+            if (next && !title) setTitle(next.name);
+          }}
+        />
+      </label>
+      <button className="button primary" type="submit">
+        Upload and reset date
+      </button>
+    </form>
+  );
+}
+
+function DeliveryForm({
+  defaultRemaining,
+  defaultPerDay,
+  scheduled,
+  onSave,
+}: {
+  defaultRemaining: number;
+  defaultPerDay: number;
+  scheduled: boolean;
+  onSave: (remaining: number, perDay: number) => void;
+}) {
+  const [remaining, setRemaining] = useState(String(defaultRemaining));
+  const [perDay, setPerDay] = useState(String(defaultPerDay || 1));
+  return (
+    <form
+      className="renewal-upload"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(Number(remaining), scheduled ? Number(perDay) : 0);
+      }}
+    >
+      <label>
+        Pills remaining
+        <input
+          type="number"
+          min="0"
+          value={remaining}
+          onChange={(e) => setRemaining(e.target.value)}
+        />
+      </label>
+      {scheduled && (
+        <label>
+          Pills per day
+          <input
+            type="number"
+            min="1"
+            value={perDay}
+            onChange={(e) => setPerDay(e.target.value)}
+          />
+        </label>
+      )}
+      <button className="button primary" type="submit">
+        Record delivery count
+      </button>
+    </form>
+  );
+}

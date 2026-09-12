@@ -184,6 +184,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     permissions: pack([
       "individuals.view",
       "documents.view",
+      "clinical.view",
       "audit.read",
       "audit.export",
     ]),

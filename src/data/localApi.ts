@@ -62,6 +62,21 @@ import {
   type PlanStackView,
 } from "./planStack";
 import {
+  applyDailyMedDrop,
+  canLogPrnDose,
+  canRecordDelivery,
+  canSeeMeds,
+  canSignTrainingAsHm,
+  mergeTrainingLines,
+  toMedicationView,
+  todayIso,
+  trainingLinesFromObligations,
+  trainingStatus,
+  type ChartFileKind,
+} from "./chart";
+import { buildCarePlanPdf } from "../pdf/carePlanPdf";
+import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
+import {
   LOGIN_FAILED_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
@@ -164,6 +179,27 @@ export interface ComplyraApi {
     uploadedOn?: string;
     file?: File;
   }): Promise<void>;
+  discontinueDelegation(input: {
+    obligationId: string;
+    title: string;
+    file: File;
+  }): Promise<void>;
+  getChartFile(input: {
+    type: "renewal" | "discontinue" | "training" | "version";
+    id: string;
+  }): Promise<{ blob: Blob; name: string } | null>;
+  recordMedDelivery(input: {
+    medicationId: string;
+    remainingPills: number;
+    pillsPerDay: number;
+    countedOn?: string;
+  }): Promise<void>;
+  logPrnDose(medicationId: string, pills?: number): Promise<void>;
+  signTrainingChecklist(
+    checklistId: string,
+    role: "staff" | "hm",
+    signatureName: string,
+  ): Promise<void>;
   resetWorkspace(): Promise<void>;
   createSite(input: {
     name: string;
@@ -339,11 +375,21 @@ async function hydrate() {
         browserStore.db.obligationSignatures ?? [];
       browserStore.db.packetSubmissions = browserStore.db.packetSubmissions ?? [];
       browserStore.db.clinicalRenewals = browserStore.db.clinicalRenewals ?? [];
+      browserStore.db.chartFiles = browserStore.db.chartFiles ?? [];
+      browserStore.db.medications = browserStore.db.medications ?? [];
+      browserStore.db.medicationDeliveries = browserStore.db.medicationDeliveries ?? [];
+      browserStore.db.trainingChecklists = browserStore.db.trainingChecklists ?? [];
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
         item.rnSignedAt = item.rnSignedAt ?? null;
         item.rnSignatureName = item.rnSignatureName ?? null;
         item.rnSignatureMark = item.rnSignatureMark ?? null;
+        item.discontinuedAt = item.discontinuedAt ?? null;
+        item.discontinueFileId = item.discontinueFileId ?? null;
+        item.discontinueTitle = item.discontinueTitle ?? null;
+      }
+      for (const row of browserStore.db.clinicalRenewals) {
+        row.fileId = row.fileId ?? null;
       }
     }
   } catch {
@@ -521,6 +567,10 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.obligationSignatures = store.db.obligationSignatures ?? [];
   store.db.packetSubmissions = store.db.packetSubmissions ?? [];
   store.db.clinicalRenewals = store.db.clinicalRenewals ?? [];
+  store.db.chartFiles = store.db.chartFiles ?? [];
+  store.db.medications = store.db.medications ?? [];
+  store.db.medicationDeliveries = store.db.medicationDeliveries ?? [];
+  store.db.trainingChecklists = store.db.trainingChecklists ?? [];
 }
 
 function ensureClinicalRenewals(store: MemoryStore) {
@@ -535,6 +585,91 @@ function ensureClinicalRenewals(store: MemoryStore) {
       }
     }
   }
+}
+
+async function saveChartFile(
+  store: MemoryStore,
+  input: {
+    agencyId: string;
+    individualId: string;
+    kind: ChartFileKind;
+    file: File;
+  },
+) {
+  const id = crypto.randomUUID();
+  const storagePath = `${input.agencyId}/${input.individualId}/chart/${id}/${input.file.name}`;
+  await persistFile(storagePath, input.file);
+  store.db.chartFiles.push({
+    id,
+    agencyId: input.agencyId,
+    individualId: input.individualId,
+    kind: input.kind,
+    name: input.file.name,
+    mime: input.file.type || "application/pdf",
+    storagePath,
+  });
+  return id;
+}
+
+function homeStaff(store: MemoryStore, person: IndividualRecord) {
+  const assigned = store.db.assignments
+    .filter((row) => row.individualId === person.id && !row.endsOn)
+    .map((row) => row.userId);
+  const hm = store.db.memberships
+    .filter(
+      (row) =>
+        row.agencyId === person.agencyId &&
+        row.siteId === person.siteId &&
+        (row.roleKey === "house_manager" || row.role === "manager"),
+    )
+    .map((row) => row.userId);
+  return [...new Set([...assigned, ...hm])];
+}
+
+function ensureTrainingChecklists(store: MemoryStore) {
+  ensurePlanCollections(store);
+  for (const person of store.db.individuals) {
+    const pcsp = store.db.obligations.find(
+      (item) =>
+        item.individualId === person.id &&
+        item.kind === "pcsp" &&
+        item.enabled,
+    );
+    const lines = trainingLinesFromObligations(
+      store.db.obligations.filter((item) => item.individualId === person.id),
+    );
+    for (const userId of homeStaff(store, person)) {
+      const profile = store.db.profiles.find((row) => row.id === userId);
+      if (!profile) continue;
+      const existing = store.db.trainingChecklists.find(
+        (row) =>
+          row.individualId === person.id &&
+          row.staffUserId === userId &&
+          row.documentVersionId === (pcsp?.documentVersionId ?? null),
+      );
+      if (existing) {
+        existing.items = mergeTrainingLines(existing.items, lines);
+        continue;
+      }
+      store.db.trainingChecklists.push({
+        id: crypto.randomUUID(),
+        agencyId: person.agencyId,
+        individualId: person.id,
+        staffUserId: userId,
+        staffName: profile.fullName,
+        documentVersionId: pcsp?.documentVersionId ?? null,
+        items: lines,
+        staffSignedAt: null,
+        staffSignatureName: null,
+        hmSignedAt: null,
+        hmSignatureName: null,
+      });
+    }
+  }
+}
+
+function applyMedicationCountdowns(store: MemoryStore) {
+  store.db.medications = store.db.medications.map((row) => applyDailyMedDrop(row));
 }
 
 function syncObligationRoster(store: MemoryStore, item: ObligationItem) {
@@ -607,6 +742,29 @@ function mapPlanStack(
           .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn) }))
           .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
       : [],
+    carePlan: (() => {
+      const pcsp = required.find((view) => view.item.kind === "pcsp" && view.item.enabled);
+      if (!pcsp) return null;
+      const version = pcsp.item.documentVersionId
+        ? store.db.versions.find((row) => row.id === pcsp.item.documentVersionId)
+        : null;
+      return {
+        title: pcsp.item.title,
+        versionLabel: version?.versionLabel ?? null,
+        documentVersionId: pcsp.item.documentVersionId,
+        signedCount: pcsp.signedCount,
+        assignedCount: pcsp.assignedCount,
+      };
+    })(),
+    medications: canSeeMeds(session.roleKey)
+      ? store.db.medications
+          .filter((row) => row.individualId === person.id)
+          .map((row) => toMedicationView(row))
+      : [],
+    staffTraining: store.db.trainingChecklists
+      .filter((row) => row.individualId === person.id)
+      .filter((row) => canSeeRenewals(session.roleKey) || row.staffUserId === session.userId)
+      .map((checklist) => ({ checklist, status: trainingStatus(checklist) })),
     mySubmissionAt: submission?.submittedAt ?? null,
     canSubmit:
       mustSign.length > 0 &&
@@ -755,6 +913,8 @@ function packetDetail(store: MemoryStore, packet: AcknowledgmentPacket): PacketD
 function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensurePlanCollections(store);
   ensureClinicalRenewals(store);
+  ensureTrainingChecklists(store);
+  applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit =
     hasPermission(session, "audit.read") || canViewPeople;
@@ -1520,6 +1680,12 @@ export class LocalApi implements ComplyraApi {
     const item = this.store.db.obligations.find((row) => row.id === obligationId);
     if (!item) throw new Error("Item not found.");
     const turningOnDelegation = item.kind === "delegation" && patch.enabled === true;
+    const turningOffDelegation = item.kind === "delegation" && patch.enabled === false;
+    if (turningOffDelegation) {
+      throw new Error(
+        "Upload a discontinuation order before turning a delegation off.",
+      );
+    }
     if (turningOnDelegation) {
       if (!canToggleDelegation(session.roleKey, session.role, hasPermission(session, "requirements.approve"))) {
         throw new Error("Only a DPM or nurse can turn a delegation on.");
@@ -1691,10 +1857,20 @@ export class LocalApi implements ComplyraApi {
       input.file?.name ||
       "Clinical evidence";
     const uploadedOn = (input.uploadedOn ?? new Date().toISOString()).slice(0, 10);
+    let fileId = renewal.fileId;
+    if (input.file) {
+      fileId = await saveChartFile(this.store, {
+        agencyId: session.agencyId,
+        individualId: renewal.individualId,
+        kind: "renewal",
+        file: input.file,
+      });
+    }
     const next = applyRenewalUpload(renewal, {
       uploadedOn,
       documentTitle: title,
       evidenceKind: input.evidenceKind,
+      fileId,
     });
     this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
       row.id === renewal.id ? next : row,
@@ -1706,6 +1882,222 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} uploaded ${title} for ${renewal.title}`,
       "clinical_renewal",
       renewal.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async discontinueDelegation(input: {
+    obligationId: string;
+    title: string;
+    file: File;
+  }) {
+    const session = assertSession(this.store);
+    const item = this.store.db.obligations.find((row) => row.id === input.obligationId);
+    if (!item || item.kind !== "delegation") {
+      throw new Error("Delegation not found.");
+    }
+    if (
+      !canToggleDelegation(
+        session.roleKey,
+        session.role,
+        hasPermission(session, "requirements.approve"),
+      )
+    ) {
+      throw new Error("Only a DPM or nurse can discontinue a delegation.");
+    }
+    if (!input.file) {
+      throw new Error("Upload the discontinuation order first.");
+    }
+    const title = input.title.trim() || input.file.name;
+    const fileId = await saveChartFile(this.store, {
+      agencyId: session.agencyId,
+      individualId: item.individualId,
+      kind: "discontinue",
+      file: input.file,
+    });
+    item.enabled = false;
+    item.discontinuedAt = new Date().toISOString();
+    item.discontinueFileId = fileId;
+    item.discontinueTitle = title;
+    log(
+      this.store,
+      session,
+      "delegation.discontinued",
+      `${session.fullName} discontinued ${item.title} · ${title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async getChartFile(input: {
+    type: "renewal" | "discontinue" | "training" | "version";
+    id: string;
+  }) {
+    const session = assertSession(this.store);
+    if (input.type === "training") {
+      const checklist = this.store.db.trainingChecklists.find((row) => row.id === input.id);
+      if (!checklist) return null;
+      if (
+        !canSeeRenewals(session.roleKey) &&
+        checklist.staffUserId !== session.userId
+      ) {
+        throw new Error("You can only open your own training sheet.");
+      }
+      const person = this.store.db.individuals.find(
+        (row) => row.id === checklist.individualId,
+      );
+      if (!person) return null;
+      const site = this.store.db.sites.find((row) => row.id === person.siteId);
+      const pdf = buildTrainingChecklistPdf({
+        agencyName: session.agencyName,
+        individualName: person.fullName,
+        siteName: site?.name ?? "",
+        checklist,
+      });
+      return {
+        blob: pdf.output("blob"),
+        name: trainingFileName(checklist.staffName, person.fullName),
+      };
+    }
+    if (input.type === "version") {
+      const version = this.store.db.versions.find((row) => row.id === input.id);
+      if (!version) return null;
+      const document = this.store.db.documents.find((row) => row.id === version.documentId);
+      const stored = version.storagePath ? await readFile(version.storagePath) : null;
+      if (stored) {
+        return {
+          blob: stored,
+          name: `${document?.title ?? "care-plan"}-${version.versionLabel}.pdf`,
+        };
+      }
+      const person = document
+        ? this.store.db.individuals.find((row) => row.id === document.individualId)
+        : null;
+      const pdf = buildCarePlanPdf({
+        agencyName: session.agencyName,
+        individualName: person?.fullName ?? "Individual",
+        title: document?.title ?? "Care plan",
+        versionLabel: version.versionLabel,
+        effectiveOn: version.effectiveOn,
+      });
+      return {
+        blob: pdf.output("blob"),
+        name: `complyrer-care-plan-${(person?.fullName ?? "individual")
+          .toLowerCase()
+          .replaceAll(" ", "-")}.pdf`,
+      };
+    }
+    const file = this.store.db.chartFiles.find((row) => row.id === input.id);
+    if (!file) return null;
+    const blob = await readFile(file.storagePath);
+    if (!blob) return null;
+    return { blob, name: file.name };
+  }
+
+  async recordMedDelivery(input: {
+    medicationId: string;
+    remainingPills: number;
+    pillsPerDay: number;
+    countedOn?: string;
+  }) {
+    const session = assertSession(this.store);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM records a medication delivery.");
+    }
+    const med = this.store.db.medications.find((row) => row.id === input.medicationId);
+    if (!med) throw new Error("Medication not found.");
+    if (input.remainingPills < 0) {
+      throw new Error("Remaining pills cannot be negative.");
+    }
+    if (med.kind === "scheduled" && input.pillsPerDay <= 0) {
+      throw new Error("Set pills per day for a scheduled medication.");
+    }
+    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    med.remainingPills = input.remainingPills;
+    med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
+    med.lastDeliveryOn = countedOn;
+    med.lastCountdownOn = countedOn;
+    this.store.db.medicationDeliveries.push({
+      id: crypto.randomUUID(),
+      medicationId: med.id,
+      countedOn,
+      remainingPills: med.remainingPills,
+      pillsPerDay: med.pillsPerDay,
+      recordedBy: session.userId,
+    });
+    log(
+      this.store,
+      session,
+      "medication.delivery",
+      `${session.fullName} counted ${med.name} at ${med.remainingPills} pills`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async logPrnDose(medicationId: string, pills = 1) {
+    const session = assertSession(this.store);
+    if (!canLogPrnDose(session.roleKey)) {
+      throw new Error("You cannot log a PRN dose.");
+    }
+    const med = this.store.db.medications.find((row) => row.id === medicationId);
+    if (!med || med.kind !== "prn") {
+      throw new Error("PRN medication not found.");
+    }
+    if (pills <= 0) throw new Error("Enter how many pills were given.");
+    med.remainingPills = Math.max(0, med.remainingPills - pills);
+    log(
+      this.store,
+      session,
+      "medication.prn",
+      `${session.fullName} gave ${pills} ${med.name}`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async signTrainingChecklist(
+    checklistId: string,
+    role: "staff" | "hm",
+    signatureName: string,
+  ) {
+    const session = assertSession(this.store);
+    const row = this.store.db.trainingChecklists.find((item) => item.id === checklistId);
+    if (!row) throw new Error("Training checklist not found.");
+    if (!signatureName.trim()) throw new Error("Type your name to sign.");
+    const now = new Date().toISOString();
+    if (role === "staff") {
+      if (row.staffUserId !== session.userId) {
+        throw new Error("Staff must sign their own training sheet.");
+      }
+      if (row.staffSignedAt) throw new Error("This sheet is already signed by staff.");
+      row.staffSignedAt = now;
+      row.staffSignatureName = signatureName.trim();
+      row.items = row.items.map((line) => ({
+        ...line,
+        initialedAt: line.initialedAt ?? now,
+      }));
+    } else {
+      if (!canSignTrainingAsHm(session.roleKey)) {
+        throw new Error("Only a house manager can counter-sign training.");
+      }
+      if (!row.staffSignedAt) {
+        throw new Error("Staff must sign this sheet before the house manager.");
+      }
+      if (row.hmSignedAt) throw new Error("House manager already signed.");
+      row.hmSignedAt = now;
+      row.hmSignatureName = signatureName.trim();
+    }
+    log(
+      this.store,
+      session,
+      "training.signed",
+      `${session.fullName} signed training for ${row.staffName}`,
+      "training_checklist",
+      row.id,
     );
     await persistMeta(this.store);
   }

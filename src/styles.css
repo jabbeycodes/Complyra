@@ -4417,6 +4417,57 @@ th {
   background: #d7e2cc;
   color: #2f4630;
 }
+.individual-chart {
+  display: grid;
+  gap: 22px;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.chart-widget {
+  background: #faf6ef;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 10px;
+  color: #241e18;
+}
+.chart-widget h2 {
+  font-size: 18px;
+  color: #2f4630;
+}
+.chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kind-pill.control {
+  background: #f3e6dc;
+  color: #7a2e24;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kind-pill.scheduled {
+  background: #d7e2cc;
+  color: #2f4630;
+}
+.kind-pill.prn {
+  background: #efe4d4;
+  color: #6f4a2e;
+}
+.med-card p,
+.chart-widget > p {
+  color: #241e18;
+}
+@media (max-width: 900px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 700px) {
   .cover-grid {
     grid-template-columns: 1fr;

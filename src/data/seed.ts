@@ -29,6 +29,15 @@ import type {
   PacketSubmission,
 } from "./planStack";
 import { defaultRenewals } from "./planStack";
+import {
+  defaultJodieMedications,
+  mergeTrainingLines,
+  trainingLinesFromObligations,
+  type ChartFile,
+  type Medication,
+  type MedicationDelivery,
+  type TrainingChecklist,
+} from "./chart";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 
@@ -66,6 +75,10 @@ export interface LocalDatabase {
   obligationSignatures: ObligationSignature[];
   packetSubmissions: PacketSubmission[];
   clinicalRenewals: ClinicalRenewal[];
+  chartFiles: ChartFile[];
+  medications: Medication[];
+  medicationDeliveries: MedicationDelivery[];
+  trainingChecklists: TrainingChecklist[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -379,7 +392,43 @@ export function createEvergreenSeed(): LocalDatabase {
     clinicalRenewals: individuals.flatMap((person) =>
       defaultRenewals(AGENCY_ID, person.id),
     ),
+    chartFiles: [],
+    medications: defaultJodieMedications(AGENCY_ID, jodie.id),
+    medicationDeliveries: [],
+    trainingChecklists: buildTrainingChecklists(
+      AGENCY_ID,
+      jodie.id,
+      jodieV2.id,
+      jodieObligations,
+      jodieStaff.map((assignment) => {
+        const profile = profiles.find((p) => p.id === assignment.userId)!;
+        return { userId: profile.id, staffName: profile.fullName };
+      }),
+    ),
   };
+}
+
+function buildTrainingChecklists(
+  agencyId: string,
+  individualId: string,
+  documentVersionId: string,
+  obligations: ObligationItem[],
+  staff: { userId: string; staffName: string }[],
+): TrainingChecklist[] {
+  const lines = trainingLinesFromObligations(obligations);
+  return staff.map((member, i) => ({
+    id: padId(1401 + i),
+    agencyId,
+    individualId,
+    staffUserId: member.userId,
+    staffName: member.staffName,
+    documentVersionId,
+    items: mergeTrainingLines([], lines),
+    staffSignedAt: null,
+    staffSignatureName: null,
+    hmSignedAt: null,
+    hmSignatureName: null,
+  }));
 }
 
 function buildJodieStack(
@@ -414,6 +463,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1102),
@@ -436,6 +488,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1103),
@@ -458,6 +513,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1104),
@@ -480,6 +538,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1105),
@@ -502,6 +563,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1106),
@@ -524,6 +588,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
     {
       id: padId(1107),
@@ -546,6 +613,9 @@ function buildJodieStack(
       rnSignedAt: null,
       rnSignatureName: null,
       rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
     },
   ];
 

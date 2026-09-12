@@ -36,11 +36,10 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await personDialog.getByLabel("Date of birth").fill("1991-04-12");
   await personDialog.getByLabel("Program site").selectOption({ label: "Poplar House" });
   await personDialog.getByRole("button", { name: "Add person", exact: true }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Required documents" }),
-  ).toContainText("Nora");
+  await expect(page.getByRole("heading", { name: "Nora Fields" })).toBeVisible();
+  await expect(page.locator(".individual-chart")).toContainText("Nora");
 
-  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Back to individuals" }).click();
   await page.getByRole("button", { name: "Add a person" }).click();
   const uploadDialog = page.getByRole("dialog", { name: "Add a person" });
   await uploadDialog.getByRole("tab", { name: /Upload a PCSP/ }).click();
