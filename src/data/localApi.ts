@@ -11,6 +11,8 @@ import {
 import {
   PLAN_SIGNER_ROLE_KEYS,
   ROLE_TEMPLATES,
+  canCreateIndividual,
+  canCreateSite,
   capabilityForRoleKey,
   defaultPermissions,
   hasPermission,
@@ -163,6 +165,22 @@ export interface ComplyraApi {
     file?: File;
   }): Promise<void>;
   resetWorkspace(): Promise<void>;
+  createSite(input: {
+    name: string;
+    address: string;
+    programName: string;
+    managerUserId?: string | null;
+  }): Promise<{ id: string }>;
+  createIndividual(input: {
+    fullName: string;
+    dateOfBirth: string;
+    siteId: string;
+    goesBy?: string;
+    dmhId?: string;
+    file?: File;
+    pageCount?: number;
+    effectiveOn?: string;
+  }): Promise<{ id: string; name: string }>;
 }
 
 export interface WorkspaceView {
@@ -1718,6 +1736,155 @@ export class LocalApi implements ComplyraApi {
       individualId,
     );
     await persistMeta(this.store);
+  }
+
+  async createSite(input: {
+    name: string;
+    address: string;
+    programName: string;
+    managerUserId?: string | null;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCreateSite(session.roleKey)) {
+      throw new Error("Only a DPM or administrator can add a program site.");
+    }
+    const name = input.name.trim();
+    const address = input.address.trim();
+    const programName = input.programName.trim();
+    if (!name || !address || !programName) {
+      throw new Error("Name the site, its address, and the program.");
+    }
+    if (
+      this.store.db.sites.some(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      throw new Error("A site with that name already exists.");
+    }
+    let program = this.store.db.programs.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.name.toLowerCase() === programName.toLowerCase(),
+    );
+    if (!program) {
+      program = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        name: programName,
+      };
+      this.store.db.programs.push(program);
+    }
+    const site = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      programId: program.id,
+      name,
+      address,
+    };
+    this.store.db.sites.push(site);
+    if (input.managerUserId) {
+      const membership = this.store.db.memberships.find(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId === input.managerUserId,
+      );
+      if (membership) membership.siteId = site.id;
+    }
+    log(
+      this.store,
+      session,
+      "site.created",
+      `${name} added to ${programName}`,
+      "site",
+      site.id,
+    );
+    await persistMeta(this.store);
+    return { id: site.id };
+  }
+
+  async createIndividual(input: {
+    fullName: string;
+    dateOfBirth: string;
+    siteId: string;
+    goesBy?: string;
+    dmhId?: string;
+    file?: File;
+    pageCount?: number;
+    effectiveOn?: string;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCreateIndividual(session.roleKey)) {
+      throw new Error("Only a DPM, nurse, or house manager can add an individual.");
+    }
+    const fullName = input.fullName.trim();
+    if (!fullName) throw new Error("Enter the individual’s legal name.");
+    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    const site = this.store.db.sites.find(
+      (row) => row.id === input.siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Choose a program site.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can add people to their own site.");
+    }
+    if (
+      this.store.db.individuals.some(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.fullName.toLowerCase() === fullName.toLowerCase(),
+      )
+    ) {
+      throw new Error("Someone with that name is already on the roster.");
+    }
+    const person = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: site.id,
+      fullName,
+      dateOfBirth: input.dateOfBirth,
+      profile: {
+        ...emptyProfile({
+          id: "new",
+          agencyId: session.agencyId,
+          siteId: site.id,
+          fullName,
+          dateOfBirth: input.dateOfBirth,
+        }),
+        goesBy: input.goesBy?.trim() || fullName.split(" ")[0] || fullName,
+        dmhId: input.dmhId?.trim() || "",
+      },
+    };
+    this.store.db.individuals.push(person);
+    this.store.db.clinicalRenewals.push(
+      ...defaultRenewals(session.agencyId, person.id),
+    );
+    log(
+      this.store,
+      session,
+      "individual.created",
+      `${fullName} added at ${site.name}`,
+      "individual",
+      person.id,
+    );
+    await persistMeta(this.store);
+    if (input.file) {
+      await this.uploadDocument({
+        individualId: person.id,
+        file: input.file,
+        title: `${fullName} · PCSP`,
+        kind: "pcsp",
+        pageCount: input.pageCount || 1,
+        effectiveOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        requirementTitle: `Acknowledge PCSP for ${fullName}`,
+        category: "PCSP acknowledgments",
+        ownerUserId: session.userId,
+        dueOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        frequency: "On plan update",
+        sourcePage: 1,
+      });
+    }
+    return { id: person.id, name: fullName };
   }
 
   async resetWorkspace() {

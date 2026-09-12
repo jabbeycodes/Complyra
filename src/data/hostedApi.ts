@@ -985,6 +985,12 @@ export class HostedApi implements ComplyraApi {
   async uploadRenewalEvidence() {
     throw new Error("Clinical renewals are on the local workspace until the hosted schema is migrated.");
   }
+  async createSite(): Promise<{ id: string }> {
+    throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");
+  }
+  async createIndividual(): Promise<{ id: string; name: string }> {
+    throw new Error("Adding individuals is on the local workspace until the hosted schema is migrated.");
+  }
 
   async resetWorkspace() {
     throw new Error("Hosted workspaces cannot be reset from the browser.");

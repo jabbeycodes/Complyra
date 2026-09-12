@@ -244,14 +244,14 @@ button:hover:not(:disabled) {
   width: 100%;
   text-align: left;
   padding: 14px 12px 12px;
-  background: linear-gradient(125deg, #efe4d4, #f4efe6);
+  background: #efe4d4;
   border: 1px solid #ddd2c2;
   border-radius: 8px;
   margin: 9px 0 16px;
   display: flex;
   flex-direction: column;
   gap: 9px;
-  color: #8b7460;
+  color: #3a3228;
 }
 .assistant-card-top {
   display: flex;
@@ -620,7 +620,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #939c95;
+  color: #3a3228;
 }
 .snapshot-label > span {
   width: 5px;
@@ -632,7 +632,7 @@ h1 {
   display: flex;
   gap: 13px;
   align-items: center;
-  background: linear-gradient(110deg, #eff5ee, #f3f7f2);
+  background: #d7e2cc;
   border: 1px solid #e2eae0;
   border-radius: 8px;
   padding: 16px 18px;
@@ -1190,7 +1190,7 @@ td > svg {
   border-top: 1px solid #f1f0ee;
   margin-top: auto;
   font-size: 11px;
-  color: #8b7460;
+  color: #3a3228;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1203,7 +1203,7 @@ td > svg {
   padding: 16px 19px;
   border: 1px solid #ece9e5;
   border-radius: 8px;
-  background: linear-gradient(100deg, #f6f4f2, #f9f8f7);
+  background: #efe4d4;
   margin-top: 23px;
   text-align: left;
 }
@@ -1215,7 +1215,7 @@ td > svg {
   justify-content: center;
   border-radius: 8px;
   background: #efece8;
-  color: #bdaf9e;
+  color: #3a3228;
 }
 .copilot-banner strong {
   font-size: 13px;
@@ -1431,7 +1431,7 @@ td > svg {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  color: #c3bbb1;
+  color: #4a4036;
 }
 .person-card .avatar {
   width: 45px;
@@ -1448,7 +1448,7 @@ td > svg {
   display: flex;
   gap: 5px;
   font-size: 12px;
-  color: #c2b9ae;
+  color: #4a4036;
   align-items: center;
   margin: 9px 0 23px;
 }
@@ -1456,7 +1456,7 @@ td > svg {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #897461;
+  color: #4a4036;
   margin-bottom: 8px;
 }
 .person-card-progress strong {
@@ -1468,7 +1468,7 @@ td > svg {
   justify-content: space-between;
   gap: 8px;
   font-size: 10px;
-  color: #bfb7ae;
+  color: #4a4036;
   margin-top: 15px;
 }
 .site-grid {
@@ -1478,6 +1478,12 @@ td > svg {
 }
 .location-card {
   padding: 23px;
+}
+.location-card .heading-actions {
+  margin-top: 14px;
+}
+.location-card .heading-actions .button.full {
+  flex: 1;
 }
 .location-top {
   display: flex;
@@ -1672,7 +1678,7 @@ td > svg {
   font:
     500 28px "Manrope Variable",
     sans-serif;
-  color: #897461;
+  color: #4a4036;
   display: block;
 }
 .audit-summary > div span {
@@ -1895,7 +1901,7 @@ td > svg {
 .detail-grid strong {
   display: block;
   font-size: 15px;
-  color: #897461;
+  color: #4a4036;
   font-weight: 500;
 }
 .detail-grid span {
@@ -2442,7 +2448,7 @@ td > svg {
   color: #8a7460;
 }
 .detail-subtitle {
-  color: #897461 !important;
+  color: #4a4036 !important;
 }
 .detail-grid span {
   color: #897462;
@@ -2469,7 +2475,7 @@ td {
   color: #8a7460;
 }
 .copilot-answer > p {
-  color: #8b7460;
+  color: #3a3228;
 }
 .suggested-questions button {
   color: #8c745f;
@@ -3830,7 +3836,7 @@ th {
   color: #4a4036;
 }
 .settings-row strong {
-  color: #897461;
+  color: #4a4036;
 }
 .settings-row small {
   color: #8a7461;
@@ -3940,10 +3946,7 @@ th {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    radial-gradient(circle at top left, #c5d4b8, transparent 42%),
-    radial-gradient(circle at bottom right, #e6d3b4, transparent 46%),
-    #e8dcc8;
+  background: #e8dcc8;
 }
 .login-card {
   width: min(460px, 100%);
@@ -4306,6 +4309,93 @@ th {
 .person-renewals li span:first-child {
   flex: 1;
   min-width: 0;
+  font-weight: 600;
+  color: #241e18;
+}
+.due-chip {
+  width: 58px;
+  min-width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  line-height: 1.05;
+  flex-shrink: 0;
+  color: #faf6ef;
+  background: #3f5c3b;
+  box-shadow: none;
+}
+.due-chip-month {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.due-chip-day {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+}
+.due-chip.overdue {
+  background: #7a2e24;
+}
+.due-chip.due-soon {
+  background: #8b5e3c;
+}
+.due-chip.current {
+  background: #2f4630;
+}
+.renewal-card header {
+  align-items: center;
+}
+.renewal-card header > div {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+}
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.choice-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.choice-card {
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 2px solid #c9b48a;
+  background: #faf6ef;
+  color: #241e18;
+  border-radius: 12px;
+}
+.choice-card strong {
+  font-size: 15px;
+}
+.choice-card span {
+  font-size: 13px;
+  color: #4a4036;
+  line-height: 1.35;
+}
+.choice-card.active {
+  border-color: #2f4630;
+  background: #d7e2cc;
+}
+.setup-form {
+  display: grid;
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .choice-row {
+    grid-template-columns: 1fr;
+  }
 }
 .kind-pill.renewal.overdue {
   background: #f3e6dc;

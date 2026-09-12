@@ -247,3 +247,20 @@ export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [
   "degreed_professional_manager",
   "program_manager",
 ];
+
+export function canCreateSite(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "degreed_professional_manager",
+    "program_manager",
+  ].includes(roleKey);
+}
+
+export function canCreateIndividual(roleKey: string) {
+  return (
+    canCreateSite(roleKey) ||
+    roleKey === "house_manager" ||
+    roleKey === "nurse"
+  );
+}

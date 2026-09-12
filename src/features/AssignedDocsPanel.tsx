@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check, FileText, LockKeyhole, PenLine } from "lucide-react";
-import { Badge, formatDate } from "../components";
+import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
 import {
@@ -286,8 +286,11 @@ function ClinicalRenewals({
           return (
             <article key={row.id} className="obligation-card renewal-card">
               <header>
-                <span className={`kind-pill renewal ${row.status}`}>{row.kind.replace("_", " ")}</span>
-                <h3>{row.title}</h3>
+                <DueChip date={row.nextDueOn} status={renewalBadge(row.status)} />
+                <div>
+                  <span className={`kind-pill renewal ${row.status}`}>{row.kind.replace("_", " ")}</span>
+                  <h3>{row.title}</h3>
+                </div>
                 <Badge status={renewalBadge(row.status)} />
               </header>
               <p>

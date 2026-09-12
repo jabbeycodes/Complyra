@@ -42,6 +42,7 @@ import Dashboard from "./Dashboard";
 import {
   Avatar,
   Badge,
+  DueChip,
   Empty,
   FilterBar,
   Modal,
@@ -60,6 +61,8 @@ import AuthEntry from "./auth/AuthEntry";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
+import AddIndividualForm from "./features/AddIndividualForm";
+import AddSiteForm from "./features/AddSiteForm";
 import AssignedDocsPanel from "./features/AssignedDocsPanel";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -67,6 +70,7 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
+import { canCreateIndividual, canCreateSite } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -94,6 +98,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
+  const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
@@ -173,6 +178,8 @@ export default function App() {
     : null;
   const canManage = can(session, "requirements.approve");
   const canUpload = can(session, "documents.upload");
+  const canAddSite = canCreateSite(session.roleKey);
+  const canAddPerson = canCreateIndividual(session.roleKey);
   const canInvite = can(session, "members.invite");
   const canAssign = can(session, "members.assign_roles");
   const canCompleteWork = can(session, "requirements.complete");
@@ -612,13 +619,21 @@ export default function App() {
                     title="Every person. One connected record."
                     description="Care plans, responsibilities, and evidence, organized around the people you support."
                   >
+                    {canAddPerson && (
+                      <button
+                        className="button primary"
+                        onClick={() => setModal("add-person")}
+                      >
+                        <UserPlus size={16} /> Add a person
+                      </button>
+                    )}
                     {canUpload && (
-                    <button
-                      className="button"
-                      onClick={() => setModal("upload")}
-                    >
-                      <Upload size={16} /> Add a plan
-                    </button>
+                      <button
+                        className="button"
+                        onClick={() => setModal("upload")}
+                      >
+                        <Upload size={16} /> Add a plan
+                      </button>
                     )}
                   </PageHeading>
                   <div className="list-controls">
@@ -680,8 +695,10 @@ export default function App() {
                                 {renewals.map((row) => (
                                   <li key={row.id}>
                                     <span>{row.title}</span>
-                                    <span>{formatDate(row.nextDueOn)}</span>
-                                    <Badge status={renewalBadge(row.status)} />
+                                    <DueChip
+                                      date={row.nextDueOn}
+                                      status={renewalBadge(row.status)}
+                                    />
                                   </li>
                                 ))}
                               </ul>
@@ -717,10 +734,21 @@ export default function App() {
                     eyebrow="ONE AGENCY. CONNECTED CARE."
                     title="A home for every detail."
                     description="See how each site is doing and give your team the support it needs."
-                  />
+                  >
+                    {canAddSite && (
+                      <button
+                        className="button primary"
+                        onClick={() => setModal("add-site")}
+                      >
+                        <Building2 size={16} /> Add a site
+                      </button>
+                    )}
+                  </PageHeading>
                   <div className="list-controls">
                     <span>
-                      {sites.length} program sites · 24 individuals · 2 programs
+                      {sites.length} program sites · {individuals.length}{" "}
+                      individuals ·{" "}
+                      {new Set(sites.map((row) => row.program)).size} programs
                     </span>
                     <select
                       aria-label="Select site"
@@ -779,17 +807,33 @@ export default function App() {
                                 {s.manager}
                                 <small>House manager</small>
                               </span>
-                              <span className="muted">4 individuals</span>
+                              <span className="muted">
+                                {individuals.filter((person) => person.site === s.name).length}{" "}
+                                individuals
+                              </span>
                             </div>
-                            <button
-                              className="button full"
-                              onClick={() => {
-                                setSite(s.name);
-                                navigate("Requirements");
-                              }}
-                            >
-                              View site requirements <ArrowRight size={16} />
-                            </button>
+                            <div className="heading-actions">
+                              {canAddPerson && (
+                                <button
+                                  className="button"
+                                  onClick={() => {
+                                    setAddPersonSiteId(s.id);
+                                    setModal("add-person");
+                                  }}
+                                >
+                                  <UserPlus size={16} /> Add a person
+                                </button>
+                              )}
+                              <button
+                                className="button full"
+                                onClick={() => {
+                                  setSite(s.name);
+                                  navigate("Requirements");
+                                }}
+                              >
+                                View site requirements <ArrowRight size={16} />
+                              </button>
+                            </div>
                           </section>
                         );
                       })}
@@ -1610,6 +1654,45 @@ export default function App() {
           >
             View related requirements <ArrowRight size={16} />
           </button>
+        </Modal>
+      )}
+      {modal === "add-site" && (
+        <Modal title="Add a program site" onClose={() => setModal(null)}>
+          <AddSiteForm
+            onCreated={(name) => {
+              setModal(null);
+              setSite(name);
+              notify(`${name} is ready. Add people to this home next.`);
+            }}
+          />
+        </Modal>
+      )}
+      {modal === "add-person" && (
+        <Modal
+          title="Add a person"
+          onClose={() => {
+            setModal(null);
+            setAddPersonSiteId(null);
+          }}
+        >
+          <AddIndividualForm
+            initialSiteId={
+              addPersonSiteId ??
+              (site !== "All sites"
+                ? sites.find((row) => row.name === site)?.id ?? null
+                : null)
+            }
+            onCreated={(name, uploaded) => {
+              setAddPersonSiteId(null);
+              setModal(null);
+              setPerson(name);
+              notify(
+                uploaded
+                  ? `${name} was added. The PCSP is in Review queue.`
+                  : `${name} was added. Upload a PCSP when you have it.`,
+              );
+            }}
+          />
         </Modal>
       )}
       {(modal === "upload" || modal === "new") && (

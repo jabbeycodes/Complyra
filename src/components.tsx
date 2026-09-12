@@ -199,6 +199,36 @@ export function formatDate(date: string) {
     day: "numeric",
   });
 }
+
+export function dateParts(date: string) {
+  const parsed = new Date(`${date.slice(0, 10)}T12:00:00`);
+  return {
+    month: parsed.toLocaleDateString("en-US", { month: "short" }),
+    day: String(parsed.getDate()),
+  };
+}
+
+export function DueChip({
+  date,
+  status = "Current",
+}: {
+  date: string;
+  status?: string;
+}) {
+  const { month, day } = dateParts(date);
+  const tone =
+    status === "Overdue" ? "overdue" : status === "Due soon" ? "due-soon" : "current";
+  return (
+    <span
+      className={`due-chip ${tone}`}
+      title={`${status}: ${month} ${day}`}
+      aria-label={`${status} ${month} ${day}`}
+    >
+      <span className="due-chip-month">{month}</span>
+      <span className="due-chip-day">{day}</span>
+    </span>
+  );
+}
 export function FilterBar({
   query,
   setQuery,
