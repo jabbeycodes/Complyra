@@ -11,6 +11,8 @@ import {
 import {
   PLAN_SIGNER_ROLE_KEYS,
   ROLE_TEMPLATES,
+  canCreateIndividual,
+  canCreateSite,
   capabilityForRoleKey,
   defaultPermissions,
   hasPermission,
@@ -38,14 +40,23 @@ import type {
   UploadDocumentInput,
 } from "./types";
 import {
+  applyRenewalUpload,
+  blankRnFields,
   canEditCover,
   canEditExtraction,
+  canSeeRenewals,
+  canSignAsDelegatingRn,
   canToggleDelegation,
+  canUploadRenewal,
+  defaultRenewals,
   emptyProfile,
   isObligationActive,
   proposeFromPcsp,
   requiredForSigning,
+  renewalStatus,
   sortObligations,
+  staffCanSignDelegation,
+  type ClinicalEvidenceKind,
   type IndividualProfile,
   type ObligationItem,
   type PlanStackView,
@@ -141,7 +152,35 @@ export interface ComplyraApi {
     signatureMark: string,
   ): Promise<void>;
   submitPlanPacket(individualId: string): Promise<void>;
+  signDelegationRn(
+    obligationId: string,
+    signatureName: string,
+    signatureMark: string,
+  ): Promise<void>;
+  uploadRenewalEvidence(input: {
+    renewalId: string;
+    evidenceKind: ClinicalEvidenceKind;
+    documentTitle: string;
+    uploadedOn?: string;
+    file?: File;
+  }): Promise<void>;
   resetWorkspace(): Promise<void>;
+  createSite(input: {
+    name: string;
+    address: string;
+    programName: string;
+    managerUserId?: string | null;
+  }): Promise<{ id: string }>;
+  createIndividual(input: {
+    fullName: string;
+    dateOfBirth: string;
+    siteId: string;
+    goesBy?: string;
+    dmhId?: string;
+    file?: File;
+    pageCount?: number;
+    effectiveOn?: string;
+  }): Promise<{ id: string; name: string }>;
 }
 
 export interface WorkspaceView {
@@ -299,6 +338,13 @@ async function hydrate() {
       browserStore.db.obligationSignatures =
         browserStore.db.obligationSignatures ?? [];
       browserStore.db.packetSubmissions = browserStore.db.packetSubmissions ?? [];
+      browserStore.db.clinicalRenewals = browserStore.db.clinicalRenewals ?? [];
+      for (const item of browserStore.db.obligations) {
+        item.delegatingRnUserId = item.delegatingRnUserId ?? null;
+        item.rnSignedAt = item.rnSignedAt ?? null;
+        item.rnSignatureName = item.rnSignatureName ?? null;
+        item.rnSignatureMark = item.rnSignatureMark ?? null;
+      }
     }
   } catch {
     /* Keep the fictional seed if stored state cannot be read. */
@@ -474,6 +520,21 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.obligations = store.db.obligations ?? [];
   store.db.obligationSignatures = store.db.obligationSignatures ?? [];
   store.db.packetSubmissions = store.db.packetSubmissions ?? [];
+  store.db.clinicalRenewals = store.db.clinicalRenewals ?? [];
+}
+
+function ensureClinicalRenewals(store: MemoryStore) {
+  ensurePlanCollections(store);
+  const existing = new Set(
+    store.db.clinicalRenewals.map((row) => `${row.individualId}:${row.kind}`),
+  );
+  for (const person of store.db.individuals) {
+    for (const row of defaultRenewals(person.agencyId, person.id)) {
+      if (!existing.has(`${row.individualId}:${row.kind}`)) {
+        store.db.clinicalRenewals.push(row);
+      }
+    }
+  }
 }
 
 function syncObligationRoster(store: MemoryStore, item: ObligationItem) {
@@ -540,6 +601,12 @@ function mapPlanStack(
     profile: person.profile ?? emptyProfile(person),
     required,
     checked,
+    renewals: canSeeRenewals(session.roleKey)
+      ? (store.db.clinicalRenewals ?? [])
+          .filter((row) => row.individualId === person.id)
+          .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn) }))
+          .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
+      : [],
     mySubmissionAt: submission?.submittedAt ?? null,
     canSubmit:
       mustSign.length > 0 &&
@@ -651,6 +718,7 @@ function activateVersion(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      ...blankRnFields,
     });
   }
   for (const item of store.db.obligations.filter(
@@ -686,6 +754,7 @@ function packetDetail(store: MemoryStore, packet: AcknowledgmentPacket): PacketD
 
 function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensurePlanCollections(store);
+  ensureClinicalRenewals(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit =
     hasPermission(session, "audit.read") || canViewPeople;
@@ -1459,6 +1528,10 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Only a DPM can edit extracted items.");
     }
     Object.assign(item, patch);
+    if (turningOnDelegation) {
+      // DPM can create/turn on the form. The delegating RN still signs first.
+      Object.assign(item, blankRnFields);
+    }
     if (item.enabled && item.mode === "required") {
       item.proposed = false;
       syncObligationRoster(this.store, item);
@@ -1491,6 +1564,7 @@ export class LocalApi implements ComplyraApi {
       createdFrom: "manual",
       inventoryState: "present",
       proposed: false,
+      ...blankRnFields,
     };
     this.store.db.obligations.push(item);
     syncObligationRoster(this.store, item);
@@ -1541,6 +1615,11 @@ export class LocalApi implements ComplyraApi {
     if (!item || !isObligationActive(item)) {
       throw new Error("This document is not open for signature.");
     }
+    if (!staffCanSignDelegation(item)) {
+      throw new Error(
+        "The delegating RN must sign this form before staff can sign.",
+      );
+    }
     if (!row.openedAt) {
       throw new Error("Open and review the document before signing.");
     }
@@ -1558,6 +1637,75 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} signed ${item.title}`,
       "obligation_signature",
       row.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async signDelegationRn(
+    obligationId: string,
+    signatureName: string,
+    signatureMark: string,
+  ) {
+    const session = assertSession(this.store);
+    if (!canSignAsDelegatingRn(session.roleKey, session.role)) {
+      throw new Error("Only the delegating RN can sign this first.");
+    }
+    const item = this.store.db.obligations.find((row) => row.id === obligationId);
+    if (!item || item.kind !== "delegation" || !item.enabled) {
+      throw new Error("Turn the delegation on before the RN signs.");
+    }
+    if (item.rnSignedAt) throw new Error("Delegating RN already signed.");
+    if (!signatureName.trim() || !signatureMark) {
+      throw new Error("Type your legal name and add a signature mark.");
+    }
+    item.delegatingRnUserId = session.userId;
+    item.rnSignedAt = new Date().toISOString();
+    item.rnSignatureName = signatureName.trim();
+    item.rnSignatureMark = signatureMark;
+    log(
+      this.store,
+      session,
+      "delegation.rn_signed",
+      `${session.fullName} signed as delegating RN on ${item.title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async uploadRenewalEvidence(input: {
+    renewalId: string;
+    evidenceKind: ClinicalEvidenceKind;
+    documentTitle: string;
+    uploadedOn?: string;
+    file?: File;
+  }) {
+    const session = assertSession(this.store);
+    if (!canUploadRenewal(session.roleKey)) {
+      throw new Error("RN, DPM, or House Manager can upload renewal evidence.");
+    }
+    const renewal = this.store.db.clinicalRenewals.find((row) => row.id === input.renewalId);
+    if (!renewal) throw new Error("Renewal not found.");
+    const title =
+      input.documentTitle.trim() ||
+      input.file?.name ||
+      "Clinical evidence";
+    const uploadedOn = (input.uploadedOn ?? new Date().toISOString()).slice(0, 10);
+    const next = applyRenewalUpload(renewal, {
+      uploadedOn,
+      documentTitle: title,
+      evidenceKind: input.evidenceKind,
+    });
+    this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
+      row.id === renewal.id ? next : row,
+    );
+    log(
+      this.store,
+      session,
+      "renewal.evidence_uploaded",
+      `${session.fullName} uploaded ${title} for ${renewal.title}`,
+      "clinical_renewal",
+      renewal.id,
     );
     await persistMeta(this.store);
   }
@@ -1588,6 +1736,155 @@ export class LocalApi implements ComplyraApi {
       individualId,
     );
     await persistMeta(this.store);
+  }
+
+  async createSite(input: {
+    name: string;
+    address: string;
+    programName: string;
+    managerUserId?: string | null;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCreateSite(session.roleKey)) {
+      throw new Error("Only a DPM or administrator can add a program site.");
+    }
+    const name = input.name.trim();
+    const address = input.address.trim();
+    const programName = input.programName.trim();
+    if (!name || !address || !programName) {
+      throw new Error("Name the site, its address, and the program.");
+    }
+    if (
+      this.store.db.sites.some(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      throw new Error("A site with that name already exists.");
+    }
+    let program = this.store.db.programs.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.name.toLowerCase() === programName.toLowerCase(),
+    );
+    if (!program) {
+      program = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        name: programName,
+      };
+      this.store.db.programs.push(program);
+    }
+    const site = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      programId: program.id,
+      name,
+      address,
+    };
+    this.store.db.sites.push(site);
+    if (input.managerUserId) {
+      const membership = this.store.db.memberships.find(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId === input.managerUserId,
+      );
+      if (membership) membership.siteId = site.id;
+    }
+    log(
+      this.store,
+      session,
+      "site.created",
+      `${name} added to ${programName}`,
+      "site",
+      site.id,
+    );
+    await persistMeta(this.store);
+    return { id: site.id };
+  }
+
+  async createIndividual(input: {
+    fullName: string;
+    dateOfBirth: string;
+    siteId: string;
+    goesBy?: string;
+    dmhId?: string;
+    file?: File;
+    pageCount?: number;
+    effectiveOn?: string;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCreateIndividual(session.roleKey)) {
+      throw new Error("Only a DPM, nurse, or house manager can add an individual.");
+    }
+    const fullName = input.fullName.trim();
+    if (!fullName) throw new Error("Enter the individual’s legal name.");
+    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    const site = this.store.db.sites.find(
+      (row) => row.id === input.siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Choose a program site.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can add people to their own site.");
+    }
+    if (
+      this.store.db.individuals.some(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.fullName.toLowerCase() === fullName.toLowerCase(),
+      )
+    ) {
+      throw new Error("Someone with that name is already on the roster.");
+    }
+    const person = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: site.id,
+      fullName,
+      dateOfBirth: input.dateOfBirth,
+      profile: {
+        ...emptyProfile({
+          id: "new",
+          agencyId: session.agencyId,
+          siteId: site.id,
+          fullName,
+          dateOfBirth: input.dateOfBirth,
+        }),
+        goesBy: input.goesBy?.trim() || fullName.split(" ")[0] || fullName,
+        dmhId: input.dmhId?.trim() || "",
+      },
+    };
+    this.store.db.individuals.push(person);
+    this.store.db.clinicalRenewals.push(
+      ...defaultRenewals(session.agencyId, person.id),
+    );
+    log(
+      this.store,
+      session,
+      "individual.created",
+      `${fullName} added at ${site.name}`,
+      "individual",
+      person.id,
+    );
+    await persistMeta(this.store);
+    if (input.file) {
+      await this.uploadDocument({
+        individualId: person.id,
+        file: input.file,
+        title: `${fullName} · PCSP`,
+        kind: "pcsp",
+        pageCount: input.pageCount || 1,
+        effectiveOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        requirementTitle: `Acknowledge PCSP for ${fullName}`,
+        category: "PCSP acknowledgments",
+        ownerUserId: session.userId,
+        dueOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        frequency: "On plan update",
+        sourcePage: 1,
+      });
+    }
+    return { id: person.id, name: fullName };
   }
 
   async resetWorkspace() {

@@ -309,6 +309,69 @@ test("a DPM can reset another staff member’s password", async () => {
   assert.equal(next.mustChangePassword, true);
 });
 
+test("a DPM/admin can add a site and a person by hand or from a PCSP", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const site = await api.createSite({
+    name: "Poplar House",
+    address: "12 Poplar Lane",
+    programName: "Residential services",
+  });
+  const manual = await api.createIndividual({
+    fullName: "Nora Fields",
+    dateOfBirth: "1991-04-12",
+    siteId: site.id,
+    goesBy: "Nora",
+  });
+  const workspace = await api.loadWorkspace(session);
+  assert.equal(workspace.sites.some((row) => row.name === "Poplar House"), true);
+  assert.equal(workspace.individuals.some((row) => row.id === manual.id), true);
+  const stack = workspace.planStacks.find((row) => row.individualId === manual.id);
+  assert.ok(stack);
+  assert.equal(stack.renewals.some((row) => row.kind === "annual_physical"), true);
+
+  const file = new File(["%PDF-1.4 fictional"], "nora-pcsp.pdf", {
+    type: "application/pdf",
+  });
+  const fromPlan = await api.createIndividual({
+    fullName: "Eli Navarro",
+    dateOfBirth: "1988-11-02",
+    siteId: site.id,
+    file,
+    pageCount: 10,
+    effectiveOn: "2026-09-12",
+  });
+  const after = await api.loadWorkspace(session);
+  assert.equal(
+    after.plans.some((plan) => plan.person === fromPlan.name && plan.status === "Pending review"),
+    true,
+  );
+});
+
+test("a DSP cannot add a site or an individual", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(dspLogin());
+  const workspace = await api.loadWorkspace(session);
+  await assert.rejects(
+    () =>
+      api.createSite({
+        name: "Should Fail",
+        address: "1 Nowhere",
+        programName: "Residential services",
+      }),
+    /administrator/,
+  );
+  await assert.rejects(
+    () =>
+      api.createIndividual({
+        fullName: "Should Fail",
+        dateOfBirth: "1990-01-01",
+        siteId: workspace.sites[0].id,
+      }),
+    /house manager/,
+  );
+});
+
 test("the platform owner can approve a pending agency", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

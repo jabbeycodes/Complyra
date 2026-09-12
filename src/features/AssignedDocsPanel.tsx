@@ -1,19 +1,32 @@
 import { useState } from "react";
 import { Check, FileText, LockKeyhole, PenLine } from "lucide-react";
-import { Badge, formatDate } from "../components";
+import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
 import {
   canEditCover,
   canEditExtraction,
+  canSignAsDelegatingRn,
   canToggleDelegation,
+  canUploadRenewal,
   isObligationActive,
+  renewalBadge,
+  staffCanSignDelegation,
+  type ClinicalEvidenceKind,
+  type ClinicalRenewalView,
   type IndividualProfile,
   type ObligationView,
 } from "../data/planStack";
 import SignaturePad from "./SignaturePad";
 
 type Tab = "required" | "checked";
+
+const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
+  { value: "consultation", label: "Consultation note" },
+  { value: "doctor_notes", label: "Doctor's notes" },
+  { value: "physician_orders", label: "Physician orders" },
+  { value: "pdf", label: "PDF / other" },
+];
 
 export default function AssignedDocsPanel({
   individualId,
@@ -25,6 +38,7 @@ export default function AssignedDocsPanel({
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [tab, setTab] = useState<Tab>("required");
   const [signingId, setSigningId] = useState<string | null>(null);
+  const [rnSigningId, setRnSigningId] = useState<string | null>(null);
   const [legalName, setLegalName] = useState(session?.fullName ?? "");
   const [mark, setMark] = useState("");
   const [error, setError] = useState("");
@@ -44,6 +58,9 @@ export default function AssignedDocsPanel({
     session.role,
     can(session, "requirements.approve"),
   );
+  const nurseFirst = canSignAsDelegatingRn(session.roleKey, session.role);
+  const showRenewals = stack.renewals.length > 0;
+  const uploadRenewal = canUploadRenewal(session.roleKey);
   const activeProfile = profile ?? stack.profile;
 
   async function run(action: () => Promise<void>) {
@@ -111,6 +128,23 @@ export default function AssignedDocsPanel({
         )}
       </section>
 
+      {showRenewals && (
+        <ClinicalRenewals
+          items={stack.renewals}
+          canUpload={uploadRenewal}
+          onUpload={(renewalId, evidenceKind, documentTitle, file) =>
+            run(() =>
+              api.uploadRenewalEvidence({
+                renewalId,
+                evidenceKind,
+                documentTitle,
+                file,
+              }),
+            )
+          }
+        />
+      )}
+
       <div className="stack-tabs" role="tablist">
         <button
           type="button"
@@ -138,14 +172,17 @@ export default function AssignedDocsPanel({
         <RequiredList
           items={stack.required}
           signingId={signingId}
+          rnSigningId={rnSigningId}
           legalName={legalName}
           mark={mark}
           canSign={can(session, "acknowledgments.sign_own")}
+          nurseFirst={nurseFirst}
           editExtract={editExtract}
           editDelegation={editDelegation}
           canSubmit={stack.canSubmit}
           submittedAt={stack.mySubmissionAt}
           onSignId={setSigningId}
+          onRnSignId={setRnSigningId}
           onLegalName={setLegalName}
           onMark={setMark}
           onOpen={(id) => run(() => api.markObligationOpened(id))}
@@ -153,6 +190,13 @@ export default function AssignedDocsPanel({
             run(async () => {
               await api.signObligation(id, legalName, mark);
               setSigningId(null);
+              setMark("");
+            })
+          }
+          onRnSign={(id) =>
+            run(async () => {
+              await api.signDelegationRn(id, legalName, mark);
+              setRnSigningId(null);
               setMark("");
             })
           }
@@ -207,38 +251,172 @@ export default function AssignedDocsPanel({
   );
 }
 
+function ClinicalRenewals({
+  items,
+  canUpload,
+  onUpload,
+}: {
+  items: ClinicalRenewalView[];
+  canUpload: boolean;
+  onUpload: (
+    renewalId: string,
+    evidenceKind: ClinicalEvidenceKind,
+    documentTitle: string,
+    file?: File,
+  ) => void;
+}) {
+  const [drafts, setDrafts] = useState<
+    Record<string, { kind: ClinicalEvidenceKind; title: string; file?: File }>
+  >({});
+
+  function draft(id: string) {
+    return drafts[id] ?? { kind: "consultation" as const, title: "" };
+  }
+
+  return (
+    <section className="clinical-renewals">
+      <h3 className="section-label">Upcoming clinical renewals</h3>
+      <p className="stack-help">
+        Annual physical, vision, dental, and physician orders. The next due date
+        resets only after the required document is uploaded.
+      </p>
+      <div className="obligation-list">
+        {items.map((row) => {
+          const current = draft(row.id);
+          return (
+            <article key={row.id} className="obligation-card renewal-card">
+              <header>
+                <DueChip date={row.nextDueOn} status={renewalBadge(row.status)} />
+                <div>
+                  <span className={`kind-pill renewal ${row.status}`}>{row.kind.replace("_", " ")}</span>
+                  <h3>{row.title}</h3>
+                </div>
+                <Badge status={renewalBadge(row.status)} />
+              </header>
+              <p>
+                Next due {formatDate(row.nextDueOn)}
+                {row.lastUploadedOn
+                  ? ` · Last uploaded ${formatDate(row.lastUploadedOn)}`
+                  : ""}
+                {row.lastDocumentTitle ? ` · ${row.lastDocumentTitle}` : ""}
+              </p>
+              {canUpload && (
+                <form
+                  className="renewal-upload"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    onUpload(
+                      row.id,
+                      current.kind,
+                      current.title || current.file?.name || row.title,
+                      current.file,
+                    );
+                  }}
+                >
+                  <label>
+                    Evidence type
+                    <select
+                      value={current.kind}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [row.id]: {
+                            ...current,
+                            kind: e.target.value as ClinicalEvidenceKind,
+                          },
+                        }))
+                      }
+                    >
+                      {EVIDENCE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Document title
+                    <input
+                      value={current.title}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [row.id]: { ...current, title: e.target.value },
+                        }))
+                      }
+                      placeholder="Consultation note, doctor's notes, or PDF"
+                    />
+                  </label>
+                  <label>
+                    File
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [row.id]: {
+                            ...current,
+                            file: e.target.files?.[0],
+                            title: current.title || e.target.files?.[0]?.name || "",
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <button className="button primary" type="submit">
+                    Upload and reset date
+                  </button>
+                </form>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function RequiredList({
   items,
   signingId,
+  rnSigningId,
   legalName,
   mark,
   canSign,
+  nurseFirst,
   editExtract,
   editDelegation,
   canSubmit,
   submittedAt,
   onSignId,
+  onRnSignId,
   onLegalName,
   onMark,
   onOpen,
   onSign,
+  onRnSign,
   onToggle,
   onSubmit,
 }: {
   items: ObligationView[];
   signingId: string | null;
+  rnSigningId: string | null;
   legalName: string;
   mark: string;
   canSign: boolean;
+  nurseFirst: boolean;
   editExtract: boolean;
   editDelegation: boolean;
   canSubmit: boolean;
   submittedAt: string | null;
   onSignId: (id: string | null) => void;
+  onRnSignId: (id: string | null) => void;
   onLegalName: (value: string) => void;
   onMark: (value: string) => void;
   onOpen: (id: string) => void;
   onSign: (id: string) => void;
+  onRnSign: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onSubmit: () => void;
 }) {
@@ -253,6 +431,11 @@ function RequiredList({
       </p>
       {visible.map((view) => {
         const mine = view.mySignature;
+        const waitingOnRn =
+          view.item.kind === "delegation" &&
+          view.item.enabled &&
+          !view.item.rnSignedAt;
+        const staffMaySign = staffCanSignDelegation(view.item);
         const openForMe =
           view.item.enabled &&
           isObligationActive(view.item) &&
@@ -266,13 +449,28 @@ function RequiredList({
                 status={
                   mine?.signedAt
                     ? "Signed"
-                    : view.item.enabled
-                      ? "Needs signature"
-                      : "Off"
+                    : waitingOnRn
+                      ? "Waiting for RN"
+                      : view.item.enabled
+                        ? "Needs signature"
+                        : "Off"
                 }
               />
             </header>
             <p>{view.item.detail}</p>
+            {waitingOnRn && (
+              <p className="rn-gate">
+                The delegating RN must sign this form first. Staff cannot sign
+                yet, even if a DPM created or turned the form on.
+              </p>
+            )}
+            {view.item.rnSignedAt && (
+              <p className="signed-flag">
+                <Check size={16} /> Delegating RN signed{" "}
+                {formatDate(view.item.rnSignedAt)}
+                {view.item.rnSignatureName ? ` · ${view.item.rnSignatureName}` : ""}
+              </p>
+            )}
             {view.item.shiftPeriods.length > 0 && (
               <p className="shift-periods">
                 Shift periods: {view.item.shiftPeriods.join(", ")}
@@ -291,7 +489,15 @@ function RequiredList({
                   {view.item.enabled ? "Turn delegation off" : "Turn delegation on"}
                 </button>
               )}
-              {openForMe && mine && !mine.signedAt && canSign && (
+              {waitingOnRn && nurseFirst && (
+                <button
+                  className="button primary"
+                  onClick={() => onRnSignId(view.item.id)}
+                >
+                  <PenLine size={16} /> Sign as delegating RN
+                </button>
+              )}
+              {openForMe && mine && !mine.signedAt && canSign && staffMaySign && (
                 <>
                   <button className="button" onClick={() => onOpen(mine.id)}>
                     <FileText size={16} /> Review
@@ -305,12 +511,36 @@ function RequiredList({
                   </button>
                 </>
               )}
+              {openForMe && mine && !mine.signedAt && canSign && waitingOnRn && !nurseFirst && (
+                <button className="button" onClick={() => onOpen(mine.id)}>
+                  <FileText size={16} /> Review
+                </button>
+              )}
               {mine?.signedAt && (
                 <span className="signed-flag">
                   <Check size={16} /> Signed {formatDate(mine.signedAt)}
                 </span>
               )}
             </div>
+            {rnSigningId === view.item.id && (
+              <div className="sign-box">
+                <label>
+                  Printed name
+                  <input
+                    value={legalName}
+                    onChange={(e) => onLegalName(e.target.value)}
+                  />
+                </label>
+                <SignaturePad onChange={onMark} />
+                <button
+                  className="button primary"
+                  disabled={!mark}
+                  onClick={() => onRnSign(view.item.id)}
+                >
+                  Save RN signature
+                </button>
+              </div>
+            )}
             {signingId === mine?.id && (
               <div className="sign-box">
                 <label>

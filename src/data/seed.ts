@@ -22,11 +22,13 @@ import type {
   StaffAssignment,
 } from "./types";
 import type {
+  ClinicalRenewal,
   IndividualProfile,
   ObligationItem,
   ObligationSignature,
   PacketSubmission,
 } from "./planStack";
+import { defaultRenewals } from "./planStack";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 
@@ -63,6 +65,7 @@ export interface LocalDatabase {
   obligations: ObligationItem[];
   obligationSignatures: ObligationSignature[];
   packetSubmissions: PacketSubmission[];
+  clinicalRenewals: ClinicalRenewal[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -101,12 +104,16 @@ export function createEvergreenSeed(): LocalDatabase {
         ? "administrator"
         : member.role === "House Manager"
           ? "manager"
-          : "dsp",
+          : member.role === "Nurse"
+            ? "nurse"
+            : "dsp",
       roleKey: isSarah
         ? "administrator"
         : member.role === "House Manager"
           ? "house_manager"
-          : "dsp",
+          : member.role === "Nurse"
+            ? "nurse"
+            : "dsp",
       siteId: isSarah ? null : siteByName[member.site].id,
       expiresOn: null,
     };
@@ -369,6 +376,9 @@ export function createEvergreenSeed(): LocalDatabase {
     obligations: jodieObligations,
     obligationSignatures: jodieObligationSignatures,
     packetSubmissions: [],
+    clinicalRenewals: individuals.flatMap((person) =>
+      defaultRenewals(AGENCY_ID, person.id),
+    ),
   };
 }
 
@@ -400,6 +410,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1102),
@@ -418,6 +432,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1103),
@@ -436,6 +454,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1104),
@@ -454,6 +476,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "unchecked",
       proposed: true,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1105),
@@ -472,6 +498,10 @@ function buildJodieStack(
       createdFrom: "manual",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1106),
@@ -490,6 +520,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
     {
       id: padId(1107),
@@ -508,6 +542,10 @@ function buildJodieStack(
       createdFrom: "extraction",
       inventoryState: "present",
       proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
     },
   ];
 
@@ -540,3 +578,7 @@ export const DEMO_ADMIN_EMAIL = emailFor("Sarah Mitchell");
 export const DEMO_DSP_EMAIL = emailFor("Alex Morgan");
 export const DEMO_ADMIN_USERNAME = DEMO_ADMIN_EMAIL.split("@")[0];
 export const DEMO_DSP_USERNAME = DEMO_DSP_EMAIL.split("@")[0];
+export const DEMO_NURSE_EMAIL = emailFor("Cameron Price");
+export const DEMO_HM_EMAIL = emailFor("James Wilson");
+export const DEMO_NURSE_USERNAME = DEMO_NURSE_EMAIL.split("@")[0];
+export const DEMO_HM_USERNAME = DEMO_HM_EMAIL.split("@")[0];

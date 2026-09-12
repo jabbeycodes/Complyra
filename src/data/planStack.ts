@@ -51,6 +51,10 @@ export interface ObligationItem {
   createdFrom: ObligationOrigin;
   inventoryState: InventoryState;
   proposed: boolean;
+  delegatingRnUserId: string | null;
+  rnSignedAt: string | null;
+  rnSignatureName: string | null;
+  rnSignatureMark: string | null;
 }
 
 export interface ObligationSignature {
@@ -80,14 +84,46 @@ export interface ObligationView {
   assignedCount: number;
 }
 
+export type ClinicalRenewalKind =
+  | "annual_physical"
+  | "vision"
+  | "dental"
+  | "physician_orders";
+
+export type ClinicalEvidenceKind =
+  | "consultation"
+  | "doctor_notes"
+  | "physician_orders"
+  | "pdf";
+
+export interface ClinicalRenewal {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  kind: ClinicalRenewalKind;
+  title: string;
+  intervalMonths: number;
+  lastUploadedOn: string | null;
+  nextDueOn: string;
+  lastDocumentTitle: string | null;
+  lastEvidenceKind: ClinicalEvidenceKind | null;
+}
+
+export type RenewalStatus = "current" | "due_soon" | "overdue";
+
 export interface PlanStackView {
   individualId: string;
   individualName: string;
   profile: IndividualProfile;
   required: ObligationView[];
   checked: ObligationView[];
+  renewals: ClinicalRenewalView[];
   mySubmissionAt: string | null;
   canSubmit: boolean;
+}
+
+export interface ClinicalRenewalView extends ClinicalRenewal {
+  status: RenewalStatus;
 }
 
 const KIND_ORDER: Record<ObligationKind, number> = {
@@ -96,6 +132,13 @@ const KIND_ORDER: Record<ObligationKind, number> = {
   delegation: 2,
   shift_task: 3,
   inventory: 4,
+};
+
+export const blankRnFields = {
+  delegatingRnUserId: null as string | null,
+  rnSignedAt: null as string | null,
+  rnSignatureName: null as string | null,
+  rnSignatureMark: null as string | null,
 };
 
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
@@ -159,6 +202,10 @@ export function proposeFromPcsp(input: {
     proposed: true,
     shiftPeriods: [] as string[],
     expiresOn: input.expiresOn,
+    delegatingRnUserId: null as string | null,
+    rnSignedAt: null as string | null,
+    rnSignatureName: null as string | null,
+    rnSignatureMark: null as string | null,
   };
 
   const pcsp: ObligationItem = {
@@ -268,4 +315,92 @@ export function canEditExtraction(roleKey: string, canApprove: boolean) {
 
 export function canToggleDelegation(roleKey: string, role: string, canApprove: boolean) {
   return role === "nurse" || roleKey === "nurse" || canEditExtraction(roleKey, canApprove);
+}
+
+/** RN, DPM, and House Manager see clinical due dates. Admin can too. */
+export function canSeeRenewals(roleKey: string) {
+  return [
+    "administrator",
+    "house_manager",
+    "degreed_professional_manager",
+    "nurse",
+  ].includes(roleKey);
+}
+
+export function canUploadRenewal(roleKey: string) {
+  return canSeeRenewals(roleKey);
+}
+
+export function canSignAsDelegatingRn(roleKey: string, role: string) {
+  return role === "nurse" || roleKey === "nurse";
+}
+
+export function staffCanSignDelegation(item: ObligationItem) {
+  if (item.kind !== "delegation") return true;
+  return Boolean(item.enabled && item.rnSignedAt);
+}
+
+export function addMonths(isoDate: string, months: number) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+export function renewalStatus(
+  nextDueOn: string,
+  today = new Date().toISOString().slice(0, 10),
+): RenewalStatus {
+  if (nextDueOn < today) return "overdue";
+  const horizon = addMonths(today, 1);
+  if (nextDueOn <= horizon) return "due_soon";
+  return "current";
+}
+
+export function defaultRenewals(
+  agencyId: string,
+  individualId: string,
+  today = "2026-09-12",
+): ClinicalRenewal[] {
+  const specs: [ClinicalRenewalKind, string, string][] = [
+    ["annual_physical", "Annual physical", addMonths(today, 1)],
+    ["vision", "Vision exam", addMonths(today, -6)],
+    ["dental", "Dental exam", addMonths(today, 4)],
+    ["physician_orders", "Physician orders / equipment", addMonths(today, 0)],
+  ];
+  return specs.map(([kind, title, nextDueOn]) => ({
+    id: `${individualId}-${kind}`,
+    agencyId,
+    individualId,
+    kind,
+    title,
+    intervalMonths: 12,
+    lastUploadedOn: addMonths(nextDueOn, -12),
+    nextDueOn,
+    lastDocumentTitle: null,
+    lastEvidenceKind: null,
+  }));
+}
+
+export function renewalBadge(status: RenewalStatus) {
+  if (status === "overdue") return "Overdue";
+  if (status === "due_soon") return "Due soon";
+  return "Current";
+}
+
+export function applyRenewalUpload(
+  row: ClinicalRenewal,
+  input: {
+    uploadedOn: string;
+    documentTitle: string;
+    evidenceKind: ClinicalEvidenceKind;
+  },
+): ClinicalRenewal {
+  return {
+    ...row,
+    lastUploadedOn: input.uploadedOn,
+    nextDueOn: addMonths(input.uploadedOn, row.intervalMonths),
+    lastDocumentTitle: input.documentTitle,
+    lastEvidenceKind: input.evidenceKind,
+  };
 }
