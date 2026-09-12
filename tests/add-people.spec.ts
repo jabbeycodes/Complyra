@@ -24,7 +24,7 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await siteDialog.getByLabel("Site name").fill("Poplar House");
   await siteDialog.getByLabel("Address").fill("12 Poplar Lane");
   await siteDialog.getByRole("button", { name: "Create site" }).click();
-  await expect(page.getByRole("heading", { name: "Poplar House" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Poplar House", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: "Add a person" }).first().click();

@@ -165,7 +165,7 @@ export default function MonthlyEquipmentCard({
             onChange={(e) => setName(e.target.value)}
           />
           <button className="button" type="submit">
-            <Plus size={16} /> Add
+            <Plus size={16} /> Add equipment
           </button>
         </form>
       )}

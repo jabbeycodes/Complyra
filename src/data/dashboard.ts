@@ -88,7 +88,7 @@ export function personalQueue(input: {
   sites?: { id: string; name: string }[];
   limit?: number;
 }): PersonalWorkItem[] {
-  const limit = input.limit ?? 8;
+  const limit = input.limit ?? 12;
   const out: PersonalWorkItem[] = [];
   const seen = new Set<string>();
 
@@ -111,52 +111,6 @@ export function personalQueue(input: {
       tone: item.status === "Due soon" ? "due" : "overdue",
       requirementId: item.id,
       personName: item.person === "Site-wide" ? undefined : item.person,
-    });
-  }
-
-  for (const stack of input.planStacks) {
-    for (const view of stack.required) {
-      if (!view.item.enabled || view.item.proposed) continue;
-      if (!view.mySignature || view.mySignature.signedAt) continue;
-      if (!staffCanSignDelegation(view.item)) continue;
-      push({
-        id: `ack-${view.item.id}`,
-        kind: "acknowledgment",
-        title: obligationLabel(view.item.kind, view.item.title),
-        detail: stack.individualName,
-        tone: "overdue",
-        personName: stack.individualName,
-      });
-    }
-
-    const training = stack.myTraining;
-    if (training && training.status !== "complete") {
-      push({
-        id: `train-${training.checklist.id}`,
-        kind: "training",
-        title:
-          training.status === "staff_signed"
-            ? "Waiting on house manager countersign"
-            : "Finish in-home training",
-        detail: stack.individualName,
-        tone: "due",
-        personName: stack.individualName,
-      });
-    }
-  }
-
-  for (const packet of input.packets) {
-    const row = packet.rows.find(
-      (entry) => entry.userId === input.session.userId && !entry.signedAt,
-    );
-    if (!row) continue;
-    push({
-      id: `packet-${packet.packet.id}`,
-      kind: "acknowledgment",
-      title: `Sign ${packet.packet.whatAcknowledging || packet.document.title}`,
-      detail: `${packet.individual.fullName} · ${packet.site.name}`,
-      tone: "overdue",
-      personName: packet.individual.fullName,
     });
   }
 
@@ -204,6 +158,52 @@ export function personalQueue(input: {
         });
       }
     }
+  }
+
+  for (const stack of input.planStacks) {
+    for (const view of stack.required) {
+      if (!view.item.enabled || view.item.proposed) continue;
+      if (!view.mySignature || view.mySignature.signedAt) continue;
+      if (!staffCanSignDelegation(view.item)) continue;
+      push({
+        id: `ack-${view.item.id}`,
+        kind: "acknowledgment",
+        title: obligationLabel(view.item.kind, view.item.title),
+        detail: stack.individualName,
+        tone: "overdue",
+        personName: stack.individualName,
+      });
+    }
+
+    const training = stack.myTraining;
+    if (training && training.status !== "complete") {
+      push({
+        id: `train-${training.checklist.id}`,
+        kind: "training",
+        title:
+          training.status === "staff_signed"
+            ? "Waiting on house manager countersign"
+            : "Finish in-home training",
+        detail: stack.individualName,
+        tone: "due",
+        personName: stack.individualName,
+      });
+    }
+  }
+
+  for (const packet of input.packets) {
+    const row = packet.rows.find(
+      (entry) => entry.userId === input.session.userId && !entry.signedAt,
+    );
+    if (!row) continue;
+    push({
+      id: `packet-${packet.packet.id}`,
+      kind: "acknowledgment",
+      title: `Sign ${packet.packet.whatAcknowledging || packet.document.title}`,
+      detail: `${packet.individual.fullName} · ${packet.site.name}`,
+      tone: "overdue",
+      personName: packet.individual.fullName,
+    });
   }
 
   if (input.canApprove) {

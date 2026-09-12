@@ -67,6 +67,6 @@ test("people without equipment do not get an equipment log unless DPM adds one",
   await expect(page.getByRole("heading", { name: "Adaptive equipment log" })).toBeVisible();
   await expect(page.getByText("No adaptive equipment on this chart yet.")).toBeVisible();
   await page.getByLabel("Adaptive equipment name").fill("Walker");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Add equipment" }).click();
   await expect(page.getByRole("heading", { name: "Walker" })).toBeVisible();
 });
