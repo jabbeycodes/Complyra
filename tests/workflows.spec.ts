@@ -293,6 +293,51 @@ test("an administrator adds a member who must change the temporary password", as
   });
 });
 
+test("an administrator can open role templates and invite HR without care records", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Roles & access", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Roles and access levels" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /HM House manager/ }).click();
+  await expect(page.getByRole("heading", { name: "House manager" })).toBeVisible();
+  await page.getByRole("button", { name: "Staff", exact: true }).click();
+  await page.getByRole("button", { name: "Add member" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a member" });
+  await dialog.getByLabel("Full name").fill("Riley Hart");
+  await dialog.getByLabel("Username").fill("riley.hart");
+  await dialog.getByLabel("Temporary password").fill("TempPass!1");
+  await dialog.getByLabel("Role").selectOption("hr");
+  await dialog.getByRole("button", { name: "Create member account" }).click();
+  await expect(dialog).toContainText("riley.hart");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Your profile" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Agency code").fill("evergreen-mo");
+  await page.getByLabel("Username").fill("riley.hart");
+  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your own password" }),
+  ).toBeVisible();
+  await page.getByLabel("Temporary password").fill("TempPass!1");
+  await page.getByLabel("New password", { exact: true }).fill("Riley!own2");
+  await page.getByLabel("Confirm new password").fill("Riley!own2");
+  await page.getByRole("button", { name: "Save new password" }).click();
+  await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("button", { name: "Staff", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Individuals", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Acknowledgments" }),
+  ).toHaveCount(0);
+});
+
 test("an agency can set itself up with a state agency code", async ({
   page,
 }) => {

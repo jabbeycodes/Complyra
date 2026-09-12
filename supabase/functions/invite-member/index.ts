@@ -45,14 +45,18 @@ Deno.serve(async (req) => {
 
   const { data: membership } = await admin
     .from("memberships")
-    .select("agency_id, role")
+    .select("agency_id, role, role_key")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (
-    !membership ||
-    !["administrator", "compliance_admin"].includes(membership.role)
-  ) {
-    return json({ error: "Only administrators can add members." }, 403);
+  if (!membership) return json({ error: "Not a member of an agency." }, 403);
+  const { data: callerRole } = await admin
+    .from("agency_roles")
+    .select("permissions")
+    .eq("agency_id", membership.agency_id)
+    .eq("template_key", membership.role_key ?? membership.role)
+    .maybeSingle();
+  if (!callerRole?.permissions?.["members.invite"]) {
+    return json({ error: "You do not have permission to add members." }, 403);
   }
 
   const body = await req.json();
@@ -61,9 +65,10 @@ Deno.serve(async (req) => {
     .toLowerCase();
   const tempPassword = String(body.tempPassword ?? "");
   const fullName = String(body.fullName ?? "").trim();
-  const role = String(body.role ?? "dsp");
-  const jobTitle = String(body.jobTitle ?? "DSP").trim();
+  const roleKey = String(body.roleKey ?? body.role ?? "dsp");
+  const jobTitle = String(body.jobTitle ?? "").trim();
   const siteId = body.siteId ? String(body.siteId) : null;
+  const expiresOn = body.expiresOn ? String(body.expiresOn) : null;
 
   if (!/^[a-z0-9.]{3,40}$/.test(username)) {
     return json(
@@ -75,9 +80,25 @@ Deno.serve(async (req) => {
     return json({ error: "Temporary password must be at least 8 characters." }, 400);
   }
   if (!fullName) return json({ error: "Enter the staff member’s name." }, 400);
-  if (!["administrator", "compliance_admin", "manager", "dsp"].includes(role)) {
-    return json({ error: "Choose a valid role." }, 400);
-  }
+  const { data: assignedRole } = await admin
+    .from("agency_roles")
+    .select("template_key, name")
+    .eq("agency_id", membership.agency_id)
+    .eq("template_key", roleKey)
+    .maybeSingle();
+  if (!assignedRole) return json({ error: "Choose a valid role." }, 400);
+  const capabilityByKey: Record<string, string> = {
+    administrator: "administrator",
+    compliance_admin: "compliance_admin",
+    house_manager: "manager",
+    degreed_professional_manager: "manager",
+    dsp: "dsp",
+    nurse: "nurse",
+    hr: "hr",
+    auditor: "auditor",
+  };
+  const role = capabilityByKey[roleKey];
+  if (!role) return json({ error: "Choose a valid role." }, 400);
 
   const { data: agency } = await admin
     .from("agencies")
@@ -129,7 +150,9 @@ Deno.serve(async (req) => {
     agency_id: agency.id,
     user_id: created.user.id,
     role,
+    role_key: roleKey,
     site_id: siteId,
+    expires_on: expiresOn,
   });
   if (memberError) {
     return json({ error: memberError.message }, 400);
@@ -141,7 +164,7 @@ Deno.serve(async (req) => {
     action: "member.invited",
     target_type: "profile",
     target_id: created.user.id,
-    detail: `${fullName} invited as ${role} · username ${username}`,
+    detail: `${fullName} invited as ${roleKey} · username ${username}`,
   });
 
   return json({

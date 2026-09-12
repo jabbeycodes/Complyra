@@ -4043,3 +4043,78 @@ th {
   display: grid;
   gap: 10px;
 }
+.role-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.role-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+.role-list button {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+.role-list button.selected {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px #ece7fb;
+}
+.role-list strong {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.role-list strong span {
+  font-weight: 600;
+}
+.role-list small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.role-editor header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.role-editor .eyebrow {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--purple);
+}
+.permission-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.permission-list label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.permission-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.assign-role {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+@media (max-width: 900px) {
+  .role-layout {
+    grid-template-columns: 1fr;
+  }
+}

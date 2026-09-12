@@ -36,6 +36,7 @@ import {
   ExternalLink,
   PenLine,
   LogOut,
+  KeyRound,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import {
@@ -58,9 +59,11 @@ import type { Plan, Requirement } from "./domain";
 import AuthEntry from "./auth/AuthEntry";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
+import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
-import { isAgencyAdmin, isPrivileged } from "./data/status";
+import { can, pageVisible } from "./data/status";
 import type { PacketDetail } from "./data/types";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
@@ -118,6 +121,12 @@ export default function App() {
     setPlan(null);
   }, [session?.userId]);
   useEffect(() => {
+    if (!session) return;
+    if (page !== "Overview" && !pageVisible(session, page)) {
+      setPage("Overview");
+    }
+  }, [session, page]);
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
@@ -154,7 +163,12 @@ export default function App() {
   const selected = selectedId
     ? (data.requirements.find((r) => r.id === selectedId) ?? null)
     : null;
-  const canManage = isPrivileged(session.role);
+  const canManage = can(session, "requirements.approve");
+  const canUpload = can(session, "documents.upload");
+  const canInvite = can(session, "members.invite");
+  const canAssign = can(session, "members.assign_roles");
+  const canCompleteWork = can(session, "requirements.complete");
+  const canExportAudit = can(session, "audit.export");
   const scoped = data.requirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -272,6 +286,7 @@ export default function App() {
         ["Individuals", Users],
         ["Sites & programs", Building2],
         ["Staff", Users],
+        ["Roles & access", KeyRound],
       ],
     },
     {
@@ -318,10 +333,15 @@ export default function App() {
           <ChevronDown size={15} />
         </button>
         <nav>
-          {navItems.map((group) => (
+          {navItems.map((group) => {
+            const items = group.items.filter(([name]) =>
+              pageVisible(session, name),
+            );
+            if (!items.length) return null;
+            return (
             <div className="nav-group" key={group.title}>
               <div className="nav-label">{group.title}</div>
-              {group.items.map(([name, Icon]) => (
+              {items.map(([name, Icon]) => (
                 <button
                   key={name}
                   onClick={() => navigate(name)}
@@ -351,7 +371,8 @@ export default function App() {
                 </button>
               ))}
             </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="sidebar-bottom">
           <button
@@ -580,7 +601,7 @@ export default function App() {
                     title="Every person. One connected record."
                     description="Care plans, responsibilities, and evidence, organized around the people you support."
                   >
-                    {canManage && (
+                    {canUpload && (
                     <button
                       className="button"
                       onClick={() => setModal("upload")}
@@ -753,7 +774,7 @@ export default function App() {
                     title="Your people make it possible."
                     description="Keep every staff member connected to their assigned responsibilities."
                   >
-                    {isAgencyAdmin(session.role) && (
+                    {canInvite && (
                       <button
                         className="button primary"
                         onClick={() => setModal("invite")}
@@ -784,6 +805,7 @@ export default function App() {
                             <th>Role</th>
                             <th>Assigned site</th>
                             <th>Open requirements</th>
+                            {canAssign && <th>Assign role</th>}
                             <th />
                           </tr>
                         </thead>
@@ -816,6 +838,17 @@ export default function App() {
                                     ).length
                                   }
                                 </td>
+                                {canAssign && (
+                                  <td>
+                                    <AssignRoleControl
+                                      userId={s.id}
+                                      roleKey={s.roleKey}
+                                      siteId={s.siteId}
+                                      expiresOn={s.expiresOn}
+                                      onAssigned={notify}
+                                    />
+                                  </td>
+                                )}
                                 <td>
                                   <button
                                     className="text-button"
@@ -842,7 +875,7 @@ export default function App() {
                     title="Plans change. History stays."
                     description="A connected library of current plans, draft updates, and earlier versions."
                   >
-                    {canManage && (
+                    {canUpload && (
                     <button
                       className="button primary"
                       onClick={() => setModal("upload")}
@@ -1069,6 +1102,7 @@ export default function App() {
                       </strong>
                       <span>Open or pending items</span>
                     </div>
+                    {canExportAudit && (
                     <button
                       className="button primary"
                       disabled={!auditItems.length || auditFrom > auditTo}
@@ -1084,6 +1118,7 @@ export default function App() {
                     >
                       <Download size={17} /> Export audit register
                     </button>
+                    )}
                   </div>
                   <div className="quiet-note">
                     <CircleAlert size={15} /> Sample register only. Original
@@ -1220,6 +1255,9 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Roles & access" && (
+                <RolesAccessPage onSaved={notify} />
+              )}
               {page === "Settings" && (
                 <>
                   <PageHeading
@@ -1231,7 +1269,7 @@ export default function App() {
                     <p>
                       Agency code {session.agencyCode} · {sites.length} sites ·{" "}
                       {individuals.length} individuals · {staff.length} staff ·{" "}
-                      {session.role.replaceAll("_", " ")}
+                      {session.jobTitle}
                     </p>
                     <div className="settings-row">
                       <span>
@@ -1263,10 +1301,18 @@ export default function App() {
                         <strong>Access and permissions</strong>
                         <small>
                           Signed in as {session.fullName} ({session.username}).
-                          Role enforcement is active for this workspace.
+                          Template roles can be assigned and their access levels
+                          adjusted by an administrator.
                         </small>
                       </span>
-                      {isAgencyAdmin(session.role) ? (
+                      {canAssign ? (
+                        <button
+                          className="button"
+                          onClick={() => navigate("Roles & access")}
+                        >
+                          <KeyRound size={16} /> Roles & access
+                        </button>
+                      ) : canInvite ? (
                         <button
                           className="button"
                           onClick={() => setModal("invite")}
@@ -1426,7 +1472,7 @@ export default function App() {
                 </>
               )}
             </>
-          ) : !auditMode ? (
+          ) : !auditMode && canCompleteWork ? (
             <>
               <h3 className="section-label">Record a completion</h3>
               <p className="form-help">

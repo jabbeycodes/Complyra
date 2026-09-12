@@ -1,4 +1,11 @@
 import type { Status } from "../domain";
+import type { SessionUser } from "./types";
+import {
+  ROLE_TEMPLATE_BY_KEY,
+  hasPermission,
+  isRoleKey,
+  type PermissionKey,
+} from "./permissions";
 
 const MS_PER_DAY = 86400000;
 
@@ -38,11 +45,47 @@ export function isAgencyAdmin(role: string) {
   return role === "administrator" || role === "compliance_admin";
 }
 
+export function can(session: SessionUser, key: PermissionKey) {
+  return hasPermission(session, key);
+}
+
+/** Nav and page gates. Care records stay hidden from HR even if they guess a URL. */
+export function pageVisible(session: SessionUser, page: string) {
+  if (page === "Overview" || page === "Settings" || page === "Sites & programs") {
+    return true;
+  }
+  if (page === "Individuals" || page === "Requirements") {
+    return can(session, "individuals.view");
+  }
+  if (page === "Staff") {
+    return (
+      can(session, "hr.view_staff") ||
+      can(session, "members.invite") ||
+      can(session, "members.assign_roles")
+    );
+  }
+  if (page === "Documents") return can(session, "documents.view");
+  if (page === "Review queue") return can(session, "requirements.approve");
+  if (page === "Audit center") return can(session, "audit.read");
+  if (page === "Acknowledgments") {
+    return (
+      can(session, "acknowledgments.manage") ||
+      can(session, "acknowledgments.sign_own")
+    );
+  }
+  if (page === "Activity log") {
+    return can(session, "audit.read") || can(session, "individuals.view");
+  }
+  if (page === "Roles & access") return can(session, "members.assign_roles");
+  return can(session, "individuals.view");
+}
+
 export function roleLabel(role: string, jobTitle?: string) {
-  if (role === "administrator") return "Agency administrator";
-  if (role === "compliance_admin") return "Compliance administrator";
-  if (role === "manager") return "House Manager";
-  return jobTitle || "DSP";
+  if (isRoleKey(role)) return ROLE_TEMPLATE_BY_KEY[role].name;
+  if (role === "manager") return ROLE_TEMPLATE_BY_KEY.house_manager.name;
+  if (role === "administrator") return ROLE_TEMPLATE_BY_KEY.administrator.name;
+  if (role === "compliance_admin") return ROLE_TEMPLATE_BY_KEY.compliance_admin.name;
+  return jobTitle || ROLE_TEMPLATE_BY_KEY.dsp.name;
 }
 
 export function reviewStatusLabel(

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { Badge, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
-import { isPrivileged } from "../data/status";
+import { can, isPrivileged } from "../data/status";
 import type { PacketDetail } from "../data/types";
 import {
   buildAcknowledgmentPdf,
@@ -31,7 +31,10 @@ export default function AcknowledgmentSheet({
   const [extraUser, setExtraUser] = useState(workspace?.staff[0]?.id ?? "");
   const [reason, setReason] = useState("");
   const myRow = detail.rows.find((row) => row.userId === session?.userId);
-  const canManage = session ? isPrivileged(session.role) : false;
+  const canManage =
+    session != null &&
+    isPrivileged(session.role) &&
+    can(session, "acknowledgments.manage");
   const unsigned = detail.rows.filter((row) => !row.signedAt).length;
 
   async function run(action: () => Promise<void>) {

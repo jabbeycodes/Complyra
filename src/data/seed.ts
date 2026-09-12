@@ -22,6 +22,7 @@ import type {
   StaffAssignment,
 } from "./types";
 import { DEMO_PASSWORD } from "./types";
+import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 const RESIDENTIAL_ID = "00000000-0000-4000-8000-000000000002";
@@ -41,6 +42,7 @@ export interface LocalDatabase {
   sites: SiteRecord[];
   profiles: Profile[];
   memberships: Membership[];
+  agencyRoles: AgencyRole[];
   credentials: { userId: string; email: string; password: string }[];
   individuals: IndividualRecord[];
   assignments: StaffAssignment[];
@@ -89,9 +91,19 @@ export function createEvergreenSeed(): LocalDatabase {
         : member.role === "House Manager"
           ? "manager"
           : "dsp",
+      roleKey: isSarah
+        ? "administrator"
+        : member.role === "House Manager"
+          ? "house_manager"
+          : "dsp",
       siteId: isSarah ? null : siteByName[member.site].id,
+      expiresOn: null,
     };
   });
+  const agencyRoles: AgencyRole[] = ROLE_TEMPLATES.map((template) => ({
+    ...template,
+    agencyId: AGENCY_ID,
+  }));
   const individuals: IndividualRecord[] = demoPeople.map((person, i) => ({
     id: padId(101 + i),
     agencyId: AGENCY_ID,
@@ -245,6 +257,7 @@ export function createEvergreenSeed(): LocalDatabase {
     sites,
     profiles,
     memberships,
+    agencyRoles,
     credentials: profiles.map((profile) => ({
       userId: profile.id,
       email: profile.email,

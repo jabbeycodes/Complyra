@@ -122,7 +122,9 @@ async function main() {
       agency_id: row.agencyId,
       user_id: row.userId,
       role: row.role,
+      role_key: row.roleKey ?? row.role,
       site_id: row.siteId,
+      expires_on: row.expiresOn,
     })),
   );
   await upsert(

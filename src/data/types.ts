@@ -4,7 +4,10 @@ export type AppRole =
   | "administrator"
   | "compliance_admin"
   | "manager"
-  | "dsp";
+  | "dsp"
+  | "nurse"
+  | "hr"
+  | "auditor";
 
 export type DocumentKind = "pcsp" | "isp" | "policy" | "other";
 export type ReviewStatus = "pending_review" | "active" | "archived";
@@ -49,7 +52,9 @@ export interface Membership {
   agencyId: string;
   userId: string;
   role: AppRole;
+  roleKey: string;
   siteId: string | null;
+  expiresOn: string | null;
 }
 
 export interface IndividualRecord {
@@ -152,11 +157,14 @@ export interface SessionUser {
   fullName: string;
   jobTitle: string;
   role: AppRole;
+  roleKey: string;
   agencyId: string;
   agencyName: string;
   agencyCode: string;
   siteId: string | null;
   mustChangePassword: boolean;
+  expiresOn: string | null;
+  permissions: Record<string, boolean>;
 }
 
 export interface LoginInput {
@@ -169,9 +177,10 @@ export interface InviteMemberInput {
   fullName: string;
   username: string;
   tempPassword: string;
-  role: AppRole;
+  roleKey: string;
   jobTitle?: string;
   siteId?: string | null;
+  expiresOn?: string | null;
 }
 
 export interface InviteMemberResult {
