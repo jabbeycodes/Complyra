@@ -4420,11 +4420,14 @@ th {
 .individual-chart {
   display: grid;
   gap: 22px;
+  min-width: 0;
+  max-width: 100%;
 }
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
 }
 .chart-widget {
   background: #faf6ef;
@@ -4434,6 +4437,13 @@ th {
   display: grid;
   gap: 10px;
   color: #241e18;
+  min-width: 0;
+}
+.individual-chart .page-heading,
+.individual-chart .page-heading > div,
+.plan-stack {
+  min-width: 0;
+  max-width: 100%;
 }
 .chart-widget h2 {
   font-size: 18px;
@@ -4477,5 +4487,21 @@ th {
   }
   .person-renewals li {
     grid-template-columns: 1fr;
+  }
+  .individual-chart .page-heading p,
+  .chart-widget p,
+  .obligation-card p {
+    overflow-wrap: anywhere;
+  }
+  .renewal-upload input[type="file"],
+  .plan-stack input[type="file"] {
+    max-width: 100%;
+    width: 100%;
+  }
+  .add-protocol {
+    flex-wrap: wrap;
+  }
+  .stack-tabs {
+    overflow-x: auto;
   }
 }
