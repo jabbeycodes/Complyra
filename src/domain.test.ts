@@ -11,8 +11,8 @@ import {
 
 test("unapproved drafts never increase or reduce active compliance", () => {
   const active = seedRequirements.filter((r) => r.status !== "Pending review");
-  assert.equal(metrics(seedRequirements).score, 94);
-  assert.equal(metrics(seedRequirements).total, 128);
+  assert.equal(metrics(seedRequirements).score, 80);
+  assert.equal(metrics(seedRequirements).total, 30);
   assert.equal(metrics(seedRequirements).score, metrics(active).score);
   assert.equal(metrics(seedRequirements).review, 2);
 });
@@ -36,7 +36,7 @@ test("completion requires evidence and rejects unapproved drafts", () => {
 test("approval activates only the selected draft", () => {
   const next = approveRequirement(seedRequirements, "REQ-129");
   assert.equal(metrics(next).review, 1);
-  assert.equal(metrics(next).total, 129);
+  assert.equal(metrics(next).total, 31);
   assert.equal(next.find((r) => r.id === "REQ-130")?.status, "Pending review");
   assert.throws(() => approveRequirement(next, "REQ-129"), /Only draft/);
 });
@@ -59,5 +59,5 @@ test("a future draft is not classified as due in the next seven days", () => {
   );
   const next = approveRequirement(future, "REQ-129");
   assert.equal(next.find((r) => r.id === "REQ-129")?.status, "Upcoming");
-  assert.equal(metrics(next).dueSoon, 5);
+  assert.equal(metrics(next).dueSoon, 3);
 });

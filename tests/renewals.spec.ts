@@ -25,7 +25,9 @@ async function signOut(page: Page) {
 async function openJodie(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
-  return page.getByRole("dialog", { name: "Required documents" });
+  const chart = page.locator(".individual-chart");
+  await expect(chart.getByRole("heading", { name: "Jodie Williams", exact: true })).toBeVisible();
+  return chart;
 }
 
 async function drawSignature(page: Page) {
@@ -54,14 +56,14 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
     fullPage: true,
   });
 
-  const dialog = await openJodie(page);
-  await expect(dialog.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
-  await expect(dialog.getByRole("tab", { name: "Must acknowledge" })).toBeVisible();
-  await expect(dialog.getByRole("tab", { name: "Checked in plan" })).toBeVisible();
-  await expect(dialog.getByRole("tab")).toHaveCount(2);
+  const chart = await openJodie(page);
+  await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Must acknowledge" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Checked in plan" })).toBeVisible();
+  await expect(chart.getByRole("tab")).toHaveCount(2);
 
-  const vision = dialog.locator(".renewal-card").filter({ hasText: "Vision exam" });
-  const dental = dialog.locator(".renewal-card").filter({ hasText: "Dental exam" });
+  const vision = chart.locator(".renewal-card").filter({ hasText: "Vision exam" });
+  const dental = chart.locator(".renewal-card").filter({ hasText: "Dental exam" });
   const dentalBefore = await dental.locator("p").first().innerText();
   await vision.getByLabel("Evidence type").selectOption("doctor_notes");
   await vision.getByLabel("Document title").fill("Optometry notes");
@@ -74,7 +76,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
     path: shot("vision_date_reset.png"),
   });
 
-  const delegation = dialog.locator(".obligation-card").filter({
+  const delegation = chart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await delegation.getByRole("button", { name: "Turn delegation on" }).click();
@@ -85,7 +87,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   await page.screenshot({
     path: shot("waiting_for_rn.png"),
   });
-  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await chart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
   await signIn(page, "alex.morgan");
@@ -93,36 +95,36 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   await expect(page.getByRole("button", { name: /Jodie Williams/ }).first()).not.toContainText(
     "Annual physical",
   );
-  const dspDialog = await openJodie(page);
-  await expect(dspDialog.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
-  const dspDelegation = dspDialog.locator(".obligation-card").filter({
+  const dspChart = await openJodie(page);
+  await expect(dspChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
+  const dspDelegation = dspChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await expect(dspDelegation).toContainText("Waiting for RN");
   await expect(dspDelegation.getByRole("button", { name: /^Sign$/ })).toHaveCount(0);
-  await dspDialog.getByRole("button", { name: "Close dialog" }).click();
+  await dspChart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
   await signIn(page, "cameron.price");
-  const rnDialog = await openJodie(page);
-  await expect(rnDialog.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
-  const rnDelegation = rnDialog.locator(".obligation-card").filter({
+  const rnChart = await openJodie(page);
+  await expect(rnChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
+  const rnDelegation = rnChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await rnDelegation.getByRole("button", { name: "Sign as delegating RN" }).click();
-  await drawSignature(rnDialog.page());
+  await drawSignature(page);
   await rnDelegation.getByRole("button", { name: "Save RN signature" }).click();
   await expect(rnDelegation).toContainText("Delegating RN signed");
   await rnDelegation.scrollIntoViewIfNeeded();
   await page.screenshot({
     path: shot("rn_signed.png"),
   });
-  await rnDialog.getByRole("button", { name: "Close dialog" }).click();
+  await rnChart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
   await signIn(page, "alex.morgan");
   const after = await openJodie(page);
-  const afterDelegation = after.locator(".obligation-card").filter({
+  const afterDelegation = after.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
   await expect(afterDelegation).toContainText("Delegating RN signed");

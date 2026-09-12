@@ -23,6 +23,9 @@ const rnBlank = {
   rnSignedAt: null,
   rnSignatureName: null,
   rnSignatureMark: null,
+  discontinuedAt: null,
+  discontinueFileId: null,
+  discontinueTitle: null,
 } as const;
 
 function item(partial: Partial<ObligationItem> & Pick<ObligationItem, "id" | "kind" | "mode" | "title">): ObligationItem {
@@ -91,6 +94,16 @@ test("staff sign each required document then submit the packet", async () => {
     await client.markObligationOpened(row.id);
     await client.signObligation(row.id, dsp.fullName, "data:image/png;base64,aaa");
   }
+  const training = stack.myTraining;
+  assert.ok(training);
+  await assert.rejects(
+    () => client.signTrainingChecklist(training.checklist.id, "staff", dsp.fullName),
+    /Check off every/,
+  );
+  for (const line of training.checklist.items) {
+    await client.initialTrainingLine(training.checklist.id, line.id);
+  }
+  await client.signTrainingChecklist(training.checklist.id, "staff", dsp.fullName);
   await client.submitPlanPacket(stack.individualId);
   const after = (await client.loadWorkspace(dsp)).planStacks.find(
     (item) => item.individualId === stack.individualId,
@@ -247,6 +260,7 @@ test("uploading evidence resets the next due date by the interval", () => {
       nextDueOn: "2026-09-01",
       lastDocumentTitle: null,
       lastEvidenceKind: null,
+      fileId: null,
     },
     {
       uploadedOn: "2026-09-12",

@@ -30,6 +30,14 @@ test("HR stays out of care records and auditors stay read-only", () => {
     ROLE_TEMPLATE_BY_KEY.degreed_professional_manager.permissions["members.reset_password"],
     true,
   );
+  assert.equal(ROLE_TEMPLATE_BY_KEY.administrator.permissions["sites.create"], true);
+  assert.equal(
+    ROLE_TEMPLATE_BY_KEY.degreed_professional_manager.permissions["sites.create"],
+    true,
+  );
+  assert.equal(ROLE_TEMPLATE_BY_KEY.dsp.permissions["sites.create"], false);
+  assert.equal(ROLE_TEMPLATE_BY_KEY.house_manager.permissions["sites.create"], false);
+  assert.equal(ROLE_TEMPLATE_BY_KEY.program_manager.permissions["sites.create"], false);
   assert.equal(
     hasPermission({ role: "hr" }, "individuals.view"),
     false,

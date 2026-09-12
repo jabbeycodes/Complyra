@@ -985,6 +985,24 @@ export class HostedApi implements ComplyraApi {
   async uploadRenewalEvidence() {
     throw new Error("Clinical renewals are on the local workspace until the hosted schema is migrated.");
   }
+  async discontinueDelegation() {
+    throw new Error("Delegation discontinuation is on the local workspace until the hosted schema is migrated.");
+  }
+  async getChartFile(): Promise<{ blob: Blob; name: string } | null> {
+    throw new Error("Chart files are on the local workspace until the hosted schema is migrated.");
+  }
+  async recordMedDelivery() {
+    throw new Error("Medication deliveries are on the local workspace until the hosted schema is migrated.");
+  }
+  async logPrnDose() {
+    throw new Error("PRN logging is on the local workspace until the hosted schema is migrated.");
+  }
+  async signTrainingChecklist() {
+    throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
+  }
+  async initialTrainingLine() {
+    throw new Error("Training checklists are on the local workspace until the hosted schema is migrated.");
+  }
   async createSite(): Promise<{ id: string }> {
     throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");
   }

@@ -63,14 +63,15 @@ import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
-import AssignedDocsPanel from "./features/AssignedDocsPanel";
+import IndividualChart from "./features/IndividualChart";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
-import { canCreateIndividual, canCreateSite } from "./data/permissions";
+import { personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -129,6 +130,7 @@ export default function App() {
     setSelectedId(null);
     setPerson(null);
     setPlan(null);
+    setSite("All sites");
   }, [session?.userId]);
   useEffect(() => {
     if (!session) return;
@@ -165,8 +167,10 @@ export default function App() {
   if (!workspace) {
     return <div className="login-shell">Loading workspace…</div>;
   }
-  const sites = workspace.sites;
-  const individuals = workspace.individuals;
+  const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);
+  const individuals = workspace.individuals.filter((person) =>
+    sites.some((row) => row.name === person.site),
+  );
   const staff = workspace.staff;
   const data = {
     requirements: workspace.requirements,
@@ -178,16 +182,27 @@ export default function App() {
     : null;
   const canManage = can(session, "requirements.approve");
   const canUpload = can(session, "documents.upload");
-  const canAddSite = canCreateSite(session.roleKey);
+  const canAddSite = can(session, "sites.create");
   const canAddPerson = canCreateIndividual(session.roleKey);
   const canInvite = can(session, "members.invite");
   const canAssign = can(session, "members.assign_roles");
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
-  const scoped = data.requirements.filter(
+  const visibleSiteNames = new Set(sites.map((row) => row.name));
+  const visibleRequirements = data.requirements.filter((r) =>
+    visibleSiteNames.has(r.site),
+  );
+  const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
+  const personalItems = personalQueue({
+    session,
+    items: visibleRequirements,
+    packets: workspace.packets,
+    planStacks: workspace.planStacks,
+    canApprove: canManage,
+  });
   const m = metrics(scoped);
   const isCategory = categories.includes(page as (typeof categories)[number]);
   const auditMode = page === "Audit center";
@@ -211,8 +226,16 @@ export default function App() {
       r.due <= auditTo,
   );
   function navigate(next: string, nextStatus = "All statuses") {
+    if (next !== "Individual chart") setPerson(null);
     setPage(next);
     setStatus(nextStatus);
+    setQuery("");
+    setMobileOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function openPersonChart(name: string) {
+    setPerson(name);
+    setPage("Individual chart");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -513,14 +536,17 @@ export default function App() {
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
+              allItems={visibleRequirements}
               scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
               individuals={individuals}
               site={site}
+              personalItems={personalItems}
               onSite={setSite}
               onNavigate={navigate}
               onRequirement={selectRequirement}
+              onOpenPerson={openPersonChart}
               onExport={() => {
                 download(
                   "complyrer-sample-compliance-report.csv",
@@ -679,7 +705,7 @@ export default function App() {
                           <button
                             className="panel person-card"
                             key={p.id}
-                            onClick={() => setPerson(p.name)}
+                            onClick={() => openPersonChart(p.name)}
                           >
                             <div className="person-card-top">
                               <Avatar name={p.name} color={p.color} />
@@ -728,22 +754,21 @@ export default function App() {
                   </div>
                 </>
               )}
+              {page === "Individual chart" && person && (
+                <IndividualChart
+                  individualId={
+                    individuals.find((p) => p.name === person)?.id ?? ""
+                  }
+                  onBack={() => navigate("Individuals")}
+                />
+              )}
               {page === "Sites & programs" && (
                 <>
                   <PageHeading
                     eyebrow="ONE AGENCY. CONNECTED CARE."
                     title="A home for every detail."
                     description="See how each site is doing and give your team the support it needs."
-                  >
-                    {canAddSite && (
-                      <button
-                        className="button primary"
-                        onClick={() => setModal("add-site")}
-                      >
-                        <Building2 size={16} /> Add a site
-                      </button>
-                    )}
-                  </PageHeading>
+                  />
                   <div className="list-controls">
                     <span>
                       {sites.length} program sites · {individuals.length}{" "}
@@ -762,6 +787,20 @@ export default function App() {
                     </select>
                   </div>
                   <div className="site-grid">
+                    {canAddSite && (
+                      <button
+                        type="button"
+                        className="panel add-site-tile"
+                        aria-label="Add a site"
+                        onClick={() => setModal("add-site")}
+                      >
+                        <span className="add-site-plus" aria-hidden="true">
+                          <Plus size={56} strokeWidth={3} />
+                        </span>
+                        <strong>Add a site</strong>
+                        <span>Open a new program home as you grow</span>
+                      </button>
+                    )}
                     {sites
                       .filter((s) => site === "All sites" || s.name === site)
                       .map((s) => {
@@ -1595,17 +1634,6 @@ export default function App() {
           )}
         </Modal>
       )}
-      {person && individuals.find((p) => p.name === person) && (
-        <Modal
-          title="Required documents"
-          onClose={() => setPerson(null)}
-          wide
-        >
-          <AssignedDocsPanel
-            individualId={individuals.find((p) => p.name === person)!.id}
-          />
-        </Modal>
-      )}
       {plan && (
         <Modal title="Document record & history" onClose={() => setPlan(null)}>
           <div className="detail-status">
@@ -1685,7 +1713,7 @@ export default function App() {
             onCreated={(name, uploaded) => {
               setAddPersonSiteId(null);
               setModal(null);
-              setPerson(name);
+              openPersonChart(name);
               notify(
                 uploaded
                   ? `${name} was added. The PCSP is in Review queue.`

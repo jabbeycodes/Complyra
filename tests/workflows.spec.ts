@@ -207,7 +207,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  await page.getByLabel("Filter by site").selectOption("Cedar House");
+  await page.getByLabel("Filter by site").selectOption("Oakwood House");
   await expect(
     page.getByRole("heading", { name: "No overdue requirements" }),
   ).toBeVisible();
@@ -218,11 +218,10 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   ).toBe(true);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.locator(".person-card")).toHaveCount(4);
+  await expect(page.locator(".person-card")).toHaveCount(2);
   await page.locator(".person-card").first().click();
-  await expect(
-    page.getByRole("dialog", { name: "Individual compliance profile" }),
-  ).toBeVisible();
+  await expect(page.locator(".individual-chart")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to individuals" })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -383,4 +382,45 @@ test("an agency can set itself up with a state agency code", async ({
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
   });
+});
+
+test("overview shows agency scores, assigned site cards, and personal work", async ({
+  page,
+}) => {
+  await signIn(page);
+  await expect(page.getByText("Agency current")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "How the whole agency is doing" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Maple House compliance/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Oakwood House compliance/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Oakwood House compliance/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "No overdue requirements" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Your work/ })).toBeVisible();
+  await page.getByLabel("Filter by site").selectOption("All sites");
+  await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
+  await expect(page.locator(".location-card")).toHaveCount(2);
+  await expect(page.locator(".site-grid")).toBeVisible();
+
+  await page.getByRole("button", { name: "Your profile" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await signIn(page, "alex.morgan");
+  await expect(
+    page.getByRole("button", { name: /Maple House compliance/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Oakwood House compliance/ }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Your work/ })).toBeVisible();
+  await expect(page.locator(".personal-queue-row").first()).toBeVisible();
+  await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
+  await expect(page.locator(".location-card")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Oakwood House" })).toHaveCount(0);
 });

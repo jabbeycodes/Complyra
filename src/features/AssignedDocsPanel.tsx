@@ -3,6 +3,8 @@ import { Check, FileText, LockKeyhole, PenLine } from "lucide-react";
 import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
+import { canSignTrainingAsHm } from "../data/chart";
+import { openPrintable } from "../data/openFile";
 import {
   canEditCover,
   canEditExtraction,
@@ -17,7 +19,9 @@ import {
   type IndividualProfile,
   type ObligationView,
 } from "../data/planStack";
+import type { TrainingRowView } from "../data/chart";
 import SignaturePad from "./SignaturePad";
+import TrainingSignCard from "./TrainingSignCard";
 
 type Tab = "required" | "checked";
 
@@ -30,8 +34,12 @@ const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
 
 export default function AssignedDocsPanel({
   individualId,
+  hideIdentity = false,
+  hideRenewals = false,
 }: {
   individualId: string;
+  hideIdentity?: boolean;
+  hideRenewals?: boolean;
 }) {
   const { api, session, workspace, refresh } = useData();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
@@ -45,6 +53,9 @@ export default function AssignedDocsPanel({
   const [protocolTitle, setProtocolTitle] = useState("");
   const [shiftDraft, setShiftDraft] = useState("");
   const [profile, setProfile] = useState<IndividualProfile | null>(null);
+  const [discontinueId, setDiscontinueId] = useState<string | null>(null);
+  const [discontinueTitle, setDiscontinueTitle] = useState("");
+  const [discontinueFile, setDiscontinueFile] = useState<File | undefined>();
 
   if (!session || !stack || !person) return null;
 
@@ -75,16 +86,18 @@ export default function AssignedDocsPanel({
 
   return (
     <div className="plan-stack">
-      <div className="profile-heading">
-        <div>
-          <h2>{activeProfile.goesBy || person.name}</h2>
-          <p>
-            {person.site}
-            {activeProfile.dmhId ? ` · DMH ${activeProfile.dmhId}` : ""}
-            {person.dateOfBirth ? ` · DOB ${formatDate(person.dateOfBirth)}` : ""}
-          </p>
+      {!hideIdentity && (
+        <div className="profile-heading">
+          <div>
+            <h2>{activeProfile.goesBy || person.name}</h2>
+            <p>
+              {person.site}
+              {activeProfile.dmhId ? ` · DMH ${activeProfile.dmhId}` : ""}
+              {person.dateOfBirth ? ` · DOB ${formatDate(person.dateOfBirth)}` : ""}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <section className="cover-fields">
         <h3 className="section-label">Cover page</h3>
@@ -128,7 +141,7 @@ export default function AssignedDocsPanel({
         )}
       </section>
 
-      {showRenewals && (
+      {showRenewals && !hideRenewals && (
         <ClinicalRenewals
           items={stack.renewals}
           canUpload={uploadRenewal}
@@ -171,6 +184,7 @@ export default function AssignedDocsPanel({
       {tab === "required" ? (
         <RequiredList
           items={stack.required}
+          training={stack.myTraining}
           signingId={signingId}
           rnSigningId={rnSigningId}
           legalName={legalName}
@@ -200,8 +214,68 @@ export default function AssignedDocsPanel({
               setMark("");
             })
           }
-          onToggle={(id, enabled) => run(() => api.updateObligation(id, { enabled }))}
+          onToggle={(id, enabled) => {
+            if (!enabled) {
+              setDiscontinueId(id);
+              setDiscontinueTitle("");
+              setDiscontinueFile(undefined);
+              return Promise.resolve();
+            }
+            return run(() => api.updateObligation(id, { enabled }));
+          }}
+          discontinueId={discontinueId}
+          discontinueTitle={discontinueTitle}
+          discontinueFile={discontinueFile}
+          onDiscontinueTitle={setDiscontinueTitle}
+          onDiscontinueFile={setDiscontinueFile}
+          onDiscontinue={(id) =>
+            run(async () => {
+              if (!discontinueFile) {
+                throw new Error("Upload a discontinuation order first.");
+              }
+              await api.discontinueDelegation({
+                obligationId: id,
+                title: discontinueTitle || discontinueFile.name,
+                file: discontinueFile,
+              });
+              setDiscontinueId(null);
+              setDiscontinueFile(undefined);
+            })
+          }
           onSubmit={() => run(() => api.submitPlanPacket(individualId))}
+          onInitialLine={(checklistId, lineId) =>
+            run(() => api.initialTrainingLine(checklistId, lineId))
+          }
+          onSignTraining={(role) =>
+            stack.myTraining
+              ? run(() =>
+                  api.signTrainingChecklist(
+                    stack.myTraining!.checklist.id,
+                    role,
+                    session.fullName,
+                  ),
+                )
+              : Promise.resolve()
+          }
+          onOpenTraining={async (mode) => {
+            if (!stack.myTraining) return;
+            const file = await api.getChartFile({
+              type: "training",
+              id: stack.myTraining.checklist.id,
+            });
+            if (!file) throw new Error("That file is not stored yet.");
+            await openPrintable(file.name, file.blob, mode);
+          }}
+          canCheckTraining={
+            Boolean(stack.myTraining) &&
+            stack.myTraining!.checklist.staffUserId === session.userId &&
+            !stack.myTraining!.checklist.staffSignedAt
+          }
+          canSignTrainingStaff={
+            Boolean(stack.myTraining) &&
+            stack.myTraining!.checklist.staffUserId === session.userId
+          }
+          canSignTrainingHm={canSignTrainingAsHm(session.roleKey)}
         />
       ) : (
         <CheckedList
@@ -398,6 +472,19 @@ function RequiredList({
   onRnSign,
   onToggle,
   onSubmit,
+  discontinueId,
+  discontinueTitle,
+  discontinueFile,
+  onDiscontinueTitle,
+  onDiscontinueFile,
+  onDiscontinue,
+  training,
+  onInitialLine,
+  onSignTraining,
+  onOpenTraining,
+  canCheckTraining,
+  canSignTrainingStaff,
+  canSignTrainingHm,
 }: {
   items: ObligationView[];
   signingId: string | null;
@@ -419,6 +506,19 @@ function RequiredList({
   onRnSign: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onSubmit: () => void;
+  discontinueId: string | null;
+  discontinueTitle: string;
+  discontinueFile?: File;
+  onDiscontinueTitle: (value: string) => void;
+  onDiscontinueFile: (file?: File) => void;
+  onDiscontinue: (id: string) => void;
+  training: TrainingRowView | null;
+  onInitialLine: (checklistId: string, lineId: string) => void;
+  onSignTraining: (role: "staff" | "hm") => void;
+  onOpenTraining: (mode: "download" | "print") => Promise<void>;
+  canCheckTraining: boolean;
+  canSignTrainingStaff: boolean;
+  canSignTrainingHm: boolean;
 }) {
   const visible = items.filter(
     (view) => view.item.enabled || view.item.kind === "delegation",
@@ -426,9 +526,26 @@ function RequiredList({
   return (
     <div className="obligation-list">
       <p className="stack-help">
-        Sign each required document. Submit the packet when every item on your
-        list is signed.
+        The first time you are assigned to this home, check off every in-home
+        training item. Then sign the other required documents and submit.
       </p>
+      {training && (
+        <TrainingSignCard
+          row={training}
+          canCheck={canCheckTraining}
+          canSignStaff={canSignTrainingStaff}
+          canSignHm={canSignTrainingHm}
+          onInitial={(lineId) => onInitialLine(training.checklist.id, lineId)}
+          onSignStaff={() => onSignTraining("staff")}
+          onSignHm={() => onSignTraining("hm")}
+          onDownload={() => {
+            void onOpenTraining("download");
+          }}
+          onPrint={() => {
+            void onOpenTraining("print");
+          }}
+        />
+      )}
       {visible.map((view) => {
         const mine = view.mySignature;
         const waitingOnRn =
@@ -489,6 +606,11 @@ function RequiredList({
                   {view.item.enabled ? "Turn delegation off" : "Turn delegation on"}
                 </button>
               )}
+              {view.item.discontinueTitle && (
+                <p className="quiet-note">
+                  Discontinued with {view.item.discontinueTitle}
+                </p>
+              )}
               {waitingOnRn && nurseFirst && (
                 <button
                   className="button primary"
@@ -522,6 +644,39 @@ function RequiredList({
                 </span>
               )}
             </div>
+            {discontinueId === view.item.id && (
+              <form
+                className="renewal-upload"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onDiscontinue(view.item.id);
+                }}
+              >
+                <label>
+                  Discontinuation order title
+                  <input
+                    value={discontinueTitle}
+                    onChange={(e) => onDiscontinueTitle(e.target.value)}
+                    placeholder="Physician discontinue order"
+                  />
+                </label>
+                <label>
+                  File
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                    onChange={(e) => onDiscontinueFile(e.target.files?.[0])}
+                  />
+                </label>
+                <button
+                  className="button primary"
+                  type="submit"
+                  disabled={!discontinueFile}
+                >
+                  Upload order and turn off
+                </button>
+              </form>
+            )}
             {rnSigningId === view.item.id && (
               <div className="sign-box">
                 <label>
