@@ -14,27 +14,38 @@ import type {
   AcknowledgmentRow,
   AddCertificateInput,
   AppRole,
+  AssignTrainingInput,
   ChecklistAnswer,
   ChecklistAttestation,
   ChecklistItem,
   DocumentRecord,
   DocumentVersion,
   ExpiringCertificate,
-  HmWeeklyChecklist,  IndividualRecord,
+  HmWeeklyChecklist,
+  IndividualRecord,
   AgencyStatus,
   CreateAgencyInput,
   CreateAgencyResult,
   InviteMemberInput,
   InviteMemberResult,
+  LegacyLineSignoffInput,
   LoginInput,
   PacketDetail,
   PendingAgency,
+  RequirementLineSignoffInput,
   RequirementRecord,
   ServiceLogEntry,
   ServiceLogKind,
   SessionUser,
   SiteRecord,
   StaffCertificate,
+  StaffClearanceRow,
+  StaffTrainingProfile,
+  TrainingCountersignature,
+  TrainingRequirement,
+  TrainingRequirementView,
+  TrainingSignoff,
+  TrainingTopic,
   UpdateCertificateInput,
   UploadCertificateFileInput,
   UploadDocumentInput,
@@ -177,6 +188,21 @@ import {
   obligationPatch,
   profileFromRow,
 } from "./hostedMappers";
+// LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
+import {
+  TRAINING_TOPICS,
+  TRAINING_TOPIC_BY_ID,
+  individualChecklistTopics,
+  planUpdateRetrainingTopicIds,
+  renderTopicTitle,
+  siteChecklistTopics,
+} from "../features/training/topics";
+import {
+  computeNextDueOn,
+  evaluateInRatioGate,
+  resolveRequirementStatus,
+  sumHours,
+} from "../features/training/gate";
 
 const BUCKET = "agency-documents";
 const CHART_BUCKET = "care-plan-docs";
@@ -929,6 +955,17 @@ export class HostedApi implements ComplyraApi {
           { p_version_id: version.id },
         );
         throwIf(activateError, "Requirement approved, but the plan could not be activated.");
+        // LIFEPATH-P2 hook: targeted retraining for staff assigned to this individual.
+        const person = await this.individualRecord(String(item!.individual_id));
+        if (person) {
+          await this.p2GeneratePlanRetraining(
+            session,
+            person.id,
+            person.siteId,
+            person.fullName,
+            String(version.id),
+          );
+        }
       }
     }
 
@@ -1208,6 +1245,8 @@ export class HostedApi implements ComplyraApi {
       throwIf(syncError, "Staff assigned, but the acknowledgment sheet could not be updated.");
     }
     const staffName = await this.profileName(userId);
+    // LIFEPATH-P2 hook: auto-generate the full in-home checklist for the newly assigned staff.
+    await this.p2GenerateForNewAssignment(session, userId, individual!);
     await this.audit(
       session,
       "staff.assigned",
@@ -1892,7 +1931,13 @@ export class HostedApi implements ComplyraApi {
 
   // ---- Training ----
 
-  async signTrainingChecklist(checklistId: string, role: "staff" | "hm", signatureName: string) {
+  async signTrainingChecklist(
+    checklistId: string,
+    role: "staff" | "hm",
+    signatureName: string,
+    // LIFEPATH-P2: optional signature mark (SignaturePad pattern); omitted = legacy behavior.
+    opts?: { signatureMark?: string },
+  ) {
     const session = await this.requireSession();
     const { data: row, error } = await this.client
       .from("training_checklists")
@@ -1913,7 +1958,12 @@ export class HostedApi implements ComplyraApi {
       }
       const { error: updateError } = await this.client
         .from("training_checklists")
-        .update({ staff_signed_at: now, staff_signature_name: signatureName.trim() })
+        .update({
+          staff_signed_at: now,
+          staff_signature_name: signatureName.trim(),
+          // LIFEPATH-P2: signature mark column added by the P2 migration.
+          staff_signature_mark: opts?.signatureMark ?? null,
+        })
         .eq("id", checklistId);
       throwIf(updateError, "Could not save the signature.");
     } else {
@@ -1926,7 +1976,12 @@ export class HostedApi implements ComplyraApi {
       if (checklist.hmSignedAt) throw new Error("House manager already signed.");
       const { error: updateError } = await this.client
         .from("training_checklists")
-        .update({ hm_signed_at: now, hm_signature_name: signatureName.trim() })
+        .update({
+          hm_signed_at: now,
+          hm_signature_name: signatureName.trim(),
+          // LIFEPATH-P2: signature mark column added by the P2 migration.
+          hm_signature_mark: opts?.signatureMark ?? null,
+        })
         .eq("id", checklistId);
       throwIf(updateError, "Could not save the signature.");
     }
@@ -1939,7 +1994,12 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
-  async initialTrainingLine(checklistId: string, lineId: string) {
+  async initialTrainingLine(
+    checklistId: string,
+    lineId: string,
+    // LIFEPATH-P2: optional full sign-off detail; omitted = legacy title+date behavior.
+    signoff?: LegacyLineSignoffInput,
+  ) {
     const session = await this.requireSession();
     const { data: row, error } = await this.client
       .from("training_checklists")
@@ -1956,7 +2016,14 @@ export class HostedApi implements ComplyraApi {
     if (!line) throw new Error("Training item not found.");
     if (line.initialedAt) return;
     const items = checklist.items.map((item) =>
-      item.id === lineId ? { ...item, initialedAt: new Date().toISOString() } : item,
+      item.id === lineId
+        ? {
+            ...item,
+            initialedAt: new Date().toISOString(),
+            // LIFEPATH-P2: extended sign-off detail kept inside the line JSON.
+            ...(signoff && (signoff.initials || signoff.trainerName) ? { signoffDetail: signoff } : {}),
+          }
+        : item,
     );
     const { error: updateError } = await this.client
       .from("training_checklists")
@@ -3257,6 +3324,620 @@ export class HostedApi implements ComplyraApi {
   }
 
   // ===== LIFEPATH-P2 HOSTED (training engine) =====
+  private mapTrainingRequirement(row: Record<string, unknown>): TrainingRequirement {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      userId: String(row.user_id),
+      topicId: String(row.topic_id),
+      individualId: (row.individual_id as string | null) ?? null,
+      siteId: (row.site_id as string | null) ?? null,
+      source: row.source as TrainingRequirement["source"],
+      planVersionId: (row.plan_version_id as string | null) ?? null,
+      delegationId: (row.delegation_id as string | null) ?? null,
+      status: row.status as TrainingRequirement["status"],
+      dueOn: row.due_on ? String(row.due_on).slice(0, 10) : null,
+      createdAt: String(row.created_at),
+    };
+  }
+
+  private mapTrainingSignoff(row: Record<string, unknown>): TrainingSignoff {
+    return {
+      id: String(row.id),
+      requirementId: String(row.requirement_id),
+      initials: String(row.initials),
+      signedOn: String(row.signed_on).slice(0, 10),
+      na: Boolean(row.na),
+      naReason: (row.na_reason as string | null) ?? null,
+      trainerName: String(row.trainer_name),
+      method: (row.method as TrainingSignoff["method"]) ?? null,
+      hoursTotal: Number(row.hours_total ?? 0),
+      hoursWithHm: Number(row.hours_with_hm ?? 0),
+      competencyText: (row.competency_text as string | null) ?? null,
+      observerName: (row.observer_name as string | null) ?? null,
+      observerSignature: (row.observer_signature as string | null) ?? null,
+      evidenceRef: (row.evidence_ref as string | null) ?? null,
+      renewalRule: (row.renewal_rule as string | null) ?? null,
+      nextDueOn: row.next_due_on ? String(row.next_due_on).slice(0, 10) : null,
+      createdAt: String(row.created_at),
+    };
+  }
+
+  private mapTrainingCountersignature(row: Record<string, unknown>): TrainingCountersignature {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      userId: String(row.user_id),
+      siteId: String(row.site_id),
+      staffSignatureName: (row.staff_signature_name as string | null) ?? null,
+      staffSignatureMark: (row.staff_signature_mark as string | null) ?? null,
+      staffSignedAt: (row.staff_signed_at as string | null) ?? null,
+      hmSignatureName: (row.hm_signature_name as string | null) ?? null,
+      hmSignatureMark: (row.hm_signature_mark as string | null) ?? null,
+      hmSignedAt: (row.hm_signed_at as string | null) ?? null,
+    };
+  }
+
+  /** Internal generator — no permission check; callers gate access. */
+  private async p2GenerateTraining(input: {
+    agencyId: string;
+    userId: string;
+    siteId: string | null;
+    individualId: string | null;
+    source: TrainingRequirement["source"];
+    planVersionId?: string | null;
+    delegationId?: string | null;
+    topicIds: string[];
+    dueOn?: string | null;
+  }): Promise<TrainingRequirement[]> {
+    const { data: existing } = await this.client
+      .from("training_requirements")
+      .select("topic_id, site_id, individual_id")
+      .eq("agency_id", input.agencyId)
+      .eq("user_id", input.userId);
+    const seen = new Set(
+      (existing ?? []).map(
+        (row) =>
+          `${String(row.topic_id)}|${String(row.site_id ?? "")}|${String(row.individual_id ?? "")}`,
+      ),
+    );
+    const rows = input.topicIds
+      .filter((topicId) => TRAINING_TOPIC_BY_ID[topicId])
+      .filter((topicId) => {
+        const key = `${topicId}|${input.siteId ?? ""}|${input.individualId ?? ""}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((topicId) => ({
+        agency_id: input.agencyId,
+        user_id: input.userId,
+        topic_id: topicId,
+        individual_id: input.individualId,
+        site_id: input.siteId,
+        source: input.source,
+        plan_version_id: input.planVersionId ?? null,
+        delegation_id: input.delegationId ?? null,
+        status: "pending",
+        due_on: input.dueOn ?? null,
+      }));
+    if (rows.length === 0) return [];
+    const { data, error } = await this.client
+      .from("training_requirements")
+      .insert(rows)
+      .select("*");
+    throwIf(error, "Could not generate training lines.");
+    return (data ?? []).map((row) => this.mapTrainingRequirement(row));
+  }
+
+  /** LIFEPATH-P2 hook target: full checklist when a staff member is assigned. */
+  private async p2GenerateForNewAssignment(
+    session: SessionUser,
+    userId: string,
+    individual: { id: string; site_id: string; full_name: string },
+  ) {
+    const siteCreated = await this.p2GenerateTraining({
+      agencyId: session.agencyId,
+      userId,
+      siteId: individual.site_id,
+      individualId: null,
+      source: "checklist",
+      topicIds: siteChecklistTopics().map((topic) => topic.id),
+    });
+    const individualCreated = await this.p2GenerateTraining({
+      agencyId: session.agencyId,
+      userId,
+      siteId: individual.site_id,
+      individualId: individual.id,
+      source: "checklist",
+      topicIds: individualChecklistTopics().map((topic) => topic.id),
+    });
+    const total = siteCreated.length + individualCreated.length;
+    if (total > 0) {
+      await this.audit(
+        session,
+        "training.assigned",
+        `${total} training lines generated for ${await this.profileName(userId)} at ${individual.full_name}`,
+        "training_requirement",
+      );
+    }
+  }
+
+  /** LIFEPATH-P2 hook target: targeted retraining when a plan version goes active. */
+  private async p2GeneratePlanRetraining(
+    session: SessionUser,
+    individualId: string,
+    siteId: string,
+    individualName: string,
+    versionId: string,
+  ) {
+    const { data: assignments } = await this.client
+      .from("staff_assignments")
+      .select("user_id")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId);
+    const userIds = [...new Set((assignments ?? []).map((row) => String(row.user_id)))];
+    if (userIds.length === 0) return;
+    let total = 0;
+    for (const userId of userIds) {
+      total += (
+        await this.p2GenerateTraining({
+          agencyId: session.agencyId,
+          userId,
+          siteId,
+          individualId,
+          source: "plan_version",
+          planVersionId: versionId,
+          topicIds: planUpdateRetrainingTopicIds(),
+        })
+      ).length;
+    }
+    if (total > 0) {
+      await this.audit(
+        session,
+        "training.retraining_assigned",
+        `${total} retraining lines generated for a new active plan version (${individualName})`,
+        "document_version",
+        versionId,
+      );
+    }
+  }
+
+  async listTrainingTopics(scope?: "agency" | "site"): Promise<TrainingTopic[]> {
+    await this.requireSession();
+    return scope ? TRAINING_TOPICS.filter((topic) => topic.scope === scope) : [...TRAINING_TOPICS];
+  }
+
+  async assignTraining(input: AssignTrainingInput): Promise<TrainingRequirement[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "hr.view_staff");
+    const { data: membership, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", input.userId)
+      .maybeSingle();
+    throwIf(memberError, "Could not verify that staff member.");
+    if (!membership) throw new Error("That staff member is not in this agency.");
+    const siteId = input.siteId ?? null;
+    const individualId = input.individualId ?? null;
+    let created: TrainingRequirement[];
+    if (input.source === "checklist" && !input.topicIds) {
+      // Sections 1–5 once per staff per site; section 6 once per staff per individual.
+      created = await this.p2GenerateTraining({
+        agencyId: session.agencyId,
+        userId: input.userId,
+        siteId,
+        individualId: null,
+        source: "checklist",
+        topicIds: siteChecklistTopics().map((topic) => topic.id),
+        dueOn: input.dueOn ?? null,
+      });
+      if (individualId) {
+        created = created.concat(
+          await this.p2GenerateTraining({
+            agencyId: session.agencyId,
+            userId: input.userId,
+            siteId,
+            individualId,
+            source: "checklist",
+            topicIds: individualChecklistTopics().map((topic) => topic.id),
+            dueOn: input.dueOn ?? null,
+          }),
+        );
+      }
+    } else {
+      const topicIds = input.topicIds ?? [];
+      if (topicIds.length === 0) throw new Error("Choose at least one training topic.");
+      created = await this.p2GenerateTraining({
+        agencyId: session.agencyId,
+        userId: input.userId,
+        siteId,
+        individualId,
+        source: input.source,
+        planVersionId: input.planVersionId ?? null,
+        delegationId: input.delegationId ?? null,
+        topicIds,
+        dueOn: input.dueOn ?? null,
+      });
+    }
+    await this.audit(
+      session,
+      "training.assigned",
+      `${created.length} training lines assigned to ${await this.profileName(input.userId)} (${input.source})`,
+      "training_requirement",
+    );
+    return created;
+  }
+
+  private async p2RequirementView(
+    requirement: TrainingRequirement,
+    signoffsByRequirement: Map<string, TrainingSignoff>,
+    individualNames: Map<string, string>,
+    today: string,
+  ): Promise<TrainingRequirementView> {
+    const topic = TRAINING_TOPIC_BY_ID[requirement.topicId];
+    const individualName = requirement.individualId
+      ? (individualNames.get(requirement.individualId) ?? null)
+      : null;
+    const signoff = signoffsByRequirement.get(requirement.id) ?? null;
+    return {
+      ...requirement,
+      topicTitle: renderTopicTitle(topic, individualName),
+      section: topic?.section ?? 5,
+      perIndividual: topic?.perIndividual ?? false,
+      individualName,
+      signoff,
+      resolvedStatus: resolveRequirementStatus(requirement.status, requirement.dueOn, today),
+    };
+  }
+
+  async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
+    const session = await this.requireSession();
+    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    const fullName = await this.profileName(userId);
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: reqRows, error: reqError } = await this.client
+      .from("training_requirements")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true });
+    throwIf(reqError, "Could not load training lines.");
+    const requirements = (reqRows ?? []).map((row) => this.mapTrainingRequirement(row));
+    const requirementIds = requirements.map((row) => row.id);
+    const { data: signoffRows } = requirementIds.length
+      ? await this.client.from("training_signoffs").select("*").in("requirement_id", requirementIds)
+      : { data: [] as Record<string, unknown>[] };
+    const signoffs = ((signoffRows ?? []) as Record<string, unknown>[]).map((row) =>
+      this.mapTrainingSignoff(row),
+    );
+    const signoffsByRequirement = new Map(signoffs.map((row) => [row.requirementId, row]));
+    const individualIds = [
+      ...new Set(requirements.map((row) => row.individualId).filter(Boolean)),
+    ] as string[];
+    const { data: people } = individualIds.length
+      ? await this.client.from("individuals").select("id, full_name").in("id", individualIds)
+      : { data: [] as { id: string; full_name: string }[] };
+    const individualNames = new Map(
+      ((people ?? []) as { id: string; full_name: string }[]).map((row) => [row.id, row.full_name]),
+    );
+    const views: TrainingRequirementView[] = [];
+    for (const requirement of requirements) {
+      views.push(
+        await this.p2RequirementView(requirement, signoffsByRequirement, individualNames, today),
+      );
+    }
+    const { data: counterRows } = await this.client
+      .from("training_countersignatures")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", userId);
+    const countersignatures = ((counterRows ?? []) as Record<string, unknown>[]).map((row) =>
+      this.mapTrainingCountersignature(row),
+    );
+    const siteIds = [...new Set(requirements.map((row) => row.siteId).filter(Boolean))] as string[];
+    const { data: siteRows } = siteIds.length
+      ? await this.client.from("sites").select("id, name").in("id", siteIds)
+      : { data: [] as { id: string; name: string }[] };
+    const siteNameById = new Map(
+      ((siteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+    );
+    const siteNames = siteIds.map((id) => siteNameById.get(id) ?? "Unknown site");
+    const { hoursTotal, hoursWithHm } = sumHours(
+      signoffs.map((row) => ({ hoursTotal: row.hoursTotal, hoursWithHm: row.hoursWithHm, na: row.na })),
+    );
+    let complete = 0;
+    let pending = 0;
+    let overdue = 0;
+    let waived = 0;
+    for (const view of views) {
+      if (view.resolvedStatus === "complete") complete += 1;
+      else if (view.resolvedStatus === "waived_na") waived += 1;
+      else if (view.resolvedStatus === "overdue") overdue += 1;
+      else pending += 1;
+    }
+    const required = complete + pending + overdue;
+    let staffCountersigned = siteIds.length > 0;
+    let hmCountersigned = siteIds.length > 0;
+    for (const siteId of siteIds) {
+      const counter = countersignatures.find((row) => row.siteId === siteId);
+      if (!counter?.staffSignedAt) staffCountersigned = false;
+      if (!counter?.hmSignedAt) hmCountersigned = false;
+    }
+    const gate = evaluateInRatioGate({
+      signoffs: signoffs.map((row) => ({
+        hoursTotal: row.hoursTotal,
+        hoursWithHm: row.hoursWithHm,
+        na: row.na,
+      })),
+      requiredTotal: required,
+      completeCount: complete,
+      pendingCount: pending,
+      overdueCount: overdue,
+      staffCountersigned,
+      hmCountersigned,
+    });
+    const reasons = [...gate.reasons];
+    if (requirements.length === 0) reasons.unshift("No training assigned yet");
+    return {
+      userId,
+      fullName,
+      siteNames,
+      individualNames: individualIds.map((id) => ({
+        id,
+        fullName: individualNames.get(id) ?? "Unknown",
+      })),
+      requirements: views,
+      countersignatures,
+      hoursTotal: gate.hoursTotal,
+      hoursWithHm: gate.hoursWithHm,
+      counts: { required, complete, pending, overdue, waived },
+      clearedForInRatio: gate.cleared && requirements.length > 0,
+      gateReasons: reasons,
+      certificates: [],
+    };
+  }
+
+  async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "hr.view_staff");
+    let query = this.client
+      .from("training_requirements")
+      .select("user_id")
+      .eq("agency_id", session.agencyId);
+    if (siteId) query = query.eq("site_id", siteId);
+    const { data, error } = await query;
+    throwIf(error, "Could not load staff training.");
+    const userIds = [...new Set((data ?? []).map((row) => String(row.user_id)))];
+    const rows: StaffClearanceRow[] = [];
+    for (const userId of userIds) {
+      const profile = await this.getStaffTrainingProfile(userId);
+      rows.push({
+        userId,
+        fullName: profile.fullName,
+        siteName: siteId ? (profile.siteNames[0] ?? "Unknown site") : profile.siteNames.join(", ") || "—",
+        clearedForInRatio: profile.clearedForInRatio,
+        gateReasons: profile.gateReasons,
+        pendingCount: profile.counts.pending,
+        overdueCount: profile.counts.overdue,
+        hoursTotal: profile.hoursTotal,
+        hoursWithHm: profile.hoursWithHm,
+      });
+    }
+    rows.sort((a, b) => Number(a.clearedForInRatio) - Number(b.clearedForInRatio));
+    return rows;
+  }
+
+  async initialRequirementLine(
+    requirementId: string,
+    input: RequirementLineSignoffInput,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    const { data: requirement, error } = await this.client
+      .from("training_requirements")
+      .select("*")
+      .eq("id", requirementId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Training line not found.");
+    if (!requirement) throw new Error("Training line not found.");
+    const mapped = this.mapTrainingRequirement(requirement);
+    if (session.userId !== mapped.userId) this.requirePermission(session, "hr.view_staff");
+    const { data: existingSignoff } = await this.client
+      .from("training_signoffs")
+      .select("id")
+      .eq("requirement_id", requirementId)
+      .maybeSingle();
+    if (existingSignoff) throw new Error("This training line is already initialed.");
+    const initials = input.initials.trim();
+    if (!initials) throw new Error("Type your initials — checkmarks are not allowed.");
+    const trainerName = input.trainerName.trim();
+    if (!trainerName) throw new Error("Name the trainer who delivered this training.");
+    const hoursTotal = Math.max(0, input.hoursTotal ?? 0);
+    const hoursWithHm = Math.max(0, input.hoursWithHm ?? 0);
+    if (hoursWithHm > hoursTotal) {
+      throw new Error("Hours with the house manager cannot exceed total hours.");
+    }
+    const signedOn = (input.signedOn ?? new Date().toISOString()).slice(0, 10);
+    const { error: insertError } = await this.client.from("training_signoffs").insert({
+      agency_id: session.agencyId,
+      requirement_id: requirementId,
+      initials,
+      signed_on: signedOn,
+      na: false,
+      na_reason: null,
+      trainer_name: trainerName,
+      method: input.method ?? null,
+      hours_total: hoursTotal,
+      hours_with_hm: hoursWithHm,
+      competency_text: input.competencyText?.trim() || null,
+      observer_name: input.observerName?.trim() || null,
+      observer_signature: input.observerSignature?.trim() || null,
+      evidence_ref: input.evidenceRef?.trim() || null,
+      renewal_rule: input.renewalRule?.trim() || null,
+      next_due_on:
+        input.nextDueOn?.slice(0, 10) ??
+        computeNextDueOn(input.renewalRule?.trim() ?? null, signedOn),
+    });
+    throwIf(insertError, "Could not save the sign-off.");
+    const { error: updateError } = await this.client
+      .from("training_requirements")
+      .update({ status: "complete" })
+      .eq("id", requirementId);
+    throwIf(updateError, "Sign-off saved, but the line status could not be updated.");
+    await this.audit(
+      session,
+      "training.line_initialed",
+      `${initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)}`,
+      "training_requirement",
+      requirementId,
+    );
+  }
+
+  async waiveRequirementLine(requirementId: string, reason: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "hr.view_staff");
+    const { data: requirement, error } = await this.client
+      .from("training_requirements")
+      .select("*")
+      .eq("id", requirementId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Training line not found.");
+    if (!requirement) throw new Error("Training line not found.");
+    const mapped = this.mapTrainingRequirement(requirement);
+    const { data: existingSignoff } = await this.client
+      .from("training_signoffs")
+      .select("id")
+      .eq("requirement_id", requirementId)
+      .maybeSingle();
+    if (existingSignoff) throw new Error("This training line is already initialed.");
+    const trimmed = reason.trim();
+    if (!trimmed) throw new Error("Write the reason this line is N/A.");
+    const { error: insertError } = await this.client.from("training_signoffs").insert({
+      agency_id: session.agencyId,
+      requirement_id: requirementId,
+      initials: "N/A",
+      signed_on: new Date().toISOString().slice(0, 10),
+      na: true,
+      na_reason: trimmed,
+      trainer_name: session.fullName,
+      method: null,
+      hours_total: 0,
+      hours_with_hm: 0,
+      competency_text: null,
+      observer_name: null,
+      observer_signature: null,
+      evidence_ref: null,
+      renewal_rule: null,
+      next_due_on: null,
+    });
+    throwIf(insertError, "Could not save the N/A.");
+    const { error: updateError } = await this.client
+      .from("training_requirements")
+      .update({ status: "waived_na" })
+      .eq("id", requirementId);
+    throwIf(updateError, "N/A saved, but the line status could not be updated.");
+    await this.audit(
+      session,
+      "training.line_waived",
+      `N/A: “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)} — ${trimmed}`,
+      "training_requirement",
+      requirementId,
+    );
+  }
+
+  async signStaffChecklist(input: {
+    userId: string;
+    siteId: string;
+    role: "staff" | "hm";
+    signatureName: string;
+    signatureMark?: string;
+  }): Promise<void> {
+    const session = await this.requireSession();
+    const { data: reqRows, error: reqError } = await this.client
+      .from("training_requirements")
+      .select("id, status, due_on")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", input.userId)
+      .eq("site_id", input.siteId);
+    throwIf(reqError, "Could not load training lines.");
+    const lines = reqRows ?? [];
+    if (lines.length === 0) throw new Error("No training lines assigned for this site yet.");
+    const today = new Date().toISOString().slice(0, 10);
+    const requirementIds = lines.map((row) => String(row.id));
+    const { data: signoffRows } = await this.client
+      .from("training_signoffs")
+      .select("requirement_id")
+      .in("requirement_id", requirementIds);
+    const signedIds = new Set((signoffRows ?? []).map((row) => String(row.requirement_id)));
+    const { data: counterRow } = await this.client
+      .from("training_countersignatures")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", input.userId)
+      .eq("site_id", input.siteId)
+      .maybeSingle();
+    let counter = counterRow ? this.mapTrainingCountersignature(counterRow) : null;
+    if (!counter) {
+      const { data: inserted, error: insertError } = await this.client
+        .from("training_countersignatures")
+        .insert({ agency_id: session.agencyId, user_id: input.userId, site_id: input.siteId })
+        .select("*")
+        .single();
+      throwIf(insertError, "Could not start the signature sheet.");
+      counter = this.mapTrainingCountersignature(inserted!);
+    }
+    const name = input.signatureName.trim();
+    if (!name) throw new Error("Type your name to sign.");
+    const now = new Date().toISOString();
+    if (input.role === "staff") {
+      if (session.userId !== input.userId) {
+        throw new Error("Staff must sign their own training sheet.");
+      }
+      if (counter.staffSignedAt) throw new Error("This sheet is already signed by staff.");
+      const open = lines.filter((row) => !signedIds.has(String(row.id)));
+      if (open.length > 0) {
+        throw new Error(
+          `Initial or N/A every training line before signing (${open.length} still open).`,
+        );
+      }
+      const { error: updateError } = await this.client
+        .from("training_countersignatures")
+        .update({
+          staff_signed_at: now,
+          staff_signature_name: name,
+          staff_signature_mark: input.signatureMark ?? null,
+        })
+        .eq("id", counter.id);
+      throwIf(updateError, "Could not save the signature.");
+    } else {
+      if (!canSignTrainingAsHm(session.roleKey)) {
+        throw new Error("Only a house manager can counter-sign training.");
+      }
+      if (!counter.staffSignedAt) {
+        throw new Error("Staff must sign this sheet before the house manager.");
+      }
+      if (counter.hmSignedAt) throw new Error("House manager already signed.");
+      const { error: updateError } = await this.client
+        .from("training_countersignatures")
+        .update({
+          hm_signed_at: now,
+          hm_signature_name: name,
+          hm_signature_mark: input.signatureMark ?? null,
+        })
+        .eq("id", counter.id);
+      throwIf(updateError, "Could not save the signature.");
+    }
+    await this.audit(
+      session,
+      "training.checklist_signed",
+      `${name} signed the training checklist for ${await this.profileName(input.userId)} at ${await this.siteName(input.siteId)} (${input.role})`,
+      "training_requirement",
+      counter.id,
+    );
+  }
   // ===== LIFEPATH-P3 HOSTED (delegation forms) =====
   // ===== LIFEPATH-P4 HOSTED (certificates) =====
   // LIFEPATH-P4 (certificates): HR certificate tracking (HostedApi, Supabase).
