@@ -511,6 +511,23 @@ export interface ComplyraApi {
     checklistId: string,
   ): Promise<{ blob: Blob; name: string }>;
   // ===== LIFEPATH-P6 API (med inventory) =====
+  getMedInventory(
+    individualId: string,
+  ): Promise<import("./types").MedInventoryView[]>;
+  getMedicationSupplyStatus(
+    siteId: string,
+  ): Promise<import("./types").MedSupplyStatus>;
+  adjustMedInventory(input: {
+    medicationId: string;
+    quantityDelta: number;
+    reason: string;
+    countedOn?: string;
+  }): Promise<void>;
+  setReorderThreshold(input: {
+    medicationId: string;
+    lowThresholdDays: number;
+  }): Promise<void>;
+  acknowledgeReorderAlert(medicationId: string): Promise<void>;
 }
 
 export type WorkspaceSite = {
@@ -4592,6 +4609,193 @@ export class LocalApi implements ComplyraApi {
     };
   }
   // ===== LIFEPATH-P6 IMPL (med inventory) =====
+  private async p6lib(): Promise<typeof import("./medInventory")> {
+    return await import("./medInventory");
+  }
+
+  private p6rows(): import("./types").MedInventoryRecord[] {
+    const db = this.store.db as LocalDatabase & {
+      medInventory?: import("./types").MedInventoryRecord[];
+    };
+    if (!db.medInventory) db.medInventory = [];
+    return db.medInventory;
+  }
+
+  private p6medicationOrThrow(medicationId: string) {
+    const session = assertSession(this.store);
+    const med = this.store.db.medications.find((row) => row.id === medicationId);
+    if (!med || med.agencyId !== session.agencyId) {
+      throw new Error("Medication not found.");
+    }
+    return { session, med };
+  }
+
+  private p6upsertRow(
+    session: { agencyId: string },
+    med: { id: string; individualId: string },
+    patch: Partial<import("./types").MedInventoryRecord>,
+  ): import("./types").MedInventoryRecord {
+    const rows = this.p6rows();
+    const existing = rows.find((row) => row.medicationId === med.id);
+    if (existing) {
+      Object.assign(existing, patch, { updatedAt: new Date().toISOString() });
+      return existing;
+    }
+    const row: import("./types").MedInventoryRecord = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      lowThresholdDays: 7,
+      doseTimes: [],
+      reorderAcknowledgedOn: null,
+      updatedAt: new Date().toISOString(),
+      ...patch,
+    };
+    rows.push(row);
+    return row;
+  }
+
+  async getMedInventory(
+    individualId: string,
+  ): Promise<import("./types").MedInventoryView[]> {
+    const { projectMedInventory, compareMedInventory } = await this.p6lib();
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view medication inventory.");
+    }
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId,
+    );
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const rows = this.p6rows();
+    const today = todayIso();
+    return this.store.db.medications
+      .filter(
+        (med) =>
+          med.individualId === individualId && med.agencyId === session.agencyId,
+      )
+      .map((med) =>
+        projectMedInventory({
+          med,
+          inventory: rows.find((row) => row.medicationId === med.id) ?? null,
+          deliveries: this.store.db.medicationDeliveries.filter(
+            (delivery) => delivery.medicationId === med.id,
+          ),
+          // Local backend: logPrnDose decrements the medication row directly,
+          // so projectMedInventory falls back to the row count for PRN meds.
+          prnDoses: [],
+          today,
+        }),
+      )
+      .sort(compareMedInventory);
+  }
+
+  async getMedicationSupplyStatus(
+    siteId: string,
+  ): Promise<import("./types").MedSupplyStatus> {
+    const { summarizeMedSupply } = await this.p6lib();
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view medication inventory.");
+    }
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    const people = this.store.db.individuals.filter(
+      (row) => row.siteId === siteId && row.agencyId === session.agencyId,
+    );
+    const views = (
+      await Promise.all(people.map((person) => this.getMedInventory(person.id)))
+    ).flat();
+    return summarizeMedSupply(siteId, site.name, views, todayIso());
+  }
+
+  async adjustMedInventory(input: {
+    medicationId: string;
+    quantityDelta: number;
+    reason: string;
+    countedOn?: string;
+  }) {
+    const { session, med } = this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM adjusts medication inventory.");
+    }
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Give a reason for the count correction.");
+    if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
+      throw new Error("Enter a non-zero correction.");
+    }
+    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const next = Math.max(
+      0,
+      Math.round((med.remainingPills + input.quantityDelta) * 100) / 100,
+    );
+    med.remainingPills = next;
+    med.lastDeliveryOn = countedOn;
+    med.lastCountdownOn = countedOn;
+    this.store.db.medicationDeliveries.push({
+      id: crypto.randomUUID(),
+      medicationId: med.id,
+      countedOn,
+      remainingPills: next,
+      pillsPerDay: med.pillsPerDay,
+      recordedBy: session.userId,
+    });
+    log(
+      this.store,
+      session,
+      "medication.inventory_adjusted",
+      `${session.fullName} corrected ${med.name} by ${input.quantityDelta > 0 ? "+" : ""}${input.quantityDelta} pills: ${reason}`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async setReorderThreshold(input: {
+    medicationId: string;
+    lowThresholdDays: number;
+  }) {
+    const { session, med } = this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM sets the reorder threshold.");
+    }
+    const days = Math.floor(input.lowThresholdDays);
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      throw new Error("Set the reorder threshold to 1–90 days of doses.");
+    }
+    this.p6upsertRow(session, med, { lowThresholdDays: days });
+    log(
+      this.store,
+      session,
+      "medication.threshold_updated",
+      `${session.fullName} set the ${med.name} reorder threshold to ${days} days`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async acknowledgeReorderAlert(medicationId: string) {
+    const { session, med } = this.p6medicationOrThrow(medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM acknowledges a reorder alert.");
+    }
+    this.p6upsertRow(session, med, { reorderAcknowledgedOn: todayIso() });
+    log(
+      this.store,
+      session,
+      "medication.reorder_acknowledged",
+      `${session.fullName} acknowledged the ${med.name} reorder alert`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
 }
 
 export function createLocalApi(store?: MemoryStore) {

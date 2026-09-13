@@ -705,3 +705,80 @@ export interface HmWeeklyChecklist {
   updatedAt: string;
 }
 // ===== LIFEPATH-P6 TYPES (med inventory) =====
+export type MedInventoryStatus = "ok" | "low" | "critical" | "out";
+
+/** Default reorder threshold: raise a reorder alert when this many days of doses remain. */
+export const DEFAULT_MED_LOW_THRESHOLD_DAYS = 7;
+
+/**
+ * Stored med-inventory record (one per medication). The pill count itself is
+ * derived deterministically from delivery records, so this row only carries
+ * Phase-6-owned state: the reorder threshold, dose-time schedule, and the
+ * last reorder-alert acknowledgment.
+ */
+export interface MedInventoryRecord {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  medicationId: string;
+  lowThresholdDays: number;
+  doseTimes: string[];
+  reorderAcknowledgedOn: string | null;
+  updatedAt: string | null;
+}
+
+/** Deterministic projection of a medication's supply. Pure — see projectInventory. */
+export interface MedInventoryProjection {
+  /** Pills remaining after scheduled drops and logged PRN doses. */
+  currentCount: number;
+  /** Whole days of scheduled doses remaining; null for PRN meds. */
+  daysRemaining: number | null;
+  /** Pill count at which a reorder alert fires. */
+  reorderPointPills: number;
+  status: MedInventoryStatus;
+  /** True when the status needs attention and no acknowledgment covers today. */
+  alertActive: boolean;
+  /** PRN doses logged since the delivery-day count. */
+  prnDosesSinceDelivery: number;
+}
+
+export interface MedDeliverySummary {
+  id: string;
+  countedOn: string;
+  remainingPills: number;
+  pillsPerDay: number;
+  recordedBy: string;
+}
+
+/** Medication + stored inventory state + deterministic projection. */
+export interface MedInventory extends MedInventoryRecord {
+  medicationName: string;
+  strength: string;
+  kind: "scheduled" | "prn";
+  dosesPerDay: number;
+  /** Delivery-day quantity the projection counts down from. */
+  quantityOnDelivery: number;
+  /** Date of the delivery-day count (ISO). */
+  deliveredOn: string | null;
+}
+
+export interface MedInventoryView extends MedInventory, MedInventoryProjection {
+  deliveries: MedDeliverySummary[];
+}
+
+/** Aggregate supply picture for one home — read by the HM weekly checklist. */
+export interface MedSupplyStatus {
+  siteId: string;
+  siteName: string;
+  checkedOn: string;
+  totalMeds: number;
+  okCount: number;
+  lowCount: number;
+  criticalCount: number;
+  outCount: number;
+  /** True when every medication at the home is "ok". */
+  allClear: boolean;
+  /** Non-ok meds, worst first. */
+  alerts: MedInventoryView[];
+  summary: string;
+}

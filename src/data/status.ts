@@ -108,6 +108,7 @@ export function pageVisible(session: SessionUser, page: string) {
     );
   }
   // LIFEPATH-P6-PAGEVIS (med inventory)
+  if (page === "Med inventory") return can(session, "individuals.view");
   return can(session, "individuals.view");
 }
 

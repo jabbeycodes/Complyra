@@ -82,6 +82,8 @@ import StaffCertificatesModal from "./features/certificates/StaffCertificatesMod
 import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage";
 import ChecklistAssigner from "./features/hmChecklist/ChecklistAssigner";
 // LIFEPATH-P6-IMPORT (med inventory)
+import { Pill as MedInventoryNavIcon } from "lucide-react";
+import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -473,6 +475,7 @@ export default function App() {
         ["Weekly checklist", ClipboardCheck],
         ["Checklist assignments", ClipboardList],
         // LIFEPATH-P6-NAV (med inventory)
+        ["Med inventory", MedInventoryNavIcon],
       ],
     },
   ] as const;
@@ -1602,6 +1605,7 @@ export default function App() {
               {page === "Weekly checklist" && <HmWeeklyChecklistPage />}
               {page === "Checklist assignments" && <ChecklistAssigner />}
               {/* LIFEPATH-P6-PAGE (med inventory) */}
+              {page === "Med inventory" && <MedInventoryPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading

@@ -32,7 +32,8 @@ import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
 // LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
 import DelegationFormDetail from "./delegations/DelegationFormDetail";
-
+// LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
+import MedInventoryCard from "./medInventory/MedInventoryCard";
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
   { value: "doctor_notes", label: "Doctor's notes" },
@@ -303,6 +304,8 @@ export default function IndividualChart({
                 )}
               </article>
             ))}
+            {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
+            <MedInventoryCard individualId={individualId} />
           </section>
         )}
 
