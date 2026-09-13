@@ -4911,6 +4911,85 @@ th {
   color: #4a4036;
   white-space: nowrap;
 }
+.site-review {
+  margin-top: 20px;
+}
+.site-review-toolbar,
+.site-review-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px 16px;
+}
+.site-review-facts,
+.site-review-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px solid #e6ddd0;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+.site-review-facts legend,
+.site-review-section h3 {
+  font-size: 14px;
+  color: #2f4630;
+}
+.site-review-facts label,
+.site-review-meta label,
+.site-review-line label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #4a4036;
+}
+.site-review-facts .check-row,
+.site-review-meta .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.site-review-people,
+.site-review-section {
+  padding: 0 20px 16px;
+  color: #4a4036;
+}
+.site-review-line {
+  border: 1px solid #e6ddd0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 8px;
+  background: #fffdf8;
+}
+.site-review-line legend {
+  padding: 0 6px;
+  font-size: 13px;
+  color: #241e18;
+}
+.site-review-line .stack-help,
+.evidence-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: #5f5145;
+}
+.evidence-note {
+  color: #2f4630;
+}
+@media (max-width: 900px) {
+  .site-review-facts,
+  .site-review-meta,
+  .site-review-line {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 720px) {
   .monthly-due-form {
     grid-template-columns: 1fr 1fr;

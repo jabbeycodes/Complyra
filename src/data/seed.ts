@@ -47,6 +47,12 @@ import {
   type EquipmentMonthLog,
   type HomeSafetyReport,
 } from "./monthlyChecks";
+import {
+  applyWellWaterDefault,
+  blankSiteReview,
+  mergeSiteReviewLines,
+  type SiteReview,
+} from "./siteReview";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -90,6 +96,7 @@ export interface LocalDatabase {
   equipmentMonthLogs: EquipmentMonthLog[];
   emergencyDrills: EmergencyDrill[];
   homeSafetyReports: HomeSafetyReport[];
+  siteReviews: SiteReview[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -97,14 +104,28 @@ export function createEvergreenSeed(): LocalDatabase {
     { id: RESIDENTIAL_ID, agencyId: AGENCY_ID, name: "Residential services" },
     { id: SUPPORTED_ID, agencyId: AGENCY_ID, name: "Supported living" },
   ];
-  const sites: SiteRecord[] = demoSites.map((site, i) => ({
-    id: padId(11 + i),
-    agencyId: AGENCY_ID,
-    programId:
-      site.program === "Supported living" ? SUPPORTED_ID : RESIDENTIAL_ID,
-    name: site.name,
-    address: site.address,
-  }));
+  const sites: SiteRecord[] = demoSites.map((site, i) => {
+    const maple = site.name === "Maple House";
+    return {
+      id: padId(11 + i),
+      agencyId: AGENCY_ID,
+      programId:
+        site.program === "Supported living" ? SUPPORTED_ID : RESIDENTIAL_ID,
+      name: site.name,
+      address: site.address,
+      serviceType: "ISL",
+      staffed24h: true,
+      overnightSleepStaff: false,
+      wellWater: false,
+      lastWaterTestOn: "",
+      sitePhone: maple ? "573-555-0144" : "573-555-0188",
+      contactName: maple ? "Sarah Mitchell" : "James Wilson",
+      contactPhone: maple ? "573-555-0144" : "573-555-0188",
+      city: maple ? "Columbia" : "Columbia",
+      county: "Boone",
+      zip: maple ? "65202" : "65203",
+    };
+  });
   const siteByName = Object.fromEntries(sites.map((s) => [s.name, s]));
   const profiles: Profile[] = demoStaff.map((member, i) => ({
     id: padId(201 + i),
@@ -253,6 +274,13 @@ export function createEvergreenSeed(): LocalDatabase {
     implementationStart: "2026-01-15",
     implementationEnd: "2027-01-14",
     serviceCoordinator: "Ashley Allen",
+    sex: "F",
+    medicaidStatus: "yes",
+    specializedDiet: "No concentrated sweets. Nut allergy.",
+    specializedMedical: "Seizure protocol. Wheelchair for community distances.",
+    behaviorSupports: "None",
+    dailyActivities: "Day habilitation, weekdays",
+    visitHours: "Weekdays after 4:00 p.m.; weekends by appointment",
     guardians: [
       {
         name: "Jonathan Williams",
@@ -265,6 +293,7 @@ export function createEvergreenSeed(): LocalDatabase {
   };
   const jodieRecord = individuals.find((p) => p.id === jodie.id);
   if (jodieRecord) jodieRecord.profile = jodieProfile;
+  attachSurveyProfiles(individuals);
   const jodieV2 = versions.find((v) => {
     const doc = documents.find((d) => d.id === v.documentId);
     return doc?.title === "Jodie Williams · PCSP 2026" && v.versionLabel === "v2";
@@ -418,7 +447,132 @@ export function createEvergreenSeed(): LocalDatabase {
       }),
     ),
     ...buildMonthlySeed(sites, individuals),
+    siteReviews: buildSiteReviewSeed(sites),
   };
+}
+
+function attachSurveyProfiles(people: IndividualRecord[]) {
+  const extras: Record<string, Partial<IndividualProfile>> = {
+    "Brandon Miller": {
+      legalName: "Brandon Miller",
+      goesBy: "Brandon",
+      dmhId: "110312",
+      diagnosis: "Mild intellectual disability",
+      waiver: "Comprehensive Residential",
+      address: "3201 Pompey Drive",
+      sex: "M",
+      medicaidStatus: "yes",
+      specializedDiet: "None",
+      specializedMedical: "Gait belt for transfers.",
+      behaviorSupports: "None",
+      dailyActivities: "Community employment, weekdays",
+      visitHours: "Evenings after 5:00 p.m.",
+      serviceCoordinator: "Jason Briscoe",
+    },
+    "Sylvester Jones": {
+      legalName: "Sylvester Jones",
+      goesBy: "Sylvester",
+      dmhId: "110418",
+      diagnosis: "Unspecified intellectual disability",
+      waiver: "Comprehensive Residential",
+      address: "1840 Oakwood Lane",
+      sex: "M",
+      medicaidStatus: "ida",
+      specializedDiet: "Texture-modified diet. No thin liquids.",
+      specializedMedical: "Enteral feeding support.",
+      behaviorSupports: "Positive behavior supports on file",
+      dailyActivities: "Day habilitation, weekdays",
+      visitHours: "Weekends 10:00 a.m. to 2:00 p.m.",
+      serviceCoordinator: "Jason Briscoe",
+    },
+    "Maya Johnson": {
+      legalName: "Maya Johnson",
+      goesBy: "Maya",
+      dmhId: "110509",
+      diagnosis: "Moderate intellectual disability",
+      waiver: "Comprehensive Residential",
+      address: "1840 Oakwood Lane",
+      sex: "F",
+      medicaidStatus: "yes",
+      specializedDiet: "None",
+      specializedMedical: "Shower chair. Fall risk in wet areas.",
+      behaviorSupports: "None",
+      dailyActivities: "Volunteer site, Tuesday and Thursday",
+      visitHours: "Weekdays after 3:00 p.m.",
+      serviceCoordinator: "Ashley Allen",
+    },
+  };
+  for (const person of people) {
+    const extra = extras[person.fullName];
+    if (!extra) continue;
+    person.profile = {
+      legalName: person.fullName,
+      goesBy: person.fullName.split(" ")[0] ?? person.fullName,
+      dmhId: "",
+      diagnosis: "",
+      waiver: "",
+      address: "",
+      phone: "",
+      language: "English",
+      implementationStart: "",
+      implementationEnd: "",
+      serviceCoordinator: "",
+      guardians: [],
+      sex: "",
+      medicaidStatus: "",
+      specializedDiet: "",
+      specializedMedical: "",
+      behaviorSupports: "",
+      dailyActivities: "",
+      visitHours: "",
+      ...person.profile,
+      ...extra,
+    };
+  }
+}
+
+function buildSiteReviewSeed(sites: SiteRecord[]): SiteReview[] {
+  return sites.map((site, i) => {
+    const blank = blankSiteReview({
+      id: padId(1501 + i),
+      agencyId: site.agencyId,
+      siteId: site.id,
+      updatedAt: "2026-07-15T16:00:00.000Z",
+    });
+    if (site.name !== "Maple House") return blank;
+    const complete = applyWellWaterDefault(
+      {
+        ...blank,
+        reviewerName: "Sarah Mitchell",
+        supportCoordinator: "Jason Briscoe",
+        reviewedOn: "2026-07-15",
+        providerOwnedControlled: true,
+        heightenedScrutiny: false,
+        meetsIndividualNeeds: true,
+        part2Verified: true,
+        lines: mergeSiteReviewLines(
+          blank.lines.map((line) => ({
+            ...line,
+            status: line.id === "int-well-water" ? "na" : "satisfactory",
+          })),
+        ),
+      },
+      {
+        serviceType: site.serviceType ?? "ISL",
+        staffed24h: Boolean(site.staffed24h),
+        overnightSleepStaff: Boolean(site.overnightSleepStaff),
+        wellWater: Boolean(site.wellWater),
+        lastWaterTestOn: site.lastWaterTestOn ?? "",
+        sitePhone: site.sitePhone ?? "",
+        contactName: site.contactName ?? "",
+        contactPhone: site.contactPhone ?? "",
+        city: site.city ?? "",
+        county: site.county ?? "",
+        zip: site.zip ?? "",
+      },
+    );
+    return complete;
+  });
 }
 
 function buildMonthlySeed(

@@ -14,6 +14,13 @@ import {
   type MonthlyDueSettings,
   type MonthlyWorkspace,
 } from "./monthlyChecks";
+import {
+  canEditSiteReview,
+  isSiteReviewInPlace,
+  normalizeSiteFacts,
+  type SiteFacts,
+  type SiteReview,
+} from "./siteReview";
 
 export const AGENCY_WIDE_ROLE_KEYS = [
   "administrator",
@@ -63,7 +70,7 @@ export function sitesVisibleTo<T extends { id: string }>(
 
 export type PersonalWorkItem = {
   id: string;
-  kind: "requirement" | "acknowledgment" | "training" | "review" | "monthly";
+  kind: "requirement" | "acknowledgment" | "training" | "review" | "monthly" | "site_review";
   title: string;
   detail: string;
   tone: "overdue" | "due" | "review";
@@ -87,8 +94,9 @@ export function personalQueue(input: {
   canApprove: boolean;
   monthly?: MonthlyWorkspace;
   individuals?: { id: string; name: string; site: string }[];
-  sites?: { id: string; name: string }[];
+  sites?: Array<{ id: string; name: string } & Partial<SiteFacts>>;
   monthlyDue?: MonthlyDueSettings;
+  siteReviews?: SiteReview[];
   limit?: number;
 }): PersonalWorkItem[] {
   const limit = input.limit ?? 12;
@@ -170,6 +178,22 @@ export function personalQueue(input: {
           siteName: site.name,
         });
       }
+    }
+  }
+
+  if (canEditSiteReview(input.session.roleKey) && input.sites) {
+    for (const site of input.sites) {
+      const review = input.siteReviews?.find((row) => row.siteId === site.id);
+      const facts = normalizeSiteFacts(site);
+      if (isSiteReviewInPlace(review, facts, today)) continue;
+      push({
+        id: `site-review-${site.id}`,
+        kind: "site_review",
+        title: "Confirm site-review checks are in place",
+        detail: `${site.name} · DPM environmental pack`,
+        tone: "overdue",
+        siteName: site.name,
+      });
     }
   }
 

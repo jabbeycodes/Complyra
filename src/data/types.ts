@@ -39,12 +39,25 @@ export interface Program {
   name: string;
 }
 
+export type SiteServiceType = "ISL" | "GH" | "SL" | "DH" | "CN" | "ISD";
+
 export interface SiteRecord {
   id: string;
   agencyId: string;
   programId: string;
   name: string;
   address: string;
+  serviceType?: SiteServiceType;
+  staffed24h?: boolean;
+  overnightSleepStaff?: boolean;
+  wellWater?: boolean;
+  lastWaterTestOn?: string;
+  sitePhone?: string;
+  contactName?: string;
+  contactPhone?: string;
+  city?: string;
+  county?: string;
+  zip?: string;
 }
 
 export interface Profile {

@@ -19,6 +19,9 @@ export interface GuardianContact {
   preferredContact: string;
 }
 
+export type SexCode = "" | "M" | "F" | "X";
+export type MedicaidStatus = "" | "yes" | "no" | "ida" | "cd_only";
+
 export interface IndividualProfile {
   legalName: string;
   goesBy: string;
@@ -32,6 +35,13 @@ export interface IndividualProfile {
   implementationEnd: string;
   serviceCoordinator: string;
   guardians: GuardianContact[];
+  sex: SexCode;
+  medicaidStatus: MedicaidStatus;
+  specializedDiet: string;
+  specializedMedical: string;
+  behaviorSupports: string;
+  dailyActivities: string;
+  visitHours: string;
 }
 
 export interface ObligationItem {
@@ -152,6 +162,16 @@ export const blankRnFields = {
   discontinueTitle: null as string | null,
 };
 
+const SURVEY_PROFILE_DEFAULTS = {
+  sex: "" as SexCode,
+  medicaidStatus: "" as MedicaidStatus,
+  specializedDiet: "",
+  specializedMedical: "",
+  behaviorSupports: "",
+  dailyActivities: "",
+  visitHours: "",
+};
+
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
   return {
     legalName: person.fullName,
@@ -166,6 +186,26 @@ export function emptyProfile(person: IndividualRecord): IndividualProfile {
     implementationEnd: "",
     serviceCoordinator: "",
     guardians: [],
+    ...SURVEY_PROFILE_DEFAULTS,
+  };
+}
+
+export function normalizeProfile(
+  person: IndividualRecord,
+  profile?: Partial<IndividualProfile> | null,
+): IndividualProfile {
+  const base = emptyProfile(person);
+  return {
+    ...base,
+    ...profile,
+    guardians: profile?.guardians ?? base.guardians,
+    sex: profile?.sex ?? base.sex,
+    medicaidStatus: profile?.medicaidStatus ?? base.medicaidStatus,
+    specializedDiet: profile?.specializedDiet ?? "",
+    specializedMedical: profile?.specializedMedical ?? "",
+    behaviorSupports: profile?.behaviorSupports ?? "",
+    dailyActivities: profile?.dailyActivities ?? "",
+    visitHours: profile?.visitHours ?? "",
   };
 }
 
