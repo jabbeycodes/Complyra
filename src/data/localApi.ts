@@ -33,6 +33,7 @@ import { generateTempPassword } from "./agencyCode";
 import type {
   AcknowledgmentPacket,
   AppRole,
+  AssignTrainingInput,
   DocumentVersion,
   IndividualRecord,
   CreateAgencyInput,
@@ -40,11 +41,20 @@ import type {
   AgencyStatus,
   InviteMemberInput,
   InviteMemberResult,
+  LegacyLineSignoffInput,
   LoginInput,
   PacketDetail,
   PendingAgency,
+  RequirementLineSignoffInput,
   RequirementRecord,
   SessionUser,
+  StaffClearanceRow,
+  StaffTrainingProfile,
+  TrainingRequirement,
+  TrainingSignoff,
+  TrainingCountersignature,
+  TrainingRequirementView,
+  TrainingTopic,
   UploadDocumentInput,
 } from "./types";
 import {
@@ -70,6 +80,21 @@ import {
   type ObligationItem,
   type PlanStackView,
 } from "./planStack";
+// LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
+import {
+  TRAINING_TOPICS,
+  TRAINING_TOPIC_BY_ID,
+  individualChecklistTopics,
+  planUpdateRetrainingTopicIds,
+  renderTopicTitle,
+  siteChecklistTopics,
+} from "../features/training/topics";
+import {
+  computeNextDueOn,
+  evaluateInRatioGate,
+  resolveRequirementStatus,
+  sumHours,
+} from "../features/training/gate";
 import {
   allLinesInitialed,
   applyDailyMedDrop,
@@ -263,8 +288,15 @@ export interface ComplyraApi {
     checklistId: string,
     role: "staff" | "hm",
     signatureName: string,
+    // LIFEPATH-P2: optional signature mark captured by the SignaturePad pattern (backward compat).
+    opts?: { signatureMark?: string },
   ): Promise<void>;
-  initialTrainingLine(checklistId: string, lineId: string): Promise<void>;
+  initialTrainingLine(
+    checklistId: string,
+    lineId: string,
+    // LIFEPATH-P2: optional full sign-off detail for the line (backward compat).
+    signoff?: LegacyLineSignoffInput,
+  ): Promise<void>;
   addAdaptiveEquipment(individualId: string, name: string): Promise<void>;
   removeAdaptiveEquipment(equipmentId: string): Promise<void>;
   checkEquipmentLog(input: {
@@ -328,6 +360,30 @@ export interface ComplyraApi {
     effectiveOn?: string;
   }): Promise<{ id: string; name: string }>;
   // ===== LIFEPATH-P2 API (training engine) =====
+  /** All training topics (checklist verbatim + A1–A6 supplemental sets). */
+  listTrainingTopics(scope?: "agency" | "site"): Promise<TrainingTopic[]>;
+  /**
+   * Bulk-generate training requirements for a staff member (checklist per site,
+   * section 6 per individual, plan-version retraining, corrective or delegation sets).
+   * Idempotent: existing open requirements for the same topic/user/individual are skipped.
+   */
+  assignTraining(input: AssignTrainingInput): Promise<TrainingRequirement[]>;
+  /** Per-staff compliance profile incl. hours, gate status, and countersignatures. */
+  getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile>;
+  /** "Not cleared to work alone" list across the agency (optionally filtered to a site). */
+  listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]>;
+  /** Initial a single requirement line with the full sign-off payload (typed initials, not a checkmark). */
+  initialRequirementLine(requirementId: string, input: RequirementLineSignoffInput): Promise<void>;
+  /** Mark a requirement line N/A with a written reason (no blanks allowed). */
+  waiveRequirementLine(requirementId: string, reason: string): Promise<void>;
+  /** Whole-checklist countersignature: staff signs own sheet, then the house manager countersigns. */
+  signStaffChecklist(input: {
+    userId: string;
+    siteId: string;
+    role: "staff" | "hm";
+    signatureName: string;
+    signatureMark?: string;
+  }): Promise<void>;
   // ===== LIFEPATH-P3 API (delegation forms) =====
   // ===== LIFEPATH-P4 API (certificates) =====
   // ===== LIFEPATH-P5 API (HM weekly checklist) =====
@@ -1634,6 +1690,11 @@ export class LocalApi implements ComplyraApi {
     );
     if (version && version.status === "pending_review" && !stillPending) {
       activateVersion(this.store, session, version);
+      // LIFEPATH-P2 hook: targeted retraining for staff assigned to this individual.
+      const individual = this.store.db.individuals.find(
+        (row) => row.id === item.individualId,
+      );
+      if (individual) await this.p2GeneratePlanRetraining(session, individual, version);
     }
     log(
       this.store,
@@ -1850,6 +1911,8 @@ export class LocalApi implements ComplyraApi {
     )) {
       syncPacketRoster(this.store, packet);
     }
+    // LIFEPATH-P2 hook: auto-generate the full in-home checklist for the newly assigned staff.
+    await this.p2GenerateForNewAssignment(session, userId, individual);
     ensurePlanCollections(this.store);
     for (const item of this.store.db.obligations.filter(
       (row) => row.individualId === individualId,
@@ -2357,6 +2420,8 @@ export class LocalApi implements ComplyraApi {
     checklistId: string,
     role: "staff" | "hm",
     signatureName: string,
+    // LIFEPATH-P2: optional signature mark (SignaturePad pattern); omitted = legacy behavior.
+    opts?: { signatureMark?: string },
   ) {
     const session = assertSession(this.store);
     const row = this.store.db.trainingChecklists.find((item) => item.id === checklistId);
@@ -2373,6 +2438,13 @@ export class LocalApi implements ComplyraApi {
       }
       row.staffSignedAt = now;
       row.staffSignatureName = signatureName.trim();
+      // LIFEPATH-P2: keep the signature mark alongside the legacy checklist.
+      if (opts?.signatureMark) {
+        this.p2Collections().trainingLegacyChecklistMarks[checklistId] = {
+          ...this.p2Collections().trainingLegacyChecklistMarks[checklistId],
+          staffMark: opts.signatureMark,
+        };
+      }
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
@@ -2383,6 +2455,13 @@ export class LocalApi implements ComplyraApi {
       if (row.hmSignedAt) throw new Error("House manager already signed.");
       row.hmSignedAt = now;
       row.hmSignatureName = signatureName.trim();
+      // LIFEPATH-P2: keep the signature mark alongside the legacy checklist.
+      if (opts?.signatureMark) {
+        this.p2Collections().trainingLegacyChecklistMarks[checklistId] = {
+          ...this.p2Collections().trainingLegacyChecklistMarks[checklistId],
+          hmMark: opts.signatureMark,
+        };
+      }
     }
     log(
       this.store,
@@ -2395,7 +2474,12 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
-  async initialTrainingLine(checklistId: string, lineId: string) {
+  async initialTrainingLine(
+    checklistId: string,
+    lineId: string,
+    // LIFEPATH-P2: optional full sign-off detail; omitted = legacy title+date behavior.
+    signoff?: LegacyLineSignoffInput,
+  ) {
     const session = assertSession(this.store);
     const row = this.store.db.trainingChecklists.find((item) => item.id === checklistId);
     if (!row) throw new Error("Training checklist not found.");
@@ -2409,6 +2493,13 @@ export class LocalApi implements ComplyraApi {
     if (!line) throw new Error("Training item not found.");
     if (line.initialedAt) return;
     line.initialedAt = new Date().toISOString();
+    // LIFEPATH-P2: store the extended sign-off detail alongside the legacy line.
+    if (signoff && (signoff.initials || signoff.trainerName)) {
+      this.p2Collections().trainingLegacyLineSignoffs[`${checklistId}:${lineId}`] = {
+        ...signoff,
+        initialedAt: line.initialedAt,
+      };
+    }
     await persistMeta(this.store);
   }
 
@@ -3046,6 +3137,552 @@ export class LocalApi implements ComplyraApi {
     hydrated = true;
   }
   // ===== LIFEPATH-P2 IMPL (training engine) =====
+  /**
+   * In-memory collections for the training engine. Stored as plain properties
+   * on store.db (outside the shared LocalDatabase shape so seed.ts is untouched);
+   * lazily initialized and serialized by persistMeta like everything else.
+   */
+  private p2Collections(): {
+    trainingRequirements: TrainingRequirement[];
+    trainingSignoffs: TrainingSignoff[];
+    trainingCountersignatures: TrainingCountersignature[];
+    trainingLegacyLineSignoffs: Record<string, LegacyLineSignoffInput & { initialedAt: string }>;
+    trainingLegacyChecklistMarks: Record<string, { staffMark?: string; hmMark?: string }>;
+  } {
+    const db = this.store.db as unknown as {
+      trainingRequirements?: TrainingRequirement[];
+      trainingSignoffs?: TrainingSignoff[];
+      trainingCountersignatures?: TrainingCountersignature[];
+      trainingLegacyLineSignoffs?: Record<string, LegacyLineSignoffInput & { initialedAt: string }>;
+      trainingLegacyChecklistMarks?: Record<string, { staffMark?: string; hmMark?: string }>;
+    };
+    db.trainingRequirements ??= [];
+    db.trainingSignoffs ??= [];
+    db.trainingCountersignatures ??= [];
+    db.trainingLegacyLineSignoffs ??= {};
+    db.trainingLegacyChecklistMarks ??= {};
+    return db as {
+      trainingRequirements: TrainingRequirement[];
+      trainingSignoffs: TrainingSignoff[];
+      trainingCountersignatures: TrainingCountersignature[];
+      trainingLegacyLineSignoffs: Record<string, LegacyLineSignoffInput & { initialedAt: string }>;
+      trainingLegacyChecklistMarks: Record<string, { staffMark?: string; hmMark?: string }>;
+    };
+  }
+
+  /** Internal generator — no permission check; callers gate access. */
+  private p2GenerateTraining(input: {
+    agencyId: string;
+    userId: string;
+    siteId: string | null;
+    individualId: string | null;
+    source: TrainingRequirement["source"];
+    planVersionId?: string | null;
+    delegationId?: string | null;
+    topicIds: string[];
+    dueOn?: string | null;
+  }): TrainingRequirement[] {
+    const coll = this.p2Collections();
+    const now = new Date().toISOString();
+    const created: TrainingRequirement[] = [];
+    for (const topicId of input.topicIds) {
+      if (!TRAINING_TOPIC_BY_ID[topicId]) continue;
+      const duplicate = coll.trainingRequirements.some(
+        (row) =>
+          row.agencyId === input.agencyId &&
+          row.userId === input.userId &&
+          row.topicId === topicId &&
+          (row.siteId ?? null) === (input.siteId ?? null) &&
+          (row.individualId ?? null) === (input.individualId ?? null),
+      );
+      if (duplicate) continue;
+      const row: TrainingRequirement = {
+        id: crypto.randomUUID(),
+        agencyId: input.agencyId,
+        userId: input.userId,
+        topicId,
+        individualId: input.individualId ?? null,
+        siteId: input.siteId ?? null,
+        source: input.source,
+        planVersionId: input.planVersionId ?? null,
+        delegationId: input.delegationId ?? null,
+        status: "pending",
+        dueOn: input.dueOn ?? null,
+        createdAt: now,
+      };
+      coll.trainingRequirements.push(row);
+      created.push(row);
+    }
+    return created;
+  }
+
+  /** LIFEPATH-P2 hook target: full checklist when a staff member is assigned. */
+  private async p2GenerateForNewAssignment(
+    session: SessionUser,
+    userId: string,
+    individual: IndividualRecord,
+  ) {
+    const siteTopics = siteChecklistTopics();
+    const individualTopics = individualChecklistTopics();
+    const siteCreated = this.p2GenerateTraining({
+      agencyId: session.agencyId,
+      userId,
+      siteId: individual.siteId,
+      individualId: null,
+      source: "checklist",
+      topicIds: siteTopics.map((topic) => topic.id),
+    });
+    const individualCreated = this.p2GenerateTraining({
+      agencyId: session.agencyId,
+      userId,
+      siteId: individual.siteId,
+      individualId: individual.id,
+      source: "checklist",
+      topicIds: individualTopics.map((topic) => topic.id),
+    });
+    const total = siteCreated.length + individualCreated.length;
+    if (total > 0) {
+      log(
+        this.store,
+        session,
+        "training.assigned",
+        `${total} training lines generated for ${ownerName(this.store, userId)} at ${individual.fullName}`,
+        "training_requirement",
+      );
+    }
+  }
+
+  /** LIFEPATH-P2 hook target: targeted retraining when a plan version goes active. */
+  private async p2GeneratePlanRetraining(
+    session: SessionUser,
+    individual: IndividualRecord,
+    version: DocumentVersion,
+  ) {
+    const userIds = assignedUserIds(this.store, individual);
+    if (userIds.length === 0) return;
+    let total = 0;
+    for (const userId of userIds) {
+      total += this.p2GenerateTraining({
+        agencyId: session.agencyId,
+        userId,
+        siteId: individual.siteId,
+        individualId: individual.id,
+        source: "plan_version",
+        planVersionId: version.id,
+        topicIds: planUpdateRetrainingTopicIds(),
+      }).length;
+    }
+    if (total > 0) {
+      log(
+        this.store,
+        session,
+        "training.retraining_assigned",
+        `${total} retraining lines generated for a new active plan version (${individual.fullName})`,
+        "document_version",
+        version.id,
+      );
+    }
+  }
+
+  async listTrainingTopics(scope?: "agency" | "site"): Promise<TrainingTopic[]> {
+    assertSession(this.store);
+    return scope ? TRAINING_TOPICS.filter((topic) => topic.scope === scope) : [...TRAINING_TOPICS];
+  }
+
+  async assignTraining(input: AssignTrainingInput): Promise<TrainingRequirement[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "hr.view_staff");
+    const profile = this.store.db.profiles.find((row) => row.id === input.userId);
+    if (!profile) throw new Error("Staff member not found.");
+    const membership = this.store.db.memberships.find(
+      (row) => row.userId === input.userId && row.agencyId === session.agencyId,
+    );
+    if (!membership) throw new Error("That staff member is not in this agency.");
+    const siteId = input.siteId ?? null;
+    const individualId = input.individualId ?? null;
+    let created: TrainingRequirement[];
+    if (input.source === "checklist" && !input.topicIds) {
+      // Sections 1–5 once per staff per site; section 6 once per staff per individual.
+      created = this.p2GenerateTraining({
+        agencyId: session.agencyId,
+        userId: input.userId,
+        siteId,
+        individualId: null,
+        source: "checklist",
+        topicIds: siteChecklistTopics().map((topic) => topic.id),
+        dueOn: input.dueOn ?? null,
+      });
+      if (individualId) {
+        created = created.concat(
+          this.p2GenerateTraining({
+            agencyId: session.agencyId,
+            userId: input.userId,
+            siteId,
+            individualId,
+            source: "checklist",
+            topicIds: individualChecklistTopics().map((topic) => topic.id),
+            dueOn: input.dueOn ?? null,
+          }),
+        );
+      }
+    } else {
+      const topicIds = input.topicIds ?? [];
+      if (topicIds.length === 0) throw new Error("Choose at least one training topic.");
+      created = this.p2GenerateTraining({
+        agencyId: session.agencyId,
+        userId: input.userId,
+        siteId,
+        individualId,
+        source: input.source,
+        planVersionId: input.planVersionId ?? null,
+        delegationId: input.delegationId ?? null,
+        topicIds,
+        dueOn: input.dueOn ?? null,
+      });
+    }
+    log(
+      this.store,
+      session,
+      "training.assigned",
+      `${created.length} training lines assigned to ${profile.fullName} (${input.source})`,
+      "training_requirement",
+    );
+    await persistMeta(this.store);
+    return created;
+  }
+
+  private p2SignoffFor(requirementId: string): TrainingSignoff | null {
+    return (
+      this.p2Collections().trainingSignoffs.find((row) => row.requirementId === requirementId) ??
+      null
+    );
+  }
+
+  private p2RequirementView(
+    requirement: TrainingRequirement,
+    today: string,
+  ): TrainingRequirementView {
+    const topic = TRAINING_TOPIC_BY_ID[requirement.topicId];
+    const individual = requirement.individualId
+      ? (this.store.db.individuals.find((row) => row.id === requirement.individualId) ?? null)
+      : null;
+    const signoff = this.p2SignoffFor(requirement.id);
+    return {
+      ...requirement,
+      topicTitle: renderTopicTitle(topic, individual?.fullName),
+      section: topic?.section ?? 5,
+      perIndividual: topic?.perIndividual ?? false,
+      individualName: individual?.fullName ?? null,
+      signoff,
+      resolvedStatus: resolveRequirementStatus(requirement.status, requirement.dueOn, today),
+    };
+  }
+
+  async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
+    const session = assertSession(this.store);
+    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    const profile = this.store.db.profiles.find((row) => row.id === userId);
+    if (!profile) throw new Error("Staff member not found.");
+    const today = new Date().toISOString().slice(0, 10);
+    const coll = this.p2Collections();
+    const requirements = coll.trainingRequirements
+      .filter((row) => row.agencyId === session.agencyId && row.userId === userId)
+      .map((row) => this.p2RequirementView(row, today));
+    const countersignatures = coll.trainingCountersignatures.filter(
+      (row) => row.agencyId === session.agencyId && row.userId === userId,
+    );
+    const siteIds = [...new Set(requirements.map((row) => row.siteId).filter(Boolean))] as string[];
+    const siteNames = siteIds.map(
+      (siteId) => this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site",
+    );
+    const individualIds = [
+      ...new Set(requirements.map((row) => row.individualId).filter(Boolean)),
+    ] as string[];
+    const individualNames = individualIds
+      .map((id) => this.store.db.individuals.find((row) => row.id === id))
+      .filter((row): row is IndividualRecord => Boolean(row))
+      .map((row) => ({ id: row.id, fullName: row.fullName }));
+    const signoffs = requirements
+      .map((row) => row.signoff)
+      .filter((row): row is TrainingSignoff => Boolean(row));
+    const { hoursTotal, hoursWithHm } = sumHours(
+      signoffs.map((row) => ({
+        hoursTotal: row.hoursTotal,
+        hoursWithHm: row.hoursWithHm,
+        na: row.na,
+      })),
+    );
+    let complete = 0;
+    let pending = 0;
+    let overdue = 0;
+    let waived = 0;
+    for (const row of requirements) {
+      if (row.resolvedStatus === "complete") complete += 1;
+      else if (row.resolvedStatus === "waived_na") waived += 1;
+      else if (row.resolvedStatus === "overdue") overdue += 1;
+      else pending += 1;
+    }
+    const required = complete + pending + overdue;
+    // Countersignature is per site: the gate needs every assigned site countersigned.
+    let staffCountersigned = siteIds.length > 0;
+    let hmCountersigned = siteIds.length > 0;
+    for (const siteId of siteIds) {
+      const counter = countersignatures.find((row) => row.siteId === siteId);
+      if (!counter?.staffSignedAt) staffCountersigned = false;
+      if (!counter?.hmSignedAt) hmCountersigned = false;
+    }
+    const gate = evaluateInRatioGate({
+      signoffs: signoffs.map((row) => ({
+        hoursTotal: row.hoursTotal,
+        hoursWithHm: row.hoursWithHm,
+        na: row.na,
+      })),
+      requiredTotal: required,
+      completeCount: complete,
+      pendingCount: pending,
+      overdueCount: overdue,
+      staffCountersigned,
+      hmCountersigned,
+    });
+    const reasons = [...gate.reasons];
+    if (requirements.length === 0) reasons.unshift("No training assigned yet");
+    return {
+      userId,
+      fullName: profile.fullName,
+      siteNames,
+      individualNames,
+      requirements,
+      countersignatures,
+      hoursTotal: gate.hoursTotal,
+      hoursWithHm: gate.hoursWithHm,
+      counts: { required, complete, pending, overdue, waived },
+      clearedForInRatio: gate.cleared && requirements.length > 0,
+      gateReasons: reasons,
+      certificates: [],
+    };
+  }
+
+  async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "hr.view_staff");
+    const coll = this.p2Collections();
+    const userIds = [
+      ...new Set(
+        coll.trainingRequirements
+          .filter(
+            (row) =>
+              row.agencyId === session.agencyId && (!siteId || row.siteId === siteId),
+          )
+          .map((row) => row.userId),
+      ),
+    ];
+    const rows: StaffClearanceRow[] = [];
+    for (const userId of userIds) {
+      const profile = await this.getStaffTrainingProfile(userId);
+      rows.push({
+        userId,
+        fullName: profile.fullName,
+        siteName: siteId
+          ? (this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site")
+          : profile.siteNames.join(", ") || "—",
+        clearedForInRatio: profile.clearedForInRatio,
+        gateReasons: profile.gateReasons,
+        pendingCount: profile.counts.pending,
+        overdueCount: profile.counts.overdue,
+        hoursTotal: profile.hoursTotal,
+        hoursWithHm: profile.hoursWithHm,
+      });
+    }
+    rows.sort((a, b) => Number(a.clearedForInRatio) - Number(b.clearedForInRatio));
+    return rows;
+  }
+
+  async initialRequirementLine(
+    requirementId: string,
+    input: RequirementLineSignoffInput,
+  ): Promise<void> {
+    const session = assertSession(this.store);
+    const coll = this.p2Collections();
+    const requirement = coll.trainingRequirements.find(
+      (row) => row.id === requirementId && row.agencyId === session.agencyId,
+    );
+    if (!requirement) throw new Error("Training line not found.");
+    if (session.userId !== requirement.userId) assertCan(session, "hr.view_staff");
+    if (this.p2SignoffFor(requirementId)) {
+      throw new Error("This training line is already initialed.");
+    }
+    const initials = input.initials.trim();
+    if (!initials) throw new Error("Type your initials — checkmarks are not allowed.");
+    const trainerName = input.trainerName.trim();
+    if (!trainerName) throw new Error("Name the trainer who delivered this training.");
+    const hoursTotal = Math.max(0, input.hoursTotal ?? 0);
+    const hoursWithHm = Math.max(0, input.hoursWithHm ?? 0);
+    if (hoursWithHm > hoursTotal) {
+      throw new Error("Hours with the house manager cannot exceed total hours.");
+    }
+    const signedOn = (input.signedOn ?? new Date().toISOString()).slice(0, 10);
+    const now = new Date().toISOString();
+    coll.trainingSignoffs.push({
+      id: crypto.randomUUID(),
+      requirementId,
+      initials,
+      signedOn,
+      na: false,
+      naReason: null,
+      trainerName,
+      method: input.method ?? null,
+      hoursTotal,
+      hoursWithHm,
+      competencyText: input.competencyText?.trim() || null,
+      observerName: input.observerName?.trim() || null,
+      observerSignature: input.observerSignature?.trim() || null,
+      evidenceRef: input.evidenceRef?.trim() || null,
+      renewalRule: input.renewalRule?.trim() || null,
+      nextDueOn:
+        input.nextDueOn?.slice(0, 10) ??
+        computeNextDueOn(input.renewalRule?.trim() ?? null, signedOn),
+      createdAt: now,
+    });
+    requirement.status = "complete";
+    log(
+      this.store,
+      session,
+      "training.line_initialed",
+      `${initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)}`,
+      "training_requirement",
+      requirementId,
+    );
+    await persistMeta(this.store);
+  }
+
+  async waiveRequirementLine(requirementId: string, reason: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "hr.view_staff");
+    const coll = this.p2Collections();
+    const requirement = coll.trainingRequirements.find(
+      (row) => row.id === requirementId && row.agencyId === session.agencyId,
+    );
+    if (!requirement) throw new Error("Training line not found.");
+    if (this.p2SignoffFor(requirementId)) {
+      throw new Error("This training line is already initialed.");
+    }
+    const trimmed = reason.trim();
+    if (!trimmed) throw new Error("Write the reason this line is N/A.");
+    const now = new Date().toISOString();
+    coll.trainingSignoffs.push({
+      id: crypto.randomUUID(),
+      requirementId,
+      initials: "N/A",
+      signedOn: now.slice(0, 10),
+      na: true,
+      naReason: trimmed,
+      trainerName: session.fullName,
+      method: null,
+      hoursTotal: 0,
+      hoursWithHm: 0,
+      competencyText: null,
+      observerName: null,
+      observerSignature: null,
+      evidenceRef: null,
+      renewalRule: null,
+      nextDueOn: null,
+      createdAt: now,
+    });
+    requirement.status = "waived_na";
+    log(
+      this.store,
+      session,
+      "training.line_waived",
+      `N/A: “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)} — ${trimmed}`,
+      "training_requirement",
+      requirementId,
+    );
+    await persistMeta(this.store);
+  }
+
+  async signStaffChecklist(input: {
+    userId: string;
+    siteId: string;
+    role: "staff" | "hm";
+    signatureName: string;
+    signatureMark?: string;
+  }): Promise<void> {
+    const session = assertSession(this.store);
+    const coll = this.p2Collections();
+    const site = this.store.db.sites.find((row) => row.id === input.siteId);
+    if (!site) throw new Error("Site not found.");
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = coll.trainingRequirements
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId === input.userId &&
+          row.siteId === input.siteId,
+      )
+      .map((row) => this.p2RequirementView(row, today));
+    if (lines.length === 0) throw new Error("No training lines assigned for this site yet.");
+    let counter = coll.trainingCountersignatures.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.userId === input.userId &&
+        row.siteId === input.siteId,
+    );
+    if (!counter) {
+      counter = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        userId: input.userId,
+        siteId: input.siteId,
+        staffSignatureName: null,
+        staffSignatureMark: null,
+        staffSignedAt: null,
+        hmSignatureName: null,
+        hmSignatureMark: null,
+        hmSignedAt: null,
+      };
+      coll.trainingCountersignatures.push(counter);
+    }
+    const name = input.signatureName.trim();
+    if (!name) throw new Error("Type your name to sign.");
+    const now = new Date().toISOString();
+    if (input.role === "staff") {
+      if (session.userId !== input.userId) {
+        throw new Error("Staff must sign their own training sheet.");
+      }
+      if (counter.staffSignedAt) throw new Error("This sheet is already signed by staff.");
+      const open = lines.filter(
+        (row) => row.resolvedStatus !== "complete" && row.resolvedStatus !== "waived_na",
+      );
+      if (open.length > 0) {
+        throw new Error(
+          `Initial or N/A every training line before signing (${open.length} still open).`,
+        );
+      }
+      counter.staffSignedAt = now;
+      counter.staffSignatureName = name;
+      counter.staffSignatureMark = input.signatureMark ?? null;
+    } else {
+      if (!canSignTrainingAsHm(session.roleKey)) {
+        throw new Error("Only a house manager can counter-sign training.");
+      }
+      if (!counter.staffSignedAt) {
+        throw new Error("Staff must sign this sheet before the house manager.");
+      }
+      if (counter.hmSignedAt) throw new Error("House manager already signed.");
+      counter.hmSignedAt = now;
+      counter.hmSignatureName = name;
+      counter.hmSignatureMark = input.signatureMark ?? null;
+    }
+    log(
+      this.store,
+      session,
+      "training.checklist_signed",
+      `${name} signed the training checklist for ${ownerName(this.store, input.userId)} at ${site.name} (${input.role})`,
+      "training_requirement",
+      counter.id,
+    );
+    await persistMeta(this.store);
+  }
   // ===== LIFEPATH-P3 IMPL (delegation forms) =====
   // ===== LIFEPATH-P4 IMPL (certificates) =====
   // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====

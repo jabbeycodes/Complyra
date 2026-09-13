@@ -84,6 +84,8 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   if (page === "Roles & access") return can(session, "members.assign_roles");
   // LIFEPATH-P2-PAGEVIS (training engine)
+  if (page === "Training")
+    return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
   // LIFEPATH-P3-PAGEVIS (delegation forms)
   // LIFEPATH-P4-PAGEVIS (certificates)
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)

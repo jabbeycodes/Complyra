@@ -283,6 +283,154 @@ export function normalizeUsername(value: string) {
 export { normalizeAgencyCode } from "./agencyCode";
 
 // ===== LIFEPATH-P2 TYPES (training engine) =====
+/** Section numbers of the LifePath in-home training checklist (section 6 repeats per individual). */
+export type TrainingSectionNumber = 1 | 2 | 3 | 4 | 5 | 6;
+export type TrainingTopicScope = "agency" | "site";
+/** "checklist" = the ~65 verbatim checklist topics; "supplemental" = A1-A6 sets from extraction notes. */
+export type TrainingTopicSourceKind = "checklist" | "supplemental";
+export interface TrainingTopic {
+  /** Stable seed id, e.g. "chk-1-03", "chk-6-11", "gt-07", "law-04", "cor-02". */
+  id: string;
+  section: TrainingSectionNumber;
+  /** Verbatim from the source document (checklist transcription or extraction notes). */
+  title: string;
+  /** True only for section 6 and per-individual supplemental sets (G-tube, acknowledgments). */
+  perIndividual: boolean;
+  scope: TrainingTopicScope;
+  /** True for reusable sets like the G-tube competency template (per Joshua's build decision). */
+  reusableTemplate: boolean;
+  source: TrainingTopicSourceKind;
+  /** Display set name, e.g. "In-home training checklist", "G-tube competency template". */
+  setName: string;
+}
+export type TrainingRequirementSource = "checklist" | "plan_version" | "corrective" | "delegation";
+export type TrainingRequirementStatus =
+  | "pending"
+  | "in_progress"
+  | "complete"
+  | "overdue"
+  | "waived_na";
+export type TrainingMethod = "shadowing" | "classroom" | "video" | "hands-on" | "reading";
+export interface TrainingRequirement {
+  id: string;
+  agencyId: string;
+  /** Staff member the requirement belongs to. */
+  userId: string;
+  topicId: string;
+  /** Set only for section-6 / per-individual topics. */
+  individualId: string | null;
+  siteId: string | null;
+  source: TrainingRequirementSource;
+  planVersionId: string | null;
+  delegationId: string | null;
+  /** "overdue" is derived on read when dueOn passes; the rest are stored. */
+  status: TrainingRequirementStatus;
+  dueOn: string | null;
+  createdAt: string;
+}
+export interface TrainingSignoff {
+  id: string;
+  requirementId: string;
+  /** Typed initials, NOT a checkmark. */
+  initials: string;
+  signedOn: string;
+  /** N/A allowed; no blanks — every line must be initialed or N/A. */
+  na: boolean;
+  naReason: string | null;
+  trainerName: string;
+  method: TrainingMethod | null;
+  hoursTotal: number;
+  hoursWithHm: number;
+  competencyText: string | null;
+  observerName: string | null;
+  observerSignature: string | null;
+  evidenceRef: string | null;
+  /** e.g. "annual" */
+  renewalRule: string | null;
+  nextDueOn: string | null;
+  createdAt: string;
+}
+export interface TrainingCountersignature {
+  id: string;
+  agencyId: string;
+  userId: string;
+  siteId: string;
+  staffSignatureName: string | null;
+  staffSignatureMark: string | null;
+  staffSignedAt: string | null;
+  hmSignatureName: string | null;
+  hmSignatureMark: string | null;
+  hmSignedAt: string | null;
+}
+/** Full per-line sign-off payload for a training requirement line. */
+export interface RequirementLineSignoffInput {
+  initials: string;
+  signedOn?: string;
+  trainerName: string;
+  method?: TrainingMethod;
+  hoursTotal?: number;
+  hoursWithHm?: number;
+  competencyText?: string;
+  observerName?: string;
+  observerSignature?: string;
+  evidenceRef?: string;
+  renewalRule?: string;
+  nextDueOn?: string;
+}
+/** Optional extra sign-off detail accepted by the legacy initialTrainingLine (backward compat). */
+export interface LegacyLineSignoffInput {
+  initials?: string;
+  trainerName?: string;
+  method?: TrainingMethod;
+  hoursTotal?: number;
+  hoursWithHm?: number;
+  notes?: string;
+}
+export interface AssignTrainingInput {
+  userId: string;
+  siteId?: string | null;
+  individualId?: string | null;
+  source: TrainingRequirementSource;
+  planVersionId?: string | null;
+  delegationId?: string | null;
+  /** Topic ids to generate; defaults to the full in-home checklist when source is "checklist". */
+  topicIds?: string[];
+  dueOn?: string | null;
+}
+export interface TrainingRequirementView extends TrainingRequirement {
+  topicTitle: string;
+  section: TrainingSectionNumber;
+  perIndividual: boolean;
+  individualName: string | null;
+  signoff: TrainingSignoff | null;
+  resolvedStatus: TrainingRequirementStatus;
+}
+export interface StaffTrainingProfile {
+  userId: string;
+  fullName: string;
+  siteNames: string[];
+  individualNames: { id: string; fullName: string }[];
+  requirements: TrainingRequirementView[];
+  countersignatures: TrainingCountersignature[];
+  hoursTotal: number;
+  hoursWithHm: number;
+  counts: { required: number; complete: number; pending: number; overdue: number; waived: number };
+  clearedForInRatio: boolean;
+  gateReasons: string[];
+  /** Extension point for Phase 4 (certificate tracking). */
+  certificates: never[];
+}
+export interface StaffClearanceRow {
+  userId: string;
+  fullName: string;
+  siteName: string;
+  clearedForInRatio: boolean;
+  gateReasons: string[];
+  pendingCount: number;
+  overdueCount: number;
+  hoursTotal: number;
+  hoursWithHm: number;
+}
 // ===== LIFEPATH-P3 TYPES (delegation forms) =====
 // ===== LIFEPATH-P4 TYPES (certificates) =====
 // ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
