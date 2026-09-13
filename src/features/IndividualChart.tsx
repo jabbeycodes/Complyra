@@ -30,6 +30,8 @@ import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
+// LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
+import MedInventoryCard from "./medInventory/MedInventoryCard";
 
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
@@ -290,6 +292,8 @@ export default function IndividualChart({
                 )}
               </article>
             ))}
+            {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
+            <MedInventoryCard individualId={individualId} />
           </section>
         )}
 

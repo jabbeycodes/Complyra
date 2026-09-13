@@ -3230,6 +3230,279 @@ export class HostedApi implements ComplyraApi {
   // ===== LIFEPATH-P4 HOSTED (certificates) =====
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
   // ===== LIFEPATH-P6 HOSTED (med inventory) =====
+  private async p6lib(): Promise<typeof import("./medInventory")> {
+    return await import("./medInventory");
+  }
+
+  private mapMedInventoryRecord(
+    row: Record<string, unknown>,
+  ): import("./types").MedInventoryRecord {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      individualId: row.individual_id as string,
+      medicationId: row.medication_id as string,
+      lowThresholdDays: Number(row.low_threshold_days ?? 7),
+      doseTimes: Array.isArray(row.dose_times)
+        ? (row.dose_times as string[])
+        : [],
+      reorderAcknowledgedOn: (row.reorder_acknowledged_on as string | null) ?? null,
+      updatedAt: (row.updated_at as string | null) ?? new Date().toISOString(),
+    };
+  }
+
+  private async p6medicationOrThrow(medicationId: string) {
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view medication inventory.");
+    }
+    const { data: row, error } = await this.client
+      .from("medications")
+      .select("*")
+      .eq("id", medicationId)
+      .single();
+    throwIf(error, "Medication not found.");
+    const med = mapMedication(row!);
+    if (med.agencyId !== session.agencyId) throw new Error("Medication not found.");
+    return { session, med };
+  }
+
+  private async p6inventoryViews(
+    session: SessionUser,
+    individualId: string,
+    today: string,
+  ): Promise<import("./types").MedInventoryView[]> {
+    const { projectMedInventory, compareMedInventory } = await this.p6lib();
+    const medsRes = await this.client
+      .from("medications")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId);
+    throwIf(medsRes.error, "Could not load medications.");
+    const meds = (medsRes.data ?? []).map(mapMedication);
+    const medIds = meds.map((med) => med.id);
+    const prnIds = meds.filter((med) => med.kind === "prn").map((med) => med.id);
+    const [invRes, delRes, prnRes] = await Promise.all([
+      medIds.length
+        ? this.client
+            .from("med_inventory")
+            .select("*")
+            .eq("agency_id", session.agencyId)
+            .eq("individual_id", individualId)
+        : { data: [], error: null },
+      medIds.length
+        ? this.client
+            .from("medication_deliveries")
+            .select("*")
+            .eq("agency_id", session.agencyId)
+            .in("medication_id", medIds)
+            .order("counted_on", { ascending: false })
+        : { data: [], error: null },
+      prnIds.length
+        ? this.client
+            .from("prn_dose_logs")
+            .select("medication_id,logged_on,pills_used")
+            .eq("agency_id", session.agencyId)
+            .in("medication_id", prnIds)
+        : { data: [], error: null },
+    ]);
+    throwIf(invRes.error, "Could not load medication inventory.");
+    throwIf(delRes.error, "Could not load delivery records.");
+    throwIf(prnRes.error, "Could not load PRN dose logs.");
+    const invByMed = new Map(
+      ((invRes.data ?? []) as Record<string, unknown>[]).map((row) => {
+        const record = this.mapMedInventoryRecord(row);
+        return [record.medicationId, record] as const;
+      }),
+    );
+    const { mapMedicationDelivery } = await import("./hostedMappers");
+    const deliveries = (
+      (delRes.data ?? []) as Record<string, unknown>[]
+    ).map((row) => mapMedicationDelivery(row));
+    const prnByMed = new Map<string, Array<{ date: string; pills: number }>>();
+    for (const row of (prnRes.data ?? []) as Record<string, unknown>[]) {
+      const medId = row.medication_id as string;
+      const list = prnByMed.get(medId) ?? [];
+      list.push({
+        date: (row.logged_on as string) ?? "",
+        pills: Number(row.pills_used ?? 0),
+      });
+      prnByMed.set(medId, list);
+    }
+    return meds
+      .map((med) =>
+        projectMedInventory({
+          med,
+          inventory: invByMed.get(med.id) ?? null,
+          deliveries: deliveries.filter((row) => row.medicationId === med.id),
+          prnDoses: prnByMed.get(med.id) ?? [],
+          today,
+        }),
+      )
+      .sort(compareMedInventory);
+  }
+
+  async getMedInventory(
+    individualId: string,
+  ): Promise<import("./types").MedInventoryView[]> {
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view medication inventory.");
+    }
+    const { data: person, error } = await this.client
+      .from("individuals")
+      .select("id,agency_id")
+      .eq("id", individualId)
+      .single();
+    throwIf(error, "Individual not found.");
+    if ((person!.agency_id as string) !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    return this.p6inventoryViews(session, individualId, todayIso());
+  }
+
+  async getMedicationSupplyStatus(
+    siteId: string,
+  ): Promise<import("./types").MedSupplyStatus> {
+    const { summarizeMedSupply } = await this.p6lib();
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view medication inventory.");
+    }
+    const { data: site, error: siteError } = await this.client
+      .from("sites")
+      .select("id,name,agency_id")
+      .eq("id", siteId)
+      .single();
+    throwIf(siteError, "Site not found.");
+    if ((site!.agency_id as string) !== session.agencyId) {
+      throw new Error("Site not found.");
+    }
+    const { data: people, error: peopleError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(peopleError, "Could not load individuals.");
+    const today = todayIso();
+    const views = (
+      await Promise.all(
+        ((people ?? []) as Array<{ id: string }>).map((person) =>
+          this.p6inventoryViews(session, person.id as string, today),
+        ),
+      )
+    ).flat();
+    return summarizeMedSupply(
+      siteId,
+      (site!.name as string) ?? "Site",
+      views,
+      today,
+    );
+  }
+
+  async adjustMedInventory(input: {
+    medicationId: string;
+    quantityDelta: number;
+    reason: string;
+    countedOn?: string;
+  }) {
+    const { session, med } = await this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM adjusts medication inventory.");
+    }
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Give a reason for the count correction.");
+    if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
+      throw new Error("Enter a non-zero correction.");
+    }
+    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const next =
+      Math.max(0, Math.round((med.remainingPills + input.quantityDelta) * 100) / 100);
+    const { error: updateError } = await this.client
+      .from("medications")
+      .update({
+        remaining_pills: next,
+        last_delivery_on: countedOn,
+        last_countdown_on: countedOn,
+      })
+      .eq("id", med.id);
+    throwIf(updateError, "Could not correct the count.");
+    const { error: deliveryError } = await this.client
+      .from("medication_deliveries")
+      .insert({
+        agency_id: session.agencyId,
+        medication_id: med.id,
+        counted_on: countedOn,
+        remaining_pills: next,
+        pills_per_day: med.pillsPerDay,
+        recorded_by: session.userId,
+      });
+    throwIf(deliveryError, "Correction saved, but the count record could not be written.");
+    await this.audit(
+      session,
+      "medication.inventory_adjusted",
+      `${session.fullName} corrected ${med.name} by ${input.quantityDelta > 0 ? "+" : ""}${input.quantityDelta} pills: ${reason}`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async setReorderThreshold(input: {
+    medicationId: string;
+    lowThresholdDays: number;
+  }) {
+    const { session, med } = await this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM sets the reorder threshold.");
+    }
+    const days = Math.floor(input.lowThresholdDays);
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      throw new Error("Set the reorder threshold to 1–90 days of doses.");
+    }
+    const { error } = await this.client.from("med_inventory").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        low_threshold_days: days,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "agency_id,medication_id" },
+    );
+    throwIf(error, "Could not save the reorder threshold.");
+    await this.audit(
+      session,
+      "medication.threshold_updated",
+      `${session.fullName} set the ${med.name} reorder threshold to ${days} days`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async acknowledgeReorderAlert(medicationId: string) {
+    const { session, med } = await this.p6medicationOrThrow(medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or DPM acknowledges a reorder alert.");
+    }
+    const { error } = await this.client.from("med_inventory").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        reorder_acknowledged_on: todayIso(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "agency_id,medication_id" },
+    );
+    throwIf(error, "Could not acknowledge the reorder alert.");
+    await this.audit(
+      session,
+      "medication.reorder_acknowledged",
+      `${session.fullName} acknowledged the ${med.name} reorder alert`,
+      "medication",
+      med.id,
+    );
+  }
 }
 
 function mapSite(row: Record<string, unknown>): SiteRecord {

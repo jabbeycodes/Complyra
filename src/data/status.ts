@@ -88,6 +88,7 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P4-PAGEVIS (certificates)
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
   // LIFEPATH-P6-PAGEVIS (med inventory)
+  if (page === "Med inventory") return can(session, "individuals.view");
   return can(session, "individuals.view");
 }
 

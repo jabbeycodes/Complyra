@@ -74,6 +74,8 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 // LIFEPATH-P4-IMPORT (certificates)
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 // LIFEPATH-P6-IMPORT (med inventory)
+import { Pill as MedInventoryNavIcon } from "lucide-react";
+import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -424,6 +426,7 @@ export default function App() {
         // LIFEPATH-P4-NAV (certificates)
         // LIFEPATH-P5-NAV (HM weekly checklist)
         // LIFEPATH-P6-NAV (med inventory)
+        ["Med inventory", MedInventoryNavIcon],
       ],
     },
   ] as const;
@@ -1515,6 +1518,7 @@ export default function App() {
               {/* LIFEPATH-P4-PAGE (certificates) */}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
               {/* LIFEPATH-P6-PAGE (med inventory) */}
+              {page === "Med inventory" && <MedInventoryPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading
