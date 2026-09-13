@@ -16,6 +16,7 @@ export const PERMISSION_KEYS = [
   "audit.read",
   "audit.export",
   "sites.create",
+  // LIFEPATH-P4-PERM (certificates.manage goes here)
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];

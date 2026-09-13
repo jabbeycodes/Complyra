@@ -281,3 +281,9 @@ export function normalizeUsername(value: string) {
 }
 
 export { normalizeAgencyCode } from "./agencyCode";
+
+// ===== LIFEPATH-P2 TYPES (training engine) =====
+// ===== LIFEPATH-P3 TYPES (delegation forms) =====
+// ===== LIFEPATH-P4 TYPES (certificates) =====
+// ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
+// ===== LIFEPATH-P6 TYPES (med inventory) =====

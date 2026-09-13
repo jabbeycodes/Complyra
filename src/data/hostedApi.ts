@@ -3224,6 +3224,12 @@ export class HostedApi implements ComplyraApi {
     });
     return match?.id ?? null;
   }
+
+  // ===== LIFEPATH-P2 HOSTED (training engine) =====
+  // ===== LIFEPATH-P3 HOSTED (delegation forms) =====
+  // ===== LIFEPATH-P4 HOSTED (certificates) =====
+  // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
+  // ===== LIFEPATH-P6 HOSTED (med inventory) =====
 }
 
 function mapSite(row: Record<string, unknown>): SiteRecord {

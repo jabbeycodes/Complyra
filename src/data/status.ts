@@ -83,6 +83,11 @@ export function pageVisible(session: SessionUser, page: string) {
     return can(session, "audit.read") || can(session, "individuals.view");
   }
   if (page === "Roles & access") return can(session, "members.assign_roles");
+  // LIFEPATH-P2-PAGEVIS (training engine)
+  // LIFEPATH-P3-PAGEVIS (delegation forms)
+  // LIFEPATH-P4-PAGEVIS (certificates)
+  // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
+  // LIFEPATH-P6-PAGEVIS (med inventory)
   return can(session, "individuals.view");
 }
 

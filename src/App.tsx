@@ -69,6 +69,11 @@ import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
+// LIFEPATH-P2-IMPORT (training engine)
+// LIFEPATH-P3-IMPORT (delegation forms)
+// LIFEPATH-P4-IMPORT (certificates)
+// LIFEPATH-P5-IMPORT (HM weekly checklist)
+// LIFEPATH-P6-IMPORT (med inventory)
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -409,6 +414,16 @@ export default function App() {
         ["Audit center", ShieldCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
+      ],
+    },
+    {
+      title: "LIFEPATH",
+      items: [
+        // LIFEPATH-P2-NAV (training engine)
+        // LIFEPATH-P3-NAV (delegation forms)
+        // LIFEPATH-P4-NAV (certificates)
+        // LIFEPATH-P5-NAV (HM weekly checklist)
+        // LIFEPATH-P6-NAV (med inventory)
       ],
     },
   ] as const;
@@ -1495,6 +1510,11 @@ export default function App() {
               {page === "Roles & access" && (
                 <RolesAccessPage onSaved={notify} />
               )}
+                            {/* LIFEPATH-P2-PAGE (training engine) */}
+              {/* LIFEPATH-P3-PAGE (delegation forms) */}
+              {/* LIFEPATH-P4-PAGE (certificates) */}
+              {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
+              {/* LIFEPATH-P6-PAGE (med inventory) */}
               {page === "Settings" && (
                 <>
                   <PageHeading

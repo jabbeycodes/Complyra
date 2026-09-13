@@ -327,6 +327,11 @@ export interface ComplyraApi {
     pageCount?: number;
     effectiveOn?: string;
   }): Promise<{ id: string; name: string }>;
+  // ===== LIFEPATH-P2 API (training engine) =====
+  // ===== LIFEPATH-P3 API (delegation forms) =====
+  // ===== LIFEPATH-P4 API (certificates) =====
+  // ===== LIFEPATH-P5 API (HM weekly checklist) =====
+  // ===== LIFEPATH-P6 API (med inventory) =====
 }
 
 export type WorkspaceSite = {
@@ -3040,6 +3045,11 @@ export class LocalApi implements ComplyraApi {
     }
     hydrated = true;
   }
+  // ===== LIFEPATH-P2 IMPL (training engine) =====
+  // ===== LIFEPATH-P3 IMPL (delegation forms) =====
+  // ===== LIFEPATH-P4 IMPL (certificates) =====
+  // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====
+  // ===== LIFEPATH-P6 IMPL (med inventory) =====
 }
 
 export function createLocalApi(store?: MemoryStore) {
