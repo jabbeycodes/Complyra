@@ -43,6 +43,16 @@ Deno.serve(async (req) => {
   } = await caller.auth.getUser();
   if (userError || !user) return json({ error: "Not signed in" }, 401);
 
+  // P0-3 (2026-09-13): parse the request body BEFORE any guard that reads it —
+  // the HR-ROLES guard below referenced `body` before its declaration, a
+  // temporal-dead-zone ReferenceError that crashed every invocation.
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid request body." }, 400);
+  }
+
   const { data: membership } = await admin
     .from("memberships")
     .select("agency_id, role, role_key")
@@ -73,7 +83,6 @@ Deno.serve(async (req) => {
     return json({ error: "Only an administrator can invite someone to that role." }, 403);
   }
 
-  const body = await req.json();
   const username = String(body.username ?? "")
     .trim()
     .toLowerCase();

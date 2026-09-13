@@ -18,6 +18,18 @@ function tempPassword() {
   return `Reset!${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
 }
 
+// P0-4 (2026-09-13): mirrors the client `canGrantRole` in
+// src/data/permissions.ts — callers may only reset passwords for roles they
+// could grant. Without this, a DPM could reset the administrator's password
+// and take over the account.
+function canResetPasswordFor(callerRoleKey: string, targetRoleKey: string): boolean {
+  if (targetRoleKey === "administrator") return callerRoleKey === "administrator";
+  if (targetRoleKey === "compliance_admin") {
+    return callerRoleKey === "administrator" || callerRoleKey === "compliance_admin";
+  }
+  return true;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -65,11 +77,17 @@ Deno.serve(async (req) => {
 
   const { data: target } = await admin
     .from("memberships")
-    .select("user_id, agency_id")
+    .select("user_id, agency_id, role_key, role")
     .eq("user_id", userId)
     .eq("agency_id", membership.agency_id)
     .maybeSingle();
   if (!target) return json({ error: "Staff member not found." }, 404);
+
+  const callerRoleKey = String(membership.role_key ?? membership.role ?? "");
+  const targetRoleKey = String(target.role_key ?? target.role ?? "");
+  if (!canResetPasswordFor(callerRoleKey, targetRoleKey)) {
+    return json({ error: "You cannot reset that staff member's password." }, 403);
+  }
 
   const password = tempPassword();
   const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
