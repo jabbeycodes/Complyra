@@ -176,6 +176,15 @@ export interface ComplyraApi {
   approveRequirement(id: string): Promise<void>;
   completeRequirement(id: string, evidence: string): Promise<void>;
   reassignRequirement(id: string, ownerUserId: string): Promise<void>;
+  updateRequirement(
+    id: string,
+    patch: {
+      title?: string;
+      dueOn?: string;
+      frequency?: string;
+      ownerUserId?: string;
+    },
+  ): Promise<void>;
   uploadDocument(input: UploadDocumentInput): Promise<void>;
   getDocumentFile(versionId: string): Promise<Blob | null>;
   assignStaff(individualId: string, userId: string): Promise<void>;
@@ -1668,6 +1677,63 @@ export class LocalApi implements ComplyraApi {
     const item = this.store.db.requirements.find((r) => r.id === id);
     if (!item) throw new Error("Requirement not found.");
     item.ownerUserId = ownerUserId;
+    await persistMeta(this.store);
+  }
+
+  async updateRequirement(
+    id: string,
+    patch: {
+      title?: string;
+      dueOn?: string;
+      frequency?: string;
+      ownerUserId?: string;
+    },
+  ) {
+    const session = assertSession(this.store);
+    assertCan(session, "requirements.approve");
+    const item = this.store.db.requirements.find((r) => r.id === id);
+    if (!item) throw new Error("Requirement not found.");
+    const changes: string[] = [];
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new Error("Enter a title for the requirement.");
+      if (title !== item.title) {
+        changes.push(`title \u2192 "${title}"`);
+        item.title = title;
+      }
+    }
+    if (patch.dueOn !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.dueOn)) {
+        throw new Error("Use a valid due date.");
+      }
+      if (patch.dueOn !== item.dueOn) {
+        changes.push(`due ${item.dueOn} \u2192 ${patch.dueOn}`);
+        item.dueOn = patch.dueOn;
+      }
+    }
+    if (patch.frequency !== undefined && patch.frequency !== item.frequency) {
+      changes.push(`frequency \u2192 ${patch.frequency}`);
+      item.frequency = patch.frequency;
+    }
+    if (
+      patch.ownerUserId !== undefined &&
+      patch.ownerUserId !== item.ownerUserId
+    ) {
+      changes.push(`owner \u2192 ${ownerName(this.store, patch.ownerUserId)}`);
+      item.ownerUserId = patch.ownerUserId;
+    }
+    if (!changes.length) return;
+    if (item.status !== "Pending review" && item.status !== "Compliant") {
+      item.status = computeRequirementStatus(item.dueOn, item.category);
+    }
+    log(
+      this.store,
+      session,
+      "requirement.corrected",
+      `${session.fullName} corrected ${item.title} \u00b7 ${changes.join(" \u00b7 ")}`,
+      "requirement",
+      item.id,
+    );
     await persistMeta(this.store);
   }
 

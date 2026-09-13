@@ -618,6 +618,17 @@ h1 {
   border-color: #e2c4b4;
   color: #8a5340;
 }
+.confirm-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #4a4036;
+  margin: 4px 0 20px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .scope-row {
   display: flex;
   justify-content: space-between;
@@ -2173,6 +2184,47 @@ td > svg {
   justify-content: space-between;
   font-size: 11px;
   color: #c0b8af;
+}
+.detail-status-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b5d4f;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-button:hover {
+  color: #4a4036;
+}
+.error-fallback {
+  max-width: 560px;
+  margin: 12vh auto;
+  padding: 32px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #e9e6e1;
+  border-radius: 12px;
+}
+.error-fallback h1 {
+  font-size: 20px;
+  color: #4a4036;
+  margin-bottom: 10px;
+}
+.error-fallback p {
+  font-size: 14px;
+  color: #6b5d4f;
+  margin-bottom: 18px;
 }
 .detail-title {
   font-size: 24px;

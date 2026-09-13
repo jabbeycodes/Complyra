@@ -402,3 +402,52 @@ test("the platform owner can approve a pending agency", async () => {
   });
   assert.equal(admin.agencyStatus, "active");
 });
+
+test("managers can correct a requirement and the fix is audit-logged", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Jodie"),
+  )!;
+  await api.createRequirementDraft({
+    individualId: jodie.id,
+    title: "Reveiw transport instructions",
+    category: "PCSP acknowledgments",
+    ownerUserId: admin.userId,
+    source: "Jodie Williams · PCSP 2026 · v2",
+    sourcePage: 4,
+    dueOn: "2026-09-20",
+    frequency: "On plan update",
+  });
+  const draft = (await api.loadWorkspace(admin)).requirements.find(
+    (r) => r.title === "Reveiw transport instructions",
+  )!;
+  await api.approveRequirement(draft.id);
+  await api.updateRequirement(draft.id, {
+    title: "Review transport instructions",
+    dueOn: "2026-12-01",
+    frequency: "Monthly",
+  });
+  const fixed = (await api.loadWorkspace(admin)).requirements.find(
+    (r) => r.id === draft.id,
+  )!;
+  assert.equal(fixed.title, "Review transport instructions");
+  assert.equal(fixed.due, "2026-12-01");
+  assert.equal(fixed.frequency, "Monthly");
+  assert.equal(fixed.status, "Upcoming");
+  const entry = (await api.loadWorkspace(admin)).activity.find((a) =>
+    a.detail.includes("Review transport instructions"),
+  );
+  assert.ok(entry, "expected an audit entry for the correction");
+  assert.match(entry!.detail, /corrected/);
+  await assert.rejects(
+    () => api.updateRequirement(draft.id, { title: "   " }),
+    /Enter a title/,
+  );
+  await api.signOut();
+  await api.signIn(dspLogin());
+  await assert.rejects(
+    () => api.updateRequirement(draft.id, { title: "Nope" }),
+    /permission/i,
+  );
+});

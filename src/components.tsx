@@ -199,6 +199,13 @@ export function formatDate(date: string) {
     day: "numeric",
   });
 }
+export function formatDateLong(date: string) {
+  return new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 export function dateParts(date: string) {
   const parsed = new Date(`${date.slice(0, 10)}T12:00:00`);
@@ -235,12 +242,14 @@ export function FilterBar({
   status,
   setStatus,
   count,
+  statuses,
 }: {
   query: string;
   setQuery: (s: string) => void;
   status: string;
   setStatus: (s: string) => void;
   count: number;
+  statuses?: string[];
 }) {
   return (
     <div className="filter-bar">
@@ -261,15 +270,17 @@ export function FilterBar({
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
-          {[
-            "All statuses",
-            "Compliant",
-            "Due soon",
-            "Upcoming",
-            "Overdue",
-            "Expired",
-            "Pending review",
-          ].map((s) => (
+          {(
+            statuses ?? [
+              "All statuses",
+              "Compliant",
+              "Due soon",
+              "Upcoming",
+              "Overdue",
+              "Expired",
+              "Pending review",
+            ]
+          ).map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>

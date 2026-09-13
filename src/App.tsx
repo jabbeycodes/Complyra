@@ -50,6 +50,7 @@ import {
   RequirementTable,
   SourceCard,
   formatDate,
+  formatDateLong,
 } from "./components";
 import {
   categories,
@@ -115,6 +116,18 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [evidence, setEvidence] = useState("");
   const [formError, setFormError] = useState("");
+  const [confirm, setConfirm] = useState<null | {
+    title: string;
+    body: string;
+    action: string;
+    run: () => void;
+  }>(null);
+  const [editDraft, setEditDraft] = useState<null | {
+    title: string;
+    ownerUserId: string;
+    due: string;
+    frequency: string;
+  }>(null);
   const [copilotQuestion, setCopilotQuestion] = useState("");
   const [answer, setAnswer] = useState<{
     text: string;
@@ -151,6 +164,14 @@ export default function App() {
         searchRef.current?.focus();
       }
       if (e.key === "Escape") {
+        // If focus is inside a field, let the field keep its own behavior
+        // instead of wiping the global search while the user is typing.
+        if (
+          document.activeElement instanceof HTMLInputElement ||
+          document.activeElement instanceof HTMLTextAreaElement
+        ) {
+          return;
+        }
         setGlobalQuery("");
         setMobileOpen(false);
       }
@@ -205,6 +226,9 @@ export default function App() {
   );
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
+  );
+  const alertItems = scoped.filter((r) =>
+    ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
   const personalItems = personalQueue({
     session,
@@ -283,6 +307,38 @@ export default function App() {
       notify(
         "Requirement approved and activated. Earlier plan versions are retained.",
       );
+    } catch (e) {
+      setFormError((e as Error).message);
+    }
+  }
+  function openEdit() {
+    if (!selected) return;
+    setFormError("");
+    setEditDraft({
+      title: selected.title,
+      ownerUserId: staff.find((s) => s.name === selected.owner)?.id ?? "",
+      due: selected.due.slice(0, 10),
+      frequency: selected.frequency,
+    });
+  }
+  async function saveEdit() {
+    if (!selected || !editDraft) return;
+    const title = editDraft.title.trim();
+    if (!title) {
+      setFormError("Enter a title for the requirement.");
+      return;
+    }
+    try {
+      await api.updateRequirement(selected.id, {
+        title,
+        dueOn: editDraft.due,
+        frequency: editDraft.frequency,
+        ownerUserId: editDraft.ownerUserId || undefined,
+      });
+      await refresh();
+      setEditDraft(null);
+      setFormError("");
+      notify("Correction saved to the audit trail.");
     } catch (e) {
       setFormError((e as Error).message);
     }
@@ -441,7 +497,7 @@ export default function App() {
           >
             <span className="assistant-card-top">
               <Sparkles size={18} />
-              <span>YOUR COMPLIANCE PARTNER</span>
+              <span>RECORDS LOOKUP</span>
             </span>
             <strong>A little help, a lot of clarity.</strong>
             <span>
@@ -548,7 +604,7 @@ export default function App() {
               onClick={() => setModal("notifications")}
             >
               <Bell size={19} />
-              <i />
+              {alertItems.length > 0 && <i />}
             </button>
             <Avatar name={session.fullName} color="peach" small />
           </div>
@@ -652,6 +708,11 @@ export default function App() {
                       status={status}
                       setStatus={setStatus}
                       count={filtered.length}
+                      statuses={
+                        page === "Review queue"
+                          ? ["All statuses", "Pending review"]
+                          : undefined
+                      }
                     />
                     <RequirementTable
                       items={filtered}
@@ -1133,7 +1194,7 @@ export default function App() {
                                 <td>
                                   <span className="version">{p.version}</span>
                                 </td>
-                                <td>{formatDate(p.effective)}, 2026</td>
+                                <td>{formatDateLong(p.effective)}</td>
                                 <td>
                                   <Badge status={p.status} />
                                 </td>
@@ -1565,8 +1626,15 @@ export default function App() {
           onClose={() => setSelectedId(null)}
         >
           <div className="detail-status">
-            <Badge status={selected.status} />
-            <span>{selected.id}</span>
+            <span className="detail-status-left">
+              <Badge status={selected.status} />
+              <span>{selected.id}</span>
+            </span>
+            {!auditMode && canManage && selected.status !== "Compliant" && (
+              <button className="link-button" onClick={openEdit}>
+                <PenLine size={14} /> Edit
+              </button>
+            )}
           </div>
           <h2 className="detail-title">{selected.title}</h2>
           <p className="detail-subtitle">
@@ -1580,7 +1648,7 @@ export default function App() {
             </div>
             <div>
               <small>DUE DATE</small>
-              <strong>{formatDate(selected.due)}, 2026</strong>
+              <strong>{formatDateLong(selected.due)}</strong>
               <span>{selected.frequency}</span>
             </div>
           </div>
@@ -1643,8 +1711,22 @@ export default function App() {
                           </option>
                         ))}
                     </select>
+                    <span className="form-help">
+                      Only staff assigned to {selected.site} or agency-wide are
+                      listed.
+                    </span>
                   </label>
-                  <button className="button primary full" onClick={approve}>
+                  <button
+                    className="button primary full"
+                    onClick={() =>
+                      setConfirm({
+                        title: "Approve this requirement?",
+                        body: `“${selected.title}” will become an active obligation for ${selected.owner}. Earlier plan versions are retained.`,
+                        action: "Approve & activate",
+                        run: approve,
+                      })
+                    }
+                  >
                     <Check size={17} /> Approve & activate requirement
                   </button>
                 </>
@@ -1674,7 +1756,14 @@ export default function App() {
               )}
               <button
                 className="button primary full"
-                onClick={finishRequirement}
+                onClick={() =>
+                  setConfirm({
+                    title: "Mark this requirement complete?",
+                    body: `“${selected.title}” will be recorded as complete with the evidence entered above.`,
+                    action: "Save completion",
+                    run: finishRequirement,
+                  })
+                }
               >
                 <CheckCheck size={17} /> Save completion evidence
               </button>
@@ -1687,6 +1776,107 @@ export default function App() {
           )}
         </Modal>
       )}
+      {confirm && (
+        <Modal title={confirm.title} onClose={() => setConfirm(null)}>
+          <p className="confirm-body">{confirm.body}</p>
+          <div className="confirm-actions">
+            <button className="button" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+            <button
+              className="button primary"
+              onClick={() => {
+                const run = confirm.run;
+                setConfirm(null);
+                run();
+              }}
+            >
+              {confirm.action}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {editDraft && selected && (
+        <Modal title="Correct requirement" onClose={() => setEditDraft(null)}>
+          <p className="form-help">
+            Fix a title, owner, due date, or frequency. The correction is
+            written to the audit trail, so the original record is never
+            silently rewritten.
+          </p>
+          <label className="form-label">
+            Title
+            <input
+              value={editDraft.title}
+              onChange={(e) =>
+                setEditDraft({ ...editDraft, title: e.target.value })
+              }
+              required
+            />
+          </label>
+          <div className="form-two">
+            <label className="form-label">
+              Owner
+              <select
+                value={editDraft.ownerUserId}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, ownerUserId: e.target.value })
+                }
+              >
+                {staff
+                  .filter(
+                    (s) =>
+                      s.site === selected.site || s.site === "Agency-wide",
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="form-label">
+              Due date
+              <input
+                type="date"
+                value={editDraft.due}
+                onChange={(e) =>
+                  setEditDraft({ ...editDraft, due: e.target.value })
+                }
+                required
+              />
+            </label>
+          </div>
+          <label className="form-label">
+            Frequency
+            <select
+              value={editDraft.frequency}
+              onChange={(e) =>
+                setEditDraft({ ...editDraft, frequency: e.target.value })
+              }
+            >
+              <option>On plan update</option>
+              <option>Daily</option>
+              <option>Weekly</option>
+              <option>Monthly</option>
+              <option>Annually</option>
+              <option>One time</option>
+            </select>
+          </label>
+          {formError && (
+            <p className="inline-error" role="alert">
+              {formError}
+            </p>
+          )}
+          <div className="confirm-actions">
+            <button className="button" onClick={() => setEditDraft(null)}>
+              Cancel
+            </button>
+            <button className="button primary" onClick={saveEdit}>
+              Save correction
+            </button>
+          </div>
+        </Modal>
+      )}
       {plan && (
         <Modal title="Document record & history" onClose={() => setPlan(null)}>
           <div className="detail-status">
@@ -1696,7 +1886,7 @@ export default function App() {
           <h2 className="detail-title">{plan.name}</h2>
           <p className="detail-subtitle">
             {plan.site} · {plan.pages} pages · Effective{" "}
-            {formatDate(plan.effective)}, 2026
+            {formatDateLong(plan.effective)}
           </p>
           <div className="review-callout">
             <FileText size={22} />
@@ -1718,7 +1908,7 @@ export default function App() {
                 <div key={p.id}>
                   <span>
                     <strong>{p.version}</strong>
-                    <small>Effective {formatDate(p.effective)}, 2026</small>
+                    <small>Effective {formatDateLong(p.effective)}</small>
                   </span>
                   <Badge status={p.status} />
                 </div>
@@ -1928,11 +2118,13 @@ export default function App() {
             Sample activity and open priorities. Email reminders are not
             connected.
           </p>
-          {scoped
-            .filter((r) =>
-              ["Overdue", "Expired", "Pending review"].includes(r.status),
-            )
-            .map((r) => (
+          {alertItems.length === 0 ? (
+            <Empty
+              title="All caught up"
+              text="No overdue items or drafts waiting on review."
+            />
+          ) : (
+            alertItems.map((r) => (
               <button
                 key={r.id}
                 className="notification-row"
@@ -1952,7 +2144,8 @@ export default function App() {
                 </span>
                 <Badge status={r.status} />
               </button>
-            ))}
+            ))
+          )}
         </Modal>
       )}
       {modal === "help" && (

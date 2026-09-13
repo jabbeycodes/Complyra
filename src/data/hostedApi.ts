@@ -715,6 +715,76 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Could not reassign that requirement.");
   }
 
+  async updateRequirement(
+    id: string,
+    patch: {
+      title?: string;
+      dueOn?: string;
+      frequency?: string;
+      ownerUserId?: string;
+    },
+  ) {
+    const session = await this.requireSession();
+    this.requirePermission(session, "requirements.approve");
+    const { data: item, error } = await this.client
+      .from("requirement_definitions")
+      .select("id, title, due_on, frequency, owner_user_id, status, category")
+      .eq("id", id)
+      .single();
+    throwIf(error, "Requirement not found.");
+    const update: Record<string, string> = {};
+    const changes: string[] = [];
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new Error("Enter a title for the requirement.");
+      if (title !== item!.title) {
+        update.title = title;
+        changes.push(`title → "${title}"`);
+      }
+    }
+    if (patch.dueOn !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.dueOn)) {
+        throw new Error("Use a valid due date.");
+      }
+      if (patch.dueOn !== item!.due_on) {
+        update.due_on = patch.dueOn;
+        changes.push(`due ${item!.due_on} → ${patch.dueOn}`);
+      }
+    }
+    if (patch.frequency !== undefined && patch.frequency !== item!.frequency) {
+      update.frequency = patch.frequency;
+      changes.push(`frequency → ${patch.frequency}`);
+    }
+    if (
+      patch.ownerUserId !== undefined &&
+      patch.ownerUserId !== item!.owner_user_id
+    ) {
+      update.owner_user_id = patch.ownerUserId;
+      changes.push(`owner → ${await this.profileName(patch.ownerUserId)}`);
+    }
+    if (!changes.length) return;
+    if (item!.status !== "pending_review" && item!.status !== "compliant") {
+      update.status = requirementStatusToDb(
+        computeRequirementStatus(
+          update.due_on ?? (item!.due_on as string),
+          item!.category as string,
+        ),
+      );
+    }
+    const { error: updateError } = await this.client
+      .from("requirement_definitions")
+      .update(update)
+      .eq("id", id);
+    throwIf(updateError, "Could not correct that requirement.");
+    await this.audit(
+      session,
+      "requirement.corrected",
+      `${session.fullName} corrected ${update.title ?? item!.title} · ${changes.join(" · ")}`,
+      "requirement",
+      id,
+    );
+  }
+
   async uploadDocument(input: UploadDocumentInput) {
     const session = await this.requireSession();
     this.requirePermission(session, "documents.upload");
