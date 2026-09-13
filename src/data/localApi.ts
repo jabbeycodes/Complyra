@@ -50,6 +50,7 @@ import {
   canUploadRenewal,
   defaultRenewals,
   emptyProfile,
+  normalizeProfile,
   isObligationActive,
   proposeFromPcsp,
   requiredForSigning,
@@ -84,7 +85,9 @@ import {
   drillComplete,
   ensureMonthlyCycles,
   equipmentViewForPerson,
+  monthKeyFrom,
   safetyComplete,
+  siteSafetyView,
   normalizeMonthlyDue,
   type AdaptiveEquipment,
   type EmergencyDrill,
@@ -100,6 +103,26 @@ import {
   equipmentFileName,
   safetyFileName,
 } from "../pdf/monthlyChecksPdf";
+import {
+  applyWellWaterDefault,
+  blankSiteReview,
+  buildPreSurveyRow,
+  canEditSiteReview,
+  ensureSiteReviews,
+  monthlySafetyOnFile,
+  normalizeSiteFacts,
+  normalizeSiteReview,
+  siteFactsFrom,
+  type SiteFacts,
+  type SiteReview,
+  type SiteReviewLineStatus,
+} from "./siteReview";
+import {
+  buildPreSurveyPdf,
+  buildSiteReviewPdf,
+  preSurveyFileName,
+  siteReviewFileName,
+} from "../pdf/siteReviewPdf";
 import {
   LOGIN_FAILED_MESSAGE,
   USERNAME_PATTERN,
@@ -254,6 +277,20 @@ export interface ComplyraApi {
     id: string;
     monthKey: string;
   }): Promise<{ blob: Blob; name: string }>;
+  saveSiteFacts(siteId: string, facts: Partial<SiteFacts>): Promise<void>;
+  saveSiteReview(input: {
+    id: string;
+    reviewerName: string;
+    supportCoordinator: string;
+    reviewedOn: string;
+    providerOwnedControlled: boolean | null;
+    heightenedScrutiny: boolean | null;
+    meetsIndividualNeeds: boolean | null;
+    part2Verified: boolean;
+    lines: Array<{ id: string; status: SiteReviewLineStatus; comment: string }>;
+  }): Promise<void>;
+  downloadSiteReviewPdf(siteId: string): Promise<{ blob: Blob; name: string }>;
+  downloadPreSurveyPdf(siteId: string): Promise<{ blob: Blob; name: string }>;
   resetWorkspace(): Promise<void>;
   createSite(input: {
     name: string;
@@ -273,9 +310,19 @@ export interface ComplyraApi {
   }): Promise<{ id: string; name: string }>;
 }
 
+export type WorkspaceSite = {
+  id: string;
+  name: string;
+  address: string;
+  program: string;
+  manager: string;
+  color: string;
+  initials: string;
+} & SiteFacts;
+
 export interface WorkspaceView {
   session: SessionUser;
-  sites: { id: string; name: string; address: string; program: string; manager: string; color: string; initials: string }[];
+  sites: WorkspaceSite[];
   individuals: {
     id: string;
     name: string;
@@ -319,6 +366,7 @@ export interface WorkspaceView {
     safetyReports: HomeSafetyReport[];
   };
   monthlyDue: import("./monthlyChecks").MonthlyDueSettings;
+  siteReviews: SiteReview[];
 }
 
 function cloneSeed(): LocalDatabase {
@@ -445,6 +493,7 @@ async function hydrate() {
       browserStore.db.equipmentMonthLogs = browserStore.db.equipmentMonthLogs ?? [];
       browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
       browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
+      browserStore.db.siteReviews = browserStore.db.siteReviews ?? [];
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
         item.rnSignedAt = item.rnSignedAt ?? null;
@@ -644,6 +693,7 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.equipmentMonthLogs = store.db.equipmentMonthLogs ?? [];
   store.db.emergencyDrills = store.db.emergencyDrills ?? [];
   store.db.homeSafetyReports = store.db.homeSafetyReports ?? [];
+  store.db.siteReviews = store.db.siteReviews ?? [];
 }
 
 function ensureClinicalRenewals(store: MemoryStore) {
@@ -813,7 +863,7 @@ function mapPlanStack(
   return {
     individualId: person.id,
     individualName: person.fullName,
-    profile: person.profile ?? emptyProfile(person),
+    profile: normalizeProfile(person, person.profile),
     required,
     checked,
     renewals: canSeeRenewals(session.roleKey)
@@ -1010,6 +1060,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensureClinicalRenewals(store);
   ensureTrainingChecklists(store);
   ensureMonthlyCycles(store.db, todayIso());
+  ensureSiteReviews(store.db);
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit =
@@ -1061,6 +1112,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         .split(" ")
         .map((part) => part[0])
         .join(""),
+      ...normalizeSiteFacts(site),
     })),
     individuals: individuals.map((person, i) => {
       const site = sites.find((s) => s.id === person.siteId)!;
@@ -1075,7 +1127,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           .map((part) => part[0])
           .join(""),
         color: colors[i % 4],
-        profile: person.profile ?? emptyProfile(person),
+        profile: normalizeProfile(person, person.profile),
       };
     }),
     staff: memberships.map((membership) => {
@@ -1129,6 +1181,17 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     monthlyDue: normalizeMonthlyDue(
       store.db.agencies.find((row) => row.id === session.agencyId)?.monthlyDue,
     ),
+    siteReviews: (store.db.siteReviews ?? [])
+      .filter((row) => row.agencyId === session.agencyId)
+      .map((row) => normalizeSiteReview(applyWellWaterDefault(row, siteFactsFrom(
+        sites.find((site) => site.id === row.siteId) ?? {
+          id: row.siteId,
+          agencyId: row.agencyId,
+          programId: "",
+          name: "",
+          address: "",
+        },
+      )))),
   };
 }
 
@@ -1778,7 +1841,7 @@ export class LocalApi implements ComplyraApi {
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
-    person.profile = profile;
+    person.profile = normalizeProfile(person, profile);
     if (profile.legalName.trim()) person.fullName = profile.legalName.trim();
     await persistMeta(this.store);
   }
@@ -2517,6 +2580,148 @@ export class LocalApi implements ComplyraApi {
     return { blob: doc.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
 
+  async saveSiteFacts(siteId: string, facts: Partial<SiteFacts>) {
+    const session = assertSession(this.store);
+    if (!canEditSiteReview(session.roleKey)) {
+      throw new Error("Only a DPM, house manager, or administrator can update site-review facts.");
+    }
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can update their own site.");
+    }
+    Object.assign(site, normalizeSiteFacts({ ...siteFactsFrom(site), ...facts }));
+    log(
+      this.store,
+      session,
+      "site.facts_updated",
+      `Site facts updated for ${site.name}`,
+      "site",
+      site.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async saveSiteReview(input: {
+    id: string;
+    reviewerName: string;
+    supportCoordinator: string;
+    reviewedOn: string;
+    providerOwnedControlled: boolean | null;
+    heightenedScrutiny: boolean | null;
+    meetsIndividualNeeds: boolean | null;
+    part2Verified: boolean;
+    lines: Array<{ id: string; status: SiteReviewLineStatus; comment: string }>;
+  }) {
+    const session = assertSession(this.store);
+    if (!canEditSiteReview(session.roleKey)) {
+      throw new Error("Only a DPM, house manager, or administrator can mark site-review checks.");
+    }
+    ensureSiteReviews(this.store.db);
+    const review = this.store.db.siteReviews.find((row) => row.id === input.id);
+    if (!review || review.agencyId !== session.agencyId) {
+      throw new Error("Site review not found.");
+    }
+    const site = this.store.db.sites.find((row) => row.id === review.siteId);
+    if (!site) throw new Error("Site not found.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can update their own site.");
+    }
+    review.reviewerName = input.reviewerName.trim();
+    review.supportCoordinator = input.supportCoordinator.trim();
+    review.reviewedOn = input.reviewedOn;
+    review.providerOwnedControlled = input.providerOwnedControlled;
+    review.heightenedScrutiny = input.heightenedScrutiny;
+    review.meetsIndividualNeeds = input.meetsIndividualNeeds;
+    review.part2Verified = input.part2Verified;
+    review.lines = normalizeSiteReview({
+      ...review,
+      lines: input.lines.map((line) => ({
+        id: line.id,
+        status: line.status,
+        comment: line.comment,
+      })),
+    }).lines;
+    review.updatedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "site_review.saved",
+      `Site review saved for ${site.name}`,
+      "site_review",
+      review.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async downloadSiteReviewPdf(siteId: string) {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    ensureSiteReviews(this.store.db);
+    const review = this.store.db.siteReviews.find((row) => row.siteId === site.id);
+    if (!review) throw new Error("Site review not found.");
+    const facts = siteFactsFrom(site);
+    const people = this.store.db.individuals.filter((row) => row.siteId === site.id);
+    const safety = siteSafetyView(
+      {
+        adaptiveEquipment: this.store.db.adaptiveEquipment,
+        equipmentMonthLogs: this.store.db.equipmentMonthLogs,
+        emergencyDrills: this.store.db.emergencyDrills,
+        homeSafetyReports: this.store.db.homeSafetyReports,
+      },
+      site.id,
+      monthKeyFrom(todayIso()),
+    );
+    const doc = buildSiteReviewPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      address: site.address,
+      facts,
+      residents: people.map((row) => row.fullName),
+      review: normalizeSiteReview(applyWellWaterDefault(review, facts)),
+      monthlySafetyOnFile: monthlySafetyOnFile(safety),
+    });
+    return { blob: doc.output("blob"), name: siteReviewFileName(site.name) };
+  }
+
+  async downloadPreSurveyPdf(siteId: string) {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    const facts = siteFactsFrom(site);
+    const today = todayIso();
+    const rows = this.store.db.individuals
+      .filter((row) => row.siteId === site.id)
+      .map((person) =>
+        buildPreSurveyRow({
+          person,
+          profile: normalizeProfile(person, person.profile),
+          today,
+          equipment: this.store.db.adaptiveEquipment.filter(
+            (row) => row.individualId === person.id && row.active,
+          ),
+          obligations: this.store.db.obligations.filter(
+            (row) => row.individualId === person.id,
+          ),
+        }),
+      );
+    const doc = buildPreSurveyPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      address: site.address,
+      facts,
+      rows,
+    });
+    return { blob: doc.output("blob"), name: preSurveyFileName(site.name) };
+  }
+
   async createSite(input: {
     name: string;
     address: string;
@@ -2561,8 +2766,14 @@ export class LocalApi implements ComplyraApi {
       programId: program.id,
       name,
       address,
+      ...normalizeSiteFacts({
+        contactName: session.fullName,
+      }),
     };
     this.store.db.sites.push(site);
+    this.store.db.siteReviews.push(
+      blankSiteReview({ agencyId: session.agencyId, siteId: site.id }),
+    );
     if (input.managerUserId) {
       const membership = this.store.db.memberships.find(
         (row) =>

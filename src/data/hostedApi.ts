@@ -430,6 +430,17 @@ export class HostedApi implements ComplyraApi {
           .split(" ")
           .map((part) => part[0])
           .join(""),
+        serviceType: "ISL",
+        staffed24h: false,
+        overnightSleepStaff: false,
+        wellWater: false,
+        lastWaterTestOn: "",
+        sitePhone: "",
+        contactName: "",
+        contactPhone: "",
+        city: "",
+        county: "",
+        zip: "",
       })),
       individuals: individuals.map((person, i) => {
         const site = siteById[person.siteId];
@@ -567,6 +578,7 @@ export class HostedApi implements ComplyraApi {
         safetyReports: [],
       },
       monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
+      siteReviews: [],
     };
   }
 
@@ -1030,6 +1042,18 @@ export class HostedApi implements ComplyraApi {
   }
   async downloadMonthlyCheck(): Promise<{ blob: Blob; name: string }> {
     throw new Error("Monthly check downloads are on the local workspace until the hosted schema is migrated.");
+  }
+  async saveSiteFacts() {
+    throw new Error("Site reviews are on the local workspace until the hosted schema is migrated.");
+  }
+  async saveSiteReview() {
+    throw new Error("Site reviews are on the local workspace until the hosted schema is migrated.");
+  }
+  async downloadSiteReviewPdf(): Promise<{ blob: Blob; name: string }> {
+    throw new Error("Site review downloads are on the local workspace until the hosted schema is migrated.");
+  }
+  async downloadPreSurveyPdf(): Promise<{ blob: Blob; name: string }> {
+    throw new Error("Pre-survey downloads are on the local workspace until the hosted schema is migrated.");
   }
   async createSite(): Promise<{ id: string }> {
     throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");

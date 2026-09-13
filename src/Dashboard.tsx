@@ -24,6 +24,9 @@ import { categories, metrics } from "./domain";
 import type { Requirement, Activity } from "./domain";
 import { Badge, Empty } from "./components";
 import type { PersonalWorkItem } from "./data/dashboard";
+import type { SiteReview } from "./data/siteReview";
+import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
+import { todayIso } from "./data/chart";
 
 interface SiteCard {
   id: string;
@@ -32,6 +35,8 @@ interface SiteCard {
   program: string;
   manager: string;
   color?: string;
+  wellWater?: boolean;
+  lastWaterTestOn?: string;
 }
 
 interface Props {
@@ -47,6 +52,7 @@ interface Props {
   };
   activity: Activity[];
   sites: SiteCard[];
+  siteReviews?: SiteReview[];
   individuals: { name: string; site: string }[];
   site: string;
   personalItems: PersonalWorkItem[];
@@ -71,6 +77,7 @@ export default function Dashboard({
   scorecard,
   activity,
   sites,
+  siteReviews = [],
   individuals,
   site,
   personalItems,
@@ -305,6 +312,11 @@ export default function Dashboard({
                   const sm = metrics(allItems.filter((r) => r.site === s.name));
                   const people = individuals.filter((p) => p.site === s.name).length;
                   const selected = site === s.name;
+                  const reviewInPlace = isSiteReviewInPlace(
+                    siteReviews.find((row) => row.siteId === s.id),
+                    normalizeSiteFacts(s),
+                    todayIso(),
+                  );
                   return (
                     <button
                       type="button"
@@ -331,7 +343,11 @@ export default function Dashboard({
                         <span style={{ width: `${sm.score}%` }} />
                       </div>
                       <div className="site-score-meta">
-                        <span>{people} people</span>
+                        <span>
+                          {people} people
+                          {" · "}
+                          {reviewInPlace ? "Review in place" : "Review open"}
+                        </span>
                         {sm.overdue ? (
                           <span className="overdue-text">
                             {sm.overdue} need attention
@@ -381,7 +397,7 @@ export default function Dashboard({
                     <PenLine size={17} />
                   ) : item.kind === "review" ? (
                     <ClipboardCheck size={17} />
-                  ) : item.kind === "monthly" ? (
+                  ) : item.kind === "monthly" || item.kind === "site_review" ? (
                     <Building2 size={17} />
                   ) : (
                     <CircleAlert size={17} />

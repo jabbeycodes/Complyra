@@ -129,6 +129,72 @@ export default function AssignedDocsPanel({
             </label>
           ))}
         </div>
+        <h3 className="section-label">Pre-survey facts</h3>
+        <p className="stack-help">
+          These fill the pre-survey individual information sheet for this
+          home. Adaptive equipment comes from the monthly equipment log.
+        </p>
+        <div className="cover-grid">
+          <label>
+            Sex
+            <select
+              aria-label="Sex"
+              disabled={!editCover}
+              value={activeProfile.sex}
+              onChange={(e) =>
+                setProfile({
+                  ...activeProfile,
+                  sex: e.target.value as IndividualProfile["sex"],
+                })
+              }
+            >
+              <option value="">Not listed</option>
+              <option value="F">F</option>
+              <option value="M">M</option>
+              <option value="X">X</option>
+            </select>
+          </label>
+          <label>
+            DMH / Medicaid / waiver
+            <select
+              aria-label="Medicaid status"
+              disabled={!editCover}
+              value={activeProfile.medicaidStatus}
+              onChange={(e) =>
+                setProfile({
+                  ...activeProfile,
+                  medicaidStatus: e.target.value as IndividualProfile["medicaidStatus"],
+                })
+              }
+            >
+              <option value="">Not listed</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="ida">IDA</option>
+              <option value="cd_only">CD only</option>
+            </select>
+          </label>
+          {(
+            [
+              ["specializedDiet", "Physician-ordered / specialized diet"],
+              ["specializedMedical", "Specialized medical needs"],
+              ["behaviorSupports", "Restrictions / BSP"],
+              ["dailyActivities", "Scheduled daily activities"],
+              ["visitHours", "Hours available for visits"],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key}>
+              {label}
+              <input
+                value={activeProfile[key]}
+                disabled={!editCover}
+                onChange={(e) =>
+                  setProfile({ ...activeProfile, [key]: e.target.value })
+                }
+              />
+            </label>
+          ))}
+        </div>
         {editCover && (
           <button
             className="button"

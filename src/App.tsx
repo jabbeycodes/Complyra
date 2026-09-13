@@ -65,6 +65,7 @@ import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
+import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -73,6 +74,8 @@ import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
+import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -208,6 +211,7 @@ export default function App() {
     monthlyDue: workspace.monthlyDue,
     individuals,
     sites,
+    siteReviews: workspace.siteReviews,
   });
   const m = metrics(scoped);
   const isCategory = categories.includes(page as (typeof categories)[number]);
@@ -546,6 +550,7 @@ export default function App() {
               scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
+              siteReviews={workspace.siteReviews}
               individuals={individuals}
               site={site}
               personalItems={personalItems}
@@ -813,6 +818,14 @@ export default function App() {
                         const sm = metrics(
                           data.requirements.filter((r) => r.site === s.name),
                         );
+                        const review = workspace.siteReviews.find(
+                          (row) => row.siteId === s.id,
+                        );
+                        const reviewInPlace = isSiteReviewInPlace(
+                          review,
+                          normalizeSiteFacts(s),
+                          todayIso(),
+                        );
                         return (
                           <section className="panel location-card" key={s.name}>
                             <div className="location-top">
@@ -855,6 +868,10 @@ export default function App() {
                               <span className="muted">
                                 {individuals.filter((person) => person.site === s.name).length}{" "}
                                 individuals
+                                {" · "}
+                                {reviewInPlace
+                                  ? "Site review in place"
+                                  : "Site review open"}
                               </span>
                             </div>
                             <div className="heading-actions">
@@ -869,6 +886,12 @@ export default function App() {
                                   <UserPlus size={16} /> Add a person
                                 </button>
                               )}
+                              <button
+                                className="button"
+                                onClick={() => setSite(s.name)}
+                              >
+                                Site review pack
+                              </button>
                               <button
                                 className="button"
                                 onClick={() => setSite(s.name)}
@@ -893,7 +916,10 @@ export default function App() {
                     sites
                       .filter((row) => row.name === site)
                       .map((row) => (
-                        <SiteMonthlyChecks key={row.id} siteId={row.id} />
+                        <div key={row.id}>
+                          <SiteReviewPanel siteId={row.id} />
+                          <SiteMonthlyChecks siteId={row.id} />
+                        </div>
                       ))}
                 </>
               )}
