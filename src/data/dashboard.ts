@@ -128,6 +128,23 @@ export function personalQueue(input: {
   const today = todayIso();
   const key = monthKeyFrom(today);
   const due = input.monthlyDue ?? DEFAULT_MONTHLY_DUE;
+
+  if (canEditSiteReview(input.session.roleKey) && input.sites) {
+    for (const site of input.sites) {
+      const review = input.siteReviews?.find((row) => row.siteId === site.id);
+      const facts = normalizeSiteFacts(site);
+      if (isSiteReviewInPlace(review, facts, today)) continue;
+      push({
+        id: `site-review-${site.id}`,
+        kind: "site_review",
+        title: "Confirm site-review checks are in place",
+        detail: `${site.name} · DPM environmental pack`,
+        tone: "overdue",
+        siteName: site.name,
+      });
+    }
+  }
+
   if (input.monthly && input.individuals && input.sites) {
     const collections = asMonthlyCollections(input.monthly);
     for (const person of input.individuals) {
@@ -178,22 +195,6 @@ export function personalQueue(input: {
           siteName: site.name,
         });
       }
-    }
-  }
-
-  if (canEditSiteReview(input.session.roleKey) && input.sites) {
-    for (const site of input.sites) {
-      const review = input.siteReviews?.find((row) => row.siteId === site.id);
-      const facts = normalizeSiteFacts(site);
-      if (isSiteReviewInPlace(review, facts, today)) continue;
-      push({
-        id: `site-review-${site.id}`,
-        kind: "site_review",
-        title: "Confirm site-review checks are in place",
-        detail: `${site.name} · DPM environmental pack`,
-        tone: "overdue",
-        siteName: site.name,
-      });
     }
   }
 
