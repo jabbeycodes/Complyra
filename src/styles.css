@@ -5059,11 +5059,6 @@ main,
 .table-scroll {
   min-width: 0;
 }
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-}
 .sidebar-close {
   display: none;
 }
@@ -5071,6 +5066,9 @@ body.nav-open {
   overflow: hidden;
 }
 @media (max-width: 720px) {
+  html {
+    scroll-padding-top: 72px;
+  }
   .sidebar {
     width: min(320px, 88vw);
     padding-top: max(16px, env(safe-area-inset-top));
@@ -5090,6 +5088,9 @@ body.nav-open {
     padding-right: 48px;
   }
   .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
     height: auto;
     min-height: 58px;
     padding: max(8px, env(safe-area-inset-top)) 12px 8px;

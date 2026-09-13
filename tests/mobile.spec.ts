@@ -12,21 +12,39 @@ async function signIn(page: Page) {
 }
 
 async function assertNoHorizontalOverflow(page: Page) {
+  await page.mouse.wheel(120, 0);
   const result = await page.evaluate(() => {
     const vw = window.innerWidth;
-    const scroller = document.scrollingElement;
-    if (scroller) scroller.scrollLeft = 80;
-    const pageShifted = Boolean(scroller && scroller.scrollLeft > 0);
-    if (scroller) scroller.scrollLeft = 0;
+    const pageShifted = window.scrollX > 0;
+    window.scrollTo(0, window.scrollY);
     const wide = [...document.querySelectorAll("body *")].filter((el) => {
       const style = getComputedStyle(el);
       if (style.position === "fixed") return false;
+      let parent = el.parentElement;
+      while (
+        parent &&
+        parent !== document.body &&
+        parent !== document.documentElement
+      ) {
+        const overflowX = getComputedStyle(parent).overflowX;
+        if (
+          overflowX === "auto" ||
+          overflowX === "scroll" ||
+          overflowX === "hidden"
+        ) {
+          return false;
+        }
+        parent = parent.parentElement;
+      }
       const box = el.getBoundingClientRect();
       return box.width > 1 && box.right > vw + 2;
     });
     return {
       pageShifted,
-      wide: wide.slice(0, 8).map((el) => el.className?.toString().slice(0, 60)),
+      wide: wide.slice(0, 8).map(
+        (el) =>
+          `${el.tagName.toLowerCase()}.${el.className?.toString().slice(0, 40)}`,
+      ),
     };
   });
   expect(result.pageShifted, "page should not scroll sideways").toBe(false);
@@ -69,7 +87,9 @@ test("login and workspace pages stay on screen at phone width", async ({
 
   await openPage(page, "Individuals");
   await page.getByRole("button", { name: /Jodie Williams/ }).click();
-  await expect(page.getByRole("heading", { name: "Jodie Williams" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Jodie Williams", exact: true }),
+  ).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
   await openPage(page, "Sites & programs");
