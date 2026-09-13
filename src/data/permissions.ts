@@ -17,6 +17,7 @@ export const PERMISSION_KEYS = [
   "audit.export",
   "sites.create",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
+  "certificates.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -63,7 +64,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     description: "Creates the agency workspace, assigns roles, and can do every operational action.",
     defaultScope: "agency",
     capability: "administrator",
-    permissions: pack(ALL),
+    // LIFEPATH-P4 (certificates): certificates.manage is NOT in the
+    // administrator default set — it is grantable explicitly via Roles & access.
+    permissions: pack(ALL.filter((key) => key !== "certificates.manage")),
   },
   {
     key: "compliance_admin",
@@ -175,7 +178,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     description: "Staff accounts and employment records only. Sees the agency score, not individual care files.",
     defaultScope: "agency",
     capability: "hr",
-    permissions: pack(["members.invite", "hr.view_staff"]),
+    // LIFEPATH-P4 (certificates): certificates.manage granted to HR by default.
+    permissions: pack(["members.invite", "hr.view_staff", "certificates.manage"]),
   },
   {
     key: "auditor",
@@ -245,6 +249,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "audit.read": "Open Audit center",
   "audit.export": "Export audit packets",
   "sites.create": "Add program sites",
+  // LIFEPATH-P4 (certificates)
+  "certificates.manage": "Manage staff certificates",
 };
 
 export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [

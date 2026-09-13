@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  PERMISSION_KEYS,
+  PERMISSION_LABELS,
   ROLE_TEMPLATE_BY_KEY,
   capabilityForRoleKey,
+  defaultPermissions,
   hasPermission,
 } from "./permissions";
 
@@ -42,4 +45,20 @@ test("HR stays out of care records and auditors stay read-only", () => {
     hasPermission({ role: "hr" }, "individuals.view"),
     false,
   );
+});
+
+test("LIFEPATH-P4: certificates.manage defaults — HR on, administrator off", () => {
+  assert.ok(PERMISSION_KEYS.includes("certificates.manage"));
+  assert.equal(PERMISSION_LABELS["certificates.manage"], "Manage staff certificates");
+  assert.equal(defaultPermissions("hr")["certificates.manage"], true);
+  assert.equal(defaultPermissions("administrator")["certificates.manage"], false);
+  // Other roles do not get it by default (administrator explicit grant path).
+  assert.equal(defaultPermissions("dsp")["certificates.manage"], false);
+});
+
+test("LIFEPATH-P4: hasPermission honors the new key from session packs and role templates", () => {
+  assert.equal(hasPermission({ permissions: { "certificates.manage": true } }, "certificates.manage"), true);
+  assert.equal(hasPermission({ permissions: { "certificates.manage": false } }, "certificates.manage"), false);
+  assert.equal(hasPermission({ role: "hr" }, "certificates.manage"), true);
+  assert.equal(hasPermission({ role: "administrator" }, "certificates.manage"), false);
 });

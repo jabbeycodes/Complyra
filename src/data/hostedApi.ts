@@ -12,9 +12,11 @@ import type { ComplyraApi, WorkspaceView } from "./localApi";
 import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
+  AddCertificateInput,
   AppRole,
   DocumentRecord,
   DocumentVersion,
+  ExpiringCertificate,
   IndividualRecord,
   AgencyStatus,
   CreateAgencyInput,
@@ -27,6 +29,9 @@ import type {
   RequirementRecord,
   SessionUser,
   SiteRecord,
+  StaffCertificate,
+  UpdateCertificateInput,
+  UploadCertificateFileInput,
   UploadDocumentInput,
 } from "./types";
 import {
@@ -84,6 +89,12 @@ import {
   type Medication,
   type TrainingChecklist,
 } from "./chart";
+// LIFEPATH-P4 (certificates): expiry countdown + file validation helpers.
+import {
+  daysRemaining,
+  validateCertificateDates,
+  validateCertificateFile,
+} from "./certificates";
 import {
   DEFAULT_MONTHLY_DUE,
   blankSafetyLines,
@@ -3228,6 +3239,228 @@ export class HostedApi implements ComplyraApi {
   // ===== LIFEPATH-P2 HOSTED (training engine) =====
   // ===== LIFEPATH-P3 HOSTED (delegation forms) =====
   // ===== LIFEPATH-P4 HOSTED (certificates) =====
+  // LIFEPATH-P4 (certificates): HR certificate tracking (HostedApi, Supabase).
+  // Storage bucket is `staff-certificates` (created by the Phase 4 migration);
+  // file paths look like `agency/<agencyId>/certs/<certId>/<file>`.
+
+  private requireCertificateWrite(session: SessionUser) {
+    this.requirePermission(session, "certificates.manage");
+  }
+
+  private requireCertificateRead(session: SessionUser) {
+    if (
+      !hasPermission(session, "certificates.manage") &&
+      !hasPermission(session, "hr.view_staff")
+    ) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private mapCertificate(row: Record<string, unknown>): StaffCertificate {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      userId: row.user_id as string,
+      certName: row.cert_name as string,
+      issuedOn: String(row.issued_on).slice(0, 10),
+      expiresOn: String(row.expires_on).slice(0, 10),
+      filePath: (row.storage_path as string) ?? null,
+      fileName: (row.file_name as string) ?? null,
+      enteredBy: row.entered_by as string,
+      createdAt: row.created_at as string,
+    };
+  }
+
+  private async fetchCertificateRow(session: SessionUser, id: string) {
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the certificate.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Certificate not found.");
+    }
+    return data as Record<string, unknown>;
+  }
+
+  async listCertificates(userId: string): Promise<StaffCertificate[]> {
+    const session = await this.requireSession();
+    this.requireCertificateRead(session);
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .select("*")
+      .eq("user_id", userId)
+      .order("expires_on", { ascending: true });
+    throwIf(error, "Could not load certificates.");
+    return (data ?? []).map((row) => this.mapCertificate(row as Record<string, unknown>));
+  }
+
+  async addCertificate(input: AddCertificateInput): Promise<StaffCertificate> {
+    const session = await this.requireSession();
+    this.requireCertificateWrite(session);
+    const certName = input.certName.trim();
+    if (!certName) throw new Error("Enter the certificate name.");
+    validateCertificateDates(input.issuedOn, input.expiresOn);
+    const { data: profile, error: profileError } = await this.client
+      .from("profiles")
+      .select("id")
+      .eq("id", input.userId)
+      .eq("home_agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(profileError, "Could not verify the staff member.");
+    if (!profile) throw new Error("Staff member not found.");
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .insert({
+        agency_id: session.agencyId,
+        user_id: input.userId,
+        cert_name: certName,
+        issued_on: input.issuedOn,
+        expires_on: input.expiresOn,
+        entered_by: session.userId,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the certificate.");
+    const cert = this.mapCertificate(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "certificate.added",
+      `${cert.certName} recorded (renews ${cert.expiresOn})`,
+      "certificate",
+      cert.id,
+    );
+    return cert;
+  }
+
+  async uploadCertificateFile(
+    input: UploadCertificateFileInput,
+  ): Promise<StaffCertificate> {
+    const session = await this.requireSession();
+    this.requireCertificateWrite(session);
+    validateCertificateFile(input.file);
+    const cert = await this.addCertificate({
+      userId: input.userId,
+      certName: input.certName,
+      issuedOn: input.issuedOn,
+      expiresOn: input.expiresOn,
+    });
+    const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "certificate.pdf";
+    const storagePath = `agency/${session.agencyId}/certs/${cert.id}/${safeName}`;
+    const { error: uploadError } = await this.client.storage
+      .from("staff-certificates")
+      .upload(storagePath, input.file, {
+        contentType: input.file.type || "application/pdf",
+        upsert: false,
+      });
+    if (uploadError) {
+      await this.client.from("staff_certificates").delete().eq("id", cert.id);
+      throw new Error(uploadError.message || "Could not store the certificate file.");
+    }
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .update({ storage_path: storagePath, file_name: input.file.name })
+      .eq("id", cert.id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not link the certificate file.");
+    const linked = this.mapCertificate(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "certificate.uploaded",
+      `Certificate file uploaded for ${linked.certName}`,
+      "certificate",
+      linked.id,
+    );
+    return linked;
+  }
+
+  async updateCertificate(
+    id: string,
+    input: UpdateCertificateInput,
+  ): Promise<StaffCertificate> {
+    const session = await this.requireSession();
+    this.requireCertificateWrite(session);
+    const current = this.mapCertificate(await this.fetchCertificateRow(session, id));
+    const certName = input.certName?.trim() ?? current.certName;
+    if (!certName) throw new Error("Enter the certificate name.");
+    const issuedOn = input.issuedOn ?? current.issuedOn;
+    const expiresOn = input.expiresOn ?? current.expiresOn;
+    validateCertificateDates(issuedOn, expiresOn);
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .update({ cert_name: certName, issued_on: issuedOn, expires_on: expiresOn })
+      .eq("id", id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the certificate.");
+    const updated = this.mapCertificate(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "certificate.updated",
+      `${updated.certName} updated (renews ${updated.expiresOn})`,
+      "certificate",
+      updated.id,
+    );
+    return updated;
+  }
+
+  async deleteCertificate(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requireCertificateWrite(session);
+    const row = await this.fetchCertificateRow(session, id);
+    const cert = this.mapCertificate(row);
+    if (cert.filePath) {
+      await this.client.storage.from("staff-certificates").remove([cert.filePath]);
+    }
+    const { error } = await this.client.from("staff_certificates").delete().eq("id", id);
+    throwIf(error, "Could not delete the certificate.");
+    await this.audit(
+      session,
+      "certificate.deleted",
+      `${cert.certName} removed`,
+      "certificate",
+      cert.id,
+    );
+  }
+
+  async certificatesExpiringSoon(days: number): Promise<ExpiringCertificate[]> {
+    const session = await this.requireSession();
+    this.requireCertificateRead(session);
+    const today = todayIso();
+    const { data, error } = await this.client
+      .from("staff_certificates")
+      .select("*, profiles!staff_certificates_user_id_fkey(full_name)")
+      .eq("agency_id", session.agencyId)
+      .order("expires_on", { ascending: true });
+    throwIf(error, "Could not load certificates.");
+    const out: ExpiringCertificate[] = [];
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      const cert = this.mapCertificate(row);
+      const remaining = daysRemaining(cert.expiresOn, today);
+      if (remaining > days) continue;
+      const profile = row.profiles as { full_name?: string } | null;
+      out.push({
+        ...cert,
+        staffName: profile?.full_name ?? "Unknown staff",
+        daysRemaining: remaining,
+      });
+    }
+    return out.sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }
+
+  async certificateFileUrl(id: string): Promise<string> {
+    const session = await this.requireSession();
+    this.requireCertificateRead(session);
+    const cert = this.mapCertificate(await this.fetchCertificateRow(session, id));
+    if (!cert.filePath) throw new Error("This certificate has no file attached.");
+    const { data, error } = await this.client.storage
+      .from("staff-certificates")
+      .createSignedUrl(cert.filePath, 300);
+    throwIf(error, "Could not open the certificate file.");
+    return data!.signedUrl;
+  }
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
   // ===== LIFEPATH-P6 HOSTED (med inventory) =====
 }

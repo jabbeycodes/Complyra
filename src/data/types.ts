@@ -285,5 +285,47 @@ export { normalizeAgencyCode } from "./agencyCode";
 // ===== LIFEPATH-P2 TYPES (training engine) =====
 // ===== LIFEPATH-P3 TYPES (delegation forms) =====
 // ===== LIFEPATH-P4 TYPES (certificates) =====
+// LIFEPATH-P4 (certificates): staff certificate tracking for HR.
+
+/** A staff certificate record (CPR, CPI, PBS, L1MA, or free text). */
+export interface StaffCertificate {
+  id: string;
+  agencyId: string;
+  userId: string;
+  certName: string;
+  issuedOn: string; // ISO yyyy-mm-dd
+  expiresOn: string; // ISO yyyy-mm-dd (renewal date)
+  filePath: string | null; // Supabase Storage path (bucket: staff-certificates)
+  fileName: string | null;
+  enteredBy: string; // userId of the HR member who recorded it
+  createdAt: string; // ISO timestamp
+}
+
+export interface AddCertificateInput {
+  userId: string;
+  certName: string;
+  issuedOn: string;
+  expiresOn: string;
+}
+
+export interface UpdateCertificateInput {
+  certName?: string;
+  issuedOn?: string;
+  expiresOn?: string;
+}
+
+export interface UploadCertificateFileInput {
+  userId: string;
+  file: File;
+  certName: string;
+  issuedOn: string;
+  expiresOn: string;
+}
+
+/** A certificate enriched for HR views: staff name + live days-remaining countdown. */
+export interface ExpiringCertificate extends StaffCertificate {
+  staffName: string;
+  daysRemaining: number;
+}
 // ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
 // ===== LIFEPATH-P6 TYPES (med inventory) =====

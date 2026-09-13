@@ -5325,3 +5325,49 @@ body.nav-open {
     grid-template-columns: 32px 1fr 16px;
   }
 }
+
+/* LIFEPATH-P4 (certificates): certificate lists, countdown badges, entry form. */
+.cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.cert-row {
+  border: 1px solid #f1f0ed;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.cert-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cert-row-meta {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.cert-row-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+.cert-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -32,8 +32,10 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import type {
   AcknowledgmentPacket,
+  AddCertificateInput,
   AppRole,
   DocumentVersion,
+  ExpiringCertificate,
   IndividualRecord,
   CreateAgencyInput,
   CreateAgencyResult,
@@ -45,6 +47,9 @@ import type {
   PendingAgency,
   RequirementRecord,
   SessionUser,
+  StaffCertificate,
+  UpdateCertificateInput,
+  UploadCertificateFileInput,
   UploadDocumentInput,
 } from "./types";
 import {
@@ -84,6 +89,11 @@ import {
   trainingStatus,
   type ChartFileKind,
 } from "./chart";
+import {
+  daysRemaining,
+  validateCertificateDates,
+  validateCertificateFile,
+} from "./certificates";
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
 import {
@@ -330,6 +340,19 @@ export interface ComplyraApi {
   // ===== LIFEPATH-P2 API (training engine) =====
   // ===== LIFEPATH-P3 API (delegation forms) =====
   // ===== LIFEPATH-P4 API (certificates) =====
+  // LIFEPATH-P4 (certificates): HR certificate tracking.
+  listCertificates(userId: string): Promise<StaffCertificate[]>;
+  addCertificate(input: AddCertificateInput): Promise<StaffCertificate>;
+  uploadCertificateFile(
+    input: UploadCertificateFileInput,
+  ): Promise<StaffCertificate>;
+  updateCertificate(
+    id: string,
+    input: UpdateCertificateInput,
+  ): Promise<StaffCertificate>;
+  deleteCertificate(id: string): Promise<void>;
+  certificatesExpiringSoon(days: number): Promise<ExpiringCertificate[]>;
+  certificateFileUrl(id: string): Promise<string>;
   // ===== LIFEPATH-P5 API (HM weekly checklist) =====
   // ===== LIFEPATH-P6 API (med inventory) =====
 }
@@ -3048,6 +3071,182 @@ export class LocalApi implements ComplyraApi {
   // ===== LIFEPATH-P2 IMPL (training engine) =====
   // ===== LIFEPATH-P3 IMPL (delegation forms) =====
   // ===== LIFEPATH-P4 IMPL (certificates) =====
+  // LIFEPATH-P4 (certificates): HR certificate tracking (LocalApi, in-memory).
+  private certificatesOf() {
+    return (this.store.db.certificates ??= []);
+  }
+
+  private assertCertificateRead(session: SessionUser) {
+    if (
+      !hasPermission(session, "certificates.manage") &&
+      !hasPermission(session, "hr.view_staff")
+    ) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private assertCertificateWrite(session: SessionUser) {
+    assertCan(session, "certificates.manage");
+  }
+
+  private requireAgencyProfile(session: SessionUser, userId: string) {
+    const profile = this.store.db.profiles.find(
+      (row) => row.id === userId && row.homeAgencyId === session.agencyId,
+    );
+    if (!profile) throw new Error("Staff member not found.");
+    return profile;
+  }
+
+  private findCertificate(session: SessionUser, id: string) {
+    const cert = this.certificatesOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!cert) throw new Error("Certificate not found.");
+    return cert;
+  }
+
+  async listCertificates(userId: string): Promise<StaffCertificate[]> {
+    const session = assertSession(this.store);
+    this.assertCertificateRead(session);
+    return this.certificatesOf()
+      .filter((row) => row.userId === userId && row.agencyId === session.agencyId)
+      .slice()
+      .sort((a, b) => a.expiresOn.localeCompare(b.expiresOn));
+  }
+
+  async addCertificate(input: AddCertificateInput): Promise<StaffCertificate> {
+    const session = assertSession(this.store);
+    this.assertCertificateWrite(session);
+    this.requireAgencyProfile(session, input.userId);
+    const certName = input.certName.trim();
+    if (!certName) throw new Error("Enter the certificate name.");
+    validateCertificateDates(input.issuedOn, input.expiresOn);
+    const cert: StaffCertificate = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      userId: input.userId,
+      certName,
+      issuedOn: input.issuedOn,
+      expiresOn: input.expiresOn,
+      filePath: null,
+      fileName: null,
+      enteredBy: session.userId,
+      createdAt: new Date().toISOString(),
+    };
+    this.certificatesOf().unshift(cert);
+    log(
+      this.store,
+      session,
+      "certificate.added",
+      `${certName} recorded for ${this.requireAgencyProfile(session, input.userId).fullName} (renews ${input.expiresOn})`,
+      "certificate",
+      cert.id,
+    );
+    await persistMeta(this.store);
+    return cert;
+  }
+
+  async uploadCertificateFile(
+    input: UploadCertificateFileInput,
+  ): Promise<StaffCertificate> {
+    const session = assertSession(this.store);
+    this.assertCertificateWrite(session);
+    validateCertificateFile(input.file);
+    const cert = await this.addCertificate({
+      userId: input.userId,
+      certName: input.certName,
+      issuedOn: input.issuedOn,
+      expiresOn: input.expiresOn,
+    });
+    const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "certificate.pdf";
+    const storagePath = `agency/${session.agencyId}/certs/${cert.id}/${safeName}`;
+    await persistFile(storagePath, input.file);
+    cert.filePath = storagePath;
+    cert.fileName = input.file.name;
+    log(
+      this.store,
+      session,
+      "certificate.uploaded",
+      `Certificate file uploaded for ${cert.certName}`,
+      "certificate",
+      cert.id,
+    );
+    await persistMeta(this.store);
+    return cert;
+  }
+
+  async updateCertificate(
+    id: string,
+    input: UpdateCertificateInput,
+  ): Promise<StaffCertificate> {
+    const session = assertSession(this.store);
+    this.assertCertificateWrite(session);
+    const cert = this.findCertificate(session, id);
+    const certName = input.certName?.trim() ?? cert.certName;
+    if (!certName) throw new Error("Enter the certificate name.");
+    const issuedOn = input.issuedOn ?? cert.issuedOn;
+    const expiresOn = input.expiresOn ?? cert.expiresOn;
+    validateCertificateDates(issuedOn, expiresOn);
+    cert.certName = certName;
+    cert.issuedOn = issuedOn;
+    cert.expiresOn = expiresOn;
+    log(
+      this.store,
+      session,
+      "certificate.updated",
+      `${cert.certName} updated (renews ${cert.expiresOn})`,
+      "certificate",
+      cert.id,
+    );
+    await persistMeta(this.store);
+    return cert;
+  }
+
+  async deleteCertificate(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    this.assertCertificateWrite(session);
+    const cert = this.findCertificate(session, id);
+    const store = this.certificatesOf();
+    store.splice(store.indexOf(cert), 1);
+    if (cert.filePath) this.store.files.delete(cert.filePath);
+    log(
+      this.store,
+      session,
+      "certificate.deleted",
+      `${cert.certName} removed`,
+      "certificate",
+      cert.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async certificatesExpiringSoon(days: number): Promise<ExpiringCertificate[]> {
+    const session = assertSession(this.store);
+    this.assertCertificateRead(session);
+    const today = todayIso();
+    return this.certificatesOf()
+      .filter((row) => row.agencyId === session.agencyId)
+      .map((row) => {
+        const profile = this.store.db.profiles.find((p) => p.id === row.userId);
+        return {
+          ...row,
+          staffName: profile?.fullName ?? "Unknown staff",
+          daysRemaining: daysRemaining(row.expiresOn, today),
+        };
+      })
+      .filter((row) => row.daysRemaining <= days)
+      .sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }
+
+  async certificateFileUrl(id: string): Promise<string> {
+    const session = assertSession(this.store);
+    this.assertCertificateRead(session);
+    const cert = this.findCertificate(session, id);
+    if (!cert.filePath) throw new Error("This certificate has no file attached.");
+    const blob = await readStoredFile(this.store, cert.filePath);
+    if (!blob || blob.size === 0) throw new Error("The certificate file is missing.");
+    return URL.createObjectURL(blob);
+  }
   // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====
   // ===== LIFEPATH-P6 IMPL (med inventory) =====
 }

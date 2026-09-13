@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --import tsx --test src/domain.test.ts src/data/localApi.test.ts src/data/agencyCode.test.ts src/data/permissions.test.ts src/data/planStack.test.ts src/data/chart.test.ts src/data/dashboard.test.ts src/data/monthlyChecks.test.ts src/data/siteReview.test.ts src/data/branding.test.ts src/data/hostedMappers.test.ts src/mobile/native.test.ts",
+    "test": "node --import tsx --test src/domain.test.ts src/data/localApi.test.ts src/data/agencyCode.test.ts src/data/permissions.test.ts src/data/planStack.test.ts src/data/chart.test.ts src/data/dashboard.test.ts src/data/monthlyChecks.test.ts src/data/siteReview.test.ts src/data/branding.test.ts src/data/hostedMappers.test.ts src/data/certificates.test.ts src/mobile/native.test.ts",
     "test:e2e": "playwright test",
     "seed:evergreen": "tsx scripts/seed-evergreen.ts",
     "supabase:link": "bash scripts/link-and-push.sh",

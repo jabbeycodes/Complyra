@@ -20,6 +20,7 @@ import type {
   RequirementRecord,
   SiteRecord,
   StaffAssignment,
+  StaffCertificate,
 } from "./types";
 import type {
   ClinicalRenewal,
@@ -97,6 +98,8 @@ export interface LocalDatabase {
   emergencyDrills: EmergencyDrill[];
   homeSafetyReports: HomeSafetyReport[];
   siteReviews: SiteReview[];
+  // LIFEPATH-P4 (certificates): per-staff certificate records for HR tracking.
+  certificates: StaffCertificate[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -449,6 +452,8 @@ export function createEvergreenSeed(): LocalDatabase {
     ),
     ...buildMonthlySeed(sites, individuals),
     siteReviews: buildSiteReviewSeed(sites),
+    // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
+    certificates: [],
   };
 }
 

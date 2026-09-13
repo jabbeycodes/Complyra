@@ -86,6 +86,9 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P2-PAGEVIS (training engine)
   // LIFEPATH-P3-PAGEVIS (delegation forms)
   // LIFEPATH-P4-PAGEVIS (certificates)
+  if (page === "Certificates") {
+    return can(session, "certificates.manage") || can(session, "hr.view_staff");
+  }
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
   // LIFEPATH-P6-PAGEVIS (med inventory)
   return can(session, "individuals.view");

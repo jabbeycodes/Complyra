@@ -451,3 +451,161 @@ test("managers can correct a requirement and the fix is audit-logged", async () 
     /permission/i,
   );
 });
+
+function isoPlus(days: number): string {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function pdfFile(name = "cpr.pdf", size = 2048): File {
+  return new File([new Uint8Array(size)], name, { type: "application/pdf" });
+}
+
+test("LIFEPATH-P4: certificate mutations require certificates.manage (admin default off)", async () => {
+  const db = store();
+  const api = new LocalApi(db);
+  const session = await api.signIn(adminLogin());
+  await assert.rejects(
+    () =>
+      api.addCertificate({
+        userId: session.userId,
+        certName: "CPR",
+        issuedOn: isoPlus(-400),
+        expiresOn: isoPlus(300),
+      }),
+    /permission/i,
+  );
+  // Explicitly granting it via the agency role (Roles & access flow) works.
+  const roleRow = db.db.agencyRoles.find(
+    (row) => row.agencyId === session.agencyId && row.key === "administrator",
+  )!;
+  roleRow.permissions["certificates.manage"] = true;
+  const created = await api.addCertificate({
+    userId: session.userId,
+    certName: "CPR",
+    issuedOn: isoPlus(-400),
+    expiresOn: isoPlus(300),
+  });
+  assert.ok(created.id);
+  assert.equal(created.certName, "CPR");
+  assert.equal(created.filePath, null);
+  assert.equal(created.enteredBy, session.userId);
+  // Renewal date before issue date is rejected.
+  await assert.rejects(
+    () =>
+      api.addCertificate({
+        userId: session.userId,
+        certName: "CPI",
+        issuedOn: isoPlus(0),
+        expiresOn: isoPlus(-10),
+      }),
+    /cannot be before the issue date/,
+  );
+});
+
+test("LIFEPATH-P4: list/update/delete certificates and the expiring-soon panel", async () => {
+  const db = store();
+  const api = new LocalApi(db);
+  const session = await api.signIn(adminLogin());
+  db.db.agencyRoles.find(
+    (row) => row.agencyId === session.agencyId && row.key === "administrator",
+  )!.permissions["certificates.manage"] = true;
+
+  await api.addCertificate({
+    userId: session.userId,
+    certName: "CPR",
+    issuedOn: isoPlus(-400),
+    expiresOn: isoPlus(30),
+  });
+  await api.addCertificate({
+    userId: session.userId,
+    certName: "L1MA",
+    issuedOn: isoPlus(-400),
+    expiresOn: isoPlus(-10),
+  });
+  await api.addCertificate({
+    userId: session.userId,
+    certName: "CPI",
+    issuedOn: isoPlus(-400),
+    expiresOn: isoPlus(400),
+  });
+
+  const list = await api.listCertificates(session.userId);
+  assert.equal(list.length, 3);
+
+  const soon = await api.certificatesExpiringSoon(90);
+  assert.equal(soon.length, 2, "expired + 30-day certs, not the 400-day one");
+  assert.equal(soon[0].daysRemaining <= 0, true);
+  assert.equal(soon[0].staffName.length > 0, true);
+  assert.equal(soon[1].daysRemaining <= 30, true);
+
+  const cpr = list.find((c) => c.certName === "CPR")!;
+  const updated = await api.updateCertificate(cpr.id, { certName: "CPR (renewed)" });
+  assert.equal(updated.certName, "CPR (renewed)");
+
+  await api.deleteCertificate(cpr.id);
+  const after = await api.listCertificates(session.userId);
+  assert.equal(after.length, 2);
+  assert.equal(after.some((c) => c.id === cpr.id), false);
+});
+
+test("LIFEPATH-P4: certificate file upload links the scan and serves a download URL", async () => {
+  const db = store();
+  const api = new LocalApi(db);
+  const session = await api.signIn(adminLogin());
+  db.db.agencyRoles.find(
+    (row) => row.agencyId === session.agencyId && row.key === "administrator",
+  )!.permissions["certificates.manage"] = true;
+
+  const cert = await api.uploadCertificateFile({
+    userId: session.userId,
+    file: pdfFile(),
+    certName: "CPI",
+    issuedOn: isoPlus(-100),
+    expiresOn: isoPlus(265),
+  });
+  assert.ok(cert.filePath, "storage path linked");
+  assert.equal(cert.fileName, "cpr.pdf");
+  const url = await api.certificateFileUrl(cert.id);
+  assert.match(url, /^blob:/);
+  // Non-PDF/non-image and oversized files are rejected.
+  await assert.rejects(
+    () =>
+      api.uploadCertificateFile({
+        userId: session.userId,
+        file: new File(["x"], "notes.txt", { type: "text/plain" }),
+        certName: "CPI",
+        issuedOn: isoPlus(-100),
+        expiresOn: isoPlus(265),
+      }),
+    /PDF or image/,
+  );
+  await assert.rejects(
+    () =>
+      api.uploadCertificateFile({
+        userId: session.userId,
+        file: pdfFile("big.pdf", 10 * 1024 * 1024 + 1),
+        certName: "CPI",
+        issuedOn: isoPlus(-100),
+        expiresOn: isoPlus(265),
+      }),
+    /10 MB/,
+  );
+});
+
+test("LIFEPATH-P4: certificate reads require hr.view_staff or certificates.manage", async () => {
+  const db = store();
+  const api = new LocalApi(db);
+  const session = await api.signIn(adminLogin());
+  db.db.agencyRoles.find(
+    (row) => row.agencyId === session.agencyId && row.key === "administrator",
+  )!.permissions["certificates.manage"] = true;
+  await api.addCertificate({
+    userId: session.userId,
+    certName: "CPR",
+    issuedOn: isoPlus(-400),
+    expiresOn: isoPlus(300),
+  });
+  await api.signIn(dspLogin());
+  await assert.rejects(() => api.listCertificates(session.userId), /permission/i);
+  await assert.rejects(() => api.certificatesExpiringSoon(90), /permission/i);
+});

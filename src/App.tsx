@@ -72,6 +72,9 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 // LIFEPATH-P2-IMPORT (training engine)
 // LIFEPATH-P3-IMPORT (delegation forms)
 // LIFEPATH-P4-IMPORT (certificates)
+import { Award } from "lucide-react";
+import CertificateManager from "./features/certificates/CertificateManager";
+import StaffCertificatesModal from "./features/certificates/StaffCertificatesModal";
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 // LIFEPATH-P6-IMPORT (med inventory)
 import AssignRoleControl from "./features/AssignRoleControl";
@@ -111,6 +114,12 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
+  // LIFEPATH-P4 (certificates): staff-profile certificates modal state +
+  // per-staff expiring-soon badges on the Staff page.
+  const [certStaff, setCertStaff] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [certAlerts, setCertAlerts] = useState<Record<string, number>>({});
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -156,6 +165,33 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
+  // LIFEPATH-P4 (certificates): preload expiring-soon badges for the Staff page.
+  useEffect(() => {
+    if (!session) return;
+    if (page !== "Staff") return;
+    if (!can(session, "hr.view_staff") && !can(session, "certificates.manage"))
+      return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const soon = await api.certificatesExpiringSoon(90);
+        if (cancelled) return;
+        const alerts: Record<string, number> = {};
+        for (const row of soon) {
+          const prev = alerts[row.userId];
+          if (prev === undefined || row.daysRemaining < prev) {
+            alerts[row.userId] = row.daysRemaining;
+          }
+        }
+        setCertAlerts(alerts);
+      } catch {
+        /* badges are best-effort; the Certificates page reports errors */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, page, api]);
   useEffect(() => {
     if (!session) return;
     if (page !== "Overview" && !pageVisible(session, page)) {
@@ -221,6 +257,9 @@ export default function App() {
   const canAddSite = can(session, "sites.create");
   const canAddPerson = canCreateIndividual(session.roleKey);
   const canInvite = can(session, "members.invite");
+  // LIFEPATH-P4 (certificates): who may open the staff certificates section.
+  const canViewCerts =
+    can(session, "hr.view_staff") || can(session, "certificates.manage");
   const canAssign = can(session, "members.assign_roles");
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
@@ -422,6 +461,7 @@ export default function App() {
         // LIFEPATH-P2-NAV (training engine)
         // LIFEPATH-P3-NAV (delegation forms)
         // LIFEPATH-P4-NAV (certificates)
+        ["Certificates", Award],
         // LIFEPATH-P5-NAV (HM weekly checklist)
         // LIFEPATH-P6-NAV (med inventory)
       ],
@@ -1044,6 +1084,8 @@ export default function App() {
                             <th>Role</th>
                             <th>Assigned site</th>
                             <th>Open requirements</th>
+                            {/* LIFEPATH-P4 (certificates) */}
+                            {canViewCerts && <th>Certificates</th>}
                             {canAssign && <th>Assign role</th>}
                             {canResetPassword && <th>Password</th>}
                             <th />
@@ -1098,6 +1140,29 @@ export default function App() {
                                     />
                                   </td>
                                 )}
+                                {/* LIFEPATH-P4 (certificates) */}
+                                {canViewCerts && (
+                                  <td>
+                                    <button
+                                      className="text-button"
+                                      onClick={() =>
+                                        setCertStaff({ id: s.id, name: s.name })
+                                      }
+                                    >
+                                      View
+                                    </button>
+                                    {certAlerts[s.id] !== undefined && (
+                                      <span
+                                        className={`badge ${certAlerts[s.id] < 0 ? "expired" : "due-soon"}`}
+                                        style={{ marginLeft: 8 }}
+                                      >
+                                        {certAlerts[s.id] < 0
+                                          ? "Expired"
+                                          : `${certAlerts[s.id]}d left`}
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                                 <td>
                                   <button
                                     className="text-button"
@@ -1115,6 +1180,14 @@ export default function App() {
                       </table>
                     </div>
                   </section>
+                  {/* LIFEPATH-P4 (certificates): staff-profile certificates section */}
+                  {certStaff && (
+                    <StaffCertificatesModal
+                      staffName={certStaff.name}
+                      userId={certStaff.id}
+                      onClose={() => setCertStaff(null)}
+                    />
+                  )}
                 </>
               )}
               {page === "Documents" && (
@@ -1513,6 +1586,7 @@ export default function App() {
                             {/* LIFEPATH-P2-PAGE (training engine) */}
               {/* LIFEPATH-P3-PAGE (delegation forms) */}
               {/* LIFEPATH-P4-PAGE (certificates) */}
+              {page === "Certificates" && <CertificateManager />}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
               {/* LIFEPATH-P6-PAGE (med inventory) */}
               {page === "Settings" && (
