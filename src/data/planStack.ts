@@ -1,4 +1,4 @@
-import type { IndividualRecord } from "./types";
+import type { DelegationForm, IndividualRecord } from "./types";
 
 export type ObligationKind =
   | "pcsp"
@@ -68,6 +68,8 @@ export interface ObligationItem {
   discontinuedAt: string | null;
   discontinueFileId: string | null;
   discontinueTitle: string | null;
+  /** LIFEPATH-P3 (delegation forms): full RN delegation form, stored as jsonb. */
+  delegationForm?: DelegationForm | null;
 }
 
 export interface ObligationSignature {

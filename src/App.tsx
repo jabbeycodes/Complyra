@@ -73,6 +73,7 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 // LIFEPATH-P2-IMPORT (training engine)
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
+import DelegationsPage from "./features/delegations/DelegationsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
@@ -465,6 +466,7 @@ export default function App() {
         // LIFEPATH-P2-NAV (training engine)
         ["Training", BookOpen],
         // LIFEPATH-P3-NAV (delegation forms)
+        ["Delegations", FileText],
         // LIFEPATH-P4-NAV (certificates)
         ["Certificates", Award],
         // LIFEPATH-P5-NAV (HM weekly checklist)
@@ -1593,6 +1595,7 @@ export default function App() {
                             {/* LIFEPATH-P2-PAGE (training engine) */}
               {page === "Training" && <StaffCompliancePage onSaved={notify} />}
               {/* LIFEPATH-P3-PAGE (delegation forms) */}
+              {page === "Delegations" && <DelegationsPage />}
               {/* LIFEPATH-P4-PAGE (certificates) */}
               {page === "Certificates" && <CertificateManager />}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}

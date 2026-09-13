@@ -1,4 +1,5 @@
-import type { IndividualRecord } from "./types";
+import type { DelegationForm, IndividualRecord } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import type {
   IndividualProfile,
   ObligationItem,
@@ -87,7 +88,61 @@ export function mapObligation(row: Row): ObligationItem {
     discontinuedAt: isoDateTime(row.discontinued_at),
     discontinueFileId: strOrNull(row.discontinue_file_id),
     discontinueTitle: strOrNull(row.discontinue_title),
+    // LIFEPATH-P3 (delegation forms): delegation_form jsonb -> DelegationForm.
+    delegationForm: mapDelegationForm(row.delegation_form),
   };
+}
+
+/** LIFEPATH-P3 (delegation forms): sanitize the delegation_form jsonb column. */
+export function mapDelegationForm(value: unknown): DelegationForm | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const form = blankDelegationForm(
+    raw.templateVersion === "complyrer_improved" ? "complyrer_improved" : "lifepath_exact",
+  );
+  form.purpose = str(raw.purpose);
+  form.procedures = str(raw.procedures);
+  form.observeReportDo = str(raw.observeReportDo);
+  form.nonTransferableAcknowledged = Boolean(raw.nonTransferableAcknowledged);
+  form.inspectionInterval = str(raw.inspectionInterval) || form.inspectionInterval;
+  form.reviewDate = isoDate(raw.reviewDate);
+  form.inspectionCadence = strOrNull(raw.inspectionCadence);
+  form.rescindReason =
+    raw.rescindReason === "health_status_change" || raw.rescindReason === "other"
+      ? raw.rescindReason
+      : null;
+  form.rescindExplanation = str(raw.rescindExplanation);
+  const prof = (raw.instructingProfessional ?? {}) as Record<string, unknown>;
+  form.instructingProfessional = {
+    name: str(prof.name),
+    title: str(prof.title),
+    signedAt: isoDateTime(prof.signedAt),
+    contactNumber: str(prof.contactNumber),
+  };
+  const rn = (raw.delegatingRn ?? {}) as Record<string, unknown>;
+  form.delegatingRn = {
+    name: str(rn.name),
+    signatureName: strOrNull(rn.signatureName),
+    dateSigned: isoDate(rn.dateSigned),
+    contactNumber: str(rn.contactNumber),
+  };
+  const rows = Array.isArray(raw.roster) ? raw.roster : [];
+  form.roster = Array.from({ length: DELEGATION_ROSTER_ROWS }, (_, i) => {
+    const r = (rows[i] ?? {}) as Record<string, unknown>;
+    return {
+      printName: str(r.printName),
+      title: str(r.title),
+      staffSignature: strOrNull(r.staffSignature),
+      signatureName: strOrNull(r.signatureName),
+      signedAt: isoDateTime(r.signedAt),
+      rescindedDate: isoDate(r.rescindedDate),
+      initials: strOrNull(r.initials),
+      competency: Array.isArray(r.competency)
+        ? (r.competency as unknown[]).filter((c): c is string => typeof c === "string")
+        : [],
+    };
+  });
+  return form;
 }
 
 /** Partial obligation edits -> db column patch. */

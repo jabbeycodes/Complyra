@@ -87,6 +87,7 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Training")
     return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
   // LIFEPATH-P3-PAGEVIS (delegation forms)
+  if (page === "Delegations") return can(session, "clinical.view");
   // LIFEPATH-P4-PAGEVIS (certificates)
   if (page === "Certificates") {
     return can(session, "certificates.manage") || can(session, "hr.view_staff");
