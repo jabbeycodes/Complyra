@@ -14,10 +14,13 @@ import type {
   AcknowledgmentRow,
   AddCertificateInput,
   AppRole,
+  ChecklistAnswer,
+  ChecklistAttestation,
+  ChecklistItem,
   DocumentRecord,
   DocumentVersion,
   ExpiringCertificate,
-  IndividualRecord,
+  HmWeeklyChecklist,  IndividualRecord,
   AgencyStatus,
   CreateAgencyInput,
   CreateAgencyResult,
@@ -27,12 +30,15 @@ import type {
   PacketDetail,
   PendingAgency,
   RequirementRecord,
+  ServiceLogEntry,
+  ServiceLogKind,
   SessionUser,
   SiteRecord,
   StaffCertificate,
   UpdateCertificateInput,
   UploadCertificateFileInput,
   UploadDocumentInput,
+  WeeklyChecklistStatus,
 } from "./types";
 import {
   LOGIN_FAILED_MESSAGE,
@@ -126,6 +132,20 @@ import {
   canManageAgencyLogo,
   validateLogoFile,
 } from "./branding";
+import {
+  applyItem21,
+  applyItemAnswer,
+  blankItemNumbers,
+  buildChecklistItems,
+  computeItem21,
+  weekOfSundayIso,
+  ITEM_21_KEY,
+  type TrainingReadiness,
+} from "./hmChecklist";
+import {
+  buildWeeklyChecklistPdf,
+  weeklyChecklistPdfName,
+} from "../pdf/hmChecklistPdf";
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
 import {
@@ -3462,6 +3482,499 @@ export class HostedApi implements ComplyraApi {
     return data!.signedUrl;
   }
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
+
+  private checklistCanAssign(session: SessionUser): boolean {
+    return (
+      session.roleKey === "degreed_professional_manager" ||
+      session.role === "administrator" ||
+      session.role === "compliance_admin" ||
+      session.platformAdmin
+    );
+  }
+
+  private checklistCanOversee(session: SessionUser): boolean {
+    return this.checklistCanAssign(session);
+  }
+
+  private mapChecklistRow(row: Record<string, unknown>): HmWeeklyChecklist {
+    const isoOrNull = (value: unknown): string | null => {
+      if (value == null) return null;
+      const d = new Date(value as string);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    };
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      weekOf: (row.week_of as string).slice(0, 10),
+      assignedToUserId: row.assigned_to_user_id as string,
+      assignedByUserId: (row.assigned_by_user_id as string | null) ?? null,
+      status: row.status as WeeklyChecklistStatus,
+      submittedAt: isoOrNull(row.submitted_at),
+      items: (row.items as ChecklistItem[]) ?? [],
+      serviceLogs: (row.service_logs as ServiceLogEntry[]) ?? [],
+      attestation: (row.attestation as ChecklistAttestation | null) ?? null,
+      createdAt: isoOrNull(row.created_at) ?? "",
+      updatedAt: isoOrNull(row.updated_at) ?? "",
+    };
+  }
+
+  private async checklistRow(
+    session: SessionUser,
+    checklistId: string,
+  ): Promise<HmWeeklyChecklist> {
+    const { data, error } = await this.client
+      .from("hm_weekly_checklists")
+      .select("*")
+      .eq("id", checklistId)
+      .maybeSingle();
+    throwIf(error, "Could not load the checklist.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Checklist not found.");
+    }
+    const row = this.mapChecklistRow(data as Record<string, unknown>);
+    if (
+      row.assignedToUserId !== session.userId &&
+      !this.checklistCanOversee(session)
+    ) {
+      throw new Error("This checklist is assigned to another house manager.");
+    }
+    return row;
+  }
+
+  /**
+   * LIFEPATH-P5 → P2 HOOK: pre-Phase-2 training readiness feed, built from the
+   * legacy training_checklists table (mirrors LocalApi.trainingReadinessForSite).
+   * When the Phase 2 training engine merges, replace this with the engine's
+   * per-staff readiness feed (including delegation sign-offs). The
+   * TrainingReadiness shape and computeItem21 stay the same.
+   */
+  private async trainingReadinessHosted(
+    session: SessionUser,
+    siteId: string,
+  ): Promise<TrainingReadiness[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: memberships, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id, role_key, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .not(
+        "role_key",
+        "in",
+        "(administrator,compliance_admin,degreed_professional_manager,program_manager)",
+      );
+    throwIf(memberError, "Could not load site staff.");
+    const active = (memberships ?? []).filter(
+      (m) => !(m.expires_on as string | null) || (m.expires_on as string) >= today,
+    );
+    if (active.length === 0) return [];
+    const userIds = active.map((m) => m.user_id as string);
+    const { data: profiles } = await this.client
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", userIds);
+    const names = new Map(
+      (profiles ?? []).map((p) => [p.id as string, p.full_name as string]),
+    );
+    const { data: sheets, error: sheetError } = await this.client
+      .from("training_checklists")
+      .select("staff_user_id, staff_signed_at, hm_signed_at, items")
+      .eq("agency_id", session.agencyId)
+      .in("staff_user_id", userIds);
+    throwIf(sheetError, "Could not load training records.");
+    return active.map((m) => {
+      const userId = m.user_id as string;
+      const rows = (sheets ?? []).filter(
+        (s) => (s.staff_user_id as string) === userId,
+      );
+      const fullySignedOff =
+        rows.length > 0 &&
+        rows.every(
+          (s) =>
+            Boolean(s.staff_signed_at) &&
+            Boolean(s.hm_signed_at) &&
+            Array.isArray(s.items) &&
+            (s.items as Array<{ initialedAt?: string | null }>).every((line) =>
+              Boolean(line.initialedAt),
+            ),
+        );
+      return {
+        staffId: userId,
+        staffName: names.get(userId) ?? "Staff",
+        fullySignedOff,
+      };
+    });
+  }
+
+  private async stampItem21Hosted(
+    session: SessionUser,
+    row: HmWeeklyChecklist,
+  ): Promise<ChecklistAnswer> {
+    const readiness = await this.trainingReadinessHosted(session, row.siteId);
+    const items = applyItem21(row.items, computeItem21(readiness));
+    const { error } = await this.client
+      .from("hm_weekly_checklists")
+      .update({ items })
+      .eq("id", row.id);
+    throwIf(error, "Could not update item 21.");
+    row.items = items;
+    return (items.find((i) => i.key === ITEM_21_KEY)?.answer ?? "N") as ChecklistAnswer;
+  }
+
+  async assignWeeklyChecklist(input: {
+    siteId: string;
+    hmUserId: string;
+    weekOf: string;
+  }): Promise<HmWeeklyChecklist> {
+    const session = await this.requireSession();
+    if (!this.checklistCanAssign(session)) {
+      throw new Error(
+        "Only a DPM or agency administrator can assign weekly checklists.",
+      );
+    }
+    const weekOf = weekOfSundayIso(input.weekOf);
+    const site = await this.siteRecord(input.siteId);
+    if (!site || site.agencyId !== session.agencyId) {
+      throw new Error("Home not found.");
+    }
+    const { data: hmRow } = await this.client
+      .from("memberships")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", input.hmUserId)
+      .eq("role_key", "house_manager")
+      .maybeSingle();
+    if (!hmRow) {
+      throw new Error("Checklists can only be assigned to a house manager.");
+    }
+    const { data: existing } = await this.client
+      .from("hm_weekly_checklists")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", input.siteId)
+      .eq("week_of", weekOf)
+      .maybeSingle();
+    if (existing) {
+      const row = this.mapChecklistRow(existing as Record<string, unknown>);
+      let items = row.items;
+      if (row.status === "open") {
+        const readiness = await this.trainingReadinessHosted(session, row.siteId);
+        items = applyItem21(items, computeItem21(readiness));
+      }
+      const { error } = await this.client
+        .from("hm_weekly_checklists")
+        .update({
+          assigned_to_user_id: input.hmUserId,
+          assigned_by_user_id: session.userId,
+          items,
+        })
+        .eq("id", row.id);
+      throwIf(error, "Could not reassign the checklist.");
+      await this.audit(
+        session,
+        "checklist.assigned",
+        `Weekly checklist reassigned for ${site.name} · week of ${weekOf}`,
+        "hm_weekly_checklist",
+        row.id,
+      );
+      return { ...row, assignedToUserId: input.hmUserId, assignedByUserId: session.userId, items };
+    }
+    const readiness = await this.trainingReadinessHosted(session, input.siteId);
+    const items = applyItem21(buildChecklistItems(), computeItem21(readiness));
+    const { data, error } = await this.client
+      .from("hm_weekly_checklists")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: input.siteId,
+        week_of: weekOf,
+        assigned_to_user_id: input.hmUserId,
+        assigned_by_user_id: session.userId,
+        status: "open",
+        items,
+        service_logs: [],
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not assign the checklist.");
+    await this.audit(
+      session,
+      "checklist.assigned",
+      `Weekly checklist assigned for ${site.name} · week of ${weekOf}`,
+      "hm_weekly_checklist",
+      (data as Record<string, unknown>).id as string,
+    );
+    return this.mapChecklistRow(data as Record<string, unknown>);
+  }
+
+  async listWeeklyChecklists(input?: {
+    siteId?: string;
+    weekOf?: string;
+  }): Promise<HmWeeklyChecklist[]> {
+    const session = await this.requireSession();
+    let query = this.client
+      .from("hm_weekly_checklists")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    if (!this.checklistCanOversee(session)) {
+      query = query.eq("assigned_to_user_id", session.userId);
+    }
+    if (input?.siteId) query = query.eq("site_id", input.siteId);
+    if (input?.weekOf) query = query.eq("week_of", weekOfSundayIso(input.weekOf));
+    query = query.order("week_of", { ascending: false });
+    const { data, error } = await query;
+    throwIf(error, "Could not load checklists.");
+    return (data ?? []).map((r) =>
+      this.mapChecklistRow(r as Record<string, unknown>),
+    );
+  }
+
+  async answerChecklistItem(
+    checklistId: string,
+    itemKey: string,
+    answer: ChecklistAnswer,
+    note?: string,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    if (row.assignedToUserId !== session.userId) {
+      throw new Error("Only the assigned house manager can fill in this checklist.");
+    }
+    if (row.status !== "open") {
+      throw new Error("This checklist is no longer open for edits.");
+    }
+    if (itemKey === ITEM_21_KEY) {
+      throw new Error(
+        "Item 21 is auto-checked from training records and cannot be answered by hand.",
+      );
+    }
+    if (!row.items.some((item) => item.key === itemKey)) {
+      throw new Error("Checklist item not found.");
+    }
+    const items = applyItemAnswer(row.items, itemKey, answer, note);
+    const { error } = await this.client
+      .from("hm_weekly_checklists")
+      .update({ items })
+      .eq("id", row.id);
+    throwIf(error, "Could not save the answer.");
+  }
+
+  async addServiceLogEntry(
+    checklistId: string,
+    input: {
+      kind: ServiceLogKind;
+      detail: string;
+      staffName?: string;
+      dateTime?: string;
+    },
+  ): Promise<ServiceLogEntry> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    if (row.assignedToUserId !== session.userId) {
+      throw new Error("Only the assigned house manager can fill in this checklist.");
+    }
+    if (row.status !== "open") {
+      throw new Error("This checklist is no longer open for edits.");
+    }
+    if (!input.detail.trim()) throw new Error("Describe the log entry.");
+    const entry: ServiceLogEntry = {
+      id: crypto.randomUUID(),
+      kind: input.kind,
+      detail: input.detail.trim(),
+      staffName: input.staffName?.trim() || null,
+      dateTime: input.dateTime?.trim() || null,
+      createdAt: new Date().toISOString(),
+    };
+    const serviceLogs = [...row.serviceLogs, entry];
+    const { error } = await this.client
+      .from("hm_weekly_checklists")
+      .update({ service_logs: serviceLogs })
+      .eq("id", row.id);
+    throwIf(error, "Could not add the log entry.");
+    return entry;
+  }
+
+  async removeServiceLogEntry(
+    checklistId: string,
+    entryId: string,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    if (row.assignedToUserId !== session.userId) {
+      throw new Error("Only the assigned house manager can fill in this checklist.");
+    }
+    if (row.status !== "open") {
+      throw new Error("This checklist is no longer open for edits.");
+    }
+    const serviceLogs = row.serviceLogs.filter((e) => e.id !== entryId);
+    const { error } = await this.client
+      .from("hm_weekly_checklists")
+      .update({ service_logs: serviceLogs })
+      .eq("id", row.id);
+    throwIf(error, "Could not remove the log entry.");
+  }
+
+  async refreshChecklistItem21(
+    checklistId: string,
+  ): Promise<ChecklistAnswer> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    if (row.status !== "open") return "N";
+    return this.stampItem21Hosted(session, row);
+  }
+
+  async submitWeeklyChecklist(
+    checklistId: string,
+    signatureName: string,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    if (row.assignedToUserId !== session.userId) {
+      throw new Error("Only the assigned house manager can fill in this checklist.");
+    }
+    if (row.status !== "open") {
+      throw new Error("This checklist is no longer open.");
+    }
+    // Item 21 reflects the latest training data at submit time.
+    const readiness = await this.trainingReadinessHosted(session, row.siteId);
+    const items = applyItem21(row.items, computeItem21(readiness));
+    const blanks = blankItemNumbers(items);
+    if (blanks.length > 0) {
+      throw new Error(
+        `Answer every item before submitting (do not leave blanks). Blank: ${blanks
+          .map((n) => `#${n}`)
+          .join(", ")}.`,
+      );
+    }
+    const signedBy = signatureName.trim();
+    if (!signedBy) throw new Error("Type your name to sign the attestation.");
+    const now = new Date().toISOString();
+    const attestation: ChecklistAttestation = {
+      signedBy,
+      signedAt: now,
+      signatureMark: signedBy,
+    };
+    const { error } = await this.client
+      .from("hm_weekly_checklists")
+      .update({
+        items,
+        attestation,
+        status: "submitted",
+        submitted_at: now,
+      })
+      .eq("id", row.id);
+    throwIf(error, "Could not submit the checklist.");
+    const site = await this.siteRecord(row.siteId);
+    await this.audit(
+      session,
+      "checklist.submitted",
+      `Weekly checklist submitted for ${site?.name ?? "home"} · week of ${row.weekOf}`,
+      "hm_weekly_checklist",
+      row.id,
+    );
+  }
+
+  async rolloverWeeklyChecklists(): Promise<{
+    created: number;
+    locked: number;
+  }> {
+    const session = await this.requireSession();
+    const today = new Date().toISOString().slice(0, 10);
+    const currentWeek = weekOfSundayIso(today);
+    const { data: stale, error: staleError } = await this.client
+      .from("hm_weekly_checklists")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("status", "open")
+      .lt("week_of", currentWeek);
+    throwIf(staleError, "Could not find stale checklists.");
+    let locked = 0;
+    if (stale && stale.length > 0) {
+      const { error } = await this.client
+        .from("hm_weekly_checklists")
+        .update({ status: "overdue" })
+        .in(
+          "id",
+          stale.map((r) => (r as Record<string, unknown>).id as string),
+        );
+      throwIf(error, "Could not lock prior weeks.");
+      locked = stale.length;
+    }
+    const { data: assignments, error: assignError } = await this.client
+      .from("memberships")
+      .select("user_id, site_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("role_key", "house_manager")
+      .not("site_id", "is", null);
+    throwIf(assignError, "Could not load HM assignments.");
+    const { data: have, error: haveError } = await this.client
+      .from("hm_weekly_checklists")
+      .select("site_id")
+      .eq("agency_id", session.agencyId)
+      .eq("week_of", currentWeek);
+    throwIf(haveError, "Could not load this week's checklists.");
+    const haveSites = new Set(
+      (have ?? []).map((r) => (r as Record<string, unknown>).site_id as string),
+    );
+    let created = 0;
+    for (const m of (assignments ?? []) as Array<Record<string, unknown>>) {
+      const expiresOn = m.expires_on as string | null;
+      if (expiresOn && expiresOn < today) continue;
+      const siteId = m.site_id as string;
+      if (haveSites.has(siteId)) continue;
+      const readiness = await this.trainingReadinessHosted(session, siteId);
+      const items = applyItem21(buildChecklistItems(), computeItem21(readiness));
+      const { error } = await this.client.from("hm_weekly_checklists").insert({
+        agency_id: session.agencyId,
+        site_id: siteId,
+        week_of: currentWeek,
+        assigned_to_user_id: m.user_id as string,
+        assigned_by_user_id: null,
+        status: "open",
+        items,
+        service_logs: [],
+      });
+      if (error) {
+        // Idempotent: another concurrent run may have created this row.
+        if (!/duplicate|unique/i.test(error.message)) {
+          throwIf(error, "Could not open this week's checklist.");
+        }
+        continue;
+      }
+      created += 1;
+      haveSites.add(siteId);
+    }
+    if (created > 0 || locked > 0) {
+      await this.audit(
+        session,
+        "checklist.rollover",
+        `Weekly rollover: ${created} opened · ${locked} locked overdue`,
+        "hm_weekly_checklist",
+      );
+    }
+    return { created, locked };
+  }
+
+  async exportWeeklyChecklistPdf(
+    checklistId: string,
+  ): Promise<{ blob: Blob; name: string }> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    const site = await this.siteRecord(row.siteId);
+    const hmName = await this.profileName(row.assignedToUserId);
+    const doc = buildWeeklyChecklistPdf({
+      agencyName: session.agencyName,
+      siteName: site?.name ?? "Home",
+      weekOf: row.weekOf,
+      checklist: row,
+      hmName,
+      logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+    });
+    return {
+      blob: doc.output("blob"),
+      name: weeklyChecklistPdfName(site?.name ?? "home", row.weekOf),
+    };
+  }
   // ===== LIFEPATH-P6 HOSTED (med inventory) =====
 }
 

@@ -90,6 +90,20 @@ export function pageVisible(session: SessionUser, page: string) {
     return can(session, "certificates.manage") || can(session, "hr.view_staff");
   }
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
+  if (page === "Weekly checklist") {
+    return (
+      session.roleKey === "house_manager" ||
+      isAgencyAdmin(session.role) ||
+      Boolean(session.platformAdmin)
+    );
+  }
+  if (page === "Checklist assignments") {
+    return (
+      session.roleKey === "degreed_professional_manager" ||
+      isAgencyAdmin(session.role) ||
+      Boolean(session.platformAdmin)
+    );
+  }
   // LIFEPATH-P6-PAGEVIS (med inventory)
   return can(session, "individuals.view");
 }

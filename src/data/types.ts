@@ -328,4 +328,57 @@ export interface ExpiringCertificate extends StaffCertificate {
   daysRemaining: number;
 }
 // ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
+export type ChecklistAnswer = "Y" | "N" | "N/A";
+
+export interface ChecklistItem {
+  key: string;
+  prompt: string;
+  answer: ChecklistAnswer | null;
+  note: string;
+  /** Item 21 is auto-computed from training data and cannot be answered by hand. */
+  autoComputed?: boolean;
+}
+
+export type ServiceLogKind =
+  | "class_reminder"
+  | "call_in"
+  | "direct_care"
+  | "off_shift"
+  | "issue";
+
+export interface ServiceLogEntry {
+  id: string;
+  kind: ServiceLogKind;
+  detail: string;
+  staffName?: string | null;
+  dateTime?: string | null;
+  createdAt: string;
+}
+
+export interface ChecklistAttestation {
+  signedBy: string;
+  signedAt: string;
+  signatureMark: string;
+}
+
+export type WeeklyChecklistStatus = "open" | "submitted" | "overdue" | "locked";
+
+export interface HmWeeklyChecklist {
+  id: string;
+  agencyId: string;
+  siteId: string;
+  /** ISO date of the Sunday that opens the week. */
+  weekOf: string;
+  /** The HM this instance is assigned to. */
+  assignedToUserId: string;
+  /** The DPM (or system rollover) that created the assignment. */
+  assignedByUserId: string | null;
+  status: WeeklyChecklistStatus;
+  submittedAt: string | null;
+  items: ChecklistItem[];
+  serviceLogs: ServiceLogEntry[];
+  attestation: ChecklistAttestation | null;
+  createdAt: string;
+  updatedAt: string;
+}
 // ===== LIFEPATH-P6 TYPES (med inventory) =====
