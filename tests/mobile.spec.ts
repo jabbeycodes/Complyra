@@ -12,11 +12,25 @@ async function signIn(page: Page) {
 }
 
 async function assertNoHorizontalOverflow(page: Page) {
-  const box = await page.evaluate(() => ({
-    scroll: document.documentElement.scrollWidth,
-    client: document.documentElement.clientWidth,
-  }));
-  expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
+  const result = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const scroller = document.scrollingElement;
+    if (scroller) scroller.scrollLeft = 80;
+    const pageShifted = Boolean(scroller && scroller.scrollLeft > 0);
+    if (scroller) scroller.scrollLeft = 0;
+    const wide = [...document.querySelectorAll("body *")].filter((el) => {
+      const style = getComputedStyle(el);
+      if (style.position === "fixed") return false;
+      const box = el.getBoundingClientRect();
+      return box.width > 1 && box.right > vw + 2;
+    });
+    return {
+      pageShifted,
+      wide: wide.slice(0, 8).map((el) => el.className?.toString().slice(0, 60)),
+    };
+  });
+  expect(result.pageShifted, "page should not scroll sideways").toBe(false);
+  expect(result.wide, "in-flow layout should stay in the viewport").toEqual([]);
 }
 
 async function openPage(page: Page, name: string) {

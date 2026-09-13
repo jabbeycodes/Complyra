@@ -5046,9 +5046,18 @@ th {
 
 /* Phone + Capacitor: keep every workspace page on one readable column. */
 html,
-body {
-  overflow-x: clip;
+body,
+.app-shell,
+.main-shell {
+  overflow-x: hidden;
   max-width: 100%;
+}
+.app-shell,
+.main-shell,
+main,
+.panel,
+.table-scroll {
+  min-width: 0;
 }
 .topbar {
   position: sticky;
@@ -5219,9 +5228,14 @@ body.nav-open {
     flex: 1;
   }
   .table-scroll {
-    margin-inline: -14px;
-    padding-inline: 14px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+  .table-scroll table {
+    width: max-content;
+    min-width: 100%;
   }
   .training-lines label {
     grid-template-columns: auto 1fr;
