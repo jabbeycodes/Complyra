@@ -5271,6 +5271,87 @@ export class HostedApi implements ComplyraApi {
     return summarizeMonthlyMileage(trips, individualIds);
   }
 
+  /** All trips for one home, oldest first, for continuity checks and yearly rollups. */
+  private async siteMileageTripsOrdered(session: SessionUser, siteId: string) {
+    const { compareMileageTrips } = await this.p7lib();
+    await this.assertSiteInAgency(session, siteId);
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .select("id,trip_date,created_at,odometer_start,odometer_end,miles")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(error, "Could not load the mileage log.");
+    return (data ?? [])
+      .map((row) => this.mapMileageTrip(row as Record<string, unknown>))
+      .sort(compareMileageTrips);
+  }
+
+  async getLastMileageOdometerEnd(siteId: string): Promise<number | null> {
+    const { getLastOdometerEnd } = await this.p7lib();
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    return getLastOdometerEnd(
+      await this.siteMileageTripsOrdered(session, siteId),
+    );
+  }
+
+  async getPreviousMileageOdometerEnd(
+    siteId: string,
+    tripId: string,
+  ): Promise<number | null> {
+    const { getPreviousOdometerEnd } = await this.p7lib();
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    return getPreviousOdometerEnd(
+      await this.siteMileageTripsOrdered(session, siteId),
+      tripId,
+    );
+  }
+
+  async getMileageYearlySummary(
+    siteId: string,
+    year: number,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageYearlySummary> {
+    const { summarizeYearlyMileage } = await this.p7lib();
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    await this.assertSiteInAgency(session, siteId);
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .gte("trip_date", `${year}-01-01`)
+      .lt("trip_date", `${year + 1}-01-01`);
+    throwIf(error, "Could not load the yearly mileage summary.");
+    const trips = (data ?? []).map((row) =>
+      this.mapMileageTrip(row as Record<string, unknown>),
+    );
+    return summarizeYearlyMileage(trips, individualIds, year);
+  }
+
+  /** The log is one unbroken chain: a trip's start must continue the previous end. */
+  private async assertOdometerContinuity(
+    session: SessionUser,
+    siteId: string,
+    odometerStart: number,
+    excludeTripId?: string,
+  ) {
+    const {
+      validateOdometerContinuity,
+      getLastOdometerEnd,
+      getPreviousOdometerEnd,
+    } = await this.p7lib();
+    const trips = await this.siteMileageTripsOrdered(session, siteId);
+    const expected =
+      excludeTripId === undefined
+        ? getLastOdometerEnd(trips)
+        : getPreviousOdometerEnd(trips, excludeTripId);
+    const problem = validateOdometerContinuity(odometerStart, expected);
+    if (problem) throw new Error(problem);
+  }
+
   async addMileageTrip(
     input: import("./types").AddMileageTripInput,
   ): Promise<import("./types").MileageTrip> {
@@ -5279,6 +5360,7 @@ export class HostedApi implements ComplyraApi {
     await this.assertSiteInAgency(session, input.siteId);
     await this.assertRidersInSite(session, input.siteId, input.riderIds);
     const valid = await this.validatedTripInput(input);
+    await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
     const { data, error } = await this.client
       .from("mileage_trips")
       .insert({
@@ -5319,6 +5401,12 @@ export class HostedApi implements ComplyraApi {
     const nextRiders = patch.riderIds ?? existing.riderIds;
     await this.assertRidersInSite(session, existing.siteId, nextRiders);
     const valid = await this.validatedTripInput(patch, existing);
+    await this.assertOdometerContinuity(
+      session,
+      existing.siteId,
+      valid.odometerStart,
+      existing.id,
+    );
     const { data, error } = await this.client
       .from("mileage_trips")
       .update({

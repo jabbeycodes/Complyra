@@ -549,6 +549,19 @@ export interface ComplyraApi {
     patch: import("./types").UpdateMileageTripInput,
   ): Promise<import("./types").MileageTrip>;
   deleteMileageTrip(tripId: string): Promise<void>;
+  /** Odometer end of the most recent trip for a home (continuity prefill); null when no trips exist. */
+  getLastMileageOdometerEnd(siteId: string): Promise<number | null>;
+  /** Odometer end of the trip just before this one in log order; null when none (for edit validation). */
+  getPreviousMileageOdometerEnd(
+    siteId: string,
+    tripId: string,
+  ): Promise<number | null>;
+  /** Yearly administrator summary: per-individual Jan–Dec totals + grand total row. */
+  getMileageYearlySummary(
+    siteId: string,
+    year: number,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageYearlySummary>;
 }
 
 export type WorkspaceSite = {
@@ -4935,6 +4948,74 @@ export class LocalApi implements ComplyraApi {
     return summarizeMonthlyMileage(trips, individualIds);
   }
 
+  /** Trips for one home across all time, oldest first (continuity + yearly rollups). */
+  private siteMileageTrips(session: { agencyId: string }, siteId: string) {
+    return this.mileageRows()
+      .filter((row) => row.agencyId === session.agencyId && row.siteId === siteId)
+      .sort((a, b) =>
+        a.tripDate !== b.tripDate
+          ? a.tripDate < b.tripDate
+            ? -1
+            : 1
+          : a.createdAt < b.createdAt
+            ? -1
+            : 1,
+      );
+  }
+
+  async getLastMileageOdometerEnd(siteId: string): Promise<number | null> {
+    const { getLastOdometerEnd } = await this.p7lib();
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    this.siteOrThrow(session, siteId);
+    return getLastOdometerEnd(this.siteMileageTrips(session, siteId));
+  }
+
+  async getPreviousMileageOdometerEnd(
+    siteId: string,
+    tripId: string,
+  ): Promise<number | null> {
+    const { getPreviousOdometerEnd } = await this.p7lib();
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    this.siteOrThrow(session, siteId);
+    return getPreviousOdometerEnd(this.siteMileageTrips(session, siteId), tripId);
+  }
+
+  async getMileageYearlySummary(
+    siteId: string,
+    year: number,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageYearlySummary> {
+    const { summarizeYearlyMileage } = await this.p7lib();
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    this.siteOrThrow(session, siteId);
+    return summarizeYearlyMileage(
+      this.siteMileageTrips(session, siteId),
+      individualIds,
+      year,
+    );
+  }
+
+  /** The log is one unbroken chain: a new trip's start must continue the latest end. */
+  private async assertOdometerContinuity(
+    session: { agencyId: string },
+    siteId: string,
+    odometerStart: number,
+    excludeTripId?: string,
+  ) {
+    const { validateOdometerContinuity, getLastOdometerEnd, getPreviousOdometerEnd } =
+      await this.p7lib();
+    const trips = this.siteMileageTrips(session, siteId);
+    const expected =
+      excludeTripId === undefined
+        ? getLastOdometerEnd(trips)
+        : getPreviousOdometerEnd(trips, excludeTripId);
+    const problem = validateOdometerContinuity(odometerStart, expected);
+    if (problem) throw new Error(problem);
+  }
+
   async addMileageTrip(
     input: import("./types").AddMileageTripInput,
   ): Promise<import("./types").MileageTrip> {
@@ -4943,6 +5024,7 @@ export class LocalApi implements ComplyraApi {
     this.siteOrThrow(session, input.siteId);
     this.riderIndividualsOrThrow(session, input.siteId, input.riderIds);
     const valid = await this.validatedTripInput(input);
+    await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
     const trip: import("./types").MileageTrip = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -4981,6 +5063,12 @@ export class LocalApi implements ComplyraApi {
     const nextRiders = patch.riderIds ?? trip.riderIds;
     this.riderIndividualsOrThrow(session, trip.siteId, nextRiders);
     const valid = await this.validatedTripInput(patch, trip);
+    await this.assertOdometerContinuity(
+      session,
+      trip.siteId,
+      valid.odometerStart,
+      trip.id,
+    );
     Object.assign(trip, {
       tripDate: valid.tripDate,
       odometerStart: valid.odometerStart,

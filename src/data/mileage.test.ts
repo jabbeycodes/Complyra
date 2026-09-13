@@ -10,13 +10,20 @@ import { DEMO_PASSWORD } from "./types";
 import {
   compareMileageTrips,
   computeTripMiles,
+  getLastOdometerEnd,
+  getPreviousOdometerEnd,
+  latestMileageTrip,
   monthKeyOf,
   monthLabel,
   nextMonthStart,
   roundMiles,
   splitMilesAmongRiders,
   summarizeMonthlyMileage,
+  summarizeWeeklyMileage,
+  summarizeYearlyMileage,
+  validateOdometerContinuity,
   validateTripInput,
+  weekBucketOfDay,
 } from "./mileage";
 import {
   PERMISSION_KEYS,
@@ -310,4 +317,219 @@ test("addMileageTrip rejects an inverted odometer and riders outside the home", 
     () => client.addMileageTrip(tripInput(site.id, [otherSitePerson.id])),
     /not part of this home/,
   );
+});
+
+// ---------- Odometer continuity ----------
+
+function baseTrip(overrides: Partial<MileageTrip> = {}): MileageTrip {
+  return {
+    id: "trip-1",
+    agencyId: "agency-1",
+    siteId: "site-1",
+    tripDate: "2026-09-10",
+    odometerStart: 45210,
+    odometerEnd: 45236,
+    miles: 26,
+    riderIds: ["a"],
+    reason: "Doctor appointment",
+    driverName: "Alex Morgan",
+    signatureName: "Alex Morgan",
+    createdBy: "user-1",
+    createdAt: "2026-09-10T08:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("validateOdometerContinuity passes when the start continues the last end", () => {
+  assert.equal(validateOdometerContinuity(45236, 45236), null);
+});
+
+test("validateOdometerContinuity passes for the first trip ever (no previous end)", () => {
+  assert.equal(validateOdometerContinuity(100, null), null);
+});
+
+test("validateOdometerContinuity blocks a mismatched start with a fix-it message", () => {
+  const message = validateOdometerContinuity(45000, 45236);
+  assert.ok(message);
+  assert.match(message, /must continue from the last trip's end/);
+  assert.match(message, /45,236/);
+  assert.match(message, /Fix it to continue/);
+});
+
+test("latestMileageTrip picks the newest date and breaks ties by creation order", () => {
+  const trips = [
+    baseTrip({ id: "a", tripDate: "2026-09-10", odometerEnd: 100, createdAt: "2026-09-10T01:00:00.000Z" }),
+    baseTrip({ id: "b", tripDate: "2026-09-10", odometerEnd: 150, createdAt: "2026-09-10T02:00:00.000Z" }),
+    baseTrip({ id: "c", tripDate: "2026-09-09", odometerEnd: 999, createdAt: "2026-09-11T01:00:00.000Z" }),
+  ];
+  assert.equal(latestMileageTrip(trips)?.id, "b");
+  assert.equal(getLastOdometerEnd(trips), 150);
+  assert.equal(getLastOdometerEnd([]), null);
+});
+
+test("getPreviousOdometerEnd returns the end of the trip right before the given one", () => {
+  const trips = [
+    baseTrip({ id: "a", tripDate: "2026-09-10", odometerEnd: 100, createdAt: "2026-09-10T01:00:00.000Z" }),
+    baseTrip({ id: "b", tripDate: "2026-09-11", odometerEnd: 200, createdAt: "2026-09-11T01:00:00.000Z" }),
+    baseTrip({ id: "c", tripDate: "2026-09-12", odometerEnd: 300, createdAt: "2026-09-12T01:00:00.000Z" }),
+  ];
+  assert.equal(getPreviousOdometerEnd(trips, "b"), 100);
+  assert.equal(getPreviousOdometerEnd(trips, "c"), 200);
+  assert.equal(getPreviousOdometerEnd(trips, "a"), null);
+  assert.equal(getPreviousOdometerEnd(trips, "missing"), null);
+});
+
+// ---------- Weekly breakdown ----------
+
+test("weekBucketOfDay buckets days 1–7, 8–14, 15–21, 22–28, 29–31", () => {
+  assert.equal(weekBucketOfDay(1), 0);
+  assert.equal(weekBucketOfDay(7), 0);
+  assert.equal(weekBucketOfDay(8), 1);
+  assert.equal(weekBucketOfDay(14), 1);
+  assert.equal(weekBucketOfDay(15), 2);
+  assert.equal(weekBucketOfDay(21), 2);
+  assert.equal(weekBucketOfDay(22), 3);
+  assert.equal(weekBucketOfDay(28), 3);
+  assert.equal(weekBucketOfDay(29), 4);
+  assert.equal(weekBucketOfDay(31), 4);
+});
+
+test("summarizeWeeklyMileage buckets per-individual shares into weeks 1–5", () => {
+  const trips = [
+    baseTrip({ id: "w1", tripDate: "2026-09-03", miles: 20, riderIds: ["a", "b"] }),
+    baseTrip({ id: "w2", tripDate: "2026-09-10", miles: 30, riderIds: ["a"] }),
+    baseTrip({ id: "w5", tripDate: "2026-09-30", miles: 10, riderIds: ["b"] }),
+  ];
+  const result = summarizeWeeklyMileage(trips, ["a", "b", "c"]);
+  assert.equal(result.month, "2026-09");
+  assert.equal(result.hasWeek5, true);
+  const byId = Object.fromEntries(result.rows.map((row) => [row.individualId, row]));
+  assert.deepEqual(byId["a"].weeks, [10, 30, 0, 0, 0]);
+  assert.equal(byId["a"].monthlyTotal, 40);
+  assert.deepEqual(byId["b"].weeks, [10, 0, 0, 0, 10]);
+  assert.equal(byId["b"].monthlyTotal, 20);
+  assert.deepEqual(byId["c"].weeks, [0, 0, 0, 0, 0]);
+  assert.equal(byId["c"].monthlyTotal, 0);
+});
+
+test("summarizeWeeklyMileage reports no week 5 when nothing falls on days 29–31", () => {
+  const trips = [
+    baseTrip({ id: "w1", tripDate: "2026-09-03", miles: 20, riderIds: ["a"] }),
+    baseTrip({ id: "w4", tripDate: "2026-09-28", miles: 8, riderIds: ["a"] }),
+  ];
+  const result = summarizeWeeklyMileage(trips, ["a"]);
+  assert.equal(result.hasWeek5, false);
+  assert.deepEqual(result.rows[0].weeks, [20, 0, 0, 8, 0]);
+  assert.equal(result.rows[0].monthlyTotal, 28);
+});
+
+// ---------- Yearly summary ----------
+
+test("summarizeYearlyMileage rolls up Jan–Dec per individual plus a grand total row", () => {
+  const trips = [
+    baseTrip({ id: "j1", tripDate: "2026-01-15", miles: 20, riderIds: ["a", "b"] }),
+    baseTrip({ id: "j2", tripDate: "2026-01-20", miles: 30, riderIds: ["a"] }),
+    baseTrip({ id: "f1", tripDate: "2026-02-02", miles: 10, riderIds: ["b"] }),
+    baseTrip({ id: "old", tripDate: "2025-12-20", miles: 100, riderIds: ["a"] }),
+  ];
+  const result = summarizeYearlyMileage(trips, ["a", "b", "c"], 2026);
+  assert.equal(result.year, 2026);
+  assert.equal(result.rows.length, 3);
+  const byId = Object.fromEntries(result.rows.map((row) => [row.individualId, row]));
+  assert.equal(byId["a"].months[0], 40); // 10 + 30 in January
+  assert.equal(byId["a"].months[1], 0);
+  assert.equal(byId["a"].yearlyTotal, 40);
+  assert.equal(byId["b"].months[0], 10);
+  assert.equal(byId["b"].months[1], 10);
+  assert.equal(byId["b"].yearlyTotal, 20);
+  assert.equal(byId["c"].yearlyTotal, 0); // pre-populated with zeros
+  assert.equal(result.grandTotal.months[0], 50);
+  assert.equal(result.grandTotal.months[1], 10);
+  assert.equal(result.grandTotal.yearlyTotal, 60);
+});
+
+// ---------- LocalApi integration: continuity + yearly ----------
+
+test("addMileageTrip enforces odometer continuity against the latest trip", async () => {
+  const { client, site, people } = await dspClient();
+  await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  assert.equal(await client.getLastMileageOdometerEnd(site.id), 45236);
+  await assert.rejects(
+    () =>
+      client.addMileageTrip({
+        ...tripInput(site.id, [people[0].id]),
+        tripDate: "2026-09-11",
+        odometerStart: 45000,
+        odometerEnd: 45010,
+      }),
+    /must continue from the last trip's end/,
+  );
+  const second = await client.addMileageTrip({
+    ...tripInput(site.id, [people[0].id]),
+    tripDate: "2026-09-11",
+    odometerStart: 45236,
+    odometerEnd: 45250,
+  });
+  assert.equal(second.miles, 14);
+  assert.equal(await client.getLastMileageOdometerEnd(site.id), 45250);
+});
+
+test("updateMileageTrip validates the start against the previous trip's end", async () => {
+  const { client, site, people } = await dspClient();
+  const first = await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  const second = await client.addMileageTrip({
+    ...tripInput(site.id, [people[0].id]),
+    tripDate: "2026-09-11",
+    odometerStart: 45236,
+    odometerEnd: 45250,
+  });
+  assert.equal(await client.getPreviousMileageOdometerEnd(site.id, first.id), null);
+  assert.equal(await client.getPreviousMileageOdometerEnd(site.id, second.id), 45236);
+  await assert.rejects(
+    () => client.updateMileageTrip(second.id, { odometerStart: 45000 }),
+    /must continue from the last trip's end/,
+  );
+  const updated = await client.updateMileageTrip(second.id, { odometerEnd: 45260 });
+  assert.equal(updated.miles, 24);
+});
+
+test("getMileageYearlySummary rolls up per-individual months and the grand total", async () => {
+  const { client, site, people } = await dspClient();
+  const [first, second] = people;
+  await client.addMileageTrip({
+    ...tripInput(site.id, [first.id, second.id]),
+    tripDate: "2026-01-05",
+    odometerStart: 100,
+    odometerEnd: 120,
+  });
+  await client.addMileageTrip({
+    ...tripInput(site.id, [first.id]),
+    tripDate: "2026-01-20",
+    odometerStart: 120,
+    odometerEnd: 150,
+  });
+  await client.addMileageTrip({
+    ...tripInput(site.id, [second.id]),
+    tripDate: "2026-02-02",
+    odometerStart: 150,
+    odometerEnd: 160,
+  });
+  const yearly = await client.getMileageYearlySummary(
+    site.id,
+    2026,
+    people.map((p) => p.id),
+  );
+  assert.equal(yearly.rows.length, people.length);
+  const byId = Object.fromEntries(
+    yearly.rows.map((row) => [row.individualId, row]),
+  );
+  assert.equal(byId[first.id].months[0], 40);
+  assert.equal(byId[first.id].months[1], 0);
+  assert.equal(byId[first.id].yearlyTotal, 40);
+  assert.equal(byId[second.id].months[0], 10);
+  assert.equal(byId[second.id].months[1], 10);
+  assert.equal(byId[second.id].yearlyTotal, 20);
+  assert.equal(yearly.grandTotal.months[0], 50);
+  assert.equal(yearly.grandTotal.months[1], 10);
+  assert.equal(yearly.grandTotal.yearlyTotal, 60);
 });

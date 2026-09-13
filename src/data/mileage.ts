@@ -163,3 +163,192 @@ export function compareMileageTrips(a: MileageTrip, b: MileageTrip): number {
   if (a.tripDate !== b.tripDate) return a.tripDate < b.tripDate ? -1 : 1;
   return a.createdAt < b.createdAt ? -1 : 1;
 }
+
+// ---------- Odometer continuity ----------
+// The paper log is one unbroken chain: the next trip's odometer start must
+// continue from the most recent trip's end. If a user types anything else,
+// the form blocks with an error so they fix it — there is no override.
+
+/** Latest trip by trip date, tie-breaking on creation order. Null when empty. */
+export function latestMileageTrip(trips: MileageTrip[]): MileageTrip | null {
+  if (trips.length === 0) return null;
+  return [...trips].sort(compareMileageTrips).at(-1) ?? null;
+}
+
+/** Odometer end of the most recent trip, or null when the home has no trips yet. */
+export function getLastOdometerEnd(trips: MileageTrip[]): number | null {
+  return latestMileageTrip(trips)?.odometerEnd ?? null;
+}
+
+/** Odometer end of the trip that comes right before `tripId` in log order. */
+export function getPreviousOdometerEnd(
+  trips: MileageTrip[],
+  tripId: string,
+): number | null {
+  const ordered = [...trips].sort(compareMileageTrips);
+  const index = ordered.findIndex((trip) => trip.id === tripId);
+  if (index <= 0) return null;
+  return ordered[index - 1].odometerEnd;
+}
+
+function formatOdometer(value: number): string {
+  return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+/**
+ * Blocking continuity check for the trip form: the entered start must equal
+ * the expected start (the previous trip's end). Returns the error message to
+ * show, or null when the start is fine. A null expected start means this is
+ * the first trip ever, so anything goes.
+ */
+export function validateOdometerContinuity(
+  enteredStart: number,
+  expectedStart: number | null,
+): string | null {
+  if (expectedStart === null) return null;
+  if (!Number.isFinite(enteredStart)) return null; // basic validation reports this
+  if (roundMiles(enteredStart) === roundMiles(expectedStart)) return null;
+  return (
+    `Start mileage must continue from the last trip's end ` +
+    `(${formatOdometer(expectedStart)}). Fix it to continue.`
+  );
+}
+
+// ---------- Weekly breakdown (monthly sheet: Week 1–Week 5) ----------
+// Mirrors the full-year tracker workbook: Week 1 = days 1–7, Week 2 = 8–14,
+// Week 3 = 15–21, Week 4 = 22–28, Week 5 = days 29–31 (rendered only when the
+// month actually has week-5 trip data).
+
+export const WEEK_LABELS = ["Week 1", "Week 2", "Week 3", "Week 4", "Week 5"];
+
+/** 0-based week bucket for a day-of-month: 1–7 → 0 … 29–31 → 4. */
+export function weekBucketOfDay(day: number): number {
+  if (day <= 7) return 0;
+  if (day <= 14) return 1;
+  if (day <= 21) return 2;
+  if (day <= 28) return 3;
+  return 4;
+}
+
+export interface MileageWeeklyRow {
+  individualId: string;
+  /** Per-week shares; index 4 is the optional Week 5 (days 29–31). */
+  weeks: number[];
+  monthlyTotal: number;
+}
+
+export interface MileageWeeklyBreakdown {
+  month: string;
+  rows: MileageWeeklyRow[];
+  /** True when at least one trip falls on day 29–31; the UI renders the Week 5 column only then. */
+  hasWeek5: boolean;
+}
+
+/**
+ * Weekly breakdown for the monthly sheet: each individual's equal-share
+ * miles bucketed into Week 1–Week 4, plus Week 5 when the month has trips
+ * on days 29–31. Individual ids with no trips still appear with zeros.
+ */
+export function summarizeWeeklyMileage(
+  trips: MileageTrip[],
+  individualIds: string[],
+): MileageWeeklyBreakdown {
+  const weeksById = new Map<string, number[]>(
+    individualIds.map((id) => [id, [0, 0, 0, 0, 0]]),
+  );
+  let hasWeek5 = false;
+  for (const trip of trips) {
+    const day = Number(trip.tripDate.slice(8, 10));
+    if (!Number.isFinite(day) || day < 1) continue;
+    const bucket = weekBucketOfDay(day);
+    if (bucket === 4) hasWeek5 = true;
+    const shares = splitMilesAmongRiders(trip.miles, trip.riderIds);
+    for (const [riderId, share] of shares) {
+      const weeks = weeksById.get(riderId);
+      if (!weeks) continue;
+      weeks[bucket] = roundMiles(weeks[bucket] + share);
+    }
+  }
+  const month = trips.length > 0 ? monthKeyOf(trips[0].tripDate) : "";
+  return {
+    month,
+    rows: individualIds.map((individualId) => {
+      const weeks = weeksById.get(individualId) ?? [0, 0, 0, 0, 0];
+      return {
+        individualId,
+        weeks,
+        monthlyTotal: roundMiles(weeks.reduce((sum, w) => sum + w, 0)),
+      };
+    }),
+    hasWeek5,
+  };
+}
+
+// ---------- Yearly summary (Yearly Summary sheet) ----------
+// Mirrors the workbook's "Yearly Summary" sheet: one row per individual with
+// Jan–Dec columns plus a Yearly Total, and a Grand Total row at the bottom.
+
+export const MONTH_LABELS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export interface MileageYearRow {
+  individualId: string;
+  /** Per-month shares, index 0 = January … 11 = December. */
+  months: number[];
+  yearlyTotal: number;
+}
+
+export interface MileageYearlySummary {
+  year: number;
+  rows: MileageYearRow[];
+  grandTotal: { months: number[]; yearlyTotal: number };
+}
+
+/**
+ * Yearly summary for the administrator view: each individual's equal-share
+ * miles per calendar month, a yearly total per individual, and a grand-total
+ * row. Every individual id appears even with zero miles so the table is
+ * pre-populated. Trips outside `year` are ignored.
+ */
+export function summarizeYearlyMileage(
+  trips: MileageTrip[],
+  individualIds: string[],
+  year: number,
+): MileageYearlySummary {
+  const monthsById = new Map<string, number[]>(
+    individualIds.map((id) => [id, new Array(12).fill(0)]),
+  );
+  for (const trip of trips) {
+    const tripYear = Number(trip.tripDate.slice(0, 4));
+    if (tripYear !== year) continue;
+    const monthIndex = Number(trip.tripDate.slice(5, 7)) - 1;
+    if (monthIndex < 0 || monthIndex > 11) continue;
+    const shares = splitMilesAmongRiders(trip.miles, trip.riderIds);
+    for (const [riderId, share] of shares) {
+      const months = monthsById.get(riderId);
+      if (!months) continue;
+      months[monthIndex] = roundMiles(months[monthIndex] + share);
+    }
+  }
+  const rows: MileageYearRow[] = individualIds.map((individualId) => {
+    const months = monthsById.get(individualId) ?? new Array(12).fill(0);
+    return {
+      individualId,
+      months,
+      yearlyTotal: roundMiles(months.reduce((sum, m) => sum + m, 0)),
+    };
+  });
+  const grandMonths = MONTH_LABELS_SHORT.map((_, index) =>
+    roundMiles(rows.reduce((sum, row) => sum + row.months[index], 0)),
+  );
+  return {
+    year,
+    rows,
+    grandTotal: {
+      months: grandMonths,
+      yearlyTotal: roundMiles(grandMonths.reduce((sum, m) => sum + m, 0)),
+    },
+  };
+}
