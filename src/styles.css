@@ -5043,3 +5043,211 @@ th {
     grid-column: 1 / -1;
   }
 }
+
+/* Phone + Capacitor: keep every workspace page on one readable column. */
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.sidebar-close {
+  display: none;
+}
+body.nav-open {
+  overflow: hidden;
+}
+@media (max-width: 720px) {
+  .sidebar {
+    width: min(320px, 88vw);
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+  .sidebar-close {
+    display: inline-flex;
+    position: absolute;
+    top: max(10px, env(safe-area-inset-top));
+    right: 10px;
+    min-width: 44px;
+    min-height: 44px;
+    z-index: 1;
+  }
+  .sidebar .brand {
+    padding-right: 48px;
+  }
+  .topbar {
+    height: auto;
+    min-height: 58px;
+    padding: max(8px, env(safe-area-inset-top)) 12px 8px;
+    gap: 8px;
+  }
+  .topbar-actions {
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .global-search {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    max-width: 220px;
+  }
+  .icon-button,
+  .mobile-menu,
+  .nav-item {
+    min-height: 44px;
+  }
+  .icon-button,
+  .mobile-menu {
+    min-width: 44px;
+  }
+  .button {
+    min-height: 44px;
+    white-space: normal;
+    text-align: center;
+  }
+  .heading-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .heading-row .button,
+  .readiness-banner button,
+  .copilot-banner-action,
+  .demo-strip button {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+  .heading-row h1,
+  .page-heading h1 {
+    max-width: none;
+  }
+  .scope-row,
+  .list-controls,
+  .audit-summary,
+  .page-footer,
+  .demo-strip {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .page-footer > span:last-child,
+  .demo-strip > span:nth-child(2) {
+    max-width: none;
+    text-align: left;
+  }
+  .demo-strip {
+    font-size: 11px;
+    letter-spacing: 0;
+    padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+  }
+  .demo-strip button {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .people-grid,
+  .site-grid,
+  .form-two,
+  .ack-meta,
+  .audit-filters,
+  .monthly-due-form {
+    grid-template-columns: 1fr;
+  }
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  main {
+    padding: 16px 14px max(24px, env(safe-area-inset-bottom));
+  }
+  .login-shell {
+    display: block;
+    padding: max(20px, env(safe-area-inset-top)) 16px
+      max(20px, env(safe-area-inset-bottom));
+  }
+  .login-card {
+    width: 100%;
+    padding: 24px 18px;
+    border-radius: 20px;
+  }
+  .login-card h1 {
+    font-size: 26px;
+  }
+  .form-label input,
+  .form-label select,
+  .form-label textarea,
+  .audit-filters input,
+  .audit-filters select,
+  .input-search input,
+  .global-search input,
+  .cover-grid input,
+  .monthly-form input,
+  .monthly-form select,
+  .site-review-facts input,
+  .site-review-facts select,
+  .site-review-meta input,
+  .site-review-line select,
+  .site-review-line textarea {
+    font-size: 16px;
+  }
+  .toast {
+    min-width: 0;
+    width: calc(100vw - 24px);
+    left: 50%;
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  .modal,
+  .modal.wide {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 12px;
+  }
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-right,
+  .heading-actions {
+    width: 100%;
+  }
+  .heading-actions .button {
+    flex: 1;
+  }
+  .table-scroll {
+    margin-inline: -14px;
+    padding-inline: 14px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .training-lines label {
+    grid-template-columns: auto 1fr;
+  }
+  .training-lines small {
+    grid-column: 2;
+    white-space: normal;
+  }
+  .location-card > .button,
+  .location-card .heading-actions {
+    width: 100%;
+  }
+  .tabs {
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+  .site-score-grid {
+    grid-template-columns: 1fr;
+  }
+  .personal-queue-row {
+    grid-template-columns: 32px 1fr 16px;
+  }
+}

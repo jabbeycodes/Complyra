@@ -158,6 +158,10 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  useEffect(() => {
+    document.body.classList.toggle("nav-open", mobileOpen);
+    return () => document.body.classList.remove("nav-open");
+  }, [mobileOpen]);
   if (loading) {
     return <div className="login-shell">Loading workspace…</div>;
   }
@@ -363,6 +367,13 @@ export default function App() {
       )}
       <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
         <button
+          className="sidebar-close icon-button"
+          aria-label="Close navigation"
+          onClick={() => setMobileOpen(false)}
+        >
+          <X size={20} />
+        </button>
+        <button
           className="brand"
           onClick={() => navigate("Overview")}
           aria-label="Complyrer home"
@@ -475,6 +486,7 @@ export default function App() {
               className="icon-button mobile-menu"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation"
+              aria-expanded={mobileOpen}
             >
               <Menu size={21} />
             </button>
