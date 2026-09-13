@@ -1,4 +1,3 @@
-import { jsPDF } from "jspdf";
 import {
   DRILL_LABELS,
   SAFETY_LINE_DEFS,
@@ -8,28 +7,18 @@ import {
   type EquipmentMonthLog,
   type HomeSafetyReport,
 } from "../data/monthlyChecks";
+import { startBrandedDoc } from "./brandHeader";
 
-function startDoc(title: string) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  const margin = 48;
-  let y = 56;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(47, 70, 48);
-  doc.text("COMPLYRER", margin, y);
-  doc.setTextColor(36, 30, 24);
-  doc.setFontSize(16);
-  y += 22;
-  doc.text(title, margin, y);
-  return { doc, margin, y };
-}
-
-function line(doc: jsPDF, label: string, value: string, x: number, y: number) {
+function line(doc: import("jspdf").jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.text(`${label}:`, x, y);
   doc.setFont("helvetica", "normal");
   doc.text(value || "—", x + 110, y, { maxWidth: 430 });
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
 }
 
 export function equipmentFileName(personName: string, monthKey: string) {
@@ -44,19 +33,19 @@ export function safetyFileName(siteName: string, monthKey: string) {
   return `complyrer-home-safety-${slug(siteName)}-${monthKey}.pdf`;
 }
 
-function slug(value: string) {
-  return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
-}
-
 export function buildEquipmentMonthPdf(input: {
   agencyName: string;
   individualName: string;
   dmhId: string;
   monthKey: string;
   items: Array<AdaptiveEquipment & { log?: EquipmentMonthLog }>;
+  logoDataUrl?: string | null;
 }) {
-  const { doc, margin } = startDoc("Adaptive Equipment Log");
-  let y = 96;
+  const { doc, margin, y: startY } = startBrandedDoc("Adaptive Equipment Log", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  });
+  let y = startY;
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
   line(doc, "Individual", input.individualName, margin, y);
@@ -98,9 +87,13 @@ export function buildDrillsMonthPdf(input: {
   siteName: string;
   monthKey: string;
   drills: EmergencyDrill[];
+  logoDataUrl?: string | null;
 }) {
-  const { doc, margin } = startDoc("Emergency Drills");
-  let y = 96;
+  const { doc, margin, y: startY } = startBrandedDoc("Emergency Drills", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  });
+  let y = startY;
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
   line(doc, "Home", input.siteName, margin, y);
@@ -144,9 +137,13 @@ export function buildSafetyMonthPdf(input: {
   siteName: string;
   monthKey: string;
   report: HomeSafetyReport;
+  logoDataUrl?: string | null;
 }) {
-  const { doc, margin } = startDoc("Monthly Home Safety Report");
-  let y = 96;
+  const { doc, margin, y: startY } = startBrandedDoc("Monthly Home Safety Report", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  });
+  let y = startY;
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
   line(doc, "Home", input.siteName, margin, y);

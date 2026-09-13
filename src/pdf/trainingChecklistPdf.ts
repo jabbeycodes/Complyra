@@ -1,26 +1,20 @@
-import { jsPDF } from "jspdf";
 import type { TrainingChecklist } from "../data/chart";
+import { startBrandedDoc } from "./brandHeader";
 
 export function buildTrainingChecklistPdf(input: {
   agencyName: string;
   individualName: string;
   siteName: string;
   checklist: TrainingChecklist;
+  logoDataUrl?: string | null;
 }) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  const margin = 54;
-  let y = 64;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(47, 70, 48);
-  doc.text("COMPLYRER", margin, y);
-  doc.setTextColor(36, 30, 24);
-  doc.setFontSize(18);
-  y += 26;
-  doc.text("Staff In-Home Training Checklist", margin, y);
+  const { doc, margin, y: startY } = startBrandedDoc("Staff In-Home Training Checklist", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  }, 54);
+  let y = startY;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  y += 28;
   for (const [label, value] of [
     ["Agency", input.agencyName],
     ["Individual", input.individualName],

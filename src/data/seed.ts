@@ -363,6 +363,7 @@ export function createEvergreenSeed(): LocalDatabase {
         provisionedBy: "platform",
         status: "active",
         monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
+        logoPath: `agency/${AGENCY_ID}/logo`,
       },
       {
         id: PLATFORM_AGENCY_ID,

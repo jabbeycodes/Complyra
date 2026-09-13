@@ -9,21 +9,7 @@ import {
   type SiteFacts,
   type SiteReview,
 } from "../data/siteReview";
-
-function startDoc(title: string) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  const margin = 48;
-  let y = 56;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(47, 70, 48);
-  doc.text("COMPLYRER", margin, y);
-  doc.setTextColor(36, 30, 24);
-  doc.setFontSize(16);
-  y += 22;
-  doc.text(title, margin, y);
-  return { doc, margin, y };
-}
+import { startBrandedDoc } from "./brandHeader";
 
 function field(doc: jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -53,9 +39,13 @@ export function buildSiteReviewPdf(input: {
   residents: string[];
   review: SiteReview;
   monthlySafetyOnFile: boolean;
+  logoDataUrl?: string | null;
 }) {
-  const { doc, margin } = startDoc("Environmental site review");
-  let y = 96;
+  const { doc, margin, y: startY } = startBrandedDoc("Environmental site review", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  });
+  let y = startY;
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);
@@ -150,9 +140,16 @@ export function buildPreSurveyPdf(input: {
   address: string;
   facts: SiteFacts;
   rows: PreSurveyRow[];
+  logoDataUrl?: string | null;
 }) {
-  const { doc, margin } = startDoc("Pre-survey individual information");
-  let y = 96;
+  const { doc, margin, y: startY } = startBrandedDoc(
+    "Pre-survey individual information",
+    {
+      agencyName: input.agencyName,
+      logoDataUrl: input.logoDataUrl,
+    },
+  );
+  let y = startY;
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);

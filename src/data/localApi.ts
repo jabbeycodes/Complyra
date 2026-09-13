@@ -1,5 +1,13 @@
 import type { Activity, Plan, Requirement } from "../domain";
-import { createEvergreenSeed, type LocalDatabase } from "./seed";
+import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
+import {
+  agencyLogoPath,
+  blobToDataUrl,
+  canManageAgencyLogo,
+  evergreenDemoLogoBytes,
+  evergreenDemoLogoDataUrl,
+  validateLogoFile,
+} from "./branding";
 import { metrics } from "../domain";
 import {
   computeRequirementStatus,
@@ -291,6 +299,8 @@ export interface ComplyraApi {
   }): Promise<void>;
   downloadSiteReviewPdf(siteId: string): Promise<{ blob: Blob; name: string }>;
   downloadPreSurveyPdf(siteId: string): Promise<{ blob: Blob; name: string }>;
+  uploadAgencyLogo(file: File): Promise<void>;
+  removeAgencyLogo(): Promise<void>;
   resetWorkspace(): Promise<void>;
   createSite(input: {
     name: string;
@@ -367,6 +377,7 @@ export interface WorkspaceView {
   };
   monthlyDue: import("./monthlyChecks").MonthlyDueSettings;
   siteReviews: SiteReview[];
+  branding: { logoUrl: string | null };
 }
 
 function cloneSeed(): LocalDatabase {
@@ -425,6 +436,35 @@ async function persistFile(path: string, file: File) {
       tx.onerror = () => reject(tx.error);
     };
   });
+}
+
+function seedDemoLogoPath(store: MemoryStore) {
+  const agency = store.db.agencies.find((row) => row.id === AGENCY_ID);
+  if (!agency || agency.logoPath === null) return;
+  if (!agency.logoPath) agency.logoPath = agencyLogoPath(AGENCY_ID);
+}
+
+async function readStoredFile(store: MemoryStore, path: string) {
+  const memory = store.files.get(path);
+  if (memory) return new Blob([memory.bytes], { type: memory.mime });
+  return readFile(path);
+}
+
+async function logoDataUrlFor(store: MemoryStore, agencyId: string) {
+  seedDemoLogoPath(store);
+  const agency = store.db.agencies.find((row) => row.id === agencyId);
+  if (!agency?.logoPath) return null;
+  const blob = await readStoredFile(store, agency.logoPath);
+  if (blob && blob.size > 0) return blobToDataUrl(blob);
+  if (agency.id === AGENCY_ID && agency.logoPath === agencyLogoPath(AGENCY_ID)) {
+    const bytes = evergreenDemoLogoBytes();
+    store.files.set(agency.logoPath, {
+      mime: "image/png",
+      bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    });
+    return evergreenDemoLogoDataUrl();
+  }
+  return null;
 }
 
 async function readFile(path: string): Promise<Blob | null> {
@@ -494,6 +534,7 @@ async function hydrate() {
       browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
       browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
       browserStore.db.siteReviews = browserStore.db.siteReviews ?? [];
+      seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
         item.rnSignedAt = item.rnSignedAt ?? null;
@@ -1192,6 +1233,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           address: "",
         },
       )))),
+    branding: { logoUrl: null },
   };
 }
 
@@ -1517,7 +1559,12 @@ export class LocalApi implements ComplyraApi {
 
   async loadWorkspace(session: SessionUser) {
     await hydrate();
-    return toWorkspace(this.store, session);
+    seedDemoLogoPath(this.store);
+    const view = toWorkspace(this.store, session);
+    view.branding = {
+      logoUrl: await logoDataUrlFor(this.store, session.agencyId),
+    };
+    return view;
   }
 
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
@@ -2128,6 +2175,7 @@ export class LocalApi implements ComplyraApi {
         individualName: person.fullName,
         siteName: site?.name ?? "",
         checklist,
+        logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
       });
       return {
         blob: pdf.output("blob"),
@@ -2154,6 +2202,7 @@ export class LocalApi implements ComplyraApi {
         title: document?.title ?? "Care plan",
         versionLabel: version.versionLabel,
         effectiveOn: version.effectiveOn,
+        logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
       });
       return {
         blob: pdf.output("blob"),
@@ -2540,6 +2589,7 @@ export class LocalApi implements ComplyraApi {
         dmhId: person.profile?.dmhId ?? "",
         monthKey: input.monthKey,
         items: view.items,
+        logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
       });
       return {
         blob: doc.output("blob"),
@@ -2562,6 +2612,7 @@ export class LocalApi implements ComplyraApi {
         siteName: site.name,
         monthKey: input.monthKey,
         drills,
+        logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
       });
       return { blob: doc.output("blob"), name: drillsFileName(site.name, input.monthKey) };
     }
@@ -2576,6 +2627,7 @@ export class LocalApi implements ComplyraApi {
       siteName: site.name,
       monthKey: input.monthKey,
       report,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
     });
     return { blob: doc.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
@@ -2685,6 +2737,7 @@ export class LocalApi implements ComplyraApi {
       residents: people.map((row) => row.fullName),
       review: normalizeSiteReview(applyWellWaterDefault(review, facts)),
       monthlySafetyOnFile: monthlySafetyOnFile(safety),
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
     });
     return { blob: doc.output("blob"), name: siteReviewFileName(site.name) };
   }
@@ -2718,8 +2771,39 @@ export class LocalApi implements ComplyraApi {
       address: site.address,
       facts,
       rows,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
     });
     return { blob: doc.output("blob"), name: preSurveyFileName(site.name) };
+  }
+
+  async uploadAgencyLogo(file: File) {
+    const session = assertSession(this.store);
+    if (!canManageAgencyLogo(session.roleKey)) {
+      throw new Error("Only a DPM or administrator can change the agency logo.");
+    }
+    validateLogoFile(file);
+    const agency = this.store.db.agencies.find((row) => row.id === session.agencyId);
+    if (!agency) throw new Error("Agency not found.");
+    const path = agencyLogoPath(agency.id);
+    const bytes = await file.arrayBuffer();
+    this.store.files.set(path, { mime: file.type || "image/png", bytes });
+    await persistFile(path, file);
+    agency.logoPath = path;
+    log(this.store, session, "agency.logo_updated", `Logo uploaded for ${agency.name}`, "agency", agency.id);
+    await persistMeta(this.store);
+  }
+
+  async removeAgencyLogo() {
+    const session = assertSession(this.store);
+    if (!canManageAgencyLogo(session.roleKey)) {
+      throw new Error("Only a DPM or administrator can change the agency logo.");
+    }
+    const agency = this.store.db.agencies.find((row) => row.id === session.agencyId);
+    if (!agency) throw new Error("Agency not found.");
+    if (agency.logoPath) this.store.files.delete(agency.logoPath);
+    agency.logoPath = null;
+    log(this.store, session, "agency.logo_removed", `Logo removed for ${agency.name}`, "agency", agency.id);
+    await persistMeta(this.store);
   }
 
   async createSite(input: {

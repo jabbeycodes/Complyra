@@ -31,6 +31,7 @@ export interface Agency {
   provisionedBy?: AgencyProvisionedBy;
   status: AgencyStatus;
   monthlyDue?: import("./monthlyChecks").MonthlyDueSettings;
+  logoPath?: string | null;
 }
 
 export interface Program {

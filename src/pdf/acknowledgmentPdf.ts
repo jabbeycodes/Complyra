@@ -1,5 +1,5 @@
-import { jsPDF } from "jspdf";
 import type { PacketDetail } from "../data/types";
+import { startBrandedDoc } from "./brandHeader";
 
 function formatLongDate(iso: string | null) {
   if (!iso) return "—";
@@ -32,24 +32,17 @@ export function sortAcknowledgmentRows<T extends { signedAt: string | null; staf
 export function buildAcknowledgmentPdf(
   agencyName: string,
   detail: PacketDetail,
+  logoDataUrl?: string | null,
 ) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const { doc, margin, y: startY } = startBrandedDoc(
+    "PCSP Acknowledgment Sheet",
+    { agencyName, logoDataUrl },
+    54,
+  );
   const rows = sortAcknowledgmentRows(detail.rows);
-  const margin = 54;
-  let y = 64;
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(117, 97, 188);
-  doc.text("COMPLYRA", margin, y);
-  doc.setTextColor(52, 54, 62);
-  doc.setFontSize(18);
-  y += 28;
-  doc.text("PCSP Acknowledgment Sheet", margin, y);
-
+  let y = startY;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  y += 28;
   const header = [
     ["Agency", agencyName],
     ["Individual", detail.individual.fullName],
