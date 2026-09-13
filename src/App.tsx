@@ -71,6 +71,7 @@ import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 // LIFEPATH-P2-IMPORT (training engine)
 // LIFEPATH-P3-IMPORT (delegation forms)
+import DelegationsPage from "./features/delegations/DelegationsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 // LIFEPATH-P6-IMPORT (med inventory)
@@ -421,6 +422,7 @@ export default function App() {
       items: [
         // LIFEPATH-P2-NAV (training engine)
         // LIFEPATH-P3-NAV (delegation forms)
+        ["Delegations", FileText],
         // LIFEPATH-P4-NAV (certificates)
         // LIFEPATH-P5-NAV (HM weekly checklist)
         // LIFEPATH-P6-NAV (med inventory)
@@ -1512,6 +1514,7 @@ export default function App() {
               )}
                             {/* LIFEPATH-P2-PAGE (training engine) */}
               {/* LIFEPATH-P3-PAGE (delegation forms) */}
+              {page === "Delegations" && <DelegationsPage />}
               {/* LIFEPATH-P4-PAGE (certificates) */}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
               {/* LIFEPATH-P6-PAGE (med inventory) */}

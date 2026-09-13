@@ -30,6 +30,8 @@ import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
+// LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
+import DelegationFormDetail from "./delegations/DelegationFormDetail";
 
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
@@ -49,6 +51,8 @@ export default function IndividualChart({
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [error, setError] = useState("");
+  // LIFEPATH-P3: which delegation's form detail is open (template toggle lives there).
+  const [formDelegationId, setFormDelegationId] = useState<string | null>(null);
 
   if (!session || !stack || !person) return null;
 
@@ -156,6 +160,8 @@ export default function IndividualChart({
                     ? openFile("discontinue", view.item.discontinueFileId, mode)
                     : Promise.resolve()
                 }
+                // LIFEPATH-P3: open the RN delegation form detail (exact/improved toggle).
+                onViewForm={() => setFormDelegationId(view.item.id)}
                 onDiscontinue={(title, file) =>
                   run(() =>
                     api.discontinueDelegation({
@@ -167,6 +173,13 @@ export default function IndividualChart({
                 }
               />
             ))}
+            {/* LIFEPATH-P3: delegation form detail dialog. */}
+            {formDelegationId && (
+              <DelegationFormDetail
+                obligationId={formDelegationId}
+                onClose={() => setFormDelegationId(null)}
+              />
+            )}
           </section>
         )}
 
@@ -359,6 +372,7 @@ function DelegationBlock({
   discontinueFileId,
   canDiscontinue,
   onOpen,
+  onViewForm,
   onDiscontinue,
 }: {
   title: string;
@@ -367,6 +381,8 @@ function DelegationBlock({
   discontinueFileId: string | null;
   canDiscontinue: boolean;
   onOpen: (mode: "download" | "print") => void;
+  /** LIFEPATH-P3: open the delegation form detail. */
+  onViewForm: () => void;
   onDiscontinue: (title: string, file: File) => void;
 }) {
   const [titleDraft, setTitleDraft] = useState("");
@@ -385,6 +401,10 @@ function DelegationBlock({
         </p>
       )}
       <div className="chart-actions">
+        {/* LIFEPATH-P3: entry point to the exact/improved delegation form. */}
+        <button className="button" onClick={onViewForm}>
+          <FileText size={16} /> Open form
+        </button>
         {discontinueFileId && (
           <>
             <button className="button" onClick={() => onOpen("download")}>

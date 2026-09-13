@@ -33,6 +33,8 @@ import { generateTempPassword } from "./agencyCode";
 import type {
   AcknowledgmentPacket,
   AppRole,
+  DelegationFormPatch,
+  DelegationTemplateVersion,
   DocumentVersion,
   IndividualRecord,
   CreateAgencyInput,
@@ -47,6 +49,7 @@ import type {
   SessionUser,
   UploadDocumentInput,
 } from "./types";
+import { blankDelegationForm } from "./types";
 import {
   applyRenewalUpload,
   blankRnFields,
@@ -86,6 +89,7 @@ import {
 } from "./chart";
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
+import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
 import {
   canCompleteMonthly,
   canConfigureMonthlyDue,
@@ -329,6 +333,39 @@ export interface ComplyraApi {
   }): Promise<{ id: string; name: string }>;
   // ===== LIFEPATH-P2 API (training engine) =====
   // ===== LIFEPATH-P3 API (delegation forms) =====
+  /** Create a new RN delegation of a specified nursing task (one form per individual per task). */
+  createDelegation(input: {
+    individualId: string;
+    taskTitle: string;
+    purpose: string;
+    templateVersion: DelegationTemplateVersion;
+    procedures?: string;
+    observeReportDo?: string;
+  }): Promise<{ id: string }>;
+  /** Patch fields on the delegation form (purpose, procedures, instructing RN, rescind state, …). */
+  updateDelegationForm(input: {
+    obligationId: string;
+    patch: DelegationFormPatch;
+  }): Promise<void>;
+  /** A rostered staff member signs their row. The delegating RN must sign first. */
+  signDelegationRow(input: {
+    obligationId: string;
+    rowIndex: number;
+    signatureName: string;
+    signatureMark: string;
+    initials: string;
+  }): Promise<void>;
+  /** Record a per-row rescinded date on the employee roster. */
+  rescindDelegationRow(input: {
+    obligationId: string;
+    rowIndex: number;
+    rescindedDate: string;
+  }): Promise<void>;
+  /** Render the delegation form to PDF in either template. */
+  getDelegationPdf(input: {
+    obligationId: string;
+    kind: "exact" | "improved";
+  }): Promise<{ blob: Blob; name: string }>;
   // ===== LIFEPATH-P4 API (certificates) =====
   // ===== LIFEPATH-P5 API (HM weekly checklist) =====
   // ===== LIFEPATH-P6 API (med inventory) =====
@@ -3047,6 +3084,197 @@ export class LocalApi implements ComplyraApi {
   }
   // ===== LIFEPATH-P2 IMPL (training engine) =====
   // ===== LIFEPATH-P3 IMPL (delegation forms) =====
+
+  /** Find the delegation obligation and assert it belongs to the caller's agency. */
+  private delegationItem(store: MemoryStore, session: SessionUser, obligationId: string) {
+    const item = store.db.obligations.find((row) => row.id === obligationId);
+    if (!item || item.kind !== "delegation" || item.agencyId !== session.agencyId) {
+      throw new Error("Delegation not found.");
+    }
+    if (!item.delegationForm) item.delegationForm = blankDelegationForm();
+    return item;
+  }
+
+  private assertDelegationEditor(session: SessionUser) {
+    if (
+      !canToggleDelegation(
+        session.roleKey,
+        session.role,
+        hasPermission(session, "requirements.approve"),
+      )
+    ) {
+      throw new Error("Only a DPM or nurse can manage a delegation form.");
+    }
+  }
+
+  async createDelegation(input: {
+    individualId: string;
+    taskTitle: string;
+    purpose: string;
+    templateVersion: DelegationTemplateVersion;
+    procedures?: string;
+    observeReportDo?: string;
+  }) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const person = this.store.db.individuals.find(
+      (row) => row.id === input.individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    const taskTitle = input.taskTitle.trim();
+    if (!taskTitle) throw new Error("Name the delegated task.");
+    if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const form = blankDelegationForm(input.templateVersion);
+    form.purpose = input.purpose.trim();
+    form.procedures = input.procedures?.trim() ?? "";
+    form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    const item: ObligationItem = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: person.id,
+      kind: "delegation",
+      mode: "required",
+      title: taskTitle,
+      detail: form.purpose,
+      sourcePage: null,
+      documentVersionId: null,
+      enabled: true,
+      frequency: "On plan update",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "manual",
+      inventoryState: "present",
+      proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
+      delegationForm: form,
+    };
+    this.store.db.obligations.push(item);
+    log(
+      this.store,
+      session,
+      "delegation.created",
+      `${session.fullName} created delegation "${taskTitle}" for ${person.fullName}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+    return { id: item.id };
+  }
+
+  async updateDelegationForm(input: {
+    obligationId: string;
+    patch: DelegationFormPatch;
+  }) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const item = this.delegationItem(this.store, session, input.obligationId);
+    const form = item.delegationForm!;
+    const { instructingProfessional, delegatingRn, roster, ...rest } = input.patch;
+    Object.assign(form, rest);
+    if (instructingProfessional) Object.assign(form.instructingProfessional, instructingProfessional);
+    if (delegatingRn) Object.assign(form.delegatingRn, delegatingRn);
+    if (roster) form.roster = roster.slice(0, 12);
+    log(
+      this.store,
+      session,
+      "delegation.form_updated",
+      `${session.fullName} updated the delegation form for ${item.title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async signDelegationRow(input: {
+    obligationId: string;
+    rowIndex: number;
+    signatureName: string;
+    signatureMark: string;
+    initials: string;
+  }) {
+    const session = assertSession(this.store);
+    const item = this.delegationItem(this.store, session, input.obligationId);
+    if (!item.enabled) throw new Error("This delegation is turned off.");
+    // Signing order: RN first, then staff — matches the real workflow.
+    if (!item.rnSignedAt) {
+      throw new Error("The delegating RN must sign before staff sign their rows.");
+    }
+    const form = item.delegationForm!;
+    const row = form.roster[input.rowIndex];
+    if (!row) throw new Error("Roster row not found.");
+    if (!row.printName.trim()) throw new Error("Name the staff member on that row first.");
+    if (row.signedAt) throw new Error("That row is already signed.");
+    if (!input.signatureName.trim() || !input.signatureMark) {
+      throw new Error("Type your legal name and add a signature mark.");
+    }
+    if (!input.initials.trim()) throw new Error("Add your initials.");
+    row.signatureName = input.signatureName.trim();
+    row.staffSignature = input.signatureMark;
+    row.initials = input.initials.trim().toUpperCase();
+    row.signedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "delegation.row_signed",
+      `${input.signatureName.trim()} signed the delegation roster for ${item.title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async rescindDelegationRow(input: {
+    obligationId: string;
+    rowIndex: number;
+    rescindedDate: string;
+  }) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const item = this.delegationItem(this.store, session, input.obligationId);
+    const form = item.delegationForm!;
+    const row = form.roster[input.rowIndex];
+    if (!row) throw new Error("Roster row not found.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.rescindedDate)) {
+      throw new Error("Use a valid rescinded date.");
+    }
+    row.rescindedDate = input.rescindedDate;
+    log(
+      this.store,
+      session,
+      "delegation.row_rescinded",
+      `${session.fullName} rescinded ${row.printName || "a roster row"} on ${item.title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async getDelegationPdf(input: { obligationId: string; kind: "exact" | "improved" }) {
+    const session = assertSession(this.store);
+    const item = this.delegationItem(this.store, session, input.obligationId);
+    const person = this.store.db.individuals.find((row) => row.id === item.individualId);
+    const site = this.store.db.sites.find((row) => row.id === person?.siteId);
+    const pdf = buildDelegationPdf({
+      agencyName: session.agencyName,
+      individualName: person?.fullName ?? "Individual",
+      dmhId: "",
+      individualLocation: site?.name ?? "",
+      taskTitle: item.title,
+      form: item.delegationForm!,
+      kind: input.kind,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+    });
+    return {
+      blob: pdf.output("blob"),
+      name: delegationFileName(item.title, person?.fullName ?? "individual", input.kind),
+    };
+  }
   // ===== LIFEPATH-P4 IMPL (certificates) =====
   // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====
   // ===== LIFEPATH-P6 IMPL (med inventory) =====
