@@ -179,3 +179,35 @@
     font-size: 0.75rem;
   }
 }
+
+/* Admin backfill: out-of-sequence trip checkbox + row badge. */
+.mileage-backfill {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.mileage-backfill input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.mileage-backfill .stack-help {
+  display: block;
+  font-weight: 400;
+}
+
+.mileage-backfill-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  vertical-align: middle;
+}

@@ -62,6 +62,11 @@ import {
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
 import {
+  hasBackfillMarker,
+  stripBackfillMarker,
+  withBackfillMarker,
+} from "./mileage";
+import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
   canCreateIndividual,
@@ -5157,6 +5162,9 @@ export class HostedApi implements ComplyraApi {
   }
 
   private mapMileageTrip(row: Record<string, unknown>): import("./types").MileageTrip {
+    // Backfilled trips are flagged via a "[backfill]" marker on the stored
+    // reason (no schema change); the mapper strips it back into `backfilled`.
+    const rawReason = (row.reason as string) ?? "";
     return {
       id: row.id as string,
       agencyId: row.agency_id as string,
@@ -5166,7 +5174,8 @@ export class HostedApi implements ComplyraApi {
       odometerEnd: Number(row.odometer_end),
       miles: Number(row.miles),
       riderIds: (row.rider_ids as string[]) ?? [],
-      reason: (row.reason as string) ?? "",
+      reason: stripBackfillMarker(rawReason),
+      backfilled: hasBackfillMarker(rawReason),
       driverName: (row.driver_name as string) ?? "",
       signatureName: (row.signature_name as string) ?? "",
       createdBy: (row.created_by as string) ?? "",
@@ -5352,6 +5361,21 @@ export class HostedApi implements ComplyraApi {
     if (problem) throw new Error(problem);
   }
 
+  /**
+   * Resolve the backfill request on a trip write: only administrators,
+   * compliance administrators, and house managers may bypass continuity.
+   * Returns whether this write is a backfill.
+   */
+  private async resolveBackfill(
+    session: SessionUser,
+    backfill: boolean | undefined,
+  ): Promise<boolean> {
+    if (backfill !== true) return false;
+    const { assertCanBackfillMileage } = await this.p7lib();
+    assertCanBackfillMileage(session);
+    return true;
+  }
+
   async addMileageTrip(
     input: import("./types").AddMileageTripInput,
   ): Promise<import("./types").MileageTrip> {
@@ -5360,7 +5384,13 @@ export class HostedApi implements ComplyraApi {
     await this.assertSiteInAgency(session, input.siteId);
     await this.assertRidersInSite(session, input.siteId, input.riderIds);
     const valid = await this.validatedTripInput(input);
-    await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
+    const backfill = await this.resolveBackfill(session, input.backfill);
+    if (!backfill) {
+      await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
+    }
+    const storedReason = backfill
+      ? withBackfillMarker(valid.reason.trim())
+      : valid.reason.trim();
     const { data, error } = await this.client
       .from("mileage_trips")
       .insert({
@@ -5371,7 +5401,7 @@ export class HostedApi implements ComplyraApi {
         odometer_end: valid.odometerEnd,
         miles: valid.miles,
         rider_ids: [...new Set(valid.riderIds)],
-        reason: valid.reason.trim(),
+        reason: storedReason,
         driver_name: valid.driverName.trim(),
         signature_name: input.signatureName.trim(),
         created_by: session.userId,
@@ -5383,7 +5413,7 @@ export class HostedApi implements ComplyraApi {
     await this.audit(
       session,
       "mileage.trip_added",
-      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate}`,
+      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate}${backfill ? " [backfilled]" : ""}`,
       "mileage_trip",
       trip.id,
     );
@@ -5401,12 +5431,21 @@ export class HostedApi implements ComplyraApi {
     const nextRiders = patch.riderIds ?? existing.riderIds;
     await this.assertRidersInSite(session, existing.siteId, nextRiders);
     const valid = await this.validatedTripInput(patch, existing);
-    await this.assertOdometerContinuity(
-      session,
-      existing.siteId,
-      valid.odometerStart,
-      existing.id,
-    );
+    const backfill = (await this.resolveBackfill(session, patch.backfill)) || existing.backfilled;
+    // A trip already marked backfilled stays exempt from the chain: it was
+    // knowingly logged out of sequence by an authorized backfiller, so later
+    // edits (reason, driver, …) must not be forced back into continuity.
+    if (!backfill) {
+      await this.assertOdometerContinuity(
+        session,
+        existing.siteId,
+        valid.odometerStart,
+        existing.id,
+      );
+    }
+    const storedReason = backfill
+      ? withBackfillMarker(valid.reason.trim())
+      : stripBackfillMarker(valid.reason.trim());
     const { data, error } = await this.client
       .from("mileage_trips")
       .update({
@@ -5415,7 +5454,7 @@ export class HostedApi implements ComplyraApi {
         odometer_end: valid.odometerEnd,
         miles: valid.miles,
         rider_ids: [...new Set(valid.riderIds)],
-        reason: valid.reason.trim(),
+        reason: storedReason,
         driver_name: valid.driverName.trim(),
         signature_name: (patch.signatureName ?? existing.signatureName).trim(),
         updated_at: new Date().toISOString(),

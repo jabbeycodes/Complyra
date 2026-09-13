@@ -6,6 +6,7 @@ import { hasPermission } from "../../data/permissions";
 import {
   MONTH_LABELS_SHORT,
   WEEK_LABELS,
+  canBackfillMileage,
   computeTripMiles,
   monthKeyOf,
   monthLabel,
@@ -27,6 +28,8 @@ interface FormState {
   reason: string;
   driverName: string;
   signatureName: string;
+  /** Admin backfill: this trip is being logged out of sequence. */
+  backfill: boolean;
 }
 
 function emptyForm(): FormState {
@@ -38,6 +41,7 @@ function emptyForm(): FormState {
     reason: "",
     driverName: "",
     signatureName: "",
+    backfill: false,
   };
 }
 
@@ -78,6 +82,9 @@ export default function MileagePage() {
   const activeSiteId = siteId || sites[0]?.id || "";
   const activeSite = sites.find((site) => site.id === activeSiteId);
   const showYearly = canViewYearlySummary(session);
+  /** Admin backfill: administrators, compliance admins, and house managers
+   * may log a forgotten trip out of sequence. Regular staff never see it. */
+  const showBackfill = canBackfillMileage(session);
   const people = useMemo(
     () =>
       (workspace?.individuals ?? []).filter(
@@ -191,6 +198,7 @@ export default function MileagePage() {
       reason: trip.reason,
       driverName: trip.driverName,
       signatureName: trip.signatureName,
+      backfill: false,
     });
     setFormErrors([]);
     try {
@@ -236,11 +244,15 @@ export default function MileagePage() {
       driverName: form.driverName,
     });
     // Odometer continuity is blocking: the start must continue the previous
-    // trip's end (latest end for a new trip), with no override.
-    const continuity = validateOdometerContinuity(
-      odometerStart,
-      editingId ? editExpectedStart : expectedStart,
-    );
+    // trip's end (latest end for a new trip) — unless an authorized
+    // backfiller checked the backfill box to log a forgotten trip.
+    const backfill = showBackfill && form.backfill;
+    const continuity = backfill
+      ? null
+      : validateOdometerContinuity(
+          odometerStart,
+          editingId ? editExpectedStart : expectedStart,
+        );
     if (continuity) {
       problems.push({ field: "odometerStart", message: continuity });
     }
@@ -258,6 +270,7 @@ export default function MileagePage() {
           reason: form.reason,
           driverName: form.driverName,
           signatureName: form.signatureName,
+          backfill,
         });
       } else {
         await api.addMileageTrip({
@@ -269,6 +282,7 @@ export default function MileagePage() {
           reason: form.reason,
           driverName: form.driverName,
           signatureName: form.signatureName,
+          backfill,
         });
       }
       await refresh();
@@ -346,7 +360,7 @@ export default function MileagePage() {
                     {people.map((person) => (
                       <td key={person.id}>{shareById[person.id] ?? ""}</td>
                     ))}
-                    <td>{trip.reason}</td>
+                    <td>{trip.reason}{trip.backfilled ? " (backfilled)" : ""}</td>
                     <td className="mileage-signature">{trip.signatureName}</td>
                   </tr>
                 );
@@ -636,6 +650,19 @@ export default function MileagePage() {
               <div className="mileage-live-miles" aria-live="polite">
                 Miles: <strong>{liveMiles === null || Number.isNaN(liveMiles) ? "—" : liveMiles}</strong>
               </div>
+              {showBackfill && (
+                <label className="mileage-backfill mileage-form-wide">
+                  <input
+                    type="checkbox"
+                    checked={form.backfill}
+                    onChange={(e) => setForm({ ...form, backfill: e.target.checked })}
+                  />
+                  Backfill — this trip is out of sequence
+                  <span className="stack-help">
+                    For a forgotten trip logged late: skips the odometer chain check and flags the row.
+                  </span>
+                </label>
+              )}
               <fieldset className="mileage-riders">
                 <legend>Individuals who rode (miles split equally)</legend>
                 {people.length === 0 && (
@@ -722,7 +749,12 @@ export default function MileagePage() {
                       );
                       return (
                         <tr key={trip.id}>
-                          <td>{formatDate(trip.tripDate)}</td>
+                          <td>
+                            {formatDate(trip.tripDate)}
+                            {trip.backfilled && (
+                              <span className="mileage-backfill-badge">backfilled</span>
+                            )}
+                          </td>
                           <td>{trip.odometerStart}</td>
                           <td>{trip.odometerEnd}</td>
                           <td>

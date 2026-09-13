@@ -4,26 +4,34 @@ import { LocalApi, MemoryStore } from "./localApi";
 import { createEvergreenSeed } from "./seed";
 import {
   DEMO_AGENCY_CODE,
+  DEMO_ADMIN_USERNAME,
   DEMO_DSP_USERNAME,
+  DEMO_HM_USERNAME,
+  DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import {
+  assertCanBackfillMileage,
+  canBackfillMileage,
   compareMileageTrips,
   computeTripMiles,
   getLastOdometerEnd,
   getPreviousOdometerEnd,
+  hasBackfillMarker,
   latestMileageTrip,
   monthKeyOf,
   monthLabel,
   nextMonthStart,
   roundMiles,
   splitMilesAmongRiders,
+  stripBackfillMarker,
   summarizeMonthlyMileage,
   summarizeWeeklyMileage,
   summarizeYearlyMileage,
   validateOdometerContinuity,
   validateTripInput,
   weekBucketOfDay,
+  withBackfillMarker,
 } from "./mileage";
 import {
   PERMISSION_KEYS,
@@ -130,6 +138,7 @@ function trip(overrides: Partial<MileageTrip> = {}): MileageTrip {
     odometerEnd: 120,
     miles: 20,
     riderIds: ["sylvester", "brandon"],
+    backfilled: false,
     reason: "Clinic",
     driverName: "Alex",
     signatureName: "Alex",
@@ -207,6 +216,24 @@ async function dspClient() {
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
     username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const site = store.db.sites.find(
+    (s) => s.agencyId === session.agencyId && s.name === "Maple House",
+  )!;
+  const people = store.db.individuals.filter(
+    (p) => p.agencyId === session.agencyId && p.siteId === site.id,
+  );
+  assert.ok(people.length >= 2, "seed needs two individuals at Maple House");
+  return { client, store, session, site, people };
+}
+
+async function clientAs(username: string) {
+  const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  const client = new LocalApi(store);
+  const session = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username,
     password: DEMO_PASSWORD,
   });
   const site = store.db.sites.find(
@@ -332,6 +359,7 @@ function baseTrip(overrides: Partial<MileageTrip> = {}): MileageTrip {
     miles: 26,
     riderIds: ["a"],
     reason: "Doctor appointment",
+    backfilled: false,
     driverName: "Alex Morgan",
     signatureName: "Alex Morgan",
     createdBy: "user-1",
@@ -532,4 +560,142 @@ test("getMileageYearlySummary rolls up per-individual months and the grand total
   assert.equal(yearly.grandTotal.months[0], 50);
   assert.equal(yearly.grandTotal.months[1], 10);
   assert.equal(yearly.grandTotal.yearlyTotal, 60);
+});
+
+// ---------- Admin backfill override ----------
+
+test("canBackfillMileage allows administrator, compliance_admin, house_manager, and platform admins", () => {
+  assert.equal(canBackfillMileage({ roleKey: "administrator", platformAdmin: false }), true);
+  assert.equal(canBackfillMileage({ roleKey: "compliance_admin", platformAdmin: false }), true);
+  assert.equal(canBackfillMileage({ roleKey: "house_manager", platformAdmin: false }), true);
+  assert.equal(canBackfillMileage({ roleKey: "dsp", platformAdmin: true }), true);
+});
+
+test("canBackfillMileage blocks DSP, nurse, HR, and auditor staff", () => {
+  for (const roleKey of ["dsp", "nurse", "hr", "auditor", "degreed_professional_manager", "program_manager"]) {
+    assert.equal(canBackfillMileage({ roleKey, platformAdmin: false }), false, roleKey);
+  }
+  assert.equal(canBackfillMileage(null), false);
+});
+
+test("assertCanBackfillMileage throws for staff but not for house managers", () => {
+  assert.doesNotThrow(() =>
+    assertCanBackfillMileage({ roleKey: "house_manager", platformAdmin: false }),
+  );
+  assert.throws(
+    () => assertCanBackfillMileage({ roleKey: "dsp", platformAdmin: false }),
+    /Only administrators, compliance administrators, and house managers/,
+  );
+});
+
+test("backfill reason marker round-trips without leaking into display text", () => {
+  assert.equal(hasBackfillMarker("[backfill] Doctor appointment"), true);
+  assert.equal(hasBackfillMarker("Doctor appointment"), false);
+  assert.equal(stripBackfillMarker("[backfill] Doctor appointment"), "Doctor appointment");
+  assert.equal(stripBackfillMarker("Doctor appointment"), "Doctor appointment");
+  assert.equal(withBackfillMarker("Doctor appointment"), "[backfill] Doctor appointment");
+  // idempotent: never double-prefix
+  assert.equal(withBackfillMarker("[backfill] Doctor appointment"), "[backfill] Doctor appointment");
+});
+
+test("house_manager can backfill a forgotten trip out of sequence", async () => {
+  const { client, site, people } = await clientAs(DEMO_HM_USERNAME);
+  await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  const backfilled = await client.addMileageTrip({
+    ...tripInput(site.id, [people[0].id]),
+    tripDate: "2026-09-05", // older trip logged late: start does not continue the chain
+    odometerStart: 44000,
+    odometerEnd: 44020,
+    backfill: true,
+  });
+  assert.equal(backfilled.backfilled, true);
+  assert.equal(backfilled.miles, 20);
+  assert.equal(backfilled.reason, "Doctor appointment"); // marker stripped for display
+
+  const rows = await client.listMileageTrips(site.id, "2026-09");
+  const found = rows.find((row) => row.id === backfilled.id)!;
+  assert.equal(found.backfilled, true); // badge flag present in the log view
+
+  const summary = await client.getMileageMonthlySummary(
+    site.id,
+    "2026-09",
+    people.map((p) => p.id),
+  );
+  assert.equal(summary.totalMiles, 46); // 26 + 20 both counted
+});
+
+test("administrator can backfill; inverted odometer still rejected with backfill", async () => {
+  const { client, site, people } = await clientAs(DEMO_ADMIN_USERNAME);
+  await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  const backfilled = await client.addMileageTrip({
+    ...tripInput(site.id, [people[0].id]),
+    tripDate: "2026-09-06",
+    odometerStart: 44000,
+    odometerEnd: 44020,
+    backfill: true,
+  });
+  assert.equal(backfilled.backfilled, true);
+  await assert.rejects(
+    () =>
+      client.addMileageTrip({
+        ...tripInput(site.id, [people[0].id]),
+        odometerStart: 44500,
+        odometerEnd: 44490, // end < start is never allowed, even on backfill
+        backfill: true,
+      }),
+    /cannot be less than the starting reading/,
+  );
+});
+
+test("staff backfill attempts are rejected at the API level", async () => {
+  for (const username of [DEMO_DSP_USERNAME, DEMO_NURSE_USERNAME]) {
+    const { client, site, people } = await clientAs(username);
+    await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+    await assert.rejects(
+      () =>
+        client.addMileageTrip({
+          ...tripInput(site.id, [people[0].id]),
+          tripDate: "2026-09-05",
+          odometerStart: 44000,
+          odometerEnd: 44020,
+          backfill: true,
+        }),
+      /Only administrators, compliance administrators, and house managers/,
+      username,
+    );
+    const first = (await client.listMileageTrips(site.id, "2026-09"))[0];
+    await assert.rejects(
+      () => client.updateMileageTrip(first.id, { backfill: true }),
+      /Only administrators, compliance administrators, and house managers/,
+      username,
+    );
+  }
+});
+
+test("continuity is still enforced for everyone without the backfill flag", async () => {
+  const { client, site, people } = await clientAs(DEMO_HM_USERNAME);
+  await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  // house manager WITHOUT the flag is held to the chain like everyone else
+  await assert.rejects(
+    () =>
+      client.addMileageTrip({
+        ...tripInput(site.id, [people[0].id]),
+        tripDate: "2026-09-11",
+        odometerStart: 44000,
+        odometerEnd: 44020,
+      }),
+    /must continue from the last trip's end/,
+  );
+});
+
+test("updateMileageTrip can mark a trip backfilled; staff cannot", async () => {
+  const { client, site, people } = await clientAs(DEMO_ADMIN_USERNAME);
+  const trip = await client.addMileageTrip(tripInput(site.id, [people[0].id]));
+  assert.equal(trip.backfilled, false);
+  const marked = await client.updateMileageTrip(trip.id, { backfill: true });
+  assert.equal(marked.backfilled, true);
+  // the flag survives later edits that do not mention backfill
+  const edited = await client.updateMileageTrip(trip.id, { reason: "Grocery run" });
+  assert.equal(edited.backfilled, true);
+  assert.equal(edited.reason, "Grocery run");
 });

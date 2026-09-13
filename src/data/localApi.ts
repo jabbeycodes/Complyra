@@ -5016,6 +5016,21 @@ export class LocalApi implements ComplyraApi {
     if (problem) throw new Error(problem);
   }
 
+  /**
+   * Resolve the backfill request on a trip write: only administrators,
+   * compliance administrators, and house managers may bypass continuity.
+   * Returns whether this write is a backfill.
+   */
+  private async resolveBackfill(
+    session: SessionUser,
+    backfill: boolean | undefined,
+  ): Promise<boolean> {
+    if (backfill !== true) return false;
+    const { assertCanBackfillMileage } = await this.p7lib();
+    assertCanBackfillMileage(session);
+    return true;
+  }
+
   async addMileageTrip(
     input: import("./types").AddMileageTripInput,
   ): Promise<import("./types").MileageTrip> {
@@ -5024,7 +5039,10 @@ export class LocalApi implements ComplyraApi {
     this.siteOrThrow(session, input.siteId);
     this.riderIndividualsOrThrow(session, input.siteId, input.riderIds);
     const valid = await this.validatedTripInput(input);
-    await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
+    const backfill = await this.resolveBackfill(session, input.backfill);
+    if (!backfill) {
+      await this.assertOdometerContinuity(session, input.siteId, valid.odometerStart);
+    }
     const trip: import("./types").MileageTrip = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -5035,6 +5053,7 @@ export class LocalApi implements ComplyraApi {
       miles: valid.miles,
       riderIds: [...new Set(valid.riderIds)],
       reason: valid.reason.trim(),
+      backfilled: backfill,
       driverName: valid.driverName.trim(),
       signatureName: input.signatureName.trim(),
       createdBy: session.userId,
@@ -5045,7 +5064,7 @@ export class LocalApi implements ComplyraApi {
       this.store,
       session,
       "mileage.trip_added",
-      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate} (${trip.reason || "no reason given"})`,
+      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate} (${trip.reason || "no reason given"})${backfill ? " [backfilled]" : ""}`,
       "mileage_trip",
       trip.id,
     );
@@ -5063,12 +5082,18 @@ export class LocalApi implements ComplyraApi {
     const nextRiders = patch.riderIds ?? trip.riderIds;
     this.riderIndividualsOrThrow(session, trip.siteId, nextRiders);
     const valid = await this.validatedTripInput(patch, trip);
-    await this.assertOdometerContinuity(
-      session,
-      trip.siteId,
-      valid.odometerStart,
-      trip.id,
-    );
+    const backfill = (await this.resolveBackfill(session, patch.backfill)) || trip.backfilled;
+    // A trip already marked backfilled stays exempt from the chain: it was
+    // knowingly logged out of sequence by an authorized backfiller, so later
+    // edits (reason, driver, …) must not be forced back into continuity.
+    if (!backfill) {
+      await this.assertOdometerContinuity(
+        session,
+        trip.siteId,
+        valid.odometerStart,
+        trip.id,
+      );
+    }
     Object.assign(trip, {
       tripDate: valid.tripDate,
       odometerStart: valid.odometerStart,
@@ -5076,6 +5101,7 @@ export class LocalApi implements ComplyraApi {
       miles: valid.miles,
       riderIds: [...new Set(valid.riderIds)],
       reason: valid.reason.trim(),
+      backfilled: backfill,
       driverName: valid.driverName.trim(),
       signatureName: (patch.signatureName ?? trip.signatureName).trim(),
     });

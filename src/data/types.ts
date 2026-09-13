@@ -665,7 +665,9 @@ export interface MileageTrip {
   odometerEnd: number;
   miles: number; // computed: odometerEnd - odometerStart
   riderIds: string[]; // individuals who rode; each gets an equal share
-  reason: string;
+  reason: string; // display reason (backfill marker stripped by the API mappers)
+  /** True when an authorized backfiller logged this trip out of sequence. */
+  backfilled: boolean;
   driverName: string; // print name
   signatureName: string; // signature
   createdBy: string; // userId of the staff member who logged the trip
@@ -681,6 +683,13 @@ export interface AddMileageTripInput {
   reason: string;
   driverName: string;
   signatureName: string;
+  /**
+   * Admin backfill: skip the odometer-continuity check for a forgotten trip
+   * logged out of sequence, and mark the trip backfilled. Only
+   * administrator / compliance_admin / house_manager (or platform admin)
+   * may pass true — the API rejects it from everyone else.
+   */
+  backfill?: boolean;
 }
 
 export interface UpdateMileageTripInput {
@@ -691,6 +700,8 @@ export interface UpdateMileageTripInput {
   reason?: string;
   driverName?: string;
   signatureName?: string;
+  /** Same backfill bypass as AddMileageTripInput; also marks the trip backfilled. */
+  backfill?: boolean;
 }
 
 /** One trip enriched for the monthly log table: per-rider mile shares. */
