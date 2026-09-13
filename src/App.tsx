@@ -84,6 +84,9 @@ import ChecklistAssigner from "./features/hmChecklist/ChecklistAssigner";
 // LIFEPATH-P6-IMPORT (med inventory)
 import { Pill as MedInventoryNavIcon } from "lucide-react";
 import MedInventoryPage from "./features/medInventory/MedInventoryPage";
+// LIFEPATH-P7-IMPORT (mileage tracking)
+import { CarFront as MileageNavIcon } from "lucide-react";
+import MileagePage from "./features/mileage/MileagePage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -479,6 +482,8 @@ export default function App() {
         ["Checklist assignments", ClipboardList],
         // LIFEPATH-P6-NAV (med inventory)
         ["Med inventory", MedInventoryNavIcon],
+        // LIFEPATH-P7-NAV (mileage tracking)
+        ["Mileage", MileageNavIcon],
       ],
     },
   ] as const;
@@ -1609,6 +1614,8 @@ export default function App() {
               {page === "Checklist assignments" && <ChecklistAssigner />}
               {/* LIFEPATH-P6-PAGE (med inventory) */}
               {page === "Med inventory" && <MedInventoryPage />}
+              {/* LIFEPATH-P7-PAGE (mileage tracking) */}
+              {page === "Mileage" && <MileagePage />}
               {page === "Settings" && (
                 <>
                   <PageHeading

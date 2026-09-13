@@ -5145,6 +5145,223 @@ export class HostedApi implements ComplyraApi {
       med.id,
     );
   }
+  // ===== LIFEPATH-P7 HOSTED (mileage tracking) =====
+  // LIFEPATH-P7 (mileage): vehicle mileage log (HostedApi, Supabase).
+
+  private async p7lib(): Promise<typeof import("./mileage")> {
+    return await import("./mileage");
+  }
+
+  private requireMileageAccess(session: SessionUser) {
+    this.requirePermission(session, "mileage.manage");
+  }
+
+  private mapMileageTrip(row: Record<string, unknown>): import("./types").MileageTrip {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      tripDate: String(row.trip_date).slice(0, 10),
+      odometerStart: Number(row.odometer_start),
+      odometerEnd: Number(row.odometer_end),
+      miles: Number(row.miles),
+      riderIds: (row.rider_ids as string[]) ?? [],
+      reason: (row.reason as string) ?? "",
+      driverName: (row.driver_name as string) ?? "",
+      signatureName: (row.signature_name as string) ?? "",
+      createdBy: (row.created_by as string) ?? "",
+      createdAt: row.created_at as string,
+    };
+  }
+
+  private async fetchMileageTrip(session: SessionUser, tripId: string) {
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .select("*")
+      .eq("id", tripId)
+      .maybeSingle();
+    throwIf(error, "Could not load the mileage trip.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Mileage trip not found.");
+    }
+    return data as Record<string, unknown>;
+  }
+
+  private async assertSiteInAgency(session: SessionUser, siteId: string) {
+    const { data, error } = await this.client
+      .from("sites")
+      .select("id")
+      .eq("id", siteId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not verify the home.");
+    if (!data) throw new Error("Home not found.");
+  }
+
+  private async assertRidersInSite(session: SessionUser, siteId: string, riderIds: string[]) {
+    const { data, error } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(error, "Could not verify the riders.");
+    const ids = new Set((data ?? []).map((row) => (row as Record<string, unknown>).id as string));
+    for (const riderId of riderIds) {
+      if (!ids.has(riderId)) throw new Error("A rider is not part of this home.");
+    }
+  }
+
+  private async validatedTripInput(
+    input:
+      | import("./types").AddMileageTripInput
+      | import("./types").UpdateMileageTripInput,
+    existing?: import("./types").MileageTrip,
+  ) {
+    const { validateTripInput, computeTripMiles } = await this.p7lib();
+    const merged = {
+      tripDate: input.tripDate ?? existing?.tripDate ?? "",
+      odometerStart: input.odometerStart ?? existing?.odometerStart ?? NaN,
+      odometerEnd: input.odometerEnd ?? existing?.odometerEnd ?? NaN,
+      riderIds: input.riderIds ?? existing?.riderIds ?? [],
+      reason: input.reason ?? existing?.reason ?? "",
+      driverName: input.driverName ?? existing?.driverName ?? "",
+    };
+    const errors = validateTripInput(merged);
+    if (errors.length > 0) throw new Error(errors[0].message);
+    return { ...merged, miles: computeTripMiles(merged.odometerStart, merged.odometerEnd) };
+  }
+
+  async listMileageTrips(
+    siteId: string,
+    month: string,
+  ): Promise<import("./types").MileageTripView[]> {
+    const { compareMileageTrips, splitMilesAmongRiders, nextMonthStart } =
+      await this.p7lib();
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    await this.assertSiteInAgency(session, siteId);
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .gte("trip_date", `${month}-01`)
+      .lt("trip_date", nextMonthStart(month))
+      .order("trip_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the mileage log.");
+    return (data ?? [])
+      .map((row) => this.mapMileageTrip(row as Record<string, unknown>))
+      .sort(compareMileageTrips)
+      .map((trip) => ({
+        ...trip,
+        riderShares: [...splitMilesAmongRiders(trip.miles, trip.riderIds)].map(
+          ([individualId, miles]) => ({ individualId, miles }),
+        ),
+      }));
+  }
+
+  async getMileageMonthlySummary(
+    siteId: string,
+    month: string,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageMonthlySummary> {
+    const { summarizeMonthlyMileage } = await this.p7lib();
+    const trips = await this.listMileageTrips(siteId, month);
+    return summarizeMonthlyMileage(trips, individualIds);
+  }
+
+  async addMileageTrip(
+    input: import("./types").AddMileageTripInput,
+  ): Promise<import("./types").MileageTrip> {
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    await this.assertSiteInAgency(session, input.siteId);
+    await this.assertRidersInSite(session, input.siteId, input.riderIds);
+    const valid = await this.validatedTripInput(input);
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: input.siteId,
+        trip_date: valid.tripDate,
+        odometer_start: valid.odometerStart,
+        odometer_end: valid.odometerEnd,
+        miles: valid.miles,
+        rider_ids: [...new Set(valid.riderIds)],
+        reason: valid.reason.trim(),
+        driver_name: valid.driverName.trim(),
+        signature_name: input.signatureName.trim(),
+        created_by: session.userId,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the mileage trip.");
+    const trip = this.mapMileageTrip(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "mileage.trip_added",
+      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate}`,
+      "mileage_trip",
+      trip.id,
+    );
+    return trip;
+  }
+
+  async updateMileageTrip(
+    tripId: string,
+    patch: import("./types").UpdateMileageTripInput,
+  ): Promise<import("./types").MileageTrip> {
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    const row = await this.fetchMileageTrip(session, tripId);
+    const existing = this.mapMileageTrip(row);
+    const nextRiders = patch.riderIds ?? existing.riderIds;
+    await this.assertRidersInSite(session, existing.siteId, nextRiders);
+    const valid = await this.validatedTripInput(patch, existing);
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .update({
+        trip_date: valid.tripDate,
+        odometer_start: valid.odometerStart,
+        odometer_end: valid.odometerEnd,
+        miles: valid.miles,
+        rider_ids: [...new Set(valid.riderIds)],
+        reason: valid.reason.trim(),
+        driver_name: valid.driverName.trim(),
+        signature_name: (patch.signatureName ?? existing.signatureName).trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", tripId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the mileage trip.");
+    const trip = this.mapMileageTrip(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "mileage.trip_updated",
+      `${session.fullName} updated the ${trip.tripDate} mileage trip (${trip.miles} miles)`,
+      "mileage_trip",
+      trip.id,
+    );
+    return trip;
+  }
+
+  async deleteMileageTrip(tripId: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    const row = await this.fetchMileageTrip(session, tripId);
+    const trip = this.mapMileageTrip(row);
+    const { error } = await this.client.from("mileage_trips").delete().eq("id", tripId);
+    throwIf(error, "Could not delete the mileage trip.");
+    await this.audit(
+      session,
+      "mileage.trip_deleted",
+      `${session.fullName} removed the ${trip.tripDate} mileage trip (${trip.miles} miles)`,
+      "mileage_trip",
+      trip.id,
+    );
+  }
 }
 
 function mapSite(row: Record<string, unknown>): SiteRecord {

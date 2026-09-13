@@ -529,6 +529,26 @@ export interface ComplyraApi {
     lowThresholdDays: number;
   }): Promise<void>;
   acknowledgeReorderAlert(medicationId: string): Promise<void>;
+  // ===== LIFEPATH-P7 API (mileage tracking) =====
+  /** Monthly mileage log for one house (month as "YYYY-MM"). */
+  listMileageTrips(
+    siteId: string,
+    month: string,
+  ): Promise<import("./types").MileageTripView[]>;
+  /** Monthly totals: total miles + per-individual equal-share totals. */
+  getMileageMonthlySummary(
+    siteId: string,
+    month: string,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageMonthlySummary>;
+  addMileageTrip(
+    input: import("./types").AddMileageTripInput,
+  ): Promise<import("./types").MileageTrip>;
+  updateMileageTrip(
+    tripId: string,
+    patch: import("./types").UpdateMileageTripInput,
+  ): Promise<import("./types").MileageTrip>;
+  deleteMileageTrip(tripId: string): Promise<void>;
 }
 
 export type WorkspaceSite = {
@@ -4810,6 +4830,195 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} acknowledged the ${med.name} reorder alert`,
       "medication",
       med.id,
+    );
+    await persistMeta(this.store);
+  }
+  // ===== LIFEPATH-P7 IMPL (mileage tracking) =====
+  // LIFEPATH-P7 (mileage): vehicle mileage log (LocalApi, in-memory).
+
+  private async p7lib(): Promise<typeof import("./mileage")> {
+    return await import("./mileage");
+  }
+
+  private mileageRows(): import("./types").MileageTrip[] {
+    const db = this.store.db as LocalDatabase & {
+      mileageTrips?: import("./types").MileageTrip[];
+    };
+    if (!db.mileageTrips) db.mileageTrips = [];
+    return db.mileageTrips;
+  }
+
+  private assertMileageAccess(session: SessionUser) {
+    assertCan(session, "mileage.manage");
+  }
+
+  private siteOrThrow(session: { agencyId: string }, siteId: string) {
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Home not found.");
+    return site;
+  }
+
+  private findMileageTrip(session: { agencyId: string }, tripId: string) {
+    const trip = this.mileageRows().find(
+      (row) => row.id === tripId && row.agencyId === session.agencyId,
+    );
+    if (!trip) throw new Error("Mileage trip not found.");
+    return trip;
+  }
+
+  private async validatedTripInput(
+    input: import("./types").AddMileageTripInput | import("./types").UpdateMileageTripInput,
+    existing?: import("./types").MileageTrip,
+  ) {
+    const { validateTripInput, computeTripMiles } = await this.p7lib();
+    const merged = {
+      tripDate: input.tripDate ?? existing?.tripDate ?? "",
+      odometerStart: input.odometerStart ?? existing?.odometerStart ?? NaN,
+      odometerEnd: input.odometerEnd ?? existing?.odometerEnd ?? NaN,
+      riderIds: input.riderIds ?? existing?.riderIds ?? [],
+      reason: input.reason ?? existing?.reason ?? "",
+      driverName: input.driverName ?? existing?.driverName ?? "",
+    };
+    const errors = validateTripInput(merged);
+    if (errors.length > 0) throw new Error(errors[0].message);
+    return { ...merged, miles: computeTripMiles(merged.odometerStart, merged.odometerEnd) };
+  }
+
+  private riderIndividualsOrThrow(
+    session: { agencyId: string },
+    siteId: string,
+    riderIds: string[],
+  ) {
+    const people = this.store.db.individuals.filter(
+      (row) => row.agencyId === session.agencyId && row.siteId === siteId,
+    );
+    const ids = new Set(people.map((row) => row.id));
+    for (const riderId of riderIds) {
+      if (!ids.has(riderId)) throw new Error("A rider is not part of this home.");
+    }
+    return people;
+  }
+
+  async listMileageTrips(
+    siteId: string,
+    month: string,
+  ): Promise<import("./types").MileageTripView[]> {
+    const { compareMileageTrips, splitMilesAmongRiders } = await this.p7lib();
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    this.siteOrThrow(session, siteId);
+    return this.mileageRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.siteId === siteId &&
+          row.tripDate.slice(0, 7) === month,
+      )
+      .sort(compareMileageTrips)
+      .map((trip) => ({
+        ...trip,
+        riderShares: [...splitMilesAmongRiders(trip.miles, trip.riderIds)].map(
+          ([individualId, miles]) => ({ individualId, miles }),
+        ),
+      }));
+  }
+
+  async getMileageMonthlySummary(
+    siteId: string,
+    month: string,
+    individualIds: string[],
+  ): Promise<import("./mileage").MileageMonthlySummary> {
+    const { summarizeMonthlyMileage } = await this.p7lib();
+    const trips = await this.listMileageTrips(siteId, month);
+    return summarizeMonthlyMileage(trips, individualIds);
+  }
+
+  async addMileageTrip(
+    input: import("./types").AddMileageTripInput,
+  ): Promise<import("./types").MileageTrip> {
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    this.siteOrThrow(session, input.siteId);
+    this.riderIndividualsOrThrow(session, input.siteId, input.riderIds);
+    const valid = await this.validatedTripInput(input);
+    const trip: import("./types").MileageTrip = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      tripDate: valid.tripDate,
+      odometerStart: valid.odometerStart,
+      odometerEnd: valid.odometerEnd,
+      miles: valid.miles,
+      riderIds: [...new Set(valid.riderIds)],
+      reason: valid.reason.trim(),
+      driverName: valid.driverName.trim(),
+      signatureName: input.signatureName.trim(),
+      createdBy: session.userId,
+      createdAt: new Date().toISOString(),
+    };
+    this.mileageRows().unshift(trip);
+    log(
+      this.store,
+      session,
+      "mileage.trip_added",
+      `${session.fullName} logged a ${trip.miles}-mile trip on ${trip.tripDate} (${trip.reason || "no reason given"})`,
+      "mileage_trip",
+      trip.id,
+    );
+    await persistMeta(this.store);
+    return trip;
+  }
+
+  async updateMileageTrip(
+    tripId: string,
+    patch: import("./types").UpdateMileageTripInput,
+  ): Promise<import("./types").MileageTrip> {
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    const trip = this.findMileageTrip(session, tripId);
+    const nextRiders = patch.riderIds ?? trip.riderIds;
+    this.riderIndividualsOrThrow(session, trip.siteId, nextRiders);
+    const valid = await this.validatedTripInput(patch, trip);
+    Object.assign(trip, {
+      tripDate: valid.tripDate,
+      odometerStart: valid.odometerStart,
+      odometerEnd: valid.odometerEnd,
+      miles: valid.miles,
+      riderIds: [...new Set(valid.riderIds)],
+      reason: valid.reason.trim(),
+      driverName: valid.driverName.trim(),
+      signatureName: (patch.signatureName ?? trip.signatureName).trim(),
+    });
+    log(
+      this.store,
+      session,
+      "mileage.trip_updated",
+      `${session.fullName} updated the ${trip.tripDate} mileage trip (${trip.miles} miles)`,
+      "mileage_trip",
+      trip.id,
+    );
+    await persistMeta(this.store);
+    return trip;
+  }
+
+  async deleteMileageTrip(tripId: string): Promise<void> {
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    const rows = this.mileageRows();
+    const index = rows.findIndex(
+      (row) => row.id === tripId && row.agencyId === session.agencyId,
+    );
+    if (index === -1) throw new Error("Mileage trip not found.");
+    const [removed] = rows.splice(index, 1);
+    log(
+      this.store,
+      session,
+      "mileage.trip_deleted",
+      `${session.fullName} removed the ${removed.tripDate} mileage trip (${removed.miles} miles)`,
+      "mileage_trip",
+      removed.id,
     );
     await persistMeta(this.store);
   }

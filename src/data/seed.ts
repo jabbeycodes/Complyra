@@ -15,6 +15,7 @@ import type {
   DocumentVersion,
   IndividualRecord,
   Membership,
+  MileageTrip,
   Profile,
   Program,
   RequirementRecord,
@@ -100,6 +101,8 @@ export interface LocalDatabase {
   siteReviews: SiteReview[];
   // LIFEPATH-P4 (certificates): per-staff certificate records for HR tracking.
   certificates: StaffCertificate[];
+  // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
+  mileageTrips: MileageTrip[];
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -454,6 +457,8 @@ export function createEvergreenSeed(): LocalDatabase {
     siteReviews: buildSiteReviewSeed(sites),
     // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
     certificates: [],
+    // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.
+    mileageTrips: [],
   };
 }
 

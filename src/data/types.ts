@@ -650,6 +650,53 @@ export interface ExpiringCertificate extends StaffCertificate {
   staffName: string;
   daysRemaining: number;
 }
+// ===== LIFEPATH-P7 TYPES (mileage tracking) =====
+// LIFEPATH-P7 (mileage): vehicle mileage log, one entry per trip per house.
+// Mirrors the paper "Mileage Log" form: DATE | ODOMETER START | ODOMETER
+// STOP | MILES | per-individual rider columns | REASON/TRIP | SIGNATURE.
+
+/** One mileage trip row. miles is always odometerEnd - odometerStart. */
+export interface MileageTrip {
+  id: string;
+  agencyId: string;
+  siteId: string;
+  tripDate: string; // ISO yyyy-mm-dd
+  odometerStart: number;
+  odometerEnd: number;
+  miles: number; // computed: odometerEnd - odometerStart
+  riderIds: string[]; // individuals who rode; each gets an equal share
+  reason: string;
+  driverName: string; // print name
+  signatureName: string; // signature
+  createdBy: string; // userId of the staff member who logged the trip
+  createdAt: string; // ISO timestamp
+}
+
+export interface AddMileageTripInput {
+  siteId: string;
+  tripDate: string;
+  odometerStart: number;
+  odometerEnd: number;
+  riderIds: string[];
+  reason: string;
+  driverName: string;
+  signatureName: string;
+}
+
+export interface UpdateMileageTripInput {
+  tripDate?: string;
+  odometerStart?: number;
+  odometerEnd?: number;
+  riderIds?: string[];
+  reason?: string;
+  driverName?: string;
+  signatureName?: string;
+}
+
+/** One trip enriched for the monthly log table: per-rider mile shares. */
+export interface MileageTripView extends MileageTrip {
+  riderShares: Array<{ individualId: string; miles: number }>;
+}
 // ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
 export type ChecklistAnswer = "Y" | "N" | "N/A";
 

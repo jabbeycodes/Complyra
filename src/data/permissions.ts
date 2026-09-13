@@ -19,6 +19,8 @@ export const PERMISSION_KEYS = [
   "sites.create",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
   "certificates.manage",
+  // LIFEPATH-P7-PERM (mileage.manage goes here)
+  "mileage.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -95,6 +97,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "audit.read",
+      "mileage.manage",
     ]),
   },
   {
@@ -117,6 +120,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       "sites.create",
+      "mileage.manage",
     ]),
   },
   {
@@ -137,6 +141,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      "mileage.manage",
     ]),
   },
   {
@@ -152,6 +157,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "requirements.complete",
       "acknowledgments.sign_own",
       "clinical.view",
+      "mileage.manage",
     ]),
   },
   {
@@ -170,6 +176,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "audit.read",
+      "mileage.manage",
     ]),
   },
   {
@@ -187,6 +194,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "members.assign_roles",
       "hr.view_staff",
       "certificates.manage",
+      "mileage.manage",
     ]),
   },
   {
@@ -280,6 +288,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "sites.create": "Add program sites",
   // LIFEPATH-P4 (certificates)
   "certificates.manage": "Manage staff certificates",
+  // LIFEPATH-P7 (mileage)
+  "mileage.manage": "Log vehicle mileage",
 };
 
 export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [

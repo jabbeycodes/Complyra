@@ -1,0 +1,181 @@
+/* LIFEPATH-P7 (mileage tracking) styles. */
+
+.mileage-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.mileage-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.mileage-form-wide {
+  grid-column: 1 / -1;
+}
+
+.mileage-live-miles {
+  align-self: end;
+  padding: 8px 0;
+  font-size: 1rem;
+}
+
+.mileage-riders {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border, #e2e2e2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.mileage-riders legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.mileage-rider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.mileage-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mileage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.mileage-table th,
+.mileage-table td {
+  border-bottom: 1px solid var(--border, #e8e8e8);
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mileage-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #666);
+}
+
+.mileage-totals-row td {
+  border-top: 2px solid var(--border-strong, #999);
+  border-bottom: none;
+  background: var(--row-highlight, #f7f7f7);
+}
+
+.mileage-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* ---- Printable paper-form sheet ---- */
+
+.mileage-print-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mileage-sheet {
+  background: #fff;
+  color: #000;
+  padding: 24px;
+  max-width: 1000px;
+}
+
+.mileage-sheet h1 {
+  font-size: 1.4rem;
+  margin: 0;
+}
+
+.mileage-sheet-sub {
+  margin: 4px 0 16px;
+  font-size: 1rem;
+}
+
+.mileage-sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.mileage-sheet-table th,
+.mileage-sheet-table td {
+  border: 1px solid #000;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.mileage-sheet-table th {
+  background: #f0f0f0;
+}
+
+.mileage-sheet-table .mileage-totals-row td {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+
+.mileage-blank-row td {
+  height: 28px;
+}
+
+.mileage-signature {
+  font-family: cursive;
+}
+
+.mileage-sign-rows {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.mileage-sign-row {
+  display: flex;
+  gap: 32px;
+  font-size: 0.9rem;
+}
+
+.mileage-sign-line {
+  display: inline-block;
+  min-width: 220px;
+  border-bottom: 1px solid #000;
+  margin-left: 8px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .mileage-print {
+    padding: 0;
+  }
+
+  .mileage-sheet {
+    padding: 0;
+    max-width: none;
+  }
+
+  .mileage-sheet-table {
+    font-size: 0.75rem;
+  }
+}
