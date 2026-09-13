@@ -4,6 +4,7 @@ export const PERMISSION_KEYS = [
   "members.invite",
   "members.assign_roles",
   "members.reset_password",
+  "roles.manage",
   "hr.view_staff",
   "individuals.view",
   "documents.view",
@@ -179,7 +180,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     defaultScope: "agency",
     capability: "hr",
     // LIFEPATH-P4 (certificates): certificates.manage granted to HR by default.
-    permissions: pack(["members.invite", "hr.view_staff", "certificates.manage"]),
+    // HR-ROLES (2026-09-13): members.assign_roles lets HR assign staff roles.
+    // roles.manage (edit the role templates themselves) stays administrator-only.
+    permissions: pack([
+      "members.invite",
+      "members.assign_roles",
+      "hr.view_staff",
+      "certificates.manage",
+    ]),
   },
   {
     key: "auditor",
@@ -233,10 +241,31 @@ export function hasPermission(
   return ROLE_TEMPLATE_BY_KEY.dsp.permissions[key];
 }
 
+/**
+ * HR-ROLES (2026-09-13): who may grant which role to a staff member.
+ * HR can assign operational roles, but the administrator and
+ * compliance-administrator roles can only be granted by someone who already
+ * holds equivalent-or-higher standing — otherwise HR could silently promote
+ * anyone (including themselves) to full administrator.
+ */
+export function canGrantRole(
+  callerRoleKey: string | undefined,
+  targetRoleKey: string,
+): boolean {
+  if (!isRoleKey(targetRoleKey)) return false;
+  if (targetRoleKey === "administrator") return callerRoleKey === "administrator";
+  if (targetRoleKey === "compliance_admin")
+    return callerRoleKey === "administrator" || callerRoleKey === "compliance_admin";
+  return true;
+}
+
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "members.invite": "Add members",
-  "members.assign_roles": "Assign and edit roles",
+  // HR-ROLES (2026-09-13): assigning roles to people is separate from editing
+  // the role templates themselves (roles.manage).
+  "members.assign_roles": "Assign roles to staff",
   "members.reset_password": "Reset staff passwords",
+  "roles.manage": "Edit role access levels",
   "hr.view_staff": "View staff records",
   "individuals.view": "View individual records",
   "documents.view": "View plans and documents",

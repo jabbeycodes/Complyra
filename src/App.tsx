@@ -268,6 +268,9 @@ export default function App() {
   const canViewCerts =
     can(session, "hr.view_staff") || can(session, "certificates.manage");
   const canAssign = can(session, "members.assign_roles");
+  // HR-ROLES (2026-09-13): the Roles & access page edits role templates —
+  // HR can assign roles to people but cannot redefine the roles themselves.
+  const canManageRoles = can(session, "roles.manage");
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
@@ -1653,7 +1656,7 @@ export default function App() {
                           adjusted by an administrator.
                         </small>
                       </span>
-                      {canAssign ? (
+                      {canManageRoles ? (
                         <button
                           className="button"
                           onClick={() => navigate("Roles & access")}

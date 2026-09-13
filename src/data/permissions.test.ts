@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PERMISSION_KEYS,
+  canGrantRole,
   PERMISSION_LABELS,
   ROLE_TEMPLATE_BY_KEY,
   capabilityForRoleKey,
@@ -61,4 +62,37 @@ test("LIFEPATH-P4: hasPermission honors the new key from session packs and role 
   assert.equal(hasPermission({ permissions: { "certificates.manage": false } }, "certificates.manage"), false);
   assert.equal(hasPermission({ role: "hr" }, "certificates.manage"), true);
   assert.equal(hasPermission({ role: "administrator" }, "certificates.manage"), false);
+});
+
+test("HR-ROLES: HR can assign roles to staff but cannot manage role templates", () => {
+  assert.ok(PERMISSION_KEYS.includes("roles.manage"));
+  assert.equal(PERMISSION_LABELS["roles.manage"], "Edit role access levels");
+  assert.equal(PERMISSION_LABELS["members.assign_roles"], "Assign roles to staff");
+  assert.equal(defaultPermissions("hr")["members.assign_roles"], true);
+  assert.equal(defaultPermissions("hr")["roles.manage"], false);
+  assert.equal(defaultPermissions("hr")["members.invite"], true);
+  assert.equal(defaultPermissions("administrator")["roles.manage"], true);
+  assert.equal(defaultPermissions("compliance_admin")["roles.manage"], true);
+  assert.equal(defaultPermissions("administrator")["members.assign_roles"], true);
+});
+
+test("HR-ROLES: canGrantRole keeps administrator grants with administrators", () => {
+  // HR can grant operational roles…
+  assert.equal(canGrantRole("hr", "dsp"), true);
+  assert.equal(canGrantRole("hr", "house_manager"), true);
+  assert.equal(canGrantRole("hr", "hr"), true);
+  assert.equal(canGrantRole("hr", "nurse"), true);
+  // …but never administrator…
+  assert.equal(canGrantRole("hr", "administrator"), false);
+  assert.equal(canGrantRole("hr", "compliance_admin"), false);
+  // …administrators can grant anything…
+  assert.equal(canGrantRole("administrator", "administrator"), true);
+  assert.equal(canGrantRole("administrator", "compliance_admin"), true);
+  assert.equal(canGrantRole("administrator", "hr"), true);
+  // …compliance admins can grant compliance_admin but not administrator…
+  assert.equal(canGrantRole("compliance_admin", "compliance_admin"), true);
+  assert.equal(canGrantRole("compliance_admin", "administrator"), false);
+  assert.equal(canGrantRole("compliance_admin", "dsp"), true);
+  // …and unknown targets are rejected.
+  assert.equal(canGrantRole("administrator", "superuser"), false);
 });

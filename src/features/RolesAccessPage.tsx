@@ -36,6 +36,8 @@ export default function RolesAccessPage({
 
   function toggle(key: PermissionKey) {
     if (selected === "administrator" && key === "members.assign_roles") return;
+    // HR-ROLES (2026-09-13): the administrator role must keep roles.manage.
+    if (selected === "administrator" && key === "roles.manage") return;
     setDraft({ ...permissions, [key]: !permissions[key] });
   }
 
@@ -87,7 +89,8 @@ export default function RolesAccessPage({
                     type="checkbox"
                     checked={Boolean(permissions[key])}
                     disabled={
-                      selected === "administrator" && key === "members.assign_roles"
+                      (selected === "administrator" && key === "members.assign_roles") ||
+                      (selected === "administrator" && key === "roles.manage")
                     }
                     onChange={() => toggle(key)}
                   />

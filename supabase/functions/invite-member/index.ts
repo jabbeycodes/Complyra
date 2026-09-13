@@ -58,6 +58,20 @@ Deno.serve(async (req) => {
   if (!callerRole?.permissions?.["members.invite"]) {
     return json({ error: "You do not have permission to add members." }, 403);
   }
+  // HR-ROLES (2026-09-13): HR may invite staff, but the administrator and
+  // compliance-administrator roles can only be granted by administrators —
+  // otherwise HR could silently promote anyone to full administrator.
+  const callerRoleKey = String(membership.role_key ?? membership.role ?? "");
+  const targetRoleKey = String(body.roleKey ?? body.role ?? "dsp");
+  const mayGrantTarget =
+    targetRoleKey === "administrator"
+      ? callerRoleKey === "administrator"
+      : targetRoleKey === "compliance_admin"
+        ? callerRoleKey === "administrator" || callerRoleKey === "compliance_admin"
+        : true;
+  if (!mayGrantTarget) {
+    return json({ error: "Only an administrator can invite someone to that role." }, 403);
+  }
 
   const body = await req.json();
   const username = String(body.username ?? "")

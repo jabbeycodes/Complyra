@@ -65,6 +65,7 @@ import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
   canCreateIndividual,
+  canGrantRole,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -327,6 +328,11 @@ export class HostedApi implements ComplyraApi {
     if (!session.permissions["members.invite"]) {
       throw new Error("You do not have permission to add members.");
     }
+    // HR-ROLES (2026-09-13): HR may invite staff, but only an administrator
+    // may invite another administrator (mirror of the edge-function guard).
+    if (!canGrantRole(session.roleKey, input.roleKey)) {
+      throw new Error("Only an administrator can invite someone to that role.");
+    }
     const username = normalizeUsername(input.username);
     if (!USERNAME_PATTERN.test(username)) {
       throw new Error("Username must be 3–40 characters: letters, numbers, or dots.");
@@ -366,9 +372,14 @@ export class HostedApi implements ComplyraApi {
   ) {
     const session = await this.requireSession();
     if (!session.permissions["members.assign_roles"]) {
-      throw new Error("Only administrators can assign roles.");
+      throw new Error("You do not have permission to assign roles.");
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
+    // HR-ROLES (2026-09-13): HR can assign operational roles, but granting
+    // administrator / compliance-administrator stays with administrators.
+    if (!canGrantRole(session.roleKey, roleKey)) {
+      throw new Error("Only an administrator can grant that role.");
+    }
     const { data: membership, error } = await this.client
       .from("memberships")
       .select("id, role_key, site_id")
@@ -407,12 +418,18 @@ export class HostedApi implements ComplyraApi {
 
   async updateAgencyRole(roleKey: string, permissions: PermissionMap) {
     const session = await this.requireSession();
-    if (!session.permissions["members.assign_roles"]) {
+    // HR-ROLES (2026-09-13): editing the role templates themselves is a
+    // separate permission from assigning roles to people, so HR cannot use
+    // role assignment to escalate its own access.
+    if (!session.permissions["roles.manage"]) {
       throw new Error("Only administrators can edit role access.");
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
     if (roleKey === "administrator" && !permissions["members.assign_roles"]) {
       throw new Error("The administrator role must keep role-assignment access.");
+    }
+    if (roleKey === "administrator" && !permissions["roles.manage"]) {
+      throw new Error("The administrator role must keep role-management access.");
     }
     const { error } = await this.client
       .from("agency_roles")

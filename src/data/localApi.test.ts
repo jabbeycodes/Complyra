@@ -609,3 +609,104 @@ test("LIFEPATH-P4: certificate reads require hr.view_staff or certificates.manag
   await assert.rejects(() => api.listCertificates(session.userId), /permission/i);
   await assert.rejects(() => api.certificatesExpiringSoon(90), /permission/i);
 });
+
+test("HR-ROLES: HR can add staff and assign operational roles, but cannot escalate", async () => {
+  const db = store();
+  const api = new LocalApi(db);
+  const admin = await api.signIn(adminLogin());
+
+  // Seed an HR staff member directly (mirrors the seed's row shapes).
+  const hrUserId = "00000000-0000-4000-8000-0000000000hr";
+  db.db.profiles.push({
+    id: hrUserId,
+    fullName: "Helen Recruit",
+    email: "helen.recruit@demo.complyrer.user",
+    jobTitle: "HR",
+    username: "helen.recruit",
+    homeAgencyId: admin.agencyId,
+    mustChangePassword: false,
+  });
+  db.db.memberships.push({
+    id: "00000000-0000-4000-8000-000000000hrm",
+    agencyId: admin.agencyId,
+    userId: hrUserId,
+    role: "hr",
+    roleKey: "hr",
+    siteId: null,
+    expiresOn: null,
+  });
+  db.db.credentials.push({
+    userId: hrUserId,
+    email: "helen.recruit@demo.complyrer.user",
+    password: DEMO_PASSWORD,
+  });
+
+  const dspInvite = await api.inviteMember({
+    fullName: "Dan Support",
+    username: "dan.support",
+    tempPassword: "TempPass!1",
+    roleKey: "dsp",
+    jobTitle: "DSP",
+  });
+  await api.signOut();
+
+  // Sign in as HR.
+  const hrSession = await api.signIn({
+    agencyCode: admin.agencyCode,
+    username: "helen.recruit",
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(hrSession.roleKey, "hr");
+
+  // HR can add a staff member…
+  const added = await api.inviteMember({
+    fullName: "Amy Aide",
+    username: "amy.aide",
+    tempPassword: "TempPass!1",
+    roleKey: "dsp",
+    jobTitle: "DSP",
+  });
+  assert.equal(added.username, "amy.aide");
+
+  // …and assign operational roles…
+  const target = (await api.loadWorkspace(hrSession)).staff.find(
+    (p) => p.username === dspInvite.username,
+  )!;
+  await api.assignMemberRole(target.id, "house_manager");
+
+  // …but cannot grant administrator…
+  await assert.rejects(
+    () => api.assignMemberRole(target.id, "administrator"),
+    /Only an administrator can grant that role/,
+  );
+  await assert.rejects(
+    () => api.assignMemberRole(target.id, "compliance_admin"),
+    /Only an administrator can grant that role/,
+  );
+  // …cannot invite an administrator…
+  await assert.rejects(
+    () =>
+      api.inviteMember({
+        fullName: "Eve Escalate",
+        username: "eve.escalate",
+        tempPassword: "TempPass!1",
+        roleKey: "administrator",
+        jobTitle: "Admin",
+      }),
+    /Only an administrator can invite someone to that role/,
+  );
+  // …and cannot edit the role templates themselves.
+  await assert.rejects(
+    () => api.updateAgencyRole("hr", { ...defaultPermissions("hr") }),
+    /Only administrators can edit role access/,
+  );
+
+  // Administrators keep full control.
+  await api.signOut();
+  await api.signIn(adminLogin());
+  await api.updateAgencyRole("dsp", {
+    ...defaultPermissions("dsp"),
+    "members.invite": true,
+  });
+  await api.assignMemberRole(target.id, "dsp");
+});

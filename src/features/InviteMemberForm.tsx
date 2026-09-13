@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useData } from "../data/DataProvider";
-import { ROLE_TEMPLATES, type RoleKey } from "../data/permissions";
+import { ROLE_TEMPLATES, canGrantRole, type RoleKey } from "../data/permissions";
 import type { InviteMemberResult } from "../data/types";
 import { USERNAME_PATTERN, normalizeUsername } from "../data/types";
 
@@ -9,7 +9,7 @@ export default function InviteMemberForm({
 }: {
   onCreated?: (result: InviteMemberResult, tempPassword: string) => void;
 }) {
-  const { api, workspace, refresh } = useData();
+  const { api, workspace, refresh, session } = useData();
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [tempPassword, setTempPassword] = useState("");
@@ -24,6 +24,12 @@ export default function InviteMemberForm({
   >(null);
 
   const template = ROLE_TEMPLATES.find((row) => row.key === roleKey)!;
+
+  // HR-ROLES (2026-09-13): HR can invite staff into operational roles, but the
+  // administrator / compliance-administrator options are hidden for HR.
+  const grantableRoles = ROLE_TEMPLATES.filter((row) =>
+    canGrantRole(session?.roleKey, row.key),
+  );
 
   if (created) {
     return (
@@ -144,7 +150,7 @@ export default function InviteMemberForm({
             if (nextTemplate) setJobTitle(nextTemplate.name);
           }}
         >
-          {ROLE_TEMPLATES.map((option) => (
+          {grantableRoles.map((option) => (
             <option key={option.key} value={option.key}>
               {option.shortCode} · {option.name}
             </option>

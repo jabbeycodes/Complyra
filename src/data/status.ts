@@ -82,7 +82,9 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Activity log") {
     return can(session, "audit.read") || can(session, "individuals.view");
   }
-  if (page === "Roles & access") return can(session, "members.assign_roles");
+  // HR-ROLES (2026-09-13): editing role templates is roles.manage, separate
+  // from assigning roles to people (members.assign_roles).
+  if (page === "Roles & access") return can(session, "roles.manage");
   // LIFEPATH-P2-PAGEVIS (training engine)
   if (page === "Training")
     return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
