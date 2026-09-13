@@ -579,6 +579,7 @@ export class HostedApi implements ComplyraApi {
       },
       monthlyDue: { equipmentDay: 7, drillDay: 7, safetyDay: 7 },
       siteReviews: [],
+      branding: { logoUrl: null },
     };
   }
 
@@ -1054,6 +1055,12 @@ export class HostedApi implements ComplyraApi {
   }
   async downloadPreSurveyPdf(): Promise<{ blob: Blob; name: string }> {
     throw new Error("Pre-survey downloads are on the local workspace until the hosted schema is migrated.");
+  }
+  async uploadAgencyLogo() {
+    throw new Error("Agency logos are on the local workspace until the hosted schema is migrated.");
+  }
+  async removeAgencyLogo() {
+    throw new Error("Agency logos are on the local workspace until the hosted schema is migrated.");
   }
   async createSite(): Promise<{ id: string }> {
     throw new Error("Adding sites is on the local workspace until the hosted schema is migrated.");

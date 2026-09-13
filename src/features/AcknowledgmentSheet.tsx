@@ -219,6 +219,7 @@ export default function AcknowledgmentSheet({
             const pdf = buildAcknowledgmentPdf(
               session?.agencyName ?? "Agency",
               detail,
+              workspace?.branding.logoUrl,
             );
             pdf.save(packetFileName(detail));
           }}

@@ -67,6 +67,7 @@ import IndividualChart from "./features/IndividualChart";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
+import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -373,9 +374,7 @@ export default function App() {
         </button>
         <div className="brand-tagline">COMPLIANCE, CONNECTED.</div>
         <button className="agency-picker" onClick={() => setModal("agency")}>
-          <span className="agency-mark">
-            <Building2 size={20} />
-          </span>
+          <AgencyMark name={session.agencyName} logoUrl={workspace.branding.logoUrl} />
           <span>
             <strong>{session.agencyName}</strong>
             <small>{usingHostedBackend ? "Hosted workspace" : "Local workspace"}</small>
@@ -1492,6 +1491,7 @@ export default function App() {
                         <LockKeyhole size={20} />
                       )}
                     </div>
+                    <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     <div className="settings-row">
                       <span>
@@ -1992,9 +1992,11 @@ export default function App() {
       {modal === "agency" && (
         <Modal title="Agency workspace" onClose={() => setModal(null)}>
           <div className="agency-modal">
-            <span className="agency-mark">
-              <Building2 size={27} />
-            </span>
+            <AgencyMark
+              name={session.agencyName}
+              logoUrl={workspace.branding.logoUrl}
+              size={48}
+            />
             <div>
               <h2>{session.agencyName}</h2>
               <p>

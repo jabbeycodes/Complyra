@@ -1,4 +1,4 @@
-import { jsPDF } from "jspdf";
+import { startBrandedDoc } from "./brandHeader";
 
 export function buildCarePlanPdf(input: {
   agencyName: string;
@@ -6,21 +6,15 @@ export function buildCarePlanPdf(input: {
   title: string;
   versionLabel: string;
   effectiveOn: string;
+  logoDataUrl?: string | null;
 }) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  const margin = 54;
-  let y = 64;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(47, 70, 48);
-  doc.text("COMPLYRER", margin, y);
-  doc.setTextColor(36, 30, 24);
-  doc.setFontSize(18);
-  y += 26;
-  doc.text(input.title, margin, y, { maxWidth: 500 });
+  const { doc, margin, y: startY } = startBrandedDoc(input.title, {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  }, 54);
+  let y = startY;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  y += 32;
   for (const [label, value] of [
     ["Agency", input.agencyName],
     ["Individual", input.individualName],
