@@ -817,7 +817,7 @@ export default function App() {
                         onClick={() => setModal("add-site")}
                       >
                         <span className="add-site-plus" aria-hidden="true">
-                          <Plus size={56} strokeWidth={3} />
+                          <Plus size={22} strokeWidth={3} />
                         </span>
                         <strong>Add a site</strong>
                         <span>Open a new program home as you grow</span>
@@ -841,41 +841,37 @@ export default function App() {
                           <section className="panel location-card" key={s.name}>
                             <div className="location-top">
                               <span className={`house-icon ${s.color}`}>
-                                <Building2 size={24} />
+                                <Building2 size={20} />
                               </span>
+                              <div className="location-title">
+                                <h2>{s.name}</h2>
+                                <p>
+                                  {s.address}
+                                  <span className="program-tag">{s.program}</span>
+                                </p>
+                              </div>
                               <Badge
                                 status={
                                   sm.overdue ? "Needs attention" : "On track"
                                 }
                               />
                             </div>
-                            <h2>{s.name}</h2>
-                            <p>{s.address}</p>
-                            <span className="program-tag">{s.program}</span>
                             <div className="location-stat">
                               <strong>
                                 {sm.score}
                                 <small>%</small>
                               </strong>
-                              <span>
-                                compliance
-                                <br />
-                                readiness
-                              </span>
-                              <div>
-                                {sm.overdue}
-                                <small>overdue</small>
+                              <span>ready</span>
+                              <div className="progress-track">
+                                <span style={{ width: `${sm.score}%` }} />
                               </div>
-                            </div>
-                            <div className="progress-track">
-                              <span style={{ width: `${sm.score}%` }} />
+                              <em>
+                                {sm.overdue} overdue
+                              </em>
                             </div>
                             <div className="location-manager">
                               <Avatar name={s.manager} small color={s.color} />
-                              <span>
-                                {s.manager}
-                                <small>House manager</small>
-                              </span>
+                              <span>{s.manager}</span>
                               <span className="muted">
                                 {individuals.filter((person) => person.site === s.name).length}{" "}
                                 individuals
