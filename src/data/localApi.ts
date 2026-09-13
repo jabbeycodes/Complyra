@@ -34,12 +34,14 @@ import { generateTempPassword } from "./agencyCode";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
+  AddMedDoseExceptionInput,
   AppRole,
   AssignTrainingInput,
   ChecklistAnswer,
   DelegationFormPatch,
   DelegationTemplateVersion,
   DocumentVersion,
+  DoseExceptionKind,
   ExpiringCertificate,
   HmWeeklyChecklist,
   IndividualRecord,
@@ -50,8 +52,10 @@ import type {
   InviteMemberResult,
   LegacyLineSignoffInput,
   LoginInput,
+  MedDoseException,
   PacketDetail,
   PendingAgency,
+  RequestTrainingCorrectionInput,
   RequirementLineSignoffInput,
   RequirementRecord,
   ServiceLogEntry,
@@ -105,14 +109,19 @@ import {
 import {
   computeNextDueOn,
   evaluateInRatioGate,
+  LOCKED_TRAINING_SHEET_MESSAGE,
   resolveRequirementStatus,
   sumHours,
+  validateTrainingLineInput,
 } from "../features/training/gate";
 import {
   allLinesInitialed,
   applyDailyMedDrop,
+  canEditTrainingLine,
+  canLogDoseException,
   canLogPrnDose,
   canRecordDelivery,
+  canRequestTrainingCorrection,
   canSeeMeds,
   canSignTrainingAsHm,
   mergeTrainingLines,
@@ -409,6 +418,13 @@ export interface ComplyraApi {
   initialRequirementLine(requirementId: string, input: RequirementLineSignoffInput): Promise<void>;
   /** Mark a requirement line N/A with a written reason (no blanks allowed). */
   waiveRequirementLine(requirementId: string, reason: string): Promise<void>;
+  /**
+   * Correction flow: an administrator, compliance admin, or DPM deletes the
+   * house manager's countersignature (with a written reason) to unlock a
+   * signed sheet so bad lines can be fixed. The reason is written to the
+   * audit trail. The sheet must be re-signed and re-countersigned after.
+   */
+  requestTrainingCorrection(input: RequestTrainingCorrectionInput): Promise<void>;
   /** Whole-checklist countersignature: staff signs own sheet, then the house manager countersigns. */
   signStaffChecklist(input: {
     userId: string;
@@ -529,6 +545,12 @@ export interface ComplyraApi {
     lowThresholdDays: number;
   }): Promise<void>;
   acknowledgeReorderAlert(medicationId: string): Promise<void>;
+  /**
+   * Log a refused / held / wasted dose exception during the med pass. The
+   * forecast subtracts the affected pills; the row is insert-only (corrections
+   * are new rows, never edits) and the reason is written to the audit trail.
+   */
+  addMedDoseException(input: AddMedDoseExceptionInput): Promise<void>;
   // ===== LIFEPATH-P7 API (mileage tracking) =====
   /** Monthly mileage log for one house (month as "YYYY-MM"). */
   listMileageTrips(
@@ -3548,6 +3570,37 @@ export class LocalApi implements ComplyraApi {
     );
   }
 
+  /**
+   * True when a house-manager countersignature locks the staffer's sheet.
+   * Mirrors the training_signoffs RLS freeze: the join is on
+   * (agency_id, user_id, site_id), and NULL site_id never matches in SQL.
+   */
+  private p2SheetLocked(requirement: TrainingRequirement): boolean {
+    if (requirement.siteId == null) return false;
+    return this.p2Collections().trainingCountersignatures.some(
+      (row) =>
+        row.agencyId === requirement.agencyId &&
+        row.userId === requirement.userId &&
+        row.siteId === requirement.siteId &&
+        row.hmSignedAt != null,
+    );
+  }
+
+  private assertTrainingUnlocked(requirement: TrainingRequirement) {
+    if (this.p2SheetLocked(requirement)) {
+      throw new Error(LOCKED_TRAINING_SHEET_MESSAGE);
+    }
+  }
+
+  /** Resolve a trainer id against the agency staff roster (no free text). */
+  private p2TrainerName(session: SessionUser, trainerUserId: string): string {
+    const trainer = this.store.db.profiles.find(
+      (row) => row.id === trainerUserId && row.homeAgencyId === session.agencyId,
+    );
+    if (!trainer) throw new Error("Choose the trainer from the staff roster.");
+    return trainer.fullName;
+  }
+
   private p2RequirementView(
     requirement: TrainingRequirement,
     today: string,
@@ -3698,31 +3751,67 @@ export class LocalApi implements ComplyraApi {
     );
     if (!requirement) throw new Error("Training line not found.");
     if (session.userId !== requirement.userId) assertCan(session, "hr.view_staff");
-    if (this.p2SignoffFor(requirementId)) {
-      throw new Error("This training line is already initialed.");
-    }
-    const initials = input.initials.trim();
-    if (!initials) throw new Error("Type your initials — checkmarks are not allowed.");
-    const trainerName = input.trainerName.trim();
-    if (!trainerName) throw new Error("Name the trainer who delivered this training.");
-    const hoursTotal = Math.max(0, input.hoursTotal ?? 0);
-    const hoursWithHm = Math.max(0, input.hoursWithHm ?? 0);
-    if (hoursWithHm > hoursTotal) {
-      throw new Error("Hours with the house manager cannot exceed total hours.");
-    }
-    const signedOn = (input.signedOn ?? new Date().toISOString()).slice(0, 10);
+    this.assertTrainingUnlocked(requirement);
+    const validated = validateTrainingLineInput(input);
+    const trainerName = this.p2TrainerName(session, validated.trainerUserId);
+    const selfTraining = validated.trainerUserId === requirement.userId;
     const now = new Date().toISOString();
+    const existing = this.p2SignoffFor(requirementId);
+    if (existing) {
+      // Correction edit of a completed line: allowed only on unlocked sheets
+      // and only by roles that may update signoffs (mirrors RLS).
+      if (!canEditTrainingLine(session.roleKey)) {
+        throw new Error(
+          "Only an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
+        );
+      }
+      Object.assign(existing, {
+        initials: validated.initials,
+        signedOn: validated.signedOn,
+        na: false,
+        naReason: null,
+        trainerName,
+        trainerUserId: validated.trainerUserId,
+        signedByUserId: session.userId,
+        selfTraining,
+        method: input.method ?? null,
+        hoursTotal: validated.hoursTotal,
+        hoursWithHm: validated.hoursWithHm,
+        competencyText: input.competencyText?.trim() || null,
+        observerName: input.observerName?.trim() || null,
+        observerSignature: input.observerSignature?.trim() || null,
+        evidenceRef: input.evidenceRef?.trim() || null,
+        renewalRule: input.renewalRule?.trim() || null,
+        nextDueOn:
+          input.nextDueOn?.slice(0, 10) ??
+          computeNextDueOn(input.renewalRule?.trim() ?? null, validated.signedOn),
+      });
+      requirement.status = "complete";
+      log(
+        this.store,
+        session,
+        "training.line_edited",
+        `${validated.initials} edited “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)}`,
+        "training_requirement",
+        requirementId,
+      );
+      await persistMeta(this.store);
+      return;
+    }
     coll.trainingSignoffs.push({
       id: crypto.randomUUID(),
       requirementId,
-      initials,
-      signedOn,
+      initials: validated.initials,
+      signedOn: validated.signedOn,
       na: false,
       naReason: null,
       trainerName,
+      trainerUserId: validated.trainerUserId,
+      signedByUserId: session.userId,
+      selfTraining,
       method: input.method ?? null,
-      hoursTotal,
-      hoursWithHm,
+      hoursTotal: validated.hoursTotal,
+      hoursWithHm: validated.hoursWithHm,
       competencyText: input.competencyText?.trim() || null,
       observerName: input.observerName?.trim() || null,
       observerSignature: input.observerSignature?.trim() || null,
@@ -3730,7 +3819,7 @@ export class LocalApi implements ComplyraApi {
       renewalRule: input.renewalRule?.trim() || null,
       nextDueOn:
         input.nextDueOn?.slice(0, 10) ??
-        computeNextDueOn(input.renewalRule?.trim() ?? null, signedOn),
+        computeNextDueOn(input.renewalRule?.trim() ?? null, validated.signedOn),
       createdAt: now,
     });
     requirement.status = "complete";
@@ -3738,7 +3827,7 @@ export class LocalApi implements ComplyraApi {
       this.store,
       session,
       "training.line_initialed",
-      `${initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)}`,
+      `${validated.initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)}`,
       "training_requirement",
       requirementId,
     );
@@ -3753,6 +3842,7 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === requirementId && row.agencyId === session.agencyId,
     );
     if (!requirement) throw new Error("Training line not found.");
+    this.assertTrainingUnlocked(requirement);
     if (this.p2SignoffFor(requirementId)) {
       throw new Error("This training line is already initialed.");
     }
@@ -3767,6 +3857,9 @@ export class LocalApi implements ComplyraApi {
       na: true,
       naReason: trimmed,
       trainerName: session.fullName,
+      trainerUserId: session.userId,
+      signedByUserId: session.userId,
+      selfTraining: false,
       method: null,
       hoursTotal: 0,
       hoursWithHm: 0,
@@ -3786,6 +3879,34 @@ export class LocalApi implements ComplyraApi {
       `N/A: “${renderTopicTitle(TRAINING_TOPIC_BY_ID[requirement.topicId])}” for ${ownerName(this.store, requirement.userId)} — ${trimmed}`,
       "training_requirement",
       requirementId,
+    );
+    await persistMeta(this.store);
+  }
+
+  async requestTrainingCorrection(input: RequestTrainingCorrectionInput): Promise<void> {
+    const session = assertSession(this.store);
+    if (!canRequestTrainingCorrection(session.roleKey)) {
+      throw new Error(
+        "Only an administrator, compliance admin, or DPM can request a training correction.",
+      );
+    }
+    const coll = this.p2Collections();
+    const index = coll.trainingCountersignatures.findIndex(
+      (row) => row.id === input.countersignatureId && row.agencyId === session.agencyId,
+    );
+    if (index < 0) throw new Error("Training sheet not found.");
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Write the reason for this correction.");
+    const [removed] = coll.trainingCountersignatures.splice(index, 1);
+    // Deleting the countersignature unlocks the sheet: completed lines can be
+    // edited, and the sheet must be re-signed and re-countersigned.
+    log(
+      this.store,
+      session,
+      "training.correction_requested",
+      `Correction requested for ${ownerName(this.store, removed.userId)}'s training sheet: ${reason}`,
+      "training_countersignature",
+      removed.id,
     );
     await persistMeta(this.store);
   }
@@ -4680,6 +4801,14 @@ export class LocalApi implements ComplyraApi {
     return { session, med };
   }
 
+  private p6doseExceptions(): MedDoseException[] {
+    const db = this.store.db as LocalDatabase & {
+      medDoseExceptions?: MedDoseException[];
+    };
+    if (!db.medDoseExceptions) db.medDoseExceptions = [];
+    return db.medDoseExceptions;
+  }
+
   private p6upsertRow(
     session: { agencyId: string },
     med: { id: string; individualId: string },
@@ -4737,6 +4866,9 @@ export class LocalApi implements ComplyraApi {
           // Local backend: logPrnDose decrements the medication row directly,
           // so projectMedInventory falls back to the row count for PRN meds.
           prnDoses: [],
+          doseExceptions: this.p6doseExceptions().filter(
+            (exception) => exception.medicationId === med.id,
+          ),
           today,
         }),
       )
@@ -4843,6 +4975,40 @@ export class LocalApi implements ComplyraApi {
       `${session.fullName} acknowledged the ${med.name} reorder alert`,
       "medication",
       med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async addMedDoseException(input: AddMedDoseExceptionInput) {
+    const { validateDoseExceptionInput } = await this.p6lib();
+    const { session, med } = this.p6medicationOrThrow(input.medicationId);
+    if (!canLogDoseException(session.roleKey)) {
+      throw new Error("You cannot log a dose exception.");
+    }
+    const validated = validateDoseExceptionInput(input);
+    const now = new Date().toISOString();
+    const row: MedDoseException = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      occurredOn: validated.occurredOn,
+      kind: validated.kind,
+      pillsAffected: validated.pillsAffected,
+      reason: validated.reason,
+      createdBy: session.userId,
+      createdAt: now,
+    };
+    // Insert-only: corrections are new rows, never edits — there is no
+    // updateMedDoseException or deleteMedDoseException on this API.
+    this.p6doseExceptions().push(row);
+    log(
+      this.store,
+      session,
+      "medication.dose_exception",
+      `${session.fullName} logged a ${validated.kind} dose exception for ${med.name} (${validated.pillsAffected} pill${validated.pillsAffected === 1 ? "" : "s"}): ${validated.reason}`,
+      "med_dose_exception",
+      row.id,
     );
     await persistMeta(this.store);
   }

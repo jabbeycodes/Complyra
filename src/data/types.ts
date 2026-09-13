@@ -337,7 +337,14 @@ export interface TrainingSignoff {
   /** N/A allowed; no blanks — every line must be initialed or N/A. */
   na: boolean;
   naReason: string | null;
+  /** Display name of the trainer, resolved from the agency staff roster. */
   trainerName: string;
+  /** Roster id of the trainer who delivered the training (never free text). */
+  trainerUserId: string | null;
+  /** Session user who recorded the sign-off. */
+  signedByUserId: string | null;
+  /** True when the staffer trained themselves (flagged for review). */
+  selfTraining: boolean;
   method: TrainingMethod | null;
   hoursTotal: number;
   hoursWithHm: number;
@@ -366,7 +373,8 @@ export interface TrainingCountersignature {
 export interface RequirementLineSignoffInput {
   initials: string;
   signedOn?: string;
-  trainerName: string;
+  /** Agency staff roster id of the trainer (selected from a roster picker — never free text). */
+  trainerUserId: string;
   method?: TrainingMethod;
   hoursTotal?: number;
   hoursWithHm?: number;
@@ -404,6 +412,12 @@ export interface TrainingRequirementView extends TrainingRequirement {
   individualName: string | null;
   signoff: TrainingSignoff | null;
   resolvedStatus: TrainingRequirementStatus;
+}
+/** Correction flow: a privileged role deletes the HM countersignature (with a
+ *  written reason) to unlock a signed sheet so bad lines can be fixed. */
+export interface RequestTrainingCorrectionInput {
+  countersignatureId: string;
+  reason: string;
 }
 export interface StaffTrainingProfile {
   userId: string;
@@ -765,6 +779,33 @@ export interface HmWeeklyChecklist {
 // ===== LIFEPATH-P6 TYPES (med inventory) =====
 export type MedInventoryStatus = "ok" | "low" | "critical" | "out";
 
+/** Refused / held / wasted dose events that subtract pills from the supply forecast. */
+export type DoseExceptionKind = "refused" | "held" | "wasted";
+
+export interface MedDoseException {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  medicationId: string;
+  /** ISO date the exception occurred. */
+  occurredOn: string;
+  kind: DoseExceptionKind;
+  /** Positive whole number of pills affected. */
+  pillsAffected: number;
+  /** Non-blank reason; written into the audit trail. */
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface AddMedDoseExceptionInput {
+  medicationId: string;
+  kind: DoseExceptionKind;
+  pillsAffected: number;
+  reason: string;
+  occurredOn?: string;
+}
+
 /** Default reorder threshold: raise a reorder alert when this many days of doses remain. */
 export const DEFAULT_MED_LOW_THRESHOLD_DAYS = 7;
 
@@ -822,6 +863,8 @@ export interface MedInventory extends MedInventoryRecord {
 
 export interface MedInventoryView extends MedInventory, MedInventoryProjection {
   deliveries: MedDeliverySummary[];
+  /** Logged refused/held/wasted dose exceptions, newest first (combined into supply history). */
+  doseExceptions: MedDoseException[];
 }
 
 /** Aggregate supply picture for one home — read by the HM weekly checklist. */

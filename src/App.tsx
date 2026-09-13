@@ -480,8 +480,8 @@ export default function App() {
         // LIFEPATH-P5-NAV (HM weekly checklist)
         ["Weekly checklist", ClipboardCheck],
         ["Checklist assignments", ClipboardList],
-        // LIFEPATH-P6-NAV (med inventory)
-        ["Med inventory", MedInventoryNavIcon],
+        // LIFEPATH-P6-NAV (med supply forecast)
+        ["Supply forecast", MedInventoryNavIcon],
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
       ],
@@ -1612,8 +1612,8 @@ export default function App() {
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
               {page === "Weekly checklist" && <HmWeeklyChecklistPage />}
               {page === "Checklist assignments" && <ChecklistAssigner />}
-              {/* LIFEPATH-P6-PAGE (med inventory) */}
-              {page === "Med inventory" && <MedInventoryPage />}
+              {/* LIFEPATH-P6-PAGE (med supply forecast) */}
+              {page === "Supply forecast" && <MedInventoryPage />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {page === "Settings" && (

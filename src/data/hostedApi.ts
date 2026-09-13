@@ -13,6 +13,7 @@ import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
   AddCertificateInput,
+  AddMedDoseExceptionInput,
   AppRole,
   AssignTrainingInput,
   ChecklistAnswer,
@@ -32,8 +33,10 @@ import type {
   InviteMemberResult,
   LegacyLineSignoffInput,
   LoginInput,
+  MedDoseException,
   PacketDetail,
   PendingAgency,
+  RequestTrainingCorrectionInput,
   RequirementLineSignoffInput,
   RequirementRecord,
   ServiceLogEntry,
@@ -104,8 +107,11 @@ import {
 } from "./planStack";
 import {
   allLinesInitialed,
+  canEditTrainingLine,
+  canLogDoseException,
   canLogPrnDose,
   canRecordDelivery,
+  canRequestTrainingCorrection,
   canSeeMeds,
   canSignTrainingAsHm,
   toMedicationView,
@@ -211,8 +217,10 @@ import {
 import {
   computeNextDueOn,
   evaluateInRatioGate,
+  LOCKED_TRAINING_SHEET_MESSAGE,
   resolveRequirementStatus,
   sumHours,
+  validateTrainingLineInput,
 } from "../features/training/gate";
 
 const BUCKET = "agency-documents";
@@ -3377,6 +3385,9 @@ export class HostedApi implements ComplyraApi {
       na: Boolean(row.na),
       naReason: (row.na_reason as string | null) ?? null,
       trainerName: String(row.trainer_name),
+      trainerUserId: (row.trainer_user_id as string | null) ?? null,
+      signedByUserId: (row.signed_by_user_id as string | null) ?? null,
+      selfTraining: Boolean(row.self_training),
       method: (row.method as TrainingSignoff["method"]) ?? null,
       hoursTotal: Number(row.hours_total ?? 0),
       hoursWithHm: Number(row.hours_with_hm ?? 0),
@@ -3756,6 +3767,52 @@ export class HostedApi implements ComplyraApi {
     return rows;
   }
 
+  /**
+   * App-level locked-sheet check: a house-manager countersignature freezes
+   * signoff writes for that staffer+site (the RLS update policy rejects them
+   * too, but this gives a clear message instead of a database error).
+   */
+  private async assertTrainingUnlocked(requirement: {
+    userId: string;
+    siteId: string | null;
+  }) {
+    if (requirement.siteId == null) return;
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("training_countersignatures")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", requirement.userId)
+      .eq("site_id", requirement.siteId)
+      .not("hm_signed_at", "is", null)
+      .limit(1);
+    throwIf(error, "Could not check the training sheet lock.");
+    if ((data ?? []).length > 0) throw new Error(LOCKED_TRAINING_SHEET_MESSAGE);
+  }
+
+  /** Resolve a trainer id against the agency staff roster (no free text). */
+  private async trainerNameOrThrow(session: SessionUser, trainerUserId: string) {
+    const { data, error } = await this.client
+      .from("profiles")
+      .select("full_name,home_agency_id")
+      .eq("id", trainerUserId)
+      .maybeSingle();
+    throwIf(error, "Could not verify the trainer.");
+    if (!data || (data.home_agency_id as string) !== session.agencyId) {
+      throw new Error("Choose the trainer from the staff roster.");
+    }
+    return String(data.full_name);
+  }
+
+  /** Map a lock-shaped database error to the friendly locked-sheet message. */
+  private throwLockAware(error: { message: string } | null, fallback: string): never {
+    if (error && /row-level security/i.test(error.message ?? "")) {
+      throw new Error(LOCKED_TRAINING_SHEET_MESSAGE);
+    }
+    if (error) throwIf(error, fallback);
+    throw new Error(fallback);
+  }
+
   async initialRequirementLine(
     requirementId: string,
     input: RequirementLineSignoffInput,
@@ -3771,33 +3828,22 @@ export class HostedApi implements ComplyraApi {
     if (!requirement) throw new Error("Training line not found.");
     const mapped = this.mapTrainingRequirement(requirement);
     if (session.userId !== mapped.userId) this.requirePermission(session, "hr.view_staff");
-    const { data: existingSignoff } = await this.client
-      .from("training_signoffs")
-      .select("id")
-      .eq("requirement_id", requirementId)
-      .maybeSingle();
-    if (existingSignoff) throw new Error("This training line is already initialed.");
-    const initials = input.initials.trim();
-    if (!initials) throw new Error("Type your initials — checkmarks are not allowed.");
-    const trainerName = input.trainerName.trim();
-    if (!trainerName) throw new Error("Name the trainer who delivered this training.");
-    const hoursTotal = Math.max(0, input.hoursTotal ?? 0);
-    const hoursWithHm = Math.max(0, input.hoursWithHm ?? 0);
-    if (hoursWithHm > hoursTotal) {
-      throw new Error("Hours with the house manager cannot exceed total hours.");
-    }
-    const signedOn = (input.signedOn ?? new Date().toISOString()).slice(0, 10);
-    const { error: insertError } = await this.client.from("training_signoffs").insert({
-      agency_id: session.agencyId,
-      requirement_id: requirementId,
-      initials,
-      signed_on: signedOn,
+    await this.assertTrainingUnlocked(mapped);
+    const validated = validateTrainingLineInput(input);
+    const trainerName = await this.trainerNameOrThrow(session, validated.trainerUserId);
+    const selfTraining = validated.trainerUserId === mapped.userId;
+    const payload = {
+      initials: validated.initials,
+      signed_on: validated.signedOn,
       na: false,
       na_reason: null,
       trainer_name: trainerName,
+      trainer_user_id: validated.trainerUserId,
+      signed_by_user_id: session.userId,
+      self_training: selfTraining,
       method: input.method ?? null,
-      hours_total: hoursTotal,
-      hours_with_hm: hoursWithHm,
+      hours_total: validated.hoursTotal,
+      hours_with_hm: validated.hoursWithHm,
       competency_text: input.competencyText?.trim() || null,
       observer_name: input.observerName?.trim() || null,
       observer_signature: input.observerSignature?.trim() || null,
@@ -3805,7 +3851,44 @@ export class HostedApi implements ComplyraApi {
       renewal_rule: input.renewalRule?.trim() || null,
       next_due_on:
         input.nextDueOn?.slice(0, 10) ??
-        computeNextDueOn(input.renewalRule?.trim() ?? null, signedOn),
+        computeNextDueOn(input.renewalRule?.trim() ?? null, validated.signedOn),
+    };
+    const { data: existingSignoff } = await this.client
+      .from("training_signoffs")
+      .select("id")
+      .eq("requirement_id", requirementId)
+      .maybeSingle();
+    if (existingSignoff) {
+      // Correction edit of a completed line: allowed only on unlocked sheets
+      // and only by roles that may update signoffs (mirrors RLS).
+      if (!canEditTrainingLine(session.roleKey)) {
+        throw new Error(
+          "Only an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
+        );
+      }
+      const { error: updateError } = await this.client
+        .from("training_signoffs")
+        .update(payload)
+        .eq("id", (existingSignoff as { id: string }).id);
+      if (updateError) this.throwLockAware(updateError, "Could not save the sign-off.");
+      const { error: updateStatusError } = await this.client
+        .from("training_requirements")
+        .update({ status: "complete" })
+        .eq("id", requirementId);
+      throwIf(updateStatusError, "Sign-off saved, but the line status could not be updated.");
+      await this.audit(
+        session,
+        "training.line_edited",
+        `${validated.initials} edited “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)}`,
+        "training_requirement",
+        requirementId,
+      );
+      return;
+    }
+    const { error: insertError } = await this.client.from("training_signoffs").insert({
+      agency_id: session.agencyId,
+      requirement_id: requirementId,
+      ...payload,
     });
     throwIf(insertError, "Could not save the sign-off.");
     const { error: updateError } = await this.client
@@ -3816,7 +3899,7 @@ export class HostedApi implements ComplyraApi {
     await this.audit(
       session,
       "training.line_initialed",
-      `${initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)}`,
+      `${validated.initials} initialed “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)}`,
       "training_requirement",
       requirementId,
     );
@@ -3834,6 +3917,7 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Training line not found.");
     if (!requirement) throw new Error("Training line not found.");
     const mapped = this.mapTrainingRequirement(requirement);
+    await this.assertTrainingUnlocked(mapped);
     const { data: existingSignoff } = await this.client
       .from("training_signoffs")
       .select("id")
@@ -3850,6 +3934,9 @@ export class HostedApi implements ComplyraApi {
       na: true,
       na_reason: trimmed,
       trainer_name: session.fullName,
+      trainer_user_id: session.userId,
+      signed_by_user_id: session.userId,
+      self_training: false,
       method: null,
       hours_total: 0,
       hours_with_hm: 0,
@@ -3872,6 +3959,39 @@ export class HostedApi implements ComplyraApi {
       `N/A: “${renderTopicTitle(TRAINING_TOPIC_BY_ID[mapped.topicId])}” for ${await this.profileName(mapped.userId)} — ${trimmed}`,
       "training_requirement",
       requirementId,
+    );
+  }
+
+  async requestTrainingCorrection(input: RequestTrainingCorrectionInput): Promise<void> {
+    const session = await this.requireSession();
+    if (!canRequestTrainingCorrection(session.roleKey)) {
+      throw new Error(
+        "Only an administrator, compliance admin, or DPM can request a training correction.",
+      );
+    }
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Write the reason for this correction.");
+    const { data: counter, error: fetchError } = await this.client
+      .from("training_countersignatures")
+      .select("id, user_id")
+      .eq("id", input.countersignatureId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(fetchError, "Training sheet not found.");
+    if (!counter) throw new Error("Training sheet not found.");
+    // Deleting the countersignature unlocks the sheet: completed lines can be
+    // edited, and the sheet must be re-signed and re-countersigned.
+    const { error: deleteError } = await this.client
+      .from("training_countersignatures")
+      .delete()
+      .eq("id", input.countersignatureId);
+    if (deleteError) this.throwLockAware(deleteError, "Could not request the correction.");
+    await this.audit(
+      session,
+      "training.correction_requested",
+      `Correction requested for ${await this.profileName((counter as { user_id: string }).user_id)}'s training sheet: ${reason}`,
+      "training_countersignature",
+      input.countersignatureId,
     );
   }
 
@@ -4929,7 +5049,7 @@ export class HostedApi implements ComplyraApi {
     const meds = (medsRes.data ?? []).map(mapMedication);
     const medIds = meds.map((med) => med.id);
     const prnIds = meds.filter((med) => med.kind === "prn").map((med) => med.id);
-    const [invRes, delRes, prnRes] = await Promise.all([
+    const [invRes, delRes, prnRes, excRes] = await Promise.all([
       medIds.length
         ? this.client
             .from("med_inventory")
@@ -4952,10 +5072,19 @@ export class HostedApi implements ComplyraApi {
             .eq("agency_id", session.agencyId)
             .in("medication_id", prnIds)
         : { data: [], error: null },
+      medIds.length
+        ? this.client
+            .from("med_dose_exceptions")
+            .select("*")
+            .eq("agency_id", session.agencyId)
+            .in("medication_id", medIds)
+            .order("occurred_on", { ascending: false })
+        : { data: [], error: null },
     ]);
     throwIf(invRes.error, "Could not load medication inventory.");
     throwIf(delRes.error, "Could not load delivery records.");
     throwIf(prnRes.error, "Could not load PRN dose logs.");
+    throwIf(excRes.error, "Could not load dose exceptions.");
     const invByMed = new Map(
       ((invRes.data ?? []) as Record<string, unknown>[]).map((row) => {
         const record = this.mapMedInventoryRecord(row);
@@ -4976,6 +5105,24 @@ export class HostedApi implements ComplyraApi {
       });
       prnByMed.set(medId, list);
     }
+    const excByMed = new Map<string, MedDoseException[]>();
+    for (const row of (excRes.data ?? []) as Record<string, unknown>[]) {
+      const medId = row.medication_id as string;
+      const list = excByMed.get(medId) ?? [];
+      list.push({
+        id: String(row.id),
+        agencyId: String(row.agency_id),
+        individualId: String(row.individual_id),
+        medicationId: medId,
+        occurredOn: String(row.occurred_on).slice(0, 10),
+        kind: row.kind as MedDoseException["kind"],
+        pillsAffected: Number(row.pills_affected ?? 0),
+        reason: String(row.reason ?? ""),
+        createdBy: (row.created_by as string | null) ?? null,
+        createdAt: String(row.created_at),
+      });
+      excByMed.set(medId, list);
+    }
     return meds
       .map((med) =>
         projectMedInventory({
@@ -4983,6 +5130,7 @@ export class HostedApi implements ComplyraApi {
           inventory: invByMed.get(med.id) ?? null,
           deliveries: deliveries.filter((row) => row.medicationId === med.id),
           prnDoses: prnByMed.get(med.id) ?? [],
+          doseExceptions: excByMed.get(med.id) ?? [],
           today,
         }),
       )
@@ -5148,6 +5296,39 @@ export class HostedApi implements ComplyraApi {
       `${session.fullName} acknowledged the ${med.name} reorder alert`,
       "medication",
       med.id,
+    );
+  }
+
+  async addMedDoseException(input: AddMedDoseExceptionInput) {
+    const { validateDoseExceptionInput } = await import("./medInventory");
+    const { session, med } = await this.p6medicationOrThrow(input.medicationId);
+    if (!canLogDoseException(session.roleKey)) {
+      throw new Error("You cannot log a dose exception.");
+    }
+    const validated = validateDoseExceptionInput(input);
+    // Insert-only: corrections are new rows, never edits — there is no
+    // update/delete path for med_dose_exceptions on this API.
+    const { data, error } = await this.client
+      .from("med_dose_exceptions")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        occurred_on: validated.occurredOn,
+        kind: validated.kind,
+        pills_affected: validated.pillsAffected,
+        reason: validated.reason,
+        created_by: session.userId,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not log the dose exception.");
+    await this.audit(
+      session,
+      "medication.dose_exception",
+      `${session.fullName} logged a ${validated.kind} dose exception for ${med.name} (${validated.pillsAffected} pill${validated.pillsAffected === 1 ? "" : "s"}): ${validated.reason}`,
+      "med_dose_exception",
+      (data as { id: string } | null)?.id,
     );
   }
   // ===== LIFEPATH-P7 HOSTED (mileage tracking) =====

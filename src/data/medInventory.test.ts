@@ -214,6 +214,7 @@ test("newest delivery anchors the projection; history is newest-first", () => {
       { id: "d2", medicationId: "med-1", countedOn: "2026-09-08", remainingPills: 40, pillsPerDay: 2, recordedBy: "u" },
     ],
     prnDoses: [],
+    doseExceptions: [],
     today: "2026-09-10",
   });
   assert.equal(view.quantityOnDelivery, 40);
@@ -239,6 +240,7 @@ test("stored threshold and acknowledgment flow into the view", () => {
     },
     deliveries: [],
     prnDoses: [],
+    doseExceptions: [],
     today: "2026-09-10",
   });
   // 30 pills, 2/day, delivered 2026-09-01 -> 12 left, 6 days, low at 14-day threshold
@@ -255,6 +257,7 @@ test("PRN meds without dose logs fall back to the decremented row count", () => 
       { id: "d1", medicationId: "med-1", countedOn: "2026-09-01", remainingPills: 12, pillsPerDay: 0, recordedBy: "u" },
     ],
     prnDoses: [],
+    doseExceptions: [],
     today: "2026-09-10",
   });
   assert.equal(view.currentCount, 7);
@@ -287,6 +290,7 @@ function viewWithStatus(status: MedInventoryView["status"], individualId = "i"):
     alertActive: status !== "ok",
     prnDosesSinceDelivery: 0,
     deliveries: [],
+    doseExceptions: [],
   };
 }
 

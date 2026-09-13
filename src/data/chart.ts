@@ -125,6 +125,50 @@ export function canLogPrnDose(roleKey: string) {
   return canRecordDelivery(roleKey) || roleKey === "dsp";
 }
 
+/**
+ * Who may log a refused / held / wasted dose exception. Matches the
+ * med_dose_exceptions RLS insert policy: DSPs record exceptions during the
+ * med pass, alongside administrators, compliance admins, house managers,
+ * DPMs, and nurses.
+ */
+export function canLogDoseException(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "house_manager",
+    "degreed_professional_manager",
+    "nurse",
+    "dsp",
+  ].includes(roleKey);
+}
+
+/**
+ * Who may edit a completed (but unlocked) training signoff line. Mirrors the
+ * training_signoffs RLS update policy; the app enforces it before the API
+ * so staff get a clear message instead of a database error.
+ */
+export function canEditTrainingLine(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "house_manager",
+    "degreed_professional_manager",
+  ].includes(roleKey);
+}
+
+/**
+ * Who may void a locked training sheet via the correction flow (delete the
+ * HM countersignature with a written reason). Matches the
+ * training_countersignatures_delete RLS policy — house managers are
+ * deliberately excluded; they ask an administrator, compliance admin, or
+ * DPM instead.
+ */
+export function canRequestTrainingCorrection(roleKey: string) {
+  return ["administrator", "compliance_admin", "degreed_professional_manager"].includes(
+    roleKey,
+  );
+}
+
 export function canSignTrainingAsHm(roleKey: string) {
   return [
     "administrator",

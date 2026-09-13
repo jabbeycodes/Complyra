@@ -48,7 +48,7 @@ export default function MedInventoryPage() {
   if (!session || !canSeeMeds(session.roleKey)) {
     return (
       <Empty
-        title="Medication inventory"
+        title="Medication supply forecast"
         text="You don't have access to medication records."
       />
     );
@@ -70,8 +70,8 @@ export default function MedInventoryPage() {
     <div>
       <PageHeading
         eyebrow="LIFEPATH"
-        title="Medication inventory"
-        description="Delivery-day counts, daily countdowns, and reorder alerts for every home."
+        title="Medication supply forecast"
+        description="A projection of pills on hand — not a medication administration record. Delivery-day counts, daily countdowns, dose exceptions, and reorder alerts for every home."
       />
       {error && <p className="form-error">{error}</p>}
       <p style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

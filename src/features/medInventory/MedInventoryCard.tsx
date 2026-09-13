@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import { BellRing, History, Pill, Settings2 } from "lucide-react";
+import { BellRing, History, Pill, Settings2, TriangleAlert } from "lucide-react";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
-import { canRecordDelivery } from "../../data/chart";
-import { inventoryCountdownLabel } from "../../data/medInventory";
-import type { MedInventoryStatus, MedInventoryView } from "../../data/types";
+import { canLogDoseException, canRecordDelivery } from "../../data/chart";
+import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
+import type {
+  DoseExceptionKind,
+  MedInventoryStatus,
+  MedInventoryView,
+} from "../../data/types";
 
 const STATUS_BADGE: Record<MedInventoryStatus, string> = {
   ok: "Active",
@@ -19,6 +23,8 @@ const STATUS_LABEL: Record<MedInventoryStatus, string> = {
   critical: "Reorder now",
   out: "Out of stock",
 };
+
+const EXCEPTION_KINDS: DoseExceptionKind[] = ["refused", "held", "wasted"];
 
 function statusTone(status: MedInventoryStatus) {
   if (status === "out" || status === "critical") return "#b3261e";
@@ -35,6 +41,13 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
   const [adjustDrafts, setAdjustDrafts] = useState<
     Record<string, { delta: string; reason: string }>
   >({});
+  const [exceptionMed, setExceptionMed] = useState<string | null>(null);
+  const [exceptionDraft, setExceptionDraft] = useState<{
+    kind: DoseExceptionKind;
+    pills: string;
+    reason: string;
+    occurredOn: string;
+  }>({ kind: "refused", pills: "", reason: "", occurredOn: new Date().toISOString().slice(0, 10) });
 
   useEffect(() => {
     let live = true;
@@ -54,6 +67,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
 
   if (!session) return null;
   const canManage = canRecordDelivery(session.roleKey);
+  const canLogException = canLogDoseException(session.roleKey);
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -70,13 +84,15 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
 
   return (
     <section className="chart-widget" aria-labelledby="med-inventory-heading">
-      <h2 id="med-inventory-heading">Medication inventory</h2>
+      <h2 id="med-inventory-heading">Medication supply forecast</h2>
       <p className="stack-help">
-        Countdown from the delivery-day count: scheduled meds drop by pills-per-day
-        each calendar day, logged PRN doses decrement too. No manual recounts needed.
+        A projection of pills on hand — <strong>not a medication administration record</strong>.
+        Scheduled meds drop by pills-per-day each calendar day from the delivery-day count; logged
+        PRN doses and refused / held / wasted dose exceptions decrement too. No manual recounts
+        needed.
       </p>
       {error && <p className="form-error">{error}</p>}
-      {views === null && <p>Loading inventory…</p>}
+      {views === null && <p>Loading forecast…</p>}
       {views !== null && views.length === 0 && (
         <Empty title="No medications" text="No medications are on this chart yet." />
       )}
@@ -98,6 +114,9 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
               {view.deliveredOn ? ` · Counted ${formatDate(view.deliveredOn)}` : ""}
               {view.kind === "prn" && view.prnDosesSinceDelivery > 0
                 ? ` · ${view.prnDosesSinceDelivery} PRN dose${view.prnDosesSinceDelivery === 1 ? "" : "s"} since`
+                : ""}
+              {view.doseExceptions.length > 0
+                ? ` · ${view.doseExceptions.length} dose exception${view.doseExceptions.length === 1 ? "" : "s"} logged`
                 : ""}
             </p>
             <div
@@ -153,15 +172,116 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
               >
                 <Settings2 size={15} /> Threshold & correction
               </button>
+              {canLogException && (
+                <button
+                  className="button"
+                  onClick={() => {
+                    setExceptionMed(
+                      exceptionMed === view.medicationId ? null : view.medicationId,
+                    );
+                    setExceptionDraft({
+                      kind: "refused",
+                      pills: "",
+                      reason: "",
+                      occurredOn: new Date().toISOString().slice(0, 10),
+                    });
+                  }}
+                >
+                  <TriangleAlert size={15} /> Log dose exception
+                </button>
+              )}
               <button
                 className="button"
                 onClick={() =>
                   setOpenMed(openMed === `history-${view.medicationId}` ? null : `history-${view.medicationId}`)
                 }
               >
-                <History size={15} /> Delivery history
+                <History size={15} /> Supply history
               </button>
             </p>
+            {exceptionMed === view.medicationId && canLogException && (
+              <form
+                className="renewal-upload"
+                style={{ marginTop: 8 }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  run(() =>
+                    api.addMedDoseException({
+                      medicationId: view.medicationId,
+                      kind: exceptionDraft.kind,
+                      pillsAffected: Number(exceptionDraft.pills),
+                      reason: exceptionDraft.reason,
+                      occurredOn: exceptionDraft.occurredOn,
+                    }),
+                  ).then((ok) => {
+                    if (ok) setExceptionMed(null);
+                  });
+                }}
+              >
+                <p className="stack-help" style={{ margin: 0 }}>
+                  Refused, held, or wasted doses subtract pills from the forecast. This is
+                  recorded permanently — corrections are logged as new rows, never edits.
+                </p>
+                <label>
+                  What happened
+                  <select
+                    value={exceptionDraft.kind}
+                    onChange={(e) =>
+                      setExceptionDraft((prev) => ({
+                        ...prev,
+                        kind: e.target.value as DoseExceptionKind,
+                      }))
+                    }
+                  >
+                    {EXCEPTION_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {doseExceptionKindLabel(kind)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Pills affected
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={exceptionDraft.pills}
+                    onChange={(e) =>
+                      setExceptionDraft((prev) => ({ ...prev, pills: e.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    required
+                    max={new Date().toISOString().slice(0, 10)}
+                    value={exceptionDraft.occurredOn}
+                    onChange={(e) =>
+                      setExceptionDraft((prev) => ({ ...prev, occurredOn: e.target.value }))
+                    }
+                  />
+                </label>
+                <label>
+                  Reason (goes in the audit trail)
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. individual refused the evening dose"
+                    value={exceptionDraft.reason}
+                    onChange={(e) =>
+                      setExceptionDraft((prev) => ({ ...prev, reason: e.target.value }))
+                    }
+                  />
+                </label>
+                <button className="button primary" type="submit">
+                  Log exception
+                </button>
+              </form>
+            )}
             {expanded && canManage && (
               <div style={{ display: "grid", gap: 12, marginTop: 4 }}>
                 <form
@@ -260,7 +380,20 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             )}
             {openMed === `history-${view.medicationId}` && (
               <ul className="person-renewals" style={{ marginTop: 8 }}>
-                {view.deliveries.length === 0 && <li>No delivery counts recorded yet.</li>}
+                {view.deliveries.length === 0 && view.doseExceptions.length === 0 && (
+                  <li>No delivery counts recorded yet.</li>
+                )}
+                {[...view.doseExceptions]
+                  .sort((a, b) => (a.occurredOn < b.occurredOn ? 1 : -1))
+                  .map((exception) => (
+                    <li key={exception.id}>
+                      <span>
+                        <strong>{formatDate(exception.occurredOn)}</strong> —{" "}
+                        {doseExceptionKindLabel(exception.kind)}: {exception.pillsAffected} pill
+                        {exception.pillsAffected === 1 ? "" : "s"} · {exception.reason}
+                      </span>
+                    </li>
+                  ))}
                 {view.deliveries.map((delivery) => (
                   <li key={delivery.id}>
                     <span>

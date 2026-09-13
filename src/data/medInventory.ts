@@ -9,6 +9,9 @@
 import { daysBetween, todayIso, type Medication, type MedicationDelivery } from "./chart";
 import {
   DEFAULT_MED_LOW_THRESHOLD_DAYS,
+  type AddMedDoseExceptionInput,
+  type DoseExceptionKind,
+  type MedDoseException,
   type MedInventoryRecord,
   type MedInventoryStatus,
   type MedInventoryView,
@@ -29,6 +32,8 @@ export interface ProjectInventoryInput {
   today?: string;
   /** PRN doses given since delivery. Dated outside [deliveredOn, today] are ignored. */
   dosesLogged?: Array<{ date: string; pills: number }>;
+  /** Refused / held / wasted dose exceptions in the window: their pills are subtracted. */
+  doseExceptions?: Array<{ date: string; pills: number }>;
   /** Days of doses remaining that trigger a reorder alert. */
   lowThresholdDays?: number;
   /** ISO date the reorder alert was last acknowledged, if any. */
@@ -49,7 +54,8 @@ export interface InventoryProjection {
  *
  * Scheduled meds drop by dosesPerDay for each full calendar day since the
  * delivery-day count. PRN meds never auto-drop; only logged PRN doses
- * decrement them. Status: "out" at zero pills, "critical" at <= 2 days (or
+ * decrement them. Refused / held / wasted dose exceptions subtract pills for
+ * any med kind. Status: "out" at zero pills, "critical" at <= 2 days (or
  * <= 2 pills for PRN), "low" at or under the reorder threshold, else "ok".
  */
 export function projectInventory(input: ProjectInventoryInput): InventoryProjection {
@@ -58,6 +64,7 @@ export function projectInventory(input: ProjectInventoryInput): InventoryProject
     dosesPerDay,
     today = todayIso(),
     dosesLogged = [],
+    doseExceptions = [],
     lowThresholdDays = DEFAULT_MED_LOW_THRESHOLD_DAYS,
     reorderAcknowledgedOn = null,
   } = input;
@@ -73,7 +80,20 @@ export function projectInventory(input: ProjectInventoryInput): InventoryProject
       if (on >= deliveredOn && on <= today && dose.pills > 0) prnUsed += dose.pills;
     }
   }
-  const currentCount = Math.max(0, Math.round((deliveryQty - scheduledUsed - prnUsed) * 100) / 100);
+  // Refused / held / wasted dose exceptions subtract pills for scheduled AND
+  // PRN meds — a wasted dose is gone regardless of schedule. Out-of-window
+  // exceptions (before delivery or after today) are ignored.
+  let exceptionUsed = 0;
+  for (const exception of doseExceptions) {
+    const on = exception.date.slice(0, 10);
+    if (on >= deliveredOn && on <= today && exception.pills > 0) {
+      exceptionUsed += exception.pills;
+    }
+  }
+  const currentCount = Math.max(
+    0,
+    Math.round((deliveryQty - scheduledUsed - prnUsed - exceptionUsed) * 100) / 100,
+  );
   const daysRemaining = dosesPerDay > 0 ? Math.floor(currentCount / dosesPerDay) : null;
   const threshold = Math.max(1, Math.floor(lowThresholdDays));
   const reorderPointPills = dosesPerDay > 0 ? Math.ceil(threshold * dosesPerDay) : threshold;
@@ -99,6 +119,8 @@ export interface ProjectMedInventoryInput {
   deliveries: MedicationDelivery[];
   /** PRN doses logged since delivery (hosted backend reads prn_dose_logs). */
   prnDoses: Array<{ date: string; pills: number }>;
+  /** Refused / held / wasted dose exceptions (subtracted from the forecast). */
+  doseExceptions: MedDoseException[];
   today?: string;
 }
 
@@ -130,6 +152,12 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
     const on = dose.date.slice(0, 10);
     return on >= anchorDate.slice(0, 10) && on <= today;
   });
+  const inWindowExceptions = input.doseExceptions
+    .filter((exception) => {
+      const on = exception.occurredOn.slice(0, 10);
+      return on >= anchorDate.slice(0, 10) && on <= today;
+    })
+    .map((exception) => ({ date: exception.occurredOn.slice(0, 10), pills: exception.pillsAffected }));
 
   const projection = projectInventory({
     deliveryQty,
@@ -137,6 +165,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
     deliveredOn: anchorDate,
     today,
     dosesLogged: inWindow,
+    doseExceptions: inWindowExceptions,
     lowThresholdDays: input.inventory?.lowThresholdDays ?? DEFAULT_MED_LOW_THRESHOLD_DAYS,
     reorderAcknowledgedOn: input.inventory?.reorderAcknowledgedOn ?? null,
   });
@@ -169,6 +198,9 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
         pillsPerDay: row.pillsPerDay,
         recordedBy: row.recordedBy,
       })),
+    doseExceptions: [...input.doseExceptions].sort((a, b) =>
+      a.occurredOn < b.occurredOn ? 1 : -1,
+    ),
   };
 }
 
@@ -231,4 +263,40 @@ export function inventoryCountdownLabel(view: MedInventoryView): string {
   const pills = `${view.currentCount} pill${view.currentCount === 1 ? "" : "s"} remaining`;
   if (view.kind === "prn" || view.daysRemaining === null) return `${pills} · PRN`;
   return `${pills} · ~${view.daysRemaining} day${view.daysRemaining === 1 ? "" : "s"} left`;
+}
+
+export interface ValidatedDoseExceptionInput {
+  kind: DoseExceptionKind;
+  pillsAffected: number;
+  reason: string;
+  occurredOn: string;
+}
+
+/** Human label for a dose exception kind, e.g. "Refused". */
+export function doseExceptionKindLabel(kind: DoseExceptionKind): string {
+  return kind === "refused" ? "Refused" : kind === "held" ? "Held" : "Wasted";
+}
+
+/**
+ * Shared validator for refused / held / wasted dose exceptions (local +
+ * hosted APIs and unit tests). Throws a human-readable Error on the first
+ * problem. Rows are insert-only: there is no update/delete path, so this
+ * runs exactly once per exception at write time.
+ */
+export function validateDoseExceptionInput(
+  input: AddMedDoseExceptionInput,
+  today = todayIso(),
+): ValidatedDoseExceptionInput {
+  const kind = input.kind;
+  if (kind !== "refused" && kind !== "held" && kind !== "wasted") {
+    throw new Error("Choose refused, held, or wasted.");
+  }
+  if (!Number.isInteger(input.pillsAffected) || input.pillsAffected <= 0) {
+    throw new Error("Pills affected must be a positive whole number.");
+  }
+  const reason = input.reason.trim();
+  if (!reason) throw new Error("Write the reason for this dose exception.");
+  const occurredOn = (input.occurredOn ?? today).slice(0, 10);
+  if (occurredOn > today) throw new Error("The exception date cannot be in the future.");
+  return { kind, pillsAffected: input.pillsAffected, reason, occurredOn };
 }

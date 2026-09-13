@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
-import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE, DEMO_DSP_USERNAME } from "./seed";
+import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE, DEMO_DSP_USERNAME, DEMO_HM_USERNAME } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { siteChecklistTopics, individualChecklistTopics } from "../features/training/topics";
 
@@ -112,7 +112,7 @@ test("full sign-off flow clears the in-ratio gate", async () => {
   for (const line of profile.requirements) {
     await dspApi.initialRequirementLine(line.id, {
       initials: "AM",
-      trainerName: "House Manager",
+      trainerUserId: workspace.staff.find((person) => person.username === DEMO_HM_USERNAME)!.id,
       method: "shadowing",
       hoursTotal: 1,
       hoursWithHm: 0.2,

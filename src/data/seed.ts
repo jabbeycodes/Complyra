@@ -22,6 +22,7 @@ import type {
   SiteRecord,
   StaffAssignment,
   StaffCertificate,
+  MedDoseException,
 } from "./types";
 import type {
   ClinicalRenewal,
@@ -93,6 +94,7 @@ export interface LocalDatabase {
   chartFiles: ChartFile[];
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
+  medDoseExceptions: MedDoseException[];
   trainingChecklists: TrainingChecklist[];
   adaptiveEquipment: AdaptiveEquipment[];
   equipmentMonthLogs: EquipmentMonthLog[];
@@ -443,6 +445,7 @@ export function createEvergreenSeed(): LocalDatabase {
     chartFiles: [],
     medications: defaultJodieMedications(AGENCY_ID, jodie.id),
     medicationDeliveries: [],
+    medDoseExceptions: [],
     trainingChecklists: buildTrainingChecklists(
       AGENCY_ID,
       jodie.id,

@@ -109,8 +109,8 @@ export function pageVisible(session: SessionUser, page: string) {
       Boolean(session.platformAdmin)
     );
   }
-  // LIFEPATH-P6-PAGEVIS (med inventory)
-  if (page === "Med inventory") return can(session, "individuals.view");
+  // LIFEPATH-P6-PAGEVIS (med supply forecast)
+  if (page === "Supply forecast") return can(session, "individuals.view");
   return can(session, "individuals.view");
 }
 

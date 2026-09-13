@@ -12,12 +12,18 @@ import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import SignaturePad from "../SignaturePad";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
-import { canSignTrainingAsHm } from "../../data/chart";
+import {
+  canEditTrainingLine,
+  canRequestTrainingCorrection,
+  canSignTrainingAsHm,
+} from "../../data/chart";
+import { TRAINING_LINE_MAX_HOURS } from "./gate";
 import type {
   StaffClearanceRow,
   StaffTrainingProfile,
   TrainingMethod,
   TrainingRequirementView,
+  TrainingSignoff,
 } from "../../data/types";
 
 const SECTION_NAMES: Record<number, string> = {
@@ -48,7 +54,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<
-    null | { kind: "initial"; requirement: TrainingRequirementView } | { kind: "waive"; requirement: TrainingRequirementView } | { kind: "sign"; role: "staff" | "hm"; siteId: string } | { kind: "assign" }
+    null | { kind: "initial"; requirement: TrainingRequirementView; existing?: TrainingSignoff } | { kind: "waive"; requirement: TrainingRequirementView } | { kind: "sign"; role: "staff" | "hm"; siteId: string } | { kind: "correct"; countersignatureId: string } | { kind: "assign" }
   >(null);
 
   const canManage = session ? can(session, "hr.view_staff") : false;
@@ -204,12 +210,18 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         <ProfilePanel
           profile={profile}
           sessionUserId={session.userId}
+          sessionRoleKey={session.roleKey}
           canManage={canManage}
           isHm={isHm}
           busy={busy}
+          staffNames={Object.fromEntries((workspace?.staff ?? []).map((s) => [s.id, s.name]))}
           onInitial={(requirement) => setModal({ kind: "initial", requirement })}
+          onEdit={(requirement, existing) =>
+            setModal({ kind: "initial", requirement, existing })
+          }
           onWaive={(requirement) => setModal({ kind: "waive", requirement })}
           onSign={(role, siteId) => setModal({ kind: "sign", role, siteId })}
+          onCorrect={(countersignatureId) => setModal({ kind: "correct", countersignatureId })}
           onClose={() => {
             setSelected(null);
             setProfile(null);
@@ -220,12 +232,15 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       {modal?.kind === "initial" && (
         <InitialLineModal
           requirement={modal.requirement}
+          existing={modal.existing}
+          staffUserId={profile?.userId ?? ""}
+          roster={workspace?.staff ?? []}
           busy={busy}
           onClose={() => setModal(null)}
           onSubmit={(input) =>
             run(
               () => api.initialRequirementLine(modal.requirement.id, input),
-              "Training line initialed.",
+              modal.existing ? "Training line updated." : "Training line initialed.",
             )
           }
         />
@@ -260,6 +275,22 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
+      {modal?.kind === "correct" && (
+        <RequestCorrectionModal
+          busy={busy}
+          onClose={() => setModal(null)}
+          onSubmit={(reason) =>
+            run(
+              () =>
+                api.requestTrainingCorrection({
+                  countersignatureId: modal.countersignatureId,
+                  reason,
+                }),
+              "Correction requested — the sheet is unlocked.",
+            )
+          }
+        />
+      )}
       {modal?.kind === "assign" && workspace && (
         <AssignTrainingModal
           staff={workspace.staff}
@@ -285,22 +316,30 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 function ProfilePanel({
   profile,
   sessionUserId,
+  sessionRoleKey,
   canManage,
   isHm,
   busy,
+  staffNames,
   onInitial,
+  onEdit,
   onWaive,
   onSign,
+  onCorrect,
   onClose,
 }: {
   profile: StaffTrainingProfile;
   sessionUserId: string;
+  sessionRoleKey: string;
   canManage: boolean;
   isHm: boolean;
   busy: boolean;
+  staffNames: Record<string, string>;
   onInitial: (requirement: TrainingRequirementView) => void;
+  onEdit: (requirement: TrainingRequirementView, existing: TrainingSignoff) => void;
   onWaive: (requirement: TrainingRequirementView) => void;
   onSign: (role: "staff" | "hm", siteId: string) => void;
+  onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
@@ -308,6 +347,14 @@ function ProfilePanel({
     lines: profile.requirements.filter((row) => row.section === section),
   }));
   const canInitialOwn = profile.userId === sessionUserId;
+  const canEditLines = canEditTrainingLine(sessionRoleKey);
+  const canCorrect = canRequestTrainingCorrection(sessionRoleKey);
+  const lockedSiteIds = new Set(
+    profile.countersignatures
+      .filter((counter) => counter.hmSignedAt)
+      .map((counter) => counter.siteId),
+  );
+  const firstSiteId = profile.requirements.find((row) => row.siteId)?.siteId ?? null;
   return (
     <section className="panel" aria-label={`${profile.fullName} training profile`}>
       <div className="panel-head">
@@ -392,47 +439,74 @@ function ProfilePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((line) => (
-                    <tr key={line.id}>
-                      <td>{line.topicTitle}</td>
-                      <td>{line.individualName ?? "—"}</td>
-                      <td>{statusBadge(line.resolvedStatus)}</td>
-                      <td>
-                        {line.signoff
-                          ? `${line.signoff.initials} · ${formatDate(line.signoff.signedOn)}`
-                          : "—"}
-                      </td>
-                      <td>
-                        {line.signoff && !line.signoff.na
-                          ? `${line.signoff.hoursTotal}h${line.signoff.hoursWithHm > 0 ? ` (${line.signoff.hoursWithHm}h HM)` : ""}`
-                          : "—"}
-                      </td>
-                      {(canInitialOwn || canManage) && (
+                  {lines.map((line) => {
+                    const locked = line.siteId != null && lockedSiteIds.has(line.siteId);
+                    const signoff = line.signoff;
+                    const signerName =
+                      (signoff?.signedByUserId && staffNames[signoff.signedByUserId]) ??
+                      "—";
+                    return (
+                      <tr key={line.id}>
+                        <td>{line.topicTitle}</td>
+                        <td>{line.individualName ?? "—"}</td>
+                        <td>{statusBadge(line.resolvedStatus)}</td>
                         <td>
-                          {!line.signoff && (
+                          {signoff ? (
                             <>
-                              <button
-                                className="button"
-                                disabled={busy}
-                                onClick={() => onInitial(line)}
-                              >
-                                Initial
-                              </button>{" "}
-                              {canManage && (
+                              {signoff.initials} · {formatDate(signoff.signedOn)}
+                              <br />
+                              <small className="muted">
+                                Trainer: {signoff.trainerName}
+                                {signoff.selfTraining ? " (self-training — flagged for review)" : ""}{" "}
+                                · Recorded by: {signerName}
+                              </small>
+                            </>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {signoff && !signoff.na
+                            ? `${signoff.hoursTotal}h${signoff.hoursWithHm > 0 ? ` (${signoff.hoursWithHm}h HM)` : ""}`
+                            : "—"}
+                        </td>
+                        {(canInitialOwn || canManage) && (
+                          <td>
+                            {!signoff && !locked && (
+                              <>
                                 <button
                                   className="button"
                                   disabled={busy}
-                                  onClick={() => onWaive(line)}
+                                  onClick={() => onInitial(line)}
                                 >
-                                  N/A
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
+                                  Initial
+                                </button>{" "}
+                                {canManage && (
+                                  <button
+                                    className="button"
+                                    disabled={busy}
+                                    onClick={() => onWaive(line)}
+                                  >
+                                    N/A
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {signoff && !locked && canEditLines && (
+                              <button
+                                className="button"
+                                disabled={busy}
+                                onClick={() => onEdit(line, signoff)}
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {locked && <small className="muted">Locked</small>}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -441,38 +515,78 @@ function ProfilePanel({
 
       <h3>Checklist signatures</h3>
       {profile.countersignatures.length === 0 && (
-        <p className="muted">No signatures yet for this staff member.</p>
+        <>
+          <p className="muted">No signatures yet for this staff member.</p>
+          {canInitialOwn && firstSiteId && (
+            <p>
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={() => onSign("staff", firstSiteId)}
+              >
+                Begin signature sheet
+              </button>
+            </p>
+          )}
+        </>
       )}
       <ul className="signature-list">
-        {profile.countersignatures.map((counter) => (
-          <li key={counter.id}>
-            <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
-            <span>
-              Staff:{" "}
-              {counter.staffSignedAt
-                ? `${counter.staffSignatureName} · ${formatDate(counter.staffSignedAt)}`
-                : "not signed"}
-            </span>
-            <span>
-              House manager:{" "}
-              {counter.hmSignedAt
-                ? `${counter.hmSignatureName} · ${formatDate(counter.hmSignedAt)}`
-                : "not countersigned"}
-            </span>
-            <span className="signature-actions">
-              {canInitialOwn && !counter.staffSignedAt && (
-                <button className="button" disabled={busy} onClick={() => onSign("staff", counter.siteId)}>
-                  Sign as staff
-                </button>
+        {profile.countersignatures.map((counter) => {
+          const locked = Boolean(counter.hmSignedAt);
+          return (
+            <li key={counter.id}>
+              <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
+              <span>
+                Staff:{" "}
+                {counter.staffSignedAt
+                  ? `${counter.staffSignatureName} · ${formatDate(counter.staffSignedAt)}`
+                  : "not signed"}
+              </span>
+              <span>
+                House manager:{" "}
+                {counter.hmSignedAt
+                  ? `${counter.hmSignatureName} · ${formatDate(counter.hmSignedAt)} — locked`
+                  : "not countersigned"}
+              </span>
+              <span className="signature-actions">
+                {canInitialOwn && !counter.staffSignedAt && (
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => onSign("staff", counter.siteId)}
+                  >
+                    Sign as staff
+                  </button>
+                )}
+                {isHm && counter.staffSignedAt && !locked && (
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => onSign("hm", counter.siteId)}
+                  >
+                    Countersign as HM
+                  </button>
+                )}
+                {locked && canCorrect && (
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => onCorrect(counter.id)}
+                  >
+                    Request correction
+                  </button>
+                )}
+              </span>
+              {locked && !canCorrect && (canInitialOwn || isHm) && (
+                <small className="muted">
+                  Locked sheets can only be corrected by an administrator, compliance
+                  admin, or DPM — ask one of them to unlock this sheet so lines can be
+                  edited and re-signed.
+                </small>
               )}
-              {isHm && counter.staffSignedAt && !counter.hmSignedAt && (
-                <button className="button" disabled={busy} onClick={() => onSign("hm", counter.siteId)}>
-                  Countersign as HM
-                </button>
-              )}
-            </span>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
 
       {/* LIFEPATH-P4 extension point: certificate tracking UI plugs in here. */}
@@ -488,17 +602,23 @@ function ProfilePanel({
 
 function InitialLineModal({
   requirement,
+  existing,
+  staffUserId,
+  roster,
   busy,
   onClose,
   onSubmit,
 }: {
   requirement: TrainingRequirementView;
+  existing?: TrainingSignoff;
+  staffUserId: string;
+  roster: { id: string; name: string }[];
   busy: boolean;
   onClose: () => void;
   onSubmit: (input: {
     initials: string;
     signedOn: string;
-    trainerName: string;
+    trainerUserId: string;
     method: TrainingMethod | undefined;
     hoursTotal: number;
     hoursWithHm: number;
@@ -508,26 +628,35 @@ function InitialLineModal({
     renewalRule?: string;
   }) => void;
 }) {
-  const [initials, setInitials] = useState("");
-  const [signedOn, setSignedOn] = useState(new Date().toISOString().slice(0, 10));
-  const [trainerName, setTrainerName] = useState("");
-  const [method, setMethod] = useState<TrainingMethod | "">("");
-  const [hoursTotal, setHoursTotal] = useState(1);
-  const [hoursWithHm, setHoursWithHm] = useState(0);
-  const [competencyText, setCompetencyText] = useState("");
-  const [observerName, setObserverName] = useState("");
-  const [evidenceRef, setEvidenceRef] = useState("");
-  const [renewalRule, setRenewalRule] = useState("");
+  const today = new Date().toISOString().slice(0, 10);
+  const [initials, setInitials] = useState(existing?.initials ?? "");
+  const [signedOn, setSignedOn] = useState(existing?.signedOn ?? today);
+  const [trainerUserId, setTrainerUserId] = useState(existing?.trainerUserId ?? "");
+  const [method, setMethod] = useState<TrainingMethod | "">(existing?.method ?? "");
+  const [hoursTotal, setHoursTotal] = useState(existing?.hoursTotal ?? 1);
+  const [hoursWithHm, setHoursWithHm] = useState(existing?.hoursWithHm ?? 0);
+  const [competencyText, setCompetencyText] = useState(existing?.competencyText ?? "");
+  const [observerName, setObserverName] = useState(existing?.observerName ?? "");
+  const [evidenceRef, setEvidenceRef] = useState(existing?.evidenceRef ?? "");
+  const [renewalRule, setRenewalRule] = useState(existing?.renewalRule ?? "");
+  const isEdit = Boolean(existing);
+  const selfTraining = trainerUserId !== "" && trainerUserId === staffUserId;
   return (
-    <Modal title="Initial training line" onClose={onClose}>
+    <Modal title={isEdit ? "Edit training line" : "Initial training line"} onClose={onClose}>
       <p className="muted">{requirement.topicTitle}</p>
+      {isEdit && (
+        <p className="muted">
+          You are editing an existing signoff. The change is recorded in the audit trail
+          with your name.
+        </p>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit({
             initials,
             signedOn,
-            trainerName,
+            trainerUserId,
             method: method || undefined,
             hoursTotal,
             hoursWithHm,
@@ -544,12 +673,35 @@ function InitialLineModal({
         </label>
         <label>
           Date trained
-          <input type="date" value={signedOn} onChange={(e) => setSignedOn(e.target.value)} required />
+          <input
+            type="date"
+            value={signedOn}
+            max={today}
+            onChange={(e) => setSignedOn(e.target.value)}
+            required
+          />
         </label>
         <label>
-          Trainer name
-          <input value={trainerName} onChange={(e) => setTrainerName(e.target.value)} required />
+          Trainer (from staff roster — free-text names are not accepted)
+          <select
+            value={trainerUserId}
+            onChange={(e) => setTrainerUserId(e.target.value)}
+            required
+          >
+            <option value="">Select a trainer…</option>
+            {roster.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
         </label>
+        {selfTraining && (
+          <p className="form-error">
+            You selected the staffer as their own trainer. This line will be flagged as
+            self-training and may be reviewed.
+          </p>
+        )}
         <label>
           Training method
           <select value={method} onChange={(e) => setMethod(e.target.value as TrainingMethod | "")}>
@@ -566,11 +718,16 @@ function InitialLineModal({
           <input
             type="number"
             min={0}
+            max={TRAINING_LINE_MAX_HOURS}
             step={0.5}
             value={hoursTotal}
             onChange={(e) => setHoursTotal(Number(e.target.value))}
           />
         </label>
+        <p className="muted">
+          One training line covers up to {TRAINING_LINE_MAX_HOURS} hours — a full training day.
+          Longer training goes on separately dated lines.
+        </p>
         <label>
           Hours with the house manager
           <input
@@ -598,7 +755,7 @@ function InitialLineModal({
           <input value={renewalRule} onChange={(e) => setRenewalRule(e.target.value)} />
         </label>
         <button className="button" type="submit" disabled={busy}>
-          Save initials
+          {isEdit ? "Save changes" : "Save initials"}
         </button>
       </form>
     </Modal>
@@ -633,6 +790,41 @@ function WaiveLineModal({
         </label>
         <button className="button" type="submit" disabled={busy}>
           Mark N/A
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function RequestCorrectionModal({
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <Modal title="Request training correction" onClose={onClose}>
+      <p className="muted">
+        This unlocks the training sheet so lines can be edited. The sheet must then be
+        re-signed by the staffer and re-countersigned by the house manager. The reason
+        below is written to the audit trail.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit(reason);
+        }}
+      >
+        <label>
+          Correction reason (required)
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} required />
+        </label>
+        <button className="button" type="submit" disabled={busy}>
+          Unlock sheet
         </button>
       </form>
     </Modal>
