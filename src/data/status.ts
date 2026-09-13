@@ -87,6 +87,20 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P3-PAGEVIS (delegation forms)
   // LIFEPATH-P4-PAGEVIS (certificates)
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
+  if (page === "Weekly checklist") {
+    return (
+      session.roleKey === "house_manager" ||
+      isAgencyAdmin(session.role) ||
+      Boolean(session.platformAdmin)
+    );
+  }
+  if (page === "Checklist assignments") {
+    return (
+      session.roleKey === "degreed_professional_manager" ||
+      isAgencyAdmin(session.role) ||
+      Boolean(session.platformAdmin)
+    );
+  }
   // LIFEPATH-P6-PAGEVIS (med inventory)
   return can(session, "individuals.view");
 }

@@ -6,6 +6,7 @@ import {
   ListChecks,
   FolderOpen,
   ClipboardCheck,
+  ClipboardList,
   ShieldCheck,
   History,
   Settings,
@@ -73,6 +74,8 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 // LIFEPATH-P3-IMPORT (delegation forms)
 // LIFEPATH-P4-IMPORT (certificates)
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
+import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage";
+import ChecklistAssigner from "./features/hmChecklist/ChecklistAssigner";
 // LIFEPATH-P6-IMPORT (med inventory)
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -423,6 +426,8 @@ export default function App() {
         // LIFEPATH-P3-NAV (delegation forms)
         // LIFEPATH-P4-NAV (certificates)
         // LIFEPATH-P5-NAV (HM weekly checklist)
+        ["Weekly checklist", ClipboardCheck],
+        ["Checklist assignments", ClipboardList],
         // LIFEPATH-P6-NAV (med inventory)
       ],
     },
@@ -1514,6 +1519,8 @@ export default function App() {
               {/* LIFEPATH-P3-PAGE (delegation forms) */}
               {/* LIFEPATH-P4-PAGE (certificates) */}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
+              {page === "Weekly checklist" && <HmWeeklyChecklistPage />}
+              {page === "Checklist assignments" && <ChecklistAssigner />}
               {/* LIFEPATH-P6-PAGE (med inventory) */}
               {page === "Settings" && (
                 <>
