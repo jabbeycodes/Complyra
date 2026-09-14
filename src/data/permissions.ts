@@ -41,6 +41,8 @@ export const PERMISSION_KEYS = [
   "audit.read",
   "audit.export",
   "sites.create",
+  // AUDIT-READINESS (corrective actions)
+  "correctiveActions.manage",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
@@ -151,6 +153,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       "sites.create",
+      "correctiveActions.manage",
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
@@ -174,6 +177,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      "correctiveActions.manage",
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
@@ -315,6 +319,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "audit.read": "Open Audit center",
   "audit.export": "Export audit packets",
   "sites.create": "Add program sites",
+  // AUDIT-READINESS (corrective actions)
+  "correctiveActions.manage": "Manage corrective actions",
   // LIFEPATH-P4 (certificates)
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)

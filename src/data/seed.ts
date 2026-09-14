@@ -57,6 +57,8 @@ import {
   type SiteReview,
 } from "./siteReview";
 import type { DspHmRating, HmDspReview } from "../recognition/recognition";
+import type { CorrectiveAction } from "./correctiveActions";
+import type { ScoreSnapshot } from "./complianceScore";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -104,6 +106,10 @@ export interface LocalDatabase {
   siteReviews: SiteReview[];
   // LIFEPATH-P4 (certificates): per-staff certificate records for HR tracking.
   certificates: StaffCertificate[];
+  // AUDIT-READINESS: corrective actions are created by managers after go-live.
+  correctiveActions: CorrectiveAction[];
+  // AUDIT-READINESS: compliance score snapshots for the trend chart.
+  complianceSnapshots: ScoreSnapshot[];
   // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
   mileageTrips: MileageTrip[];
   // RECOGNITION: bidirectional ratings/reviews + weekly winners (winners-only).
@@ -507,6 +513,10 @@ export function createEvergreenSeed(): LocalDatabase {
     siteReviews: buildSiteReviewSeed(sites),
     // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
     certificates: [],
+    // AUDIT-READINESS: managers create corrective actions after go-live.
+    correctiveActions: [],
+    // AUDIT-READINESS: score snapshots accumulate as the command center runs.
+    complianceSnapshots: [],
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.
     mileageTrips: [],
     // RECOGNITION: ratings/reviews and winners accumulate through use.

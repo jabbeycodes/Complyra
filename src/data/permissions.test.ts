@@ -255,3 +255,32 @@ test("WS4: assertNoDrift catches undeclared permission strings", () => {
   assert.doesNotThrow(() => assertNoDrift([...PERMISSION_KEYS]));
   assert.throws(() => assertNoDrift(["members.invite", "bogus.key"]), /bogus\.key/);
 });
+
+test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field staff off", () => {
+  assert.ok(PERMISSION_KEYS.includes("correctiveActions.manage"));
+  assert.equal(PERMISSION_LABELS["correctiveActions.manage"], "Manage corrective actions");
+  // Granted: administrator, compliance_admin, degreed_professional_manager, program_manager.
+  assert.equal(defaultPermissions("administrator")["correctiveActions.manage"], true);
+  assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], true);
+  assert.equal(
+    defaultPermissions("degreed_professional_manager")["correctiveActions.manage"],
+    true,
+  );
+  assert.equal(defaultPermissions("program_manager")["correctiveActions.manage"], true);
+  // Not granted: house_manager, dsp, nurse, hr, auditor.
+  assert.equal(defaultPermissions("house_manager")["correctiveActions.manage"], false);
+  assert.equal(defaultPermissions("dsp")["correctiveActions.manage"], false);
+  assert.equal(defaultPermissions("nurse")["correctiveActions.manage"], false);
+  assert.equal(defaultPermissions("hr")["correctiveActions.manage"], false);
+  assert.equal(defaultPermissions("auditor")["correctiveActions.manage"], false);
+  // hasPermission honors it from both session packs and role templates.
+  assert.equal(
+    hasPermission({ permissions: { "correctiveActions.manage": true } }, "correctiveActions.manage"),
+    true,
+  );
+  assert.equal(
+    hasPermission({ role: "program_manager" }, "correctiveActions.manage"),
+    true,
+  );
+  assert.equal(hasPermission({ role: "house_manager" }, "correctiveActions.manage"), false);
+});

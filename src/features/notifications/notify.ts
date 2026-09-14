@@ -30,7 +30,14 @@ export type NotificationType =
   | "rating.changed"
   | "review.changed"
   | "recognition.hm_winner"
-  | "recognition.dsp_winner";
+  | "recognition.dsp_winner"
+  // AUDIT-READINESS (workflow library): new types for automated workflows.
+  // NOTE: supabase/functions/notify-event has its own hardcoded
+  // NOTIFICATION_TYPES list — add these three there on its next deploy
+  // before server-side delivery of these types.
+  | "delegation.unacknowledged"
+  | "isp.renewal_soon"
+  | "incident.followup";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -47,6 +54,10 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  // AUDIT-READINESS (workflow library)
+  "delegation.unacknowledged",
+  "isp.renewal_soon",
+  "incident.followup",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -144,12 +155,12 @@ export function unreadCount(rows: NotificationRow[]): number {
   return rows.filter(isUnread).length;
 }
 
-export type NotificationStatus = "compliant" | "expiring" | "expired" | "missing" | "late" | "pending";
+export type NotificationStatus = "compliant" | "expiring" | "expired" | "missing" | "late" | "pending" | "attention";
 
 /**
  * Icon + text presentation for each type, matching the StatusBadge status
- * union ('compliant'|'expiring'|'expired'|'missing'|'late'|'pending') so the
- * badge can be swapped in later. Status is never conveyed by color alone.
+ * union ('compliant'|'expiring'|'expired'|'missing'|'late'|'pending'|'attention')
+ * so the badge can be swapped in later. Status is never conveyed by color alone.
  */
 export const NOTIFICATION_META: Record<
   NotificationType,
@@ -169,6 +180,10 @@ export const NOTIFICATION_META: Record<
   "review.changed": { status: "pending", label: "Review updated" },
   "recognition.hm_winner": { status: "compliant", label: "House Manager of the Week" },
   "recognition.dsp_winner": { status: "compliant", label: "DSP of the Week" },
+  // AUDIT-READINESS (workflow library)
+  "delegation.unacknowledged": { status: "pending", label: "Delegation unacknowledged" },
+  "isp.renewal_soon": { status: "expiring", label: "Plan renewal approaching" },
+  "incident.followup": { status: "attention", label: "Incident follow-up" },
 };
 
 export function metaForType(type: NotificationType) {
@@ -562,4 +577,100 @@ export function dspWinnerBroadcastPayload(input: {
   weekLabel: string;
 }): NotificationPayload {
   return winnerPayload({ ...input, category: "recognition.dsp_winner", self: false });
+}
+
+/* ------------------------------------------------------------------ */
+/* Audit-readiness workflow payloads                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A delegation (or its training material) is still unacknowledged past its
+ * expected window. Targeted at the staffer who must sign; managers get the
+ * same payload via the workflow's role broadcast. The dedupe key is the
+ * acknowledgment row id, so each outstanding signature notifies once.
+ */
+export function delegationUnacknowledgedPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  acknowledgmentId: string;
+  delegationTitle: string;
+  staffName?: string;
+  individualName?: string;
+}): NotificationPayload {
+  const who = input.staffName ? `${input.staffName}, ` : "";
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "delegation.unacknowledged",
+    title: "Delegation needs your signature",
+    body: input.individualName
+      ? `${who}the delegation "${input.delegationTitle}" for ${input.individualName} is still unsigned. Review and sign it to stay compliant.`
+      : `${who}the delegation "${input.delegationTitle}" is still unsigned. Review and sign it to stay compliant.`,
+    deepLink: "/delegations",
+    entityType: "delegation_acknowledgment",
+    entityId: input.acknowledgmentId,
+    dedupeKey: dedupeKeyFor("delegation.unacknowledged", input.acknowledgmentId),
+  };
+}
+
+/**
+ * A plan/ISP renewal is approaching. Targeted at the DPM/program manager
+ * who owns renewals. Dedupe is per plan + due date so each renewal cycle
+ * notifies once.
+ */
+export function ispRenewalSoonPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  planId: string;
+  planTitle: string;
+  individualName: string;
+  dueOn: string;
+  daysRemaining: number;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "isp.renewal_soon",
+    title: "Plan renewal approaching",
+    body:
+      `Action required: ${input.planTitle} for ${input.individualName} ` +
+      `renews in ${input.daysRemaining} day${input.daysRemaining === 1 ? "" : "s"} ` +
+      `(${input.dueOn}). Start the renewal now to avoid a lapse in the plan.`,
+    deepLink: "/delegations",
+    entityType: "plan_renewal",
+    entityId: input.planId,
+    dedupeKey: dedupeKeyFor("isp.renewal_soon", input.planId, input.dueOn),
+  };
+}
+
+/**
+ * An incident needs follow-up: reported but no follow-up record, or the
+ * next-business-day filing window is closing. Targeted at managers.
+ */
+export function incidentFollowupPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  incidentId: string;
+  summary: string;
+  occurredOn: string;
+  followupDueOn: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey,
+    type: "incident.followup",
+    title: "Incident follow-up due",
+    body:
+      `Action required: follow up on the incident from ${input.occurredOn} ` +
+      `(${input.summary}) by ${input.followupDueOn}. ` +
+      `File the follow-up electronically to meet the next-business-day requirement.`,
+    deepLink: "/audit",
+    entityType: "incident",
+    entityId: input.incidentId,
+    dedupeKey: dedupeKeyFor("incident.followup", input.incidentId),
+  };
 }

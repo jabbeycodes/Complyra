@@ -1,0 +1,518 @@
+/**
+ * CommandCenter.css — audit-readiness command center.
+ *
+ * Design rules (Complyrer standard): solid colors only, strong contrast,
+ * icon + text + color statuses, touch targets ≥ 44px, inputs ≥ 16px,
+ * mobile-first layout.
+ */
+
+.cc-wrap {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.cc-loading {
+  font-size: 1.0625rem;
+  color: #1f2937;
+}
+
+.cc-error {
+  background: #fef2f2;
+  border: 2px solid #b91c1c;
+  color: #7f1d1d;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Header + agency score */
+
+.cc-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: stretch;
+  justify-content: space-between;
+}
+
+.cc-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 0.25rem;
+}
+
+.cc-subtitle {
+  font-size: 1.0625rem;
+  color: #374151;
+  margin: 0;
+  max-width: 34rem;
+}
+
+.cc-score-card {
+  background: #1e3a8a;
+  color: #ffffff;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  min-width: 13rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.cc-score-label {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #dbeafe;
+}
+
+.cc-score-number {
+  font-size: 2.75rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.cc-score-number-sm {
+  font-size: 2rem;
+}
+
+.cc-score-band {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.cc-score-facts {
+  font-size: 0.9375rem;
+  color: #dbeafe;
+}
+
+/* Sections */
+
+.cc-section {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.cc-section-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cc-section-note {
+  font-size: 1rem;
+  color: #374151;
+  margin: 0 0 0.75rem;
+}
+
+.cc-caveat {
+  background: #fffbeb;
+  border-left: 4px solid #b45309;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0 0.375rem 0.375rem 0;
+}
+
+.cc-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  border-radius: 9999px;
+  background: #1e3a8a;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.cc-empty {
+  font-size: 1.0625rem;
+  color: #374151;
+  margin: 0.25rem 0;
+}
+
+/* Lists */
+
+.cc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.cc-list-compact {
+  gap: 0.375rem;
+}
+
+.cc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #f9fafb;
+}
+
+.cc-item-compact {
+  padding: 0.375rem 0.5rem;
+}
+
+.cc-item-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.cc-item-title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cc-item-detail {
+  font-size: 0.9375rem;
+  color: #374151;
+}
+
+.cc-item-action {
+  font-size: 0.9375rem;
+  color: #1e40af;
+}
+
+.cc-item-date {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #1e3a8a;
+  background: #dbeafe;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  white-space: nowrap;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Badges and statuses: icon + text + color, always. */
+
+.cc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  min-height: 2.75rem;
+  white-space: nowrap;
+}
+
+.cc-badge-ok {
+  background: #166534;
+  color: #ffffff;
+}
+
+.cc-badge-warn {
+  background: #b45309;
+  color: #ffffff;
+}
+
+.cc-badge-bad {
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.cc-status-met {
+  background: #166534;
+  color: #ffffff;
+}
+
+.cc-status-at-risk {
+  background: #b45309;
+  color: #ffffff;
+}
+
+.cc-status-unmet {
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.cc-status-unknown {
+  background: #4b5563;
+  color: #ffffff;
+}
+
+.cc-status-open {
+  background: #1e40af;
+  color: #ffffff;
+}
+
+.cc-status-in-progress {
+  background: #b45309;
+  color: #ffffff;
+}
+
+.cc-status-overdue {
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.cc-status-resolved {
+  background: #166534;
+  color: #ffffff;
+}
+
+.cc-sev {
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.cc-sev-critical { color: #b91c1c; }
+.cc-sev-high { color: #c2410c; }
+.cc-sev-medium { color: #b45309; }
+.cc-sev-low { color: #4d7c0f; }
+
+.cc-sev-label {
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 800;
+}
+
+/* Urgency indicators */
+
+.cc-urgency {
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.cc-urgency-overdue { color: #b91c1c; }
+.cc-urgency-due-today { color: #c2410c; }
+.cc-urgency-due-this-week { color: #b45309; }
+.cc-urgency-upcoming { color: #1e40af; }
+
+.cc-urgency-text {
+  font-weight: 700;
+}
+
+.cc-urgency-badge {
+  flex-shrink: 0;
+}
+
+/* Cards and grids */
+
+.cc-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+@media (min-width: 40rem) {
+  .cc-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 64rem) {
+  .cc-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.cc-card {
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.875rem;
+}
+
+.cc-card-title {
+  font-size: 1.0625rem;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 0.375rem;
+}
+
+.cc-card-score {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.25rem;
+}
+
+.cc-card-facts {
+  font-size: 0.9375rem;
+  color: #374151;
+  margin: 0.25rem 0 0;
+}
+
+/* Forms: inputs ≥ 16px, buttons ≥ 44px */
+
+.cc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.875rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  background: #f9fafb;
+}
+
+.cc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.cc-field input,
+.cc-field select {
+  font-size: 1rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid #6b7280;
+  border-radius: 0.375rem;
+  background: #ffffff;
+  color: #111827;
+}
+
+.cc-field input:focus,
+.cc-field select:focus {
+  outline: 3px solid #1e40af;
+  outline-offset: 1px;
+  border-color: #1e40af;
+}
+
+.cc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.5rem;
+  border: 2px solid #1e40af;
+  background: #ffffff;
+  color: #1e40af;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cc-button:hover {
+  background: #eff6ff;
+}
+
+.cc-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cc-button-primary {
+  background: #1e40af;
+  color: #ffffff;
+}
+
+.cc-button-primary:hover {
+  background: #1e3a8a;
+}
+
+.cc-form-error {
+  color: #7f1d1d;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Details (readiness categories) */
+
+.cc-details {
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  margin-bottom: 0.625rem;
+  background: #f9fafb;
+}
+
+.cc-details-summary {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  color: #111827;
+  cursor: pointer;
+}
+
+.cc-details-summary:focus {
+  outline: 3px solid #1e40af;
+  outline-offset: 1px;
+}
+
+.cc-details .cc-list {
+  padding: 0 0.75rem 0.75rem;
+}
+
+/* Trend chart */
+
+.cc-chart {
+  margin: 0;
+}
+
+.cc-chart-svg {
+  width: 100%;
+  max-width: 32rem;
+  height: auto;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+}
+
+.cc-chart-line {
+  fill: none;
+  stroke: #1e40af;
+  stroke-width: 3;
+}
+
+.cc-chart-dot {
+  fill: #1e40af;
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.cc-chart-threshold {
+  stroke: #166534;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.cc-chart-caption {
+  font-size: 0.9375rem;
+  color: #374151;
+  margin-top: 0.375rem;
+}
