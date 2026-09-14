@@ -629,7 +629,7 @@ export default function App() {
           >
             <span className="assistant-card-top">
               <Sparkles size={18} />
-              <span>Records lookup</span>
+              <span>Records</span>
             </span>
             <b>
               Ask Complyrer <ArrowUpRight size={15} />
