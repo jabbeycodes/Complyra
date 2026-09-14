@@ -541,7 +541,9 @@ export function createEvergreenSeed(): LocalDatabase {
     obligationSignatures: jodieObligationSignatures,
     packetSubmissions: [],
     clinicalRenewals: individuals.flatMap((person) =>
-      defaultRenewals(AGENCY_ID, person.id),
+      // Vary the reference date per person so annual physical, vision,
+      // dental, and physician-order cards don't show identical dates.
+      defaultRenewals(AGENCY_ID, person.id, renewalSeedToday(person.fullName)),
     ),
     chartFiles: [],
     medications: defaultJodieMedications(AGENCY_ID, jodie.id),
@@ -559,8 +561,10 @@ export function createEvergreenSeed(): LocalDatabase {
     ),
     ...buildMonthlySeed(sites, individuals),
     siteReviews: buildSiteReviewSeed(sites),
-    // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
-    certificates: [],
+    // LIFEPATH-P4 (certificates): a realistic starter set so the demo shows
+    // the expiry countdown working — two expiring within 90 days, one
+    // already expired, the rest current.
+    certificates: buildCertificateSeed(profileByName),
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.
     mileageTrips: [],
     // RECOGNITION: ratings/reviews and winners accumulate through use.
@@ -670,6 +674,54 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       ...extra,
     };
   }
+}
+
+/** Per-person reference date so seeded clinical renewals vary realistically. */
+function renewalSeedToday(fullName: string): string {
+  switch (fullName) {
+    case "Brandon Miller":
+      return "2026-08-20";
+    case "Sylvester Jones":
+      return "2026-09-25";
+    case "Maya Johnson":
+      return "2026-07-30";
+    default:
+      return "2026-09-12";
+  }
+}
+
+function buildCertificateSeed(
+  profileByName: Record<string, Profile>,
+): StaffCertificate[] {
+  const hr = profileByName["James Wilson"];
+  const specs: Array<{
+    staffName: string;
+    certName: string;
+    issuedOn: string;
+    expiresOn: string;
+  }> = [
+    // Expiring within 90 days of the demo "today" (2026-09-14).
+    { staffName: "Alex Morgan", certName: "CPR", issuedOn: "2024-10-20", expiresOn: "2026-10-20" },
+    { staffName: "Casey Adams", certName: "Positive Behavior Support", issuedOn: "2025-01-15", expiresOn: "2026-11-15" },
+    // Already expired — HR needs to see this too.
+    { staffName: "James Wilson", certName: "First Aid", issuedOn: "2024-08-01", expiresOn: "2026-08-01" },
+    // Current.
+    { staffName: "Taylor Reed", certName: "Crisis Prevention (CPI)", issuedOn: "2026-03-10", expiresOn: "2027-03-10" },
+    { staffName: "Jordan Lee", certName: "Level 1 Medication Aide", issuedOn: "2026-06-01", expiresOn: "2027-06-01" },
+    { staffName: "Cameron Price", certName: "CPR", issuedOn: "2026-02-15", expiresOn: "2027-02-15" },
+  ];
+  return specs.map((spec, i) => ({
+    id: padId(1601 + i),
+    agencyId: AGENCY_ID,
+    userId: profileByName[spec.staffName].id,
+    certName: spec.certName,
+    issuedOn: spec.issuedOn,
+    expiresOn: spec.expiresOn,
+    filePath: null,
+    fileName: null,
+    enteredBy: hr.id,
+    createdAt: `${spec.issuedOn}T09:00:00.000Z`,
+  }));
 }
 
 function buildSiteReviewSeed(sites: SiteRecord[]): SiteReview[] {

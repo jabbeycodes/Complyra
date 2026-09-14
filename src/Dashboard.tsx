@@ -129,7 +129,7 @@ export default function Dashboard({
             </p>
           </div>
           <button className="button" onClick={onExport}>
-            <Download size={16} /> Export report
+            <Download size={16} /> Export report (PDF)
           </button>
         </div>
       </div>
@@ -345,7 +345,7 @@ export default function Dashboard({
                       </div>
                       <div className="site-score-meta">
                         <span>
-                          {people} people
+                          {people} individual{people === 1 ? "" : "s"}
                           {" · "}
                           {reviewInPlace ? "Review in place" : "Review open"}
                         </span>

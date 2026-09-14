@@ -10,6 +10,7 @@ import "./scheduler.css";
 import { downloadBlob } from "../../data/openFile";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { todayIso } from "../../data/chart";
+import { formatRolloverNotice } from "./rolloverNotice";
 import type {
   ChecklistAnswer,
   HmWeeklyChecklist,
@@ -78,6 +79,7 @@ export default function HmWeeklyChecklistPage() {
   const [logDetail, setLogDetail] = useState("");
   const [logStaff, setLogStaff] = useState("");
   const [logDateTime, setLogDateTime] = useState("");
+  const [rolloverNotice, setRolloverNotice] = useState("");
 
   const currentWeek = weekOfSundayIso(todayIso());
   const openList = useMemo(
@@ -97,7 +99,10 @@ export default function HmWeeklyChecklistPage() {
     try {
       // Lightweight Sunday rollover trigger: the routine is idempotent, and
       // there is no backend cron, so the app advances the week on load.
-      await api.rolloverWeeklyChecklists();
+      // When the rollover actually changed something, tell the HM what
+      // happened — otherwise the new week appears with no explanation.
+      const rollover = await api.rolloverWeeklyChecklists();
+      setRolloverNotice(formatRolloverNotice(rollover) ?? "");
       const rows = await api.listWeeklyChecklists();
       const open = rows.find(
         (c) => c.status === "open" && c.weekOf === weekOfSundayIso(todayIso()),
@@ -140,6 +145,11 @@ export default function HmWeeklyChecklistPage() {
     downloadBlob(file.name, file.blob);
   }
 
+  async function downloadServiceLog(checklistId: string) {
+    const file = await api.exportWeeklyServiceLogPdf(checklistId);
+    downloadBlob(file.name, file.blob);
+  }
+
   const overdue = openList ? deadlinePassed(openList.weekOf) : false;
   // Scheduler-driven lifecycle status: submitted -> compliant, past due_at
   // and unsubmitted -> late, otherwise pending.
@@ -158,6 +168,11 @@ export default function HmWeeklyChecklistPage() {
         description="Your weekly compliance walkthrough. Answer every item — do not leave blanks — and submit it Monday by 4:00 p.m."
       />
       {error && <p className="form-error">{error}</p>}
+      {rolloverNotice && (
+        <p className="rollover-notice" role="status">
+          {rolloverNotice}
+        </p>
+      )}
       {loading && <p>Loading your checklist…</p>}
       {!loading && !openList && (
         <section className="panel">
@@ -377,11 +392,17 @@ export default function HmWeeklyChecklistPage() {
               className="button secondary"
               onClick={() => run(() => download(openList.id))}
             >
-              <Download size={16} /> Download PDF
+              <Download size={16} /> Download checklist PDF
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => run(() => downloadServiceLog(openList.id))}
+            >
+              <Download size={16} /> Download service log PDF
             </button>
           </div>
           <ComplyrerRecordMark
-            documentId={openList.id}
+            documentId={`HM weekly checklist · ${openSite?.name ?? "Home"} · week of ${weekRangeLabel(openList.weekOf)}`}
             generatedAt={openList.submittedAt}
           />
         </section>
@@ -423,7 +444,13 @@ export default function HmWeeklyChecklistPage() {
                         className="button secondary small"
                         onClick={() => run(() => download(c.id))}
                       >
-                        <Download size={14} /> PDF
+                        <Download size={14} /> Checklist
+                      </button>{" "}
+                      <button
+                        className="button secondary small"
+                        onClick={() => run(() => downloadServiceLog(c.id))}
+                      >
+                        <Download size={14} /> Service log
                       </button>
                     </td>
                   </tr>

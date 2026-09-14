@@ -94,7 +94,7 @@ export default function ImprovedDelegationForm({
               <th>Staff</th>
               <th>Competency verified</th>
               <th>Signed</th>
-              <th>Rescinded</th>
+              <th>Training date</th>
             </tr>
           </thead>
           <tbody>

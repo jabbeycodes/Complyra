@@ -36,6 +36,7 @@ import {
   canSignTrainingAsHm,
 } from "../../data/chart";
 import { TRAINING_LINE_MAX_HOURS } from "./gate";
+import AssignTrainingModal from "./AssignTrainingModal";
 import type {
   AdoptedSignature,
   SignatureEvent,
@@ -1196,76 +1197,3 @@ function RequestCorrectionModal({
   );
 }
 
-function AssignTrainingModal({
-  staff,
-  sites,
-  individuals,
-  busy,
-  onClose,
-  onSubmit,
-}: {
-  staff: { id: string; name: string }[];
-  sites: { id: string; name: string }[];
-  individuals: { id: string; name: string }[];
-  busy: boolean;
-  onClose: () => void;
-  onSubmit: (input: {
-    userId: string;
-    siteId: string;
-    individualId?: string | null;
-    source: "checklist";
-  }) => void;
-}) {
-  const [userId, setUserId] = useState(staff[0]?.id ?? "");
-  const [siteId, setSiteId] = useState(sites[0]?.id ?? "");
-  const [individualId, setIndividualId] = useState("");
-  return (
-    <Modal title="Assign training" onClose={onClose}>
-      <p className="muted">
-        Generates the full in-home checklist: sections 1–5 once for the site, section 6 once per
-        individual. Lines already assigned are skipped.
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit({ userId, siteId, individualId: individualId || null, source: "checklist" });
-        }}
-      >
-        <label>
-          Staff member
-          <select value={userId} onChange={(e) => setUserId(e.target.value)} required>
-            {staff.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Site
-          <select value={siteId} onChange={(e) => setSiteId(e.target.value)} required>
-            {sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Individual (adds section 6 for this person)
-          <select value={individualId} onChange={(e) => setIndividualId(e.target.value)}>
-            <option value="">— none —</option>
-            {individuals.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="button" type="submit" disabled={busy || !userId || !siteId}>
-          Generate checklist
-        </button>
-      </form>
-    </Modal>
-  );
-}

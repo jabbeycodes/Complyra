@@ -245,7 +245,7 @@ function RosterBlock({
           <tr>
             <th>Print name / title</th>
             <th>Signature</th>
-            <th>Rescinded</th>
+            <th>Training date</th>
             <th>Initials</th>
           </tr>
         </thead>
@@ -418,9 +418,9 @@ function RescindRowInput({ onRescind }: { onRescind: (date: string) => void }) {
       }}
       className="delegation-inline"
     >
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Rescinded date" />
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Training date" />
       <button className="button" type="submit" disabled={!date}>
-        Rescind
+        Set date
       </button>
     </form>
   );

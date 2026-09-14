@@ -303,7 +303,7 @@ export function SourceCard({
       <span>
         <strong>{item.source}</strong>
         <small>
-          Source document · Page {item.page} · {item.id}
+          Source document · Page {item.page}
         </small>
       </span>
       <ArrowUpRight size={17} />

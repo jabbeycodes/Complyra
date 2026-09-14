@@ -605,3 +605,79 @@ test("updateSignatureSettings rejects non-admins and all-methods-off", async () 
   assert.deepEqual(saved, { allowDraw: true, allowType: false, allowUpload: true });
   assert.deepEqual(await adminApi.getSignatureSettings(), saved);
 });
+
+// ===== P0 regression: full signing ceremony persists everything =====
+
+test("P0: signing ceremony persists signature + activity log; reload finds the signed state", async () => {
+  const api = new LocalApi(store());
+  const nurse = await api.signIn(login(DEMO_NURSE_USERNAME));
+  const person = (await api.loadWorkspace(nurse)).individuals[0];
+  const { id } = await api.createDelegation({
+    individualId: person.id,
+    taskTitle: "Skin checks",
+    purpose: "Daily checks.",
+    templateVersion: "complyrer_improved",
+  });
+
+  // 1. Ceremony requires adoption + fresh password re-entry.
+  await assert.rejects(
+    () =>
+      api.applySignature({
+        documentType: "delegation_form",
+        documentId: id,
+        fieldName: "rn_signature",
+        kind: "signature",
+        documentPayload: { obligationId: id },
+      }),
+    /Adopt your electronic signature/,
+  );
+  await api.adoptSignature(adoptInput());
+  await assert.rejects(
+    () =>
+      api.applySignature({
+        documentType: "delegation_form",
+        documentId: id,
+        fieldName: "rn_signature",
+        kind: "signature",
+        documentPayload: { obligationId: id },
+      }),
+    /re-enter your password/,
+  );
+  await api.verifySigningPassword(DEMO_PASSWORD);
+
+  // 2. Ceremony completes.
+  const result = await api.applySignature({
+    documentType: "delegation_form",
+    documentId: id,
+    fieldName: "rn_signature",
+    kind: "signature",
+    documentPayload: { obligationId: id, purpose: "Daily checks." },
+  });
+  assert.ok(result.eventId, "event id returned");
+  assert.ok(result.signedAt, "timestamp returned");
+  assert.ok(result.documentHash, "document hash returned");
+
+  // 3. Signature persists with signer name + timestamp.
+  const events = await api.getSignatureEvents("delegation_form", id);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].fieldName, "rn_signature");
+  assert.equal(events[0].signerName, nurse.fullName);
+  assert.equal(events[0].signedAt, result.signedAt);
+  assert.equal(events[0].documentHash, result.documentHash);
+
+  // 4. An activity-log event was recorded.
+  const workspace = await api.loadWorkspace(nurse);
+  const signedActivity = workspace.activity.filter((a) =>
+    a.text.includes("signature applied") || a.detail?.includes("signed"),
+  );
+  assert.ok(
+    signedActivity.length > 0,
+    "expected a signature activity-log entry",
+  );
+
+  // 5. UI reload (fresh events fetch, as SignatureField.reload does) finds
+  // the signed state for the field.
+  const reloaded = await api.getSignatureEvents("delegation_form", id);
+  const fieldEvent = reloaded.find((e) => e.fieldName === "rn_signature") ?? null;
+  assert.ok(fieldEvent, "reload finds the signed field state");
+});

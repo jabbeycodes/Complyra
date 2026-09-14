@@ -1,12 +1,22 @@
 import type { TrainingChecklist } from "../data/chart";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
+/** Format an ISO timestamp as "M/D/YY h:mm AM/PM" for signature lines. */
+function formatSignatureTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${date} ${time}`;
+}
+
 export function buildTrainingChecklistPdf(input: {
   agencyName: string;
   individualName: string;
   siteName: string;
   checklist: TrainingChecklist;
   logoDataUrl?: string | null;
+  /** Actual initials per line (lineId -> initials text, e.g. "TSO"). */
+  lineInitials?: Record<string, string>;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("In-Home Staff Training Record", {
     agencyName: input.agencyName,
@@ -42,30 +52,44 @@ export function buildTrainingChecklistPdf(input: {
       y = 64;
     }
     doc.text(line.title, margin, y, { maxWidth: 340 });
-    doc.text(line.initialedAt ? "Initialed" : "Pending", 420, y);
+    // Show the staff member's ACTUAL initials — never the word "initialed".
+    const initials = input.lineInitials?.[line.id]?.trim();
+    if (initials) {
+      doc.setFont("helvetica", "bold");
+      doc.text(initials, 420, y);
+      doc.setFont("helvetica", "normal");
+    } else if (line.initialedAt) {
+      // Fallback: show the date the line was initialed (not the word "Initialed").
+      const d = new Date(line.initialedAt);
+      doc.text(
+        d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" }),
+        420,
+        y,
+      );
+    } else {
+      doc.text("Pending", 420, y);
+    }
     y += 22;
   }
   y += 16;
   doc.setFont("helvetica", "bold");
-  doc.text(
-    `Staff signature: ${
-      input.checklist.staffSignedAt
-        ? input.checklist.staffSignatureName || input.checklist.staffName
-        : "Pending"
-    }`,
-    margin,
-    y,
-  );
+  // Staff signature with timestamp (date + time).
+  const staffSig = input.checklist.staffSignedAt
+    ? input.checklist.staffSignatureName || input.checklist.staffName
+    : "Pending";
+  const staffTime = input.checklist.staffSignedAt
+    ? ` — ${formatSignatureTimestamp(input.checklist.staffSignedAt)}`
+    : "";
+  doc.text(`Staff signature: ${staffSig}${staffTime}`, margin, y);
   y += 20;
-  doc.text(
-    `House manager signature: ${
-      input.checklist.hmSignedAt
-        ? input.checklist.hmSignatureName || "Signed"
-        : "Pending"
-    }`,
-    margin,
-    y,
-  );
+  // HM signature with timestamp (date + time).
+  const hmSig = input.checklist.hmSignedAt
+    ? input.checklist.hmSignatureName || "Signed"
+    : "Pending";
+  const hmTime = input.checklist.hmSignedAt
+    ? ` — ${formatSignatureTimestamp(input.checklist.hmSignedAt)}`
+    : "";
+  doc.text(`House manager signature: ${hmSig}${hmTime}`, margin, y);
   stampRecordMark(doc, {
     documentId: input.checklist.id,
     generatedAt: input.checklist.hmSignedAt ?? input.checklist.staffSignedAt,

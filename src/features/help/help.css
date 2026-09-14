@@ -1,0 +1,68 @@
+/* Help & resources page — solid colors, generous touch targets. */
+.help-toc ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.help-toc li a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #e9e6e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: inherit;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+.help-toc li a:hover {
+  background: #fbfbfa;
+}
+.help-list {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.help-faq {
+  border: 1px solid #e9e6e1;
+  border-radius: 8px;
+  margin-top: 10px;
+  background: #ffffff;
+}
+.help-faq summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+  list-style: none;
+}
+.help-faq summary::-webkit-details-marker {
+  display: none;
+}
+.help-faq summary::before {
+  content: "+";
+  margin-right: 10px;
+  font-weight: 700;
+  color: #6f815c;
+}
+.help-faq[open] summary::before {
+  content: "–";
+}
+.help-faq p {
+  margin: 0;
+  padding: 0 14px 14px 34px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #4a4036;
+}

@@ -219,7 +219,9 @@ import {
 } from "./hmChecklist";
 import {
   buildWeeklyChecklistPdf,
+  buildWeeklyServiceLogPdf,
   weeklyChecklistPdfName,
+  weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
@@ -5822,6 +5824,27 @@ export class HostedApi implements ComplyraApi {
     return {
       blob: doc.output("blob"),
       name: weeklyChecklistPdfName(site?.name ?? "home", row.weekOf),
+    };
+  }
+
+  async exportWeeklyServiceLogPdf(
+    checklistId: string,
+  ): Promise<{ blob: Blob; name: string }> {
+    const session = await this.requireSession();
+    const row = await this.checklistRow(session, checklistId);
+    const site = await this.siteRecord(row.siteId);
+    const hmName = await this.profileName(row.assignedToUserId);
+    const doc = buildWeeklyServiceLogPdf({
+      agencyName: session.agencyName,
+      siteName: site?.name ?? "Home",
+      weekOf: row.weekOf,
+      checklist: row,
+      hmName,
+      logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+    });
+    return {
+      blob: doc.output("blob"),
+      name: weeklyServiceLogPdfName(site?.name ?? "home", row.weekOf),
     };
   }
   // ===== LIFEPATH-P6 HOSTED (med inventory) =====

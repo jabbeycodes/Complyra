@@ -241,7 +241,9 @@ import {
 } from "./hmChecklist";
 import {
   buildWeeklyChecklistPdf,
+  buildWeeklyServiceLogPdf,
   weeklyChecklistPdfName,
+  weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
 import {
   buildDrillsMonthPdf,
@@ -614,6 +616,9 @@ export interface ComplyraApi {
    */
   rolloverWeeklyChecklists(): Promise<{ created: number; locked: number }>;
   exportWeeklyChecklistPdf(
+    checklistId: string,
+  ): Promise<{ blob: Blob; name: string }>;
+  exportWeeklyServiceLogPdf(
     checklistId: string,
   ): Promise<{ blob: Blob; name: string }>;
   // ===== LIFEPATH-P6 API (med inventory) =====
@@ -3116,12 +3121,22 @@ export class LocalApi implements ComplyraApi {
       );
       if (!person) return null;
       const site = this.store.db.sites.find((row) => row.id === person.siteId);
+      // Collect actual initials per line from the sign-off records.
+      const lineInitials: Record<string, string> = {};
+      const signoffs = this.p2Collections().trainingLegacyLineSignoffs;
+      for (const line of checklist.items) {
+        const signoff = signoffs[`${checklist.id}:${line.id}`];
+        if (signoff?.initials?.trim()) {
+          lineInitials[line.id] = signoff.initials.trim();
+        }
+      }
       const pdf = buildTrainingChecklistPdf({
         agencyName: session.agencyName,
         individualName: person.fullName,
         siteName: site?.name ?? "",
         checklist,
         logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+        lineInitials,
       });
       return {
         blob: pdf.output("blob"),
@@ -4322,17 +4337,15 @@ export class LocalApi implements ComplyraApi {
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
     assertCan(session, "hr.view_staff");
-    const coll = this.p2Collections();
-    const userIds = [
-      ...new Set(
-        coll.trainingRequirements
-          .filter(
-            (row) =>
-              row.agencyId === session.agencyId && (!siteId || row.siteId === siteId),
-          )
-          .map((row) => row.userId),
-      ),
-    ];
+    // Roster comes from the agency's staff memberships — not only from staff
+    // who already have training assigned — so "All staff" never renders an
+    // empty table while the agency has people.
+    const memberships = this.store.db.memberships.filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        (!siteId || row.siteId === siteId),
+    );
+    const userIds = [...new Set(memberships.map((row) => row.userId))];
     const rows: StaffClearanceRow[] = [];
     for (const userId of userIds) {
       const profile = await this.getStaffTrainingProfile(userId);
@@ -5477,6 +5490,27 @@ export class LocalApi implements ComplyraApi {
     return {
       blob: doc.output("blob"),
       name: weeklyChecklistPdfName(site?.name ?? "home", row.weekOf),
+    };
+  }
+
+  async exportWeeklyServiceLogPdf(
+    checklistId: string,
+  ): Promise<{ blob: Blob; name: string }> {
+    const session = assertSession(this.store);
+    const row = this.checklistById(session, checklistId);
+    const site = this.store.db.sites.find((s) => s.id === row.siteId);
+    const hm = this.store.db.profiles.find((p) => p.id === row.assignedToUserId);
+    const doc = buildWeeklyServiceLogPdf({
+      agencyName: session.agencyName,
+      siteName: site?.name ?? "Home",
+      weekOf: row.weekOf,
+      checklist: row,
+      hmName: hm?.fullName ?? "",
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+    });
+    return {
+      blob: doc.output("blob"),
+      name: weeklyServiceLogPdfName(site?.name ?? "home", row.weekOf),
     };
   }
   // ===== LIFEPATH-P6 IMPL (med inventory) =====
