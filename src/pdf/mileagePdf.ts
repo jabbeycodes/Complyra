@@ -48,6 +48,7 @@ type RGB = [number, number, number];
 const INK: RGB = [36, 30, 24];
 const EVERGREEN: RGB = [47, 70, 48];
 const HEADER_FILL: RGB = [240, 240, 240];
+const GROUP_FILL: RGB = [233, 229, 221];
 
 function drawBrand(doc: jsPDF, agencyName: string, monthKey: string, siteName: string) {
   let y = 48;
@@ -231,10 +232,17 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
 
 export interface MileageYearPdfInput {
   agencyName: string;
+  /** Per-site home name, or "All sites" for the agency-wide view. */
   siteName: string;
   year: number;
   people: MileagePdfPerson[];
   summary: MileageYearlySummary;
+  /**
+   * Agency-wide mode: maps each individual id to its site name. When present,
+   * a shaded site header row is drawn before each site's group; `people`
+   * must be ordered site-by-site so the groups stay together.
+   */
+  siteNameByIndividualId?: Record<string, string>;
 }
 
 export function mileageYearFileName(siteName: string, year: number) {
@@ -316,7 +324,37 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
   const rowById = new Map(
     input.summary.rows.map((row) => [row.individualId, row]),
   );
+
+  // Agency-wide mode: one shaded header row per site group, spanning the
+  // full table width. Per-site callers omit siteNameByIndividualId and get
+  // the flat layout unchanged.
+  const groupOf = input.siteNameByIndividualId;
+  let lastGroup: string | null = null;
+  function drawGroupHeader(label: string) {
+    const rowH = 17;
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+    }
+    doc.setFillColor(...GROUP_FILL);
+    doc.rect(MARGIN, y, CONTENT_W, rowH, "F");
+    doc.setDrawColor(0, 0, 0);
+    doc.rect(MARGIN, y, CONTENT_W, rowH);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...INK);
+    doc.text(label, MARGIN + 4, y + 11.5);
+    y += rowH;
+  }
+
   for (const person of input.people) {
+    if (groupOf) {
+      const group = groupOf[person.id] ?? "Unassigned";
+      if (group !== lastGroup) {
+        lastGroup = group;
+        drawGroupHeader(group);
+      }
+    }
     const row = rowById.get(person.id);
     const cells: Record<string, string> = {
       name: person.name,

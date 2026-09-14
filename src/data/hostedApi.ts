@@ -6373,6 +6373,38 @@ export class HostedApi implements ComplyraApi {
     return summarizeYearlyMileage(trips, individualIds, year);
   }
 
+  async getMileageYearlySummaryAllSites(
+    year: number,
+    sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
+  ): Promise<import("./mileage").MileageAgencyYearlySummary> {
+    const { summarizeAgencyYearlyMileage, assertCanViewMileageYearlySummary } =
+      await this.p7lib();
+    const session = await this.requireSession();
+    this.requireMileageAccess(session);
+    assertCanViewMileageYearlySummary(session);
+    for (const site of sites) {
+      await this.assertSiteInAgency(session, site.siteId);
+    }
+    const { data, error } = await this.client
+      .from("mileage_trips")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .gte("trip_date", `${year}-01-01`)
+      .lt("trip_date", `${year + 1}-01-01`);
+    throwIf(error, "Could not load the agency-wide yearly mileage summary.");
+    const trips = (data ?? []).map((row) =>
+      this.mapMileageTrip(row as Record<string, unknown>),
+    );
+    const tripsBySite = new Map<string, import("./types").MileageTrip[]>();
+    for (const site of sites) {
+      tripsBySite.set(
+        site.siteId,
+        trips.filter((trip) => trip.siteId === site.siteId),
+      );
+    }
+    return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
   /** The log is one unbroken chain: a trip's start must continue the previous end. */
   private async assertOdometerContinuity(
     session: SessionUser,

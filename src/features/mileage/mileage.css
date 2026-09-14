@@ -78,6 +78,12 @@
   background: var(--row-highlight, #f7f7f7);
 }
 
+.mileage-site-row td {
+  background: var(--row-highlight, #f2efe9);
+  border-bottom: 1px solid var(--border-strong, #ccc);
+  padding-top: 10px;
+}
+
 .mileage-row-actions {
   display: flex;
   gap: 4px;

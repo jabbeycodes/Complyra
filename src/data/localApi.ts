@@ -678,6 +678,15 @@ export interface ComplyraApi {
     year: number,
     individualIds: string[],
   ): Promise<import("./mileage").MileageYearlySummary>;
+  /**
+   * Agency-wide yearly summary: every program site in one table, grouped by
+   * site. Same role gate as the per-site yearly summary (administrator, DPM,
+   * platform owner only).
+   */
+  getMileageYearlySummaryAllSites(
+    year: number,
+    sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
+  ): Promise<import("./mileage").MileageAgencyYearlySummary>;
   // ===== E-SIGNATURE API (adopt-once signatures, DocuSign-style) =====
   /**
    * The session user's adopted signature + ESIGN/UETA consent, if any.
@@ -5897,6 +5906,23 @@ export class LocalApi implements ComplyraApi {
       individualIds,
       year,
     );
+  }
+
+  async getMileageYearlySummaryAllSites(
+    year: number,
+    sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
+  ): Promise<import("./mileage").MileageAgencyYearlySummary> {
+    const { summarizeAgencyYearlyMileage, assertCanViewMileageYearlySummary } =
+      await this.p7lib();
+    const session = assertSession(this.store);
+    this.assertMileageAccess(session);
+    assertCanViewMileageYearlySummary(session);
+    const tripsBySite = new Map<string, import("./types").MileageTrip[]>();
+    for (const site of sites) {
+      this.siteOrThrow(session, site.siteId);
+      tripsBySite.set(site.siteId, this.siteMileageTrips(session, site.siteId));
+    }
+    return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
   }
 
   /** The log is one unbroken chain: a new trip's start must continue the latest end. */

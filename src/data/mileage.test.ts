@@ -28,6 +28,7 @@ import {
   roundMiles,
   splitMilesAmongRiders,
   stripBackfillMarker,
+  summarizeAgencyYearlyMileage,
   summarizeMonthlyMileage,
   summarizeWeeklyMileage,
   summarizeYearlyMileage,
@@ -761,4 +762,172 @@ test("updateMileageTrip can mark a trip backfilled; staff cannot", async () => {
   const edited = await client.updateMileageTrip(trip.id, { reason: "Grocery run" });
   assert.equal(edited.backfilled, true);
   assert.equal(edited.reason, "Grocery run");
+});
+
+// ---------- Agency-wide yearly summary ----------
+
+function agencyTrip(
+  id: string,
+  siteId: string,
+  tripDate: string,
+  miles: number,
+  riderIds: string[],
+): MileageTrip {
+  return {
+    id,
+    agencyId: "agency-1",
+    siteId,
+    tripDate,
+    odometerStart: 100,
+    odometerEnd: 100 + miles,
+    miles,
+    riderIds,
+    reason: "Test trip",
+    backfilled: false,
+    driverName: "Alex Morgan",
+    signatureName: "Alex Morgan",
+    createdBy: "staff-1",
+    createdAt: `${tripDate}T10:00:00.000Z`,
+  };
+}
+
+test("summarizeAgencyYearlyMileage groups by site and rolls up an agency grand total", () => {
+  const tripsBySite = new Map<string, MileageTrip[]>([
+    [
+      "site-a",
+      [
+        agencyTrip("t1", "site-a", "2026-01-05", 20, ["a1", "a2"]),
+        agencyTrip("t2", "site-a", "2026-02-10", 30, ["a1"]),
+        agencyTrip("t3", "site-a", "2025-12-31", 999, ["a1"]), // outside the year: ignored
+      ],
+    ],
+    ["site-b", [agencyTrip("t4", "site-b", "2026-01-15", 12, ["b1"])]],
+    ["site-c", []], // empty group still appears
+  ]);
+  const result = summarizeAgencyYearlyMileage(
+    tripsBySite,
+    [
+      { siteId: "site-a", siteName: "Maple House", individualIds: ["a1", "a2", "a3"] },
+      { siteId: "site-b", siteName: "Oakwood House", individualIds: ["b1"] },
+      { siteId: "site-c", siteName: "Empty House", individualIds: [] },
+    ],
+    2026,
+  );
+  assert.equal(result.year, 2026);
+  assert.equal(result.sites.length, 3);
+
+  const maple = result.sites[0];
+  assert.equal(maple.siteName, "Maple House");
+  const mapleById = Object.fromEntries(maple.rows.map((r) => [r.individualId, r]));
+  assert.equal(mapleById["a1"].months[0], 10); // half of 20
+  assert.equal(mapleById["a1"].months[1], 30);
+  assert.equal(mapleById["a1"].yearlyTotal, 40);
+  assert.equal(mapleById["a2"].months[0], 10);
+  assert.equal(mapleById["a2"].yearlyTotal, 10);
+  assert.equal(mapleById["a3"].yearlyTotal, 0); // pre-populated with zeros
+  assert.equal(maple.siteTotal.months[0], 20);
+  assert.equal(maple.siteTotal.months[1], 30);
+  assert.equal(maple.siteTotal.yearlyTotal, 50);
+
+  const oakwood = result.sites[1];
+  assert.equal(oakwood.siteTotal.yearlyTotal, 12);
+
+  assert.equal(result.sites[2].rows.length, 0); // empty group still listed
+
+  // Agency grand total = Maple 50 + Oakwood 12.
+  assert.equal(result.grandTotal.months[0], 32);
+  assert.equal(result.grandTotal.months[1], 30);
+  assert.equal(result.grandTotal.yearlyTotal, 62);
+});
+
+test("summarizeAgencyYearlyMileage ignores trips for sites not in the input list", () => {
+  const tripsBySite = new Map<string, MileageTrip[]>([
+    ["site-a", [agencyTrip("t1", "site-a", "2026-01-05", 20, ["a1"])]],
+    ["ghost", [agencyTrip("t9", "ghost", "2026-01-06", 50, ["g1"])]],
+  ]);
+  const result = summarizeAgencyYearlyMileage(
+    tripsBySite,
+    [{ siteId: "site-a", siteName: "Maple House", individualIds: ["a1"] }],
+    2026,
+  );
+  assert.equal(result.sites.length, 1);
+  assert.equal(result.grandTotal.yearlyTotal, 20);
+});
+
+test("getMileageYearlySummaryAllSites rolls up every site for the administrator", async () => {
+  const { client, store, session, site, people } = await clientAs(DEMO_ADMIN_USERNAME);
+  const otherSite = store.db.sites.find(
+    (s) => s.agencyId === session.agencyId && s.id !== site.id,
+  )!;
+  const otherPeople = store.db.individuals.filter(
+    (p) => p.agencyId === session.agencyId && p.siteId === otherSite.id,
+  );
+  assert.ok(otherPeople.length >= 1, "seed needs individuals at the second site");
+  const [first, second] = people;
+  const [otherFirst] = otherPeople;
+
+  await client.addMileageTrip({
+    ...tripInput(site.id, [first.id, second.id]),
+    tripDate: "2026-01-05",
+    odometerStart: 100,
+    odometerEnd: 120,
+  });
+  await client.addMileageTrip({
+    ...tripInput(otherSite.id, [otherFirst.id]),
+    tripDate: "2026-01-10",
+    odometerStart: 100,
+    odometerEnd: 112,
+  });
+
+  const summary = await client.getMileageYearlySummaryAllSites(2026, [
+    { siteId: site.id, siteName: site.name, individualIds: people.map((p) => p.id) },
+    {
+      siteId: otherSite.id,
+      siteName: otherSite.name,
+      individualIds: otherPeople.map((p) => p.id),
+    },
+  ]);
+  assert.equal(summary.sites.length, 2);
+  assert.equal(summary.sites[0].siteId, site.id);
+  const firstSiteById = Object.fromEntries(
+    summary.sites[0].rows.map((r) => [r.individualId, r]),
+  );
+  assert.equal(firstSiteById[first.id].months[0], 10);
+  assert.equal(firstSiteById[second.id].months[0], 10);
+  assert.equal(summary.sites[0].siteTotal.months[0], 20);
+  const otherById = Object.fromEntries(
+    summary.sites[1].rows.map((r) => [r.individualId, r]),
+  );
+  assert.equal(otherById[otherFirst.id].months[0], 12);
+  assert.equal(summary.grandTotal.months[0], 32);
+  assert.equal(summary.grandTotal.yearlyTotal, 32);
+});
+
+test("getMileageYearlySummaryAllSites rejects DSP and house-manager sessions server-side", async () => {
+  const dsp = await dspClient();
+  await assert.rejects(
+    () =>
+      dsp.client.getMileageYearlySummaryAllSites(2026, [
+        { siteId: dsp.site.id, siteName: dsp.site.name, individualIds: [] },
+      ]),
+    /Only administrators and degreed professional managers/,
+  );
+  const hm = await clientAs(DEMO_HM_USERNAME);
+  await assert.rejects(
+    () =>
+      hm.client.getMileageYearlySummaryAllSites(2026, [
+        { siteId: hm.site.id, siteName: hm.site.name, individualIds: [] },
+      ]),
+    /Only administrators and degreed professional managers/,
+  );
+});
+
+test("getMileageYearlySummaryAllSites allows the administrator with empty data", async () => {
+  const { client, site } = await clientAs(DEMO_ADMIN_USERNAME);
+  const summary = await client.getMileageYearlySummaryAllSites(2026, [
+    { siteId: site.id, siteName: site.name, individualIds: [] },
+  ]);
+  assert.equal(summary.year, 2026);
+  assert.equal(summary.sites.length, 1);
+  assert.equal(summary.grandTotal.yearlyTotal, 0);
 });
