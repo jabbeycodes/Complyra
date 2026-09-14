@@ -55,6 +55,13 @@ import type {
   UploadCertificateFileInput,
   UploadDocumentInput,
   WeeklyChecklistStatus,
+  AdoptedSignature,
+  AdoptSignatureInput,
+  ApplySignatureInput,
+  ApplySignatureResult,
+  SignableDocumentType,
+  SignatureEvent,
+  SignatureSettings,
 } from "./types";
 import { blankDelegationForm } from "./types";
 import {
@@ -64,6 +71,15 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
+import {
+  assertAdoptableSignature,
+  dataUrlToBlob,
+  formatSignatureDate,
+} from "../features/signatures/signatureUtils";
+import {
+  legacyTrainingDocId,
+  trainingChecklistDocId,
+} from "../features/signatures/documentPayloads";
 import {
   hasBackfillMarker,
   stripBackfillMarker,
@@ -1684,6 +1700,20 @@ export class HostedApi implements ComplyraApi {
       })
       .eq("id", obligationId);
     throwIf(updateError, "Could not save the RN signature.");
+    // Keep the form JSON's delegatingRn in sync so renders/PDFs show the sign date.
+    {
+      const { item: freshItem, form } = await this.delegationRow(session, obligationId);
+      form.delegatingRn.signatureName = signatureName.trim();
+      form.delegatingRn.dateSigned = new Date().toISOString().slice(0, 10);
+      if (!form.delegatingRn.name.trim()) {
+        form.delegatingRn.name = signatureName.trim();
+      }
+      const { error: formError } = await this.client
+        .from("obligations")
+        .update({ delegation_form: JSON.parse(JSON.stringify(form)) })
+        .eq("id", freshItem.id);
+      throwIf(formError, "Could not save the RN signature.");
+    }
     await this.audit(
       session,
       "delegation.signed_rn",
@@ -2050,6 +2080,11 @@ export class HostedApi implements ComplyraApi {
     const line = checklist.items.find((item) => item.id === lineId);
     if (!line) throw new Error("Training item not found.");
     if (line.initialedAt) return;
+    await this.assertDocumentUnlocked(
+      session,
+      "training_checklist",
+      legacyTrainingDocId(checklistId),
+    );
     const items = checklist.items.map((item) =>
       item.id === lineId
         ? {
@@ -3829,6 +3864,11 @@ export class HostedApi implements ComplyraApi {
     const mapped = this.mapTrainingRequirement(requirement);
     if (session.userId !== mapped.userId) this.requirePermission(session, "hr.view_staff");
     await this.assertTrainingUnlocked(mapped);
+    await this.assertDocumentUnlocked(
+      session,
+      "training_checklist",
+      trainingChecklistDocId(mapped.userId, mapped.siteId ?? ""),
+    );
     const validated = validateTrainingLineInput(input);
     const trainerName = await this.trainerNameOrThrow(session, validated.trainerUserId);
     const selfTraining = validated.trainerUserId === mapped.userId;
@@ -3918,6 +3958,11 @@ export class HostedApi implements ComplyraApi {
     if (!requirement) throw new Error("Training line not found.");
     const mapped = this.mapTrainingRequirement(requirement);
     await this.assertTrainingUnlocked(mapped);
+    await this.assertDocumentUnlocked(
+      session,
+      "training_checklist",
+      trainingChecklistDocId(mapped.userId, mapped.siteId ?? ""),
+    );
     const { data: existingSignoff } = await this.client
       .from("training_signoffs")
       .select("id")
@@ -3973,12 +4018,22 @@ export class HostedApi implements ComplyraApi {
     if (!reason) throw new Error("Write the reason for this correction.");
     const { data: counter, error: fetchError } = await this.client
       .from("training_countersignatures")
-      .select("id, user_id")
+      .select("id, user_id, site_id")
       .eq("id", input.countersignatureId)
       .eq("agency_id", session.agencyId)
       .maybeSingle();
     throwIf(fetchError, "Training sheet not found.");
     if (!counter) throw new Error("Training sheet not found.");
+    // Clearing the signature events unlocks the sheet: with no events the
+    // same document id can be signed again with the corrected content.
+    const counterRow = counter as { user_id: string; site_id: string };
+    const { error: eventError } = await this.client
+      .from("signature_events")
+      .delete()
+      .eq("agency_id", session.agencyId)
+      .eq("document_type", "training_checklist")
+      .eq("document_id", trainingChecklistDocId(counterRow.user_id, counterRow.site_id));
+    throwIf(eventError, "Could not clear the sheet's signatures.");
     // Deleting the countersignature unlocks the sheet: completed lines can be
     // edited, and the sheet must be re-signed and re-countersigned.
     const { error: deleteError } = await this.client
@@ -4168,6 +4223,7 @@ export class HostedApi implements ComplyraApi {
     this.requirePermission(session, "clinical.view");
     this.assertDelegationEditor(session);
     const { item, form } = await this.delegationRow(session, input.obligationId);
+    await this.assertDocumentUnlocked(session, "delegation_form", input.obligationId);
     const { instructingProfessional, delegatingRn, roster, ...rest } = input.patch;
     Object.assign(form, rest);
     if (instructingProfessional) Object.assign(form.instructingProfessional, instructingProfessional);
@@ -4237,6 +4293,7 @@ export class HostedApi implements ComplyraApi {
     this.requirePermission(session, "clinical.view");
     this.assertDelegationEditor(session);
     const { item, form } = await this.delegationRow(session, input.obligationId);
+    await this.assertDocumentUnlocked(session, "delegation_form", input.obligationId);
     const row = form.roster[input.rowIndex];
     if (!row) throw new Error("Roster row not found.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.rescindedDate)) {
@@ -4772,6 +4829,7 @@ export class HostedApi implements ComplyraApi {
     if (!row.items.some((item) => item.key === itemKey)) {
       throw new Error("Checklist item not found.");
     }
+    await this.assertDocumentUnlocked(session, "hm_checklist", checklistId);
     const items = applyItemAnswer(row.items, itemKey, answer, note);
     const { error } = await this.client
       .from("hm_weekly_checklists")
@@ -4798,6 +4856,7 @@ export class HostedApi implements ComplyraApi {
       throw new Error("This checklist is no longer open for edits.");
     }
     if (!input.detail.trim()) throw new Error("Describe the log entry.");
+    await this.assertDocumentUnlocked(session, "hm_checklist", checklistId);
     const entry: ServiceLogEntry = {
       id: crypto.randomUUID(),
       kind: input.kind,
@@ -4827,6 +4886,7 @@ export class HostedApi implements ComplyraApi {
     if (row.status !== "open") {
       throw new Error("This checklist is no longer open for edits.");
     }
+    await this.assertDocumentUnlocked(session, "hm_checklist", checklistId);
     const serviceLogs = row.serviceLogs.filter((e) => e.id !== entryId);
     const { error } = await this.client
       .from("hm_weekly_checklists")
@@ -5669,6 +5729,295 @@ export class HostedApi implements ComplyraApi {
       "mileage_trip",
       trip.id,
     );
+  }
+
+  // ===== E-SIGNATURES (hosted) =====
+
+  /**
+   * Document lock for hosted writes: a document is locked once ANY signature
+   * event exists for it. Racy by nature (two concurrent writers) — the
+   * authoritative gate is the sibling-owned RLS/trigger layer; this gives the
+   * same user-facing error before we send the write.
+   */
+  private async assertDocumentUnlocked(
+    session: SessionUser,
+    documentType: SignableDocumentType,
+    documentId: string,
+  ): Promise<void> {
+    const events = await this.getSignatureEvents(documentType, documentId);
+    if (events.length > 0) {
+      const first = [...events].sort((a, b) =>
+        a.signedAt.localeCompare(b.signedAt),
+      )[0];
+      throw new Error(
+        `Document is locked — signed on ${formatSignatureDate(first.signedAt)}. Request a correction to amend.`,
+      );
+    }
+  }
+
+  async getMySignature(): Promise<AdoptedSignature | null> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("user_signatures")
+      .select(
+        "signature_path, initials_path, adopted_at, consent_at, consent_text_version",
+      )
+      .eq("user_id", session.userId)
+      .maybeSingle();
+    throwIf(error, "Could not load your signature.");
+    if (!data) return null;
+    const row = data as Record<string, unknown>;
+    return {
+      signaturePath: row.signature_path as string,
+      initialsPath: row.initials_path as string,
+      adoptedAt: row.adopted_at as string,
+      consentAt: row.consent_at as string,
+      consentTextVersion: row.consent_text_version as string,
+    };
+  }
+
+  async adoptSignature(input: AdoptSignatureInput): Promise<AdoptedSignature> {
+    const session = await this.requireSession();
+    if (!input.consentGiven) {
+      throw new Error(
+        "You must consent to electronic records and signatures before adopting.",
+      );
+    }
+    if (!input.consentTextVersion?.trim()) {
+      throw new Error("A consent text version is required.");
+    }
+    assertAdoptableSignature("Signature", input.signatureDataUrl);
+    assertAdoptableSignature("Initials", input.initialsDataUrl);
+    // Upload the PNG bytes first; the service reads user_signatures from the
+    // session JWT.
+    const uploads: Array<[dataUrl: string, path: string]> = [
+      [input.signatureDataUrl, `${session.userId}/signature.png`],
+      [input.initialsDataUrl, `${session.userId}/initials.png`],
+    ];
+    for (const [dataUrl, path] of uploads) {
+      const { error } = await this.client.storage
+        .from("user-signatures")
+        .upload(path, dataUrlToBlob(dataUrl), {
+          upsert: true,
+          contentType: "image/png",
+        });
+      throwIf(error, "Could not save your signature images.");
+    }
+    const now = new Date().toISOString();
+    const consentTextVersion = input.consentTextVersion.trim();
+    const { error: upsertError } = await this.client
+      .from("user_signatures")
+      .upsert(
+        {
+          user_id: session.userId,
+          signature_path: `${session.userId}/signature.png`,
+          initials_path: `${session.userId}/initials.png`,
+          adopted_at: now,
+          consent_at: now,
+          consent_text_version: consentTextVersion,
+        },
+        { onConflict: "user_id" },
+      );
+    throwIf(upsertError, "Could not save your signature.");
+    await this.audit(
+      session,
+      "signature.adopted",
+      `${session.fullName} adopted an electronic signature (consent ${consentTextVersion})`,
+      "user_signature",
+      session.userId,
+    );
+    return {
+      signaturePath: `${session.userId}/signature.png`,
+      initialsPath: `${session.userId}/initials.png`,
+      adoptedAt: now,
+      consentAt: now,
+      consentTextVersion,
+    };
+  }
+
+  async applySignature(
+    input: ApplySignatureInput,
+  ): Promise<ApplySignatureResult> {
+    const session = await this.requireSession();
+    // The edge function re-validates everything against the session JWT; this
+    // just rejects malformed input early.
+    if (
+      !input ||
+      typeof input.documentType !== "string" ||
+      !input.documentType.trim() ||
+      typeof input.documentId !== "string" ||
+      !input.documentId.trim() ||
+      typeof input.fieldName !== "string" ||
+      !input.fieldName.trim() ||
+      (input.kind !== "signature" && input.kind !== "initials") ||
+      !input.documentPayload ||
+      typeof input.documentPayload !== "object" ||
+      Array.isArray(input.documentPayload)
+    ) {
+      throw new Error("A valid signature request is required.");
+    }
+    // The edge-function contract is snake_case (see
+    // supabase/functions/apply-signature/index.ts).
+    const { data, error } = await this.client.functions.invoke("apply-signature", {
+      body: {
+        document_type: input.documentType.trim(),
+        document_id: input.documentId.trim(),
+        field_name: input.fieldName.trim(),
+        signature_kind: input.kind,
+        document_payload: input.documentPayload,
+        agency_id: session.agencyId,
+      },
+    });
+    if (error) {
+      throw new Error(
+        (error as { message?: string }).message ?? "Could not apply your signature.",
+      );
+    }
+    if (data && typeof data === "object" && "error" in data) {
+      throw new Error(
+        String(
+          (data as { error?: unknown }).error ?? "Could not apply your signature.",
+        ),
+      );
+    }
+    const result = (data ?? {}) as {
+      event_id?: string;
+      signed_at?: string;
+      document_hash?: string;
+    };
+    if (!result.event_id || !result.signed_at || !result.document_hash) {
+      throw new Error("The signature service returned an unexpected response.");
+    }
+    return {
+      eventId: result.event_id,
+      signedAt: result.signed_at,
+      documentHash: result.document_hash,
+    };
+  }
+
+  async getSignatureEvents(
+    documentType: SignableDocumentType,
+    documentId: string,
+  ): Promise<SignatureEvent[]> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("signature_events")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("document_type", documentType)
+      .eq("document_id", documentId)
+      .order("signed_at", { ascending: true });
+    throwIf(error, "Could not load signature events.");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    // Resolve signer display names in one batch (signature_events stores only
+    // the signer_user_id by design).
+    const signerIds = [
+      ...new Set(
+        rows.map((r) => r.signer_user_id as string).filter(Boolean),
+      ),
+    ];
+    const names = new Map<string, string>();
+    if (signerIds.length > 0) {
+      const { data: profiles } = await this.client
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", signerIds);
+      for (const p of (profiles ?? []) as Array<{
+        id: string;
+        full_name: string;
+      }>) {
+        names.set(p.id, p.full_name);
+      }
+    }
+    return rows.map((row) =>
+      this.mapSignatureEvent(
+        row,
+        names.get(row.signer_user_id as string) ?? "Unknown signer",
+      ),
+    );
+  }
+
+  private mapSignatureEvent(
+    row: Record<string, unknown>,
+    signerName: string,
+  ): SignatureEvent {
+    return {
+      id: row.id as string,
+      agencyId: (row.agency_id as string) ?? "",
+      userId: row.signer_user_id as string,
+      signerName,
+      documentType: row.document_type as SignableDocumentType,
+      documentId: row.document_id as string,
+      fieldName: row.field_name as string,
+      kind: (row.kind as "signature" | "initials") ?? "signature",
+      documentHash: row.document_hash as string,
+      signedAt: row.signed_at as string,
+    };
+  }
+
+  async getSignatureImageUrl(path: string): Promise<string> {
+    await this.requireSession();
+    const { data, error } = await this.client.storage
+      .from("user-signatures")
+      .createSignedUrl(path, 60 * 60);
+    throwIf(error, "Could not load the signature image.");
+    if (!data?.signedUrl) throw new Error("Could not load the signature image.");
+    return data.signedUrl;
+  }
+
+  async getSignatureSettings(): Promise<SignatureSettings> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("agency_signature_settings")
+      .select("allow_draw, allow_type, allow_upload")
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load signature settings.");
+    const row = data as Record<string, unknown> | null;
+    if (!row) return { allowDraw: true, allowType: true, allowUpload: true };
+    return {
+      allowDraw: Boolean(row.allow_draw),
+      allowType: Boolean(row.allow_type),
+      allowUpload: Boolean(row.allow_upload),
+    };
+  }
+
+  async updateSignatureSettings(
+    input: SignatureSettings,
+  ): Promise<SignatureSettings> {
+    const session = await this.requireSession();
+    if (
+      session.roleKey !== "administrator" &&
+      session.role !== "administrator"
+    ) {
+      throw new Error("Only an administrator can change signature settings.");
+    }
+    const next: SignatureSettings = {
+      allowDraw: Boolean(input.allowDraw),
+      allowType: Boolean(input.allowType),
+      allowUpload: Boolean(input.allowUpload),
+    };
+    if (!next.allowDraw && !next.allowType && !next.allowUpload) {
+      throw new Error("Keep at least one adoption method on.");
+    }
+    const { error } = await this.client.from("agency_signature_settings").upsert(
+      {
+        agency_id: session.agencyId,
+        allow_draw: next.allowDraw,
+        allow_type: next.allowType,
+        allow_upload: next.allowUpload,
+      },
+      { onConflict: "agency_id" },
+    );
+    throwIf(error, "Could not save signature settings.");
+    await this.audit(
+      session,
+      "signature.settings_updated",
+      `${session.fullName} updated the signature adoption methods`,
+      "agency",
+      session.agencyId,
+    );
+    return next;
   }
 }
 

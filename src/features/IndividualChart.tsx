@@ -334,24 +334,6 @@ export default function IndividualChart({
               onInitial={(lineId) =>
                 run(() => api.initialTrainingLine(row.checklist.id, lineId))
               }
-              onSignStaff={() =>
-                run(() =>
-                  api.signTrainingChecklist(
-                    row.checklist.id,
-                    "staff",
-                    session.fullName,
-                  ),
-                )
-              }
-              onSignHm={() =>
-                run(() =>
-                  api.signTrainingChecklist(
-                    row.checklist.id,
-                    "hm",
-                    session.fullName,
-                  ),
-                )
-              }
               onDownload={() => openFile("training", row.checklist.id, "download")}
               onPrint={() => openFile("training", row.checklist.id, "print")}
             />

@@ -9,8 +9,12 @@
  */
 import { useEffect, useState } from "react";
 import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
-import SignaturePad from "../SignaturePad";
 import { useData } from "../../data/DataProvider";
+import { SignatureField } from "../signatures/SignatureField";
+import {
+  trainingChecklistDocId,
+  trainingCountersignPayload,
+} from "../signatures/documentPayloads";
 import { can } from "../../data/status";
 import {
   canEditTrainingLine,
@@ -54,7 +58,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<
-    null | { kind: "initial"; requirement: TrainingRequirementView; existing?: TrainingSignoff } | { kind: "waive"; requirement: TrainingRequirementView } | { kind: "sign"; role: "staff" | "hm"; siteId: string } | { kind: "correct"; countersignatureId: string } | { kind: "assign" }
+    null | { kind: "initial"; requirement: TrainingRequirementView; existing?: TrainingSignoff } | { kind: "waive"; requirement: TrainingRequirementView } | { kind: "correct"; countersignatureId: string } | { kind: "assign" }
   >(null);
 
   const canManage = session ? can(session, "hr.view_staff") : false;
@@ -220,7 +224,6 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
             setModal({ kind: "initial", requirement, existing })
           }
           onWaive={(requirement) => setModal({ kind: "waive", requirement })}
-          onSign={(role, siteId) => setModal({ kind: "sign", role, siteId })}
           onCorrect={(countersignatureId) => setModal({ kind: "correct", countersignatureId })}
           onClose={() => {
             setSelected(null);
@@ -252,26 +255,6 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           onClose={() => setModal(null)}
           onSubmit={(reason) =>
             run(() => api.waiveRequirementLine(modal.requirement.id, reason), "Line marked N/A.")
-          }
-        />
-      )}
-      {modal?.kind === "sign" && (
-        <SignChecklistModal
-          role={modal.role}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSubmit={(name, mark) =>
-            run(
-              () =>
-                api.signStaffChecklist({
-                  userId: profile!.userId,
-                  siteId: modal.siteId,
-                  role: modal.role,
-                  signatureName: name,
-                  signatureMark: mark,
-                }),
-              modal.role === "staff" ? "Checklist signed." : "Checklist countersigned.",
-            )
           }
         />
       )}
@@ -324,7 +307,6 @@ function ProfilePanel({
   onInitial,
   onEdit,
   onWaive,
-  onSign,
   onCorrect,
   onClose,
 }: {
@@ -338,7 +320,6 @@ function ProfilePanel({
   onInitial: (requirement: TrainingRequirementView) => void;
   onEdit: (requirement: TrainingRequirementView, existing: TrainingSignoff) => void;
   onWaive: (requirement: TrainingRequirementView) => void;
-  onSign: (role: "staff" | "hm", siteId: string) => void;
   onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
@@ -518,15 +499,14 @@ function ProfilePanel({
         <>
           <p className="muted">No signatures yet for this staff member.</p>
           {canInitialOwn && firstSiteId && (
-            <p>
-              <button
-                className="button primary"
-                disabled={busy}
-                onClick={() => onSign("staff", firstSiteId)}
-              >
-                Begin signature sheet
-              </button>
-            </p>
+            <TrainingSignField
+              profile={profile}
+              siteId={firstSiteId}
+              fieldName="staff_sign"
+              label="Staff signature"
+              actionLabel="Sign as {name}"
+              canAct
+            />
           )}
         </>
       )}
@@ -536,37 +516,41 @@ function ProfilePanel({
           return (
             <li key={counter.id}>
               <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
-              <span>
-                Staff:{" "}
-                {counter.staffSignedAt
-                  ? `${counter.staffSignatureName} · ${formatDate(counter.staffSignedAt)}`
-                  : "not signed"}
-              </span>
-              <span>
-                House manager:{" "}
-                {counter.hmSignedAt
-                  ? `${counter.hmSignatureName} · ${formatDate(counter.hmSignedAt)} — locked`
-                  : "not countersigned"}
-              </span>
+              <TrainingSignField
+                profile={profile}
+                siteId={counter.siteId}
+                fieldName="staff_sign"
+                label="Staff signature"
+                actionLabel="Sign as {name}"
+                canAct={canInitialOwn}
+                cantActReason="Not signed yet."
+                legacySigned={
+                  counter.staffSignedAt
+                    ? {
+                        signerName: counter.staffSignatureName ?? "Signed",
+                        signedAt: counter.staffSignedAt,
+                      }
+                    : null
+                }
+              />
+              <TrainingSignField
+                profile={profile}
+                siteId={counter.siteId}
+                fieldName="hm_countersign"
+                label="House manager countersignature"
+                actionLabel="Countersign as {name}"
+                canAct={isHm}
+                cantActReason="Not countersigned yet."
+                legacySigned={
+                  counter.hmSignedAt
+                    ? {
+                        signerName: counter.hmSignatureName ?? "Signed",
+                        signedAt: counter.hmSignedAt,
+                      }
+                    : null
+                }
+              />
               <span className="signature-actions">
-                {canInitialOwn && !counter.staffSignedAt && (
-                  <button
-                    className="button"
-                    disabled={busy}
-                    onClick={() => onSign("staff", counter.siteId)}
-                  >
-                    Sign as staff
-                  </button>
-                )}
-                {isHm && counter.staffSignedAt && !locked && (
-                  <button
-                    className="button"
-                    disabled={busy}
-                    onClick={() => onSign("hm", counter.siteId)}
-                  >
-                    Countersign as HM
-                  </button>
-                )}
                 {locked && canCorrect && (
                   <button
                     className="button"
@@ -597,6 +581,52 @@ function ProfilePanel({
         </p>
       </section>
     </section>
+  );
+}
+
+function TrainingSignField({
+  profile,
+  siteId,
+  fieldName,
+  label,
+  actionLabel,
+  canAct,
+  cantActReason,
+  legacySigned,
+}: {
+  profile: StaffTrainingProfile;
+  siteId: string;
+  fieldName: "staff_sign" | "hm_countersign";
+  label: string;
+  actionLabel: string;
+  canAct: boolean;
+  cantActReason?: string;
+  legacySigned?: { signerName: string; signedAt: string } | null;
+}) {
+  return (
+    <SignatureField
+      documentType="training_checklist"
+      documentId={trainingChecklistDocId(profile.userId, siteId)}
+      fieldName={fieldName}
+      label={label}
+      actionLabel={actionLabel}
+      getDocumentPayload={() =>
+        trainingCountersignPayload({
+          userId: profile.userId,
+          siteId,
+          lines: profile.requirements
+            .filter((row) => row.siteId === siteId)
+            .map((row) => ({
+              topicId: row.topicId,
+              topicTitle: row.topicTitle,
+              resolvedStatus: row.resolvedStatus,
+            })),
+        })
+      }
+      canAct={canAct}
+      cantActReason={cantActReason}
+      legacySigned={legacySigned ?? null}
+    />
   );
 }
 
@@ -825,50 +855,6 @@ function RequestCorrectionModal({
         </label>
         <button className="button" type="submit" disabled={busy}>
           Unlock sheet
-        </button>
-      </form>
-    </Modal>
-  );
-}
-
-function SignChecklistModal({
-  role,
-  busy,
-  onClose,
-  onSubmit,
-}: {
-  role: "staff" | "hm";
-  busy: boolean;
-  onClose: () => void;
-  onSubmit: (name: string, mark?: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [mark, setMark] = useState("");
-  return (
-    <Modal
-      title={role === "staff" ? "Sign training checklist" : "Countersign as house manager"}
-      onClose={onClose}
-    >
-      <p className="muted">
-        “I acknowledge that I have been informed, understand, and have had a chance to ask
-        follow-up questions regarding all training aspects above.”
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit(name, mark || undefined);
-        }}
-      >
-        <label>
-          Type your name
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label>
-          Signature mark
-          <SignaturePad onChange={setMark} />
-        </label>
-        <button className="button" type="submit" disabled={busy}>
-          {role === "staff" ? "Sign" : "Countersign"}
         </button>
       </form>
     </Modal>

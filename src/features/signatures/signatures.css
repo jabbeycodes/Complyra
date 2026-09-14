@@ -1,0 +1,269 @@
+/* E-signature styles — mobile-first, no gradients, touch-sized targets. */
+
+.sig-field {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.sig-field.compact {
+  margin: 4px 0;
+}
+.sig-field-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.sig-field .button {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* --- Signature pad --- */
+.sig-pad {
+  display: grid;
+  gap: 8px;
+}
+.sig-pad-canvas-wrap {
+  border: 1px dashed #c9b89a;
+  border-radius: 12px;
+  background: #faf6ef;
+  overflow: hidden;
+}
+.sig-pad-canvas-wrap canvas {
+  touch-action: none;
+}
+.sig-pad-clear {
+  justify-self: start;
+  min-height: 44px;
+  padding: 10px 16px;
+}
+
+/* --- Adoption screen --- */
+.sig-method-block {
+  margin-top: 16px;
+}
+.sig-method-block h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.sig-methods {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.sig-methods button {
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid #e2dccf;
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 600;
+  font-size: 14px;
+}
+.sig-methods button.active {
+  border-color: #5c5648;
+  background: #f3efe6;
+}
+.sig-type {
+  display: grid;
+  gap: 12px;
+}
+.sig-type label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.sig-type input {
+  font-size: 16px;
+  padding: 12px;
+  border: 1px solid #d8d2c4;
+  border-radius: 10px;
+  background: #fff;
+  min-height: 44px;
+}
+.sig-fonts {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.sig-fonts legend {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 0;
+  margin-bottom: 4px;
+}
+.sig-font-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e2dccf;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  min-height: 56px;
+  cursor: pointer;
+}
+.sig-font-option.selected {
+  border-color: #5c5648;
+  background: #f3efe6;
+}
+.sig-font-option input[type="radio"] {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.sig-font-name {
+  font-size: 13px;
+  color: #6b6257;
+  min-width: 64px;
+}
+.sig-font-preview {
+  font-size: 30px;
+  color: #2b2620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sig-upload {
+  display: grid;
+  gap: 8px;
+}
+.sig-upload input[type="file"] {
+  font-size: 16px;
+  min-height: 44px;
+}
+.sig-upload-preview {
+  max-width: 100%;
+  max-height: 120px;
+  border: 1px solid #e2dccf;
+  border-radius: 10px;
+  background: #fff;
+  justify-self: start;
+}
+.sig-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid #d8d2c4;
+  border-radius: 12px;
+  background: #faf6ef;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.sig-consent input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* --- Signed stamp + seal --- */
+.sig-stamp {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d8d2c4;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+.sig-stamp-img {
+  max-width: 220px;
+  max-height: 72px;
+  background: #faf6ef;
+  border-radius: 8px;
+}
+.sig-stamp-fallback {
+  font-weight: 700;
+  font-size: 18px;
+}
+.sig-stamp-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.sig-seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sig-seal.valid {
+  color: #2f5d33;
+}
+.sig-seal.invalid {
+  color: #8f3b26;
+}
+.sig-seal.checking {
+  color: #6b6257;
+  font-weight: 400;
+}
+
+/* --- Settings + profile --- */
+.signature-settings-controls {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.sig-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sig-toggle input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+}
+.profile-signature {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e9e6e1;
+  display: grid;
+  gap: 10px;
+}
+.profile-signature h3 {
+  font-size: 15px;
+}
+.profile-signature .button {
+  min-height: 44px;
+  justify-self: start;
+}
+.profile-signature-images {
+  display: flex;
+  gap: 16px;
+}
+.profile-signature-images figure {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+.profile-signature-images img {
+  max-width: 180px;
+  max-height: 64px;
+  border: 1px solid #e2dccf;
+  border-radius: 8px;
+  background: #faf6ef;
+}
+.profile-signature-images figcaption {
+  font-size: 12px;
+  color: #6b6257;
+}
+
+@media (max-width: 560px) {
+  .sig-font-preview {
+    font-size: 24px;
+  }
+  .profile-signature-images {
+    flex-direction: column;
+  }
+}

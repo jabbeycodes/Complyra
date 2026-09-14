@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { Modal } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { InitialsField } from "../signatures/SignatureField";
+import { certificatePayload } from "../signatures/documentPayloads";
 import {
   CERT_STATUS_CLASS,
   certCountdownLabel,
@@ -23,7 +25,7 @@ export default function StaffCertificatesModal({
   userId: string;
   onClose: () => void;
 }) {
-  const { api } = useData();
+  const { api, session } = useData();
   const [certs, setCerts] = useState<StaffCertificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -91,6 +93,14 @@ export default function StaffCertificatesModal({
                     </button>
                   </div>
                 )}
+                <InitialsField
+                  documentType="certificate"
+                  documentId={cert.id}
+                  fieldName="staff_ack"
+                  label="Staff acknowledgment"
+                  getDocumentPayload={() => certificatePayload(cert)}
+                  canAct={session?.userId === cert.userId}
+                />
               </div>
             );
           })}

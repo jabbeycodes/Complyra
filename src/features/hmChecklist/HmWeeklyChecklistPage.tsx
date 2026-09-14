@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Download, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Badge, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { SignatureField } from "../signatures/SignatureField";
+import { hmChecklistPayload } from "../signatures/documentPayloads";
 import "./hmChecklist.css";
 import { downloadBlob } from "../../data/openFile";
 import { todayIso } from "../../data/chart";
@@ -67,7 +69,6 @@ export default function HmWeeklyChecklistPage() {
   const [lists, setLists] = useState<HmWeeklyChecklist[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [signature, setSignature] = useState("");
   const [logKind, setLogKind] = useState<ServiceLogKind>("class_reminder");
   const [logDetail, setLogDetail] = useState("");
   const [logStaff, setLogStaff] = useState("");
@@ -314,34 +315,29 @@ export default function HmWeeklyChecklistPage() {
 
           <h3>Attestation</h3>
           <p className="attestation">{CHECKLIST_ATTESTATION_TEXT}</p>
-          <div className="form-row">
-            <label>
-              HM signature (type your name)
-              <input
-                className="input"
-                value={signature}
-                onChange={(e) => setSignature(e.target.value)}
-                placeholder="Type your full name to sign"
-              />
-            </label>
-          </div>
+          <SignatureField
+            documentType="hm_checklist"
+            documentId={openList.id}
+            fieldName="hm_signature"
+            label="HM signature"
+            actionLabel="Sign & submit as {name}"
+            getDocumentPayload={() => hmChecklistPayload(openList)}
+            canAct={session?.userId === openList.assignedToUserId}
+            legacySigned={
+              openList.submittedAt
+                ? {
+                    signerName: openList.attestation?.signedBy ?? "Signed",
+                    signedAt: openList.submittedAt,
+                  }
+                : null
+            }
+          />
           <div className="panel-actions">
             <button
               className="button secondary"
               onClick={() => run(() => download(openList.id))}
             >
               <Download size={16} /> Download PDF
-            </button>
-            <button
-              className="button primary"
-              onClick={() =>
-                run(async () => {
-                  await api.submitWeeklyChecklist(openList.id, signature);
-                  setSignature("");
-                })
-              }
-            >
-              <CheckCircle2 size={16} /> Sign &amp; submit
             </button>
           </div>
         </section>

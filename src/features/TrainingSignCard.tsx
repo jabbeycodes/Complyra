@@ -5,6 +5,11 @@ import {
   trainingProgress,
   type TrainingRowView,
 } from "../data/chart";
+import { SignatureField } from "./signatures/SignatureField";
+import {
+  legacyTrainingDocId,
+  legacyTrainingPayload,
+} from "./signatures/documentPayloads";
 
 export default function TrainingSignCard({
   row,
@@ -12,8 +17,6 @@ export default function TrainingSignCard({
   canSignStaff,
   canSignHm,
   onInitial,
-  onSignStaff,
-  onSignHm,
   onDownload,
   onPrint,
 }: {
@@ -22,13 +25,22 @@ export default function TrainingSignCard({
   canSignStaff: boolean;
   canSignHm: boolean;
   onInitial: (lineId: string) => void;
-  onSignStaff: () => void;
-  onSignHm: () => void;
   onDownload: () => void;
   onPrint: () => void;
 }) {
   const { done, total } = trainingProgress(row.checklist);
   const readyToSign = allLinesInitialed(row.checklist);
+  const documentId = legacyTrainingDocId(row.checklist.id);
+  const buildPayload = () =>
+    legacyTrainingPayload({
+      checklistId: row.checklist.id,
+      staffUserId: row.checklist.staffUserId,
+      staffName: row.checklist.staffName,
+      items: row.checklist.items.map((line) => ({
+        id: line.id,
+        title: line.title,
+      })),
+    });
   return (
     <article className="obligation-card training-card">
       <header>
@@ -84,23 +96,47 @@ export default function TrainingSignCard({
         <button className="button" onClick={onPrint}>
           <Printer size={16} /> Print
         </button>
-        {canSignStaff && !row.checklist.staffSignedAt && (
-          <button
-            className="button primary"
-            disabled={!readyToSign}
-            onClick={onSignStaff}
-          >
-            Sign as staff
-          </button>
-        )}
-        {canSignHm &&
-          row.checklist.staffSignedAt &&
-          !row.checklist.hmSignedAt && (
-            <button className="button primary" onClick={onSignHm}>
-              Sign as house manager
-            </button>
-          )}
       </div>
+      <SignatureField
+        documentType="training_checklist"
+        documentId={documentId}
+        fieldName="staff_sign"
+        label="Staff signature"
+        getDocumentPayload={buildPayload}
+        canAct={canSignStaff && readyToSign}
+        cantActReason={
+          !readyToSign
+            ? "Check off every training item before you sign."
+            : "Not signed yet."
+        }
+        legacySigned={
+          row.checklist.staffSignedAt
+            ? {
+                signerName:
+                  row.checklist.staffSignatureName ?? row.checklist.staffName,
+                signedAt: row.checklist.staffSignedAt,
+              }
+            : null
+        }
+      />
+      <SignatureField
+        documentType="training_checklist"
+        documentId={documentId}
+        fieldName="hm_countersign"
+        label="House manager signature"
+        actionLabel="Countersign as {name}"
+        getDocumentPayload={buildPayload}
+        canAct={canSignHm}
+        cantActReason="Not countersigned yet."
+        legacySigned={
+          row.checklist.hmSignedAt
+            ? {
+                signerName: row.checklist.hmSignatureName ?? "Signed",
+                signedAt: row.checklist.hmSignedAt,
+              }
+            : null
+        }
+      />
     </article>
   );
 }

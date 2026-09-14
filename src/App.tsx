@@ -70,6 +70,8 @@ import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
+import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
+import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
 // LIFEPATH-P2-IMPORT (training engine)
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
@@ -1683,6 +1685,7 @@ export default function App() {
                     </div>
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
+                    <SignatureSettingsSection onSaved={notify} />
                     <div className="settings-row">
                       <span>
                         <strong>Document intelligence</strong>
@@ -2366,6 +2369,7 @@ export default function App() {
             you can see, what you can approve, and which acknowledgment rows you
             may sign.
           </p>
+          <ProfileSignatureSection />
           <button
             className="button full"
             onClick={() => {

@@ -883,3 +883,81 @@ export interface MedSupplyStatus {
   alerts: MedInventoryView[];
   summary: string;
 }
+
+// ===== E-SIGNATURE TYPES (DocuSign-style adopted signatures) =====
+
+/** Document kinds that can carry adopted-signature events. */
+export type SignableDocumentType =
+  | "delegation_form"
+  | "training_checklist"
+  | "hm_checklist"
+  | "certificate";
+
+/**
+ * One user's adopted signature + initials + ESIGN/UETA consent.
+ * Hosted: mirrors the `user_signatures` table (sibling-owned migration).
+ */
+export interface UserSignature {
+  userId: string;
+  agencyId: string;
+  signaturePath: string;
+  initialsPath: string;
+  adoptedAt: string;
+  consentAt: string;
+  consentTextVersion: string;
+}
+
+/** What the client needs to know about its own adoption (no user id). */
+export interface AdoptedSignature {
+  signaturePath: string;
+  initialsPath: string;
+  adoptedAt: string;
+  consentAt: string;
+  consentTextVersion: string;
+}
+
+/**
+ * One signature event binding a signer to a document hash.
+ * Hosted: mirrors the `signature_events` table (sibling-owned migration).
+ */
+export interface SignatureEvent {
+  id: string;
+  agencyId: string;
+  userId: string;
+  signerName: string;
+  documentType: SignableDocumentType;
+  documentId: string;
+  fieldName: string;
+  kind: "signature" | "initials";
+  documentHash: string;
+  signedAt: string;
+}
+
+/** Agency-level toggles for the adoption methods staff may use. */
+export interface SignatureSettings {
+  allowDraw: boolean;
+  allowType: boolean;
+  allowUpload: boolean;
+}
+
+export interface AdoptSignatureInput {
+  signatureDataUrl: string;
+  initialsDataUrl: string;
+  consentTextVersion: string;
+  consentGiven: boolean;
+}
+
+export interface ApplySignatureInput {
+  documentType: SignableDocumentType;
+  documentId: string;
+  fieldName: string;
+  kind: "signature" | "initials";
+  /** Canonical signable CONTENT of the document (no signature fields). */
+  documentPayload: object;
+}
+
+export interface ApplySignatureResult {
+  eventId: string;
+  signedAt: string;
+  documentHash: string;
+}

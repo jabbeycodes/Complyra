@@ -22,6 +22,8 @@ import {
 import type { TrainingRowView } from "../data/chart";
 import SignaturePad from "./SignaturePad";
 import TrainingSignCard from "./TrainingSignCard";
+import { SignatureField } from "./signatures/SignatureField";
+import { delegationFormPayload } from "./signatures/documentPayloads";
 
 type Tab = "required" | "checked";
 
@@ -46,7 +48,6 @@ export default function AssignedDocsPanel({
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [tab, setTab] = useState<Tab>("required");
   const [signingId, setSigningId] = useState<string | null>(null);
-  const [rnSigningId, setRnSigningId] = useState<string | null>(null);
   const [legalName, setLegalName] = useState(session?.fullName ?? "");
   const [mark, setMark] = useState("");
   const [error, setError] = useState("");
@@ -252,17 +253,16 @@ export default function AssignedDocsPanel({
           items={stack.required}
           training={stack.myTraining}
           signingId={signingId}
-          rnSigningId={rnSigningId}
           legalName={legalName}
           mark={mark}
           canSign={can(session, "acknowledgments.sign_own")}
           nurseFirst={nurseFirst}
+          individualName={person.name}
           editExtract={editExtract}
           editDelegation={editDelegation}
           canSubmit={stack.canSubmit}
           submittedAt={stack.mySubmissionAt}
           onSignId={setSigningId}
-          onRnSignId={setRnSigningId}
           onLegalName={setLegalName}
           onMark={setMark}
           onOpen={(id) => run(() => api.markObligationOpened(id))}
@@ -270,13 +270,6 @@ export default function AssignedDocsPanel({
             run(async () => {
               await api.signObligation(id, legalName, mark);
               setSigningId(null);
-              setMark("");
-            })
-          }
-          onRnSign={(id) =>
-            run(async () => {
-              await api.signDelegationRn(id, legalName, mark);
-              setRnSigningId(null);
               setMark("");
             })
           }
@@ -311,17 +304,6 @@ export default function AssignedDocsPanel({
           onSubmit={() => run(() => api.submitPlanPacket(individualId))}
           onInitialLine={(checklistId, lineId) =>
             run(() => api.initialTrainingLine(checklistId, lineId))
-          }
-          onSignTraining={(role) =>
-            stack.myTraining
-              ? run(() =>
-                  api.signTrainingChecklist(
-                    stack.myTraining!.checklist.id,
-                    role,
-                    session.fullName,
-                  ),
-                )
-              : Promise.resolve()
           }
           onOpenTraining={async (mode) => {
             if (!stack.myTraining) return;
@@ -520,22 +502,23 @@ function ClinicalRenewals({
 function RequiredList({
   items,
   signingId,
-  rnSigningId,
+
   legalName,
   mark,
   canSign,
   nurseFirst,
+  individualName,
   editExtract,
   editDelegation,
   canSubmit,
   submittedAt,
   onSignId,
-  onRnSignId,
+
   onLegalName,
   onMark,
   onOpen,
   onSign,
-  onRnSign,
+
   onToggle,
   onSubmit,
   discontinueId,
@@ -546,7 +529,7 @@ function RequiredList({
   onDiscontinue,
   training,
   onInitialLine,
-  onSignTraining,
+
   onOpenTraining,
   canCheckTraining,
   canSignTrainingStaff,
@@ -554,22 +537,20 @@ function RequiredList({
 }: {
   items: ObligationView[];
   signingId: string | null;
-  rnSigningId: string | null;
   legalName: string;
   mark: string;
   canSign: boolean;
   nurseFirst: boolean;
+  individualName: string;
   editExtract: boolean;
   editDelegation: boolean;
   canSubmit: boolean;
   submittedAt: string | null;
   onSignId: (id: string | null) => void;
-  onRnSignId: (id: string | null) => void;
   onLegalName: (value: string) => void;
   onMark: (value: string) => void;
   onOpen: (id: string) => void;
   onSign: (id: string) => void;
-  onRnSign: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onSubmit: () => void;
   discontinueId: string | null;
@@ -580,7 +561,6 @@ function RequiredList({
   onDiscontinue: (id: string) => void;
   training: TrainingRowView | null;
   onInitialLine: (checklistId: string, lineId: string) => void;
-  onSignTraining: (role: "staff" | "hm") => void;
   onOpenTraining: (mode: "download" | "print") => Promise<void>;
   canCheckTraining: boolean;
   canSignTrainingStaff: boolean;
@@ -602,8 +582,6 @@ function RequiredList({
           canSignStaff={canSignTrainingStaff}
           canSignHm={canSignTrainingHm}
           onInitial={(lineId) => onInitialLine(training.checklist.id, lineId)}
-          onSignStaff={() => onSignTraining("staff")}
-          onSignHm={() => onSignTraining("hm")}
           onDownload={() => {
             void onOpenTraining("download");
           }}
@@ -677,14 +655,38 @@ function RequiredList({
                   Discontinued with {view.item.discontinueTitle}
                 </p>
               )}
-              {waitingOnRn && nurseFirst && (
-                <button
-                  className="button primary"
-                  onClick={() => onRnSignId(view.item.id)}
-                >
-                  <PenLine size={16} /> Sign as delegating RN
-                </button>
-              )}
+              {view.item.kind === "delegation" &&
+                view.item.delegationForm &&
+                (waitingOnRn || view.item.rnSignedAt) && (
+                  <SignatureField
+                    documentType="delegation_form"
+                    documentId={view.item.id}
+                    fieldName="rn_signature"
+                    label="Delegating RN signature"
+                    getDocumentPayload={() =>
+                      delegationFormPayload({
+                        obligationId: view.item.id,
+                        individualName,
+                        taskTitle: view.item.title ?? "",
+                        form: view.item.delegationForm!,
+                      })
+                    }
+                    canAct={waitingOnRn && nurseFirst}
+                    cantActReason={
+                      waitingOnRn && !nurseFirst
+                        ? "Waiting for the delegating RN."
+                        : undefined
+                    }
+                    legacySigned={
+                      view.item.rnSignedAt
+                        ? {
+                            signerName: view.item.rnSignatureName ?? "Signed",
+                            signedAt: view.item.rnSignedAt,
+                          }
+                        : null
+                    }
+                  />
+                )}
               {openForMe && mine && !mine.signedAt && canSign && staffMaySign && (
                 <>
                   <button className="button" onClick={() => onOpen(mine.id)}>
@@ -742,25 +744,6 @@ function RequiredList({
                   Upload order and turn off
                 </button>
               </form>
-            )}
-            {rnSigningId === view.item.id && (
-              <div className="sign-box">
-                <label>
-                  Printed name
-                  <input
-                    value={legalName}
-                    onChange={(e) => onLegalName(e.target.value)}
-                  />
-                </label>
-                <SignaturePad onChange={onMark} />
-                <button
-                  className="button primary"
-                  disabled={!mark}
-                  onClick={() => onRnSign(view.item.id)}
-                >
-                  Save RN signature
-                </button>
-              </div>
             )}
             {signingId === mine?.id && (
               <div className="sign-box">

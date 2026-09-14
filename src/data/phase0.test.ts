@@ -486,5 +486,5 @@ test("training UI uses a roster trainer select, not free text", () => {
   assert.ok(page.includes("Select a trainer"));
   assert.ok(!page.includes("setTrainerName"));
   assert.ok(page.includes("Request correction"));
-  assert.ok(page.includes("Begin signature sheet"));
+  assert.ok(page.includes('fieldName="staff_sign"'));
 });

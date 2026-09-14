@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { Download, LockKeyhole } from "lucide-react";
 import { Badge, formatDate, Modal } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
@@ -18,7 +18,8 @@ import {
 } from "../../data/types";
 import LifepathDelegationForm from "./LifepathDelegationForm";
 import ImprovedDelegationForm from "./ImprovedDelegationForm";
-import SignaturePad from "../SignaturePad";
+import { SignatureField } from "../signatures/SignatureField";
+import { delegationFormPayload } from "../signatures/documentPayloads";
 
 /**
  * Delegation detail view: template toggle (rendering only), form editing,
@@ -36,7 +37,6 @@ export default function DelegationFormDetail({
   const [error, setError] = useState("");
   const [template, setTemplate] = useState<"lifepath_exact" | "complyrer_improved" | null>(null);
   const [editing, setEditing] = useState(false);
-  const [signingRow, setSigningRow] = useState<number | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
 
   const view = workspace?.planStacks
@@ -69,6 +69,10 @@ export default function DelegationFormDetail({
   const rnSignatureLine = item.rnSignedAt
     ? `${item.rnSignatureName ?? "Signed"} · ${formatDate(item.rnSignedAt)}`
     : null;
+  // A signed form is read-only until a formal correction flow: hide every
+  // content-editing control (the API enforces the same lock server-side).
+  const signed =
+    Boolean(item.rnSignedAt) || form.roster.some((row) => row.signedAt);
 
   async function downloadPdf(obligationId: string, kind: "exact" | "improved") {
     setPdfBusy(true);
@@ -143,14 +147,20 @@ export default function DelegationFormDetail({
         />
       )}
 
-      {editor && (
+      {editor && !signed && (
         <div className="delegation-actions">
           <button className="button" onClick={() => setEditing((v) => !v)}>
             {editing ? "Close form editor" : "Edit form details"}
           </button>
         </div>
       )}
-      {editing && editor && (
+      {signed && (
+        <p className="quiet-note">
+          <LockKeyhole size={14} /> This form is signed and read-only. Contact an
+          administrator about the formal correction process to make changes.
+        </p>
+      )}
+      {editing && editor && !signed && (
         <FormEditor
           form={form}
           onSave={(patch) =>
@@ -162,45 +172,39 @@ export default function DelegationFormDetail({
         />
       )}
 
-      <RnSignBlock
-        itemId={item.id}
-        rnSignedAt={item.rnSignedAt}
-        canSign={rnSigner && !item.rnSignedAt}
-        onSign={(name, mark) =>
-          run(async () => {
-            await api.signDelegationRn(item.id, name, mark);
-            await api.updateDelegationForm({
-              obligationId: item.id,
-              patch: {
-                delegatingRn: {
-                  name,
-                  signatureName: name,
-                  dateSigned: new Date().toISOString().slice(0, 10),
-                },
-              },
-            });
+      <SignatureField
+        documentType="delegation_form"
+        documentId={item.id}
+        fieldName="rn_signature"
+        label="Delegating RN signature (signs first)"
+        getDocumentPayload={() =>
+          delegationFormPayload({
+            obligationId: item.id,
+            individualName: person?.name ?? "",
+            taskTitle: item.title,
+            form,
           })
+        }
+        canAct={rnSigner}
+        cantActReason="Waiting on the delegating RN signature — staff sign after."
+        legacySigned={
+          item.rnSignedAt
+            ? {
+                signerName: item.rnSignatureName ?? "Signed",
+                signedAt: item.rnSignedAt,
+              }
+            : null
         }
       />
 
       <RosterBlock
+        obligationId={item.id}
+        individualName={person?.name ?? ""}
+        taskTitle={item.title}
         form={form}
         editor={editor}
         rnSigned={Boolean(item.rnSignedAt)}
-        signingRow={signingRow}
-        onSigningRow={setSigningRow}
-        onSign={(rowIndex, signatureName, signatureMark, initials) =>
-          run(async () => {
-            await api.signDelegationRow({
-              obligationId: item.id,
-              rowIndex,
-              signatureName,
-              signatureMark,
-              initials,
-            });
-            setSigningRow(null);
-          })
-        }
+        signed={signed}
         onRescind={(rowIndex, rescindedDate) =>
           run(() => api.rescindDelegationRow({ obligationId: item.id, rowIndex, rescindedDate }))
         }
@@ -212,70 +216,37 @@ export default function DelegationFormDetail({
   );
 }
 
-function RnSignBlock({
-  itemId,
-  rnSignedAt,
-  canSign,
-  onSign,
-}: {
-  itemId: string;
-  rnSignedAt: string | null;
-  canSign: boolean;
-  onSign: (name: string, mark: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [mark, setMark] = useState("");
-  if (rnSignedAt) return null;
-  if (!canSign) {
-    return <p className="stack-help">Waiting on the delegating RN signature — staff sign after.</p>;
-  }
-  return (
-    <form
-      className="panel delegation-sign-panel"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSign(name, mark);
-      }}
-    >
-      <h4>Delegating RN signature (signs first)</h4>
-      <label>
-        Legal name
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Andrea Murdock, RN" />
-      </label>
-      <SignaturePad onChange={setMark} />
-      <button className="button" type="submit" disabled={!name.trim() || !mark} data-testid={`rn-sign-${itemId}`}>
-        Sign as delegating RN
-      </button>
-    </form>
-  );
-}
-
 function RosterBlock({
+  obligationId,
+  individualName,
+  taskTitle,
   form,
   editor,
   rnSigned,
-  signingRow,
-  onSigningRow,
-  onSign,
+  signed,
   onRescind,
   onSaveRoster,
 }: {
+  obligationId: string;
+  individualName: string;
+  taskTitle: string;
   form: DelegationForm;
   editor: boolean;
   rnSigned: boolean;
-  signingRow: number | null;
-  onSigningRow: (i: number | null) => void;
-  onSign: (rowIndex: number, name: string, mark: string, initials: string) => void;
+  /** Any signature event exists: the form is read-only. */
+  signed: boolean;
   onRescind: (rowIndex: number, date: string) => void;
   onSaveRoster: (roster: DelegationRosterRow[]) => void;
 }) {
+  const { session } = useData();
   const [draft, setDraft] = useState<DelegationRosterRow[] | null>(null);
   const [editingRoster, setEditingRoster] = useState(false);
   const rows = draft ?? form.roster;
+  const myName = (session?.fullName ?? "").trim().toLowerCase();
   return (
     <section className="panel">
       <h4>Employee roster</h4>
-      {editor && (
+      {editor && !signed && (
         <div className="chart-actions">
           <button
             className="button"
@@ -306,7 +277,6 @@ function RosterBlock({
             <th>Print name / title</th>
             <th>Signature</th>
             <th>Rescinded</th>
-            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -372,40 +342,51 @@ function RosterBlock({
                 )}
               </td>
               <td>
-                {row.signedAt ? (
-                  <>
-                    {row.signatureName} ({row.initials})
-                    <br />
-                    <span className="delegation-small">{formatDate(row.signedAt)}</span>
-                  </>
-                ) : signingRow === i ? (
-                  <RowSignForm
-                    onCancel={() => onSigningRow(null)}
-                    onSubmit={(name, mark, initials) => onSign(i, name, mark, initials)}
-                  />
-                ) : (
-                  <span className="delegation-small">Unsigned</span>
-                )}
+                {(() => {
+                  const rowName = row.printName.trim();
+                  const isMine = rowName.length > 0 && rowName.toLowerCase() === myName;
+                  return (
+                    <SignatureField
+                      compact
+                      documentType="delegation_form"
+                      documentId={obligationId}
+                      fieldName={`row:${i}`}
+                      label={`Row ${i + 1} signature`}
+                      getDocumentPayload={() =>
+                        delegationFormPayload({
+                          obligationId,
+                          individualName,
+                          taskTitle,
+                          form,
+                        })
+                      }
+                      canAct={rnSigned && isMine}
+                      cantActReason={
+                        row.signedAt
+                          ? undefined
+                          : !rnSigned
+                            ? "The delegating RN must sign first."
+                            : "Unsigned"
+                      }
+                      legacySigned={
+                        row.signedAt
+                          ? {
+                              signerName: row.signatureName || rowName || "Signed",
+                              signedAt: row.signedAt,
+                            }
+                          : null
+                      }
+                    />
+                  );
+                })()}
               </td>
               <td>
                 {row.rescindedDate ? (
                   formatDate(row.rescindedDate)
-                ) : editor && row.printName ? (
+                ) : editor && !signed && row.printName ? (
                   <RescindRowInput onRescind={(date) => onRescind(i, date)} />
                 ) : (
                   "—"
-                )}
-              </td>
-              <td>
-                {!row.signedAt && signingRow !== i && row.printName.trim() && (
-                  <button
-                    className="button"
-                    disabled={!rnSigned}
-                    title={rnSigned ? "Sign this row" : "The delegating RN must sign first"}
-                    onClick={() => onSigningRow(i)}
-                  >
-                    Sign
-                  </button>
                 )}
               </td>
             </tr>
@@ -416,44 +397,6 @@ function RosterBlock({
         <p className="stack-help">Staff rows unlock for signing once the delegating RN signs.</p>
       )}
     </section>
-  );
-}
-
-function RowSignForm({
-  onSubmit,
-  onCancel,
-}: {
-  onSubmit: (name: string, mark: string, initials: string) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [mark, setMark] = useState("");
-  const [initials, setInitials] = useState("");
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit(name, mark, initials);
-      }}
-    >
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Legal name" aria-label="Legal name" />
-      <SignaturePad onChange={setMark} />
-      <input
-        value={initials}
-        onChange={(e) => setInitials(e.target.value)}
-        placeholder="Initials"
-        aria-label="Initials"
-        maxLength={4}
-      />
-      <div className="chart-actions">
-        <button className="button primary" type="submit" disabled={!name.trim() || !mark || !initials.trim()}>
-          Sign row
-        </button>
-        <button className="button" type="button" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
   );
 }
 
