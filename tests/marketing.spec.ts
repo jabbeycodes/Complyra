@@ -20,9 +20,15 @@ test.describe("marketing legal pages", () => {
       await page.locator("footer").getByRole("link", { name: label, exact: true }).first().click();
       await expect(page).toHaveURL(`${marketing}${path}`);
       await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
-      await expect(page.locator("footer").getByRole("link", { name: "Privacy" })).toBeVisible();
-      await expect(page.locator("footer").getByRole("link", { name: "Terms" })).toBeVisible();
-      await expect(page.locator("footer").getByRole("link", { name: "Security" })).toBeVisible();
+      await expect(
+        page.locator("footer").getByRole("link", { name: "Privacy" }).first(),
+      ).toBeVisible();
+      await expect(
+        page.locator("footer").getByRole("link", { name: "Terms" }).first(),
+      ).toBeVisible();
+      await expect(
+        page.locator("footer").getByRole("link", { name: "Security" }).first(),
+      ).toBeVisible();
       await page.goto(`${marketing}/`);
     }
   });
@@ -59,7 +65,7 @@ test.describe("demo request path", () => {
     await page.goto(`${marketing}/#contact`);
     await page.getByLabel("Your name").fill("Jordan Lee");
     await page.getByLabel("Work email").fill("jordan@agency.org");
-    await page.getByLabel("Agency").fill("Cedar Ridge Supports");
+    await page.getByRole("textbox", { name: "Agency" }).fill("Cedar Ridge Supports");
     await page.getByLabel("What should we look at first?").selectOption("Delegations and signatures");
     await page.getByRole("button", { name: "Book a demo" }).click();
     await expect(page.getByRole("heading", { name: "Request received" })).toBeVisible();

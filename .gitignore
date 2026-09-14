@@ -3,6 +3,9 @@ dist
 public/privacy
 public/terms
 public/security
+public/privacy.html
+public/terms.html
+public/security.html
 public/legal.css
 .vercel
 .env
