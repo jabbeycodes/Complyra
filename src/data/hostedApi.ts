@@ -3423,16 +3423,78 @@ export class HostedApi implements ComplyraApi {
     userId: string,
     email: string,
   ): Promise<SessionUser | null> {
-    const { data: profile } = await this.client
-      .from("profiles")
-      .select("id, full_name, email, job_title, username, must_change_password, home_agency_id, platform_admin")
-      .eq("id", userId)
-      .maybeSingle();
-    const { data: membership } = await this.client
-      .from("memberships")
-      .select("agency_id, role, role_key, site_id, expires_on")
-      .eq("user_id", userId)
-      .maybeSingle();
+    // SECURITY DEFINER so a valid Auth user is not told they have no agency
+    // when memberships RLS cannot see their own row yet.
+    const { data: context } = await this.client.rpc("login_context");
+    const ctx = (context ?? {}) as {
+      profile?: Record<string, unknown> | null;
+      membership?: Record<string, unknown> | null;
+      agency?: Record<string, unknown> | null;
+    };
+    let profile = ctx.profile
+      ? {
+          id: String(ctx.profile.id),
+          full_name: String(ctx.profile.full_name ?? ""),
+          email: String(ctx.profile.email ?? email),
+          job_title: String(ctx.profile.job_title ?? ""),
+          username: String(ctx.profile.username ?? ""),
+          must_change_password: Boolean(ctx.profile.must_change_password),
+          platform_admin: Boolean(ctx.profile.platform_admin),
+        }
+      : null;
+    let membership = ctx.membership
+      ? {
+          agency_id: String(ctx.membership.agency_id),
+          role: String(ctx.membership.role),
+          role_key: String(ctx.membership.role_key ?? ctx.membership.role),
+          site_id: (ctx.membership.site_id as string | null) ?? null,
+          expires_on: ctx.membership.expires_on,
+        }
+      : null;
+    let agency = ctx.agency
+      ? {
+          id: String(ctx.agency.id),
+          name: String(ctx.agency.name ?? "Agency"),
+          agency_code: String(ctx.agency.agency_code ?? ""),
+          status: String(ctx.agency.status ?? "active"),
+        }
+      : null;
+
+    if (!profile) {
+      const { data } = await this.client
+        .from("profiles")
+        .select("id, full_name, email, job_title, username, must_change_password, home_agency_id, platform_admin")
+        .eq("id", userId)
+        .maybeSingle();
+      profile = data
+        ? {
+            id: data.id,
+            full_name: data.full_name,
+            email: data.email,
+            job_title: data.job_title,
+            username: data.username ?? "",
+            must_change_password: Boolean(data.must_change_password),
+            platform_admin: Boolean(data.platform_admin),
+          }
+        : null;
+    }
+    if (!membership) {
+      const { data } = await this.client
+        .from("memberships")
+        .select("agency_id, role, role_key, site_id, expires_on")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      membership = data
+        ? {
+            agency_id: data.agency_id,
+            role: String(data.role),
+            role_key: String(data.role_key ?? data.role),
+            site_id: data.site_id,
+            expires_on: data.expires_on,
+          }
+        : null;
+    }
     if (!profile || !membership) return null;
     if (
       membership.expires_on &&
@@ -3440,11 +3502,21 @@ export class HostedApi implements ComplyraApi {
     ) {
       return null;
     }
-    const { data: agency } = await this.client
-      .from("agencies")
-      .select("id, name, agency_code, status")
-      .eq("id", membership.agency_id)
-      .single();
+    if (!agency) {
+      const { data } = await this.client
+        .from("agencies")
+        .select("id, name, agency_code, status")
+        .eq("id", membership.agency_id)
+        .maybeSingle();
+      agency = data
+        ? {
+            id: data.id,
+            name: data.name,
+            agency_code: data.agency_code,
+            status: data.status,
+          }
+        : null;
+    }
     const roleKey = String(membership.role_key ?? membership.role);
     const { data: agencyRole } = await this.client
       .from("agency_roles")

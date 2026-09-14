@@ -31,8 +31,16 @@ async function upsert<T extends Record<string, unknown>>(
   table: string,
   rows: T[],
 ) {
+  await upsertOnConflict(table, rows, "id");
+}
+
+async function upsertOnConflict<T extends Record<string, unknown>>(
+  table: string,
+  rows: T[],
+  onConflict: string,
+) {
   if (!rows.length) return;
-  const { error } = await admin.from(table).upsert(rows, { onConflict: "id" });
+  const { error } = await admin.from(table).upsert(rows, { onConflict });
   if (error) throw new Error(`${table}: ${error.message}`);
 }
 
@@ -151,10 +159,9 @@ async function main() {
       address: row.address,
     })),
   );
-  await upsert(
+  await upsertOnConflict(
     "memberships",
     seed.memberships.map((row) => ({
-      id: row.id,
       agency_id: row.agencyId,
       user_id: uid(row.userId),
       role: row.role,
@@ -162,6 +169,7 @@ async function main() {
       site_id: row.siteId,
       expires_on: row.expiresOn,
     })),
+    "agency_id,user_id",
   );
   await upsert(
     "individuals",
