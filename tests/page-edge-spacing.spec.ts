@@ -115,7 +115,7 @@ test("desktop canvas and panel actions keep a 40/20 inset at 1280", async ({
   const menu = page.getByRole("button", { name: "Open navigation" });
   if (await menu.isVisible()) await menu.click();
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await page.getByRole("button", { name: "RN delegation forms" }).click();
 
   const openForm = await panelActionGap(page, "Delegations", "Open form");
@@ -159,7 +159,7 @@ test("phone canvas keeps 16px page inset and 20px panel actions at 390", async (
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
   await closeMobileNav(page);
-  await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await page.getByRole("button", { name: "RN delegation forms" }).click();
 
   const openForm = await panelActionGap(page, "Delegations", "Open form");

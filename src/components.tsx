@@ -79,8 +79,8 @@ export function Modal({
   );
 }
 export function Empty({
-  title = "Everything is in order",
-  text = "There are no requirements matching these filters.",
+  title = "No matching requirements",
+  text,
 }: {
   title?: string;
   text?: string;
@@ -91,7 +91,7 @@ export function Empty({
         <Check size={26} />
       </span>
       <h3>{title}</h3>
-      <p>{text}</p>
+      {text ? <p>{text}</p> : null}
     </div>
   );
 }
@@ -103,17 +103,17 @@ export function PageHeading({
 }: {
   eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   children?: ReactNode;
 }) {
   return (
     <div className="page-heading">
       <div>
-        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
       </div>
-      <div className="heading-actions">{children}</div>
+      {children ? <div className="heading-actions">{children}</div> : null}
     </div>
   );
 }

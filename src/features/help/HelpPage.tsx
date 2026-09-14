@@ -109,11 +109,7 @@ const FAQS: { q: string; a: string }[] = [
 export default function HelpPage() {
   return (
     <div data-tour="help">
-      <PageHeading
-        eyebrow="Support"
-        title="Help & resources"
-        description="How to use Complyrer's key features, answers to common questions, and where to get support."
-      />
+      <PageHeading title="Help" />
       <nav className="help-toc panel" aria-label="Help topics">
         <h2>Guides</h2>
         <ul>

@@ -41,9 +41,8 @@ export default function PlatformConsole({
   return (
     <>
       <PageHeading
-        eyebrow="COMPLYRER OPERATOR."
-        title="Approve agency setups"
-        description="Self-serve agencies stay pending until you activate them. Provider codes are always ALL CAPS."
+        title="Agencies"
+        description="Provider codes are always ALL CAPS."
       />
       {error && (
         <p className="inline-error" role="alert">

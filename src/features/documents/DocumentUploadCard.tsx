@@ -108,11 +108,7 @@ export default function DocumentUploadCard({
   if (!canUploadDocuments(session)) {
     return (
       <>
-        <PageHeading
-          eyebrow="AI DOCUMENT INTAKE."
-          title="Upload a plan document."
-          description="Turn a PCSP or physician order into reviewable, trackable items."
-        />
+        <PageHeading title="Documents" />
         <section className="panel">
           <Empty
             title="No access"
@@ -199,9 +195,8 @@ export default function DocumentUploadCard({
   return (
     <>
       <PageHeading
-        eyebrow="AI DOCUMENT INTAKE."
-        title="Upload a plan document."
-        description="The AI reads the document and proposes trackable items. A person reviews everything before anything is tracked."
+        title="Upload"
+        description="A person reviews every proposed item before anything is tracked."
       />
       {settingsError && (
         <section className="panel">

@@ -88,7 +88,6 @@ export default function IndividualChart({
   return (
     <div className="individual-chart">
       <PageHeading
-        eyebrow="INDIVIDUAL CHART"
         title={person.name}
         description={`${person.site}${
           profile.dmhId ? ` · DMH ${profile.dmhId}` : ""

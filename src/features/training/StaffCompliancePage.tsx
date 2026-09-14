@@ -161,9 +161,8 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   return (
     <div data-tour="training">
       <PageHeading
-        eyebrow="TRAINED. READY. IN RATIO."
-        title="Training & staff compliance"
-        description="In-home training checklists, sign-offs, and the in-ratio gate: 20 hours of training with 8 hours alongside the house manager before working alone."
+        title="Training"
+        description="In-ratio gate: 20 hours of training, including 8 hours alongside the house manager, before working alone."
       >
         {canManage && (
           <button className="button" onClick={() => setModal({ kind: "assign" })}>

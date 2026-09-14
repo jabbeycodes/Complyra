@@ -19,7 +19,7 @@ describe("HelpPage", () => {
       !html.includes("Welcome to Complyrer"),
       "must not render the onboarding welcome",
     );
-    assert.ok(html.includes("Help &amp; resources"), "help page title");
+    assert.ok(html.includes("<h1>Help</h1>"), "help page title");
   });
 
   it("guides the key features", () => {

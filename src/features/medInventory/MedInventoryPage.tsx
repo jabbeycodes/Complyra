@@ -71,9 +71,8 @@ export default function MedInventoryPage() {
   return (
     <div data-tour="med-inventory">
       <PageHeading
-        eyebrow="MEDICATION SUPPLY."
-        title="Medication supply forecast"
-        description="A projection of pills on hand — not a medication administration record. Delivery-day counts, daily countdowns, dose exceptions, and reorder alerts for every home."
+        title="Supply forecast"
+        description="Projected pills on hand — not a medication administration record."
       />
       {error && <p className="form-error">{error}</p>}
       <p style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

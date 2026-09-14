@@ -15,7 +15,6 @@ import {
   Download,
   FileText,
   Activity as ActivityIcon,
-  CircleCheck,
   ClipboardCheck,
   PenLine,
   BookOpen,
@@ -116,20 +115,10 @@ export default function Dashboard({
   return (
     <>
       <div className="dashboard-heading">
-        <div className="eyebrow">YOUR AGENCY, AT A GLANCE</div>
         <div className="heading-row">
-          <div>
-            <h1>
-              A little clarity. A lot of confidence
-              <span className="purple-dot">.</span>
-            </h1>
-            <p>
-              Agency-wide scores first. Then the homes you are assigned to, and
-              the work waiting on you.
-            </p>
-          </div>
-          <button className="button" onClick={onExport}>
-            <Download size={16} /> Export report (PDF)
+          <h1>Overview</h1>
+          <button className="button" onClick={onExport} aria-label="Export PDF report">
+            <Download size={16} /> Export
           </button>
         </div>
       </div>
@@ -162,22 +151,22 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
+      {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">
           <ShieldCheck size={25} />
         </div>
         <div>
-          <strong>You’re building a more audit-ready agency.</strong>
-          <p>
-            {agency.overdue
-              ? `${agency.overdue} items need attention across the agency. Let’s close the gaps, together.`
-              : "No overdue items agency-wide. Keep up the good work."}
-          </p>
+          <strong>
+            {agency.overdue} {agency.overdue === 1 ? "item needs" : "items need"}{" "}
+            attention
+          </strong>
         </div>
         <button onClick={() => onNavigate("Requirements", "Overdue")}>
-          Review priorities <ArrowRight size={16} />
+          Review <ArrowRight size={16} />
         </button>
       </div>
+      )}
       <div className="stat-grid">
         <button
           className="stat-card"
@@ -235,7 +224,7 @@ export default function Dashboard({
             <span className="stat-descriptor">requirements</span>
           </div>
           <div className="stat-foot">
-            A little action now, peace of mind later <ArrowUpRight size={14} />
+            Due soon <ArrowUpRight size={14} />
           </div>
         </button>
         <button
@@ -253,7 +242,7 @@ export default function Dashboard({
             <span className="stat-descriptor">requirements</span>
           </div>
           <div className="stat-foot">
-            <span className="review-dot" /> Your approval makes it official{" "}
+            <span className="review-dot" /> Pending review{" "}
             <ArrowUpRight size={14} />
           </div>
         </button>
@@ -267,8 +256,7 @@ export default function Dashboard({
           onClick={() => setSitesOpen((open) => !open)}
         >
           <div className="agency-hero-copy">
-            <div className="eyebrow">AGENCY-WIDE COMPLIANCE</div>
-            <h2>How the whole agency is doing</h2>
+            <h2>Agency compliance</h2>
             <p>
               {agency.done} of {agency.total} current · {agency.overdue} need
               attention
@@ -420,10 +408,7 @@ export default function Dashboard({
             ))}
           </div>
         ) : (
-          <Empty
-            title="You’re caught up"
-            text="Nothing is pending for you right now."
-          />
+          <Empty title="Nothing pending" />
         )}
       </section>
       <div className="dashboard-middle">
@@ -434,7 +419,6 @@ export default function Dashboard({
                 What needs your attention{" "}
                 <span className="count-pill">{risks.length}</span>
               </h2>
-              <p>Small gaps today. Bigger peace of mind tomorrow.</p>
             </div>
             <button
               className="text-button"
@@ -479,22 +463,14 @@ export default function Dashboard({
                 </button>
               ))
             ) : (
-              <Empty
-                title="No overdue requirements"
-                text="Your team is up to date in this view."
-              />
+              <Empty title="No overdue items" />
             )}
-          </div>
-          <div className="priority-footer">
-            <ShieldCheck size={14} /> Every action brings your agency closer to
-            audit-ready.
           </div>
         </section>
         <section className="panel category-panel">
           <div className="panel-heading">
             <div>
               <h2>Compliance by category</h2>
-              <p>The bigger picture, broken down.</p>
             </div>
             <span className="subtle-icon">
               <ShieldCheck size={18} />
@@ -596,22 +572,12 @@ export default function Dashboard({
           <Sparkles size={21} />
         </span>
         <span>
-          <strong>A clearer answer is one question away.</strong>
-          <small>
-            Ask Complyrer what to prioritize, what’s missing, or where to find
-            it.
-          </small>
+          <strong>Records lookup</strong>
         </span>
         <span className="copilot-banner-action">
           Ask Complyrer <ArrowUpRight size={17} />
         </span>
       </button>
-      <div className="page-footer">
-        <span>
-          <CircleCheck size={13} /> Clear responsibilities. Confident care.
-        </span>
-        <span>Made for the people who care for people.</span>
-      </div>
     </>
   );
 }
