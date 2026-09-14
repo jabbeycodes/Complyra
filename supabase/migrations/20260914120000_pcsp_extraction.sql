@@ -304,10 +304,13 @@ $$;
 create or replace function public.register_document_upload(
   p_agency_id uuid,
   p_individual_id uuid,
-  p_site_id uuid default null,
   p_document_type text,
   p_original_filename text,
   p_storage_path text,
+  -- Site is optional: when null/omitted the server falls back to the
+  -- individual's assigned site. Defaulted parameters are grouped after the
+  -- required ones so positional calls remain unambiguous.
+  p_site_id uuid default null,
   p_mime_type text default 'application/pdf',
   -- Optional client-generated id so the caller can derive the storage path
   -- (<agency_id>/<upload_id>/<filename>) before uploading the file.
