@@ -4490,21 +4490,21 @@ export class HostedApi implements ComplyraApi {
   }): Promise<DelegationTemplate> {
     const session = await this.requireSession();
     this.requirePermission(session, "delegation.templates.manage");
-    const { data, error } = await this.client
-      .from("delegation_templates")
-      .insert({
-        agency_id: session.agencyId,
-        name: input.name,
-        category: input.category,
-        sections: JSON.parse(JSON.stringify(input.sections)),
-        individualization_note: input.individualizationNote,
-        active: true,
-      })
-      .select(
-        "id, agency_id, name, category, sections, individualization_note, active",
-      )
-      .single();
+    // The migration ships no INSERT policy on delegation_templates: writes go
+    // through this SECURITY DEFINER RPC, which re-checks the permission.
+    // Returns a single JSON object (the template row).
+    const { data, error } = await this.client.rpc(
+      "create_delegation_template",
+      {
+        p_agency_id: session.agencyId,
+        p_name: input.name,
+        p_category: input.category,
+        p_sections: JSON.parse(JSON.stringify(input.sections)),
+        p_individualization_note: input.individualizationNote,
+      },
+    );
     throwIf(error, "Could not create the delegation template.");
+    if (!data) throw new Error("Could not create the delegation template.");
     return mapDelegationTemplate(data as Record<string, unknown>);
   }
 
@@ -4518,18 +4518,18 @@ export class HostedApi implements ComplyraApi {
   ): Promise<DelegationTemplate> {
     const session = await this.requireSession();
     this.requirePermission(session, "delegation.templates.manage");
-    const updates: Record<string, unknown> = {};
-    if (patch.name !== undefined) updates.name = patch.name;
-    if (patch.category !== undefined) updates.category = patch.category;
-    if (patch.active !== undefined) updates.active = patch.active;
-    const { data, error } = await this.client
-      .from("delegation_templates")
-      .update(updates)
-      .eq("id", id)
-      .select(
-        "id, agency_id, name, category, sections, individualization_note, active",
-      )
-      .maybeSingle();
+    // The migration ships no UPDATE policy on delegation_templates: writes go
+    // through this SECURITY DEFINER RPC, which re-checks the permission.
+    // Returns a single JSON object (the template row).
+    const { data, error } = await this.client.rpc(
+      "update_delegation_template",
+      {
+        p_template_id: id,
+        p_name: patch.name ?? null,
+        p_category: patch.category ?? null,
+        p_active: patch.active ?? null,
+      },
+    );
     throwIf(error, "Could not update the delegation template.");
     if (!data) throw new Error("Delegation template not found.");
     return mapDelegationTemplate(data as Record<string, unknown>);
@@ -4700,16 +4700,19 @@ export class HostedApi implements ComplyraApi {
   ): Promise<DelegationTrainingMaterial> {
     const session = await this.requireSession();
     this.requirePermission(session, "delegation.training.review");
-    const { data, error } = await this.client
-      .from("delegation_training_materials")
-      .update({
-        draft_content: JSON.parse(
+    // The migration ships no UPDATE policy on delegation_training_materials:
+    // writes go through this SECURITY DEFINER RPC, which re-checks the
+    // permission and only allows editing draft/in-review material.
+    // Returns a single JSON object (the material row).
+    const { data, error } = await this.client.rpc(
+      "save_delegation_training_draft",
+      {
+        p_assignment_id: assignmentId,
+        p_draft_content: JSON.parse(
           JSON.stringify({ ...draft, generatedMark: DIGITAL_RECORD_MARK }),
         ),
-      })
-      .eq("assignment_id", assignmentId)
-      .select("*")
-      .maybeSingle();
+      },
+    );
     throwIf(error, "Could not update the training draft.");
     if (!data) throw new Error("Training material not found.");
     return mapDelegationTrainingMaterial(data as Record<string, unknown>);
