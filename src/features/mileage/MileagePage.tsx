@@ -4,11 +4,18 @@ import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { hasPermission } from "../../data/permissions";
 import { downloadBlob } from "../../data/openFile";
-import { buildMileageMonthPdf, mileageMonthFileName } from "../../pdf/mileagePdf";
+import {
+  buildMileageMonthPdf,
+  buildMileageYearPdf,
+  mileageMonthFileName,
+  mileageYearFileName,
+} from "../../pdf/mileagePdf";
 import {
   MONTH_LABELS_SHORT,
   WEEK_LABELS,
   canBackfillMileage,
+  canDownloadMileageMonthly,
+  canViewMileageYearlySummary,
   computeTripMiles,
   monthKeyOf,
   monthLabel,
@@ -47,16 +54,24 @@ function emptyForm(): FormState {
   };
 }
 
-/** Yearly summary + weekly breakdowns are an administrator tracking view. */
+/**
+ * Yearly tracking is only available to administrators and degreed
+ * professional managers (plus the platform owner) — Joshua's 2026-09-14 spec.
+ */
 function canViewYearlySummary(
   session: { roleKey: string; platformAdmin: boolean } | null,
 ): boolean {
-  if (!session) return false;
-  return (
-    session.platformAdmin ||
-    session.roleKey === "administrator" ||
-    session.roleKey === "compliance_admin"
-  );
+  return canViewMileageYearlySummary(session);
+}
+
+/**
+ * The monthly sheet is for HM and DSP at their sites, but only the house
+ * manager (and the platform owner) can download/print it.
+ */
+function canDownloadMonthly(
+  session: { roleKey: string; platformAdmin: boolean } | null,
+): boolean {
+  return canDownloadMileageMonthly(session);
 }
 
 export default function MileagePage() {
@@ -312,9 +327,32 @@ export default function MileagePage() {
   }
 
   const continuityHint = editingId ? editExpectedStart : expectedStart;
-  const weekColumns = WEEK_LABELS.slice(0, weekly.hasWeek5 ? 5 : 4);
+  const weekColumns = WEEK_LABELS; // exactly Week 1–Week 4 per the tracker workbook
 
   // ---- Monthly sheet PDF: build and download a real file, no dead-end views ----
+  async function downloadYearlySummary() {
+    if (!yearly) return;
+    setDownloading(true);
+    setYearlyError("");
+    try {
+      const doc = buildMileageYearPdf({
+        agencyName: session?.agencyName ?? "Agency",
+        siteName: activeSite?.name ?? "Home",
+        year,
+        people: people.map((person) => ({ id: person.id, name: person.name })),
+        summary: yearly,
+      });
+      const blob = doc.output("blob") as Blob;
+      downloadBlob(mileageYearFileName(activeSite?.name ?? "home", year), blob);
+    } catch (err) {
+      setYearlyError(
+        err instanceof Error ? err.message : "Could not build the yearly summary PDF.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function downloadMonthlySheet() {
     setDownloading(true);
     setError("");
@@ -350,7 +388,7 @@ export default function MileagePage() {
         title="Mileage log"
         description="Vehicle mileage per house: log each trip's odometer readings, split the miles equally among the individuals who rode, and download the monthly sheet as a PDF."
       >
-        {tab === "monthly" && (
+        {tab === "monthly" && canDownloadMonthly(session) && (
           <button className="button" onClick={downloadMonthlySheet} disabled={downloading || (trips.length === 0 && people.length === 0)}>
             <Download size={14} /> {downloading ? "Building PDF…" : "Download monthly sheet (PDF)"}
           </button>
@@ -428,6 +466,15 @@ export default function MileagePage() {
             <h2>
               Yearly summary — {activeSite?.name} · {year}
             </h2>
+            <p>
+              <button
+                className="button"
+                onClick={downloadYearlySummary}
+                disabled={downloading || !yearly}
+              >
+                <Download size={14} /> {downloading ? "Building PDF…" : "Download yearly summary (PDF)"}
+              </button>
+            </p>
             {yearlyError && <p className="form-error">{yearlyError}</p>}
             {yearlyLoading || !yearly ? (
               <p className="stack-help">Loading the yearly summary…</p>
@@ -472,49 +519,6 @@ export default function MileagePage() {
             )}
           </section>
 
-          <section className="panel" aria-label="Monthly weekly breakdown">
-            <h2>Weekly breakdown — {monthLabel(month)}</h2>
-            <p style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <label>
-                Month{" "}
-                <input
-                  type="month"
-                  value={month}
-                  onChange={(e) => e.target.value && setMonth(e.target.value)}
-                />
-              </label>
-              <span className="stack-help">
-                Week 1: days 1–7 · Week 2: 8–14 · Week 3: 15–21 · Week 4: 22–28
-                {weekly.hasWeek5 ? " · Week 5: days 29–31" : ""}
-              </span>
-            </p>
-            <div className="table-scroll">
-              <table className="mileage-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    {weekColumns.map((label) => (
-                      <th key={label}>{label}</th>
-                    ))}
-                    <th>Monthly Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekly.rows.map((row) => (
-                    <tr key={row.individualId}>
-                      <td>{nameById[row.individualId] ?? row.individualId}</td>
-                      {weekColumns.map((label, index) => (
-                        <td key={label}>{row.weeks[index]}</td>
-                      ))}
-                      <td>
-                        <strong>{row.monthlyTotal}</strong>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
         </>
       )}
 
@@ -730,6 +734,41 @@ export default function MileagePage() {
                 </table>
               </div>
             )}
+          </section>
+
+          <section className="panel" aria-label="Monthly mileage sheet">
+            <h2>Monthly mileage sheet — {monthLabel(month)}</h2>
+            <p className="stack-help">
+              Auto-populated from the trip log above: one row per individual,
+              Week 1–Week 4 plus the monthly total. Week 1: days 1–7 · Week 2:
+              8–14 · Week 3: 15–21 · Week 4: day 22 through end of month.
+            </p>
+            <div className="table-scroll">
+              <table className="mileage-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    {weekColumns.map((label) => (
+                      <th key={label}>{label}</th>
+                    ))}
+                    <th>Monthly Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weekly.rows.map((row) => (
+                    <tr key={row.individualId}>
+                      <td>{nameById[row.individualId] ?? row.individualId}</td>
+                      {weekColumns.map((label, index) => (
+                        <td key={label}>{row.weeks[index]}</td>
+                      ))}
+                      <td>
+                        <strong>{row.monthlyTotal}</strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}

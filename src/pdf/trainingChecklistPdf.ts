@@ -103,3 +103,157 @@ export function trainingFileName(staffName: string, individualName: string) {
     .toLowerCase()
     .replaceAll(" ", "-")}.pdf`;
 }
+
+/**
+ * Staff training checklist PDF for the StaffCompliancePage profile view.
+ *
+ * The in-home training checklist (60 topics in 6 sections): every line shows
+ * the staffer's ACTUAL initials (never the word "initialed"), the signed-on
+ * date, the trainer, and the staff + house-manager signatures with
+ * timestamps. White, print-friendly, stamped with the Complyrer record mark.
+ */
+export interface StaffTrainingPdfLine {
+  title: string;
+  section: string;
+  /** Actual adopted initials text (e.g. "TSO"), or null when not initialed. */
+  initials: string | null;
+  /** ISO date the line was initialed, or null. */
+  signedOn: string | null;
+  na: boolean;
+  naReason: string | null;
+  trainerName: string;
+}
+
+export interface StaffTrainingPdfSignature {
+  name: string | null;
+  signedAt: string | null;
+}
+
+export interface StaffTrainingPdfSiteSignatures {
+  siteName: string;
+  staff: StaffTrainingPdfSignature;
+  hm: StaffTrainingPdfSignature;
+}
+
+export function buildStaffTrainingChecklistPdf(input: {
+  agencyName: string;
+  staffName: string;
+  siteNames: string[];
+  hoursTotal: number;
+  hoursWithHm: number;
+  lines: StaffTrainingPdfLine[];
+  signatures: StaffTrainingPdfSiteSignatures[];
+  logoDataUrl?: string | null;
+}) {
+  const { doc, margin, y: startY } = startBrandedDoc("In-Home Staff Training Checklist", {
+    agencyName: input.agencyName,
+    logoDataUrl: input.logoDataUrl,
+  }, 54);
+  let y = startY;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  for (const [label, value] of [
+    ["Agency", input.agencyName],
+    ["Staff", input.staffName],
+    ["Program site(s)", input.siteNames.join(", ") || "—"],
+    ["Training hours", `${input.hoursTotal} total · ${input.hoursWithHm} with house manager`],
+  ]) {
+    doc.setFont("helvetica", "bold");
+    doc.text(`${label}:`, margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(value, margin + 140, y, { maxWidth: 360 });
+    y += 18;
+  }
+
+  let lastSection = "";
+  for (const line of input.lines) {
+    if (line.section !== lastSection) {
+      lastSection = line.section;
+      y += 10;
+      if (y > 700) {
+        doc.addPage();
+        y = 64;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(line.section, margin, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.text("Training item", margin, y);
+      doc.text("Initials / date", 420, y);
+      y += 6;
+      doc.setDrawColor(47, 70, 48);
+      doc.line(margin, y, 558, y);
+      y += 16;
+    }
+    if (y > 710) {
+      doc.addPage();
+      y = 64;
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(line.title, margin, y, { maxWidth: 340 });
+    doc.setFont("helvetica", "bold");
+    if (line.na) {
+      doc.text("N/A", 420, y);
+      doc.setFont("helvetica", "normal");
+      if (line.naReason) {
+        doc.setFontSize(8);
+        doc.text(line.naReason, 420, y + 11, { maxWidth: 130 });
+        y += 11;
+      }
+    } else if (line.initials?.trim()) {
+      const date = line.signedOn ? ` ${line.signedOn.slice(5, 7)}/${line.signedOn.slice(8, 10)}/${line.signedOn.slice(2, 4)}` : "";
+      doc.text(`${line.initials.trim()}${date}`, 420, y);
+    } else {
+      doc.text("Pending", 420, y);
+    }
+    doc.setFont("helvetica", "normal");
+    if (line.trainerName && !line.na) {
+      doc.setFontSize(8);
+      doc.text(`Trainer: ${line.trainerName}`, margin, y + 11, { maxWidth: 340 });
+      y += 11;
+    }
+    y += 16;
+  }
+
+  y += 10;
+  if (y > 660) {
+    doc.addPage();
+    y = 64;
+  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Signatures", margin, y);
+  y += 18;
+  doc.setFontSize(10);
+  for (const site of input.signatures) {
+    if (y > 700) {
+      doc.addPage();
+      y = 64;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.text(site.siteName, margin, y);
+    y += 16;
+    doc.setFont("helvetica", "normal");
+    const staffText = site.staff.signedAt
+      ? `Staff signature: ${site.staff.name ?? "Signed"} — ${formatSignatureTimestamp(site.staff.signedAt)}`
+      : "Staff signature: Pending";
+    doc.text(staffText, margin, y, { maxWidth: 500 });
+    y += 16;
+    const hmText = site.hm.signedAt
+      ? `House manager signature: ${site.hm.name ?? "Signed"} — ${formatSignatureTimestamp(site.hm.signedAt)}`
+      : "House manager signature: Pending";
+    doc.text(hmText, margin, y, { maxWidth: 500 });
+    y += 22;
+  }
+  stampRecordMark(doc, {
+    documentId: `training-checklist-${input.staffName.toLowerCase().replaceAll(" ", "-")}`,
+    margin,
+  });
+  return doc;
+}
+
+export function staffTrainingFileName(staffName: string) {
+  return `complyrer-training-checklist-${staffName.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "")}.pdf`;
+}

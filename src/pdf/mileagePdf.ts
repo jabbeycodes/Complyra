@@ -9,6 +9,7 @@ import { jsPDF } from "jspdf";
 import { monthLabel } from "../data/mileage";
 import { stampRecordMark } from "./brandHeader";
 import type { MileageTripView } from "../data/types";
+import type { MileageYearlySummary } from "../data/mileage";
 
 export interface MileagePdfPerson {
   id: string;
@@ -213,6 +214,127 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
 
   stampRecordMark(doc, {
     documentId: `mileage-${slug(input.siteName)}-${input.monthKey}`,
+    margin: MARGIN,
+    footerY: FOOTER_Y,
+  });
+  return doc;
+}
+
+/**
+ * Yearly mileage tracking sheet PDF (Complyrer's own yearly summary).
+ *
+ * Rows = individuals, columns = January–December + Yearly Total, with a
+ * Grand Total row — the format of the paper yearly summary sheet, stamped
+ * with the Complyrer record mark. Only administrators, degreed professional
+ * managers, and platform owners may view or download it.
+ */
+
+export interface MileageYearPdfInput {
+  agencyName: string;
+  siteName: string;
+  year: number;
+  people: MileagePdfPerson[];
+  summary: MileageYearlySummary;
+}
+
+export function mileageYearFileName(siteName: string, year: number) {
+  return `complyrer-mileage-yearly-${slug(siteName)}-${year}.pdf`;
+}
+
+const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+export function buildMileageYearPdf(input: MileageYearPdfInput) {
+  const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
+  const lineH = 11;
+
+  // header
+  let y = 48;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...EVERGREEN);
+  doc.text("COMPLYRER", MARGIN, y);
+  doc.setFontSize(10);
+  doc.setTextColor(...INK);
+  doc.text(input.agencyName, MARGIN, y + 14);
+  y += 34;
+  doc.setFontSize(16);
+  doc.text("Yearly Mileage Tracking", MARGIN, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`Home: ${input.siteName}    Year: ${input.year}`, MARGIN, y + 18);
+  y += 34;
+
+  const nameW = 130;
+  const totalW = 56;
+  const monthW = Math.max(30, (CONTENT_W - nameW - totalW) / 12);
+  const columns: Column[] = [
+    { key: "name", label: "Individual", width: nameW },
+    ...MONTH_SHORT.map((label, i) => ({ key: `m${i}`, label, width: monthW })),
+    { key: "total", label: "Yearly Total", width: totalW },
+  ];
+
+  function drawRow(
+    cells: Record<string, string>,
+    opts: { bold?: boolean; fill?: RGB | null } = {},
+  ) {
+    const fontSize = 7;
+    doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+    doc.setFontSize(fontSize);
+    let rowH = fontSize + 7;
+    const wrapped = columns.map((col) => {
+      const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 6);
+      rowH = Math.max(rowH, lines.length * lineH + 6);
+      return lines as string[];
+    });
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+    }
+    let x = MARGIN;
+    columns.forEach((col, i) => {
+      if (opts.fill) {
+        doc.setFillColor(...opts.fill);
+        doc.rect(x, y, col.width, rowH, "F");
+      }
+      doc.setDrawColor(0, 0, 0);
+      doc.rect(x, y, col.width, rowH);
+      doc.setTextColor(...INK);
+      doc.text(wrapped[i], x + 3, y + lineH);
+      x += col.width;
+    });
+    y += rowH;
+  }
+
+  drawRow(
+    Object.fromEntries(columns.map((c) => [c.key, c.label])),
+    { bold: true, fill: HEADER_FILL },
+  );
+
+  const rowById = new Map(
+    input.summary.rows.map((row) => [row.individualId, row]),
+  );
+  for (const person of input.people) {
+    const row = rowById.get(person.id);
+    const cells: Record<string, string> = {
+      name: person.name,
+      total: String(row?.yearlyTotal ?? 0),
+    };
+    for (let m = 0; m < 12; m++) {
+      const miles = row?.months[m] ?? 0;
+      cells[`m${m}`] = miles ? String(miles) : "";
+    }
+    drawRow(cells);
+  }
+
+  const grand: Record<string, string> = { name: "Grand Total", total: String(input.summary.grandTotal.yearlyTotal) };
+  for (let m = 0; m < 12; m++) grand[`m${m}`] = String(input.summary.grandTotal.months[m] ?? 0);
+  drawRow(grand, { bold: true, fill: HEADER_FILL });
+
+  stampRecordMark(doc, {
+    documentId: `mileage-yearly-${slug(input.siteName)}-${input.year}`,
     margin: MARGIN,
     footerY: FOOTER_Y,
   });
