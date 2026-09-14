@@ -160,6 +160,8 @@ import {
   monthKeyFrom,
   safetyComplete,
   siteSafetyView,
+  drillDateConflict,
+  drillDateConflictMessage,
   normalizeMonthlyDue,
   type AdaptiveEquipment,
   type EmergencyDrill,
@@ -3008,6 +3010,13 @@ export class LocalApi implements ComplyraApi {
     if (!input.date || !input.time || !input.leaderName.trim() || !input.participants.trim()) {
       throw new Error("Enter the date, time, drill leader, and participants.");
     }
+    const conflict = drillDateConflict(
+      this.store.db.emergencyDrills,
+      drill.siteId,
+      drill.id,
+      input.date,
+    );
+    if (conflict) throw new Error(drillDateConflictMessage(conflict));
     drill.date = input.date;
     drill.time = input.time;
     drill.evacTime = input.evacTime?.trim() || null;

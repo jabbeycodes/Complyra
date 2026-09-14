@@ -156,6 +156,8 @@ import {
   canConfigureMonthlyDue,
   canManageEquipment,
   drillComplete,
+  drillDateConflict,
+  drillDateConflictMessage,
   drillsForMonth,
   equipmentViewForPerson,
   monthKeyFrom,
@@ -163,6 +165,7 @@ import {
   safetyComplete,
   siteSafetyView,
   type AdaptiveEquipment,
+  type DrillType,
   type SafetyLine,
 } from "./monthlyChecks";
 import {
@@ -2348,6 +2351,22 @@ export class HostedApi implements ComplyraApi {
     }
     if (!input.date || !input.time || !input.leaderName.trim() || !input.participants.trim()) {
       throw new Error("Enter the date, time, drill leader, and participants.");
+    }
+    const { data: clash } = await this.client
+      .from("emergency_drills")
+      .select("id, drill_type, date")
+      .eq("site_id", drill.siteId)
+      .eq("date", input.date)
+      .neq("id", input.id)
+      .limit(1)
+      .maybeSingle();
+    if (clash) {
+      throw new Error(
+        drillDateConflictMessage({
+          drillType: clash.drill_type as DrillType,
+          date: clash.date as string | null,
+        }),
+      );
     }
     const { error: updateError } = await this.client
       .from("emergency_drills")

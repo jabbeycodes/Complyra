@@ -127,10 +127,10 @@ test("checking equipment, drills, and safety unlocks that month’s downloads", 
     (row) => row.siteId === maple.id && row.monthKey === thisMonth,
   );
   assert.equal(drills.length, drillsForMonth(thisMonth).length);
-  for (const drill of drills) {
+  for (const [i, drill] of drills.entries()) {
     await client.recordEmergencyDrill({
       id: drill.id,
-      date: `${thisMonth}-03`,
+      date: `${thisMonth}-${String(3 + i).padStart(2, "0")}`,
       time: "10:15",
       evacTime: "2:10",
       leaderName: "Alex Morgan",
@@ -249,5 +249,133 @@ test("a DPM or admin can change monthly due days; a DSP cannot", async () => {
         safetyDay: 1,
       }),
     /DPM or administrator/,
+  );
+});
+
+test("a second drill type cannot share a date with a fire drill", async () => {
+  const client = api();
+  const session = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(session);
+  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const thisMonth = monthKeyFrom(todayIso());
+  const drills = workspace.monthly.drills.filter(
+    (row) => row.siteId === maple.id && row.monthKey === thisMonth,
+  );
+  const fire = drills.find((row) => row.drillType === "fire")!;
+  const other = drills.find((row) => row.drillType !== "fire")!;
+  const base = {
+    time: "10:15",
+    evacTime: "2:10",
+    leaderName: "Alex Morgan",
+    participants: "Alex Morgan, Taylor Reed",
+    awakeOrSleep: "awake" as const,
+  };
+  await client.recordEmergencyDrill({ id: fire.id, date: `${thisMonth}-05`, ...base });
+  await assert.rejects(
+    () => client.recordEmergencyDrill({ id: other.id, date: `${thisMonth}-05`, ...base }),
+    (err: unknown) => {
+      const message = (err as Error).message;
+      assert.match(message, /Fire drill is already recorded/);
+      assert.match(message, new RegExp(`${thisMonth}-05`));
+      assert.ok(!/constraint|unique|violates/i.test(message), "message should be human-readable");
+      return true;
+    },
+  );
+});
+
+test("a fire drill cannot share a date with another drill type", async () => {
+  const client = api();
+  const session = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(session);
+  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const thisMonth = monthKeyFrom(todayIso());
+  const drills = workspace.monthly.drills.filter(
+    (row) => row.siteId === maple.id && row.monthKey === thisMonth,
+  );
+  const fire = drills.find((row) => row.drillType === "fire")!;
+  const other = drills.find((row) => row.drillType !== "fire")!;
+  const base = {
+    time: "10:15",
+    evacTime: "2:10",
+    leaderName: "Alex Morgan",
+    participants: "Alex Morgan, Taylor Reed",
+    awakeOrSleep: "awake" as const,
+  };
+  await client.recordEmergencyDrill({ id: other.id, date: `${thisMonth}-06`, ...base });
+  await assert.rejects(
+    () => client.recordEmergencyDrill({ id: fire.id, date: `${thisMonth}-06`, ...base }),
+    /is already recorded on/,
+  );
+});
+
+test("the same drills on different dates are allowed", async () => {
+  const client = api();
+  const session = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(session);
+  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const thisMonth = monthKeyFrom(todayIso());
+  const drills = workspace.monthly.drills.filter(
+    (row) => row.siteId === maple.id && row.monthKey === thisMonth,
+  );
+  const fire = drills.find((row) => row.drillType === "fire")!;
+  const other = drills.find((row) => row.drillType !== "fire")!;
+  const base = {
+    time: "10:15",
+    evacTime: "2:10",
+    leaderName: "Alex Morgan",
+    participants: "Alex Morgan, Taylor Reed",
+    awakeOrSleep: "awake" as const,
+  };
+  await client.recordEmergencyDrill({ id: fire.id, date: `${thisMonth}-07`, ...base });
+  await client.recordEmergencyDrill({ id: other.id, date: `${thisMonth}-08`, ...base });
+  const updated = await client.loadWorkspace(session);
+  const saved = updated.monthly.drills.filter((row) => row.siteId === maple.id);
+  assert.equal(saved.find((row) => row.id === fire.id)?.date, `${thisMonth}-07`);
+  assert.equal(saved.find((row) => row.id === other.id)?.date, `${thisMonth}-08`);
+});
+
+test("re-saving a drill on its own date is allowed", async () => {
+  const client = api();
+  const session = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(session);
+  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const thisMonth = monthKeyFrom(todayIso());
+  const fire = workspace.monthly.drills.find(
+    (row) => row.siteId === maple.id && row.monthKey === thisMonth && row.drillType === "fire",
+  )!;
+  const base = {
+    time: "10:15",
+    evacTime: "2:10",
+    leaderName: "Alex Morgan",
+    participants: "Alex Morgan, Taylor Reed",
+    awakeOrSleep: "awake" as const,
+  };
+  await client.recordEmergencyDrill({ id: fire.id, date: `${thisMonth}-09`, ...base });
+  await client.recordEmergencyDrill({
+    id: fire.id,
+    date: `${thisMonth}-09`,
+    ...base,
+    leaderName: "Taylor Reed",
+  });
+  const updated = await client.loadWorkspace(session);
+  assert.equal(
+    updated.monthly.drills.find((row) => row.id === fire.id)?.leaderName,
+    "Taylor Reed",
   );
 });

@@ -233,6 +233,37 @@ export function drillComplete(drill: EmergencyDrill) {
   return Boolean(drill.date && drill.time && drill.leaderName && drill.participants.trim());
 }
 
+/**
+ * Fire drills cannot share a day with any other drill at the same home.
+ * Returns the already-recorded drill at the same site on the same date,
+ * excluding the drill currently being saved (so re-saving it is allowed).
+ */
+export function drillDateConflict(
+  drills: EmergencyDrill[],
+  siteId: string,
+  excludeId: string,
+  date: string,
+): EmergencyDrill | null {
+  if (!date) return null;
+  return (
+    drills.find(
+      (row) => row.siteId === siteId && row.id !== excludeId && row.date === date,
+    ) ?? null
+  );
+}
+
+export function drillDateConflictMessage(conflict: {
+  drillType: DrillType;
+  date: string | null;
+}): string {
+  const label = DRILL_LABELS[conflict.drillType] ?? conflict.drillType;
+  return (
+    `A ${label} drill is already recorded on ${conflict.date ?? "that date"} at this home. ` +
+    `Only one drill per day is allowed — fire drills can't share a day with any other drill. ` +
+    `Please choose a different date.`
+  );
+}
+
 export function safetyComplete(report: HomeSafetyReport) {
   return SAFETY_LINE_DEFS.every((def) => {
     const line = report.lines.find((row) => row.key === def.key);

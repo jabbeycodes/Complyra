@@ -8,6 +8,8 @@ import {
   canCompleteMonthly,
   dayOrdinal,
   drillComplete,
+  drillDateConflict,
+  drillDateConflictMessage,
   DRILL_LABELS,
   equipmentViewForPerson,
   monthDueOn,
@@ -137,7 +139,18 @@ export default function SiteMonthlyChecks({
               key={drill.id}
               drill={drill}
               canCheck={canCheck}
-              onSave={(next) => run(() => api.recordEmergencyDrill({ id: drill.id, ...next }))}
+              onSave={(next) =>
+                run(() => {
+                  const conflict = drillDateConflict(
+                    collections.emergencyDrills,
+                    siteId,
+                    drill.id,
+                    next.date,
+                  );
+                  if (conflict) throw new Error(drillDateConflictMessage(conflict));
+                  return api.recordEmergencyDrill({ id: drill.id, ...next });
+                })
+              }
             />
           ))}
         </div>
