@@ -200,13 +200,13 @@ test.describe("390 phone", () => {
     expect(reviewBox!.width).toBeGreaterThanOrEqual(44);
     expect(reviewBox!.height).toBeGreaterThanOrEqual(44);
 
-    const exportBtn = page.getByRole("button", { name: "Export" });
-    await expect(exportBtn).toBeVisible();
-    const exportBox = await exportBtn.boundingBox();
-    expect(exportBox).toBeTruthy();
-    expect(exportBox!.height).toBeGreaterThanOrEqual(44);
-    expect(exportBox!.x).toBeGreaterThanOrEqual(0);
-    expect(exportBox!.x + exportBox!.width).toBeLessThanOrEqual(390 + 1);
+    await expect(page.locator(".dashboard-heading").getByRole("button", { name: /Export/ })).toHaveCount(0);
+    const cards = page.locator(".stat-card");
+    await expect(cards).toHaveCount(4);
+    const first = await cards.nth(0).boundingBox();
+    const second = await cards.nth(1).boundingBox();
+    expect(first && second).toBeTruthy();
+    expect(Math.abs(first!.y - second!.y)).toBeLessThan(12);
 
     const shot = `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}`;
     await page.screenshot({ path: `${shot}/mobile_overview_390.png`, fullPage: false });

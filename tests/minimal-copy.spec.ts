@@ -36,8 +36,8 @@ test("workspace chrome is a plain title without slogan eyebrows", async ({
   await expect(page.locator("body")).not.toContainText("A little clarity");
   await expect(page.locator("body")).not.toContainText("audit-ready agency");
   await expect(page.locator("body")).not.toContainText("YOUR AGENCY");
-  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Agency compliance" })).toBeVisible();
+  await expect(page.locator(".dashboard-heading").getByRole("button", { name: /Export/ })).toHaveCount(0);
   await page.screenshot({ path: shotPath("copy_overview_after.png"), fullPage: false });
 
   await openPage(page, "Individuals");

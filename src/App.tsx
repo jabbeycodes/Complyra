@@ -401,6 +401,35 @@ export default function App() {
   function notify(message: string) {
     setToast(message);
   }
+  function exportComplianceReport(items: Requirement[] = scoped) {
+    if (!session || !workspace) return;
+    const asOf = new Date().toISOString().slice(0, 10);
+    const card = metrics(items);
+    const pdf = buildComplianceReportPdf({
+      agencyName: session.agencyName,
+      reportDate: new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+      asOfDate: asOf,
+      siteFilter: site,
+      score: card.score,
+      total: card.total,
+      done: card.done,
+      overdue: card.overdue,
+      dueSoon: card.dueSoon,
+      review: card.review,
+      requirements: items,
+      demoMode,
+      logoDataUrl: workspace.branding.logoUrl,
+    });
+    downloadBlob(
+      complianceReportPdfName(session.agencyName, asOf),
+      pdf.output("blob"),
+    );
+    notify("Your compliance report PDF has been downloaded.");
+  }
   async function finishRequirement() {
     if (!selected) return;
     try {
@@ -758,28 +787,6 @@ export default function App() {
               onNavigate={navigate}
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
-              onExport={() => {
-                const reportData = {
-                  agencyName: session.agencyName,
-                  reportDate: new Date().toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  }),
-                  score: workspace.scorecard?.score ?? metrics(scoped).score,
-                  total: workspace.scorecard?.total ?? scoped.length,
-                  done: workspace.scorecard?.done ?? 0,
-                  overdue: workspace.scorecard?.overdue ?? 0,
-                  dueSoon: workspace.scorecard?.dueSoon ?? 0,
-                  requirements: scoped,
-                };
-                const pdf = buildComplianceReportPdf(reportData);
-                downloadBlob(
-                  complianceReportPdfName(session.agencyName, new Date().toISOString()),
-                  pdf.output("blob"),
-                );
-                notify("Your compliance report PDF has been downloaded.");
-              }}
               onCopilot={() => setModal("copilot")}
               onActivity={() => navigate("Activity log")}
             />
@@ -1465,6 +1472,14 @@ export default function App() {
                       <span>Open or pending items</span>
                     </div>
                     {canExportAudit && (
+                    <>
+                    <button
+                      className="button"
+                      disabled={!auditItems.length || auditFrom > auditTo}
+                      onClick={() => exportComplianceReport(auditItems)}
+                    >
+                      <Download size={17} /> Export compliance report
+                    </button>
                     <button
                       className="button primary"
                       disabled={!auditItems.length || auditFrom > auditTo}
@@ -1480,6 +1495,7 @@ export default function App() {
                     >
                       <Download size={17} /> Export audit register
                     </button>
+                    </>
                     )}
                   </div>
                   <div className="quiet-note">
@@ -1694,6 +1710,24 @@ export default function App() {
                       )}
                     </div>
                     <AgencyLogoSettings onSaved={notify} />
+                    {canExportAudit && (
+                      <div className="settings-row">
+                        <span>
+                          <strong>Compliance report</strong>
+                          <small>
+                            PDF of scores, site breakdown, and the current
+                            requirement register
+                            {site !== "All sites" ? ` for ${site}` : ""}.
+                          </small>
+                        </span>
+                        <button
+                          className="button"
+                          onClick={() => exportComplianceReport()}
+                        >
+                          <Download size={16} /> Export compliance report
+                        </button>
+                      </div>
+                    )}
                     <MonthlyDueSettings onSaved={notify} />
                     <SignatureSettingsSection onSaved={notify} />
                     <div className="settings-row">

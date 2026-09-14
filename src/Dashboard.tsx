@@ -12,7 +12,6 @@ import {
   Building2,
   MoreHorizontal,
   CalendarDays,
-  Download,
   FileText,
   Activity as ActivityIcon,
   ClipboardCheck,
@@ -22,6 +21,7 @@ import {
 import { categories, metrics } from "./domain";
 import type { Requirement, Activity } from "./domain";
 import { Badge, Empty } from "./components";
+import StatusMixDonut from "./components/StatusMixDonut";
 import type { PersonalWorkItem } from "./data/dashboard";
 import type { SiteReview } from "./data/siteReview";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
@@ -59,7 +59,6 @@ interface Props {
   onNavigate: (page: string, status?: string) => void;
   onRequirement: (r: Requirement) => void;
   onOpenPerson: (name: string) => void;
-  onExport: () => void;
   onCopilot: () => void;
   onActivity: () => void;
 }
@@ -84,7 +83,6 @@ export default function Dashboard({
   onNavigate,
   onRequirement,
   onOpenPerson,
-  onExport,
   onCopilot,
   onActivity,
 }: Props) {
@@ -117,9 +115,6 @@ export default function Dashboard({
       <div className="dashboard-heading">
         <div className="heading-row">
           <h1>Overview</h1>
-          <button className="button" onClick={onExport}>
-            <Download size={16} /> Export
-          </button>
         </div>
       </div>
       <div className="scope-row">
@@ -247,6 +242,14 @@ export default function Dashboard({
           </div>
         </button>
       </div>
+      <section className="panel status-mix-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Status mix</h2>
+          </div>
+        </div>
+        <StatusMixDonut items={allItems} />
+      </section>
       <section className="panel agency-hero" data-tour="command-center">
         <button
           type="button"
