@@ -5572,9 +5572,6 @@ body.nav-open {
   font-size: 13px;
   margin: 8px 0;
 }
-.panel:has(> .delegation-table) {
-  overflow-x: auto;
-}
 .delegation-table th {
   text-align: left;
   font-size: 11px;
@@ -5725,6 +5722,40 @@ body.nav-open {
   .delegation-grid3,
   .delegation-grid4 {
     grid-template-columns: 1fr;
+  }
+  /* Keep Open form on-screen at phone width instead of a wide nowrap row. */
+  .table-scroll:has(> .delegation-table) {
+    overflow-x: visible;
+  }
+  .table-scroll:has(> .delegation-table) table {
+    width: 100%;
+    min-width: 0;
+  }
+  .delegation-table thead {
+    display: none;
+  }
+  .delegation-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    align-items: center;
+    padding: 12px var(--panel-inline);
+    border-bottom: 1px solid #efedea;
+  }
+  .delegation-table td {
+    padding: 0;
+    border: 0;
+    white-space: normal;
+  }
+  .delegation-table td:nth-child(1),
+  .delegation-table td:nth-child(2),
+  .delegation-table td:nth-child(3) {
+    grid-column: 1;
+  }
+  .delegation-table td:last-child {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    padding: 0;
   }
 }
 .delegation-reminder {

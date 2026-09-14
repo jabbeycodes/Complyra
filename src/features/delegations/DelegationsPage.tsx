@@ -131,26 +131,28 @@ export default function DelegationsPage() {
         {delegations.length === 0 ? (
           <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
         ) : (
-          <table className="delegation-table">
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th>Individual</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {delegations.map(({ view, person }) => (
-                <DelegationRow
-                  key={view.item.id}
-                  item={view.item}
-                  individualName={person?.name ?? ""}
-                  onOpen={() => setOpenId(view.item.id)}
-                />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="delegation-table">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Individual</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {delegations.map(({ view, person }) => (
+                  <DelegationRow
+                    key={view.item.id}
+                    item={view.item}
+                    individualName={person?.name ?? ""}
+                    onOpen={() => setOpenId(view.item.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 

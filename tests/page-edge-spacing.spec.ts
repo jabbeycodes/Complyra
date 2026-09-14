@@ -40,6 +40,11 @@ async function canvasMetrics(page: Page) {
   });
 }
 
+async function closeMobileNav(page: Page) {
+  const close = page.getByRole("button", { name: "Close navigation" });
+  if (await close.isVisible()) await close.click();
+}
+
 async function panelActionGap(
   page: Page,
   heading: string,
@@ -50,15 +55,16 @@ async function panelActionGap(
   });
   const button = panel.getByRole("button", { name: buttonName }).first();
   await expect(button).toBeVisible();
-  return Promise.all([panel.boundingBox(), button.boundingBox()]).then(
-    ([panelBox, buttonBox]) => {
-      if (!panelBox || !buttonBox) throw new Error("missing boxes");
-      return {
-        fromStart: buttonBox.x - panelBox.x,
-        fromEnd: panelBox.x + panelBox.width - (buttonBox.x + buttonBox.width),
-      };
-    },
-  );
+  await button.scrollIntoViewIfNeeded();
+  const [panelBox, buttonBox] = await Promise.all([
+    panel.boundingBox(),
+    button.boundingBox(),
+  ]);
+  if (!panelBox || !buttonBox) throw new Error("missing boxes");
+  return {
+    fromStart: buttonBox.x - panelBox.x,
+    fromEnd: panelBox.x + panelBox.width - (buttonBox.x + buttonBox.width),
+  };
 }
 
 async function assertNoPageHorizontalScroll(page: Page) {
@@ -145,6 +151,7 @@ test("phone canvas keeps 16px page inset and 20px panel actions at 390", async (
 
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
+  await closeMobileNav(page);
   await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
   await page.getByRole("button", { name: "RN delegation forms" }).click();
 
