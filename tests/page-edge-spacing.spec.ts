@@ -120,6 +120,10 @@ test("desktop canvas and panel actions keep a 40/20 inset at 1280", async ({
 
   const openForm = await panelActionGap(page, "Delegations", "Open form");
   expect(openForm.fromEnd).toBeGreaterThanOrEqual(20);
+  await page.screenshot({
+    path: shotPath("delegations_list_after_1280.png"),
+    fullPage: false,
+  });
 
   await page.getByRole("button", { name: "New delegation" }).click();
   const cancel = await panelActionGap(page, "Delegations", "Cancel");
@@ -160,6 +164,10 @@ test("phone canvas keeps 16px page inset and 20px panel actions at 390", async (
 
   const openForm = await panelActionGap(page, "Delegations", "Open form");
   expect(openForm.fromEnd).toBeGreaterThanOrEqual(20);
+  await page.screenshot({
+    path: shotPath("delegations_list_after_390.png"),
+    fullPage: false,
+  });
 
   await page.getByRole("button", { name: "New delegation" }).click();
   const cancel = await panelActionGap(page, "Delegations", "Cancel");
