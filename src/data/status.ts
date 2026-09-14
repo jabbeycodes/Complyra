@@ -54,6 +54,12 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Overview" || page === "Settings" || page === "Sites & programs") {
     return true;
   }
+  // Site detail is a drill-down, not a nav destination: always "visible" as a
+  // page; the component itself enforces per-site access (canAccessSite), so
+  // HMs land on their own homes and no one else's.
+  if (page === "Site detail") {
+    return true;
+  }
   if (
     page === "Individuals" ||
     page === "Requirements" ||

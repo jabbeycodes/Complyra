@@ -9,7 +9,7 @@ import {
   reviewStatusLabel,
   roleLabel,
 } from "./status";
-import type { ComplyraApi, WorkspaceView } from "./localApi";
+import type { ComplyraApi, QaAuditSummary, WorkspaceView } from "./localApi";
 import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
@@ -6498,6 +6498,41 @@ export class HostedApi implements ComplyraApi {
       );
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== SITE DETAIL API (program-site detail view, read-focused) =====
+  /**
+   * QA audit history for one program site, newest first. Read-only; the
+   * audit workflow itself lives elsewhere. RLS on qa_audits already scopes
+   * rows to the caller's agency; we additionally enforce site access and
+   * the audit.read permission here.
+   */
+  async listQaAuditHistory(siteId: string): Promise<QaAuditSummary[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    if (!canAccessSite(session, siteId)) return [];
+    await this.assertSiteInAgency(session, siteId);
+    const { data, error } = await this.client
+      .from("qa_audits")
+      .select("id, year, quarter, status, auditor_name, signed_at, created_at, score")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .order("year", { ascending: false })
+      .order("quarter", { ascending: false });
+    throwIf(error, "Could not load QA audit history.");
+    return (data ?? []).map((row) => {
+      const r = row as Record<string, unknown>;
+      return {
+        id: String(r.id),
+        year: Number(r.year),
+        quarter: Number(r.quarter),
+        status: (r.status === "finalized" || r.status === "in_progress" ? r.status : "draft") as QaAuditSummary["status"],
+        auditorName: String(r.auditor_name ?? ""),
+        signedAt: (r.signed_at as string | null) ?? null,
+        createdAt: String(r.created_at ?? ""),
+        scoreJson: (r.score as unknown) ?? null,
+      };
+    });
   }
 
   /** The log is one unbroken chain: a trip's start must continue the previous end. */

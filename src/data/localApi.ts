@@ -689,6 +689,13 @@ export interface ComplyraApi {
     year: number,
     sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
   ): Promise<import("./mileage").MileageAgencyYearlySummary>;
+  // ===== SITE DETAIL API (program-site detail view, read-focused) =====
+  /**
+   * QA audit history for one program site (newest first). Read-only: the
+   * full audit workflow lives elsewhere; the detail view shows past audits
+   * and their score snapshots.
+   */
+  listQaAuditHistory(siteId: string): Promise<QaAuditSummary[]>;
   // ===== E-SIGNATURE API (adopt-once signatures, DocuSign-style) =====
   /**
    * The session user's adopted signature + ESIGN/UETA consent, if any.
@@ -967,13 +974,28 @@ export interface ComplyraApi {
   removeTrackableItem(itemId: string): Promise<TrackableItem>;
 }
 
+/**
+ * Read-only summary of one QA audit for the program-site detail view.
+ * `scoreJson` carries the finalized score snapshot when present; its exact
+ * shape is owned by the audit workflow, so callers must read it defensively.
+ */
+export interface QaAuditSummary {
+  id: string;
+  year: number;
+  quarter: number;
+  status: "draft" | "in_progress" | "finalized";
+  auditorName: string;
+  signedAt: string | null;
+  createdAt: string;
+  scoreJson: unknown;
+}
+
 export type WorkspaceSite = {
   id: string;
   name: string;
   address: string;
   program: string;
-  manager: string;
-  color: string;
+  manager: string;  color: string;
   initials: string;
 } & SiteFacts;
 
@@ -5939,6 +5961,12 @@ export class LocalApi implements ComplyraApi {
       tripsBySite.set(site.siteId, this.siteMileageTrips(session, site.siteId));
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== SITE DETAIL API (program-site detail view, read-focused) =====
+  /** Local/demo path has no QA audits yet; the hosted path reads qa_audits. */
+  async listQaAuditHistory(_siteId: string): Promise<QaAuditSummary[]> {
+    return [];
   }
 
   /** The log is one unbroken chain: a new trip's start must continue the latest end. */
