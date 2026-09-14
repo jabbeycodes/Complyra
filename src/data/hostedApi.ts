@@ -68,12 +68,15 @@ import type {
 } from "./types";
 import { blankDelegationForm } from "./types";
 import {
+  LOGIN_BAD_PASSWORD_MESSAGE,
   LOGIN_FAILED_MESSAGE,
+  LOGIN_NO_MEMBERSHIP_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
+import { canAccessSite } from "./dashboard";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
@@ -383,11 +386,11 @@ export class HostedApi implements ComplyraApi {
       password: input.password,
     });
     if (authError || !auth.user) {
-      throw new Error(LOGIN_FAILED_MESSAGE);
+      throw new Error(LOGIN_BAD_PASSWORD_MESSAGE);
     }
     const session = await this.sessionFromUser(auth.user.id, auth.user.email ?? email);
     if (!session) {
-      throw new Error("This account is not a member of an agency.");
+      throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
     // 13 CSR 65-3.050: track user log-in (server records device + IP).
     await this.logSignatureAudit({ action: "login" });
@@ -901,6 +904,7 @@ export class HostedApi implements ComplyraApi {
           id: person.id,
           name: person.fullName,
           site: site?.name ?? "Unknown site",
+          siteId: person.siteId,
           dateOfBirth: person.dateOfBirth,
           manager: managerBySite[person.siteId] ?? fallbackManager,
           initials: person.fullName
@@ -2977,14 +2981,30 @@ export class HostedApi implements ComplyraApi {
    * month, one site review per site, default clinical renewals, and training
    * checklists for assigned staff. All writes use upserts/inserts guarded by
    * unique constraints, so repeat loads add nothing.
+   *
+   * Failures are swallowed: a DPM/nurse can often SELECT every home but fail
+   * WITH CHECK on a bulk upsert. That must not strand sign-in on
+   * "Loading workspace…".
    */
   private async ensureHostedCollections(
     session: SessionUser,
     input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
   ) {
+    try {
+      await this.writeHostedCollections(session, input);
+    } catch {
+      /* best-effort — workspace reads already succeeded */
+    }
+  }
+
+  private async writeHostedCollections(
+    session: SessionUser,
+    input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
+  ) {
     const monthKey = monthKeyFrom(todayIso());
+    const writableSites = input.sites.filter((site) => canAccessSite(session, site.id));
     if (canCompleteMonthly(session.roleKey)) {
-      const drillsPayload = input.sites.flatMap((site) =>
+      const drillsPayload = writableSites.flatMap((site) =>
         drillsForMonth(monthKey).map((drillType) => ({
           agency_id: session.agencyId,
           site_id: site.id,
@@ -3002,9 +3022,9 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("emergency_drills")
           .upsert(drillsPayload, { onConflict: "site_id,month_key,drill_type", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
-      const safetyPayload = input.sites.map((site) => ({
+      const safetyPayload = writableSites.map((site) => ({
         agency_id: session.agencyId,
         site_id: site.id,
         month_key: monthKey,
@@ -3014,7 +3034,7 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("home_safety_reports")
           .upsert(safetyPayload, { onConflict: "site_id,month_key", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
       const logsPayload = input.equipment
         .filter((item) => item.active)
@@ -3031,11 +3051,11 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("equipment_month_logs")
           .upsert(logsPayload, { onConflict: "equipment_id,month_key", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
     }
     if (canEditSiteReview(session.roleKey)) {
-      const reviewsPayload = input.sites.map((site) => {
+      const reviewsPayload = writableSites.map((site) => {
         const blank = blankSiteReview({ agencyId: session.agencyId, siteId: site.id });
         return {
           id: blank.id,
@@ -3055,7 +3075,7 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("site_reviews")
           .upsert(reviewsPayload, { onConflict: "site_id", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
     }
     if (this.canSetupChartRows(session.roleKey)) {
@@ -3403,16 +3423,78 @@ export class HostedApi implements ComplyraApi {
     userId: string,
     email: string,
   ): Promise<SessionUser | null> {
-    const { data: profile } = await this.client
-      .from("profiles")
-      .select("id, full_name, email, job_title, username, must_change_password, home_agency_id, platform_admin")
-      .eq("id", userId)
-      .maybeSingle();
-    const { data: membership } = await this.client
-      .from("memberships")
-      .select("agency_id, role, role_key, site_id, expires_on")
-      .eq("user_id", userId)
-      .maybeSingle();
+    // SECURITY DEFINER so a valid Auth user is not told they have no agency
+    // when memberships RLS cannot see their own row yet.
+    const { data: context } = await this.client.rpc("login_context");
+    const ctx = (context ?? {}) as {
+      profile?: Record<string, unknown> | null;
+      membership?: Record<string, unknown> | null;
+      agency?: Record<string, unknown> | null;
+    };
+    let profile = ctx.profile
+      ? {
+          id: String(ctx.profile.id),
+          full_name: String(ctx.profile.full_name ?? ""),
+          email: String(ctx.profile.email ?? email),
+          job_title: String(ctx.profile.job_title ?? ""),
+          username: String(ctx.profile.username ?? ""),
+          must_change_password: Boolean(ctx.profile.must_change_password),
+          platform_admin: Boolean(ctx.profile.platform_admin),
+        }
+      : null;
+    let membership = ctx.membership
+      ? {
+          agency_id: String(ctx.membership.agency_id),
+          role: String(ctx.membership.role),
+          role_key: String(ctx.membership.role_key ?? ctx.membership.role),
+          site_id: (ctx.membership.site_id as string | null) ?? null,
+          expires_on: ctx.membership.expires_on,
+        }
+      : null;
+    let agency = ctx.agency
+      ? {
+          id: String(ctx.agency.id),
+          name: String(ctx.agency.name ?? "Agency"),
+          agency_code: String(ctx.agency.agency_code ?? ""),
+          status: String(ctx.agency.status ?? "active"),
+        }
+      : null;
+
+    if (!profile) {
+      const { data } = await this.client
+        .from("profiles")
+        .select("id, full_name, email, job_title, username, must_change_password, home_agency_id, platform_admin")
+        .eq("id", userId)
+        .maybeSingle();
+      profile = data
+        ? {
+            id: data.id,
+            full_name: data.full_name,
+            email: data.email,
+            job_title: data.job_title,
+            username: data.username ?? "",
+            must_change_password: Boolean(data.must_change_password),
+            platform_admin: Boolean(data.platform_admin),
+          }
+        : null;
+    }
+    if (!membership) {
+      const { data } = await this.client
+        .from("memberships")
+        .select("agency_id, role, role_key, site_id, expires_on")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      membership = data
+        ? {
+            agency_id: data.agency_id,
+            role: String(data.role),
+            role_key: String(data.role_key ?? data.role),
+            site_id: data.site_id,
+            expires_on: data.expires_on,
+          }
+        : null;
+    }
     if (!profile || !membership) return null;
     if (
       membership.expires_on &&
@@ -3420,11 +3502,21 @@ export class HostedApi implements ComplyraApi {
     ) {
       return null;
     }
-    const { data: agency } = await this.client
-      .from("agencies")
-      .select("id, name, agency_code, status")
-      .eq("id", membership.agency_id)
-      .single();
+    if (!agency) {
+      const { data } = await this.client
+        .from("agencies")
+        .select("id, name, agency_code, status")
+        .eq("id", membership.agency_id)
+        .maybeSingle();
+      agency = data
+        ? {
+            id: data.id,
+            name: data.name,
+            agency_code: data.agency_code,
+            status: data.status,
+          }
+        : null;
+    }
     const roleKey = String(membership.role_key ?? membership.role);
     const { data: agencyRole } = await this.client
       .from("agency_roles")
@@ -4309,6 +4401,9 @@ export class HostedApi implements ComplyraApi {
     const person = await this.individualRecord(input.individualId);
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
+    }
+    if (!canAccessSite(session, person.siteId)) {
+      throw new Error("Choose a person at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");

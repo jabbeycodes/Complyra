@@ -52,6 +52,7 @@ import {
   type PermissionMap,
 } from "./permissions";
 import { generateTempPassword } from "./agencyCode";
+import { canAccessSite } from "./dashboard";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
@@ -275,6 +276,7 @@ import {
 } from "../pdf/siteReviewPdf";
 import {
   LOGIN_FAILED_MESSAGE,
+  LOGIN_NO_MEMBERSHIP_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
   normalizeUsername,
@@ -982,6 +984,7 @@ export interface WorkspaceView {
     id: string;
     name: string;
     site: string;
+    siteId: string;
     dateOfBirth: string;
     manager: string;
     initials: string;
@@ -2023,6 +2026,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         id: person.id,
         name: person.fullName,
         site: site?.name ?? "Unknown site",
+        siteId: person.siteId,
         dateOfBirth: person.dateOfBirth,
         manager: managerBySite[person.siteId] ?? fallbackManager,
         initials: person.fullName
@@ -2122,8 +2126,17 @@ export class LocalApi implements ComplyraApi {
     const credential = profile
       ? this.store.db.credentials.find((row) => row.userId === profile.id)
       : undefined;
-    if (!agency || !profile || !credential || credential.password !== input.password) {
+    if (!agency || !profile || !credential) {
       throw new Error(LOGIN_FAILED_MESSAGE);
+    }
+    if (credential.password !== input.password) {
+      throw new Error(LOGIN_FAILED_MESSAGE);
+    }
+    const membership = this.store.db.memberships.find(
+      (row) => row.userId === profile.id && row.agencyId === agency.id,
+    );
+    if (!membership) {
+      throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
     this.store.sessionUserId = credential.userId;
     const session = currentSession(this.store)!;
@@ -4704,6 +4717,9 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === input.individualId && row.agencyId === session.agencyId,
     );
     if (!person) throw new Error("Individual not found.");
+    if (!canAccessSite(session, person.siteId)) {
+      throw new Error("Choose a person at a site you can manage.");
+    }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");

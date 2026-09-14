@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileBadge2, Plus } from "lucide-react";
 import { Badge, Empty, formatDate, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { individualsAtSite, lockedSiteIdFor } from "../../data/dashboard";
 import { canToggleDelegation, type ObligationItem } from "../../data/planStack";
 import { can } from "../../data/status";
 import {
@@ -83,78 +84,77 @@ export default function DelegationsPage() {
         <DelegationTemplatesSection />
       ) : (
         <>
-          {reminders.length > 0 && (
-        <section className="panel">
-          <h2>Review reminders</h2>
-          <p className="stack-help">
-            Delegations with a review date set that is due soon or overdue.
-          </p>
-          {reminders.map(({ view, person, review }) => (
-            <div key={view.item.id} className="delegation-reminder">
-              <FileBadge2 size={16} />
-              <div>
-                <strong>{view.item.title}</strong> — {person?.name}
-                <div className={review.overdue ? "delegation-warn" : "delegation-small"}>
-                  {review.label}
-                </div>
-              </div>
-              <button className="button" onClick={() => setOpenId(view.item.id)}>
-                Open form
-              </button>
+          <section className="panel">
+            <div className="panel-heading">
+              <h2>Delegations</h2>
+              {editor && (
+                <button className="button" onClick={() => setCreating((v) => !v)}>
+                  <Plus size={16} /> {creating ? "Cancel" : "New delegation"}
+                </button>
+              )}
             </div>
-          ))}
-        </section>
-      )}
-
-      <section className="panel">
-        <div className="panel-heading">
-          <h2>Delegations</h2>
-          {editor && (
-            <button className="button" onClick={() => setCreating((v) => !v)}>
-              <Plus size={16} /> {creating ? "Cancel" : "New delegation"}
-            </button>
-          )}
-        </div>
-        {creating && editor && (
-          <div className="delegation-create">
-            <NewDelegationForm
-              onCreate={(input) =>
-                run(async () => {
-                  const { id } = await api.createDelegation(input);
-                  setCreating(false);
-                  setOpenId(id);
-                })
-              }
-            />
-          </div>
-        )}
-        {delegations.length === 0 ? (
-          <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
-        ) : (
-          <table className="delegation-table">
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th>Individual</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {delegations.map(({ view, person }) => (
-                <DelegationRow
-                  key={view.item.id}
-                  item={view.item}
-                  individualName={person?.name ?? ""}
-                  onOpen={() => setOpenId(view.item.id)}
+            {creating && editor && (
+              <div className="delegation-create">
+                <NewDelegationForm
+                  onCreate={(input) =>
+                    run(async () => {
+                      const { id } = await api.createDelegation(input);
+                      setCreating(false);
+                      setOpenId(id);
+                    })
+                  }
                 />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </div>
+            )}
+            {reminders.length > 0 && !creating && (
+              <div className="delegation-reminders">
+                <h3>Review reminders</h3>
+                <p className="stack-help">
+                  Delegations with a review date set that is due soon or overdue.
+                </p>
+                {reminders.map(({ view, person, review }) => (
+                  <div key={view.item.id} className="delegation-reminder">
+                    <FileBadge2 size={16} />
+                    <div>
+                      <strong>{view.item.title}</strong> — {person?.name}
+                      <div className={review.overdue ? "delegation-warn" : "delegation-small"}>
+                        {review.label}
+                      </div>
+                    </div>
+                    <button className="button" onClick={() => setOpenId(view.item.id)}>
+                      Open form
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {delegations.length === 0 ? (
+              <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
+            ) : (
+              <table className="delegation-table">
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Individual</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {delegations.map(({ view, person }) => (
+                    <DelegationRow
+                      key={view.item.id}
+                      item={view.item}
+                      individualName={person?.name ?? ""}
+                      onOpen={() => setOpenId(view.item.id)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
 
-      {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
+          {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
         </>
       )}
     </div>
@@ -209,12 +209,22 @@ function NewDelegationForm({
     observeReportDo?: string;
   }) => void;
 }) {
-  const { workspace } = useData();
+  const { session, workspace } = useData();
+  const sites = workspace?.sites ?? [];
+  const lockedSiteId = session ? lockedSiteIdFor(session) : null;
+  const [siteId, setSiteId] = useState(lockedSiteId ?? "");
   const [individualId, setIndividualId] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [purpose, setPurpose] = useState("");
   const [procedures, setProcedures] = useState("");
   const [observeReportDo, setObserveReportDo] = useState("");
+  const selectedSite = sites.find((site) => site.id === siteId);
+  const people = individualsAtSite(workspace?.individuals ?? [], selectedSite);
+  useEffect(() => {
+    if (individualId && !people.some((person) => person.id === individualId)) {
+      setIndividualId("");
+    }
+  }, [individualId, people]);
   return (
     <form
       className="delegation-editor"
@@ -223,14 +233,40 @@ function NewDelegationForm({
         onCreate({ individualId, taskTitle, purpose, procedures, observeReportDo });
       }}
     >
-      <div className="delegation-grid2">
+      <div className="delegation-grid3">
+        <label className="form-label">
+          Program site
+          <select
+            aria-label="Program site"
+            value={siteId}
+            onChange={(e) => setSiteId(e.target.value)}
+            disabled={Boolean(lockedSiteId)}
+            required
+          >
+            {!lockedSiteId && <option value="">Select a site…</option>}
+            {(lockedSiteId
+              ? sites.filter((site) => site.id === lockedSiteId)
+              : sites
+            ).map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="form-label">
           Individual
-          <select value={individualId} onChange={(e) => setIndividualId(e.target.value)} required>
-            <option value="">Select…</option>
-            {(workspace?.individuals ?? []).map((p) => (
+          <select
+            aria-label="Individual"
+            value={individualId}
+            onChange={(e) => setIndividualId(e.target.value)}
+            disabled={!siteId}
+            required
+          >
+            <option value="">{siteId ? "Select…" : "Choose a site first"}</option>
+            {people.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} — {p.site}
+                {p.name}
               </option>
             ))}
           </select>

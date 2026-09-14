@@ -104,7 +104,7 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
-import { personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
@@ -141,6 +141,7 @@ export default function App() {
     session,
     workspace,
     loading,
+    error,
     api,
     refresh,
     signOut,
@@ -296,6 +297,27 @@ export default function App() {
     return <PendingAgencyScreen />;
   }
   if (!workspace) {
+    if (error) {
+      return (
+        <div className="login-shell">
+          <div className="login-card">
+            <div className="login-brand">
+              <ComplyRerWordmark size={36} />
+            </div>
+            <h1>Could not open the workspace</h1>
+            <p role="alert">{error}</p>
+            <button className="button primary full" type="button" onClick={() => void refresh()}>
+              <RotateCcw size={16} /> Try again
+            </button>
+            <div className="login-demo">
+              <button type="button" onClick={() => void signOut()}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return <div className="login-shell">Loading workspace…</div>;
   }
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);
@@ -2155,6 +2177,8 @@ export default function App() {
           onClose={() => setModal(null)}
           individuals={individuals}
           staff={staff}
+          sites={sites}
+          preferredSiteName={site === "All sites" ? "" : site}
           plans={data.plans}
           onSave={async (payload) => {
             if (payload.file) {
@@ -2464,11 +2488,15 @@ function CreateForm({
   onSave,
   individuals,
   staff,
+  sites,
+  preferredSiteName,
 }: {
   upload: boolean;
   onClose: () => void;
-  individuals: { id: string; name: string; site: string }[];
+  individuals: { id: string; name: string; site: string; siteId?: string }[];
   staff: { id: string; name: string; site: string }[];
+  sites: { id: string; name: string }[];
+  preferredSiteName: string;
   plans: Plan[];
   onSave: (payload: {
     individualId: string;
@@ -2483,14 +2511,26 @@ function CreateForm({
     pageCount: number;
   }) => Promise<void>;
 }) {
-  const [personId, setPersonId] = useState(individuals[0]?.id ?? "");
-  const person = individuals.find((row) => row.id === personId) ?? individuals[0];
+  const [siteName, setSiteName] = useState(() =>
+    preferredSiteName && sites.some((row) => row.name === preferredSiteName)
+      ? preferredSiteName
+      : "",
+  );
+  const selectedSite = sites.find((row) => row.name === siteName);
+  const people = individualsAtSite(individuals, selectedSite);
+  const [personId, setPersonId] = useState(people[0]?.id ?? "");
+  const person = people.find((row) => row.id === personId) ?? people[0];
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [category, setCategory] = useState<Requirement["category"]>(
     "PCSP acknowledgments",
   );
+  useEffect(() => {
+    if (personId && !people.some((row) => row.id === personId)) {
+      setPersonId(people[0]?.id ?? "");
+    }
+  }, [personId, people]);
   return (
     <Modal
       title={upload ? "Upload a PCSP" : "Create a requirement draft"}
@@ -2511,8 +2551,12 @@ function CreateForm({
           }
           const title = String(f.get("title")).trim();
           const source = upload
-            ? `${person.name} · PCSP upload`
+            ? `${person?.name ?? ""} · PCSP upload`
             : String(f.get("source"));
+          if (!siteName || !person) {
+            setError("Choose a program site and an individual.");
+            return;
+          }
           if (!title || !source.trim()) {
             setError("Enter a requirement title and source reference.");
             return;
@@ -2571,16 +2615,41 @@ function CreateForm({
             />
           </label>
         )}
-        <label className="form-label">
-          Individual
-          <select value={personId} onChange={(e) => setPersonId(e.target.value)}>
-            {individuals.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="form-two">
+          <label className="form-label">
+            Program site
+            <select
+              aria-label="Program site"
+              value={siteName}
+              onChange={(e) => setSiteName(e.target.value)}
+              required
+            >
+              <option value="">Select a site…</option>
+              {sites.map((row) => (
+                <option key={row.id} value={row.name}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-label">
+            Individual
+            <select
+              aria-label="Individual"
+              value={personId}
+              onChange={(e) => setPersonId(e.target.value)}
+              disabled={!siteName}
+              required
+            >
+              <option value="">{siteName ? "Select…" : "Choose a site first"}</option>
+              {people.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <label className="form-label">
           Requirement
           <input
@@ -2609,7 +2678,9 @@ function CreateForm({
             <select name="owner" key={personId}>
               {staff
                 .filter(
-                  (s) => s.site === person.site || s.site === "Agency-wide",
+                  (s) =>
+                    person &&
+                    (s.site === person.site || s.site === "Agency-wide"),
                 )
                 .map((s) => (
                   <option key={s.id} value={s.id}>
