@@ -298,6 +298,16 @@ Deno.serve(async (req) => {
     }
 
     const agencyId = await resolveAgency(null, true);
+    if (verified && !agencyId) {
+      // Fail closed here too: a successful re-auth that can never lead to a
+      // signature (signing requires an active membership) would mislead the
+      // user into thinking the ceremony completed.
+      await audit("reauth_failed", {
+        agency_id: null,
+        details: { reason: "no_active_membership" },
+      });
+      return fail("No active agency membership found for this account.", 403);
+    }
     if (verified) {
       const reauthAt = now.toISOString();
       const { error: upsertError } = await admin.from("signature_reauth").upsert(
