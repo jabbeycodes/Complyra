@@ -41,8 +41,11 @@ async function canvasMetrics(page: Page) {
 }
 
 async function closeMobileNav(page: Page) {
-  const close = page.getByRole("button", { name: "Close navigation" });
-  if (await close.isVisible()) await close.click();
+  const sidebar = page.locator(".sidebar.mobile-open");
+  if (await sidebar.isVisible()) {
+    await page.locator(".sidebar-close").click();
+    await expect(sidebar).toBeHidden();
+  }
 }
 
 async function panelActionGap(
