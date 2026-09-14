@@ -172,7 +172,7 @@ export default function CertificateManager() {
   const selectedStaff = staff.find((s) => s.id === activeStaffId);
 
   return (
-    <>
+    <div data-tour="certificates">
       <PageHeading
         eyebrow="CREDENTIALS UP TO DATE."
         title="Staff certificates"
@@ -283,7 +283,7 @@ export default function CertificateManager() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 
