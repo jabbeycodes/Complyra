@@ -421,7 +421,7 @@ export default function MileagePage() {
   return (
     <div data-tour="mileage">
       <PageHeading
-        eyebrow="LIFEPATH"
+        eyebrow="EVERY MILE LOGGED."
         title="Mileage log"
         description="Vehicle mileage per house: log each trip's odometer readings, split the miles equally among the individuals who rode, and print the monthly sheet."
       >

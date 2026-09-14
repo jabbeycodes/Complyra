@@ -93,7 +93,7 @@
   flex: 1;
   min-height: 44px;
   border: 1px solid #e2dccf;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   font-weight: 600;
   font-size: 14px;
@@ -116,7 +116,7 @@
   font-size: 16px;
   padding: 12px;
   border: 1px solid #d8d2c4;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   min-height: 44px;
 }
@@ -138,7 +138,7 @@
   align-items: center;
   gap: 10px;
   border: 1px solid #e2dccf;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 10px 12px;
   background: #fff;
   min-height: 56px;
@@ -177,7 +177,7 @@
   max-width: 100%;
   max-height: 120px;
   border: 1px solid #e2dccf;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   justify-self: start;
 }

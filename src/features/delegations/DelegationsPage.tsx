@@ -58,7 +58,7 @@ export default function DelegationsPage() {
   return (
     <div data-tour="delegations">
       <PageHeading
-        eyebrow="LifePath"
+        eyebrow="ONE TASK. ONE ROSTER."
         title="RN delegations"
         description="One form per individual per task. Delegation is non-transferable — each task carries its own roster and signatures."
       />

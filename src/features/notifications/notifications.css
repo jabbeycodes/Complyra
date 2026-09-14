@@ -13,7 +13,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: #b56a4e;
   color: #fff;
   font-size: 11px;
@@ -153,7 +153,7 @@
   min-height: 64px;
   padding: 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   color: #241e18;
   text-align: left;
