@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
 import { LockKeyhole } from "lucide-react";
 import { useData } from "../data/DataProvider";
 
@@ -14,10 +15,7 @@ export default function ChangePasswordScreen() {
     <div className="login-shell">
       <div className="login-card">
         <div className="login-brand">
-          <img src="/favicon.svg" alt="" />
-          <span>
-            complyrer<span className="brand-period">.</span>
-          </span>
+          <ComplyRerWordmark size={36} />
         </div>
         <h1>Choose your own password</h1>
         <p>

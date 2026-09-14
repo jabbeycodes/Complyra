@@ -1,4 +1,5 @@
 import { Clock3, LogOut } from "lucide-react";
+import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
 import { useData } from "../data/DataProvider";
 
 export default function PendingAgencyScreen() {
@@ -9,10 +10,7 @@ export default function PendingAgencyScreen() {
     <div className="login-shell">
       <div className="login-card">
         <div className="login-brand">
-          <img src="/favicon.svg" alt="" />
-          <span>
-            complyrer<span className="brand-period">.</span>
-          </span>
+          <ComplyRerWordmark size={36} />
         </div>
         <h1>{rejected ? "This setup was not approved" : "Waiting for Complyrer review"}</h1>
         <p>
