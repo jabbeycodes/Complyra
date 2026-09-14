@@ -111,6 +111,8 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   // LIFEPATH-P6-PAGEVIS (med supply forecast)
   if (page === "Supply forecast") return can(session, "individuals.view");
+  // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
+  if (page === "Recognition") return can(session, "recognition.view_winners");
   return can(session, "individuals.view");
 }
 

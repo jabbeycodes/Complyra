@@ -45,6 +45,11 @@ export const PERMISSION_KEYS = [
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
   "mileage.manage",
+  // RECOGNITION (winners-only recognition: ratings/reviews + weekly winners)
+  "recognition.rate_hm",
+  "recognition.review_dsp",
+  "recognition.view_winners",
+  "recognition.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -122,6 +127,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      "recognition.review_dsp",
+      "recognition.view_winners",
     ]),
   },
   {
@@ -145,6 +152,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.export",
       "sites.create",
       "mileage.manage",
+      "recognition.view_winners",
+      "recognition.manage",
     ]),
   },
   {
@@ -166,6 +175,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       "mileage.manage",
+      "recognition.view_winners",
+      "recognition.manage",
     ]),
   },
   {
@@ -182,6 +193,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "mileage.manage",
+      "recognition.rate_hm",
+      "recognition.view_winners",
     ]),
   },
   {
@@ -201,6 +214,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      "recognition.view_winners",
     ]),
   },
   {
@@ -219,6 +233,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hr.view_staff",
       "certificates.manage",
       "mileage.manage",
+      "recognition.view_winners",
     ]),
   },
   {
@@ -234,6 +249,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      "recognition.view_winners",
     ]),
   },
 ];
@@ -303,6 +319,11 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)
   "mileage.manage": "Log vehicle mileage",
+  // RECOGNITION
+  "recognition.rate_hm": "Rate assigned house managers",
+  "recognition.review_dsp": "Review assigned DSPs",
+  "recognition.view_winners": "See weekly winners",
+  "recognition.manage": "Manage recognition scoring",
 };
 
 /**

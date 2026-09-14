@@ -56,6 +56,7 @@ import {
   mergeSiteReviewLines,
   type SiteReview,
 } from "./siteReview";
+import type { DspHmRating, HmDspReview } from "../recognition/recognition";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -105,6 +106,52 @@ export interface LocalDatabase {
   certificates: StaffCertificate[];
   // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
   mileageTrips: MileageTrip[];
+  // RECOGNITION: bidirectional ratings/reviews + weekly winners (winners-only).
+  dspHmRatings: DspHmRating[];
+  dspHmRatingHistory: RecognitionHistoryRow[];
+  hmDspReviews: HmDspReview[];
+  hmDspReviewHistory: RecognitionHistoryRow[];
+  recognitionWinners: RecognitionWinnerRow[];
+  notifications: RecognitionNotificationRow[];
+}
+
+/** Append-only change record for one rating/review row (local store shape). */
+export interface RecognitionHistoryRow {
+  id: string;
+  parentId: string; // rating or review id
+  agencyId: string;
+  oldRating: number | null;
+  newRating: number;
+  changedBy: string;
+  createdAt: string;
+}
+
+/** Weekly winner row (local store shape). */
+export interface RecognitionWinnerRow {
+  id: string;
+  agencyId: string;
+  weekStart: string;
+  category: "hm_of_the_week" | "dsp_of_the_week";
+  winnerId: string;
+  highlights: string[];
+  decidedAt: string;
+}
+
+/** Notification row (local store shape; mirrors the hosted table). */
+export interface RecognitionNotificationRow {
+  id: string;
+  agencyId: string;
+  userId: string | null;
+  roleKey: string | null;
+  type: string;
+  title: string;
+  body: string;
+  deepLink: string;
+  entityType: string | null;
+  entityId: string | null;
+  dedupeKey: string;
+  createdAt: string;
+  readAt: string | null;
 }
 
 export function createEvergreenSeed(): LocalDatabase {
@@ -462,6 +509,13 @@ export function createEvergreenSeed(): LocalDatabase {
     certificates: [],
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.
     mileageTrips: [],
+    // RECOGNITION: ratings/reviews and winners accumulate through use.
+    dspHmRatings: [],
+    dspHmRatingHistory: [],
+    hmDspReviews: [],
+    hmDspReviewHistory: [],
+    recognitionWinners: [],
+    notifications: [],
   };
 }
 

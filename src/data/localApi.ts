@@ -85,6 +85,27 @@ import type {
   UserSignature,
 } from "./types";
 import { blankDelegationForm } from "./types";
+import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
+import {
+  dspRatingChangedPayload,
+  dspWinnerBroadcastPayload,
+  dspWinnerSelfPayload,
+  hmReviewChangedPayload,
+  hmWinnerBroadcastPayload,
+  hmWinnerSelfPayload,
+} from "../features/notifications/notify";
+import {
+  addDaysIso,
+  buildHighlights,
+  checklistDeadlineUtc,
+  defaultRecognitionWeekStart,
+  isValidRating,
+  pickWinner,
+  ratingLabel,
+  rollingAverage,
+  scoreDspWeek,
+  scoreHmWeek,
+} from "../recognition/scoring";
 import {
   applyRenewalUpload,
   blankRnFields,
@@ -665,6 +686,63 @@ export interface ComplyraApi {
     documentType?: SignableDocumentType;
     documentId?: string;
   }): Promise<SignatureAuditRecord[]>;
+  /**
+   * RECOGNITION (winners-only). Bidirectional 1–5 ratings/reviews: exactly
+   * one current record per reviewer/subject pair and direction, append-only
+   * history, and the reviewed person is notified on every change.
+   */
+  /** DSP rates an HM (1–5). Creates or updates the single current rating. */
+  submitDspHmRating(input: {
+    hmUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").DspHmRating>;
+  /** The session DSP's current rating of one HM, if any. */
+  getMyDspHmRating(
+    hmUserId: string,
+  ): Promise<import("../recognition/recognition").DspHmRating | null>;
+  /** Ratings about the session HM, each with its full change history. */
+  listDspHmRatingsAboutMe(): Promise<
+    import("../recognition/recognition").DspHmRatingWithHistory[]
+  >;
+  /** HM reviews a DSP (1–5). Creates or updates the single current review. */
+  submitHmDspReview(input: {
+    dspUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").HmDspReview>;
+  /** The session HM's current review of one DSP, if any. */
+  getMyHmDspReview(
+    dspUserId: string,
+  ): Promise<import("../recognition/recognition").HmDspReview | null>;
+  /** Reviews about the session DSP, each with its full change history. */
+  listHmDspReviewsAboutMe(): Promise<
+    import("../recognition/recognition").HmDspReviewWithHistory[]
+  >;
+  /**
+   * The session user's recognition partners: for a DSP, the HMs at their
+   * shared active sites; for a house manager, the DSPs at theirs. These are
+   * the only people the user can rate or review. Empty for other roles.
+   */
+  listRecognitionPartners(): Promise<
+    Array<{ userId: string; fullName: string; roleKey: string }>
+  >;
+  /**
+   * Managers/admins: every current rating/review pair in the agency
+   * (current values only — history stays with the pair).
+   */
+  listRecognitionFeedback(): Promise<
+    import("../recognition/recognition").RecognitionFeedback
+  >;
+  /** Public celebration surface: winners + highlights only. No rankings. */
+  listRecognitionWinners(input?: {
+    limit?: number;
+  }): Promise<import("../recognition/recognition").PublicRecognitionWinner[]>;
+  /**
+   * Run the weekly winner selection now (idempotent; skips already-decided
+   * weeks). Managers/admins only.
+   */
+  runWeeklyRecognition(input?: {
+    weekStart?: string;
+  }): Promise<import("../recognition/recognition").WeeklyRecognitionResult>;
 }
 
 export type WorkspaceSite = {
@@ -6052,6 +6130,812 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
     return next;
   }
+
+  // ======================================================================
+  // RECOGNITION (winners-only)
+  // ======================================================================
+
+  private recognitionName(userId: string): string {
+    return (
+      this.store.db.profiles.find((p) => p.id === userId)?.fullName ??
+      "Staff member"
+    );
+  }
+
+  private activeMembership(userId: string, roleKey: string, today: string) {
+    return this.store.db.memberships.find(
+      (m) =>
+        m.userId === userId &&
+        m.roleKey === roleKey &&
+        (!m.expiresOn || m.expiresOn >= today),
+    );
+  }
+
+  /** Two members are "assigned together" when they share an active site. */
+  private shareActiveSite(userA: string, userB: string): boolean {
+    const db = this.store.db;
+    const today = new Date().toISOString().slice(0, 10);
+    const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
+      a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
+    const sitesA = new Set(
+      db.memberships
+        .filter(
+          (m) =>
+            m.userId === userA &&
+            m.siteId &&
+            (!m.expiresOn || m.expiresOn >= today),
+        )
+        .map((m) => m.siteId as string),
+    );
+    // Active staff_assignments also count as a shared assignment.
+    for (const a of db.assignments) {
+      if (a.userId === userA && a.siteId && activeAsg(a)) {
+        sitesA.add(a.siteId);
+      }
+    }
+    if (sitesA.size === 0) return false;
+    return (
+      db.memberships.some(
+        (m) =>
+          m.userId === userB &&
+          m.siteId &&
+          sitesA.has(m.siteId) &&
+          (!m.expiresOn || m.expiresOn >= today),
+      ) ||
+      db.assignments.some(
+        (a) =>
+          a.userId === userB && a.siteId && sitesA.has(a.siteId) && activeAsg(a),
+      )
+    );
+  }
+
+  private pushRecognitionNotification(input: {
+    agencyId: string;
+    userId: string | null;
+    roleKey: string | null;
+    type: string;
+    title: string;
+    body: string;
+    deepLink: string;
+    entityType: string | null;
+    entityId: string | null;
+    dedupeKey: string;
+  }) {
+    const db = this.store.db;
+    // Idempotent: the same event never queues twice.
+    if (db.notifications.some((n) => n.dedupeKey === input.dedupeKey)) return;
+    db.notifications.push({
+      id: crypto.randomUUID(),
+      ...input,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    });
+  }
+
+  private ratingHistoryFor(
+    rows: { id: string; parentId: string; oldRating: number | null; newRating: number; changedBy: string; createdAt: string }[],
+    parentId: string,
+  ): import("../recognition/recognition").RatingHistoryEntry[] {
+    return rows
+      .filter((h) => h.parentId === parentId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((h) => ({
+        id: h.id,
+        oldRating: h.oldRating,
+        newRating: h.newRating,
+        changedBy: h.changedBy,
+        changedByName: this.recognitionName(h.changedBy),
+        createdAt: h.createdAt,
+      }));
+  }
+
+  async submitDspHmRating(input: {
+    hmUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").DspHmRating> {
+    const session = assertSession(this.store);
+    assertCan(session, "recognition.rate_hm");
+    if (session.roleKey !== "dsp") {
+      throw new Error("Only direct support professionals rate house managers.");
+    }
+    if (!isValidRating(input.rating)) {
+      throw new Error("Rating must be a whole number from 1 to 5.");
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const hm = this.activeMembership(input.hmUserId, "house_manager", today);
+    if (!hm || hm.agencyId !== session.agencyId) {
+      throw new Error("That house manager was not found.");
+    }
+    if (input.hmUserId === session.userId) {
+      throw new Error("You cannot rate yourself.");
+    }
+    if (!this.shareActiveSite(session.userId, input.hmUserId)) {
+      throw new Error("You can only rate the house manager of your assigned site.");
+    }
+    const db = this.store.db;
+    const now = new Date().toISOString();
+    let row = db.dspHmRatings.find(
+      (r) =>
+        r.agencyId === session.agencyId &&
+        r.dspId === session.userId &&
+        r.hmId === input.hmUserId,
+    );
+    if (row && row.rating === input.rating) return row; // no change: no history, no notification
+    const oldRating = row?.rating ?? null;
+    if (row) {
+      row.rating = input.rating;
+      row.updatedAt = now;
+    } else {
+      row = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        dspId: session.userId,
+        hmId: input.hmUserId,
+        rating: input.rating,
+        updatedAt: now,
+      };
+      db.dspHmRatings.push(row);
+    }
+    // Append-only history (mirrors the hosted trigger).
+    const historyId = crypto.randomUUID();
+    db.dspHmRatingHistory.push({
+      id: historyId,
+      parentId: row.id,
+      agencyId: session.agencyId,
+      oldRating,
+      newRating: input.rating,
+      changedBy: session.userId,
+      createdAt: now,
+    });
+    // The reviewed HM is notified (dedupe per history row).
+    const payload = dspRatingChangedPayload({
+      agencyId: session.agencyId,
+      hmUserId: input.hmUserId,
+      historyId,
+      ratingId: row.id,
+      dspName: session.fullName,
+      rating: input.rating,
+      ratingLabel: ratingLabel(input.rating),
+    });
+    this.pushRecognitionNotification({
+      agencyId: payload.agencyId,
+      userId: payload.userId ?? null,
+      roleKey: payload.roleKey ?? null,
+      type: payload.type,
+      title: payload.title,
+      body: payload.body,
+      deepLink: payload.deepLink,
+      entityType: payload.entityType ?? null,
+      entityId: payload.entityId ?? null,
+      dedupeKey: payload.dedupeKey ?? `rating.changed:${historyId}`,
+    });
+    await persistMeta(this.store);
+    return row;
+  }
+
+  async getMyDspHmRating(
+    hmUserId: string,
+  ): Promise<import("../recognition/recognition").DspHmRating | null> {
+    const session = assertSession(this.store);
+    return (
+      this.store.db.dspHmRatings.find(
+        (r) =>
+          r.agencyId === session.agencyId &&
+          r.dspId === session.userId &&
+          r.hmId === hmUserId,
+      ) ?? null
+    );
+  }
+
+  async listDspHmRatingsAboutMe(): Promise<
+    import("../recognition/recognition").DspHmRatingWithHistory[]
+  > {
+    const session = assertSession(this.store);
+    return this.store.db.dspHmRatings
+      .filter(
+        (r) => r.agencyId === session.agencyId && r.hmId === session.userId,
+      )
+      .map((r) => ({
+        ...r,
+        hmName: this.recognitionName(r.hmId),
+        dspName: this.recognitionName(r.dspId),
+        history: this.ratingHistoryFor(this.store.db.dspHmRatingHistory, r.id),
+      }));
+  }
+
+  async submitHmDspReview(input: {
+    dspUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").HmDspReview> {
+    const session = assertSession(this.store);
+    assertCan(session, "recognition.review_dsp");
+    if (session.roleKey !== "house_manager") {
+      throw new Error("Only house managers review DSPs.");
+    }
+    if (!isValidRating(input.rating)) {
+      throw new Error("Rating must be a whole number from 1 to 5.");
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const dsp = this.activeMembership(input.dspUserId, "dsp", today);
+    if (!dsp || dsp.agencyId !== session.agencyId) {
+      throw new Error("That DSP was not found.");
+    }
+    if (input.dspUserId === session.userId) {
+      throw new Error("You cannot review yourself.");
+    }
+    if (!this.shareActiveSite(session.userId, input.dspUserId)) {
+      throw new Error("You can only review DSPs at your assigned site.");
+    }
+    const db = this.store.db;
+    const now = new Date().toISOString();
+    let row = db.hmDspReviews.find(
+      (r) =>
+        r.agencyId === session.agencyId &&
+        r.hmId === session.userId &&
+        r.dspId === input.dspUserId,
+    );
+    if (row && row.rating === input.rating) return row;
+    const oldRating = row?.rating ?? null;
+    if (row) {
+      row.rating = input.rating;
+      row.updatedAt = now;
+    } else {
+      row = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        hmId: session.userId,
+        dspId: input.dspUserId,
+        rating: input.rating,
+        updatedAt: now,
+      };
+      db.hmDspReviews.push(row);
+    }
+    const historyId = crypto.randomUUID();
+    db.hmDspReviewHistory.push({
+      id: historyId,
+      parentId: row.id,
+      agencyId: session.agencyId,
+      oldRating,
+      newRating: input.rating,
+      changedBy: session.userId,
+      createdAt: now,
+    });
+    const payload = hmReviewChangedPayload({
+      agencyId: session.agencyId,
+      dspUserId: input.dspUserId,
+      historyId,
+      reviewId: row.id,
+      hmName: session.fullName,
+      rating: input.rating,
+      ratingLabel: ratingLabel(input.rating),
+    });
+    this.pushRecognitionNotification({
+      agencyId: payload.agencyId,
+      userId: payload.userId ?? null,
+      roleKey: payload.roleKey ?? null,
+      type: payload.type,
+      title: payload.title,
+      body: payload.body,
+      deepLink: payload.deepLink,
+      entityType: payload.entityType ?? null,
+      entityId: payload.entityId ?? null,
+      dedupeKey: payload.dedupeKey ?? `review.changed:${historyId}`,
+    });
+    await persistMeta(this.store);
+    return row;
+  }
+
+  async getMyHmDspReview(
+    dspUserId: string,
+  ): Promise<import("../recognition/recognition").HmDspReview | null> {
+    const session = assertSession(this.store);
+    return (
+      this.store.db.hmDspReviews.find(
+        (r) =>
+          r.agencyId === session.agencyId &&
+          r.hmId === session.userId &&
+          r.dspId === dspUserId,
+      ) ?? null
+    );
+  }
+
+  async listHmDspReviewsAboutMe(): Promise<
+    import("../recognition/recognition").HmDspReviewWithHistory[]
+  > {
+    const session = assertSession(this.store);
+    return this.store.db.hmDspReviews
+      .filter(
+        (r) => r.agencyId === session.agencyId && r.dspId === session.userId,
+      )
+      .map((r) => ({
+        ...r,
+        hmName: this.recognitionName(r.hmId),
+        dspName: this.recognitionName(r.dspId),
+        history: this.ratingHistoryFor(this.store.db.hmDspReviewHistory, r.id),
+      }));
+  }
+
+  private canSeeRecognitionFeedback(session: SessionUser): boolean {
+    return (
+      hasPermission(session, "recognition.manage") ||
+      session.roleKey === "degreed_professional_manager" ||
+      session.roleKey === "program_manager"
+    );
+  }
+
+  async listRecognitionFeedback(): Promise<
+    import("../recognition/recognition").RecognitionFeedback
+  > {
+    const session = assertSession(this.store);
+    if (!this.canSeeRecognitionFeedback(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const db = this.store.db;
+    const today = new Date().toISOString().slice(0, 10);
+    // "Appropriate managers": administrators see the whole agency; other
+    // managers see only pairs they share an active site with.
+    const isAgencyAdmin =
+      session.roleKey === "administrator" ||
+      session.roleKey === "compliance_admin";
+    const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
+      a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
+    const sitesOf = (userId: string): Set<string> => {
+      const sites = new Set<string>();
+      for (const m of db.memberships) {
+        if (
+          m.agencyId === session.agencyId &&
+          m.userId === userId &&
+          m.siteId &&
+          (!m.expiresOn || m.expiresOn >= today)
+        ) {
+          sites.add(m.siteId);
+        }
+      }
+      for (const a of db.assignments) {
+        if (
+          a.agencyId === session.agencyId &&
+          a.userId === userId &&
+          a.siteId &&
+          activeAsg(a)
+        ) {
+          sites.add(a.siteId);
+        }
+      }
+      return sites;
+    };
+    const managerSites = isAgencyAdmin ? null : sitesOf(session.userId);
+    const visible = (a: string, b: string): boolean => {
+      if (!managerSites) return true;
+      for (const id of [a, b]) {
+        for (const s of sitesOf(id)) {
+          if (managerSites.has(s)) return true;
+        }
+      }
+      return false;
+    };
+    return {
+      dspRatings: db.dspHmRatings
+        .filter(
+          (r) =>
+            r.agencyId === session.agencyId && visible(r.dspId, r.hmId),
+        )
+        .map((r) => ({
+          ...r,
+          hmName: this.recognitionName(r.hmId),
+          dspName: this.recognitionName(r.dspId),
+          history: this.ratingHistoryFor(db.dspHmRatingHistory, r.id),
+        })),
+      hmReviews: db.hmDspReviews
+        .filter(
+          (r) =>
+            r.agencyId === session.agencyId && visible(r.hmId, r.dspId),
+        )
+        .map((r) => ({
+          ...r,
+          hmName: this.recognitionName(r.hmId),
+          dspName: this.recognitionName(r.dspId),
+          history: this.ratingHistoryFor(db.hmDspReviewHistory, r.id),
+        })),
+    };
+  }
+
+  async listRecognitionPartners(): Promise<
+    Array<{ userId: string; fullName: string; roleKey: string }>
+  > {
+    const session = assertSession(this.store);
+    const counterpart =
+      session.roleKey === "dsp"
+        ? "house_manager"
+        : session.roleKey === "house_manager"
+          ? "dsp"
+          : null;
+    if (!counterpart) return [];
+    const db = this.store.db;
+    const today = new Date().toISOString().slice(0, 10);
+    const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
+      a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
+    const roleOf = (userId: string) =>
+      db.memberships.find(
+        (m) =>
+          m.agencyId === session.agencyId &&
+          m.userId === userId &&
+          (!m.expiresOn || m.expiresOn >= today),
+      )?.roleKey;
+    const partners = new Map<string, string>();
+    const consider = (userId: string) => {
+      if (userId === session.userId || partners.has(userId)) return;
+      if (roleOf(userId) !== counterpart) return;
+      if (!this.shareActiveSite(session.userId, userId)) return;
+      partners.set(userId, this.recognitionName(userId));
+    };
+    for (const m of db.memberships) {
+      if (
+        m.agencyId === session.agencyId &&
+        m.siteId &&
+        (!m.expiresOn || m.expiresOn >= today)
+      ) {
+        consider(m.userId);
+      }
+    }
+    // Counterparts placed by active staff_assignments (role from membership).
+    for (const a of db.assignments) {
+      if (a.agencyId === session.agencyId && a.siteId && activeAsg(a)) {
+        consider(a.userId);
+      }
+    }
+    return [...partners.entries()]
+      .map(([userId, fullName]) => ({ userId, fullName, roleKey: counterpart }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+
+  async listRecognitionWinners(input?: {
+    limit?: number;
+  }): Promise<import("../recognition/recognition").PublicRecognitionWinner[]> {
+    const session = assertSession(this.store);
+    const limit = Math.max(1, Math.min(52, input?.limit ?? 12));
+    return this.store.db.recognitionWinners
+      .filter((w) => w.agencyId === session.agencyId)
+      .sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1))
+      .slice(0, limit)
+      .map((w) => ({
+        id: w.id,
+        weekStart: w.weekStart,
+        category: w.category,
+        winnerName: this.recognitionName(w.winnerId),
+        highlights: [...w.highlights],
+        decidedAt: w.decidedAt,
+      }));
+  }
+
+  /**
+   * Local/demo weekly winner selection. Mirrors the hosted
+   * select-weekly-winners edge function using the same pure scoring math;
+   * idempotent per (week, category).
+   */
+  async runWeeklyRecognition(input?: {
+    weekStart?: string;
+  }): Promise<import("../recognition/recognition").WeeklyRecognitionResult> {
+    const session = assertSession(this.store);
+    if (!this.canSeeRecognitionFeedback(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const db = this.store.db;
+    const today = new Date().toISOString().slice(0, 10);
+    const weekStart =
+      input?.weekStart && /^\d{4}-\d{2}-\d{2}$/.test(input.weekStart)
+        ? input.weekStart
+        : defaultRecognitionWeekStart(new Date());
+    const monthKey = weekStart.slice(0, 7);
+    // Checklist weeks are Sunday-keyed; the recognition Monday's checklist
+    // week is the Sunday just before it (due the following Monday 4pm).
+    const checklistSunday = addDaysIso(weekStart, -1);
+    const checklistCutoff = checklistDeadlineUtc(weekStart);
+    const active = (roleKey: string) =>
+      db.memberships.filter(
+        (m) =>
+          m.agencyId === session.agencyId &&
+          m.roleKey === roleKey &&
+          (!m.expiresOn || m.expiresOn >= today),
+      );
+    const hms = active("house_manager");
+    const dsps = active("dsp");
+
+    // --- HM inputs ---------------------------------------------------------
+    const checklists = (
+      (db as LocalDatabase & { weeklyChecklists?: HmWeeklyChecklist[] })
+        .weeklyChecklists ?? []
+    ).filter(
+      (c) =>
+        c.agencyId === session.agencyId &&
+        (c.weekStart === weekStart ||
+          (!c.weekStart && c.weekOf === checklistSunday)),
+    );
+    const satisfaction = new Map<string, number[]>();
+    for (const r of db.dspHmRatings) {
+      if (r.agencyId !== session.agencyId) continue;
+      const list = satisfaction.get(r.hmId) ?? [];
+      list.push(r.rating);
+      satisfaction.set(r.hmId, list);
+    }
+    const due = DEFAULT_MONTHLY_DUE;
+    const monthlyDueDate = (day: number) =>
+      `${monthKey}-${String(Math.min(28, Math.max(1, day))).padStart(2, "0")}`;
+    const staffAtSite = (siteId: string) =>
+      db.memberships
+        .filter(
+          (m) =>
+            m.agencyId === session.agencyId &&
+            m.roleKey === "dsp" &&
+            m.siteId === siteId &&
+            (!m.expiresOn || m.expiresOn >= today),
+        )
+        .map((m) => m.userId);
+    const siteCompliance = (siteId: string): number => {
+      const staff = staffAtSite(siteId);
+      if (staff.length === 0) return 0.5;
+      let sum = 0;
+      for (const id of staff) {
+        const trainingLeg = db.trainingChecklists.some(
+          (t) => t.staffUserId === id && t.staffSignedAt,
+        )
+          ? 1
+          : 0;
+        const certs = db.certificates.filter((c) => c.userId === id);
+        const certLeg =
+          certs.length === 0
+            ? 0.5
+            : certs.some((c) => c.expiresOn < today)
+              ? 0
+              : 1;
+        sum += (trainingLeg + certLeg) / 2;
+      }
+      return sum / staff.length;
+    };
+
+    type Candidate = { id: string; fullName: string; score: number; breakdown: import("../recognition/scoring").HmBreakdown | import("../recognition/scoring").DspBreakdown };
+    const hmCandidates: Candidate[] = hms.map((m) => {
+      const lists = checklists.filter((c) => c.assignedToUserId === m.userId);
+      const dueCount = lists.length;
+      const onTime = lists.filter(
+        (c) =>
+          c.submittedAt && c.submittedAt <= (c.dueAt ?? checklistCutoff),
+      ).length;
+      let monthlyDueCount = 0;
+      let monthlyOnTime = 0;
+      const siteIds = m.siteId ? [m.siteId] : [];
+      for (const siteId of siteIds) {
+        monthlyDueCount += 1;
+        const drill = db.emergencyDrills.find(
+          (d) => d.siteId === siteId && d.monthKey === monthKey && d.date,
+        );
+        if (drill && (drill.date as string) <= monthlyDueDate(due.drillDay)) {
+          monthlyOnTime += 1;
+        }
+        monthlyDueCount += 1;
+        if (
+          db.homeSafetyReports.some(
+            (s) => s.siteId === siteId && s.monthKey === monthKey && s.lines.length > 0,
+          )
+        ) {
+          monthlyOnTime += 1;
+        }
+        const siteEquipment = db.adaptiveEquipment.filter((e) =>
+          db.individuals.some(
+            (i) => i.id === e.individualId && i.siteId === siteId,
+          ),
+        );
+        if (siteEquipment.length > 0) {
+          monthlyDueCount += 1;
+          const allOnTime = siteEquipment.every((e) => {
+            const log = db.equipmentMonthLogs.find(
+              (l) => l.equipmentId === e.id && l.monthKey === monthKey,
+            );
+            return (
+              log?.checkedOn != null &&
+              log.checkedOn <= monthlyDueDate(due.equipmentDay)
+            );
+          });
+          if (allOnTime) monthlyOnTime += 1;
+        }
+      }
+      const result = scoreHmWeek({
+        weeklyChecklistsDue: dueCount,
+        weeklyChecklistsOnTime: onTime,
+        monthlyChecksDue: monthlyDueCount,
+        monthlyChecksOnTime: monthlyOnTime,
+        siteComplianceShare:
+          siteIds.length > 0
+            ? siteIds.reduce((a, s) => a + siteCompliance(s), 0) / siteIds.length
+            : 0.5,
+        dspSatisfactionAverage: rollingAverage(satisfaction.get(m.userId) ?? []),
+      });
+      return { id: m.userId, fullName: this.recognitionName(m.userId), score: result.score, breakdown: { ...result.breakdown } };
+    });
+
+    // --- DSP inputs ----------------------------------------------------------
+    const hmReviewAvg = new Map<string, number[]>();
+    for (const r of db.hmDspReviews) {
+      if (r.agencyId !== session.agencyId) continue;
+      const list = hmReviewAvg.get(r.dspId) ?? [];
+      list.push(r.rating);
+      hmReviewAvg.set(r.dspId, list);
+    }
+    const dspCandidates: Candidate[] = dsps.map((m) => {
+      const lines = db.trainingChecklists
+        .filter((t) => t.agencyId === session.agencyId && t.staffUserId === m.userId)
+        .flatMap((t) => t.items);
+      const trainingShare =
+        lines.length > 0
+          ? lines.filter((l) => l.initialedAt).length / lines.length
+          : 0.5;
+      const certs = db.certificates.filter((c) => c.userId === m.userId);
+      const credentialsShare =
+        certs.length > 0
+          ? certs.filter((c) => c.expiresOn >= today).length / certs.length
+          : 0.5;
+      const rows = db.rows.filter(
+        (r) => r.agencyId === session.agencyId && r.userId === m.userId,
+      );
+      const signed = rows.filter((r) => r.signedAt);
+      const packetById = new Map(db.packets.map((p) => [p.id, p]));
+      const addDays = (iso: string, days: number) => {
+        const d = new Date(`${iso}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString().slice(0, 10);
+      };
+      const onTime = signed.filter((r) => {
+        const p = packetById.get(r.packetId);
+        if (!p || !r.signedAt) return false;
+        const dueDate = p.endsOn ?? addDays(p.startsOn, 14);
+        return r.signedAt.slice(0, 10) <= dueDate;
+      }).length;
+      const result = scoreDspWeek({
+        trainingShare,
+        credentialsShare,
+        documentationTimelinessShare: signed.length > 0 ? onTime / signed.length : 0.5,
+        reliabilityShare: rows.length > 0 ? signed.length / rows.length : 0.5,
+        hmReviewAverage: rollingAverage(hmReviewAvg.get(m.userId) ?? []),
+      });
+      return { id: m.userId, fullName: this.recognitionName(m.userId), score: result.score, breakdown: { ...result.breakdown } };
+    });
+
+    // --- Decide (idempotent) ---------------------------------------------------
+    const decided = (category: "hm_of_the_week" | "dsp_of_the_week") =>
+      db.recognitionWinners.some(
+        (w) =>
+          w.agencyId === session.agencyId &&
+          w.weekStart === weekStart &&
+          w.category === category,
+      );
+    const now = new Date().toISOString();
+    const weekLabel = weekRangeLabel(weekStart);
+    const hmWasDecided = decided("hm_of_the_week");
+    const dspWasDecided = decided("dsp_of_the_week");
+    const outcomes: import("../recognition/recognition").WeeklyRecognitionResult = {
+      weekStart,
+      hmWinner: null,
+      dspWinner: null,
+      alreadyDecided: hmWasDecided && dspWasDecided,
+    };
+    const announce = (
+      category: "hm_of_the_week" | "dsp_of_the_week",
+      winner: Candidate | null,
+    ) => {
+      if (!winner || decided(category)) return;
+      db.recognitionWinners.push({
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        weekStart,
+        category,
+        winnerId: winner.id,
+        highlights: buildHighlights(category, winner.breakdown),
+        decidedAt: now,
+      });
+      const winnerName = this.recognitionName(winner.id);
+      const isHm = category === "hm_of_the_week";
+      const selfPayload = isHm
+        ? hmWinnerSelfPayload({
+            agencyId: session.agencyId,
+            winnerUserId: winner.id,
+            winnerName,
+            weekStart,
+            weekLabel,
+          })
+        : dspWinnerSelfPayload({
+            agencyId: session.agencyId,
+            winnerUserId: winner.id,
+            winnerName,
+            weekStart,
+            weekLabel,
+          });
+      this.pushRecognitionNotification({
+        agencyId: selfPayload.agencyId,
+        userId: selfPayload.userId ?? null,
+        roleKey: selfPayload.roleKey ?? null,
+        type: selfPayload.type,
+        title: selfPayload.title,
+        body: selfPayload.body,
+        deepLink: selfPayload.deepLink,
+        entityType: selfPayload.entityType ?? null,
+        entityId: selfPayload.entityId ?? null,
+        dedupeKey: selfPayload.dedupeKey ?? `${selfPayload.type}:${weekStart}:${winner.id}`,
+      });
+      for (const roleKey of ["administrator", isHm ? "dsp" : "house_manager"]) {
+        const broadcast = isHm
+          ? hmWinnerBroadcastPayload({
+              agencyId: session.agencyId,
+              roleKey,
+              winnerName,
+              weekStart,
+              weekLabel,
+            })
+          : dspWinnerBroadcastPayload({
+              agencyId: session.agencyId,
+              roleKey,
+              winnerName,
+              weekStart,
+              weekLabel,
+            });
+        this.pushRecognitionNotification({
+          agencyId: broadcast.agencyId,
+          userId: broadcast.userId ?? null,
+          roleKey: broadcast.roleKey ?? null,
+          type: broadcast.type,
+          title: broadcast.title,
+          body: broadcast.body,
+          deepLink: broadcast.deepLink,
+          entityType: broadcast.entityType ?? null,
+          entityId: broadcast.entityId ?? null,
+          dedupeKey:
+            broadcast.dedupeKey ?? `${broadcast.type}:${weekStart}:${roleKey}`,
+        });
+      }
+    };
+    const hmBest = hmWasDecided ? null : pickWinner(hmCandidates);
+    const dspBest = dspWasDecided ? null : pickWinner(dspCandidates);
+    announce("hm_of_the_week", hmBest);
+    announce("dsp_of_the_week", dspBest);
+    // Idempotent reruns report the already-decided winners (matching the
+    // select-weekly-winners edge function's already_decided response shape).
+    const existingWinner = (
+      category: "hm_of_the_week" | "dsp_of_the_week",
+    ): { id: string; fullName: string } | null => {
+      const row = db.recognitionWinners.find(
+        (w) =>
+          w.agencyId === session.agencyId &&
+          w.weekStart === weekStart &&
+          w.category === category,
+      );
+      return row
+        ? { id: row.winnerId, fullName: this.recognitionName(row.winnerId) }
+        : null;
+    };
+    if (hmBest) {
+      outcomes.hmWinner = { id: hmBest.id, fullName: hmBest.fullName };
+    } else if (hmWasDecided) {
+      outcomes.hmWinner = existingWinner("hm_of_the_week");
+    }
+    if (dspBest) {
+      outcomes.dspWinner = { id: dspBest.id, fullName: dspBest.fullName };
+    } else if (dspWasDecided) {
+      outcomes.dspWinner = existingWinner("dsp_of_the_week");
+    }
+    await persistMeta(this.store);
+    return outcomes;
+  }
+}
+
+function weekRangeLabel(weekStart: string): string {
+  const MONTHS = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const [y, m, d] = weekStart.split("-").map(Number);
+  const end = new Date(Date.UTC(y, m - 1, d));
+  end.setUTCDate(end.getUTCDate() + 6);
+  const em = end.getUTCMonth() + 1;
+  const ed = end.getUTCDate();
+  return `${MONTHS[m - 1]} ${d} – ${MONTHS[em - 1]} ${ed}`;
 }
 
 export function createLocalApi(store?: MemoryStore) {

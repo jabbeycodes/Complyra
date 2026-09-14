@@ -58,6 +58,10 @@ const NOTIFICATION_TYPES = [
   "checklist.late",
   "checklist.missed",
   "checklist.submitted",
+  "rating.changed",
+  "review.changed",
+  "recognition.hm_winner",
+  "recognition.dsp_winner",
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {

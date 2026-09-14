@@ -370,3 +370,6 @@ verify_jwt = true
 
 [functions.schedule-hm-checklists]
 verify_jwt = true
+
+[functions.select-weekly-winners]
+verify_jwt = true

@@ -26,7 +26,11 @@ export type NotificationType =
   | "checklist.assigned"
   | "checklist.late"
   | "checklist.missed"
-  | "checklist.submitted";
+  | "checklist.submitted"
+  | "rating.changed"
+  | "review.changed"
+  | "recognition.hm_winner"
+  | "recognition.dsp_winner";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -39,6 +43,10 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "checklist.late",
   "checklist.missed",
   "checklist.submitted",
+  "rating.changed",
+  "review.changed",
+  "recognition.hm_winner",
+  "recognition.dsp_winner",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -157,6 +165,10 @@ export const NOTIFICATION_META: Record<
   "checklist.late": { status: "late", label: "Checklist late" },
   "checklist.missed": { status: "missing", label: "Checklist missed" },
   "checklist.submitted": { status: "compliant", label: "Checklist submitted" },
+  "rating.changed": { status: "pending", label: "Rating updated" },
+  "review.changed": { status: "pending", label: "Review updated" },
+  "recognition.hm_winner": { status: "compliant", label: "House Manager of the Week" },
+  "recognition.dsp_winner": { status: "compliant", label: "DSP of the Week" },
 };
 
 export function metaForType(type: NotificationType) {
@@ -412,4 +424,142 @@ export function markAllRead(
   now: string,
 ): NotificationRow[] {
   return rows.map((row) => (isUnread(row) ? { ...row, read_at: now } : row));
+}
+
+/* ------------------------------------------------------------------ */
+/* Recognition payloads (winners-only recognition)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A DSP changed their 1–5 rating of a house manager. Targeted at the HM.
+ * The dedupe key is the individual history row id, so every change notifies
+ * exactly once and later legitimate changes are never suppressed.
+ */
+export function dspRatingChangedPayload(input: {
+  agencyId: string;
+  hmUserId: string;
+  historyId: string;
+  ratingId: string;
+  dspName: string;
+  rating: number;
+  ratingLabel: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.hmUserId,
+    type: "rating.changed",
+    title: "Your rating was updated",
+    body: `${input.dspName} updated their rating of you to ${input.rating} of 5 (${input.ratingLabel}).`,
+    deepLink: "/recognition",
+    entityType: "dsp_hm_rating",
+    entityId: input.ratingId,
+    dedupeKey: dedupeKeyFor("rating.changed", input.historyId),
+  };
+}
+
+/**
+ * A house manager changed their 1–5 review of a DSP. Targeted at the DSP.
+ * Dedupe is per history row, same as ratings.
+ */
+export function hmReviewChangedPayload(input: {
+  agencyId: string;
+  dspUserId: string;
+  historyId: string;
+  reviewId: string;
+  hmName: string;
+  rating: number;
+  ratingLabel: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.dspUserId,
+    type: "review.changed",
+    title: "Your review was updated",
+    body: `${input.hmName} updated their review of you to ${input.rating} of 5 (${input.ratingLabel}).`,
+    deepLink: "/recognition",
+    entityType: "hm_dsp_review",
+    entityId: input.reviewId,
+    dedupeKey: dedupeKeyFor("review.changed", input.historyId),
+  };
+}
+
+function winnerPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  category: "recognition.hm_winner" | "recognition.dsp_winner";
+  winnerName: string;
+  weekStart: string;
+  weekLabel: string;
+  self: boolean;
+}): NotificationPayload {
+  const hm = input.category === "recognition.hm_winner";
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: input.category,
+    title: input.self
+      ? hm
+        ? "You're House Manager of the Week"
+        : "You're DSP of the Week"
+      : hm
+        ? "House Manager of the Week"
+        : "DSP of the Week",
+    body: input.self
+      ? `Congratulations, ${input.winnerName}. Your work stood out for the week of ${input.weekLabel}.`
+      : `${input.winnerName} is ${hm ? "House Manager" : "DSP"} of the Week for the week of ${input.weekLabel}.`,
+    deepLink: "/recognition",
+    entityType: "recognition_winner",
+    entityId: `${input.category}:${input.weekStart}`,
+    dedupeKey: dedupeKeyFor(
+      input.category,
+      input.weekStart,
+      input.userId ?? input.roleKey ?? "all",
+    ),
+  };
+}
+
+/** Personal celebration notification for the winner. */
+export function hmWinnerSelfPayload(input: {
+  agencyId: string;
+  winnerUserId: string;
+  winnerName: string;
+  weekStart: string;
+  weekLabel: string;
+}): NotificationPayload {
+  return winnerPayload({ ...input, userId: input.winnerUserId, category: "recognition.hm_winner", self: true });
+}
+
+/** Personal celebration notification for the winner. */
+export function dspWinnerSelfPayload(input: {
+  agencyId: string;
+  winnerUserId: string;
+  winnerName: string;
+  weekStart: string;
+  weekLabel: string;
+}): NotificationPayload {
+  return winnerPayload({ ...input, userId: input.winnerUserId, category: "recognition.dsp_winner", self: true });
+}
+
+/** Role-broadcast celebration so the team hears about the winner. */
+export function hmWinnerBroadcastPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  winnerName: string;
+  weekStart: string;
+  weekLabel: string;
+}): NotificationPayload {
+  return winnerPayload({ ...input, category: "recognition.hm_winner", self: false });
+}
+
+/** Role-broadcast celebration so the team hears about the winner. */
+export function dspWinnerBroadcastPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  winnerName: string;
+  weekStart: string;
+  weekLabel: string;
+}): NotificationPayload {
+  return winnerPayload({ ...input, category: "recognition.dsp_winner", self: false });
 }

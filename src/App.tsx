@@ -88,6 +88,9 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+// LIFEPATH-P8-PAGE (recognition)
+import { Trophy } from "lucide-react";
+import RecognitionPage from "./features/recognition/RecognitionPage";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useNotifications } from "./features/notifications/useNotifications";
@@ -241,6 +244,8 @@ export default function App() {
       setPage("Certificates");
     } else if (deepLink.startsWith("/meds")) {
       setPage("Supply forecast");
+    } else if (deepLink.startsWith("/recognition")) {
+      setPage("Recognition");
     }
   }
   useEffect(() => {
@@ -516,6 +521,8 @@ export default function App() {
         ["Supply forecast", MedInventoryNavIcon],
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
+        // LIFEPATH-P8-NAV (recognition)
+        ["Recognition", Trophy],
       ],
     },
   ] as const;
@@ -1645,6 +1652,8 @@ export default function App() {
               {page === "Supply forecast" && <MedInventoryPage />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
+              {/* LIFEPATH-P8-PAGE (recognition) */}
+              {page === "Recognition" && <RecognitionPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading

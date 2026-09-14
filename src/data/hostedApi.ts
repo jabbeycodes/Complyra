@@ -104,6 +104,7 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
+import { isValidRating } from "../recognition/scoring";
 import {
   applyRenewalUpload,
   canEditCover,
@@ -6190,6 +6191,664 @@ export class HostedApi implements ComplyraApi {
     );
     return next;
   }
+
+  // ======================================================================
+  // RECOGNITION (winners-only)
+  // ======================================================================
+
+  private async recognitionNames(ids: string[]): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (unique.length === 0) return names;
+    const { data } = await this.client
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", unique);
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      names.set(row.id as string, (row.full_name as string) || "Staff member");
+    }
+    return names;
+  }
+
+  private async activeMemberInRole(
+    agencyId: string,
+    userId: string,
+    roleKey: string,
+  ): Promise<boolean> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data } = await this.client
+      .from("memberships")
+      .select("user_id")
+      .eq("agency_id", agencyId)
+      .eq("user_id", userId)
+      .eq("role_key", roleKey)
+      .or(`expires_on.is.null,expires_on.gte.${today}`)
+      .limit(1);
+    return (data?.length ?? 0) > 0;
+  }
+
+  private canSeeRecognitionFeedback(session: SessionUser): boolean {
+    return hasPermission(session, "recognition.manage");
+  }
+
+  /**
+   * Manager feedback scope: administrators (administrator/compliance_admin)
+   * see the whole agency (null); other recognition.manage holders see only
+   * pairs at sites they are actively assigned to. Mirrors
+   * private.recognition_manager_view in the recognition migration.
+   */
+  private async recognitionManagerScope(
+    session: SessionUser,
+  ): Promise<Set<string> | null> {
+    if (
+      session.roleKey === "administrator" ||
+      session.roleKey === "compliance_admin"
+    ) {
+      return null;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: m } = await this.client
+      .from("memberships")
+      .select("site_id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", session.userId)
+      .not("site_id", "is", null)
+      .or(`expires_on.is.null,expires_on.gte.${today}`);
+    const { data: a } = await this.client
+      .from("staff_assignments")
+      .select("site_id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", session.userId)
+      .not("site_id", "is", null)
+      .lte("starts_on", today)
+      .or(`ends_on.is.null,ends_on.gte.${today}`);
+    const sites = new Set<string>();
+    for (const r of ((m ?? []) as Record<string, unknown>[]).concat(
+      (a ?? []) as Record<string, unknown>[],
+    )) {
+      if (r.site_id) sites.add(r.site_id as string);
+    }
+    return sites;
+  }
+
+  /** Active site ids (memberships + staff_assignments) for each user. */
+  private async sitesOfUsers(
+    agencyId: string,
+    userIds: string[],
+  ): Promise<Map<string, Set<string>>> {
+    const map = new Map<string, Set<string>>();
+    if (userIds.length === 0) return map;
+    const today = new Date().toISOString().slice(0, 10);
+    const add = (userId: string, siteId: unknown) => {
+      if (!siteId) return;
+      let set = map.get(userId);
+      if (!set) {
+        set = new Set<string>();
+        map.set(userId, set);
+      }
+      set.add(siteId as string);
+    };
+    const { data: m } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
+      .eq("agency_id", agencyId)
+      .in("user_id", userIds)
+      .not("site_id", "is", null)
+      .or(`expires_on.is.null,expires_on.gte.${today}`);
+    const { data: a } = await this.client
+      .from("staff_assignments")
+      .select("user_id, site_id")
+      .eq("agency_id", agencyId)
+      .in("user_id", userIds)
+      .not("site_id", "is", null)
+      .lte("starts_on", today)
+      .or(`ends_on.is.null,ends_on.gte.${today}`);
+    for (const r of ((m ?? []) as Record<string, unknown>[]).concat(
+      (a ?? []) as Record<string, unknown>[],
+    )) {
+      add(r.user_id as string, r.site_id);
+    }
+    return map;
+  }
+
+  /** Whether two members share an active site (assigned together). */
+  private async shareActiveSite(
+    agencyId: string,
+    userA: string,
+    userB: string,
+  ): Promise<boolean> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
+      .eq("agency_id", agencyId)
+      .in("user_id", [userA, userB])
+      .or(`expires_on.is.null,expires_on.gte.${today}`);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const sitesA = new Set(
+      rows
+        .filter((r) => r.user_id === userA && r.site_id)
+        .map((r) => r.site_id as string),
+    );
+    // Active staff_assignments also count as a shared assignment
+    // (mirrors the SQL shared_active_site() helper).
+    const { data: asg } = await this.client
+      .from("staff_assignments")
+      .select("user_id, site_id")
+      .eq("agency_id", agencyId)
+      .in("user_id", [userA, userB])
+      .lte("starts_on", today)
+      .or(`ends_on.is.null,ends_on.gte.${today}`);
+    for (const r of ((asg ?? []) as Record<string, unknown>[])) {
+      if (r.user_id === userA && r.site_id) sitesA.add(r.site_id as string);
+    }
+    if (sitesA.size === 0) return false;
+    const inB = (r: Record<string, unknown>) =>
+      r.user_id === userB && r.site_id && sitesA.has(r.site_id as string);
+    return (
+      rows.some(inB) ||
+      ((asg ?? []) as Record<string, unknown>[]).some(inB)
+    );
+  }
+
+  async submitDspHmRating(input: {
+    hmUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").DspHmRating> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "recognition.rate_hm");
+    if (session.roleKey !== "dsp") {
+      throw new Error(
+        "Only direct support professionals rate house managers.",
+      );
+    }
+    if (!isValidRating(input.rating)) {
+      throw new Error("Rating must be a whole number from 1 to 5.");
+    }
+    if (input.hmUserId === session.userId) {
+      throw new Error("You cannot rate yourself.");
+    }
+    const isHm = await this.activeMemberInRole(
+      session.agencyId,
+      input.hmUserId,
+      "house_manager",
+    );
+    if (!isHm) throw new Error("That house manager was not found.");
+    const sharesSite = await this.shareActiveSite(
+      session.agencyId,
+      session.userId,
+      input.hmUserId,
+    );
+    if (!sharesSite) {
+      throw new Error("You can only rate the house manager of your assigned site.");
+    }
+    // Atomic submission: the submit_dsp_hm_rating RPC upserts the current
+    // value, lets the trigger append history, and queues the reviewed HM's
+    // notification in ONE transaction — a change can never succeed while its
+    // notification fails. The client prechecks above give clear errors; the
+    // RPC re-validates authoritatively.
+    const { data: rpc, error: rpcError } = await this.client.rpc(
+      "submit_dsp_hm_rating",
+      { p_hm_id: input.hmUserId, p_rating: input.rating },
+    );
+    throwIf(rpcError, "Could not save your rating.");
+    const result = rpc as { changed: boolean; rating: number } | null;
+    const { data: saved, error: readError } = await this.client
+      .from("dsp_hm_ratings")
+      .select("id, agency_id, dsp_id, hm_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("dsp_id", session.userId)
+      .eq("hm_id", input.hmUserId)
+      .single();
+    throwIf(readError, "Could not save your rating.");
+    void result?.changed;
+    return mapDspHmRating(saved as Record<string, unknown>);
+  }
+
+  async getMyDspHmRating(
+    hmUserId: string,
+  ): Promise<import("../recognition/recognition").DspHmRating | null> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("dsp_hm_ratings")
+      .select("id, agency_id, dsp_id, hm_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("dsp_id", session.userId)
+      .eq("hm_id", hmUserId)
+      .maybeSingle();
+    throwIf(error, "Could not load your rating.");
+    return data ? mapDspHmRating(data as Record<string, unknown>) : null;
+  }
+
+  async listDspHmRatingsAboutMe(): Promise<
+    import("../recognition/recognition").DspHmRatingWithHistory[]
+  > {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("dsp_hm_ratings")
+      .select("id, agency_id, dsp_id, hm_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("hm_id", session.userId)
+      .order("updated_at", { ascending: false });
+    throwIf(error, "Could not load ratings about you.");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const names = await this.recognitionNames(
+      rows.flatMap((r) => [r.dsp_id as string, r.hm_id as string]),
+    );
+    const history = await this.recognitionHistory(
+      "dsp_hm_rating_history",
+      "rating_id",
+      rows.map((r) => r.id as string),
+    );
+    return rows.map((r) => ({
+      ...mapDspHmRating(r),
+      hmName: names.get(r.hm_id as string) ?? "Staff member",
+      dspName: names.get(r.dsp_id as string) ?? "Staff member",
+      history: history.get(r.id as string) ?? [],
+    }));
+  }
+
+  async submitHmDspReview(input: {
+    dspUserId: string;
+    rating: number;
+  }): Promise<import("../recognition/recognition").HmDspReview> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "recognition.review_dsp");
+    if (session.roleKey !== "house_manager") {
+      throw new Error("Only house managers review DSPs.");
+    }
+    if (!isValidRating(input.rating)) {
+      throw new Error("Rating must be a whole number from 1 to 5.");
+    }
+    if (input.dspUserId === session.userId) {
+      throw new Error("You cannot review yourself.");
+    }
+    const isDsp = await this.activeMemberInRole(
+      session.agencyId,
+      input.dspUserId,
+      "dsp",
+    );
+    if (!isDsp) throw new Error("That DSP was not found.");
+    const sharesSite = await this.shareActiveSite(
+      session.agencyId,
+      session.userId,
+      input.dspUserId,
+    );
+    if (!sharesSite) {
+      throw new Error("You can only review DSPs at your assigned site.");
+    }
+    const { data: existing } = await this.client
+      .from("hm_dsp_reviews")
+      .select("id, agency_id, hm_id, dsp_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("hm_id", session.userId)
+      .eq("dsp_id", input.dspUserId)
+      .maybeSingle();
+    const current = existing as Record<string, unknown> | null;
+    if (current && Number(current.rating) === input.rating) {
+      return mapHmDspReview(current);
+    }
+    // Atomic submission: the submit_hm_dsp_review RPC upserts the current
+    // value, lets the trigger append history, and queues the reviewed DSP's
+    // notification in ONE transaction. The client prechecks above give clear
+    // errors; the RPC re-validates authoritatively.
+    const { error: rpcError } = await this.client.rpc("submit_hm_dsp_review", {
+      p_dsp_id: input.dspUserId,
+      p_rating: input.rating,
+    });
+    throwIf(rpcError, "Could not save your review.");
+    const { data: saved, error: readError } = await this.client
+      .from("hm_dsp_reviews")
+      .select("id, agency_id, hm_id, dsp_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("hm_id", session.userId)
+      .eq("dsp_id", input.dspUserId)
+      .single();
+    throwIf(readError, "Could not save your review.");
+    return mapHmDspReview(saved as Record<string, unknown>);
+  }
+
+  async getMyHmDspReview(
+    dspUserId: string,
+  ): Promise<import("../recognition/recognition").HmDspReview | null> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("hm_dsp_reviews")
+      .select("id, agency_id, hm_id, dsp_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("hm_id", session.userId)
+      .eq("dsp_id", dspUserId)
+      .maybeSingle();
+    throwIf(error, "Could not load your review.");
+    return data ? mapHmDspReview(data as Record<string, unknown>) : null;
+  }
+
+  async listHmDspReviewsAboutMe(): Promise<
+    import("../recognition/recognition").HmDspReviewWithHistory[]
+  > {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("hm_dsp_reviews")
+      .select("id, agency_id, hm_id, dsp_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .eq("dsp_id", session.userId)
+      .order("updated_at", { ascending: false });
+    throwIf(error, "Could not load reviews about you.");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const names = await this.recognitionNames(
+      rows.flatMap((r) => [r.hm_id as string, r.dsp_id as string]),
+    );
+    const history = await this.recognitionHistory(
+      "hm_dsp_review_history",
+      "review_id",
+      rows.map((r) => r.id as string),
+    );
+    return rows.map((r) => ({
+      ...mapHmDspReview(r),
+      hmName: names.get(r.hm_id as string) ?? "Staff member",
+      dspName: names.get(r.dsp_id as string) ?? "Staff member",
+      history: history.get(r.id as string) ?? [],
+    }));
+  }
+
+  private async recognitionHistory(
+    table: string,
+    parentColumn: string,
+    parentIds: string[],
+  ): Promise<
+    Map<string, import("../recognition/recognition").RatingHistoryEntry[]>
+  > {
+    const grouped = new Map<
+      string,
+      import("../recognition/recognition").RatingHistoryEntry[]
+    >();
+    if (parentIds.length === 0) return grouped;
+    const columns =
+      `id, agency_id, ${parentColumn}, old_rating, new_rating, changed_by, created_at` as "*";
+    const { data, error } = await this.client
+      .from(table)
+      .select(columns)
+      .in(parentColumn, parentIds)
+      .order("created_at", { ascending: false });
+    throwIf(error, "Could not load change history.");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const names = await this.recognitionNames(
+      rows.map((r) => r.changed_by as string),
+    );
+    for (const r of rows) {
+      const key = r[parentColumn] as string;
+      const list = grouped.get(key) ?? [];
+      list.push({
+        id: r.id as string,
+        oldRating: r.old_rating == null ? null : Number(r.old_rating),
+        newRating: Number(r.new_rating),
+        changedBy: r.changed_by as string,
+        changedByName: names.get(r.changed_by as string) ?? null,
+        createdAt: r.created_at as string,
+      });
+      grouped.set(key, list);
+    }
+    return grouped;
+  }
+
+  async listRecognitionFeedback(): Promise<
+    import("../recognition/recognition").RecognitionFeedback
+  > {
+    const session = await this.requireSession();
+    if (!this.canSeeRecognitionFeedback(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data: ratings, error: ratingsError } = await this.client
+      .from("dsp_hm_ratings")
+      .select("id, agency_id, dsp_id, hm_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .order("updated_at", { ascending: false });
+    throwIf(ratingsError, "Could not load ratings.");
+    const { data: reviews, error: reviewsError } = await this.client
+      .from("hm_dsp_reviews")
+      .select("id, agency_id, hm_id, dsp_id, rating, updated_at")
+      .eq("agency_id", session.agencyId)
+      .order("updated_at", { ascending: false });
+    throwIf(reviewsError, "Could not load reviews.");
+    let ratingRows = (ratings ?? []) as Record<string, unknown>[];
+    let reviewRows = (reviews ?? []) as Record<string, unknown>[];
+    // "Appropriate managers": administrators see the whole agency; other
+    // recognition.manage holders (DPM, program manager) see only pairs they
+    // share an active site with. Mirrors private.recognition_manager_view.
+    const scope = await this.recognitionManagerScope(session);
+    if (scope) {
+      const partyIds = [
+        ...new Set([
+          ...ratingRows.flatMap((r) => [r.dsp_id as string, r.hm_id as string]),
+          ...reviewRows.flatMap((r) => [r.hm_id as string, r.dsp_id as string]),
+        ]),
+      ];
+      const sitesByUser = await this.sitesOfUsers(
+        session.agencyId,
+        partyIds,
+      );
+      const visible = (a: string, b: string) => {
+        for (const id of [a, b]) {
+          for (const s of sitesByUser.get(id) ?? []) {
+            if (scope.has(s)) return true;
+          }
+        }
+        return false;
+      };
+      ratingRows = ratingRows.filter((r) =>
+        visible(r.dsp_id as string, r.hm_id as string),
+      );
+      reviewRows = reviewRows.filter((r) =>
+        visible(r.hm_id as string, r.dsp_id as string),
+      );
+    }
+    const names = await this.recognitionNames([
+      ...ratingRows.flatMap((r) => [r.dsp_id as string, r.hm_id as string]),
+      ...reviewRows.flatMap((r) => [r.hm_id as string, r.dsp_id as string]),
+    ]);
+    const ratingHistory = await this.recognitionHistory(
+      "dsp_hm_rating_history",
+      "rating_id",
+      ratingRows.map((r) => r.id as string),
+    );
+    const reviewHistory = await this.recognitionHistory(
+      "hm_dsp_review_history",
+      "review_id",
+      reviewRows.map((r) => r.id as string),
+    );
+    return {
+      dspRatings: ratingRows.map((r) => ({
+        ...mapDspHmRating(r),
+        hmName: names.get(r.hm_id as string) ?? "Staff member",
+        dspName: names.get(r.dsp_id as string) ?? "Staff member",
+        history: ratingHistory.get(r.id as string) ?? [],
+      })),
+      hmReviews: reviewRows.map((r) => ({
+        ...mapHmDspReview(r),
+        hmName: names.get(r.hm_id as string) ?? "Staff member",
+        dspName: names.get(r.dsp_id as string) ?? "Staff member",
+        history: reviewHistory.get(r.id as string) ?? [],
+      })),
+    };
+  }
+
+  async listRecognitionPartners(): Promise<
+    Array<{ userId: string; fullName: string; roleKey: string }>
+  > {
+    const session = await this.requireSession();
+    const counterpart =
+      session.roleKey === "dsp"
+        ? "house_manager"
+        : session.roleKey === "house_manager"
+          ? "dsp"
+          : null;
+    if (!counterpart) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    const active = `expires_on.is.null,expires_on.gte.${today}`;
+    const asgActive = `ends_on.is.null,ends_on.gte.${today}`;
+    const { data: mySites } = await this.client
+      .from("memberships")
+      .select("site_id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", session.userId)
+      .not("site_id", "is", null)
+      .or(active);
+    const { data: myAsg } = await this.client
+      .from("staff_assignments")
+      .select("site_id")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", session.userId)
+      .not("site_id", "is", null)
+      .lte("starts_on", today)
+      .or(asgActive);
+    const siteIds = [
+      ...new Set(
+        ((((mySites ?? []) as Record<string, unknown>[]).concat(
+          (myAsg ?? []) as Record<string, unknown>[],
+        ) as Record<string, unknown>[]).map((r) => r.site_id as string)),
+      ),
+    ];
+    if (siteIds.length === 0) return [];
+    // Counterparts via active memberships at those sites…
+    const { data: partners } = await this.client
+      .from("memberships")
+      .select("user_id")
+      .eq("agency_id", session.agencyId)
+      .eq("role_key", counterpart)
+      .in("site_id", siteIds)
+      .neq("user_id", session.userId)
+      .or(active);
+    // …plus counterparts whose active staff_assignments place them there.
+    const { data: asgPartners } = await this.client
+      .from("staff_assignments")
+      .select("user_id")
+      .eq("agency_id", session.agencyId)
+      .in("site_id", siteIds)
+      .neq("user_id", session.userId)
+      .lte("starts_on", today)
+      .or(asgActive);
+    const asgIds = [
+      ...new Set(
+        ((asgPartners ?? []) as Record<string, unknown>[]).map(
+          (r) => r.user_id as string,
+        ),
+      ),
+    ];
+    let asgCounterparts: string[] = [];
+    if (asgIds.length > 0) {
+      const { data: roles } = await this.client
+        .from("memberships")
+        .select("user_id")
+        .eq("agency_id", session.agencyId)
+        .eq("role_key", counterpart)
+        .in("user_id", asgIds)
+        .or(active);
+      asgCounterparts = ((roles ?? []) as Record<string, unknown>[]).map(
+        (r) => r.user_id as string,
+      );
+    }
+    const ids = [
+      ...new Set(
+        ((partners ?? []) as Record<string, unknown>[])
+          .map((r) => r.user_id as string)
+          .concat(asgCounterparts),
+      ),
+    ];
+    const names = await this.recognitionNames(ids);
+    return ids
+      .map((userId) => ({
+        userId,
+        fullName: names.get(userId) ?? "Staff member",
+        roleKey: counterpart,
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+
+  async listRecognitionWinners(input?: {
+    limit?: number;
+  }): Promise<import("../recognition/recognition").PublicRecognitionWinner[]> {
+    const session = await this.requireSession();
+    const limit = Math.max(1, Math.min(52, input?.limit ?? 12));
+    const { data, error } = await this.client
+      .from("recognition_winners")
+      .select("id, week_start, category, winner_id, highlights, decided_at")
+      .eq("agency_id", session.agencyId)
+      .order("week_start", { ascending: false })
+      .limit(limit);
+    throwIf(error, "Could not load winners.");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const names = await this.recognitionNames(
+      rows.map((r) => r.winner_id as string),
+    );
+    return rows.map((r) => ({
+      id: r.id as string,
+      weekStart: r.week_start as string,
+      category: r.category as "hm_of_the_week" | "dsp_of_the_week",
+      winnerName: names.get(r.winner_id as string) ?? "Staff member",
+      highlights: Array.isArray(r.highlights) ? (r.highlights as string[]) : [],
+      decidedAt: r.decided_at as string,
+    }));
+  }
+
+  async runWeeklyRecognition(input?: {
+    weekStart?: string;
+  }): Promise<import("../recognition/recognition").WeeklyRecognitionResult> {
+    const session = await this.requireSession();
+    if (!this.canSeeRecognitionFeedback(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const result = await invokeEdgeFunction<{
+      week_start: string;
+      agencies: Array<{
+        agency_id: string;
+        hm_winner: { id: string; full_name: string } | null;
+        dsp_winner: { id: string; full_name: string } | null;
+        already_decided?: boolean;
+      }>;
+    }>(this.client, "select-weekly-winners", {
+      ...(input?.weekStart ? { week_start: input.weekStart } : {}),
+      agency_id: session.agencyId,
+    });
+    const agency = result.agencies.find(
+      (a) => a.agency_id === session.agencyId,
+    );
+    return {
+      weekStart: result.week_start,
+      hmWinner: agency?.hm_winner
+        ? { id: agency.hm_winner.id, fullName: agency.hm_winner.full_name }
+        : null,
+      dspWinner: agency?.dsp_winner
+        ? { id: agency.dsp_winner.id, fullName: agency.dsp_winner.full_name }
+        : null,
+      alreadyDecided: Boolean(agency?.already_decided),
+    };
+  }
+}
+
+function mapDspHmRating(
+  row: Record<string, unknown>,
+): import("../recognition/recognition").DspHmRating {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    dspId: row.dsp_id as string,
+    hmId: row.hm_id as string,
+    rating: Number(row.rating) as 1 | 2 | 3 | 4 | 5,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function mapHmDspReview(
+  row: Record<string, unknown>,
+): import("../recognition/recognition").HmDspReview {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    hmId: row.hm_id as string,
+    dspId: row.dsp_id as string,
+    rating: Number(row.rating) as 1 | 2 | 3 | 4 | 5,
+    updatedAt: row.updated_at as string,
+  };
 }
 
 function mapSite(row: Record<string, unknown>): SiteRecord {
