@@ -7,7 +7,7 @@ import {
   type EquipmentMonthLog,
   type HomeSafetyReport,
 } from "../data/monthlyChecks";
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 function line(doc: import("jspdf").jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -79,6 +79,7 @@ export function buildEquipmentMonthPdf(input: {
       y = 64;
     }
   }
+  stampRecordMark(doc, { documentId: `equipment-${input.monthKey}`, margin });
   return doc;
 }
 
@@ -129,6 +130,7 @@ export function buildDrillsMonthPdf(input: {
       y = 64;
     }
   }
+  stampRecordMark(doc, { documentId: `drills-${input.monthKey}`, margin });
   return doc;
 }
 
@@ -177,5 +179,6 @@ export function buildSafetyMonthPdf(input: {
       y = 64;
     }
   }
+  stampRecordMark(doc, { documentId: `safety-${input.monthKey}`, margin });
   return doc;
 }

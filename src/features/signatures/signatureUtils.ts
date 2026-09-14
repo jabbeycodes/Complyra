@@ -76,6 +76,23 @@ export function suggestInitials(fullName: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
+/**
+ * Stable e-signature field name for a delegation roster row's initials cell
+ * (the paper form's "Initials" column). Roster rows carry no database id and
+ * array indexes shift when the roster is edited, so the key is derived from
+ * the staff member's printed name — the row's identity in the real-world
+ * process. "Mary Jane" -> "row:mary-jane:initials".
+ */
+export function delegationRosterRowKey(printName: string): string {
+  const slug = printName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `row:${slug || "unnamed"}:initials`;
+}
+
 /** Handwriting-ish system font stacks offered by the "Type" adoption method. */
 export const TYPED_SIGNATURE_FONTS: Array<{ label: string; stack: string }> = [
   {

@@ -8,10 +8,10 @@ import {
 import { formatDate } from "../../components";
 
 /**
- * Complyrer improved rendering of the same delegation record: adds the
- * explicit review/expiry date the paper form omits, a structured inspection
- * cadence (replacing "intervals determined by the delegating RN"), a
- * competency checklist per roster row, and a review reminder banner.
+ * Complyrer's own rendering of the delegation record: explicit review/expiry
+ * date, a structured inspection cadence, a competency checklist per roster
+ * row, and a review reminder banner. Same content as the delegation the RN
+ * signed — Complyrer's wording and layout throughout.
  */
 export default function ImprovedDelegationForm({
   individualName,
@@ -32,7 +32,7 @@ export default function ImprovedDelegationForm({
       <header className="delegation-paper-head">
         <h3>Delegation of Specified Nursing Task</h3>
         <p className="delegation-paper-sub">
-          Complyrer improved version · same record as the LifePath form · {individualName}
+          Complyrer version · {individualName}
         </p>
       </header>
 
@@ -43,8 +43,8 @@ export default function ImprovedDelegationForm({
         </div>
       ) : (
         <div className="delegation-review-banner missing">
-          <strong>No review date set.</strong> The paper form prints no expiry — set one so this
-          delegation gets automatic renewal reminders.
+          <strong>No review date set.</strong> Set one so this delegation gets
+          automatic renewal reminders.
         </div>
       )}
 
@@ -64,6 +64,12 @@ export default function ImprovedDelegationForm({
       <section className="delegation-section">
         <h4>Purpose</h4>
         <p className="delegation-value">{form.purpose || "—"}</p>
+      </section>
+
+      <section className="delegation-section">
+        <h4>Delegation terms</h4>
+        <p className="delegation-clause">{DELEGATION_NON_TRANSFERABILITY_CLAUSE}</p>
+        <p className="delegation-clause">{DELEGATION_RN_RESPONSIBILITY_CLAUSE}</p>
       </section>
 
       <section className="delegation-section">
@@ -156,12 +162,6 @@ export default function ImprovedDelegationForm({
           </div>
         </div>
       </section>
-
-      <details className="delegation-details">
-        <summary>View the original LifePath clauses</summary>
-        <p className="delegation-clause">{DELEGATION_NON_TRANSFERABILITY_CLAUSE}</p>
-        <p className="delegation-clause">{DELEGATION_RN_RESPONSIBILITY_CLAUSE}</p>
-      </details>
     </div>
   );
 }

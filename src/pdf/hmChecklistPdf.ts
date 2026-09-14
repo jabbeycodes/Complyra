@@ -13,7 +13,7 @@ import {
   formatShortDate,
   weekRangeLabel,
 } from "../data/hmChecklist";
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 type Doc = import("jspdf").jsPDF;
 
@@ -101,7 +101,7 @@ export function buildWeeklyChecklistPdf(input: {
   hmName: string;
   logoDataUrl?: string | null;
 }) {
-  const { doc, margin, y: startY } = startBrandedDoc("HM Weekly Checklist", {
+  const { doc, margin, y: startY } = startBrandedDoc("House Manager Weekly Review", {
     agencyName: input.agencyName,
     logoDataUrl: input.logoDataUrl,
   });
@@ -126,7 +126,7 @@ export function buildWeeklyChecklistPdf(input: {
   y += 8;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text("Weekly walkthrough — mark Y / N / N/A for each item.", margin, y);
+  doc.text("Weekly review — mark Y, N, or N/A for each item.", margin, y);
   y += 6;
   doc.setDrawColor(47, 70, 48);
   doc.line(margin, y, margin + CONTENT_WIDTH, y);
@@ -209,6 +209,11 @@ export function buildWeeklyChecklistPdf(input: {
     y += 8;
   }
 
+  stampRecordMark(doc, {
+    documentId: input.checklist.id,
+    generatedAt: input.checklist.submittedAt,
+    margin,
+  });
   return doc;
 }
 

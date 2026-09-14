@@ -15,6 +15,7 @@ import type {
   ExpiringCertificate,
   StaffCertificate,
 } from "../../data/types";
+import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 
 // LIFEPATH-P4 (certificates): HR certificate management page — per-staff
 // certificate lists with the days-remaining countdown, file upload + manual
@@ -256,6 +257,7 @@ export default function CertificateManager() {
             ))}
           </div>
         )}
+        <ComplyrerRecordMark />
       </section>
 
       {formOpen && canManage && (

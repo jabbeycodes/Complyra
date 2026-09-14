@@ -5505,24 +5505,6 @@ body.nav-open {
   gap: 10px;
   margin-bottom: 6px;
 }
-.delegation-toggle {
-  display: inline-flex;
-  border: 1px solid #d9d2c6;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.delegation-toggle button {
-  border: 0;
-  background: #fff;
-  padding: 8px 16px;
-  font-size: 13px;
-  cursor: pointer;
-  color: #6d6257;
-}
-.delegation-toggle button.active {
-  background: #4a4036;
-  color: #fff;
-}
 .delegation-actions {
   margin: 14px 0;
   display: flex;
@@ -5590,4 +5572,13 @@ body.nav-open {
 .delegation-details summary {
   cursor: pointer;
   font-weight: 600;
+}
+
+/* Complyrer record mark — discreet provenance line on generated documents. */
+.record-mark {
+  font-size: 11px;
+  font-style: italic;
+  color: #a89c8c;
+  margin: 22px 0 4px;
+  text-align: center;
 }

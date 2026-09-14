@@ -10,6 +10,10 @@ import {
   delegationFormStatus,
   delegationReviewState,
 } from "./types";
+import {
+  ORIGINAL_NON_TRANSFERABILITY_CLAUSE,
+  ORIGINAL_RN_RESPONSIBILITY_CLAUSE,
+} from "./complyrerOriginal.fixtures";
 import { mapDelegationForm } from "./hostedMappers";
 import {
   buildBlankDelegationPdf,
@@ -37,22 +41,33 @@ password: DEMO_PASSWORD,
   };
 }
 
-test("verbatim clauses match the LifePath paper form word-for-word", () => {
-  assert.equal(
-    DELEGATION_NON_TRANSFERABILITY_CLAUSE,
-    "The following agency employees have been trained by a licensed person, demonstrate competency in all instructed procedures and are being delegated the task indicated above. This delegation and individualized instruction is specific to this individual and may not be transferred to other individuals with similar needs within this or other agencies",
-  );
-  assert.equal(
-    DELEGATION_RN_RESPONSIBILITY_CLAUSE,
-    "The delegating RN is responsible for the provision of guidance and ongoing evaluation for the delegated nursing task, including periodic inspection based at intervals determined by the delegating RN. The delegating RN maintains authority to require corrective action or rescind delegation of this task.",
-  );
+test("delegation clauses are Complyrer's own wording, not the legacy verbatim text", () => {
+  // Same compliance meaning, different words — never the transcribed originals.
+  assert.notEqual(DELEGATION_NON_TRANSFERABILITY_CLAUSE, ORIGINAL_NON_TRANSFERABILITY_CLAUSE);
+  assert.notEqual(DELEGATION_RN_RESPONSIBILITY_CLAUSE, ORIGINAL_RN_RESPONSIBILITY_CLAUSE);
+  for (const clause of [DELEGATION_NON_TRANSFERABILITY_CLAUSE, DELEGATION_RN_RESPONSIBILITY_CLAUSE]) {
+    assert.ok(clause.length > 50);
+    assert.ok(
+      !clause.includes("may not be transferred to other individuals with similar needs"),
+    );
+    assert.ok(
+      !clause.includes("responsible for the provision of guidance and ongoing evaluation"),
+    );
+  }
+  // Non-transferability meaning preserved: individual-specific, not reusable elsewhere.
+  assert.match(DELEGATION_NON_TRANSFERABILITY_CLAUSE, /this individual alone/);
+  assert.match(DELEGATION_NON_TRANSFERABILITY_CLAUSE, /cannot be used for anyone else/);
+  // RN responsibility meaning preserved: guidance, inspection, correct/rescind authority.
+  assert.match(DELEGATION_RN_RESPONSIBILITY_CLAUSE, /accountable/);
+  assert.match(DELEGATION_RN_RESPONSIBILITY_CLAUSE, /inspections on a schedule the RN sets/);
+  assert.match(DELEGATION_RN_RESPONSIBILITY_CLAUSE, /corrective action or end the delegation/);
 });
 
-test("blank delegation form ships 12 roster rows", () => {
-  const form = blankDelegationForm("lifepath_exact");
+test("blank delegation form defaults to the Complyrer version with 12 roster rows", () => {
+  const form = blankDelegationForm();
+  assert.equal(form.templateVersion, "complyrer_improved");
   assert.equal(form.roster.length, 12);
   assert.ok(form.roster.every((row) => row.printName === "" && row.signedAt === null));
-  assert.equal(blankDelegationForm("complyrer_improved").templateVersion, "complyrer_improved");
 });
 
 test("delegationFormStatus counts named, signed, and rescinded rows", () => {
@@ -73,7 +88,7 @@ test("delegationFormStatus counts named, signed, and rescinded rows", () => {
 });
 
 test("delegationReviewState reports overdue, due, and missing review dates", () => {
-  const form = blankDelegationForm("complyrer_improved");
+  const form = blankDelegationForm();
   assert.equal(delegationReviewState(form, "2026-09-13"), null);
   form.reviewDate = "2026-09-01";
   const overdue = delegationReviewState(form, "2026-09-13")!;
@@ -90,9 +105,10 @@ test("delegationReviewState reports overdue, due, and missing review dates", () 
 test("mapDelegationForm sanitizes the delegation_form jsonb column", () => {
   assert.equal(mapDelegationForm(null), null);
   assert.equal(mapDelegationForm(undefined), null);
-  const blank = mapDelegationForm({})!;
-  assert.equal(blank.templateVersion, "lifepath_exact");
-  assert.equal(blank.roster.length, 12);
+  // Legacy rows keep their recorded version for data compatibility.
+  const legacy = mapDelegationForm({})!;
+  assert.equal(legacy.templateVersion, "lifepath_exact");
+  assert.equal(legacy.roster.length, 12);
   const form = mapDelegationForm({
     templateVersion: "complyrer_improved",
     purpose: "Keep inhaler use safe",
@@ -108,34 +124,28 @@ test("mapDelegationForm sanitizes the delegation_form jsonb column", () => {
   assert.equal(form.roster[0].printName, "Staff 0");
 });
 
-test("delegation PDFs build in both templates", () => {
-  for (const kind of ["exact", "improved"] as const) {
-    const pdf = buildBlankDelegationPdf(kind);
-    const text = pdf.output("datauristring");
-    assert.match(text, /application\/pdf/);
-  }
+test("delegation PDF builds in the single Complyrer view", () => {
+  const pdf = buildBlankDelegationPdf();
+  const text = pdf.output("datauristring");
+  assert.match(text, /application\/pdf/);
   const form = blankDelegationForm();
   form.roster[0].printName = "Alex Morgan";
   form.roster[0].signatureName = "Alex Morgan";
   form.roster[0].signedAt = "2026-09-01T10:00:00.000Z";
   form.roster[0].initials = "AM";
-  const pdf = buildDelegationPdf({
-    agencyName: "LifePath of Mid-Missouri",
+  const filled = buildDelegationPdf({
+    agencyName: "Test Agency",
     individualName: "Sylvester Drummer",
     dmhId: "",
     individualLocation: "3201 Pompey dr",
     taskTitle: "PRN Inhaler Self-Administration and Monitoring",
     form,
-    kind: "exact",
+    documentId: "delegation-1",
   });
-  assert.match(pdf.output("datauristring"), /application\/pdf/);
+  assert.match(filled.output("datauristring"), /application\/pdf/);
   assert.equal(
-    delegationFileName("PRN Inhaler Self-Administration and Monitoring", "Sylvester Drummer", "exact"),
-    "complyrer-delegation-lifepath-prn-inhaler-self-administration-and-moni-sylvester-drummer.pdf",
-  );
-  assert.match(
-    delegationFileName("Task", "Person", "improved"),
-    /complyrer-delegation-improved-task-person\.pdf/,
+    delegationFileName("PRN Inhaler Self-Administration and Monitoring", "Sylvester Drummer"),
+    "complyrer-delegation-prn-inhaler-self-administration-and-moni-sylvester-drummer.pdf",
   );
 });
 
@@ -145,14 +155,13 @@ test("createDelegation validates and stores the form", async () => {
   const workspace = await api.loadWorkspace(nurse);
   const person = workspace.individuals[0];
   await assert.rejects(
-    () => api.createDelegation({ individualId: person.id, taskTitle: "", purpose: "x", templateVersion: "lifepath_exact" }),
+    () => api.createDelegation({ individualId: person.id, taskTitle: "", purpose: "x" }),
     /Name the delegated task/,
   );
   const { id } = await api.createDelegation({
     individualId: person.id,
     taskTitle: "PRN Inhaler Self-Administration and Monitoring",
     purpose: "Keep inhaler use safe.",
-    templateVersion: "lifepath_exact",
     procedures: "Step one.",
   });
   const refreshed = await api.loadWorkspace(nurse);
@@ -160,6 +169,7 @@ test("createDelegation validates and stores the form", async () => {
     .flatMap((s) => s.required)
     .find((v) => v.item.id === id)!.item;
   assert.equal(item.kind, "delegation");
+  assert.equal(item.delegationForm?.templateVersion, "complyrer_improved");
   assert.equal(item.delegationForm?.purpose, "Keep inhaler use safe.");
   assert.equal(item.delegationForm?.procedures, "Step one.");
   assert.equal(item.delegationForm?.roster.length, 12);
@@ -174,7 +184,6 @@ test("staff cannot sign a roster row before the RN", async () => {
     individualId: person.id,
     taskTitle: "Skin checks",
     purpose: "Daily skin integrity checks.",
-    templateVersion: "lifepath_exact",
   });
   await api.updateDelegationForm({
     obligationId: id,
@@ -233,7 +242,6 @@ test("rescindDelegationRow records a per-row rescinded date", async () => {
     individualId: person.id,
     taskTitle: "G-tube flush",
     purpose: "Flush per orders.",
-    templateVersion: "complyrer_improved",
   });
   await assert.rejects(
     () => api.rescindDelegationRow({ obligationId: id, rowIndex: 0, rescindedDate: "not-a-date" }),
@@ -245,7 +253,7 @@ test("rescindDelegationRow records a per-row rescinded date", async () => {
   assert.equal(item.delegationForm!.roster[0].rescindedDate, "2026-09-10");
 });
 
-test("getDelegationPdf returns a named blob in both templates", async () => {
+test("getDelegationPdf returns a named blob in the single Complyrer view", async () => {
   const api = new LocalApi(store());
   const session = await api.signIn(adminLogin());
   const workspace = await api.loadWorkspace(session);
@@ -254,13 +262,10 @@ test("getDelegationPdf returns a named blob in both templates", async () => {
     individualId: person.id,
     taskTitle: "Skin checks",
     purpose: "Daily checks.",
-    templateVersion: "lifepath_exact",
   });
-  for (const kind of ["exact", "improved"] as const) {
-    const { blob, name } = await api.getDelegationPdf({ obligationId: id, kind });
-    assert.ok(blob.size > 0);
-    assert.match(name, new RegExp(`complyrer-delegation-${kind === "exact" ? "lifepath" : "improved"}`));
-  }
+  const { blob, name } = await api.getDelegationPdf({ obligationId: id });
+  assert.ok(blob.size > 0);
+  assert.match(name, /^complyrer-delegation-skin-checks-/);
 });
 
 test("sign-in still fails with the standard message", async () => {

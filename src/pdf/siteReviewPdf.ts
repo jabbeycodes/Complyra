@@ -9,7 +9,7 @@ import {
   type SiteFacts,
   type SiteReview,
 } from "../data/siteReview";
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 function field(doc: jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -131,6 +131,7 @@ export function buildSiteReviewPdf(input: {
     }
     y += 8;
   }
+  stampRecordMark(doc, { documentId: `site-review-${input.siteName}`, margin });
   return doc;
 }
 
@@ -233,5 +234,6 @@ export function buildPreSurveyPdf(input: {
     doc.setFontSize(10);
     doc.text("No individuals are assigned to this location yet.", margin, y);
   }
+  stampRecordMark(doc, { documentId: `pre-survey-${input.siteName}`, margin });
   return doc;
 }

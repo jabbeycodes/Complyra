@@ -334,6 +334,13 @@ export interface TrainingSignoff {
   /** Typed initials, NOT a checkmark. */
   initials: string;
   signedOn: string;
+  /**
+   * Sign-off version for the per-line e-initials flow. The first initialing
+   * is version 1; every edit voids the previous version and bumps this, so
+   * the line must be re-initialed (each version gets its own tamper-evident
+   * signature event on field `line:<requirementId>:v<signoffVersion>`).
+   */
+  signoffVersion: number;
   /** N/A allowed; no blanks — every line must be initialed or N/A. */
   na: boolean;
   naReason: string | null;
@@ -448,8 +455,9 @@ export interface StaffClearanceRow {
 // ===== LIFEPATH-P3 TYPES (delegation forms) =====
 
 /**
- * Which rendering template produced a delegation record. The detail view's
- * template toggle switches RENDERING only — one underlying delegation record.
+ * Which delegation rendering produced a record. Kept for data compatibility
+ * with older rows; the UI no longer offers a template choice — every view and
+ * export is the Complyrer version.
  */
 export type DelegationTemplateVersion = "lifepath_exact" | "complyrer_improved";
 
@@ -462,7 +470,7 @@ export interface DelegationRosterRow {
   staffSignature: string | null;
   signatureName: string | null;
   signedAt: string | null;
-  /** Per-row rescinded date from the paper form's roster table. */
+  /** Per-row rescinded date from the form's roster table. */
   rescindedDate: string | null;
   initials: string | null;
   /** Complyrer improved template: competency checklist selections. */
@@ -484,9 +492,9 @@ export interface DelegationDelegatingRn {
 }
 
 /**
- * Full "LifePath RN Delegation of Specified Nursing Task Form" (extraction
- * notes B4), stored as one jsonb object on the delegation obligation. One
- * form per individual per task; delegation is non-transferable.
+ * Full "Delegation of Specified Nursing Task" form (Complyrer's own design),
+ * stored as one jsonb object on the delegation obligation. One form per
+ * individual per task; delegation is non-transferable.
  */
 export interface DelegationForm {
   templateVersion: DelegationTemplateVersion;
@@ -496,11 +504,11 @@ export interface DelegationForm {
   /** What to OBSERVE for and REPORT, what to DO and WHOM to CONTACT. */
   observeReportDo: string;
   nonTransferableAcknowledged: boolean;
-  /** Free text; the paper form leaves this "as determined by the delegating RN". */
+  /** Free text; inspections run "as determined by the delegating RN". */
   inspectionInterval: string;
-  /** Improved template only: explicit review/expiry date (the paper form prints none). */
+  /** Explicit review/expiry date with automatic renewal reminders. */
   reviewDate: string | null;
-  /** Improved template only: structured inspection cadence with reminders. */
+  /** Structured inspection cadence with reminders. */
   inspectionCadence: string | null;
   instructingProfessional: DelegationInstructingProfessional;
   delegatingRn: DelegationDelegatingRn;
@@ -521,15 +529,15 @@ export type DelegationFormPatch = Partial<
   roster?: DelegationRosterRow[];
 };
 
-/** Verbatim from the LifePath paper form — reproduce word-for-word. */
+/** Complyrer's own wording; same compliance meaning (individual-specific, non-transferable). */
 export const DELEGATION_NON_TRANSFERABILITY_CLAUSE =
-  "The following agency employees have been trained by a licensed person, demonstrate competency in all instructed procedures and are being delegated the task indicated above. This delegation and individualized instruction is specific to this individual and may not be transferred to other individuals with similar needs within this or other agencies";
+  "The staff named below were instructed by a licensed professional and have shown they can carry out each step of the task above. This delegation — the instruction and the authorization it carries — is written for this individual alone and cannot be used for anyone else, in this agency or any other.";
 
-/** Verbatim from the LifePath paper form — reproduce word-for-word. */
+/** Complyrer's own wording; same compliance meaning (RN retains responsibility, oversight, and authority to correct or rescind). */
 export const DELEGATION_RN_RESPONSIBILITY_CLAUSE =
-  "The delegating RN is responsible for the provision of guidance and ongoing evaluation for the delegated nursing task, including periodic inspection based at intervals determined by the delegating RN. The delegating RN maintains authority to require corrective action or rescind delegation of this task.";
+  "The delegating RN stays accountable for the delegated task: providing guidance, evaluating it on an ongoing basis with inspections on a schedule the RN sets, and keeping the authority to order corrective action or end the delegation at any time.";
 
-/** Complyrer improved template: competency checklist offered per roster row. */
+/** Complyrer delegation view: competency checklist offered per roster row. */
 export const DELEGATION_COMPETENCY_ITEMS = [
   "Demonstrates all instructed procedures",
   "Knows what to observe and report",
@@ -537,7 +545,7 @@ export const DELEGATION_COMPETENCY_ITEMS = [
   "Understands documentation requirements",
 ] as const;
 
-/** Complyrer improved template: structured inspection cadence options. */
+/** Complyrer delegation view: structured inspection cadence options. */
 export const DELEGATION_INSPECTION_CADENCES = [
   "Weekly",
   "Every 2 weeks",
@@ -559,7 +567,7 @@ export function blankDelegationRoster(): DelegationRosterRow[] {
 }
 
 export function blankDelegationForm(
-  templateVersion: DelegationTemplateVersion = "lifepath_exact",
+  templateVersion: DelegationTemplateVersion = "complyrer_improved",
 ): DelegationForm {
   return {
     templateVersion,

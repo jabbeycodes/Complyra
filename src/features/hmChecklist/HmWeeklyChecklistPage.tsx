@@ -6,6 +6,7 @@ import { SignatureField } from "../signatures/SignatureField";
 import { hmChecklistPayload } from "../signatures/documentPayloads";
 import "./hmChecklist.css";
 import { downloadBlob } from "../../data/openFile";
+import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { todayIso } from "../../data/chart";
 import type {
   ChecklistAnswer,
@@ -141,7 +142,7 @@ export default function HmWeeklyChecklistPage() {
     <div aria-labelledby="hm-checklist-heading">
       <PageHeading
         title="Weekly checklist"
-        description="Your weekly compliance walkthrough. Answer every item — do not leave blanks — and turn it in Monday by 4pm."
+        description="Your weekly compliance walkthrough. Answer every item — do not leave blanks — and submit it Monday by 4:00 p.m."
       />
       {error && <p className="form-error">{error}</p>}
       {loading && <p>Loading your checklist…</p>}
@@ -226,7 +227,7 @@ export default function HmWeeklyChecklistPage() {
 
           <h3>Service log</h3>
           <p className="muted">
-            Second-page fill-ins from the paper form, as structured entries.
+            Second-page fill-ins, as structured entries.
           </p>
           <div className="service-log-form">
             <label>
@@ -340,6 +341,10 @@ export default function HmWeeklyChecklistPage() {
               <Download size={16} /> Download PDF
             </button>
           </div>
+          <ComplyrerRecordMark
+            documentId={openList.id}
+            generatedAt={openList.submittedAt}
+          />
         </section>
       )}
 

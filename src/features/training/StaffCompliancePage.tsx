@@ -11,9 +11,21 @@ import { useEffect, useState } from "react";
 import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { SignatureField } from "../signatures/SignatureField";
+import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
+import SignatureAdoption from "../signatures/SignatureAdoption";
+import SignatureSeal from "../signatures/SignatureSeal";
 import {
+  formatSignatureDate,
+  suggestInitials,
+} from "../signatures/signatureUtils";
+import {
+  latestLineEvent,
+  lineNeedsReinitial,
   trainingChecklistDocId,
   trainingCountersignPayload,
+  trainingLineFieldName,
+  trainingLinePayload,
+  trainingLinePayloadFromView,
 } from "../signatures/documentPayloads";
 import { can } from "../../data/status";
 import {
@@ -23,6 +35,8 @@ import {
 } from "../../data/chart";
 import { TRAINING_LINE_MAX_HOURS } from "./gate";
 import type {
+  AdoptedSignature,
+  SignatureEvent,
   StaffClearanceRow,
   StaffTrainingProfile,
   TrainingMethod,
@@ -30,13 +44,17 @@ import type {
   TrainingSignoff,
 } from "../../data/types";
 
+/** Paper rule: "Staff must initial each item below... Do not leave blanks." */
+const LINES_GATE_MESSAGE =
+  "Initial every training line (or mark N/A) before signing.";
+
 const SECTION_NAMES: Record<number, string> = {
-  1: "General Information",
-  2: "Locations",
-  3: "Vehicle",
-  4: "Emergency Procedures",
-  5: "Staff Duties",
-  6: "Individualized Trainings",
+  1: "Agency basics",
+  2: "Around the home",
+  3: "Vehicle use",
+  4: "Emergencies",
+  5: "Daily duties",
+  6: "Individual-specific training",
 };
 
 const METHODS: TrainingMethod[] = ["shadowing", "classroom", "video", "hands-on", "reading"];
@@ -58,8 +76,17 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<
-    null | { kind: "initial"; requirement: TrainingRequirementView; existing?: TrainingSignoff } | { kind: "waive"; requirement: TrainingRequirementView } | { kind: "correct"; countersignatureId: string } | { kind: "assign" }
+    | null
+    | { kind: "initial"; requirement: TrainingRequirementView; existing?: TrainingSignoff; reinit?: boolean }
+    | { kind: "waive"; requirement: TrainingRequirementView }
+    | { kind: "correct"; countersignatureId: string }
+    | { kind: "assign" }
   >(null);
+  // Bumped after every successful save so per-line e-initials stamps reload.
+  const [signatureTick, setSignatureTick] = useState(0);
+  const staffNames = Object.fromEntries(
+    (workspace?.staff ?? []).map((s) => [s.id, s.name]),
+  );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
@@ -108,6 +135,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       if (selected) await loadProfile(selected);
       if (canManage) await loadRows();
       setModal(null);
+      setSignatureTick((tick) => tick + 1);
       onSaved(savedMessage);
     } catch (err) {
       setError((err as Error).message);
@@ -218,8 +246,12 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           canManage={canManage}
           isHm={isHm}
           busy={busy}
-          staffNames={Object.fromEntries((workspace?.staff ?? []).map((s) => [s.id, s.name]))}
+          signatureTick={signatureTick}
+          staffNames={staffNames}
           onInitial={(requirement) => setModal({ kind: "initial", requirement })}
+          onReinitial={(requirement, existing) =>
+            setModal({ kind: "initial", requirement, existing, reinit: true })
+          }
           onEdit={(requirement, existing) =>
             setModal({ kind: "initial", requirement, existing })
           }
@@ -236,15 +268,52 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         <InitialLineModal
           requirement={modal.requirement}
           existing={modal.existing}
+          reinit={modal.reinit}
           staffUserId={profile?.userId ?? ""}
           roster={workspace?.staff ?? []}
           busy={busy}
           onClose={() => setModal(null)}
           onSubmit={(input) =>
-            run(
-              () => api.initialRequirementLine(modal.requirement.id, input),
-              modal.existing ? "Training line updated." : "Training line initialed.",
-            )
+            run(async () => {
+              const requirement = modal.requirement;
+              // Re-read the line so the versioned field name is authoritative
+              // even if an earlier attempt saved the line but failed to stamp.
+              const fresh = await api.getStaffTrainingProfile(
+                profile?.userId ?? "",
+              );
+              const freshLine = fresh.requirements.find(
+                (row) => row.id === requirement.id,
+              );
+              if (!freshLine) throw new Error("Training line not found.");
+              const nextVersion = (freshLine.signoff?.signoffVersion ?? 0) + 1;
+              const adoptedInitialsText = input.initials;
+              await api.initialRequirementLine(requirement.id, {
+                ...input,
+                initials: adoptedInitialsText,
+              });
+              await api.applySignature({
+                documentType: "training_checklist",
+                documentId: trainingChecklistDocId(
+                  profile?.userId ?? "",
+                  requirement.siteId ?? "",
+                ),
+                fieldName: trainingLineFieldName(requirement.id, nextVersion),
+                kind: "initials",
+                documentPayload: trainingLinePayload({
+                  topicId: requirement.topicId,
+                  topicTitle: requirement.topicTitle,
+                  // initialRequirementLine flips the line to complete.
+                  resolvedStatus: "complete",
+                  trainerName: staffNames[input.trainerUserId] ?? "",
+                  hoursTotal: input.hoursTotal ?? 0,
+                  hoursWithHm: input.hoursWithHm ?? 0,
+                  signedOn: (input.signedOn ?? "").slice(0, 10),
+                  na: false,
+                  naReason: null,
+                  signoffVersion: nextVersion,
+                }),
+              });
+            }, modal.existing ? "Training line updated and re-initialed." : "Training line initialed.")
           }
         />
       )}
@@ -303,8 +372,10 @@ function ProfilePanel({
   canManage,
   isHm,
   busy,
+  signatureTick,
   staffNames,
   onInitial,
+  onReinitial,
   onEdit,
   onWaive,
   onCorrect,
@@ -316,13 +387,17 @@ function ProfilePanel({
   canManage: boolean;
   isHm: boolean;
   busy: boolean;
+  /** Bumped after every successful save so per-line stamps reload. */
+  signatureTick: number;
   staffNames: Record<string, string>;
   onInitial: (requirement: TrainingRequirementView) => void;
+  onReinitial: (requirement: TrainingRequirementView, existing: TrainingSignoff) => void;
   onEdit: (requirement: TrainingRequirementView, existing: TrainingSignoff) => void;
   onWaive: (requirement: TrainingRequirementView) => void;
   onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
+  const { api } = useData();
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
     section,
     lines: profile.requirements.filter((row) => row.section === section),
@@ -336,6 +411,69 @@ function ProfilePanel({
       .map((counter) => counter.siteId),
   );
   const firstSiteId = profile.requirements.find((row) => row.siteId)?.siteId ?? null;
+
+  // Per-line e-initials events, loaded ONCE per site checklist (not one
+  // SignatureField per row — 60 rows × 2 API calls would hammer mobile).
+  const [siteEvents, setSiteEvents] = useState<Record<string, SignatureEvent[]>>(
+    {},
+  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const siteIds = [
+        ...new Set(
+          [
+            ...profile.requirements.map((row) => row.siteId),
+            ...profile.countersignatures.map((counter) => counter.siteId),
+          ].filter((id): id is string => id != null),
+        ),
+      ];
+      const loaded: Record<string, SignatureEvent[]> = {};
+      for (const siteId of siteIds) {
+        try {
+          loaded[siteId] = await api.getSignatureEvents(
+            "training_checklist",
+            trainingChecklistDocId(profile.userId, siteId),
+          );
+        } catch {
+          loaded[siteId] = [];
+        }
+      }
+      if (!cancelled) setSiteEvents(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, profile.userId, signatureTick]);
+
+  // All per-line initials events across the profile's site checklists.
+  const allLineEvents = Object.values(siteEvents).flat();
+
+  /** Paper rule: every line initialed or N/A — no blanks. */
+  function linesGate(siteId: string): { allResolved: boolean; openCount: number } {
+    const open = profile.requirements.filter(
+      (row) =>
+        row.siteId === siteId &&
+        row.resolvedStatus !== "complete" &&
+        row.resolvedStatus !== "waived_na",
+    );
+    return { allResolved: open.length === 0, openCount: open.length };
+  }
+
+  function staffSignedForSite(
+    siteId: string,
+    counter: { staffSignedAt: string | null },
+  ): boolean {
+    if (counter.staffSignedAt) return true;
+    return (siteEvents[siteId] ?? []).some(
+      (event) => event.fieldName === "staff_sign",
+    );
+  }
+
+  /** A stamped line whose sign-off was edited after stamping. */
+  function needsReinitial(line: TrainingRequirementView): boolean {
+    return lineNeedsReinitial(line.signoff, allLineEvents, line.id);
+  }
   return (
     <section className="panel" aria-label={`${profile.fullName} training profile`}>
       <div className="panel-head">
@@ -423,6 +561,8 @@ function ProfilePanel({
                   {lines.map((line) => {
                     const locked = line.siteId != null && lockedSiteIds.has(line.siteId);
                     const signoff = line.signoff;
+                    const needsReinitialStamp = needsReinitial(line);
+                    const latestEvent = latestLineEvent(allLineEvents, line.id);
                     const signerName =
                       (signoff?.signedByUserId && staffNames[signoff.signedByUserId]) ??
                       "—";
@@ -434,7 +574,28 @@ function ProfilePanel({
                         <td>
                           {signoff ? (
                             <>
-                              {signoff.initials} · {formatDate(signoff.signedOn)}
+                              {signoff.na ? (
+                                <>
+                                  N/A · {formatDate(signoff.signedOn)}
+                                  <br />
+                                  <small className="muted">{signoff.naReason}</small>
+                                </>
+                              ) : needsReinitialStamp || !latestEvent ? (
+                                <span className="reinitial-hint">
+                                  Needs re-initialing
+                                </span>
+                              ) : (
+                                <LineInitialsStamp
+                                  event={latestEvent}
+                                  documentId={trainingChecklistDocId(
+                                    profile.userId,
+                                    line.siteId ?? "",
+                                  )}
+                                  getDocumentPayload={() =>
+                                    trainingLinePayloadFromView(line)
+                                  }
+                                />
+                              )}
                               <br />
                               <small className="muted">
                                 Trainer: {signoff.trainerName}
@@ -453,34 +614,42 @@ function ProfilePanel({
                         </td>
                         {(canInitialOwn || canManage) && (
                           <td>
-                            {!signoff && !locked && (
+                            {(!signoff || needsReinitialStamp) && !locked && (
+                              <button
+                                className="button touch"
+                                disabled={busy}
+                                onClick={() =>
+                                  signoff
+                                    ? onReinitial(line, signoff)
+                                    : onInitial(line)
+                                }
+                              >
+                                {needsReinitialStamp ? "Re-initial" : "Initial"}
+                              </button>
+                            )}
+                            {!signoff && !locked && canManage && (
                               <>
+                                {" "}
                                 <button
-                                  className="button"
+                                  className="button touch"
                                   disabled={busy}
-                                  onClick={() => onInitial(line)}
+                                  onClick={() => onWaive(line)}
                                 >
-                                  Initial
-                                </button>{" "}
-                                {canManage && (
-                                  <button
-                                    className="button"
-                                    disabled={busy}
-                                    onClick={() => onWaive(line)}
-                                  >
-                                    N/A
-                                  </button>
-                                )}
+                                  N/A
+                                </button>
                               </>
                             )}
                             {signoff && !locked && canEditLines && (
-                              <button
-                                className="button"
-                                disabled={busy}
-                                onClick={() => onEdit(line, signoff)}
-                              >
-                                Edit
-                              </button>
+                              <>
+                                {" "}
+                                <button
+                                  className="button touch"
+                                  disabled={busy}
+                                  onClick={() => onEdit(line, signoff)}
+                                >
+                                  Edit
+                                </button>
+                              </>
                             )}
                             {locked && <small className="muted">Locked</small>}
                           </td>
@@ -495,6 +664,10 @@ function ProfilePanel({
       )}
 
       <h3>Checklist signatures</h3>
+      <ComplyrerRecordMark
+        documentId={`training-checklist:${profile.userId}`}
+        generatedAt={new Date().toISOString()}
+      />
       {profile.countersignatures.length === 0 && (
         <>
           <p className="muted">No signatures yet for this staff member.</p>
@@ -505,7 +678,10 @@ function ProfilePanel({
               fieldName="staff_sign"
               label="Staff signature"
               actionLabel="Sign as {name}"
-              canAct
+              canAct={linesGate(firstSiteId).allResolved}
+              cantActReason={
+                linesGate(firstSiteId).allResolved ? undefined : LINES_GATE_MESSAGE
+              }
             />
           )}
         </>
@@ -513,6 +689,12 @@ function ProfilePanel({
       <ul className="signature-list">
         {profile.countersignatures.map((counter) => {
           const locked = Boolean(counter.hmSignedAt);
+          const gate = linesGate(counter.siteId);
+          const staffSigned = staffSignedForSite(counter.siteId, counter);
+          const staffCanAct = canInitialOwn && gate.allResolved;
+          // Paper order: staff signs first, then the HM countersigns — ANDed
+          // with the paper rule that every line is initialed or N/A.
+          const hmCanAct = isHm && staffSigned && gate.allResolved;
           return (
             <li key={counter.id}>
               <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
@@ -522,8 +704,8 @@ function ProfilePanel({
                 fieldName="staff_sign"
                 label="Staff signature"
                 actionLabel="Sign as {name}"
-                canAct={canInitialOwn}
-                cantActReason="Not signed yet."
+                canAct={staffCanAct}
+                cantActReason={!gate.allResolved ? LINES_GATE_MESSAGE : "Not signed yet."}
                 legacySigned={
                   counter.staffSignedAt
                     ? {
@@ -539,8 +721,14 @@ function ProfilePanel({
                 fieldName="hm_countersign"
                 label="House manager countersignature"
                 actionLabel="Countersign as {name}"
-                canAct={isHm}
-                cantActReason="Not countersigned yet."
+                canAct={hmCanAct}
+                cantActReason={
+                  !staffSigned
+                    ? "The staffer must sign before the house manager countersigns."
+                    : !gate.allResolved
+                      ? LINES_GATE_MESSAGE
+                      : "Not countersigned yet."
+                }
                 legacySigned={
                   counter.hmSignedAt
                     ? {
@@ -581,6 +769,62 @@ function ProfilePanel({
         </p>
       </section>
     </section>
+  );
+}
+
+/**
+ * Lightweight per-line e-initials stamp: the adopted initials image, the
+ * signer name, the timestamp, and the tamper-evidence seal. Deliberately NOT
+ * a full <InitialsField> — the events are loaded once per site checklist by
+ * the parent, so each row costs at most one image fetch.
+ */
+function LineInitialsStamp({
+  event,
+  documentId,
+  getDocumentPayload,
+}: {
+  event: SignatureEvent;
+  documentId: string;
+  getDocumentPayload: () => object;
+}) {
+  const { api } = useData();
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = await api.getSignatureImageUrl(`${event.userId}/initials.png`);
+        if (!cancelled) setImgUrl(url);
+      } catch {
+        if (!cancelled) setImgUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, event.userId]);
+
+  return (
+    <span className="line-initials-stamp">
+      {imgUrl ? (
+        <img
+          src={imgUrl}
+          alt={`Initials of ${event.signerName}`}
+          className="line-initials-img"
+        />
+      ) : (
+        <strong className="line-initials-fallback">{event.signerName}</strong>
+      )}
+      <span className="muted">{formatSignatureDate(event.signedAt)}</span>
+      <SignatureSeal
+        event={event}
+        documentType="training_checklist"
+        documentId={documentId}
+        fieldName={event.fieldName}
+        getDocumentPayload={getDocumentPayload}
+      />
+    </span>
   );
 }
 
@@ -633,6 +877,7 @@ function TrainingSignField({
 function InitialLineModal({
   requirement,
   existing,
+  reinit,
   staffUserId,
   roster,
   busy,
@@ -641,6 +886,8 @@ function InitialLineModal({
 }: {
   requirement: TrainingRequirementView;
   existing?: TrainingSignoff;
+  /** True when re-stamping a line whose sign-off was edited after stamping. */
+  reinit?: boolean;
   staffUserId: string;
   roster: { id: string; name: string }[];
   busy: boolean;
@@ -658,8 +905,8 @@ function InitialLineModal({
     renewalRule?: string;
   }) => void;
 }) {
+  const { api, session } = useData();
   const today = new Date().toISOString().slice(0, 10);
-  const [initials, setInitials] = useState(existing?.initials ?? "");
   const [signedOn, setSignedOn] = useState(existing?.signedOn ?? today);
   const [trainerUserId, setTrainerUserId] = useState(existing?.trainerUserId ?? "");
   const [method, setMethod] = useState<TrainingMethod | "">(existing?.method ?? "");
@@ -669,22 +916,100 @@ function InitialLineModal({
   const [observerName, setObserverName] = useState(existing?.observerName ?? "");
   const [evidenceRef, setEvidenceRef] = useState(existing?.evidenceRef ?? "");
   const [renewalRule, setRenewalRule] = useState(existing?.renewalRule ?? "");
-  const isEdit = Boolean(existing);
+  const [adopted, setAdopted] = useState<AdoptedSignature | null>(null);
+  const [adoptedLoaded, setAdoptedLoaded] = useState(false);
+  const [initialsImg, setInitialsImg] = useState<string | null>(null);
+  const [sigError, setSigError] = useState("");
+
+  const reloadAdopted = async () => {
+    setSigError("");
+    try {
+      const sig = await api.getMySignature();
+      setAdopted(sig);
+      if (sig) {
+        try {
+          setInitialsImg(await api.getSignatureImageUrl(sig.initialsPath));
+        } catch {
+          setInitialsImg(null);
+        }
+      }
+    } catch (err) {
+      setSigError((err as Error).message);
+    } finally {
+      setAdoptedLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    void reloadAdopted();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!session) return null;
+
+  // Adopted e-initials — the stamp comes from the adoption, never typed.
+  const adoptedInitialsText = suggestInitials(session.fullName);
+  const mode = !existing ? "fresh" : reinit ? "reinit" : "edit";
+  const nextVersion = (existing?.signoffVersion ?? 0) + 1;
+
+  if (!adoptedLoaded) {
+    return (
+      <Modal title="Initial training line" onClose={onClose}>
+        <p className="muted">Loading your electronic signature…</p>
+      </Modal>
+    );
+  }
+
+  if (!adopted) {
+    // Adoption is required before initialing — one flow, then back here.
+    return (
+      <SignatureAdoption onClose={onClose} onAdopted={() => void reloadAdopted()} />
+    );
+  }
+
   const selfTraining = trainerUserId !== "" && trainerUserId === staffUserId;
+  const title =
+    mode === "fresh"
+      ? "Initial training line"
+      : mode === "reinit"
+        ? "Re-initial training line"
+        : "Edit training line";
   return (
-    <Modal title={isEdit ? "Edit training line" : "Initial training line"} onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <p className="muted">{requirement.topicTitle}</p>
-      {isEdit && (
+      {mode === "edit" && (
         <p className="muted">
-          You are editing an existing signoff. The change is recorded in the audit trail
-          with your name.
+          You are editing an existing signoff. Saving voids the previous
+          initialing (version {existing?.signoffVersion ?? 1} → {nextVersion}) and
+          re-initials the line with your adopted e-initials below. The old
+          version's stamp stays in the audit history.
         </p>
       )}
+      {mode === "reinit" && (
+        <p className="muted">
+          This line was changed after it was initialed. Your adopted e-initials
+          below will stamp the new version (v{nextVersion}); the previous stamp
+          stays in history.
+        </p>
+      )}
+      {sigError && <p className="form-error">{sigError}</p>}
+      <div className="adopted-initials-preview" aria-live="polite">
+        <span className="muted">Your adopted initials — one tap, no typing:</span>
+        {initialsImg ? (
+          <img
+            src={initialsImg}
+            alt={`Adopted initials of ${session.fullName}`}
+            className="line-initials-img"
+          />
+        ) : (
+          <strong className="line-initials-fallback">{adoptedInitialsText}</strong>
+        )}
+      </div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit({
-            initials,
+            initials: adoptedInitialsText,
             signedOn,
             trainerUserId,
             method: method || undefined,
@@ -697,10 +1022,6 @@ function InitialLineModal({
           });
         }}
       >
-        <label>
-          Your initials (no checkmarks)
-          <input value={initials} onChange={(e) => setInitials(e.target.value)} required maxLength={8} />
-        </label>
         <label>
           Date trained
           <input
@@ -784,8 +1105,12 @@ function InitialLineModal({
           Renewal rule, e.g. “annual” (optional)
           <input value={renewalRule} onChange={(e) => setRenewalRule(e.target.value)} />
         </label>
-        <button className="button" type="submit" disabled={busy}>
-          {isEdit ? "Save changes" : "Save initials"}
+        <button className="button primary touch" type="submit" disabled={busy}>
+          {mode === "fresh"
+            ? `Initial as ${session.fullName}`
+            : mode === "reinit"
+              ? `Re-initial as ${session.fullName}`
+              : `Save changes & re-initial as ${session.fullName}`}
         </button>
       </form>
     </Modal>

@@ -153,7 +153,7 @@ test("applySignature requires adoption first", async () => {
     individualId: person.id,
     taskTitle: "Skin checks",
     purpose: "Daily checks.",
-    templateVersion: "lifepath_exact",
+    templateVersion: "complyrer_improved",
   });
   await assert.rejects(
     () =>
@@ -176,7 +176,7 @@ test("applySignature records an event; a second sign of the same field rejects",
     individualId: person.id,
     taskTitle: "Skin checks",
     purpose: "Daily checks.",
-    templateVersion: "lifepath_exact",
+    templateVersion: "complyrer_improved",
   });
   const payload = { obligationId: id, purpose: "Daily checks." };
   const result = await api.applySignature({
@@ -262,7 +262,7 @@ async function delegationWithForm(api: LocalApi, username: string) {
     individualId: person.id,
     taskTitle: "PRN Inhaler Self-Administration and Monitoring",
     purpose: "Keep inhaler use safe.",
-    templateVersion: "lifepath_exact",
+    templateVersion: "complyrer_improved",
     procedures: "Step one.",
   });
   const refreshed = await api.loadWorkspace(session);

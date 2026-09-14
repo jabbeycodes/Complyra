@@ -220,6 +220,7 @@ import {
   ADOPTED_SIGNATURE_MARK,
   assertAdoptableSignature,
   dataUrlToBlob,
+  delegationRosterRowKey,
   formatSignatureDate,
   signatureDocumentHash,
   suggestInitials,
@@ -459,7 +460,8 @@ export interface ComplyraApi {
     individualId: string;
     taskTitle: string;
     purpose: string;
-    templateVersion: DelegationTemplateVersion;
+    /** Optional for data compat; new forms default to the Complyrer version. */
+    templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
   }): Promise<{ id: string }>;
@@ -482,10 +484,9 @@ export interface ComplyraApi {
     rowIndex: number;
     rescindedDate: string;
   }): Promise<void>;
-  /** Render the delegation form to PDF in either template. */
+  /** Render the delegation form to PDF (Complyrer view). */
   getDelegationPdf(input: {
     obligationId: string;
-    kind: "exact" | "improved";
   }): Promise<{ blob: Blob; name: string }>;
   // ===== LIFEPATH-P4 API (certificates) =====
   // LIFEPATH-P4 (certificates): HR certificate tracking.
@@ -3679,7 +3680,10 @@ export class LocalApi implements ComplyraApi {
       section: topic?.section ?? 5,
       perIndividual: topic?.perIndividual ?? false,
       individualName: individual?.fullName ?? null,
-      signoff,
+      // Sign-offs persisted before per-line e-initials carry no version.
+      signoff: signoff
+        ? { ...signoff, signoffVersion: signoff.signoffVersion ?? 1 }
+        : null,
       resolvedStatus: resolveRequirementStatus(requirement.status, requirement.dueOn, today),
     };
   }
@@ -3837,6 +3841,10 @@ export class LocalApi implements ComplyraApi {
         signedOn: validated.signedOn,
         na: false,
         naReason: null,
+        // Void-and-redo: the edit voids the previous initialing — the line
+        // must be re-initialed, stamping a fresh versioned signature event.
+        // The old version's event stays as history.
+        signoffVersion: (existing.signoffVersion ?? 1) + 1,
         trainerName,
         trainerUserId: validated.trainerUserId,
         signedByUserId: session.userId,
@@ -3872,6 +3880,7 @@ export class LocalApi implements ComplyraApi {
       signedOn: validated.signedOn,
       na: false,
       naReason: null,
+      signoffVersion: 1,
       trainerName,
       trainerUserId: validated.trainerUserId,
       signedByUserId: session.userId,
@@ -3927,6 +3936,7 @@ export class LocalApi implements ComplyraApi {
       signedOn: now.slice(0, 10),
       na: true,
       naReason: trimmed,
+      signoffVersion: 1,
       trainerName: session.fullName,
       trainerUserId: session.userId,
       signedByUserId: session.userId,
@@ -3971,8 +3981,9 @@ export class LocalApi implements ComplyraApi {
     const [removed] = coll.trainingCountersignatures.splice(index, 1);
     // Deleting the countersignature unlocks the sheet: completed lines can be
     // edited, and the sheet must be re-signed and re-countersigned. Clear the
-    // signature events for this document too, so the same document id can be
-    // signed again with the corrected content.
+    // whole-sheet end signatures so the same document id can be signed again,
+    // but keep the per-line versioned initials stamps as audit history — a
+    // line edit already bumps its version and requires re-initialing.
     const sigColl = this.sigCollections();
     sigColl.signatureEvents = sigColl.signatureEvents.filter(
       (row) =>
@@ -3980,7 +3991,8 @@ export class LocalApi implements ComplyraApi {
           row.agencyId === session.agencyId &&
           row.documentType === "training_checklist" &&
           row.documentId ===
-            trainingChecklistDocId(removed.userId, removed.siteId)
+            trainingChecklistDocId(removed.userId, removed.siteId) &&
+          (row.fieldName === "staff_sign" || row.fieldName === "hm_countersign")
         ),
     );
     log(
@@ -4105,7 +4117,8 @@ export class LocalApi implements ComplyraApi {
     individualId: string;
     taskTitle: string;
     purpose: string;
-    templateVersion: DelegationTemplateVersion;
+    /** Optional for data compat; new forms default to the Complyrer version. */
+    templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
   }) {
@@ -4118,7 +4131,7 @@ export class LocalApi implements ComplyraApi {
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
-    const form = blankDelegationForm(input.templateVersion);
+    const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
@@ -4224,6 +4237,51 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
+  /**
+   * Records a roster row's initials acknowledgment (the paper roster's
+   * per-row "Initials" column) via the e-signature flow. Unlike signing,
+   * initialing does not lock the form: it is the staff member's
+   * acknowledgment of the training/competency statement, and the final row
+   * signature still follows. Private — reached through applySignature only.
+   */
+  private async initialDelegationRow(input: {
+    obligationId: string;
+    rowIndex: number;
+    initials: string;
+  }) {
+    const session = assertSession(this.store);
+    const item = this.delegationItem(this.store, session, input.obligationId);
+    if (!item.enabled) throw new Error("This delegation is turned off.");
+    // Same signing order as the row signature: RN first, then staff.
+    if (!item.rnSignedAt) {
+      throw new Error(
+        "The delegating RN must sign before staff initial their rows.",
+      );
+    }
+    const form = item.delegationForm!;
+    const row = form.roster[input.rowIndex];
+    if (!row) throw new Error("Roster row not found.");
+    const named = row.printName.trim();
+    if (!named) throw new Error("Name the staff member on that row first.");
+    // Only your own row: named rows only by the person named on them.
+    if (named.toLowerCase() !== session.fullName.trim().toLowerCase()) {
+      throw new Error(`Only ${named} can initial this row.`);
+    }
+    if (!input.initials.trim()) throw new Error("Add your initials.");
+    // Keep the legacy initials column in sync; signedAt stays untouched —
+    // initialing is not the row signature and does not lock the form.
+    if (!row.initials) row.initials = input.initials.trim().toUpperCase();
+    log(
+      this.store,
+      session,
+      "delegation.row_initialed",
+      `${session.fullName} initialed the delegation roster for ${item.title}`,
+      "obligation",
+      item.id,
+    );
+    await persistMeta(this.store);
+  }
+
   async rescindDelegationRow(input: {
     obligationId: string;
     rowIndex: number;
@@ -4251,7 +4309,7 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
-  async getDelegationPdf(input: { obligationId: string; kind: "exact" | "improved" }) {
+  async getDelegationPdf(input: { obligationId: string }) {
     const session = assertSession(this.store);
     const item = this.delegationItem(this.store, session, input.obligationId);
     const person = this.store.db.individuals.find((row) => row.id === item.individualId);
@@ -4263,12 +4321,12 @@ export class LocalApi implements ComplyraApi {
       individualLocation: site?.name ?? "",
       taskTitle: item.title,
       form: item.delegationForm!,
-      kind: input.kind,
+      documentId: input.obligationId,
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
     });
     return {
       blob: pdf.output("blob"),
-      name: delegationFileName(item.title, person?.fullName ?? "individual", input.kind),
+      name: delegationFileName(item.title, person?.fullName ?? "individual"),
     };
   }
   // ===== LIFEPATH-P4 IMPL (certificates) =====
@@ -5414,17 +5472,22 @@ export class LocalApi implements ComplyraApi {
   }
 
   /**
-   * A document is locked once ANY signature event exists for it — content
-   * edits are rejected with a correction-pointer message. Further SIGNATURES
-   * on other fields are still allowed (multi-signature documents).
+   * A document is locked once a whole-document SIGNATURE event exists for it
+   * (staff_sign / hm_countersign / rn_signature / hm_signature / staff_ack) —
+   * content edits are rejected with a correction-pointer message. Per-line
+   * training initials (`line:<requirementId>:v<n>`) never lock the sheet:
+   * every line must be initialable while its siblings already carry stamps.
+   * Further SIGNATURES on other fields are still allowed (multi-signature
+   * documents).
    */
   private async assertDocumentUnlocked(
     documentType: SignableDocumentType,
     documentId: string,
   ): Promise<void> {
     const events = await this.getSignatureEvents(documentType, documentId);
-    if (events.length > 0) {
-      const first = [...events].sort((a, b) =>
+    const locking = events.filter((event) => !event.fieldName.startsWith("line:"));
+    if (locking.length > 0) {
+      const first = [...locking].sort((a, b) =>
         a.signedAt.localeCompare(b.signedAt),
       )[0];
       throw new Error(
@@ -5617,6 +5680,22 @@ export class LocalApi implements ComplyraApi {
         );
         return;
       }
+      if (fieldName.startsWith("row:") && fieldName.endsWith(":initials")) {
+        // Per-row initials (the paper roster's "Initials" column): keyed by
+        // the staff member's printed name, never the mutable array index.
+        const item = this.delegationItem(this.store, session, documentId);
+        const rowIndex =
+          item.delegationForm?.roster.findIndex(
+            (r) => delegationRosterRowKey(r.printName) === fieldName,
+          ) ?? -1;
+        if (rowIndex < 0) throw new Error("Roster row not found.");
+        await this.initialDelegationRow({
+          obligationId: documentId,
+          rowIndex,
+          initials: suggestInitials(session.fullName),
+        });
+        return;
+      }
       if (fieldName.startsWith("row:")) {
         const rowIndex = Number(fieldName.slice(4));
         if (!Number.isInteger(rowIndex) || rowIndex < 0) {
@@ -5646,6 +5725,41 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Unknown signature field.");
     }
     if (documentType === "training_checklist") {
+      // Per-line e-initials (kind "initials"). The UI calls
+      // initialRequirementLine FIRST, which writes the signoff row; the
+      // signature event is the tamper-evident stamp on top. Here we only
+      // verify the field addresses a real, current-version, non-N/A signoff
+      // on this document — no further domain change is needed.
+      const lineMatch = /^line:(.+):v(\d+)$/.exec(fieldName);
+      if (lineMatch) {
+        if (!documentId.startsWith("staff:")) throw new Error("Unknown document.");
+        const [, userId, siteId] = documentId.split(":");
+        if (!userId || !siteId) throw new Error("Unknown document.");
+        const requirementId = lineMatch[1];
+        const version = Number(lineMatch[2]);
+        const requirement = this.p2Collections().trainingRequirements.find(
+          (row) =>
+            row.agencyId === session.agencyId &&
+            row.id === requirementId &&
+            row.userId === userId &&
+            (row.siteId ?? "") === siteId,
+        );
+        if (!requirement) throw new Error("Unknown signature field.");
+        if (session.userId !== requirement.userId) {
+          assertCan(session, "hr.view_staff");
+        }
+        const signoff = this.p2SignoffFor(requirementId);
+        if (
+          !signoff ||
+          signoff.na ||
+          (signoff.signoffVersion ?? 1) !== version
+        ) {
+          throw new Error("This line has no matching sign-off to initial.");
+        }
+        // A whole-document end signature still freezes per-line stamping.
+        await this.assertDocumentUnlocked("training_checklist", documentId);
+        return;
+      }
       const role =
         fieldName === "staff_sign"
           ? "staff"

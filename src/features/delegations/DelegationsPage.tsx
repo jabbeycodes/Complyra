@@ -8,7 +8,6 @@ import {
   blankDelegationForm,
   delegationFormStatus,
   delegationReviewState,
-  type DelegationTemplateVersion,
 } from "../../data/types";
 import DelegationFormDetail from "./DelegationFormDetail";
 
@@ -67,8 +66,7 @@ export default function DelegationsPage() {
         <section className="panel">
           <h2>Review reminders</h2>
           <p className="stack-help">
-            Delegations with a review date set (Complyrer improved template) that is due soon or
-            overdue.
+            Delegations with a review date set that is due soon or overdue.
           </p>
           {reminders.map(({ view, person, review }) => (
             <div key={view.item.id} className="delegation-reminder">
@@ -115,7 +113,6 @@ export default function DelegationsPage() {
               <tr>
                 <th>Task</th>
                 <th>Individual</th>
-                <th>Template</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -161,11 +158,6 @@ function DelegationRow({
       </td>
       <td>{individualName}</td>
       <td>
-        <span className="kind-pill delegation">
-          {form.templateVersion === "complyrer_improved" ? "improved" : "exact"}
-        </span>
-      </td>
-      <td>
         <Badge status={status.rescinded ? "Off" : status.fullySigned ? "Current" : "Pending"} />
         <div className="delegation-small">
           RN {item.rnSignedAt ? `signed ${formatDate(item.rnSignedAt)}` : "not signed"} ·{" "}
@@ -188,7 +180,6 @@ function NewDelegationForm({
     individualId: string;
     taskTitle: string;
     purpose: string;
-    templateVersion: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
   }) => void;
@@ -197,7 +188,6 @@ function NewDelegationForm({
   const [individualId, setIndividualId] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [templateVersion, setTemplateVersion] = useState<DelegationTemplateVersion>("lifepath_exact");
   const [procedures, setProcedures] = useState("");
   const [observeReportDo, setObserveReportDo] = useState("");
   return (
@@ -205,7 +195,7 @@ function NewDelegationForm({
       className="delegation-editor"
       onSubmit={(e) => {
         e.preventDefault();
-        onCreate({ individualId, taskTitle, purpose, templateVersion, procedures, observeReportDo });
+        onCreate({ individualId, taskTitle, purpose, procedures, observeReportDo });
       }}
     >
       <div className="delegation-grid2">
@@ -244,16 +234,6 @@ function NewDelegationForm({
           <textarea value={observeReportDo} onChange={(e) => setObserveReportDo(e.target.value)} rows={3} />
         </label>
       </div>
-      <label>
-        Start from template
-        <select
-          value={templateVersion}
-          onChange={(e) => setTemplateVersion(e.target.value as DelegationTemplateVersion)}
-        >
-          <option value="lifepath_exact">LifePath exact (paper replica)</option>
-          <option value="complyrer_improved">Complyrer improved (review date + cadence)</option>
-        </select>
-      </label>
       <button className="button primary" type="submit" disabled={!individualId || !taskTitle.trim() || !purpose.trim()}>
         Create delegation
       </button>

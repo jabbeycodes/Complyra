@@ -16,15 +16,19 @@ import {
   type DelegationForm,
   type DelegationRosterRow,
 } from "../../data/types";
-import LifepathDelegationForm from "./LifepathDelegationForm";
 import ImprovedDelegationForm from "./ImprovedDelegationForm";
-import { SignatureField } from "../signatures/SignatureField";
-import { delegationFormPayload } from "../signatures/documentPayloads";
+import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
+import { InitialsField, SignatureField } from "../signatures/SignatureField";
+import {
+  delegationFormPayload,
+  delegationRowInitialsPayload,
+} from "../signatures/documentPayloads";
+import { delegationRosterRowKey } from "../signatures/signatureUtils";
 
 /**
- * Delegation detail view: template toggle (rendering only), form editing,
+ * Delegation detail view: Complyrer's own form rendering, form editing,
  * RN-first signing, roster row signing/rescinding, and PDF export.
- * One underlying delegation record — the toggle never forks the data.
+ * One record, one view.
  */
 export default function DelegationFormDetail({
   obligationId,
@@ -35,7 +39,6 @@ export default function DelegationFormDetail({
 }) {
   const { api, session, workspace, refresh } = useData();
   const [error, setError] = useState("");
-  const [template, setTemplate] = useState<"lifepath_exact" | "complyrer_improved" | null>(null);
   const [editing, setEditing] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
 
@@ -58,7 +61,6 @@ export default function DelegationFormDetail({
   }
 
   const form: DelegationForm = item.delegationForm ?? blankDelegationForm();
-  const tpl = template ?? form.templateVersion;
   const status = delegationFormStatus(form);
   const editor = canToggleDelegation(
     session.roleKey,
@@ -74,11 +76,11 @@ export default function DelegationFormDetail({
   const signed =
     Boolean(item.rnSignedAt) || form.roster.some((row) => row.signedAt);
 
-  async function downloadPdf(obligationId: string, kind: "exact" | "improved") {
+  async function downloadPdf(obligationId: string) {
     setPdfBusy(true);
     setError("");
     try {
-      const { blob, name } = await api.getDelegationPdf({ obligationId, kind });
+      const { blob, name } = await api.getDelegationPdf({ obligationId });
       await openPrintable(name, blob, "download");
     } catch (err) {
       setError((err as Error).message);
@@ -91,22 +93,6 @@ export default function DelegationFormDetail({
     <Modal title={`Delegation — ${item.title}`} onClose={onClose} wide>
       {error && <p className="form-error">{error}</p>}
       <div className="delegation-toolbar">
-        <div className="delegation-toggle" role="tablist" aria-label="Template">
-          {(["exact", "improved"] as const).map((kind) => {
-            const version = kind === "exact" ? "lifepath_exact" : "complyrer_improved";
-            return (
-              <button
-                key={kind}
-                role="tab"
-                aria-selected={tpl === version}
-                className={tpl === version ? "active" : ""}
-                onClick={() => setTemplate(version)}
-              >
-                {kind === "exact" ? "LifePath exact" : "Complyrer improved"}
-              </button>
-            );
-          })}
-        </div>
         <div className="chart-actions">
           <Badge
             status={status.rescinded ? "Off" : status.fullySigned ? "Current" : "Pending"}
@@ -114,38 +100,19 @@ export default function DelegationFormDetail({
           <span className="delegation-small">
             {status.rowsSigned}/{status.rowsNamed} staff signed
           </span>
-          <button className="button" disabled={pdfBusy} onClick={() => downloadPdf(item.id, "exact")}>
-            <Download size={14} /> Exact PDF
-          </button>
-          <button className="button" disabled={pdfBusy} onClick={() => downloadPdf(item.id, "improved")}>
-            <Download size={14} /> Improved PDF
+          <button className="button" disabled={pdfBusy} onClick={() => downloadPdf(item.id)}>
+            <Download size={14} /> Download PDF
           </button>
         </div>
       </div>
-      <p className="stack-help">
-        The template toggle changes rendering only — one record underneath. The LifePath exact
-        view mirrors the paper form; the Complyrer improved view adds the review date, inspection
-        cadence, and competency checks the paper form omits.
-      </p>
 
-      {tpl === "lifepath_exact" ? (
-        <LifepathDelegationForm
-          individualName={person?.name ?? ""}
-          dmhId=""
-          location={person?.site ?? ""}
-          taskTitle={item.title}
-          form={form}
-          rnSignatureLine={rnSignatureLine}
-        />
-      ) : (
-        <ImprovedDelegationForm
-          individualName={person?.name ?? ""}
-          location={person?.site ?? ""}
-          taskTitle={item.title}
-          form={form}
-          rnSignatureLine={rnSignatureLine}
-        />
-      )}
+      <ImprovedDelegationForm
+        individualName={person?.name ?? ""}
+        location={person?.site ?? ""}
+        taskTitle={item.title}
+        form={form}
+        rnSignatureLine={rnSignatureLine}
+      />
 
       {editor && !signed && (
         <div className="delegation-actions">
@@ -212,6 +179,8 @@ export default function DelegationFormDetail({
           run(() => api.updateDelegationForm({ obligationId: item.id, patch: { roster } }))
         }
       />
+
+      <ComplyrerRecordMark documentId={item.id} generatedAt={item.rnSignedAt} />
     </Modal>
   );
 }
@@ -277,6 +246,7 @@ function RosterBlock({
             <th>Print name / title</th>
             <th>Signature</th>
             <th>Rescinded</th>
+            <th>Initials</th>
           </tr>
         </thead>
         <tbody>
@@ -389,6 +359,44 @@ function RosterBlock({
                   "—"
                 )}
               </td>
+              <td>
+                {(() => {
+                  // The paper roster's "Initials" column: a staff member's
+                  // acknowledgment of the training/competency statement above
+                  // the roster. Keyed by printed name, not the array index.
+                  // No legacySigned stamp: in the typed-name era initials were
+                  // captured together with the row signature, so a separate
+                  // legacy initials mark never existed.
+                  const rowName = row.printName.trim();
+                  const isMine =
+                    rowName.length > 0 && rowName.toLowerCase() === myName;
+                  const rowKey = delegationRosterRowKey(row.printName);
+                  return (
+                    <InitialsField
+                      compact
+                      documentType="delegation_form"
+                      documentId={obligationId}
+                      fieldName={rowKey}
+                      label={`Row ${i + 1} initials`}
+                      getDocumentPayload={() =>
+                        delegationRowInitialsPayload({
+                          obligationId,
+                          individualName,
+                          taskTitle,
+                          form,
+                          rowKey,
+                        })
+                      }
+                      canAct={rnSigned && isMine}
+                      cantActReason={
+                        !rnSigned
+                          ? "The delegating RN must sign first."
+                          : "Unsigned"
+                      }
+                    />
+                  );
+                })()}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -488,7 +496,7 @@ function FormEditor({
           <input value={inspectionInterval} onChange={(e) => setInspectionInterval(e.target.value)} />
         </label>
         <label>
-          Inspection cadence (improved)
+          Inspection cadence
           <select value={inspectionCadence} onChange={(e) => setInspectionCadence(e.target.value)}>
             <option value="">Not set</option>
             {DELEGATION_INSPECTION_CADENCES.map((c) => (
@@ -500,7 +508,7 @@ function FormEditor({
         </label>
       </div>
       <label>
-        Review / expiry date (improved — the paper form prints none)
+        Review / expiry date
         <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
       </label>
       <h4>Instructional licensed medical professional</h4>

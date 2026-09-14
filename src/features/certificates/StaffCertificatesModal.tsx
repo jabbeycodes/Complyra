@@ -11,6 +11,7 @@ import {
   daysRemaining,
 } from "../../data/certificates";
 import type { StaffCertificate } from "../../data/types";
+import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 
 // LIFEPATH-P4 (certificates): the certificates section surfaced on the staff
 // profile — cert name, issued/renewal dates, days-remaining countdown, and a
@@ -106,6 +107,7 @@ export default function StaffCertificatesModal({
           })}
         </div>
       )}
+      <ComplyrerRecordMark />
     </Modal>
   );
 }

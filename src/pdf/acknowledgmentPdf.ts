@@ -1,5 +1,5 @@
 import type { PacketDetail } from "../data/types";
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 function formatLongDate(iso: string | null) {
   if (!iso) return "—";
@@ -35,7 +35,7 @@ export function buildAcknowledgmentPdf(
   logoDataUrl?: string | null,
 ) {
   const { doc, margin, y: startY } = startBrandedDoc(
-    "PCSP Acknowledgment Sheet",
+    "Support Plan Staff Acknowledgment",
     { agencyName, logoDataUrl },
     54,
   );
@@ -117,6 +117,7 @@ export function buildAcknowledgmentPdf(
     Math.min(y, 750),
     { maxWidth: 500 },
   );
+  stampRecordMark(doc, { documentId: detail.packet.id, margin });
   return doc;
 }
 

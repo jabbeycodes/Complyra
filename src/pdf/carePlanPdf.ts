@@ -1,4 +1,4 @@
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 export function buildCarePlanPdf(input: {
   agencyName: string;
@@ -34,5 +34,6 @@ export function buildCarePlanPdf(input: {
     y,
     { maxWidth: 500 },
   );
+  stampRecordMark(doc, { margin });
   return doc;
 }

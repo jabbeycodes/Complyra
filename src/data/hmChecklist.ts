@@ -1,10 +1,11 @@
 /**
- * HM Weekly Checklist — pure logic (Phase 5, LifePath).
+ * HM Weekly Checklist — pure logic (Phase 5).
  *
- * The 26 line items below are transcribed VERBATIM from
- * ~/workspace/lifepath-docs/EXTRACTION_NOTES.md section B8
- * ("HM Weekly Checklist" — Y / N / N/A per item, header field "Home:",
- * turned in Monday by 4pm). Do not reword them.
+ * The 26 line items below cover the same ground as the legacy agency's weekly
+ * checklist (Y / N / N/A per item, "Home:" header, Monday 4pm turn-in), but in
+ * Complyrer's own wording and with nothing copied. Row keys ("c1".."c26")
+ * are stable for data compatibility. See docs/coverage-map.md for the
+ * original → new wording map.
  */
 import type {
   ChecklistAnswer,
@@ -15,129 +16,128 @@ import type {
 /** Stable keys for the 26 checklist rows: "c1" .. "c26". */
 export const ITEM_21_KEY = "c21";
 
-/** Verbatim prompts for the 26 weekly checklist rows. */
+/** Complyrer's own wording for the 26 weekly checklist rows (same coverage). */
 export const WEEKLY_CHECKLIST_ITEMS: Array<{ key: string; prompt: string }> = [
   {
     key: "c1",
     prompt:
-      "Staff daily documentation is check – if missing, addressed and then re-verified",
+      "Daily staff documentation reviewed \u2014 gaps addressed, then re-verified",
   },
   {
     key: "c2",
     prompt:
-      "Timesheets checked – all staff hours are logged and errors addressed – verify that staff are not clocking in early or late",
+      "Timesheets verified \u2014 all hours logged, errors fixed, no early or late clock-ins",
   },
   {
     key: "c3",
     prompt:
-      "Medication Administration Record (MAR) checked daily for missing initials and PRN documentation",
+      "Medication Administration Record (MAR) checked daily for missing initials and PRN entries",
   },
   {
     key: "c4",
     prompt:
-      "Adequate supply of medications in the home – adequate medical supplies in the home",
+      "Enough medications and medical supplies on hand in the home",
   },
-  { key: "c5", prompt: "PRN medications in the home and not expired" },
+  { key: "c5", prompt: "PRN medications present in the home and unexpired" },
   {
     key: "c6",
     prompt:
-      "Physician ordered vital signs are documented in Therap as prescribed (* List physician-ordered vital(s): ___)",
+      "Doctor-ordered vital signs charted in Therap as prescribed (* List ordered vitals: ___)",
   },
   {
     key: "c7",
     prompt:
-      "BMs documented in Therap on each shift and PRN medications administered per BM protocol",
+      "Bowel movements charted in Therap on each shift and PRN medications given per bowel protocol",
   },
   {
     key: "c8",
-    prompt: "General environmental inspection – home clean, pathways clear, etc.",
+    prompt: "General home walkthrough \u2014 clean, pathways clear, no hazards",
   },
   {
     key: "c9",
     prompt:
-      "Maintenance issues – complete work order if Yes (* List any outstanding maintenance issues)",
+      "Maintenance issues \u2014 file a work order for any outstanding items (* List outstanding issues)",
   },
   {
     key: "c10",
-    prompt: "Vehicle inspection – clean (inside and out), maintenance completed",
+    prompt: "Vehicle checked \u2014 clean (inside and out), maintenance up to date",
   },
-  { key: "c11", prompt: "Check the house mailbox – deliver mail to Admin office" },
+  { key: "c11", prompt: "House mailbox checked \u2014 admin mail delivered to the office" },
   {
     key: "c12",
     prompt:
-      "Scan and enter med appointment records into Therap w/in 24 hours of appointment",
+      "Medical appointment records scanned into Therap within 24 hours of the appointment",
   },
   {
     key: "c13",
     prompt:
-      "Appointment notes in individual's office record book and copied to home record book",
+      "Appointment notes filed in the individual's office record book and copied to the home record book",
   },
-  { key: "c14", prompt: "Groceries and household supplies are well stocked" },
-  { key: "c15", prompt: "Adaptive equipment logs completed" },
-  { key: "c16", prompt: "Daily census logs & variance reports are up-to-date" },
-  { key: "c17", prompt: "Check emails and texts – respond in timely manner" },
+  { key: "c14", prompt: "Groceries and household supplies well stocked" },
+  { key: "c15", prompt: "Adaptive equipment logs current" },
+  { key: "c16", prompt: "Daily census logs and variance reports up to date" },
+  { key: "c17", prompt: "Emails and texts checked \u2014 replies sent promptly" },
   {
     key: "c18",
     prompt:
-      "All spend cards are in the home/available to the client – all receipts are accounted for",
+      "All spending cards in the home and available to the individual \u2014 every receipt accounted for",
   },
   {
     key: "c19",
-    prompt:
-      "When medications are picked up from pharmacy, verified no changes or contact RN",
+    prompt: "Pharmacy pickups checked for medication changes \u2014 RN contacted if anything changed",
   },
   {
     key: "c20",
-    prompt: "Monthly reviews and RN assessments in individual's home record book",
+    prompt: "Monthly reviews and RN assessments filed in the home record book",
   },
   {
     key: "c21",
     prompt:
-      "All staff have been properly trained and signed off on all trainings/delegations",
+      "All staff fully trained and signed off on trainings and delegations",
   },
   {
     key: "c22",
     prompt:
-      "Smoke detectors/water temp/CO2 monitors/fire extinguishers checked",
+      "Smoke detectors, water temperature, CO monitors, and fire extinguishers checked",
   },
-  { key: "c23", prompt: "Drills completed according to drill schedule" },
+  { key: "c23", prompt: "Drills completed per the drill schedule" },
   {
     key: "c24",
     prompt:
-      "First Aid Kit and CPR face shields in home and car – no products expired",
+      "First aid kits and CPR face shields in home and vehicle \u2014 nothing expired",
   },
   {
     key: "c25",
     prompt:
-      "Spent time with staff and individuals to build rapport, provide oversight, and address concerns",
+      "Time spent with staff and individuals \u2014 building rapport, providing oversight, addressing concerns",
   },
   {
     key: "c26",
     prompt:
-      "Evidence that rights restrictions are being followed (i.e. knives are locked up, internet is restricted)",
+      "Rights restrictions visibly followed (e.g., knives secured, internet limited)",
   },
 ];
 
-/** Verbatim attestation from the paper form. */
+/** Complyrer's own attestation wording (same compliance meaning). */
 export const CHECKLIST_ATTESTATION_TEXT =
-  "By signing below I verify that I have personally visited the home and assessed the above-listed items for compliance.";
+  "By signing, I confirm I visited the home in person and reviewed each item above for compliance.";
 
-/** Verbatim deadline from the paper form. */
-export const CHECKLIST_DEADLINE_TEXT = "Turn in Monday by 4pm";
+/** Complyrer's own deadline wording. */
+export const CHECKLIST_DEADLINE_TEXT = "Due Monday by 4:00 p.m.";
 
 /**
- * The paper form's second page ("service logs") as structured entry kinds,
- * each with its verbatim fill-in prompt.
+ * The checklist's second page ("service logs") as structured entry kinds,
+ * each with Complyrer's own fill-in prompt (same information captured).
  */
 export const SERVICE_LOG_PROMPTS: Record<ServiceLogKind, string> = {
   class_reminder:
-    "Were staff reminded of scheduled classes and flexed off to avoid OT? If so, list who was reminded and for which class:",
-  call_in: "List any call ins/tardies:",
-  direct_care: "List dates/times HM worked direct care (in-ratio):",
+    "List staff reminded of upcoming classes and flexed off to avoid overtime (who, and which class):",
+  call_in: "List any call-ins or late arrivals:",
+  direct_care: "List dates and times the HM worked direct care (in ratio):",
   off_shift:
-    "List staff who worked (dates/times), outside of assigned shifts, and verify that Therap documentation was completed:",
+    "List staff who worked outside their assigned shifts (dates/times) and confirm their Therap documentation is complete:",
   issue:
-    "Make note of any issues in the home and when it was addressed with the DSP(s).",
+    "Note any issues in the home and when they were addressed with the DSPs.",
 };
 
 export const SERVICE_LOG_KINDS: ServiceLogKind[] = [

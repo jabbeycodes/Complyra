@@ -16,6 +16,7 @@ import {
   sortAcknowledgmentRows,
 } from "../pdf/acknowledgmentPdf";
 import SignaturePad from "./SignaturePad";
+import ComplyrerRecordMark from "../components/ComplyrerRecordMark";
 
 export default function AcknowledgmentSheet({
   detail,
@@ -230,6 +231,7 @@ export default function AcknowledgmentSheet({
           Close
         </button>
       </div>
+      <ComplyrerRecordMark documentId={detail.packet.id} />
     </div>
   );
 }

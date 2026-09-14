@@ -33,16 +33,15 @@ function login(username: string) {
   };
 }
 
-test("checklist has 26 verbatim items with item 21 as the training item", () => {
+test("checklist has 26 Complyrer-original items with item 21 as the training item", () => {
   assert.equal(WEEKLY_CHECKLIST_ITEMS.length, 26);
   assert.equal(
-    WEEKLY_CHECKLIST_ITEMS[20].prompt,
-    "All staff have been properly trained and signed off on all trainings/delegations",
+    WEEKLY_CHECKLIST_ITEMS.find((i) => i.key === ITEM_21_KEY)?.prompt,
+    "All staff fully trained and signed off on trainings and delegations",
   );
-  assert.equal(WEEKLY_CHECKLIST_ITEMS[20].key, ITEM_21_KEY);
   assert.equal(
-    WEEKLY_CHECKLIST_ITEMS[0].prompt,
-    "Staff daily documentation is check – if missing, addressed and then re-verified",
+    WEEKLY_CHECKLIST_ITEMS.find((i) => i.key === "c1")?.prompt,
+    "Daily staff documentation reviewed — gaps addressed, then re-verified",
   );
   const fresh = buildChecklistItems();
   assert.equal(fresh.length, 26);

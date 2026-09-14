@@ -3419,6 +3419,8 @@ export class HostedApi implements ComplyraApi {
       signedOn: String(row.signed_on).slice(0, 10),
       na: Boolean(row.na),
       naReason: (row.na_reason as string | null) ?? null,
+      // Rows written before per-line e-initials carry no version.
+      signoffVersion: Number(row.signoff_version ?? 1),
       trainerName: String(row.trainer_name),
       trainerUserId: (row.trainer_user_id as string | null) ?? null,
       signedByUserId: (row.signed_by_user_id as string | null) ?? null,
@@ -3895,7 +3897,7 @@ export class HostedApi implements ComplyraApi {
     };
     const { data: existingSignoff } = await this.client
       .from("training_signoffs")
-      .select("id")
+      .select("id, signoff_version")
       .eq("requirement_id", requirementId)
       .maybeSingle();
     if (existingSignoff) {
@@ -3906,9 +3908,13 @@ export class HostedApi implements ComplyraApi {
           "Only an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
         );
       }
+      // Void-and-redo: the edit voids the previous initialing — the line must
+      // be re-initialed, stamping a fresh versioned signature event. The old
+      // version's event stays as history.
+      const nextVersion = Number((existingSignoff as { signoff_version?: unknown }).signoff_version ?? 1) + 1;
       const { error: updateError } = await this.client
         .from("training_signoffs")
-        .update(payload)
+        .update({ ...payload, signoff_version: nextVersion })
         .eq("id", (existingSignoff as { id: string }).id);
       if (updateError) this.throwLockAware(updateError, "Could not save the sign-off.");
       const { error: updateStatusError } = await this.client
@@ -3928,6 +3934,7 @@ export class HostedApi implements ComplyraApi {
     const { error: insertError } = await this.client.from("training_signoffs").insert({
       agency_id: session.agencyId,
       requirement_id: requirementId,
+      signoff_version: 1,
       ...payload,
     });
     throwIf(insertError, "Could not save the sign-off.");
@@ -3978,6 +3985,7 @@ export class HostedApi implements ComplyraApi {
       signed_on: new Date().toISOString().slice(0, 10),
       na: true,
       na_reason: trimmed,
+      signoff_version: 1,
       trainer_name: session.fullName,
       trainer_user_id: session.userId,
       signed_by_user_id: session.userId,
@@ -4024,15 +4032,18 @@ export class HostedApi implements ComplyraApi {
       .maybeSingle();
     throwIf(fetchError, "Training sheet not found.");
     if (!counter) throw new Error("Training sheet not found.");
-    // Clearing the signature events unlocks the sheet: with no events the
-    // same document id can be signed again with the corrected content.
+    // Clearing the end-signature events unlocks the sheet: with no sheet
+    // signatures the same document id can be signed again with the corrected
+    // content. Per-line versioned initials stamps stay as audit history —
+    // a line edit already bumps its version and requires re-initialing.
     const counterRow = counter as { user_id: string; site_id: string };
     const { error: eventError } = await this.client
       .from("signature_events")
       .delete()
       .eq("agency_id", session.agencyId)
       .eq("document_type", "training_checklist")
-      .eq("document_id", trainingChecklistDocId(counterRow.user_id, counterRow.site_id));
+      .eq("document_id", trainingChecklistDocId(counterRow.user_id, counterRow.site_id))
+      .in("field_name", ["staff_sign", "hm_countersign"]);
     throwIf(eventError, "Could not clear the sheet's signatures.");
     // Deleting the countersignature unlocks the sheet: completed lines can be
     // edited, and the sheet must be re-signed and re-countersigned.
@@ -4172,7 +4183,8 @@ export class HostedApi implements ComplyraApi {
     individualId: string;
     taskTitle: string;
     purpose: string;
-    templateVersion: DelegationTemplateVersion;
+    /** Optional for data compat; new forms default to the Complyrer version. */
+    templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
   }) {
@@ -4186,7 +4198,7 @@ export class HostedApi implements ComplyraApi {
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
-    const form = blankDelegationForm(input.templateVersion);
+    const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
@@ -4314,7 +4326,7 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
-  async getDelegationPdf(input: { obligationId: string; kind: "exact" | "improved" }) {
+  async getDelegationPdf(input: { obligationId: string }) {
     const session = await this.requireSession();
     this.requirePermission(session, "clinical.view");
     const { item, form } = await this.delegationRow(session, input.obligationId);
@@ -4328,12 +4340,12 @@ export class HostedApi implements ComplyraApi {
       individualLocation: await this.siteName(person.siteId),
       taskTitle: item.title,
       form,
-      kind: input.kind,
+      documentId: input.obligationId,
       logoDataUrl,
     });
     return {
       blob: pdf.output("blob"),
-      name: delegationFileName(item.title, person.fullName, input.kind),
+      name: delegationFileName(item.title, person.fullName),
     };
   }
   // ===== LIFEPATH-P4 HOSTED (certificates) =====
@@ -5745,8 +5757,11 @@ export class HostedApi implements ComplyraApi {
     documentId: string,
   ): Promise<void> {
     const events = await this.getSignatureEvents(documentType, documentId);
-    if (events.length > 0) {
-      const first = [...events].sort((a, b) =>
+    // Per-line training initials (`line:<requirementId>:v<n>`) never lock the
+    // sheet — only whole-document signature events do.
+    const locking = events.filter((event) => !event.fieldName.startsWith("line:"));
+    if (locking.length > 0) {
+      const first = [...locking].sort((a, b) =>
         a.signedAt.localeCompare(b.signedAt),
       )[0];
       throw new Error(

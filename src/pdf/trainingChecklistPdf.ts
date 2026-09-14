@@ -1,5 +1,5 @@
 import type { TrainingChecklist } from "../data/chart";
-import { startBrandedDoc } from "./brandHeader";
+import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 
 export function buildTrainingChecklistPdf(input: {
   agencyName: string;
@@ -8,7 +8,7 @@ export function buildTrainingChecklistPdf(input: {
   checklist: TrainingChecklist;
   logoDataUrl?: string | null;
 }) {
-  const { doc, margin, y: startY } = startBrandedDoc("Staff In-Home Training Checklist", {
+  const { doc, margin, y: startY } = startBrandedDoc("In-Home Staff Training Record", {
     agencyName: input.agencyName,
     logoDataUrl: input.logoDataUrl,
   }, 54);
@@ -66,6 +66,11 @@ export function buildTrainingChecklistPdf(input: {
     margin,
     y,
   );
+  stampRecordMark(doc, {
+    documentId: input.checklist.id,
+    generatedAt: input.checklist.hmSignedAt ?? input.checklist.staffSignedAt,
+    margin,
+  });
   return doc;
 }
 
