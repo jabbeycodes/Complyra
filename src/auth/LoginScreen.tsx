@@ -1,18 +1,11 @@
 import { useState } from "react";
 import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
-import { ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Play, ShieldCheck } from "lucide-react";
 import { useData } from "../data/DataProvider";
-import {
-  DEMO_ADMIN_USERNAME,
-  DEMO_AGENCY_CODE,
-  DEMO_DSP_USERNAME,
-  PLATFORM_AGENCY_CODE,
-  PLATFORM_USERNAME,
-} from "../data/seed";
+import { DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE } from "../data/seed";
 import { DEMO_PASSWORD } from "../data/types";
 import type { CreateAgencyResult } from "../data/types";
 import { normalizeAgencyCode } from "../data/agencyCode";
-import { roleLabel } from "../data/status";
 
 export default function LoginScreen({
   onSetup,
@@ -29,8 +22,26 @@ export default function LoginScreen({
     prefill?.username ?? DEMO_ADMIN_USERNAME,
   );
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
+
+  async function enterDemo() {
+    setDemoBusy(true);
+    setError("");
+    try {
+      await signIn({
+        agencyCode: DEMO_AGENCY_CODE,
+        username: DEMO_ADMIN_USERNAME,
+        password: DEMO_PASSWORD,
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDemoBusy(false);
+    }
+  }
 
   return (
     <div className="login-shell">
@@ -81,13 +92,28 @@ export default function LoginScreen({
           </label>
           <label className="form-label">
             Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <span className="password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} aria-hidden="true" />
+                ) : (
+                  <Eye size={20} aria-hidden="true" />
+                )}
+              </button>
+            </span>
           </label>
           {error && (
             <p className="inline-error" role="alert">
@@ -104,38 +130,23 @@ export default function LoginScreen({
           </button>
         )}
         <div className="login-demo">
-          <strong>Fictional Evergreen Care accounts</strong>
+          <strong>Try it with fictional data</strong>
+          <p className="login-demo-copy">
+            Take a guided tour of a fictional agency — no sign-up needed.
+          </p>
           <button
             type="button"
-            onClick={() => {
-              setAgencyCode(DEMO_AGENCY_CODE);
-              setUsername(DEMO_ADMIN_USERNAME);
-              setPassword(DEMO_PASSWORD);
-            }}
+            className="button full"
+            onClick={enterDemo}
+            disabled={busy || demoBusy}
           >
-            {roleLabel("administrator")} · {DEMO_AGENCY_CODE} / {DEMO_ADMIN_USERNAME}
+            <Play size={17} aria-hidden="true" />{" "}
+            {demoBusy ? "Loading demo…" : "Explore the interactive demo"}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAgencyCode(DEMO_AGENCY_CODE);
-              setUsername(DEMO_DSP_USERNAME);
-              setPassword(DEMO_PASSWORD);
-            }}
-          >
-            DSP · {DEMO_AGENCY_CODE} / {DEMO_DSP_USERNAME}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAgencyCode(PLATFORM_AGENCY_CODE);
-              setUsername(PLATFORM_USERNAME);
-              setPassword(DEMO_PASSWORD);
-            }}
-          >
-            Complyrer operator · {PLATFORM_AGENCY_CODE} / {PLATFORM_USERNAME}
-          </button>
-          <small>Sample password: {DEMO_PASSWORD}</small>
+          <small>
+            Demo uses fictional Evergreen Care records. Your own agency data
+            stays separate.
+          </small>
         </div>
       </div>
     </div>

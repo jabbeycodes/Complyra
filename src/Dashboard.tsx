@@ -221,6 +221,7 @@ export default function Dashboard({
         </button>
         <button
           className="stat-card"
+          data-tour="due-next"
           onClick={() => onNavigate("Requirements", "Due soon")}
         >
           <div className="stat-label">
@@ -257,7 +258,7 @@ export default function Dashboard({
           </div>
         </button>
       </div>
-      <section className="panel agency-hero">
+      <section className="panel agency-hero" data-tour="command-center">
         <button
           type="button"
           className="agency-hero-toggle"
@@ -426,7 +427,7 @@ export default function Dashboard({
         )}
       </section>
       <div className="dashboard-middle">
-        <section className="panel priorities-panel">
+        <section className="panel priorities-panel" data-tour="risk-list">
           <div className="panel-heading">
             <div>
               <h2>

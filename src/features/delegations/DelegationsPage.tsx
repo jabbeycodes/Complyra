@@ -56,7 +56,7 @@ export default function DelegationsPage() {
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
   return (
-    <>
+    <div data-tour="delegations">
       <PageHeading
         eyebrow="LifePath"
         title="RN delegations"
@@ -155,7 +155,7 @@ export default function DelegationsPage() {
       {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
         </>
       )}
-    </>
+    </div>
   );
 }
 
