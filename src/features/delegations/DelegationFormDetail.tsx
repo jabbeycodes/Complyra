@@ -472,16 +472,16 @@ function FormEditor({
       }}
     >
       <h4>Form details</h4>
-      <label>
+      <label className="form-label">
         Purpose of task
         <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} />
       </label>
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           PROCEDURES / steps to follow
           <textarea value={procedures} onChange={(e) => setProcedures(e.target.value)} rows={4} />
         </label>
-        <label>
+        <label className="form-label">
           What to OBSERVE / REPORT / DO / CONTACT
           <textarea value={observeReportDo} onChange={(e) => setObserveReportDo(e.target.value)} rows={4} />
         </label>
@@ -491,11 +491,11 @@ function FormEditor({
         acknowledge this delegation is specific to this individual and non-transferable
       </label>
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           Inspection interval (as determined by delegating RN)
           <input value={inspectionInterval} onChange={(e) => setInspectionInterval(e.target.value)} />
         </label>
-        <label>
+        <label className="form-label">
           Inspection cadence
           <select value={inspectionCadence} onChange={(e) => setInspectionCadence(e.target.value)}>
             <option value="">Not set</option>
@@ -507,39 +507,39 @@ function FormEditor({
           </select>
         </label>
       </div>
-      <label>
+      <label className="form-label">
         Review / expiry date
         <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
       </label>
       <h4>Instructional licensed medical professional</h4>
       <div className="delegation-grid3">
-        <label>
+        <label className="form-label">
           Printed name
           <input value={profName} onChange={(e) => setProfName(e.target.value)} />
         </label>
-        <label>
+        <label className="form-label">
           Signature and title
           <input value={profTitle} onChange={(e) => setProfTitle(e.target.value)} />
         </label>
-        <label>
+        <label className="form-label">
           Contact number
           <input value={profContact} onChange={(e) => setProfContact(e.target.value)} />
         </label>
       </div>
       <h4>Delegating RN</h4>
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           Name
           <input value={rnName} onChange={(e) => setRnName(e.target.value)} />
         </label>
-        <label>
+        <label className="form-label">
           Contact number
           <input value={rnContact} onChange={(e) => setRnContact(e.target.value)} />
         </label>
       </div>
       <h4>Task rescinded</h4>
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           Reason
           <select value={rescindReason} onChange={(e) => setRescindReason(e.target.value)}>
             <option value="">Not rescinded</option>
@@ -547,7 +547,7 @@ function FormEditor({
             <option value="other">Other</option>
           </select>
         </label>
-        <label>
+        <label className="form-label">
           Explanation
           <input value={rescindExplanation} onChange={(e) => setRescindExplanation(e.target.value)} />
         </label>

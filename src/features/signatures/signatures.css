@@ -280,15 +280,24 @@
 .profile-signature-images {
   display: flex;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 .profile-signature-images figure {
   margin: 0;
   display: grid;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
 }
 .profile-signature-images img {
-  max-width: 180px;
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(180px, 100%);
   max-height: 64px;
+  object-fit: contain;
   border: 1px solid #e2dccf;
   border-radius: 8px;
   background: #faf6ef;
