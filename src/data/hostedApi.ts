@@ -60,11 +60,19 @@ import type {
   AdoptSignatureInput,
   ApplySignatureInput,
   ApplySignatureResult,
+  LogPhiAccessInput,
   LogSignatureAuditInput,
+  MfaAssurance,
+  MfaFactor,
+  MfaState,
+  PhiAccessAction,
+  PhiAccessFilters,
+  PhiAccessRecord,
   SignableDocumentType,
   SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
+  TotpEnrollment,
 } from "./types";
 import { blankDelegationForm } from "./types";
 import {
@@ -1932,6 +1940,12 @@ export class HostedApi implements ComplyraApi {
         checklist,
         logoDataUrl,
       });
+      this.phiExport({
+        recordType: "training_checklists",
+        recordId: input.id,
+        individualId: checklist.individualId,
+        details: { export: "training_checklist_pdf" },
+      });
       return { blob: pdf.output("blob"), name: trainingFileName(checklist.staffName, person.fullName) };
     }
     if (input.type === "version") {
@@ -1952,6 +1966,14 @@ export class HostedApi implements ComplyraApi {
           .from(BUCKET)
           .download(version.storage_path as string);
         if (!downloadError && stored && stored.size > 0) {
+          if (document?.id) {
+            this.phiExport({
+              recordType: "documents",
+              recordId: String(document.id),
+              individualId: (document.individual_id as string | null) ?? null,
+              details: { export: "document_version_file" },
+            });
+          }
           return {
             blob: stored,
             name: `${(document?.title as string) ?? "care-plan"}-${version.version_label as string}.pdf`,
@@ -1969,6 +1991,14 @@ export class HostedApi implements ComplyraApi {
         effectiveOn: String(version.effective_on).slice(0, 10),
         logoDataUrl,
       });
+      if (document?.id) {
+        this.phiExport({
+          recordType: "documents",
+          recordId: String(document.id),
+          individualId: person?.id ?? null,
+          details: { export: "care_plan_pdf" },
+        });
+      }
       return {
         blob: pdf.output("blob"),
         name: `complyrer-care-plan-${(person?.fullName ?? "individual").toLowerCase().replaceAll(" ", "-")}.pdf`,
@@ -1987,6 +2017,12 @@ export class HostedApi implements ComplyraApi {
       .download(file.storagePath);
     throwIf(downloadError, "Could not open that chart file.");
     if (!blob) return null;
+    this.phiExport({
+      recordType: "chart_files",
+      recordId: String(file.id),
+      individualId: file.individualId ?? null,
+      details: { export: "chart_file" },
+    });
     return { blob, name: file.name };
   }
   // ---- Medications ----
@@ -2482,6 +2518,12 @@ export class HostedApi implements ComplyraApi {
         items: view.items,
         logoDataUrl,
       });
+      this.phiExport({
+        recordType: "individuals",
+        recordId: person.id,
+        individualId: person.id,
+        details: { export: "equipment_month_check", monthKey: input.monthKey },
+      });
       return { blob: pdf.output("blob"), name: equipmentFileName(person.fullName, input.monthKey) };
     }
     const site = await this.siteRecord(input.id);
@@ -2505,6 +2547,12 @@ export class HostedApi implements ComplyraApi {
         drills,
         logoDataUrl,
       });
+      this.phiExport({
+        recordType: "emergency_drills",
+        recordId: site.id,
+        agencyId: session.agencyId,
+        details: { export: "drills_month_check", monthKey: input.monthKey },
+      });
       return { blob: pdf.output("blob"), name: drillsFileName(site.name, input.monthKey) };
     }
     const { data: reportRow } = await this.client
@@ -2523,6 +2571,12 @@ export class HostedApi implements ComplyraApi {
       monthKey: input.monthKey,
       report,
       logoDataUrl,
+    });
+    this.phiExport({
+      recordType: "home_safety_reports",
+      recordId: site.id,
+      agencyId: session.agencyId,
+      details: { export: "safety_month_check", monthKey: input.monthKey },
     });
     return { blob: pdf.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
@@ -2619,11 +2673,16 @@ export class HostedApi implements ComplyraApi {
       monthlySafetyOnFile: monthlySafetyOnFile(safety),
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
     });
+    this.phiExport({
+      recordType: "site_reviews",
+      recordId: siteId,
+      agencyId: session.agencyId,
+      details: { export: "site_review_pdf" },
+    });
     return { blob: pdf.output("blob"), name: siteReviewFileName(site.name) };
   }
 
-  async downloadPreSurveyPdf(siteId: string): Promise<{ blob: Blob; name: string }> {
-    const session = await this.requireSession();
+  async downloadPreSurveyPdf(siteId: string): Promise<{ blob: Blob; name: string }> {    const session = await this.requireSession();
     const site = await this.siteRecord(siteId);
     if (!site || site.agencyId !== session.agencyId) throw new Error("Site not found.");
     const facts = await this.siteFacts(site.id);
@@ -2663,6 +2722,12 @@ export class HostedApi implements ComplyraApi {
       facts,
       rows,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+    });
+    this.phiExport({
+      recordType: "site_reviews",
+      recordId: siteId,
+      agencyId: session.agencyId,
+      details: { export: "pre_survey_pdf" },
     });
     return { blob: pdf.output("blob"), name: preSurveyFileName(site.name) };
   }
@@ -4456,6 +4521,12 @@ export class HostedApi implements ComplyraApi {
       documentId: input.obligationId,
       logoDataUrl,
     });
+    this.phiExport({
+      recordType: "obligations",
+      recordId: input.obligationId,
+      individualId: person.id,
+      details: { export: "delegation_pdf" },
+    });
     return {
       blob: pdf.output("blob"),
       name: delegationFileName(item.title, person.fullName),
@@ -5318,6 +5389,11 @@ export class HostedApi implements ComplyraApi {
       .from("staff-certificates")
       .createSignedUrl(cert.filePath, 300);
     throwIf(error, "Could not open the certificate file.");
+    this.phiExport({
+      recordType: "staff_certificates",
+      recordId: id,
+      details: { access: "certificate_file" },
+    });
     return data!.signedUrl;
   }
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
@@ -6696,11 +6772,144 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
+  /**
+   * HIPAA application-level PHI audit trail: report a client-observed view or
+   * export. Mutations are captured by server-side triggers; the client only
+   * reports what it alone can observe. Agency is derived server-side from the
+   * record (or verified against membership for parent-record exports).
+   * Failures are swallowed so audit logging can never break care work.
+   */
+  async logPhiAccess(input: LogPhiAccessInput): Promise<void> {
+    try {
+      await this.requireSession();
+      const { error } = await this.client.rpc("log_phi_access", {
+        p_action: input.action,
+        p_record_type: input.recordType,
+        p_record_id: input.recordId,
+        p_individual_id: input.individualId ?? null,
+        p_user_agent: typeof navigator === "undefined" ? null : navigator.userAgent,
+        p_device_id: getDeviceId(),
+        p_details: (input.details ?? {}) as Record<string, never>,
+        p_agency_id: input.agencyId ?? null,
+      });
+      if (error) throw error;
+    } catch {
+      // Audit logging must never break the action it observes.
+    }
+  }
+
+  /** Fire-and-forget PHI export logging for generated downloads. */
+  private phiExport(input: {
+    recordType: string;
+    recordId: string;
+    individualId?: string | null;
+    agencyId?: string | null;
+    details?: Record<string, unknown>;
+  }): void {
+    void this.logPhiAccess({
+      action: "export",
+      recordType: input.recordType,
+      recordId: input.recordId,
+      individualId: input.individualId ?? null,
+      agencyId: input.agencyId ?? null,
+      details: input.details,
+    });
+  }
+
+  /** Filtered PHI access rows for the Access log screen (RLS-gated). */
+  async listPhiAccessLog(filters?: PhiAccessFilters): Promise<PhiAccessRecord[]> {
+    await this.requireSession();
+    const { data, error } = await this.client.rpc("list_phi_access_log", {
+      p_user_id: filters?.userId ?? null,
+      p_record_type: filters?.recordType ?? null,
+      p_record_id: filters?.recordId ?? null,
+      p_action: filters?.action ?? null,
+      p_from: filters?.from ?? null,
+      p_to: filters?.to ?? null,
+      p_limit: filters?.limit ?? 200,
+      p_offset: filters?.offset ?? 0,
+    });
+    throwIf(error, "Could not load the PHI access log.");
+    return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      userId: row.user_id == null ? null : String(row.user_id),
+      action: String(row.action) as PhiAccessAction,
+      recordType: String(row.record_type),
+      recordId: String(row.record_id),
+      individualId: row.individual_id == null ? null : String(row.individual_id),
+      createdAt: String(row.created_at),
+      ipAddress: (row.ip_address as string | null) ?? null,
+      userAgent: (row.user_agent as string | null) ?? null,
+      deviceId: (row.device_id as string | null) ?? null,
+      details: (row.details as Record<string, unknown> | null) ?? null,
+    }));
+  }
+
+  /**
+   * Supabase Auth MFA (TOTP) state. `enrolled` is true when the session's
+   * next assurance level is AAL2 (an unverified factor is enrolled).
+   */
+  async getMfaState(): Promise<MfaState> {
+    const { data: aal, error: aalError } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalError) throw new Error("Could not check MFA status.");
+    const { data: factors, error: factorsError } = await this.client.auth.mfa.listFactors();
+    if (factorsError) throw new Error("Could not list MFA factors.");
+    const totp = (factors?.totp ?? []).map((f) => ({
+      id: String(f.id),
+      friendlyName: String(f.friendly_name ?? "Authenticator app"),
+      factorType: String(f.factor_type),
+      status: String(f.status),
+    }));
+    return {
+      enrolled: aal?.nextLevel === "aal2" || totp.length > 0,
+      assurance: (aal?.currentLevel as MfaAssurance | undefined) ?? "aal1",
+      factors: totp,
+    };
+  }
+
+  /** Start TOTP enrollment: returns the factor id, QR code, secret, and URI. */
+  async enrollTotpFactor(friendlyName: string): Promise<TotpEnrollment> {
+    const { data, error } = await this.client.auth.mfa.enroll({
+      factorType: "totp",
+      friendlyName,
+    });
+    if (error || !data?.totp) throw new Error("Could not start authenticator setup.");
+    return {
+      factorId: String(data.id),
+      qrCode: String(data.totp.qr_code),
+      secret: String(data.totp.secret),
+      uri: String(data.totp.uri),
+    };
+  }
+
+  /** Confirm TOTP enrollment with the 6-digit code from the authenticator app. */
+  async verifyTotpEnrollment(factorId: string, code: string): Promise<void> {
+    const { data: challenge, error: challengeError } = await this.client.auth.mfa.challenge({ factorId });
+    if (challengeError || !challenge?.id) throw new Error("Could not start verification.");
+    const { error } = await this.client.auth.mfa.verify({
+      factorId,
+      challengeId: challenge.id,
+      code: code.replace(/\s+/g, ""),
+    });
+    if (error) throw new Error("That code didn't match. Try again.");
+  }
+
+  /** Step-up: verify the current session with a TOTP code. */
+  async verifyTotpForSession(factorId: string, code: string): Promise<void> {
+    await this.verifyTotpEnrollment(factorId, code);
+  }
+
+  /** Remove a TOTP factor. */
+  async unenrollMfaFactor(factorId: string): Promise<void> {
+    const { error } = await this.client.auth.mfa.unenroll({ factorId });
+    if (error) throw new Error("Could not remove that authenticator.");
+  }
+
   async getSignatureAuditLog(input?: {
     documentType?: SignableDocumentType;
     documentId?: string;
-  }): Promise<SignatureAuditRecord[]> {
-    const session = await this.requireSession();
+  }): Promise<SignatureAuditRecord[]> {    const session = await this.requireSession();
     let query = this.client
       .from("signature_audit_log")
       .select("*")

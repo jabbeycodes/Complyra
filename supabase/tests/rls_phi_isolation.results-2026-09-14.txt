@@ -1,0 +1,100 @@
+setup: test agency B + user created
+sanity: user B reads own agency individuals -> 1 (PASS)
+read   individuals                         agency-A rows=   8 visible-to-B=0 PASS
+update individuals                         affected=0 PASS
+delete individuals                         affected=0 PASS
+read   individual_profiles                 agency-A rows=   0 visible-to-B=0 PASS
+update individual_profiles                 affected=0 PASS
+delete individual_profiles                 affected=0 PASS
+read   chart_files                         agency-A rows=   0 visible-to-B=0 PASS
+update chart_files                         affected=0 PASS
+delete chart_files                         affected=0 PASS
+read   medications                         agency-A rows=   0 visible-to-B=0 PASS
+update medications                         affected=0 PASS
+delete medications                         affected=0 PASS
+read   medication_deliveries               agency-A rows=   0 visible-to-B=0 PASS
+update medication_deliveries               affected=0 PASS
+delete medication_deliveries               affected=0 PASS
+read   med_dose_exceptions                 agency-A rows=   0 visible-to-B=0 PASS
+update med_dose_exceptions                 affected=0 PASS
+delete med_dose_exceptions                 affected=0 PASS
+read   prn_dose_logs                       agency-A rows=   0 visible-to-B=0 PASS
+update prn_dose_logs                       affected=0 PASS
+delete prn_dose_logs                       affected=0 PASS
+read   med_inventory                       agency-A rows=   0 visible-to-B=0 PASS
+update med_inventory                       affected=0 PASS
+delete med_inventory                       affected=0 PASS
+read   training_checklists                 agency-A rows=  24 visible-to-B=0 PASS
+update training_checklists                 affected=0 PASS
+delete training_checklists                 affected=0 PASS
+read   training_signoffs                   agency-A rows=   0 visible-to-B=0 PASS
+update training_signoffs                   affected=0 PASS
+delete training_signoffs                   affected=0 PASS
+read   training_countersignatures          agency-A rows=   0 visible-to-B=0 PASS
+update training_countersignatures          affected=0 PASS
+delete training_countersignatures          affected=0 PASS
+read   training_requirements               agency-A rows=   0 visible-to-B=0 PASS
+update training_requirements               affected=0 PASS
+delete training_requirements               affected=0 PASS
+read   staff_certificates                  agency-A rows=   0 visible-to-B=0 PASS
+update staff_certificates                  affected=0 PASS
+delete staff_certificates                  affected=0 PASS
+read   obligations                         agency-A rows=   0 visible-to-B=0 PASS
+update obligations                         affected=0 PASS
+delete obligations                         affected=0 PASS
+read   obligation_signatures               agency-A rows=   0 visible-to-B=0 PASS
+update obligation_signatures               affected=0 PASS
+delete obligation_signatures               affected=0 PASS
+read   delegation_acknowledgments          agency-A rows=   0 visible-to-B=0 PASS
+update delegation_acknowledgments          affected=0 PASS
+delete delegation_acknowledgments          affected=0 PASS
+read   delegation_training_materials       agency-A rows=   0 visible-to-B=0 PASS
+update delegation_training_materials       affected=0 PASS
+delete delegation_training_materials       affected=0 PASS
+read   individual_delegation_assignments   agency-A rows=   0 visible-to-B=0 PASS
+update individual_delegation_assignments   affected=0 PASS
+delete individual_delegation_assignments   affected=0 PASS
+read   documents                           agency-A rows=   8 visible-to-B=0 PASS
+update documents                           affected=0 PASS
+delete documents                           affected=0 PASS
+read   document_uploads                    agency-A rows=   0 visible-to-B=0 PASS
+update document_uploads                    affected=0 PASS
+delete document_uploads                    affected=0 PASS
+read   home_safety_reports                 agency-A rows=   2 visible-to-B=0 PASS
+update home_safety_reports                 affected=0 PASS
+delete home_safety_reports                 affected=0 PASS
+read   site_reviews                        agency-A rows=   2 visible-to-B=0 PASS
+update site_reviews                        affected=0 PASS
+delete site_reviews                        affected=0 PASS
+read   emergency_drills                    agency-A rows=   6 visible-to-B=0 PASS
+update emergency_drills                    affected=0 PASS
+delete emergency_drills                    affected=0 PASS
+read   hm_weekly_checklists                agency-A rows=   0 visible-to-B=0 PASS
+update hm_weekly_checklists                affected=0 PASS
+delete hm_weekly_checklists                affected=0 PASS
+read   mileage_trips                       agency-A rows=   0 visible-to-B=0 PASS
+update mileage_trips                       affected=0 PASS
+delete mileage_trips                       affected=0 PASS
+read   hm_dsp_reviews                      agency-A rows=   0 visible-to-B=0 PASS
+update hm_dsp_reviews                      affected=0 PASS
+delete hm_dsp_reviews                      affected=0 PASS
+read   adaptive_equipment                  agency-A rows=   0 visible-to-B=0 PASS
+update adaptive_equipment                  affected=0 PASS
+delete adaptive_equipment                  affected=0 PASS
+read   equipment_month_logs                agency-A rows=   0 visible-to-B=0 PASS
+update equipment_month_logs                affected=0 PASS
+delete equipment_month_logs                affected=0 PASS
+read   clinical_renewals                   agency-A rows=  32 visible-to-B=0 PASS
+update clinical_renewals                   affected=0 PASS
+delete clinical_renewals                   affected=0 PASS
+read   site_facts                          agency-A rows=   0 visible-to-B=0 PASS
+update site_facts                          affected=0 PASS
+delete site_facts                          affected=0 PASS
+insert individuals                         rejected (PASS)
+insert medications                         rejected (PASS)
+insert training_checklists                 rejected (PASS)
+insert staff_certificates                  rejected (PASS)
+insert documents                           rejected (PASS)
+
+RESULT: PASS — 30 tables x read/update/delete + 5 insert rejections, agency B isolated from agency A
+teardown: test agency B + user removed

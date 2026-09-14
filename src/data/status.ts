@@ -50,6 +50,14 @@ export function can(session: SessionUser, key: PermissionKey) {
 }
 
 /** Nav and page gates. Care records stay hidden from HR even if they guess a URL. */
+/** HIPAA PHI audit log visibility — matches the phi_access_log RLS policy. */
+export function canViewPhiAuditLog(session: SessionUser): boolean {
+  if (session.platformAdmin) return true;
+  return ["administrator", "compliance_admin", "auditor"].includes(
+    session.roleKey,
+  );
+}
+
 export function pageVisible(session: SessionUser, page: string) {
   if (page === "Overview" || page === "Settings" || page === "Sites & programs") {
     return true;
@@ -71,6 +79,8 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Documents") return can(session, "documents.view");
   if (page === "Review queue") return can(session, "requirements.approve");
   if (page === "Audit center") return can(session, "audit.read");
+  // HIPAA-PHI-AUDIT: the application-level PHI access log.
+  if (page === "Access log") return canViewPhiAuditLog(session);
   if (page === "Acknowledgments") {
     return (
       can(session, "acknowledgments.manage") ||

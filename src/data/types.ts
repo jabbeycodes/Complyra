@@ -1017,3 +1017,69 @@ export interface SignatureAuditRecord {
   userAgent: string | null;
   details: Record<string, unknown> | null;
 }
+
+/** Actions recorded by the HIPAA application-level PHI audit trail. */
+export type PhiAccessAction = "view" | "create" | "update" | "delete" | "export";
+
+/** Client-observed PHI access: the app only reports view/export; mutations are
+ * captured server-side by database triggers. */
+export interface LogPhiAccessInput {
+  action: Extract<PhiAccessAction, "view" | "export">;
+  recordType: string;
+  recordId: string;
+  individualId?: string | null;
+  /** Agency context for exports against parent records (site, individual).
+   * Verified server-side against the caller's membership. */
+  agencyId?: string | null;
+  details?: Record<string, unknown>;
+}
+
+/** One row of the HIPAA PHI audit trail (`phi_access_log`). */
+export interface PhiAccessRecord {
+  id: string;
+  agencyId: string;
+  userId: string | null;
+  action: PhiAccessAction;
+  recordType: string;
+  recordId: string;
+  individualId: string | null;
+  createdAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  deviceId: string | null;
+  details: Record<string, unknown> | null;
+}
+
+export interface PhiAccessFilters {
+  userId?: string;
+  recordType?: string;
+  recordId?: string;
+  action?: PhiAccessAction;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Supabase Auth MFA (TOTP) state for the current session. */
+export type MfaAssurance = "aal1" | "aal2";
+
+export interface MfaFactor {
+  id: string;
+  friendlyName: string;
+  factorType: string;
+  status: string;
+}
+
+export interface MfaState {
+  enrolled: boolean;
+  assurance: MfaAssurance;
+  factors: MfaFactor[];
+}
+
+export interface TotpEnrollment {
+  factorId: string;
+  qrCode: string;
+  secret: string;
+  uri: string;
+}

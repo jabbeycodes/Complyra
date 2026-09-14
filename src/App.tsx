@@ -38,6 +38,7 @@ import {
   PenLine,
   LogOut,
   KeyRound,
+  FileSearch,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import {
@@ -105,6 +106,11 @@ import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
+import MfaGate from "./security/MfaGate";
+import InactivityGuard from "./security/InactivityGuard";
+import MfaSettingsSection from "./security/MfaSettingsSection";
+import { useStepUp } from "./security/useStepUp";
+import PhiAccessLogPage from "./features/audit/PhiAccessLogPage";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
@@ -129,6 +135,9 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
+  // HIPAA-PHI-AUDIT + step-up: promise-based reauthentication for sensitive
+  // actions (individual chart views, data exports).
+  const { requireStepUp, stepUpModal } = useStepUp();
   // LIFEPATH-P4 (certificates): staff-profile certificates modal state +
   // per-staff expiring-soon badges on the Staff page.
   const [certStaff, setCertStaff] = useState<{ id: string; name: string } | null>(
@@ -254,6 +263,9 @@ export default function App() {
   if (!workspace) {
     return <div className="login-shell">Loading workspace…</div>;
   }
+  // Render scope: session is non-null past the guards above; capture the
+  // values closures need (TS does not narrow captured bindings).
+  const agencyId = session.agencyId;
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);
   const individuals = workspace.individuals.filter((person) =>
     sites.some((row) => row.name === person.site),
@@ -334,7 +346,19 @@ export default function App() {
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  function openPersonChart(name: string) {
+  async function openPersonChart(name: string) {
+    // HIPAA step-up: viewing a complete individual record is a sensitive
+    // action. The view itself is recorded in the PHI audit trail.
+    if (!(await requireStepUp("individual-chart"))) return;
+    const individual = individuals.find((p) => p.name === name);
+    if (individual) {
+      void api.logPhiAccess({
+        action: "view",
+        recordType: "individuals",
+        recordId: individual.id,
+        individualId: individual.id,
+      });
+    }
     setPerson(name);
     setPage("Individual chart");
     setQuery("");
@@ -348,6 +372,25 @@ export default function App() {
   }
   function notify(message: string) {
     setToast(message);
+  }
+  /** HIPAA step-up: exporting data out of Complyrer is a sensitive action,
+   * recorded in the PHI audit trail. */
+  async function guardedExport(input: {
+    filename: string;
+    csv: string;
+    exportKind: string;
+    doneMessage: string;
+  }) {
+    if (!(await requireStepUp("export"))) return;
+    download(input.filename, input.csv);
+    notify(input.doneMessage);
+    void api.logPhiAccess({
+      action: "export",
+      recordType: "workspace_export",
+      recordId: input.exportKind,
+      agencyId,
+      details: { filename: input.filename },
+    });
   }
   async function finishRequirement() {
     if (!selected) return;
@@ -471,6 +514,8 @@ export default function App() {
         ["Audit center", ShieldCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
+        // HIPAA-PHI-AUDIT: application-level PHI access trail.
+        ["Access log", FileSearch],
       ],
     },
     {
@@ -493,7 +538,9 @@ export default function App() {
     },
   ] as const;
   return (
-    <div className="app-shell">
+    <MfaGate session={session}>
+      <InactivityGuard onSignOut={() => void signOut()}>
+        <div className="app-shell">
       {mobileOpen && (
         <button
           className="mobile-backdrop"
@@ -703,11 +750,12 @@ export default function App() {
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
               onExport={() => {
-                download(
-                  "complyrer-sample-compliance-report.csv",
-                  exportCsv(scoped),
-                );
-                notify("Your sample compliance report has been downloaded.");
+                void guardedExport({
+                  filename: "complyrer-sample-compliance-report.csv",
+                  csv: exportCsv(scoped),
+                  exportKind: "compliance-report",
+                  doneMessage: "Your sample compliance report has been downloaded.",
+                });
               }}
               onCopilot={() => setModal("copilot")}
               onActivity={() => navigate("Activity log")}
@@ -1451,13 +1499,13 @@ export default function App() {
                       className="button primary"
                       disabled={!auditItems.length || auditFrom > auditTo}
                       onClick={() => {
-                        download(
-                          "complyrer-sample-audit-register.csv",
-                          exportCsv(auditItems),
-                        );
-                        notify(
-                          "Your filtered audit register has been downloaded.",
-                        );
+                        void guardedExport({
+                          filename: "complyrer-sample-audit-register.csv",
+                          csv: exportCsv(auditItems),
+                          exportKind: "audit-register",
+                          doneMessage:
+                            "Your filtered audit register has been downloaded.",
+                        });
                       }}
                     >
                       <Download size={17} /> Export audit register
@@ -1602,6 +1650,14 @@ export default function App() {
               {page === "Platform" && (
                 <PlatformConsole onSaved={notify} />
               )}
+              {/* HIPAA-PHI-AUDIT: application-level PHI access trail. */}
+              {page === "Access log" && (
+                <PhiAccessLogPage
+                  staff={staff.map((s) => ({ id: s.id, name: s.name }))}
+                  requireStepUp={requireStepUp}
+                  notify={notify}
+                />
+              )}
               {page === "Roles & access" && (
                 <RolesAccessPage onSaved={notify} />
               )}
@@ -1656,6 +1712,18 @@ export default function App() {
                         }
                       />
                     </div>
+                    {/* HIPAA-MFA: Settings → Security — TOTP enrollment. */}
+                    <div className="settings-row security-row">
+                      <span>
+                        <strong>Security</strong>
+                        <small>
+                          Two-factor authentication protects this account.
+                          Required for platform operators, administrators, and
+                          compliance administrators.
+                        </small>
+                      </span>
+                    </div>
+                    <MfaSettingsSection />
                     <div className="settings-row">
                       <span>
                         <strong>Access and permissions</strong>
@@ -2429,7 +2497,10 @@ export default function App() {
           />
         </Modal>
       )}
+      {stepUpModal}
     </div>
+      </InactivityGuard>
+    </MfaGate>
   );
 }
 function CreateForm({

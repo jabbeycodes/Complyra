@@ -11,13 +11,30 @@ import { useData } from "../../data/DataProvider";
  *
  * One entry covers five minutes of signing, so a user initialing dozens of
  * training lines is not asked for the password on every line.
+ *
+ * The same sheet doubles as HIPAA step-up reauthentication for sensitive
+ * actions (viewing a complete individual record, exporting data): pass a
+ * custom title/description/confirmLabel and the sensitive action proceeds on
+ * onVerified.
  */
+const DEFAULT_DESCRIPTION =
+  "To keep every signature attributable, Missouri rules require a second " +
+  "check beyond your signed-in session: enter your account password. One " +
+  "entry covers about five minutes of signing.";
+
 export default function ReauthSheet({
   onVerified,
   onClose,
+  title = "Confirm it’s you",
+  description = DEFAULT_DESCRIPTION,
+  confirmLabel = "Confirm and sign",
 }: {
   onVerified: () => void;
   onClose: () => void;
+  /** Step-up callers may override the copy; defaults keep signature wording. */
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
 }) {
   const { api } = useData();
   const [password, setPassword] = useState("");
@@ -45,13 +62,9 @@ export default function ReauthSheet({
   }
 
   return (
-    <Modal title="Confirm it’s you" onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <div className="reauth-body">
-        <p className="muted">
-          To keep every signature attributable, Missouri rules require a second
-          check beyond your signed-in session: enter your account password. One
-          entry covers about five minutes of signing.
-        </p>
+        <p className="muted">{description}</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -90,7 +103,7 @@ export default function ReauthSheet({
               className="button primary reauth-button"
               disabled={busy || !password}
             >
-              {busy ? "Confirming…" : "Confirm and sign"}
+              {busy ? "Confirming…" : confirmLabel}
             </button>
           </div>
         </form>

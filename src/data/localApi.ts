@@ -97,11 +97,19 @@ import type {
   AdoptSignatureInput,
   ApplySignatureInput,
   ApplySignatureResult,
+  LogPhiAccessInput,
   LogSignatureAuditInput,
+  MfaAssurance,
+  MfaFactor,
+  MfaState,
+  PhiAccessAction,
+  PhiAccessFilters,
+  PhiAccessRecord,
   SignableDocumentType,
   SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
+  TotpEnrollment,
   UserSignature,
 } from "./types";
 import { blankDelegationForm } from "./types";
@@ -725,6 +733,28 @@ export interface ComplyraApi {
     documentType?: SignableDocumentType;
     documentId?: string;
   }): Promise<SignatureAuditRecord[]>;
+  /**
+   * HIPAA application-level PHI audit trail. The client only reports what it
+   * alone can observe (views, exports); create/update/delete rows are written
+   * by server-side triggers. Never throws: audit must not break care work.
+   */
+  logPhiAccess(input: LogPhiAccessInput): Promise<void>;
+  /**
+   * Filtered PHI access rows for the Access log screen. Hosted resolves
+   * agency visibility server-side; only administrator/compliance_admin/
+   * auditor roles can read.
+   */
+  listPhiAccessLog(filters?: PhiAccessFilters): Promise<PhiAccessRecord[]>;
+  /** Supabase Auth MFA (TOTP): current enrollment + assurance level. */
+  getMfaState(): Promise<MfaState>;
+  /** Start TOTP enrollment: returns the QR code, secret, and factor id. */
+  enrollTotpFactor(friendlyName: string): Promise<TotpEnrollment>;
+  /** Confirm TOTP enrollment with the 6-digit code from the authenticator app. */
+  verifyTotpEnrollment(factorId: string, code: string): Promise<void>;
+  /** Step-up: verify the current session with a TOTP code. */
+  verifyTotpForSession(factorId: string, code: string): Promise<void>;
+  /** Remove a TOTP factor. */
+  unenrollMfaFactor(factorId: string): Promise<void>;
   /**
    * RECOGNITION (winners-only). Bidirectional 1–5 ratings/reviews: exactly
    * one current record per reviewer/subject pair and direction, append-only
@@ -6289,6 +6319,72 @@ export class LocalApi implements ComplyraApi {
           (!input?.documentId || row.documentId === input.documentId),
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** Local PHI audit: in-memory rows with the hosted shape (never throws). */
+  async logPhiAccess(input: LogPhiAccessInput): Promise<void> {
+    try {
+      const session = assertSession(this.store);
+      const db = this.store.db as unknown as { phiAccessLog?: PhiAccessRecord[] };
+      db.phiAccessLog ??= [];
+      db.phiAccessLog.push({
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        agencyId: input.agencyId ?? session.agencyId,
+        userId: session.userId,
+        action: input.action,
+        recordType: input.recordType,
+        recordId: input.recordId,
+        individualId: input.individualId ?? null,
+        createdAt: new Date().toISOString(),
+        ipAddress: null,
+        userAgent: typeof navigator === "undefined" ? null : navigator.userAgent,
+        deviceId: getDeviceId(),
+        details: input.details ?? null,
+      });
+      await persistMeta(this.store);
+    } catch {
+      /* audit must never break care work */
+    }
+  }
+
+  async listPhiAccessLog(filters?: PhiAccessFilters): Promise<PhiAccessRecord[]> {
+    const session = assertSession(this.store);
+    const db = this.store.db as unknown as { phiAccessLog?: PhiAccessRecord[] };
+    const rows = db.phiAccessLog ?? [];
+    return rows
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          (!filters?.userId || row.userId === filters.userId) &&
+          (!filters?.recordType || row.recordType === filters.recordType) &&
+          (!filters?.recordId || row.recordId === filters.recordId) &&
+          (!filters?.action || row.action === filters.action) &&
+          (!filters?.from || row.createdAt >= filters.from) &&
+          (!filters?.to || row.createdAt <= filters.to),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(filters?.offset ?? 0, (filters?.offset ?? 0) + (filters?.limit ?? 200));
+  }
+
+  /** Local preview has no Auth MFA: report unenrolled (never blocks). */
+  async getMfaState(): Promise<MfaState> {
+    return { enrolled: false, assurance: "aal1", factors: [] };
+  }
+
+  async enrollTotpFactor(): Promise<TotpEnrollment> {
+    throw new Error("MFA is only available in the hosted workspace.");
+  }
+
+  async verifyTotpEnrollment(): Promise<void> {
+    throw new Error("MFA is only available in the hosted workspace.");
+  }
+
+  async verifyTotpForSession(): Promise<void> {
+    throw new Error("MFA is only available in the hosted workspace.");
+  }
+
+  async unenrollMfaFactor(): Promise<void> {
+    throw new Error("MFA is only available in the hosted workspace.");
   }
 
   /** Append one row to the local 13 CSR 65-3.050 audit collection. */
