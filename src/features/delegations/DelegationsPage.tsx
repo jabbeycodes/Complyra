@@ -84,78 +84,77 @@ export default function DelegationsPage() {
         <DelegationTemplatesSection />
       ) : (
         <>
-          {reminders.length > 0 && (
-        <section className="panel">
-          <h2>Review reminders</h2>
-          <p className="stack-help">
-            Delegations with a review date set that is due soon or overdue.
-          </p>
-          {reminders.map(({ view, person, review }) => (
-            <div key={view.item.id} className="delegation-reminder">
-              <FileBadge2 size={16} />
-              <div>
-                <strong>{view.item.title}</strong> — {person?.name}
-                <div className={review.overdue ? "delegation-warn" : "delegation-small"}>
-                  {review.label}
-                </div>
-              </div>
-              <button className="button" onClick={() => setOpenId(view.item.id)}>
-                Open form
-              </button>
+          <section className="panel">
+            <div className="panel-heading">
+              <h2>Delegations</h2>
+              {editor && (
+                <button className="button" onClick={() => setCreating((v) => !v)}>
+                  <Plus size={16} /> {creating ? "Cancel" : "New delegation"}
+                </button>
+              )}
             </div>
-          ))}
-        </section>
-      )}
-
-      <section className="panel">
-        <div className="panel-heading">
-          <h2>Delegations</h2>
-          {editor && (
-            <button className="button" onClick={() => setCreating((v) => !v)}>
-              <Plus size={16} /> {creating ? "Cancel" : "New delegation"}
-            </button>
-          )}
-        </div>
-        {creating && editor && (
-          <div className="delegation-create">
-            <NewDelegationForm
-              onCreate={(input) =>
-                run(async () => {
-                  const { id } = await api.createDelegation(input);
-                  setCreating(false);
-                  setOpenId(id);
-                })
-              }
-            />
-          </div>
-        )}
-        {delegations.length === 0 ? (
-          <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
-        ) : (
-          <table className="delegation-table">
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th>Individual</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {delegations.map(({ view, person }) => (
-                <DelegationRow
-                  key={view.item.id}
-                  item={view.item}
-                  individualName={person?.name ?? ""}
-                  onOpen={() => setOpenId(view.item.id)}
+            {creating && editor && (
+              <div className="delegation-create">
+                <NewDelegationForm
+                  onCreate={(input) =>
+                    run(async () => {
+                      const { id } = await api.createDelegation(input);
+                      setCreating(false);
+                      setOpenId(id);
+                    })
+                  }
                 />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+              </div>
+            )}
+            {reminders.length > 0 && !creating && (
+              <div className="delegation-reminders">
+                <h3>Review reminders</h3>
+                <p className="stack-help">
+                  Delegations with a review date set that is due soon or overdue.
+                </p>
+                {reminders.map(({ view, person, review }) => (
+                  <div key={view.item.id} className="delegation-reminder">
+                    <FileBadge2 size={16} />
+                    <div>
+                      <strong>{view.item.title}</strong> — {person?.name}
+                      <div className={review.overdue ? "delegation-warn" : "delegation-small"}>
+                        {review.label}
+                      </div>
+                    </div>
+                    <button className="button" onClick={() => setOpenId(view.item.id)}>
+                      Open form
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {delegations.length === 0 ? (
+              <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
+            ) : (
+              <table className="delegation-table">
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Individual</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {delegations.map(({ view, person }) => (
+                    <DelegationRow
+                      key={view.item.id}
+                      item={view.item}
+                      individualName={person?.name ?? ""}
+                      onOpen={() => setOpenId(view.item.id)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
 
-      {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
+          {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
         </>
       )}
     </div>

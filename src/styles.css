@@ -5455,6 +5455,7 @@ body.nav-open {
   .form-grid {
     grid-template-columns: 1fr;
   }
+}
 
 /* ===== LIFEPATH-P3: RN delegation forms ===== */
 .delegation-paper {
