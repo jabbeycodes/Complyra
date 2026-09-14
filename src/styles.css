@@ -4458,6 +4458,21 @@ th {
   color: var(--muted);
   margin-bottom: 22px;
 }
+.login-legal {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin: 16px 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.login-legal a {
+  color: var(--moss, #3f5c3b);
+  text-decoration: none;
+}
+.login-legal a:hover {
+  text-decoration: underline;
+}
 .login-demo {
   margin-top: 22px;
   display: grid;

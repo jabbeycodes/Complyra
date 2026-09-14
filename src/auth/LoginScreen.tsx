@@ -132,6 +132,11 @@ export default function LoginScreen({
           </button>
           <small>Fictional Evergreen Care data — no sign-up needed.</small>
         </div>
+        <nav className="login-legal" aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/security">Security</a>
+        </nav>
         <div className="login-demo-cred">
           <strong>Demo access</strong>
           <p>

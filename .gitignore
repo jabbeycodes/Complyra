@@ -1,5 +1,9 @@
 node_modules
 dist
+public/privacy
+public/terms
+public/security
+public/legal.css
 .vercel
 .env
 .env.*

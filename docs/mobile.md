@@ -46,7 +46,7 @@ In Android Studio: generate a Play App Signing key, build an AAB, upload to Play
 
 ## Store review you should plan for now
 
-- Privacy policy URL on complyrer.com (required).
+- Privacy policy URL on https://complyrer.com/privacy (required).
 - Account deletion path (Apple).
 - No HIPAA or “certified compliant” claims.
 - Production builds must not expose the fictional Evergreen demo password.
