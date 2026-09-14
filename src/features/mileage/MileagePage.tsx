@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { CarFront, Download, Pencil, Trash2 } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
@@ -24,7 +24,7 @@ import {
   validateOdometerContinuity,
   validateTripInput,
 } from "../../data/mileage";
-import type { MileageYearlySummary } from "../../data/mileage";
+import type { MileageYearlySummary, MileageAgencyYearlySummary } from "../../data/mileage";
 import type { MileageTrip, MileageTripView } from "../../data/types";
 import { todayIso } from "../../data/chart";
 import "./mileage.css";
@@ -94,6 +94,9 @@ export default function MileagePage() {
   const [yearly, setYearly] = useState<MileageYearlySummary | null>(null);
   const [yearlyError, setYearlyError] = useState("");
   const [yearlyLoading, setYearlyLoading] = useState(false);
+  /** Yearly tab scope: one site, or "all" for the agency-wide view. */
+  const [yearlyScope, setYearlyScope] = useState<string>("all");
+  const [agencyYearly, setAgencyYearly] = useState<MileageAgencyYearlySummary | null>(null);
 
   const sites = workspace?.sites ?? [];
   const activeSiteId = siteId || sites[0]?.id || "";
@@ -110,10 +113,31 @@ export default function MileagePage() {
     [workspace, activeSite],
   );
   const peopleIds = useMemo(() => people.map((person) => person.id), [people]);
+  /** id -> name across ALL sites (the agency-wide yearly view needs it). */
   const nameById = useMemo(
-    () => Object.fromEntries(people.map((person) => [person.id, person.name])),
-    [people],
+    () =>
+      Object.fromEntries(
+        (workspace?.individuals ?? []).map((person) => [person.id, person.name]),
+      ),
+    [workspace],
   );
+  /** Individuals at one site, by site id — for the yearly scope selector. */
+  const peopleBySiteId = useMemo(() => {
+    const byName = new Map(sites.map((site) => [site.name, site.id]));
+    const out = new Map<string, Array<{ id: string; name: string }>>();
+    for (const person of workspace?.individuals ?? []) {
+      const siteId = byName.get(person.site);
+      if (!siteId) continue;
+      const list = out.get(siteId) ?? [];
+      list.push({ id: person.id, name: person.name });
+      out.set(siteId, list);
+    }
+    return out;
+  }, [workspace, sites]);
+  const yearlySiteName =
+    yearlyScope === "all"
+      ? "All sites"
+      : (sites.find((site) => site.id === yearlyScope)?.name ?? "");
 
   const summary = useMemo(
     () => summarizeMonthlyMileage(trips, peopleIds),
@@ -167,29 +191,54 @@ export default function MileagePage() {
   }, [api, activeSiteId, editingId, trips]);
 
   // Yearly administrator summary (auto-populated per the full-year tracker).
+  // Scope "all" pulls every program site in one agency-wide table; otherwise
+  // the selected site's per-site view.
   useEffect(() => {
-    if (tab !== "yearly" || !showYearly || !activeSiteId) return;
+    if (tab !== "yearly" || !showYearly) return;
     let live = true;
     setYearlyError("");
     setYearlyLoading(true);
-    api
-      .getMileageYearlySummary(activeSiteId, year, peopleIds)
-      .then((result) => {
-        if (live) {
-          setYearly(result);
-          setYearlyLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (live) {
-          setYearlyError((err as Error).message);
-          setYearlyLoading(false);
-        }
-      });
+    setYearly(null);
+    setAgencyYearly(null);
+    const fail = (err: unknown) => {
+      if (live) {
+        setYearlyError(
+          err instanceof Error ? err.message : "Could not load the yearly summary.",
+        );
+        setYearlyLoading(false);
+      }
+    };
+    if (yearlyScope === "all") {
+      const siteInputs = sites.map((site) => ({
+        siteId: site.id,
+        siteName: site.name,
+        individualIds: (peopleBySiteId.get(site.id) ?? []).map((p) => p.id),
+      }));
+      api
+        .getMileageYearlySummaryAllSites(year, siteInputs)
+        .then((result) => {
+          if (live) {
+            setAgencyYearly(result);
+            setYearlyLoading(false);
+          }
+        })
+        .catch(fail);
+    } else {
+      const ids = (peopleBySiteId.get(yearlyScope) ?? []).map((p) => p.id);
+      api
+        .getMileageYearlySummary(yearlyScope, year, ids)
+        .then((result) => {
+          if (live) {
+            setYearly(result);
+            setYearlyLoading(false);
+          }
+        })
+        .catch(fail);
+    }
     return () => {
       live = false;
     };
-  }, [api, tab, showYearly, activeSiteId, year, peopleIds]);
+  }, [api, tab, showYearly, yearlyScope, year, sites, peopleBySiteId]);
 
   if (!session || !hasPermission(session, "mileage.manage")) {
     return (
@@ -331,19 +380,51 @@ export default function MileagePage() {
 
   // ---- Monthly sheet PDF: build and download a real file, no dead-end views ----
   async function downloadYearlySummary() {
-    if (!yearly) return;
     setDownloading(true);
     setYearlyError("");
     try {
+      if (yearlyScope === "all") {
+        if (!agencyYearly) return;
+        // Flatten site-by-site so the PDF's group headers stay together.
+        const orderedPeople: Array<{ id: string; name: string }> = [];
+        const siteNameByIndividualId: Record<string, string> = {};
+        for (const group of agencyYearly.sites) {
+          for (const row of group.rows) {
+            orderedPeople.push({
+              id: row.individualId,
+              name: nameById[row.individualId] ?? row.individualId,
+            });
+            siteNameByIndividualId[row.individualId] = group.siteName;
+          }
+        }
+        const flatSummary: MileageYearlySummary = {
+          year: agencyYearly.year,
+          rows: agencyYearly.sites.flatMap((group) => group.rows),
+          grandTotal: agencyYearly.grandTotal,
+        };
+        const doc = buildMileageYearPdf({
+          agencyName: session?.agencyName ?? "Agency",
+          siteName: "All sites",
+          year,
+          people: orderedPeople,
+          summary: flatSummary,
+          siteNameByIndividualId,
+        });
+        const blob = doc.output("blob") as Blob;
+        downloadBlob(mileageYearFileName("all-sites", year), blob);
+        return;
+      }
+      if (!yearly) return;
+      const scopedPeople = peopleBySiteId.get(yearlyScope) ?? [];
       const doc = buildMileageYearPdf({
         agencyName: session?.agencyName ?? "Agency",
-        siteName: activeSite?.name ?? "Home",
+        siteName: yearlySiteName,
         year,
-        people: people.map((person) => ({ id: person.id, name: person.name })),
+        people: scopedPeople.map((person) => ({ id: person.id, name: person.name })),
         summary: yearly,
       });
       const blob = doc.output("blob") as Blob;
-      downloadBlob(mileageYearFileName(activeSite?.name ?? "home", year), blob);
+      downloadBlob(mileageYearFileName(yearlySiteName || "home", year), blob);
     } catch (err) {
       setYearlyError(
         err instanceof Error ? err.message : "Could not build the yearly summary PDF.",
@@ -418,16 +499,34 @@ export default function MileagePage() {
       </div>
 
       <p style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-        <label>
-          Home{" "}
-          <select value={activeSiteId} onChange={(e) => setSiteId(e.target.value)}>
-            {sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {tab === "yearly" ? (
+          <label>
+            Scope{" "}
+            <select
+              value={yearlyScope}
+              onChange={(e) => setYearlyScope(e.target.value)}
+              aria-label="Yearly summary scope"
+            >
+              <option value="all">All sites</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            Home{" "}
+            <select value={activeSiteId} onChange={(e) => setSiteId(e.target.value)}>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {tab === "monthly" ? (
           <label>
             Month{" "}
@@ -464,58 +563,111 @@ export default function MileagePage() {
         <>
           <section className="panel" aria-label={`Yearly mileage summary ${year}`}>
             <h2>
-              Yearly summary — {activeSite?.name} · {year}
+              Yearly summary — {yearlySiteName} · {year}
             </h2>
             <p>
               <button
                 className="button"
                 onClick={downloadYearlySummary}
-                disabled={downloading || !yearly}
+                disabled={
+                  downloading || (yearlyScope === "all" ? !agencyYearly : !yearly)
+                }
               >
                 <Download size={14} /> {downloading ? "Building PDF…" : "Download yearly summary (PDF)"}
               </button>
             </p>
             {yearlyError && <p className="form-error">{yearlyError}</p>}
-            {yearlyLoading || !yearly ? (
+            {yearlyLoading ? (
               <p className="stack-help">Loading the yearly summary…</p>
-            ) : (
-              <div className="table-scroll">
-                <table className="mileage-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      {MONTH_LABELS_SHORT.map((label) => (
-                        <th key={label}>{label}</th>
+            ) : yearlyScope === "all" ? (
+              agencyYearly && (
+                <div className="table-scroll">
+                  <table className="mileage-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        {MONTH_LABELS_SHORT.map((label) => (
+                          <th key={label}>{label}</th>
+                        ))}
+                        <th>Yearly Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {agencyYearly.sites.map((group) => (
+                        <Fragment key={group.siteId}>
+                          <tr className="mileage-site-row">
+                            <td colSpan={14}>
+                              <strong>{group.siteName}</strong>
+                            </td>
+                          </tr>
+                          {group.rows.map((row) => (
+                            <tr key={row.individualId}>
+                              <td>{nameById[row.individualId] ?? row.individualId}</td>
+                              {row.months.map((miles, index) => (
+                                <td key={MONTH_LABELS_SHORT[index]}>{miles}</td>
+                              ))}
+                              <td>
+                                <strong>{row.yearlyTotal}</strong>
+                              </td>
+                            </tr>
+                          ))}
+                        </Fragment>
                       ))}
-                      <th>Yearly Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yearly.rows.map((row) => (
-                      <tr key={row.individualId}>
-                        <td>{nameById[row.individualId] ?? row.individualId}</td>
-                        {row.months.map((miles, index) => (
-                          <td key={MONTH_LABELS_SHORT[index]}>{miles}</td>
+                      <tr className="mileage-totals-row">
+                        <td>Grand Total</td>
+                        {agencyYearly.grandTotal.months.map((miles, index) => (
+                          <td key={MONTH_LABELS_SHORT[index]}>
+                            <strong>{miles}</strong>
+                          </td>
                         ))}
                         <td>
-                          <strong>{row.yearlyTotal}</strong>
+                          <strong>{agencyYearly.grandTotal.yearlyTotal}</strong>
                         </td>
                       </tr>
-                    ))}
-                    <tr className="mileage-totals-row">
-                      <td>Grand Total</td>
-                      {yearly.grandTotal.months.map((miles, index) => (
-                        <td key={MONTH_LABELS_SHORT[index]}>
-                          <strong>{miles}</strong>
-                        </td>
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : (
+              yearly && (
+                <div className="table-scroll">
+                  <table className="mileage-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        {MONTH_LABELS_SHORT.map((label) => (
+                          <th key={label}>{label}</th>
+                        ))}
+                        <th>Yearly Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearly.rows.map((row) => (
+                        <tr key={row.individualId}>
+                          <td>{nameById[row.individualId] ?? row.individualId}</td>
+                          {row.months.map((miles, index) => (
+                            <td key={MONTH_LABELS_SHORT[index]}>{miles}</td>
+                          ))}
+                          <td>
+                            <strong>{row.yearlyTotal}</strong>
+                          </td>
+                        </tr>
                       ))}
-                      <td>
-                        <strong>{yearly.grandTotal.yearlyTotal}</strong>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+                      <tr className="mileage-totals-row">
+                        <td>Grand Total</td>
+                        {yearly.grandTotal.months.map((miles, index) => (
+                          <td key={MONTH_LABELS_SHORT[index]}>
+                            <strong>{miles}</strong>
+                          </td>
+                        ))}
+                        <td>
+                          <strong>{yearly.grandTotal.yearlyTotal}</strong>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )
             )}
           </section>
 

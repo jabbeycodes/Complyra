@@ -460,3 +460,69 @@ export function summarizeYearlyMileage(
     },
   };
 }
+
+// ---------- Agency-wide yearly summary ----------
+// Mirrors the workbook's "Yearly Summary" sheet: every individual at every
+// program site, grouped by site, with Jan–Dec columns, a Yearly Total per
+// individual, and one Grand Total row across the whole agency. Same equal-
+// share math as the per-site summary; the agency view is administrator /
+// degreed-professional-manager / platform-owner only.
+
+export interface MileageAgencyYearSiteInput {
+  siteId: string;
+  siteName: string;
+  individualIds: string[];
+}
+
+export interface MileageAgencyYearSite {
+  siteId: string;
+  siteName: string;
+  rows: MileageYearRow[];
+  siteTotal: { months: number[]; yearlyTotal: number };
+}
+
+export interface MileageAgencyYearlySummary {
+  year: number;
+  sites: MileageAgencyYearSite[];
+  grandTotal: { months: number[]; yearlyTotal: number };
+}
+
+/**
+ * Agency-wide yearly summary: each site's group is built with the same
+ * summarizeYearlyMileage math as the per-site view, then the groups roll up
+ * into one agency grand-total row. Sites with no individuals still appear
+ * (empty group) so every program site is represented. Trips outside `year`
+ * are ignored; trips for unknown sites are skipped.
+ */
+export function summarizeAgencyYearlyMileage(
+  tripsBySite: Map<string, MileageTrip[]>,
+  sites: MileageAgencyYearSiteInput[],
+  year: number,
+): MileageAgencyYearlySummary {
+  const groups: MileageAgencyYearSite[] = sites.map((site) => {
+    const summary = summarizeYearlyMileage(
+      tripsBySite.get(site.siteId) ?? [],
+      site.individualIds,
+      year,
+    );
+    return {
+      siteId: site.siteId,
+      siteName: site.siteName,
+      rows: summary.rows,
+      siteTotal: summary.grandTotal,
+    };
+  });
+  const grandMonths = MONTH_LABELS_SHORT.map((_, index) =>
+    roundMiles(
+      groups.reduce((sum, group) => sum + group.siteTotal.months[index], 0),
+    ),
+  );
+  return {
+    year,
+    sites: groups,
+    grandTotal: {
+      months: grandMonths,
+      yearlyTotal: roundMiles(grandMonths.reduce((sum, m) => sum + m, 0)),
+    },
+  };
+}
