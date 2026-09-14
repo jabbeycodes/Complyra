@@ -30,6 +30,11 @@ import {
   trainingLinePayloadFromView,
 } from "../signatures/documentPayloads";
 import { can } from "../../data/status";
+import { downloadBlob } from "../../data/openFile";
+import {
+  buildStaffTrainingChecklistPdf,
+  staffTrainingFileName,
+} from "../../pdf/trainingChecklistPdf";
 import {
   canEditTrainingLine,
   canRequestTrainingCorrection,
@@ -408,7 +413,8 @@ function ProfilePanel({
   onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
-  const { api } = useData();
+  const { api, session } = useData();
+  const sessionAgencyName = session?.agencyName ?? "Agency";
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
     section,
     lines: profile.requirements.filter((row) => row.section === section),
@@ -674,7 +680,47 @@ function ProfilePanel({
           ),
       )}
 
-      <h3>Checklist signatures</h3>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0 }}>Checklist signatures</h3>
+        <button
+          className="button"
+          onClick={() => {
+            const doc = buildStaffTrainingChecklistPdf({
+              agencyName: sessionAgencyName,
+              staffName: profile.fullName,
+              siteNames: profile.siteNames,
+              hoursTotal: profile.hoursTotal,
+              hoursWithHm: profile.hoursWithHm,
+              lines: profile.requirements.map((row) => ({
+                title: row.topicTitle,
+                section: `Section ${row.section}`,
+                initials: row.signoff?.initials ?? null,
+                signedOn: row.signoff?.signedOn ?? null,
+                na: row.signoff?.na ?? false,
+                naReason: row.signoff?.naReason ?? null,
+                trainerName: row.signoff?.trainerName ?? "",
+              })),
+              signatures: profile.countersignatures.map((counter) => ({
+                siteName: profile.siteNames[0] ?? counter.siteId,
+                staff: {
+                  name: counter.staffSignatureName,
+                  signedAt: counter.staffSignedAt,
+                },
+                hm: {
+                  name: counter.hmSignatureName,
+                  signedAt: counter.hmSignedAt,
+                },
+              })),
+            });
+            downloadBlob(
+              staffTrainingFileName(profile.fullName),
+              doc.output("blob") as Blob,
+            );
+          }}
+        >
+          Download checklist PDF
+        </button>
+      </div>
       <ComplyrerRecordMark
         documentId={`training-checklist:${profile.userId}`}
         generatedAt={new Date().toISOString()}

@@ -5887,9 +5887,10 @@ export class LocalApi implements ComplyraApi {
     year: number,
     individualIds: string[],
   ): Promise<import("./mileage").MileageYearlySummary> {
-    const { summarizeYearlyMileage } = await this.p7lib();
+    const { summarizeYearlyMileage, assertCanViewMileageYearlySummary } = await this.p7lib();
     const session = assertSession(this.store);
     this.assertMileageAccess(session);
+    assertCanViewMileageYearlySummary(session);
     this.siteOrThrow(session, siteId);
     return summarizeYearlyMileage(
       this.siteMileageTrips(session, siteId),

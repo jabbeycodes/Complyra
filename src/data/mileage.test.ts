@@ -12,7 +12,10 @@ import {
 import { DEMO_PASSWORD } from "./types";
 import {
   assertCanBackfillMileage,
+  assertCanViewMileageYearlySummary,
   canBackfillMileage,
+  canDownloadMileageMonthly,
+  canViewMileageYearlySummary,
   compareMileageTrips,
   computeTripMiles,
   getLastOdometerEnd,
@@ -409,7 +412,7 @@ test("getPreviousOdometerEnd returns the end of the trip right before the given 
 
 // ---------- Weekly breakdown ----------
 
-test("weekBucketOfDay buckets days 1–7, 8–14, 15–21, 22–28, 29–31", () => {
+test("weekBucketOfDay buckets days 1–7, 8–14, 15–21, 22–end of month", () => {
   assert.equal(weekBucketOfDay(1), 0);
   assert.equal(weekBucketOfDay(7), 0);
   assert.equal(weekBucketOfDay(8), 1);
@@ -418,37 +421,39 @@ test("weekBucketOfDay buckets days 1–7, 8–14, 15–21, 22–28, 29–31", ()
   assert.equal(weekBucketOfDay(21), 2);
   assert.equal(weekBucketOfDay(22), 3);
   assert.equal(weekBucketOfDay(28), 3);
-  assert.equal(weekBucketOfDay(29), 4);
-  assert.equal(weekBucketOfDay(31), 4);
+  // No Week 5: days 29–31 land in Week 4 (the tracker workbook's columns).
+  assert.equal(weekBucketOfDay(29), 3);
+  assert.equal(weekBucketOfDay(31), 3);
 });
 
-test("summarizeWeeklyMileage buckets per-individual shares into weeks 1–5", () => {
+test("summarizeWeeklyMileage buckets per-individual shares into weeks 1–4", () => {
   const trips = [
     baseTrip({ id: "w1", tripDate: "2026-09-03", miles: 20, riderIds: ["a", "b"] }),
     baseTrip({ id: "w2", tripDate: "2026-09-10", miles: 30, riderIds: ["a"] }),
-    baseTrip({ id: "w5", tripDate: "2026-09-30", miles: 10, riderIds: ["b"] }),
+    baseTrip({ id: "w4", tripDate: "2026-09-30", miles: 10, riderIds: ["b"] }),
   ];
   const result = summarizeWeeklyMileage(trips, ["a", "b", "c"]);
   assert.equal(result.month, "2026-09");
-  assert.equal(result.hasWeek5, true);
   const byId = Object.fromEntries(result.rows.map((row) => [row.individualId, row]));
-  assert.deepEqual(byId["a"].weeks, [10, 30, 0, 0, 0]);
+  assert.deepEqual(byId["a"].weeks, [10, 30, 0, 0]);
   assert.equal(byId["a"].monthlyTotal, 40);
-  assert.deepEqual(byId["b"].weeks, [10, 0, 0, 0, 10]);
+  // Day 30 falls in Week 4 — there is no Week 5 column.
+  assert.deepEqual(byId["b"].weeks, [10, 0, 0, 10]);
   assert.equal(byId["b"].monthlyTotal, 20);
-  assert.deepEqual(byId["c"].weeks, [0, 0, 0, 0, 0]);
+  assert.deepEqual(byId["c"].weeks, [0, 0, 0, 0]);
   assert.equal(byId["c"].monthlyTotal, 0);
 });
 
-test("summarizeWeeklyMileage reports no week 5 when nothing falls on days 29–31", () => {
+test("summarizeWeeklyMileage puts day-22+ trips in week 4 with exactly four columns", () => {
   const trips = [
     baseTrip({ id: "w1", tripDate: "2026-09-03", miles: 20, riderIds: ["a"] }),
     baseTrip({ id: "w4", tripDate: "2026-09-28", miles: 8, riderIds: ["a"] }),
+    baseTrip({ id: "w4b", tripDate: "2026-09-30", miles: 6, riderIds: ["a"] }),
   ];
   const result = summarizeWeeklyMileage(trips, ["a"]);
-  assert.equal(result.hasWeek5, false);
-  assert.deepEqual(result.rows[0].weeks, [20, 0, 0, 8, 0]);
-  assert.equal(result.rows[0].monthlyTotal, 28);
+  assert.equal(result.rows[0].weeks.length, 4);
+  assert.deepEqual(result.rows[0].weeks, [20, 0, 0, 14]);
+  assert.equal(result.rows[0].monthlyTotal, 34);
 });
 
 // ---------- Yearly summary ----------
@@ -522,7 +527,8 @@ test("updateMileageTrip validates the start against the previous trip's end", as
 });
 
 test("getMileageYearlySummary rolls up per-individual months and the grand total", async () => {
-  const { client, site, people } = await dspClient();
+  // Yearly summary is administrator/DPM-only server-side: sign in as the admin.
+  const { client, site, people } = await clientAs(DEMO_ADMIN_USERNAME);
   const [first, second] = people;
   await client.addMileageTrip({
     ...tripInput(site.id, [first.id, second.id]),
@@ -562,6 +568,19 @@ test("getMileageYearlySummary rolls up per-individual months and the grand total
   assert.equal(yearly.grandTotal.yearlyTotal, 60);
 });
 
+test("getMileageYearlySummary rejects DSP and house-manager sessions server-side", async () => {
+  const dsp = await dspClient();
+  await assert.rejects(
+    () => dsp.client.getMileageYearlySummary(dsp.site.id, 2026, dsp.people.map((p) => p.id)),
+    /Only administrators and degreed professional managers/,
+  );
+  const hm = await clientAs(DEMO_HM_USERNAME);
+  await assert.rejects(
+    () => hm.client.getMileageYearlySummary(hm.site.id, 2026, hm.people.map((p) => p.id)),
+    /Only administrators and degreed professional managers/,
+  );
+});
+
 // ---------- Admin backfill override ----------
 
 test("canBackfillMileage allows administrator, compliance_admin, house_manager, and platform admins", () => {
@@ -586,6 +605,50 @@ test("assertCanBackfillMileage throws for staff but not for house managers", () 
     () => assertCanBackfillMileage({ roleKey: "dsp", platformAdmin: false }),
     /Only administrators, compliance administrators, and house managers/,
   );
+});
+
+// ---------- Role gates: monthly sheet for HM/DSP, yearly for administrator/DPM ----------
+
+test("canViewMileageYearlySummary allows administrator, DPM, and platform admins only", () => {
+  assert.equal(canViewMileageYearlySummary({ roleKey: "administrator", platformAdmin: false }), true);
+  assert.equal(canViewMileageYearlySummary({ roleKey: "degreed_professional_manager", platformAdmin: false }), true);
+  assert.equal(canViewMileageYearlySummary({ roleKey: "dsp", platformAdmin: true }), true);
+});
+
+test("canViewMileageYearlySummary blocks HM, DSP, compliance_admin, and everyone else", () => {
+  for (const roleKey of ["house_manager", "dsp", "compliance_admin", "program_manager", "nurse", "hr", "auditor"]) {
+    assert.equal(canViewMileageYearlySummary({ roleKey, platformAdmin: false }), false, roleKey);
+  }
+  assert.equal(canViewMileageYearlySummary(null), false);
+});
+
+test("assertCanViewMileageYearlySummary throws for HM/DSP but not for administrator or DPM", () => {
+  assert.doesNotThrow(() =>
+    assertCanViewMileageYearlySummary({ roleKey: "administrator", platformAdmin: false }),
+  );
+  assert.doesNotThrow(() =>
+    assertCanViewMileageYearlySummary({ roleKey: "degreed_professional_manager", platformAdmin: false }),
+  );
+  assert.throws(
+    () => assertCanViewMileageYearlySummary({ roleKey: "house_manager", platformAdmin: false }),
+    /Only administrators and degreed professional managers/,
+  );
+  assert.throws(
+    () => assertCanViewMileageYearlySummary({ roleKey: "dsp", platformAdmin: false }),
+    /Only administrators and degreed professional managers/,
+  );
+});
+
+test("canDownloadMileageMonthly allows house managers and platform admins only", () => {
+  assert.equal(canDownloadMileageMonthly({ roleKey: "house_manager", platformAdmin: false }), true);
+  assert.equal(canDownloadMileageMonthly({ roleKey: "dsp", platformAdmin: true }), true);
+});
+
+test("canDownloadMileageMonthly blocks DSP, administrator, DPM, and everyone else", () => {
+  for (const roleKey of ["dsp", "administrator", "degreed_professional_manager", "compliance_admin", "nurse", "hr", "auditor"]) {
+    assert.equal(canDownloadMileageMonthly({ roleKey, platformAdmin: false }), false, roleKey);
+  }
+  assert.equal(canDownloadMileageMonthly(null), false);
 });
 
 test("backfill reason marker round-trips without leaking into display text", () => {

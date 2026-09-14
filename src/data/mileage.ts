@@ -206,6 +206,57 @@ export function assertCanBackfillMileage(session: {
   }
 }
 
+// ---------- Role gates (Joshua's 2026-09-14 spec) ----------
+// The normal monthly mileage sheet is for house managers and DSPs at their
+// sites; only house managers can download/print it. The yearly tracking
+// sheet is only available to administrators and degreed professional
+// managers. The platform owner keeps full access everywhere.
+
+/** Roles allowed to view and download the yearly mileage summary. */
+export const MILEAGE_YEARLY_ROLE_KEYS = [
+  "administrator",
+  "degreed_professional_manager",
+] as const;
+
+/**
+ * Whether this session may view the yearly mileage summary: administrators,
+ * degreed professional managers, and platform admins only.
+ */
+export function canViewMileageYearlySummary(
+  session: { roleKey: string; platformAdmin: boolean } | null,
+): boolean {
+  if (!session) return false;
+  return (
+    session.platformAdmin ||
+    (MILEAGE_YEARLY_ROLE_KEYS as readonly string[]).includes(session.roleKey)
+  );
+}
+
+/** Throw unless the session may view the yearly summary; the API layer calls this server-side. */
+export function assertCanViewMileageYearlySummary(session: {
+  roleKey: string;
+  platformAdmin: boolean;
+}): void {
+  if (!canViewMileageYearlySummary(session)) {
+    throw new Error(
+      "Only administrators and degreed professional managers " +
+        "can view the yearly mileage summary.",
+    );
+  }
+}
+
+/**
+ * Whether this session may download/print the monthly mileage sheet: house
+ * managers and platform admins only. HM and DSP both see the sheet, but the
+ * download is HM-only.
+ */
+export function canDownloadMileageMonthly(
+  session: { roleKey: string; platformAdmin: boolean } | null,
+): boolean {
+  if (!session) return false;
+  return session.platformAdmin || session.roleKey === "house_manager";
+}
+
 // ---------- Backfill marking ----------
 // Backfilled trips are flagged without a schema change: the persisted reason
 // carries a "[backfill]" marker prefix, which the API mappers strip back off
@@ -277,25 +328,24 @@ export function validateOdometerContinuity(
   );
 }
 
-// ---------- Weekly breakdown (monthly sheet: Week 1–Week 5) ----------
-// Mirrors the full-year tracker workbook: Week 1 = days 1–7, Week 2 = 8–14,
-// Week 3 = 15–21, Week 4 = 22–28, Week 5 = days 29–31 (rendered only when the
-// month actually has week-5 trip data).
+// ---------- Weekly breakdown (monthly sheet: Week 1–Week 4) ----------
+// Matches Joshua's workbook columns exactly: Week 1 = days 1–7, Week 2 =
+// 8–14, Week 3 = 15–21, Week 4 = day 22 through end of month. There is no
+// Week 5 column — days 29–31 land in Week 4.
 
-export const WEEK_LABELS = ["Week 1", "Week 2", "Week 3", "Week 4", "Week 5"];
+export const WEEK_LABELS = ["Week 1", "Week 2", "Week 3", "Week 4"];
 
-/** 0-based week bucket for a day-of-month: 1–7 → 0 … 29–31 → 4. */
+/** 0-based week bucket for a day-of-month: 1–7 → 0 … 22–31 → 3. */
 export function weekBucketOfDay(day: number): number {
   if (day <= 7) return 0;
   if (day <= 14) return 1;
   if (day <= 21) return 2;
-  if (day <= 28) return 3;
-  return 4;
+  return 3;
 }
 
 export interface MileageWeeklyRow {
   individualId: string;
-  /** Per-week shares; index 4 is the optional Week 5 (days 29–31). */
+  /** Per-week shares, indexes 0–3 = Week 1–Week 4. */
   weeks: number[];
   monthlyTotal: number;
 }
@@ -303,28 +353,24 @@ export interface MileageWeeklyRow {
 export interface MileageWeeklyBreakdown {
   month: string;
   rows: MileageWeeklyRow[];
-  /** True when at least one trip falls on day 29–31; the UI renders the Week 5 column only then. */
-  hasWeek5: boolean;
 }
 
 /**
  * Weekly breakdown for the monthly sheet: each individual's equal-share
- * miles bucketed into Week 1–Week 4, plus Week 5 when the month has trips
- * on days 29–31. Individual ids with no trips still appear with zeros.
+ * miles bucketed into Week 1–Week 4. Individual ids with no trips still
+ * appear with zeros.
  */
 export function summarizeWeeklyMileage(
   trips: MileageTrip[],
   individualIds: string[],
 ): MileageWeeklyBreakdown {
   const weeksById = new Map<string, number[]>(
-    individualIds.map((id) => [id, [0, 0, 0, 0, 0]]),
+    individualIds.map((id) => [id, [0, 0, 0, 0]]),
   );
-  let hasWeek5 = false;
   for (const trip of trips) {
     const day = Number(trip.tripDate.slice(8, 10));
     if (!Number.isFinite(day) || day < 1) continue;
     const bucket = weekBucketOfDay(day);
-    if (bucket === 4) hasWeek5 = true;
     const shares = splitMilesAmongRiders(trip.miles, trip.riderIds);
     for (const [riderId, share] of shares) {
       const weeks = weeksById.get(riderId);
@@ -336,14 +382,13 @@ export function summarizeWeeklyMileage(
   return {
     month,
     rows: individualIds.map((individualId) => {
-      const weeks = weeksById.get(individualId) ?? [0, 0, 0, 0, 0];
+      const weeks = weeksById.get(individualId) ?? [0, 0, 0, 0];
       return {
         individualId,
         weeks,
         monthlyTotal: roundMiles(weeks.reduce((sum, w) => sum + w, 0)),
       };
     }),
-    hasWeek5,
   };
 }
 

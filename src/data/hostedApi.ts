@@ -6354,9 +6354,10 @@ export class HostedApi implements ComplyraApi {
     year: number,
     individualIds: string[],
   ): Promise<import("./mileage").MileageYearlySummary> {
-    const { summarizeYearlyMileage } = await this.p7lib();
+    const { summarizeYearlyMileage, assertCanViewMileageYearlySummary } = await this.p7lib();
     const session = await this.requireSession();
     this.requireMileageAccess(session);
+    assertCanViewMileageYearlySummary(session);
     await this.assertSiteInAgency(session, siteId);
     const { data, error } = await this.client
       .from("mileage_trips")
