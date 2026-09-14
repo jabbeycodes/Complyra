@@ -33,6 +33,12 @@ select,
 textarea {
   font: inherit;
 }
+/* 16px form controls: prevents iOS auto-zoom on focus and keeps text legible. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
 button {
   cursor: pointer;
 }
@@ -249,7 +255,7 @@ button:hover:not(:disabled) {
   align-items: center;
   gap: 11px;
   width: 100%;
-  min-height: 41px;
+  min-height: 44px;
   padding: 10px 13px;
   text-align: left;
   border-radius: 8px;
@@ -486,6 +492,8 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   padding: 6px;
   border-radius: 6px;
   color: #4a4036;
@@ -606,7 +614,7 @@ h1 {
   white-space: nowrap;
   line-height: 1.4;
   box-shadow: 0 1px 2px #60514305;
-  min-height: 36px;
+  min-height: 44px;
 }
 .button:hover {
   background: #fbfbfa;
@@ -1801,7 +1809,7 @@ td > svg {
   padding-top: 0;
 }
 .location-card .heading-actions .button {
-  min-height: 34px;
+  min-height: 44px;
   padding: 6px 8px;
   font-size: 12px;
   white-space: nowrap;
@@ -2590,8 +2598,8 @@ td > svg {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 33px;
-  height: 33px;
+  width: 44px;
+  height: 44px;
   border-radius: 6px;
   color: #ffffff;
 }
@@ -4333,7 +4341,7 @@ th {
   width: min(460px, 100%);
   background: #faf6ef;
   border: 1px solid var(--border);
-  border-radius: 28px;
+  border-radius: 24px;
   padding: 36px 32px;
   box-shadow: 0 24px 80px rgba(62, 50, 32, 0.1);
 }

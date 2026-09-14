@@ -229,37 +229,62 @@ const open: Requirement[] = [
     page: 5,
   },
 ];
+/**
+ * Curated demo requirements: every title is unique across the seed so lists,
+ * exports, and the demo tour never show the same row repeated per person.
+ * (The eight `open` items above carry the overdue/due-soon/review variety;
+ * these are the completed backbone.)
+ */
+const completedSeed: Array<{
+  id: string;
+  title: string;
+  person: string;
+  site: string;
+  category: Category;
+  owner: string;
+  due: string;
+  source: string;
+  page: number;
+}> = [
+  // Maple House — Jodie Williams
+  { id: "REQ-001", title: "Acknowledge PCSP 2026 annual update", person: "Jodie Williams", site: "Maple House", category: "PCSP acknowledgments", owner: "Alex Morgan", due: "2026-09-08", source: "Jodie Williams · PCSP 2026 · v2", page: 4 },
+  { id: "REQ-002", title: "Complete seizure protocol delegation", person: "Jodie Williams", site: "Maple House", category: "Nursing delegations", owner: "Taylor Reed", due: "2026-08-22", source: "Jodie Williams · PCSP 2026 · v2", page: 9 },
+  { id: "REQ-003", title: "Verify wheelchair and adaptive equipment", person: "Jodie Williams", site: "Maple House", category: "Equipment checks", owner: "Alex Morgan", due: "2026-09-01", source: "Jodie Williams · PCSP 2026 · v2", page: 14 },
+  { id: "REQ-004", title: "Record August emergency drill", person: "Jodie Williams", site: "Maple House", category: "Emergency drills", owner: "Taylor Reed", due: "2026-08-30", source: "Jodie Williams · PCSP 2026 · v2", page: 6 },
+  // Maple House — Brandon Miller
+  { id: "REQ-005", title: "Complete diabetes care delegation", person: "Brandon Miller", site: "Maple House", category: "Nursing delegations", owner: "Alex Morgan", due: "2026-08-15", source: "Brandon Miller · PCSP 2026 · v1", page: 7 },
+  { id: "REQ-006", title: "File August blood sugar logs", person: "Brandon Miller", site: "Maple House", category: "Required forms", owner: "Taylor Reed", due: "2026-09-02", source: "Brandon Miller · PCSP 2026 · v1", page: 11 },
+  { id: "REQ-007", title: "Record August fire drill", person: "Brandon Miller", site: "Maple House", category: "Emergency drills", owner: "Alex Morgan", due: "2026-08-30", source: "Brandon Miller · PCSP 2026 · v1", page: 6 },
+  { id: "REQ-008", title: "Acknowledge medication schedule update", person: "Brandon Miller", site: "Maple House", category: "PCSP acknowledgments", owner: "Taylor Reed", due: "2026-09-05", source: "Brandon Miller · PCSP 2026 · v1", page: 5 },
+  // Oakwood House — Sylvester Jones
+  { id: "REQ-009", title: "Complete enteral feeding delegation", person: "Sylvester Jones", site: "Oakwood House", category: "Nursing delegations", owner: "Jordan Lee", due: "2026-08-18", source: "Sylvester Jones · PCSP 2026 · v1", page: 8 },
+  { id: "REQ-010", title: "Verify feeding pump equipment", person: "Sylvester Jones", site: "Oakwood House", category: "Equipment checks", owner: "Casey Adams", due: "2026-09-03", source: "Sylvester Jones · PCSP 2026 · v1", page: 12 },
+  { id: "REQ-011", title: "Acknowledge dietitian consult notes", person: "Sylvester Jones", site: "Oakwood House", category: "PCSP acknowledgments", owner: "Jordan Lee", due: "2026-08-27", source: "Sylvester Jones · PCSP 2026 · v1", page: 10 },
+  { id: "REQ-012", title: "Record August tornado drill", person: "Sylvester Jones", site: "Oakwood House", category: "Emergency drills", owner: "Casey Adams", due: "2026-08-30", source: "Sylvester Jones · PCSP 2026 · v1", page: 6 },
+  // Oakwood House — Maya Johnson
+  { id: "REQ-013", title: "Complete behavior support training", person: "Maya Johnson", site: "Oakwood House", category: "Behavior plan training", owner: "Jordan Lee", due: "2026-08-25", source: "Maya Johnson · Behavior support plan · v2 draft", page: 5 },
+  { id: "REQ-014", title: "Acknowledge community outing plan", person: "Maya Johnson", site: "Oakwood House", category: "PCSP acknowledgments", owner: "Casey Adams", due: "2026-09-06", source: "Maya Johnson · PCSP 2026 · v1", page: 7 },
+  { id: "REQ-015", title: "Verify sensory room equipment", person: "Maya Johnson", site: "Oakwood House", category: "Equipment checks", owner: "Jordan Lee", due: "2026-09-04", source: "Maya Johnson · PCSP 2026 · v1", page: 13 },
+  { id: "REQ-016", title: "File August daily service notes", person: "Maya Johnson", site: "Oakwood House", category: "Required forms", owner: "Casey Adams", due: "2026-09-02", source: "Maya Johnson · PCSP 2026 · v1", page: 15 },
+];
+
 export const seedRequirements: Requirement[] = [
   ...open,
-  ...Array.from({ length: 24 }, (_, i) => {
-    const person = individuals[i % individuals.length];
-    const category = categories[i % 6];
-    const siteStaff = staff.filter(
-      (member) => member.site === person.site && member.role === "DSP",
-    );
-    return {
-      ...base,
-      id: `REQ-${String(i + 1).padStart(3, "0")}`,
-      title: [
-        "Acknowledge current PCSP",
-        "Complete nursing delegation",
-        "Verify adaptive equipment",
-        "Complete behavior support training",
-        "Record monthly emergency drill",
-        "Complete required documentation",
-      ][i % 6],
-      person: person.name,
-      site: person.site,
-      category,
-      owner: siteStaff[i % siteStaff.length]?.name ?? person.manager,
-      due: "2026-09-08",
-      status: "Compliant" as Status,
-      source: `${person.name} · PCSP 2026 · v1`,
-      page: 4 + (i % 12),
-      evidence: `Sample signed completion record EV-${String(i + 1).padStart(3, "0")}`,
-      completedAt: "2026-09-08T14:30:00.000Z",
-    };
-  }),
+  ...completedSeed.map((item, i) => ({
+    ...base,
+    id: item.id,
+    title: item.title,
+    person: item.person,
+    site: item.site,
+    category: item.category,
+    owner: item.owner,
+    due: item.due,
+    status: "Compliant" as Status,
+    source: item.source,
+    page: item.page,
+    evidence: `Sample signed completion record EV-${String(101 + i).padStart(3, "0")}`,
+    completedAt: `${item.due}T14:30:00.000Z`,
+  })),
 ];
 export const seedPlans: Plan[] = [
   ...individuals.map((p, i) => ({

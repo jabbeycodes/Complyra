@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { CarFront, Pencil, Printer, Trash2 } from "lucide-react";
+import { CarFront, Download, Pencil, Trash2 } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { hasPermission } from "../../data/permissions";
+import { downloadBlob } from "../../data/openFile";
+import { buildMileageMonthPdf, mileageMonthFileName } from "../../pdf/mileagePdf";
 import {
   MONTH_LABELS_SHORT,
   WEEK_LABELS,
@@ -69,7 +71,7 @@ export default function MileagePage() {
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [printMode, setPrintMode] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   /** Expected start for a NEW trip: the latest trip's end (odometer continuity). */
   const [expectedStart, setExpectedStart] = useState<number | null>(null);
   /** Expected start when EDITING: the previous trip's end, excluding this trip. */
@@ -312,122 +314,45 @@ export default function MileagePage() {
   const continuityHint = editingId ? editExpectedStart : expectedStart;
   const weekColumns = WEEK_LABELS.slice(0, weekly.hasWeek5 ? 5 : 4);
 
-  // ---- Print view: reproduces the paper mileage log for this house/month ----
-  if (printMode) {
-    const totalById = Object.fromEntries(
-      summary.individualTotals.map((row) => [row.individualId, row.miles]),
-    );
-    return (
-      <div className="mileage-print">
-        <div className="mileage-print-toolbar no-print">
-          <button className="button" onClick={() => setPrintMode(false)}>
-            Back to mileage log
-          </button>
-          <button className="button primary" onClick={() => window.print()}>
-            <Printer size={14} /> Print
-          </button>
-        </div>
-        <div className="mileage-sheet">
-          <h1>{activeSite?.name ?? "Home"}</h1>
-          <p className="mileage-sheet-sub">
-            Mileage Log &nbsp;·&nbsp; Month of: {monthLabel(month)}
-          </p>
-          <table className="mileage-sheet-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Odometer start</th>
-                <th>Odometer stop</th>
-                <th>Miles</th>
-                {people.map((person) => (
-                  <th key={person.id}>{person.name}</th>
-                ))}
-                <th>Reason / Trip</th>
-                <th>Signature</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trips.map((trip) => {
-                const shareById = Object.fromEntries(
-                  trip.riderShares.map((share) => [share.individualId, share.miles]),
-                );
-                return (
-                  <tr key={trip.id}>
-                    <td>{formatDate(trip.tripDate)}</td>
-                    <td>{trip.odometerStart}</td>
-                    <td>{trip.odometerEnd}</td>
-                    <td>{trip.miles}</td>
-                    {people.map((person) => (
-                      <td key={person.id}>{shareById[person.id] ?? ""}</td>
-                    ))}
-                    <td>{trip.reason}{trip.backfilled ? " (backfilled)" : ""}</td>
-                    <td className="mileage-signature">{trip.signatureName}</td>
-                  </tr>
-                );
-              })}
-              {/* blank rows so the printed sheet has room for pen entries */}
-              {Array.from({ length: Math.max(0, 12 - trips.length) }).map((_, i) => (
-                <tr key={`blank-${i}`} className="mileage-blank-row">
-                  <td>&nbsp;</td>
-                  <td />
-                  <td />
-                  <td />
-                  {people.map((person) => (
-                    <td key={person.id} />
-                  ))}
-                  <td />
-                  <td />
-                </tr>
-              ))}
-              <tr className="mileage-totals-row">
-                <td colSpan={3}>Total Miles</td>
-                <td>{summary.totalMiles}</td>
-                {people.map((person) => (
-                  <td key={person.id}>{totalById[person.id] ?? 0}</td>
-                ))}
-                <td />
-                <td />
-              </tr>
-            </tbody>
-          </table>
-          <div className="mileage-sign-rows">
-            {people.map((person) => (
-              <div key={person.id} className="mileage-sign-row">
-                <span>
-                  <strong>Print name:</strong> {person.name}
-                </span>
-                <span>
-                  <strong>Sign name:</strong>
-                  <span className="mileage-sign-line" />
-                </span>
-              </div>
-            ))}
-            <div className="mileage-sign-row">
-              <span>
-                <strong>Print name:</strong>
-                <span className="mileage-sign-line" />
-              </span>
-              <span>
-                <strong>Sign name:</strong>
-                <span className="mileage-sign-line" />
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  // ---- Monthly sheet PDF: build and download a real file, no dead-end views ----
+  async function downloadMonthlySheet() {
+    setDownloading(true);
+    setError("");
+    try {
+      const milesByIndividualId = Object.fromEntries(
+        summary.individualTotals.map((row) => [row.individualId, row.miles]),
+      );
+      const doc = buildMileageMonthPdf({
+        agencyName: session?.agencyName ?? "Agency",
+        siteName: activeSite?.name ?? "Home",
+        monthKey: month,
+        people: people.map((person) => ({ id: person.id, name: person.name })),
+        trips,
+        totalMiles: summary.totalMiles,
+        milesByIndividualId,
+      });
+      const blob = doc.output("blob") as Blob;
+      downloadBlob(mileageMonthFileName(activeSite?.name ?? "home", month), blob);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not build the monthly sheet.",
+      );
+    } finally {
+      setDownloading(false);
+    }
   }
+
 
   return (
     <div data-tour="mileage">
       <PageHeading
         eyebrow="EVERY MILE LOGGED."
         title="Mileage log"
-        description="Vehicle mileage per house: log each trip's odometer readings, split the miles equally among the individuals who rode, and print the monthly sheet."
+        description="Vehicle mileage per house: log each trip's odometer readings, split the miles equally among the individuals who rode, and download the monthly sheet as a PDF."
       >
         {tab === "monthly" && (
-          <button className="button" onClick={() => setPrintMode(true)} disabled={trips.length === 0 && people.length === 0}>
-            <Printer size={14} /> Print monthly sheet
+          <button className="button" onClick={downloadMonthlySheet} disabled={downloading || (trips.length === 0 && people.length === 0)}>
+            <Download size={14} /> {downloading ? "Building PDF…" : "Download monthly sheet (PDF)"}
           </button>
         )}
       </PageHeading>

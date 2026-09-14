@@ -26,6 +26,14 @@ function heading(doc: ReturnType<typeof startBrandedDoc>["doc"], y: number, text
   return y + 16;
 }
 
+/** Format an ISO timestamp as "M/D/YY h:mm AM/PM" for signature lines. */
+function formatSignatureTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${date} ${time}`;
+}
+
 function fieldLine(
   doc: ReturnType<typeof startBrandedDoc>["doc"],
   y: number,
@@ -62,10 +70,10 @@ function rosterTable(
   width: number,
 ) {
   const cols = [
-    { label: "Name / title", w: 150 },
-    { label: "Competency", w: 150 },
+    { label: "Name / title", w: 130 },
+    { label: "Competency", w: 130 },
     { label: "Signature", w: 110 },
-    { label: "Rescinded", w: 60 },
+    { label: "Training date", w: 70 },
     { label: "Initials", w: 40 },
   ];
   const drawHeader = () => {
@@ -86,10 +94,16 @@ function rosterTable(
     y = ensureRoom(doc, y, 26);
     let x = margin;
     const name = row.printName ? `${row.printName}${row.title ? ` — ${row.title}` : ""}` : "";
+    // Signature includes timestamp (date + time) per audit requirements.
+    const sigText = row.signatureName
+      ? row.signedAt
+        ? `${row.signatureName}\n${formatSignatureTimestamp(row.signedAt)}`
+        : row.signatureName
+      : "";
     const cells = [
       name,
       row.competency.length > 0 ? row.competency.join("; ") : "",
-      row.signatureName || "",
+      sigText,
       row.rescindedDate || "",
       row.initials || "",
     ];

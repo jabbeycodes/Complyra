@@ -34,7 +34,6 @@ import {
   CircleAlert,
   ChevronRight,
   RotateCcw,
-  ExternalLink,
   PenLine,
   LogOut,
   KeyRound,
@@ -75,6 +74,11 @@ import ProfileSignatureSection from "./features/signatures/ProfileSignatureSecti
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
 import AiSettingsPage from "./features/documents/AiSettingsPage";
 import { canManageAiSettings } from "./features/documents/documents";
+import { downloadBlob } from "./data/openFile";
+import {
+  buildComplianceReportPdf,
+  complianceReportPdfName,
+} from "./pdf/complianceReportPdf";
 // LIFEPATH-P2-IMPORT (training engine)
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
@@ -92,6 +96,7 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -115,6 +120,20 @@ function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+/** "2 program sites · 4 individuals · 1 program" with correct pluralization. */
+function siteSummary(
+  siteCount: number,
+  individualCount: number,
+  sites: { program?: string }[],
+): string {
+  const programCount = new Set(sites.map((row) => row.program)).size;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return [
+    plural(siteCount, "program site"),
+    plural(individualCount, "individual"),
+    plural(programCount, "program"),
+  ].join(" · ");
 }
 export default function App() {
   const {
@@ -283,6 +302,13 @@ export default function App() {
     sites.some((row) => row.name === person.site),
   );
   const staff = workspace.staff;
+  // One visible-staff collection drives BOTH the header count and the table
+  // rows, so the two can never disagree when a site or search filter is set.
+  const visibleStaff = staff.filter(
+    (s) =>
+      s.name.toLowerCase().includes(query.toLowerCase()) &&
+      (site === "All sites" || s.site === site),
+  );
   const data = {
     requirements: workspace.requirements,
     plans: workspace.plans,
@@ -460,11 +486,14 @@ export default function App() {
       /audit|risk|prioriti|missing|overdue|delegat|expir|equipment|acknowledg|sign|pcsp|attention/.test(
         q,
       );
+    const overdueCount = result.filter((r) =>
+      ["Overdue", "Expired"].includes(r.status),
+    ).length;
     setAnswer(
       understood
         ? {
             text: result.length
-              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${site === "All sites" ? "the sample agency" : site}. ${result.filter((r) => ["Overdue", "Expired"].includes(r.status)).length} are overdue or expired. Open a source below to see the responsible person and next action.`
+              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${site === "All sites" ? "the sample agency" : site}. ${overdueCount} ${overdueCount === 1 ? "is" : "are"} overdue or expired. Open a source below to see the responsible person and next action.`
               : "There are no matching requirements in the current sample data and site selection. This does not confirm that a care instruction is absent from a real plan.",
             items: result.slice(0, 8),
           }
@@ -618,10 +647,13 @@ export default function App() {
             <Settings size={18} />
             <span>Settings</span>
           </button>
-          <button className="nav-item" onClick={() => setModal("help")}>
+          <button
+            className={`nav-item ${page === "Help" ? "active" : ""}`}
+            onClick={() => navigate("Help")}
+            aria-current={page === "Help" ? "page" : undefined}
+          >
             <HelpCircle size={18} />
             <span>Help & resources</span>
-            <ExternalLink size={13} />
           </button>
           <button
             className="profile"
@@ -734,11 +766,26 @@ export default function App() {
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
               onExport={() => {
-                download(
-                  "complyrer-sample-compliance-report.csv",
-                  exportCsv(scoped),
+                const reportData = {
+                  agencyName: session.agencyName,
+                  reportDate: new Date().toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  }),
+                  score: workspace.scorecard?.score ?? metrics(scoped).score,
+                  total: workspace.scorecard?.total ?? scoped.length,
+                  done: workspace.scorecard?.done ?? 0,
+                  overdue: workspace.scorecard?.overdue ?? 0,
+                  dueSoon: workspace.scorecard?.dueSoon ?? 0,
+                  requirements: scoped,
+                };
+                const pdf = buildComplianceReportPdf(reportData);
+                downloadBlob(
+                  complianceReportPdfName(session.agencyName, new Date().toISOString()),
+                  pdf.output("blob"),
                 );
-                notify("Your sample compliance report has been downloaded.");
+                notify("Your compliance report PDF has been downloaded.");
               }}
               onCopilot={() => setModal("copilot")}
               onActivity={() => navigate("Activity log")}
@@ -962,9 +1009,7 @@ export default function App() {
                   />
                   <div className="list-controls">
                     <span>
-                      {sites.length} program sites · {individuals.length}{" "}
-                      individuals ·{" "}
-                      {new Set(sites.map((row) => row.program)).size} programs
+                      {siteSummary(sites.length, individuals.length, sites)}
                     </span>
                     <select
                       aria-label="Select site"
@@ -1126,7 +1171,7 @@ export default function App() {
                           onChange={(e) => setQuery(e.target.value)}
                         />
                       </div>
-                      <span className="muted">{staff.length} team members</span>
+                      <span className="muted">{visibleStaff.length} team members</span>
                     </div>
                     <div className="table-scroll">
                       <table>
@@ -1145,15 +1190,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {staff
-                            .filter(
-                              (s) =>
-                                s.name
-                                  .toLowerCase()
-                                  .includes(query.toLowerCase()) &&
-                                (site === "All sites" || s.site === site),
-                            )
-                            .map((s) => (
+                          {visibleStaff.map((s) => (
                               <tr key={s.name}>
                                 <td>
                                   <span className="person-cell">
@@ -1739,13 +1776,14 @@ export default function App() {
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
               )}
+              {page === "Help" && <HelpPage />}
             </>
           )}
         </main>
         <div className="demo-strip">
           <span className="demo-dot" /> INTERACTIVE PREVIEW{" "}
           <span>Fictional records. Real possibilities.</span>
-          <button onClick={() => setModal("help")}>
+          <button onClick={() => navigate("Help")}>
             About this workspace <ArrowUpRight size={12} />
           </button>
         </div>
@@ -1777,7 +1815,6 @@ export default function App() {
           <div className="detail-status">
             <span className="detail-status-left">
               <Badge status={selected.status} />
-              <span>{selected.id}</span>
             </span>
             {!auditMode && canManage && selected.status !== "Compliant" && (
               <button className="link-button" onClick={openEdit}>
@@ -2164,7 +2201,7 @@ export default function App() {
           </span>
           <h2 className="detail-title">{selected.source}</h2>
           <p>
-            Page {selected.page} · {selected.id}
+            Page {selected.page} · {selected.category}
           </p>
           <div className="review-callout">
             <BookOpen size={22} />
@@ -2295,48 +2332,6 @@ export default function App() {
               </button>
             ))
           )}
-        </Modal>
-      )}
-      {modal === "help" && (
-        <Modal title="Welcome to Complyrer" onClose={() => setModal(null)}>
-          <div className="help-brand">
-            <img src="/favicon.svg" alt="" />
-            <h2>Compliance, connected.</h2>
-          </div>
-          <p>
-            Complyrer turns care plans, policies, and requirements into clear,
-            trackable responsibilities—so your agency can focus on care with
-            confidence.
-          </p>
-          <div className="help-steps">
-            <div>
-              <span>1</span>
-              <p>
-                <strong>Start with the source.</strong> Add a sample document
-                record or requirement.
-              </p>
-            </div>
-            <div>
-              <span>2</span>
-              <p>
-                <strong>Put people in control.</strong> Review and approve a
-                draft before it becomes active.
-              </p>
-            </div>
-            <div>
-              <span>3</span>
-              <p>
-                <strong>Close the loop.</strong> Record evidence and export your
-                audit register.
-              </p>
-            </div>
-          </div>
-          <div className="quiet-note">
-            This workspace uses signed-in roles, retained PDF uploads, human
-            review, and a PCSP acknowledgment sheet. AI document analysis and
-            email reminders are not connected. Do not enter real care or
-            employee records until a hosted backend with RLS is verified.
-          </div>
         </Modal>
       )}
       {modal === "agency" && (

@@ -67,7 +67,8 @@ export function buildAcknowledgmentPdf(
   y += 24;
   doc.setFont("helvetica", "bold");
   doc.text("Staff member", margin, y);
-  doc.text("Signature", 280, y);
+  doc.text("Signature", 230, y);
+  doc.text("Initials", 380, y);
   doc.text("Date", 470, y);
   y += 10;
   doc.setDrawColor(117, 97, 188);
@@ -83,23 +84,45 @@ export function buildAcknowledgmentPdf(
     doc.text(row.staffName, margin, y);
     if (row.signedAt && row.signatureMark && row.signatureMark.startsWith("data:image")) {
       try {
-        doc.addImage(row.signatureMark, "PNG", 280, y - 16, 110, 28);
+        // Render the ACTUAL adopted signature image (drawn signature mark).
+        doc.addImage(row.signatureMark, "PNG", 230, y - 16, 110, 28);
       } catch {
-        doc.text(row.signatureName || "Signed", 280, y);
+        // Fallback: render name in italic (signature style), not plain text.
+        doc.setFont("helvetica", "italic");
+        doc.text(row.signatureName || "Signed", 230, y);
+        doc.setFont("helvetica", "normal");
       }
     } else if (row.signedAt) {
-      doc.text(row.signatureName || "Signed", 280, y);
+      // Fallback: render name in italic (signature style), not plain text.
+      doc.setFont("helvetica", "italic");
+      doc.text(row.signatureName || "Signed", 230, y);
+      doc.setFont("helvetica", "normal");
     } else {
       doc.setTextColor(188, 105, 103);
-      doc.text("Pending", 280, y);
+      doc.text("Pending", 230, y);
       doc.setTextColor(52, 54, 62);
     }
+    // Initials column: show the staff member's actual initials (derived from
+    // their signature name), not the word "initialed".
+    const initials = row.signedAt && row.signatureName
+      ? row.signatureName
+          .split(/\s+/)
+          .map((part) => part[0])
+          .join("")
+          .toUpperCase()
+          .slice(0, 4)
+      : "—";
+    doc.setFont("helvetica", "bold");
+    doc.text(initials, 380, y);
+    doc.setFont("helvetica", "normal");
     doc.text(
       row.signedAt
         ? new Date(row.signedAt).toLocaleString("en-US", {
             month: "short",
             day: "numeric",
             year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
           })
         : "—",
       470,

@@ -533,10 +533,13 @@ test("LIFEPATH-P4: list/update/delete certificates and the expiring-soon panel",
   assert.equal(list.length, 3);
 
   const soon = await api.certificatesExpiringSoon(90);
-  assert.equal(soon.length, 2, "expired + 30-day certs, not the 400-day one");
-  assert.equal(soon[0].daysRemaining <= 0, true);
-  assert.equal(soon[0].staffName.length > 0, true);
-  assert.equal(soon[1].daysRemaining <= 30, true);
+  // The demo seed now ships its own certificates; scope the assertions to the
+  // three this test created for the signed-in admin.
+  const mine = soon.filter((c) => c.userId === session.userId);
+  assert.equal(mine.length, 2, "expired + 30-day certs, not the 400-day one");
+  assert.equal(mine[0].daysRemaining <= 0, true);
+  assert.equal(mine[0].staffName.length > 0, true);
+  assert.equal(mine[1].daysRemaining <= 30, true);
 
   const cpr = list.find((c) => c.certName === "CPR")!;
   const updated = await api.updateCertificate(cpr.id, { certName: "CPR (renewed)" });

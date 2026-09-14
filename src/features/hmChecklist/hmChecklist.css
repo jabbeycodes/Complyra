@@ -166,3 +166,20 @@
     margin-left: 38px;
   }
 }
+
+/* Weekly rollover success banner — solid colors, no gradients. */
+.rollover-notice {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  background: #dafbe1;
+  border: 1px solid #9ed9a8;
+  border-left: 5px solid #1a7f37;
+  border-radius: 8px;
+  color: #1a5c28;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}

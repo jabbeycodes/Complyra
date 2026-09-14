@@ -1005,6 +1005,22 @@ Deno.serve(async (req) => {
     details: { kind: signatureKind, consent_version: consentVersion },
   });
 
+  // Mirror into the agency activity log (audit_events) so the Activity Log
+  // page shows the signature alongside other agency events. Best-effort:
+  // never block a legitimate signing because the log table had a bad moment.
+  const signerDisplayName = await signerFullName();
+  const { error: activityError } = await admin.from("audit_events").insert({
+    agency_id: agencyId,
+    actor_id: user.id,
+    action: "signature.applied",
+    target_type: "signature_event",
+    target_id: event.id,
+    detail: `${signerDisplayName || "A staff member"} signed ${documentType} (${fieldName})`,
+  });
+  if (activityError) {
+    console.error("apply-signature: activity log insert failed", activityError.message);
+  }
+
   console.log("apply-signature: signed", documentType, user.id);
 
   return json({
