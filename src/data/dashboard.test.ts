@@ -10,7 +10,10 @@ import {
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import {
+  individualsAtSite,
   isAgencyWideViewer,
+  canAccessSite,
+  lockedSiteIdFor,
   personalQueue,
   sitesVisibleTo,
 } from "./dashboard";
@@ -101,4 +104,47 @@ test("personal queue lists work owned by or assigned to the signed-in user", asy
         item.kind === "review" || item.title.includes("emergency drill"),
     ),
   );
+});
+
+test("individualsAtSite keeps Maple people off an Oakwood list", async () => {
+  const client = api();
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(admin);
+  const maple = workspace.sites.find((site) => site.name === "Maple House")!;
+  const oakwood = workspace.sites.find((site) => site.name === "Oakwood House")!;
+  const maplePeople = individualsAtSite(workspace.individuals, maple);
+  const oakwoodPeople = individualsAtSite(workspace.individuals, oakwood);
+  assert.ok(maplePeople.some((row) => row.name === "Jodie Williams"));
+  assert.equal(maplePeople.some((row) => row.name === "Maya Johnson"), false);
+  assert.ok(oakwoodPeople.some((row) => row.name === "Maya Johnson"));
+  assert.equal(oakwoodPeople.some((row) => row.name === "Jodie Williams"), false);
+  assert.deepEqual(individualsAtSite(workspace.individuals, undefined), []);
+});
+
+test("site-scoped staff are locked to their home site; admins are not", async () => {
+  const client = api();
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const adminWorkspace = await client.loadWorkspace(admin);
+  const maple = adminWorkspace.sites.find((site) => site.name === "Maple House")!;
+  const oakwood = adminWorkspace.sites.find((site) => site.name === "Oakwood House")!;
+  assert.equal(canAccessSite(admin, maple.id), true);
+  assert.equal(canAccessSite(admin, oakwood.id), true);
+  assert.equal(lockedSiteIdFor(admin), null);
+
+  const hm = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(canAccessSite(hm, oakwood.id), true);
+  assert.equal(canAccessSite(hm, maple.id), false);
+  assert.equal(lockedSiteIdFor(hm), oakwood.id);
 });

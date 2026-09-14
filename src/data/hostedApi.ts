@@ -68,12 +68,15 @@ import type {
 } from "./types";
 import { blankDelegationForm } from "./types";
 import {
+  LOGIN_BAD_PASSWORD_MESSAGE,
   LOGIN_FAILED_MESSAGE,
+  LOGIN_NO_MEMBERSHIP_MESSAGE,
   USERNAME_PATTERN,
   normalizeAgencyCode,
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
+import { canAccessSite } from "./dashboard";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
@@ -383,11 +386,11 @@ export class HostedApi implements ComplyraApi {
       password: input.password,
     });
     if (authError || !auth.user) {
-      throw new Error(LOGIN_FAILED_MESSAGE);
+      throw new Error(LOGIN_BAD_PASSWORD_MESSAGE);
     }
     const session = await this.sessionFromUser(auth.user.id, auth.user.email ?? email);
     if (!session) {
-      throw new Error("This account is not a member of an agency.");
+      throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
     // 13 CSR 65-3.050: track user log-in (server records device + IP).
     await this.logSignatureAudit({ action: "login" });
@@ -901,6 +904,7 @@ export class HostedApi implements ComplyraApi {
           id: person.id,
           name: person.fullName,
           site: site?.name ?? "Unknown site",
+          siteId: person.siteId,
           dateOfBirth: person.dateOfBirth,
           manager: managerBySite[person.siteId] ?? fallbackManager,
           initials: person.fullName
@@ -4309,6 +4313,9 @@ export class HostedApi implements ComplyraApi {
     const person = await this.individualRecord(input.individualId);
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
+    }
+    if (!canAccessSite(session, person.siteId)) {
+      throw new Error("Choose a person at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");

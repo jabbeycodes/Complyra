@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileBadge2, Plus } from "lucide-react";
 import { Badge, Empty, formatDate, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { individualsAtSite, lockedSiteIdFor } from "../../data/dashboard";
 import { canToggleDelegation, type ObligationItem } from "../../data/planStack";
 import { can } from "../../data/status";
 import {
@@ -209,12 +210,22 @@ function NewDelegationForm({
     observeReportDo?: string;
   }) => void;
 }) {
-  const { workspace } = useData();
+  const { session, workspace } = useData();
+  const sites = workspace?.sites ?? [];
+  const lockedSiteId = session ? lockedSiteIdFor(session) : null;
+  const [siteId, setSiteId] = useState(lockedSiteId ?? "");
   const [individualId, setIndividualId] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [purpose, setPurpose] = useState("");
   const [procedures, setProcedures] = useState("");
   const [observeReportDo, setObserveReportDo] = useState("");
+  const selectedSite = sites.find((site) => site.id === siteId);
+  const people = individualsAtSite(workspace?.individuals ?? [], selectedSite);
+  useEffect(() => {
+    if (individualId && !people.some((person) => person.id === individualId)) {
+      setIndividualId("");
+    }
+  }, [individualId, people]);
   return (
     <form
       className="delegation-editor"
@@ -225,26 +236,52 @@ function NewDelegationForm({
     >
       <div className="delegation-grid2">
         <label className="form-label">
-          Individual
-          <select value={individualId} onChange={(e) => setIndividualId(e.target.value)} required>
-            <option value="">Select…</option>
-            {(workspace?.individuals ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} — {p.site}
+          Program site
+          <select
+            aria-label="Program site"
+            value={siteId}
+            onChange={(e) => setSiteId(e.target.value)}
+            disabled={Boolean(lockedSiteId)}
+            required
+          >
+            {!lockedSiteId && <option value="">Select a site…</option>}
+            {(lockedSiteId
+              ? sites.filter((site) => site.id === lockedSiteId)
+              : sites
+            ).map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name}
               </option>
             ))}
           </select>
         </label>
         <label className="form-label">
-          Delegated task
-          <input
-            value={taskTitle}
-            onChange={(e) => setTaskTitle(e.target.value)}
-            placeholder="PRN Inhaler Self-Administration and Monitoring"
+          Individual
+          <select
+            aria-label="Individual"
+            value={individualId}
+            onChange={(e) => setIndividualId(e.target.value)}
+            disabled={!siteId}
             required
-          />
+          >
+            <option value="">{siteId ? "Select…" : "Choose a site first"}</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
+      <label className="form-label">
+        Delegated task
+        <input
+          value={taskTitle}
+          onChange={(e) => setTaskTitle(e.target.value)}
+          placeholder="PRN Inhaler Self-Administration and Monitoring"
+          required
+        />
+      </label>
       <label className="form-label">
         Purpose of task
         <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} required />

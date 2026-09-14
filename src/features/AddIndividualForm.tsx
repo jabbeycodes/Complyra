@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
 import { useData } from "../data/DataProvider";
 
@@ -20,9 +20,7 @@ export default function AddIndividualForm({
   const [goesBy, setGoesBy] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [dmhId, setDmhId] = useState("");
-  const [siteId, setSiteId] = useState(
-    lockedSiteId ?? initialSiteId ?? sites[0]?.id ?? "",
-  );
+  const [siteId, setSiteId] = useState(lockedSiteId ?? initialSiteId ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState("12");
   const [effectiveOn, setEffectiveOn] = useState("2026-09-12");
@@ -33,6 +31,11 @@ export default function AddIndividualForm({
     () => sites.find((site) => site.id === siteId),
     [sites, siteId],
   );
+
+  useEffect(() => {
+    const next = lockedSiteId ?? initialSiteId ?? "";
+    if (next) setSiteId(next);
+  }, [lockedSiteId, initialSiteId]);
 
   return (
     <form
@@ -129,6 +132,7 @@ export default function AddIndividualForm({
             disabled={Boolean(lockedSiteId)}
             required
           >
+            {!lockedSiteId && <option value="">Select a program site…</option>}
             {sites.map((site) => (
               <option key={site.id} value={site.id}>
                 {site.name}

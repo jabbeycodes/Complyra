@@ -68,6 +68,37 @@ export function sitesVisibleTo<T extends { id: string }>(
   return sites.filter((site) => ids.has(site.id));
 }
 
+/** Agency-wide roles may act at every site; everyone else is locked to home site. */
+export function canAccessSite(
+  session: Pick<SessionUser, "roleKey" | "siteId" | "platformAdmin">,
+  siteId: string,
+): boolean {
+  if (isAgencyWideViewer(session as SessionUser)) return true;
+  return Boolean(session.siteId && session.siteId === siteId);
+}
+
+/**
+ * People at one program site. Prefer `siteId` when the workspace row has it
+ * so two homes with similar names cannot leak into each other.
+ */
+export function individualsAtSite<T extends { site: string; siteId?: string | null }>(
+  people: T[],
+  site: { id: string; name: string } | null | undefined,
+): T[] {
+  if (!site) return [];
+  return people.filter((person) =>
+    person.siteId ? person.siteId === site.id : person.site === site.name,
+  );
+}
+
+/** Site-scoped staff (HM, nurse, DSP) are forced to their assigned home. */
+export function lockedSiteIdFor(
+  session: Pick<SessionUser, "roleKey" | "siteId" | "platformAdmin">,
+): string | null {
+  if (isAgencyWideViewer(session as SessionUser)) return null;
+  return session.siteId ?? null;
+}
+
 export type PersonalWorkItem = {
   id: string;
   kind: "requirement" | "acknowledgment" | "training" | "review" | "monthly" | "site_review";
