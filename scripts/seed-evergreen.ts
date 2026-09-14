@@ -31,9 +31,29 @@ async function upsert<T extends Record<string, unknown>>(
   table: string,
   rows: T[],
 ) {
+  await upsertOnConflict(table, rows, "id");
+}
+
+async function upsertOnConflict<T extends Record<string, unknown>>(
+  table: string,
+  rows: T[],
+  onConflict: string,
+) {
   if (!rows.length) return;
-  const { error } = await admin.from(table).upsert(rows, { onConflict: "id" });
+  const { error } = await admin.from(table).upsert(rows, { onConflict });
   if (error) throw new Error(`${table}: ${error.message}`);
+}
+
+async function findAuthUserIdByEmail(email: string): Promise<string | undefined> {
+  const needle = email.toLowerCase();
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw new Error(`auth list ${email}: ${error.message}`);
+    const match = data.users.find((row) => row.email?.toLowerCase() === needle);
+    if (match) return match.id;
+    if (data.users.length < 200) return undefined;
+  }
+  return undefined;
 }
 
 async function ensureAuthUser(input: {
@@ -42,8 +62,8 @@ async function ensureAuthUser(input: {
   username: string;
   fullName: string;
   jobTitle: string;
-}) {
-  const { error } = await admin.auth.admin.createUser({
+}): Promise<string> {
+  const { data, error } = await admin.auth.admin.createUser({
     id: input.id,
     email: input.email,
     password: DEMO_PASSWORD,
@@ -56,9 +76,27 @@ async function ensureAuthUser(input: {
       must_change_password: false,
     },
   });
-  if (error && !/already been registered|already exists/i.test(error.message)) {
-    throw new Error(`auth ${input.email}: ${error.message}`);
+  if (!error && data.user) return data.user.id;
+  if (!error || !/already been registered|already exists/i.test(error.message)) {
+    throw new Error(`auth ${input.email}: ${error?.message ?? "could not create"}`);
   }
+  const existingId = await findAuthUserIdByEmail(input.email);
+  if (!existingId) {
+    throw new Error(`auth ${input.email}: already exists but could not be loaded`);
+  }
+  const { error: updateError } = await admin.auth.admin.updateUserById(existingId, {
+    password: DEMO_PASSWORD,
+    email_confirm: true,
+    user_metadata: {
+      full_name: input.fullName,
+      username: input.username,
+      job_title: input.jobTitle,
+      home_agency_id: AGENCY_ID,
+      must_change_password: false,
+    },
+  });
+  if (updateError) throw new Error(`auth ${input.email}: ${updateError.message}`);
+  return existingId;
 }
 
 async function main() {
@@ -74,20 +112,24 @@ async function main() {
     })),
   );
 
+  const authIdBySeedId = new Map<string, string>();
   for (const profile of seed.profiles) {
-    await ensureAuthUser({
+    const authId = await ensureAuthUser({
       id: profile.id,
       email: profile.email,
       username: profile.username,
       fullName: profile.fullName,
       jobTitle: profile.jobTitle,
     });
+    authIdBySeedId.set(profile.id, authId);
   }
+  const uid = (seedId: string | null | undefined) =>
+    seedId ? (authIdBySeedId.get(seedId) ?? seedId) : seedId;
 
   await upsert(
     "profiles",
     seed.profiles.map((row) => ({
-      id: row.id,
+      id: uid(row.id),
       full_name: row.fullName,
       email: row.email,
       job_title: row.jobTitle,
@@ -117,17 +159,17 @@ async function main() {
       address: row.address,
     })),
   );
-  await upsert(
+  await upsertOnConflict(
     "memberships",
     seed.memberships.map((row) => ({
-      id: row.id,
       agency_id: row.agencyId,
-      user_id: row.userId,
+      user_id: uid(row.userId),
       role: row.role,
       role_key: row.roleKey ?? row.role,
       site_id: row.siteId,
       expires_on: row.expiresOn,
     })),
+    "agency_id,user_id",
   );
   await upsert(
     "individuals",
@@ -144,7 +186,7 @@ async function main() {
     seed.assignments.map((row) => ({
       id: row.id,
       agency_id: row.agencyId,
-      user_id: row.userId,
+      user_id: uid(row.userId),
       individual_id: row.individualId,
       site_id: row.siteId,
       starts_on: row.startsOn,
@@ -174,7 +216,7 @@ async function main() {
       page_count: row.pageCount,
       effective_on: row.effectiveOn,
       expires_on: row.expiresOn,
-      created_by: row.createdBy,
+      created_by: uid(row.createdBy),
     })),
   );
   await upsert(
@@ -187,7 +229,7 @@ async function main() {
       site_id: row.siteId,
       title: row.title,
       category: row.category,
-      owner_user_id: row.ownerUserId,
+      owner_user_id: uid(row.ownerUserId),
       due_on: row.dueOn,
       frequency: row.frequency,
       source_page: row.sourcePage,
@@ -215,7 +257,7 @@ async function main() {
       id: row.id,
       agency_id: row.agencyId,
       packet_id: row.packetId,
-      user_id: row.userId,
+      user_id: uid(row.userId),
       staff_name: row.staffName,
       added_manually: row.addedManually,
       add_reason: row.addReason,

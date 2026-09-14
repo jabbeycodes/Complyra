@@ -18,6 +18,10 @@ interface DataContextValue {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
+function asErrorMessage(err: unknown, fallback: string) {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
 export function DataProvider({ children }: { children: ReactNode }) {
   const api = useMemo(() => createApi(), []);
   const usingHostedBackend = isSupabaseConfigured();
@@ -36,8 +40,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setWorkspace(null);
       return;
     }
-    const view = await api.loadWorkspace(active);
-    setWorkspace(view);
+    try {
+      const view = await api.loadWorkspace(active);
+      setWorkspace(view);
+      setError("");
+    } catch (err) {
+      setWorkspace(null);
+      setError(asErrorMessage(err, "Could not load the workspace."));
+      throw err;
+    }
   }
 
   useEffect(() => {
@@ -53,6 +64,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
           (existing.platformAdmin || existing.agencyStatus === "active")
         ) {
           setWorkspace(await api.loadWorkspace(existing));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(asErrorMessage(err, "Could not load the workspace."));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -79,17 +94,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
           await refresh(next);
         },
         changePassword: async (currentPassword, nextPassword) => {
+          setError("");
           await api.changePassword(currentPassword, nextPassword);
-          const next = session
-            ? { ...session, mustChangePassword: false }
-            : await api.getSession();
-          setSession(next);
-          if (next) await refresh(next);
+          const next =
+            (await api.getSession()) ??
+            (session ? { ...session, mustChangePassword: false } : null);
+          const ready = next ? { ...next, mustChangePassword: false } : null;
+          if (!ready) {
+            setSession(null);
+            setWorkspace(null);
+            return;
+          }
+          // Load the workspace before flipping mustChangePassword in UI so a
+          // failed bootstrap cannot unmount the password form into an infinite
+          // "Loading workspace…" spinner.
+          try {
+            await refresh(ready);
+          } catch {
+            // Password already changed. Surface the load error on the
+            // workspace screen instead of trapping the user on the form.
+          } finally {
+            setSession(ready);
+          }
         },
         signOut: async () => {
           await api.signOut();
           setSession(null);
           setWorkspace(null);
+          setError("");
         },
         refresh: () => refresh(),
       }}

@@ -276,6 +276,11 @@ export const USERNAME_PATTERN = /^[a-z0-9.]{3,40}$/;
 export const LOGIN_FAILED_MESSAGE =
   "That agency code, username, or password is not recognized.";
 
+export const LOGIN_NO_MEMBERSHIP_MESSAGE =
+  "This account is not a member of an agency.";
+
+export const LOGIN_BAD_PASSWORD_MESSAGE = "That password is not correct.";
+
 export function normalizeUsername(value: string) {
   return value.trim().toLowerCase();
 }

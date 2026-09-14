@@ -6,8 +6,9 @@ import {
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
+  DEMO_NURSE_USERNAME,
 } from "./seed";
-import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE } from "./types";
+import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE, LOGIN_NO_MEMBERSHIP_MESSAGE } from "./types";
 import { defaultPermissions } from "./permissions";
 import { buildAcknowledgmentPdf } from "../pdf/acknowledgmentPdf";
 
@@ -712,4 +713,124 @@ test("HR-ROLES: HR can add staff and assign operational roles, but cannot escala
     "members.invite": true,
   });
   await api.assignMemberRole(target.id, "dsp");
+});
+
+test("demo nurse cameron.price can sign in and is a Maple member", async () => {
+  const api = new LocalApi(store());
+  const nurse = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(nurse.roleKey, "nurse");
+  assert.equal(nurse.username, DEMO_NURSE_USERNAME);
+  const workspace = await api.loadWorkspace(nurse);
+  const maple = workspace.sites.find((site) => site.name === "Maple House");
+  assert.ok(maple);
+  assert.equal(nurse.siteId, maple.id);
+});
+
+test("createDelegation refuses a person outside the nurse's site", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  const workspace = await api.loadWorkspace(admin);
+  const oakwoodPerson = workspace.individuals.find((row) => row.site === "Oakwood House")!;
+  await api.signOut();
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  await assert.rejects(
+    () =>
+      api.createDelegation({
+        individualId: oakwoodPerson.id,
+        taskTitle: "Cross-site leak",
+        purpose: "Should not be allowed",
+      }),
+    /site you can manage/,
+  );
+});
+
+test("a requirement draft inherits the individual's site, not the first agency site", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const site = await api.createSite({
+    name: "QA Audit House",
+    address: "1 Audit Lane",
+    programName: "Residential services",
+  });
+  const person = await api.createIndividual({
+    fullName: "QA Person One",
+    dateOfBirth: "1990-01-15",
+    siteId: site.id,
+  });
+  await api.createRequirementDraft({
+    individualId: person.id,
+    title: "QA acknowledgment",
+    category: "PCSP acknowledgments",
+    ownerUserId: session.userId,
+    source: "QA Person One · PCSP 2026 · v1",
+    sourcePage: 1,
+    dueOn: "2026-09-20",
+    frequency: "On plan update",
+  });
+  const workspace = await api.loadWorkspace(session);
+  const individual = workspace.individuals.find((row) => row.id === person.id)!;
+  const requirement = workspace.requirements.find((row) => row.title === "QA acknowledgment")!;
+  assert.equal(individual.site, "QA Audit House");
+  assert.equal(individual.siteId, site.id);
+  assert.equal(requirement.person, "QA Person One");
+  assert.equal(requirement.site, "QA Audit House");
+  assert.notEqual(requirement.site, "Maple House");
+});
+
+test("inviting qa.dpm creates a login that is recognized", async () => {
+  const api = new LocalApi(store());
+  await api.signIn(adminLogin());
+  const invited = await api.inviteMember({
+    fullName: "QA Degreed Manager",
+    username: "qa.dpm",
+    tempPassword: "TempPass!1",
+    roleKey: "degreed_professional_manager",
+  });
+  assert.equal(invited.username, "qa.dpm");
+  await api.signOut();
+  const session = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "qa.dpm",
+    password: "TempPass!1",
+  });
+  assert.equal(session.roleKey, "degreed_professional_manager");
+  assert.equal(session.mustChangePassword, true);
+  await api.changePassword("TempPass!1", "QaDpm!own2");
+  const after = await api.getSession();
+  assert.equal(after?.mustChangePassword, false);
+  const workspace = await api.loadWorkspace(after!);
+  assert.ok(workspace.sites.length > 0);
+  assert.ok(workspace.staff.some((row) => row.username === "qa.dpm"));
+});
+
+test("sign-in names a missing membership separately from a bad password", async () => {
+  const memory = store();
+  const api = new LocalApi(memory);
+  await api.signIn(adminLogin());
+  const invited = await api.inviteMember({
+    fullName: "No Seat",
+    username: "qa.orphan",
+    tempPassword: "TempPass!1",
+    roleKey: "dsp",
+  });
+  const profile = memory.db.profiles.find((row) => row.username === invited.username)!;
+  memory.db.memberships = memory.db.memberships.filter((row) => row.userId !== profile.id);
+  await api.signOut();
+  await assert.rejects(
+    () =>
+      api.signIn({
+        agencyCode: DEMO_AGENCY_CODE,
+        username: "qa.orphan",
+        password: "TempPass!1",
+      }),
+    new RegExp(LOGIN_NO_MEMBERSHIP_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
 });

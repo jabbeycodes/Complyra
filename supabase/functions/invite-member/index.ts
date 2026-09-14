@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  await admin
+  const { error: profileError } = await admin
     .from("profiles")
     .update({
       username,
@@ -167,8 +167,15 @@ Deno.serve(async (req) => {
       job_title: jobTitle,
       home_agency_id: agency.id,
       must_change_password: true,
+      active: true,
     })
     .eq("id", created.user.id);
+  if (profileError) {
+    return json(
+      { error: profileError.message ?? "Could not save the member profile." },
+      400,
+    );
+  }
 
   const { error: memberError } = await admin.from("memberships").insert({
     agency_id: agency.id,
