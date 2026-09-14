@@ -42,6 +42,10 @@ export const PERMISSION_KEYS = [
   "clinical.view",
   "audit.read",
   "audit.export",
+  // QA-AUDIT (qa.* goes here)
+  "qa.audit",
+  "qa.dispute",
+  "qa.schedule",
   "sites.create",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
   "certificates.manage",
@@ -117,7 +121,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     description: "Owns the compliance loop: plans, approvals, acknowledgments, and audit exports.",
     defaultScope: "agency",
     capability: "compliance_admin",
-    permissions: pack(ALL.filter((key) => key !== "hr.view_staff")),
+    // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
+    // the compliance_admin defaults — the auditor role owns scoring, DPM/HM
+    // own disputes and schedules. Grantable explicitly via Roles & access.
+    permissions: pack(ALL.filter((key) => key !== "hr.view_staff" && !key.startsWith("qa."))),
   },
   {
     key: "house_manager",
@@ -139,6 +146,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.review_dsp",
       "recognition.view_winners",
+      // QA-AUDIT (2026-09-14): dispute findings with photo evidence.
+      "qa.dispute",
       // DELEGATION: view templates + sign own site's acknowledgments.
       "delegation.templates.view",
       "delegation.acknowledge",
@@ -169,6 +178,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
+      // QA-AUDIT (2026-09-14): schedule audits + dispute findings with evidence.
+      "qa.dispute",
+      "qa.schedule",
       // DELEGATION: full delegation workflow (activate/assign/review/approve).
       "delegation.templates.view",
       "delegation.activate",
@@ -290,6 +302,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      // QA-AUDIT (2026-09-14): conduct QA audits — system-verified items stay
+      // locked; the auditor scores the rest and resolves disputes.
+      "qa.audit",
       "recognition.view_winners",
       // DELEGATION: view templates only.
       "delegation.templates.view",
@@ -359,6 +374,10 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "clinical.view": "View clinical / delegation records",
   "audit.read": "Open Audit center",
   "audit.export": "Export audit packets",
+  // QA-AUDIT (2026-09-14)
+  "qa.audit": "Conduct QA audits (score items, finalize)",
+  "qa.dispute": "Dispute QA findings with photo evidence",
+  "qa.schedule": "Schedule QA audits for program sites",
   "sites.create": "Add program sites",
   // LIFEPATH-P4 (certificates)
   "certificates.manage": "Manage staff certificates",

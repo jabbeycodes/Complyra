@@ -192,6 +192,30 @@ import {
   type DrillType,
   type SafetyLine,
 } from "./monthlyChecks";
+// QA-AUDIT (2026-09-14): pure checklist/scoring module + row mappers.
+import {
+  expandAndVerifyQaItems,
+  mapQaAuditItemRow,
+  mapQaAuditRow,
+  mapQaScheduleRow,
+  qaAuditItemToRow,
+} from "./qaAuditApi";
+import {
+  nextQaDueDate,
+  qaQuarterMonths,
+  qaUndecidedItems,
+  raiseQaDisputeState,
+  rankQaSites,
+  resolveQaDisputeState,
+  scoreQaAudit,
+  scoreQaItemState,
+  type QaAudit,
+  type QaAuditItemState,
+  type QaAuditSchedule,
+  type QaAutoVerifyContext,
+  type QaPhotoInput,
+  type QaRankedSite,
+} from "./qaAudit";
 import {
   applyWellWaterDefault,
   blankSiteReview,
@@ -4939,6 +4963,553 @@ export class HostedApi implements ComplyraApi {
     );
     throwIf(error, "Could not sweep overdue acknowledgments.");
     return Number(data ?? 0);
+  }
+
+  // ================= QA audits (hosted) =================
+
+  /** HMs are scoped to their own site; admins/auditors/DPMs see the agency. */
+  private qaSiteFilter<T>(
+    session: SessionUser,
+    query: T,
+    siteColumn: string,
+  ): T {
+    if (session.roleKey === "house_manager" && session.siteId) {
+      // Supabase query builder: narrow via eq on the site column.
+      return (query as { eq: (c: string, v: string) => T }).eq(
+        siteColumn,
+        session.siteId,
+      );
+    }
+    return query;
+  }
+
+  /** Proof context for the five approved auto-verification mappings (hosted). */
+  private async qaAutoContext(
+    session: SessionUser,
+    siteId: string,
+    year: number,
+    quarter: number,
+  ): Promise<QaAutoVerifyContext> {
+    const months = qaQuarterMonths(year, quarter);
+    const agencyId = session.agencyId;
+    const [
+      drillsRes,
+      tripsRes,
+      packetsRes,
+      rowsRes,
+      assignmentsRes,
+      acksRes,
+      reportsRes,
+    ] = await Promise.all([
+      this.client
+        .from("emergency_drills")
+        .select("id, agency_id, site_id, month_key, drill_type, date, time, evac_time, leader_name, participants, awake_or_sleep")
+        .eq("agency_id", agencyId)
+        .eq("site_id", siteId)
+        .in("month_key", months),
+      this.client
+        .from("mileage_trips")
+        .select("site_id, trip_date")
+        .eq("agency_id", agencyId)
+        .eq("site_id", siteId)
+        .gte("trip_date", `${months[0]}-01`)
+        .lte("trip_date", `${months[months.length - 1]}-31`),
+      this.client
+        .from("acknowledgment_packets")
+        .select("id, individual_id, starts_on")
+        .eq("agency_id", agencyId)
+        .gte("starts_on", `${year}-01-01`)
+        .lt("starts_on", `${year + 1}-01-01`),
+      this.client
+        .from("acknowledgment_rows")
+        .select("packet_id, staff_name, signed_at")
+        .eq("agency_id", agencyId),
+      this.client
+        .from("individual_delegation_assignments")
+        .select("id, individual_id, status")
+        .eq("agency_id", agencyId)
+        .eq("status", "assigned"),
+      this.client
+        .from("delegation_acknowledgments")
+        .select("assignment_id, signed_at")
+        .eq("agency_id", agencyId),
+      this.client
+        .from("home_safety_reports")
+        .select("site_id, month_key, lines")
+        .eq("agency_id", agencyId)
+        .eq("site_id", siteId)
+        .in("month_key", months),
+    ]);
+    for (const [res, label] of [
+      [drillsRes, "drills"],
+      [tripsRes, "trips"],
+      [packetsRes, "packets"],
+      [rowsRes, "rows"],
+      [assignmentsRes, "assignments"],
+      [acksRes, "acks"],
+      [reportsRes, "reports"],
+    ] as const) {
+      throwIf(res.error, `Could not load ${label} for auto-verification.`);
+    }
+    const drills = ((drillsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
+      id: String(d.id),
+      agencyId: String(d.agency_id),
+      siteId: String(d.site_id),
+      monthKey: String(d.month_key),
+      drillType: String(d.drill_type) as QaAutoVerifyContext["drills"][number]["drillType"],
+      date: (d.date as string) ?? null,
+      time: (d.time as string) ?? null,
+      evacTime: (d.evac_time as string) ?? null,
+      leaderName: (d.leader_name as string) ?? null,
+      participants: String(d.participants ?? ""),
+      awakeOrSleep: (d.awake_or_sleep as "awake" | "sleep" | "") ?? "",
+    }));
+    const rowsByPacket = new Map<string, { staffName: string; signedAt: string | null }[]>();
+    for (const r of (rowsRes.data ?? []) as Record<string, unknown>[]) {
+      const list = rowsByPacket.get(String(r.packet_id)) ?? [];
+      list.push({ staffName: String(r.staff_name), signedAt: (r.signed_at as string) ?? null });
+      rowsByPacket.set(String(r.packet_id), list);
+    }
+    const acksByAssignment = new Map<string, { signedAt: string | null }[]>();
+    for (const k of (acksRes.data ?? []) as Record<string, unknown>[]) {
+      const list = acksByAssignment.get(String(k.assignment_id)) ?? [];
+      list.push({ signedAt: (k.signed_at as string) ?? null });
+      acksByAssignment.set(String(k.assignment_id), list);
+    }
+    return {
+      siteId,
+      months,
+      auditYear: year,
+      drills,
+      trips: ((tripsRes.data ?? []) as Record<string, unknown>[]).map((t) => ({
+        siteId: String(t.site_id),
+        date: String(t.trip_date),
+      })),
+      packets: ((packetsRes.data ?? []) as Record<string, unknown>[]).map((p) => ({
+        individualId: String(p.individual_id),
+        startsOn: String(p.starts_on),
+        rows: rowsByPacket.get(String(p.id)) ?? [],
+      })),
+      assignments: ((assignmentsRes.data ?? []) as Record<string, unknown>[]).map((a) => ({
+        individualId: String(a.individual_id),
+        status: String(a.status),
+        acks: acksByAssignment.get(String(a.id)) ?? [],
+      })),
+      safetyReports: ((reportsRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        siteId: String(r.site_id),
+        monthKey: String(r.month_key),
+        lines: (Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : []).map((l) => ({
+          dateChecked: (l.dateChecked as string) ?? (l.date_checked as string) ?? null,
+        })),
+      })),
+    };
+  }
+
+  private async qaAuditRowOrThrow(
+    session: SessionUser,
+    auditId: string,
+  ): Promise<QaAudit> {
+    let query = this.client.from("qa_audits").select("*").eq("id", auditId);
+    query = this.qaSiteFilter(session, query, "site_id");
+    const { data, error } = await query.maybeSingle();
+    throwIf(error, "Could not load that QA audit.");
+    if (!data) throw new Error("QA audit not found.");
+    const audit = mapQaAuditRow(data as Record<string, unknown>);
+    if (audit.agencyId !== session.agencyId) throw new Error("QA audit not found.");
+    return audit;
+  }
+
+  private async qaItemRowOrThrow(
+    audit: QaAudit,
+    itemKey: string,
+  ): Promise<Record<string, unknown>> {
+    const { data, error } = await this.client
+      .from("qa_audit_items")
+      .select("*")
+      .eq("audit_id", audit.id)
+      .eq("item_key", itemKey)
+      .maybeSingle();
+    throwIf(error, "Could not load that QA audit item.");
+    if (!data) throw new Error("QA audit item not found.");
+    return data as Record<string, unknown>;
+  }
+
+  async createQaAudit(siteId: string, year: number, quarter: number): Promise<QaAudit> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.audit");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== siteId) {
+      throw new Error("You do not have permission to do that.");
+    }
+    if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
+      throw new Error("That quarter is not valid.");
+    }
+    const { data: existing, error: existingError } = await this.client
+      .from("qa_audits")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .eq("year", year)
+      .eq("quarter", quarter)
+      .maybeSingle();
+    throwIf(existingError, "Could not load existing QA audits.");
+    if (existing) return mapQaAuditRow(existing as Record<string, unknown>);
+
+    const { data: individuals, error: individualsError } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(individualsError, "Could not load individuals for that site.");
+
+    const ctx = await this.qaAutoContext(session, siteId, year, quarter);
+    const items = expandAndVerifyQaItems(
+      ((individuals ?? []) as Record<string, unknown>[]).map((p) => ({
+        id: String(p.id),
+        fullName: String(p.full_name),
+      })),
+      ctx,
+    );
+
+    const { data: auditRow, error: auditError } = await this.client
+      .from("qa_audits")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: siteId,
+        year,
+        quarter,
+        status: "in_progress",
+        auditor_id: session.userId,
+        auditor_name: session.fullName,
+      })
+      .select("*")
+      .single();
+    throwIf(auditError, "Could not create that QA audit.");
+    const audit = mapQaAuditRow(auditRow as Record<string, unknown>);
+
+    const { error: itemsError } = await this.client.from("qa_audit_items").insert(
+      items.map((item) => qaAuditItemToRow(audit.id, session.agencyId, item)),
+    );
+    throwIf(itemsError, "Could not create the QA audit items.");
+    return audit;
+  }
+
+  async listQaAudits(filter?: { siteId?: string; year?: number; quarter?: number }): Promise<QaAudit[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    let query = this.client
+      .from("qa_audits")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("year", { ascending: false })
+      .order("quarter", { ascending: false });
+    if (filter?.siteId) query = query.eq("site_id", filter.siteId);
+    if (filter?.year) query = query.eq("year", filter.year);
+    if (filter?.quarter) query = query.eq("quarter", filter.quarter);
+    query = this.qaSiteFilter(session, query, "site_id");
+    const { data, error } = await query;
+    throwIf(error, "Could not load QA audits.");
+    return ((data ?? []) as Record<string, unknown>[]).map(mapQaAuditRow);
+  }
+
+  async getQaAudit(id: string): Promise<QaAudit | null> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    let query = this.client.from("qa_audits").select("*").eq("id", id);
+    query = this.qaSiteFilter(session, query, "site_id");
+    const { data, error } = await query.maybeSingle();
+    throwIf(error, "Could not load that QA audit.");
+    if (!data) return null;
+    const audit = mapQaAuditRow(data as Record<string, unknown>);
+    return audit.agencyId === session.agencyId ? audit : null;
+  }
+
+  async getQaAuditItems(auditId: string): Promise<QaAuditItemState[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    const audit = await this.qaAuditRowOrThrow(session, auditId);
+    const { data, error } = await this.client
+      .from("qa_audit_items")
+      .select("*")
+      .eq("audit_id", audit.id)
+      .order("item_key");
+    throwIf(error, "Could not load QA audit items.");
+    return ((data ?? []) as Record<string, unknown>[]).map(mapQaAuditItemRow);
+  }
+
+  private async qaRefreshFinalizedScore(audit: QaAudit): Promise<QaAudit> {
+    const items = await this.getQaAuditItems(audit.id);
+    const score = scoreQaAudit(items);
+    const { data, error } = await this.client
+      .from("qa_audits")
+      .update({ score })
+      .eq("id", audit.id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the QA audit score.");
+    return mapQaAuditRow(data as Record<string, unknown>);
+  }
+
+  async scoreQaItem(
+    auditId: string,
+    itemKey: string,
+    result: "yes" | "no" | "na" | "skipped",
+    comment: string,
+  ): Promise<QaAuditItemState> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.audit");
+    const audit = await this.qaAuditRowOrThrow(session, auditId);
+    if (audit.status === "finalized") {
+      throw new Error("That audit is finalized — it can no longer be scored.");
+    }
+    const row = await this.qaItemRowOrThrow(audit, itemKey);
+    // Client-side precheck gives the clear error; RLS + state machine enforce it.
+    const updated = scoreQaItemState(
+      mapQaAuditItemRow(row),
+      result,
+      comment,
+      session.userId,
+      session.fullName || "Auditor",
+    );
+    const { data, error } = await this.client
+      .from("qa_audit_items")
+      .update(qaAuditItemToRow(audit.id, session.agencyId, updated))
+      .eq("id", row.id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save that score.");
+    return mapQaAuditItemRow(data as Record<string, unknown>);
+  }
+
+  async finalizeQaAudit(
+    auditId: string,
+    signature: { name: string; mark: string },
+  ): Promise<QaAudit> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.audit");
+    const audit = await this.qaAuditRowOrThrow(session, auditId);
+    if (audit.status === "finalized") {
+      throw new Error("That audit is already finalized.");
+    }
+    const items = await this.getQaAuditItems(audit.id);
+    const undecided = qaUndecidedItems(items);
+    if (undecided.length > 0) {
+      throw new Error(
+        `${undecided.length} item${undecided.length === 1 ? " is" : "s are"} still undecided. Score or skip every item before finalizing.`,
+      );
+    }
+    if (!signature.name.trim() || !signature.mark.trim()) {
+      throw new Error("An adopted signature is required to finalize.");
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("qa_audits")
+      .update({
+        status: "finalized",
+        auditor_signature_name: signature.name.trim(),
+        auditor_signature_mark: signature.mark.trim(),
+        signed_at: now,
+        score: scoreQaAudit(items),
+      })
+      .eq("id", audit.id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not finalize that QA audit.");
+    const finalized = mapQaAuditRow(data as Record<string, unknown>);
+    // Roll the site's schedule forward one quarter.
+    const { data: schedule } = await this.client
+      .from("qa_schedules")
+      .select("id, next_due")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", audit.siteId)
+      .eq("active", true)
+      .maybeSingle();
+    if (schedule) {
+      await this.client
+        .from("qa_schedules")
+        .update({ next_due: nextQaDueDate(String((schedule as Record<string, unknown>).next_due)) })
+        .eq("id", String((schedule as Record<string, unknown>).id));
+    }
+    return finalized;
+  }
+
+  async raiseQaDispute(
+    auditId: string,
+    itemKey: string,
+    note: string,
+    photos: QaPhotoInput[],
+  ): Promise<QaAuditItemState> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.dispute");
+    const audit = await this.qaAuditRowOrThrow(session, auditId);
+    const row = await this.qaItemRowOrThrow(audit, itemKey);
+    // Client prechecks give clear errors; the RPC re-validates + notifies.
+    raiseQaDisputeState(
+      mapQaAuditItemRow(row),
+      note,
+      photos,
+      session.userId,
+      session.fullName || "Staff",
+    );
+    const { data, error } = await this.client.rpc("raise_qa_dispute", {
+      p_item_id: row.id,
+      p_note: note,
+      p_photos: photos,
+    });
+    throwIf(error, "Could not raise that dispute.");
+    return mapQaAuditItemRow(data as Record<string, unknown>);
+  }
+
+  async resolveQaDispute(
+    auditId: string,
+    itemKey: string,
+    approved: boolean,
+    reason: string,
+  ): Promise<QaAuditItemState> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.audit");
+    const audit = await this.qaAuditRowOrThrow(session, auditId);
+    const row = await this.qaItemRowOrThrow(audit, itemKey);
+    resolveQaDisputeState(
+      mapQaAuditItemRow(row),
+      approved,
+      reason,
+      session.userId,
+      session.fullName || "Auditor",
+    );
+    const { data, error } = await this.client.rpc("resolve_qa_dispute", {
+      p_item_id: row.id,
+      p_approved: approved,
+      p_reason: reason,
+    });
+    throwIf(error, "Could not resolve that dispute.");
+    const resolved = mapQaAuditItemRow(data as Record<string, unknown>);
+    if (audit.status === "finalized") {
+      await this.qaRefreshFinalizedScore(audit);
+    }
+    return resolved;
+  }
+
+  async listQaSchedules(filter?: { siteId?: string }): Promise<QaAuditSchedule[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    let query = this.client
+      .from("qa_schedules")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("next_due", { ascending: true });
+    if (filter?.siteId) query = query.eq("site_id", filter.siteId);
+    query = this.qaSiteFilter(session, query, "site_id");
+    const { data, error } = await query;
+    throwIf(error, "Could not load QA schedules.");
+    return ((data ?? []) as Record<string, unknown>[]).map(mapQaScheduleRow);
+  }
+
+  async upsertQaSchedule(input: {
+    siteId: string;
+    nextDue: string;
+    assignedAuditorId?: string | null;
+    assignedAuditorName?: string | null;
+  }): Promise<QaAuditSchedule> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.schedule");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== input.siteId) {
+      throw new Error("You do not have permission to do that.");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.nextDue)) {
+      throw new Error("The due date must be a calendar date.");
+    }
+    const { data, error } = await this.client
+      .from("qa_schedules")
+      .upsert(
+        {
+          agency_id: session.agencyId,
+          site_id: input.siteId,
+          next_due: input.nextDue,
+          assigned_auditor_id: input.assignedAuditorId ?? null,
+          assigned_auditor_name: input.assignedAuditorName ?? null,
+          active: true,
+        },
+        { onConflict: "agency_id,site_id" },
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not save that QA schedule.");
+    return mapQaScheduleRow(data as Record<string, unknown>);
+  }
+
+  async sweepQaScheduleReminders(): Promise<number> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "qa.schedule");
+    const { data, error } = await this.client.rpc("sweep_qa_schedule_reminders");
+    throwIf(error, "Could not sweep QA schedule reminders.");
+    return Number(data ?? 0);
+  }
+
+  async getQaSiteRanking(): Promise<QaRankedSite[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    let sitesQuery = this.client
+      .from("sites")
+      .select("id, name")
+      .eq("agency_id", session.agencyId)
+      .order("name");
+    sitesQuery = this.qaSiteFilter(session, sitesQuery, "id");
+    const { data: sites, error: sitesError } = await sitesQuery;
+    throwIf(sitesError, "Could not load program sites.");
+    let auditsQuery = this.client
+      .from("qa_audits")
+      .select("id, site_id, year, quarter, status, signed_at, score")
+      .eq("agency_id", session.agencyId)
+      .eq("status", "finalized");
+    auditsQuery = this.qaSiteFilter(session, auditsQuery, "site_id");
+    const { data: audits, error: auditsError } = await auditsQuery;
+    throwIf(auditsError, "Could not load QA audits.");
+    const bySite = new Map<string, QaAudit[]>();
+    for (const row of (audits ?? []) as Record<string, unknown>[]) {
+      const audit = mapQaAuditRow(row);
+      const list = bySite.get(audit.siteId) ?? [];
+      list.push(audit);
+      bySite.set(audit.siteId, list);
+    }
+    const inputs = ((sites ?? []) as Record<string, unknown>[]).map((s) => {
+      const siteAudits = (bySite.get(String(s.id)) ?? []).sort(
+        (a, b) => b.year - a.year || b.quarter - a.quarter,
+      );
+      const latest = siteAudits[0] ?? null;
+      const previous = siteAudits[1] ?? null;
+      return {
+        siteId: String(s.id),
+        siteName: String(s.name),
+        score: latest?.score?.pct ?? null,
+        previousScore: previous?.score?.pct ?? null,
+        trend:
+          latest?.score?.pct != null && previous?.score?.pct != null
+            ? latest.score.pct - previous.score.pct
+            : null,
+        criticalFails: latest?.score?.criticalFails.length ?? 0,
+        auditId: latest?.id ?? null,
+        finalizedAt: latest?.signedAt ?? null,
+      };
+    });
+    return rankQaSites(inputs);
+  }
+
+  async getQaSiteHistory(siteId: string): Promise<QaAudit[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "audit.read");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== siteId) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data, error } = await this.client
+      .from("qa_audits")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .eq("status", "finalized")
+      .order("year", { ascending: false })
+      .order("quarter", { ascending: false });
+    throwIf(error, "Could not load QA audit history.");
+    return ((data ?? []) as Record<string, unknown>[]).map(mapQaAuditRow);
   }
 
   /** The caller's own acknowledgment row for one assignment (or null). */

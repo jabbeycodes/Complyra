@@ -135,6 +135,11 @@ export interface LocalDatabase {
   documentTrackableItems: import("./documents").TrackableItem[];
   documentAuditLog: LocalDocumentAuditEntry[];
   agencyAiSettings: LocalAgencyAiSettings[];
+  // QA-AUDIT (2026-09-14): quarterly program-site QA reviews, their scored
+  // items, and per-site audit schedules.
+  qaAudits: import("./qaAudit").QaAudit[];
+  qaAuditItems: import("./qaAudit").StoredQaAuditItem[];
+  qaSchedules: import("./qaAudit").QaAuditSchedule[];
 }
 
 /** Local demo shape for one AI extraction (mirrors document_extractions). */
@@ -593,6 +598,10 @@ export function createEvergreenSeed(): LocalDatabase {
     documentTrackableItems: [],
     documentAuditLog: [],
     agencyAiSettings: [],
+    // QA-AUDIT: created at runtime — audits, items, and schedules.
+    qaAudits: [],
+    qaAuditItems: [],
+    qaSchedules: [],
   };
 }
 

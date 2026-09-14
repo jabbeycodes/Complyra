@@ -119,6 +119,15 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Extraction review")
     return can(session, "documents.review" as PermissionKey);
   if (page === "AI settings") return isAgencyAdmin(session.role);
+  // QA-AUDIT-PAGEVIS (2026-09-14): auditors, DPMs, HMs, and anyone with
+  // audit access can reach the QA audit views; each action is permission-gated.
+  if (page === "QA audits")
+    return (
+      can(session, "qa.audit") ||
+      can(session, "qa.dispute") ||
+      can(session, "qa.schedule") ||
+      can(session, "audit.read")
+    );
   return can(session, "individuals.view");
 }
 
