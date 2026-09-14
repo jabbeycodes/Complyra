@@ -73,6 +73,8 @@ import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
+import AiSettingsPage from "./features/documents/AiSettingsPage";
+import { canManageAiSettings } from "./features/documents/documents";
 // LIFEPATH-P2-IMPORT (training engine)
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
@@ -1686,16 +1688,6 @@ export default function App() {
                     <SignatureSettingsSection onSaved={notify} />
                     <div className="settings-row">
                       <span>
-                        <strong>Document intelligence</strong>
-                        <small>
-                          Manual review workflow. AI extraction and
-                          notifications are not connected.
-                        </small>
-                      </span>
-                      <Sparkles size={20} />
-                    </div>
-                    <div className="settings-row">
-                      <span>
                         <strong>Data handling</strong>
                         <small>
                           Use fictional records only. This preview is not
@@ -1713,6 +1705,7 @@ export default function App() {
                       </button>
                     )}
                   </section>
+                  {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
               )}
             </>
