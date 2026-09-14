@@ -1,19 +1,31 @@
 import { proposeFromPcsp, type ObligationItem } from "./planStack";
 
 /**
- * Recommended PCSP extractor: Anthropic Claude.
+ * Recommended PCSP extractor: Gemini through the document-extraction
+ * pipeline (supabase/functions/extract-pcsp).
  *
- * PCSPs are long narrative PDFs, not fixed forms. Claude reads that structure
- * well and can return cover-page fields plus proposed required/checked items.
- * A DPM still edits before anything becomes a staff task.
+ * PCSPs are long narrative PDFs, not fixed forms. The pipeline sends the
+ * document text to Gemini with a strict JSON responseSchema (v1), validates
+ * the output, and proposes typed trackable items — deadlines, training
+ * requirements, protocols needing delegation, physician orders, and missing
+ * signatures. A DPM/RN then reviews, edits, approves (nothing becomes
+ * tracked before approval), and activates each item; protocol items hand
+ * off into the delegation system.
  *
- * For real care records later, run Claude on Amazon Bedrock (or Azure OpenAI)
- * under a BAA. Do not send PHI from the browser. The key stays on a worker.
+ * Keys and AI settings live server-side: GEMINI_API_KEY is a Supabase
+ * function secret (never stored in agency_ai_settings), and AI processing
+ * stays OFF until an administrator enables it after a BAA with Google is
+ * in place. See docs/ai-model-settings.md. The edge function truncates
+ * document text server-side (~120k chars) for PHI minimization.
+ *
+ * This module's LOCAL path stays a pure demo: extractPlanProposal() calls
+ * proposeFromPcsp() — the same proposed stack a DPM would review — never a
+ * real model. Live calls belong in the extract-pcsp edge function.
  */
 export const EXTRACTION_PROVIDER = {
-  id: "anthropic-claude",
-  name: "Anthropic Claude",
-  model: "claude-sonnet-4-6",
+  id: "gemini-extraction-pipeline",
+  name: "Gemini document extraction pipeline",
+  model: "gemini-2.5-flash",
 } as const;
 
 export function extractPlanProposal(input: {
@@ -24,7 +36,7 @@ export function extractPlanProposal(input: {
   personName: string;
   effectiveOn: string;
 }): ObligationItem[] {
-  // Live Claude calls belong in a hosted worker. Local/demo uses the same
-  // proposed stack a DPM would review after extraction.
+  // Live Gemini calls belong in the extract-pcsp edge function. Local/demo
+  // uses the same proposed stack a DPM would review after extraction.
   return proposeFromPcsp(input);
 }

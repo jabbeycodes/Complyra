@@ -113,6 +113,12 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Supply forecast") return can(session, "individuals.view");
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
+  // PCSP-DOCUMENTS-PAGEVIS (AI document ingestion). `documents.review` is
+  // owned by the backend workstream — referenced by string until merged.
+  if (page === "Document upload") return can(session, "documents.upload");
+  if (page === "Extraction review")
+    return can(session, "documents.review" as PermissionKey);
+  if (page === "AI settings") return isAgencyAdmin(session.role);
   return can(session, "individuals.view");
 }
 

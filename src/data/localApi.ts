@@ -1,5 +1,25 @@
 import type { Activity, Plan, Requirement } from "../domain";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
+import type {
+  LocalAgencyAiSettings,
+  LocalDocumentAuditEntry,
+  LocalDocumentExtraction,
+} from "./seed";
+import type {
+  DocumentStatus,
+  DocumentType,
+  DocumentUpload,
+  PcspExtraction,
+  TrackableItem,
+  TrackableItemType,
+} from "./documents";
+import {
+  canTransitionTrackableItem,
+  canTransitionUpload,
+  DOCUMENT_DIGITAL_MARK,
+  DOCUMENT_TYPES,
+  validateExtraction,
+} from "./documents";
 import {
   agencyLogoPath,
   blobToDataUrl,
@@ -839,6 +859,92 @@ export interface ComplyraApi {
    * Idempotent. Returns the number of notifications actually inserted.
    */
   sweepDelegationAckOverdue(): Promise<number>;
+  /* ------------------------------------------------------------------ */
+  /* PCSP document-extraction pipeline: upload → extract → edit →       */
+  /* approve → activate. NOTHING is tracked before approveDocument-     */
+  /* Extraction(); activation hands protocol items into the delegation  */
+  /* system (template → site activation → assignment → training draft). */
+  /* ------------------------------------------------------------------ */
+  /** Register a document upload (documents.upload). */
+  registerDocumentUpload(input: {
+    individualId: string;
+    /** Optional — the server falls back to the individual's site when omitted. */
+    siteId?: string;
+    documentType: DocumentType;
+    originalFilename: string;
+    mimeType?: string;
+    file?: Blob | null;
+  }): Promise<DocumentUpload>;
+  /** Uploads visible to the session user (reviewers: agency; staff: approved/activated at own sites). */
+  listDocumentUploads(filter?: {
+    individualId?: string;
+    status?: DocumentStatus;
+  }): Promise<DocumentUpload[]>;
+  /** The recorded extraction + its proposed items for an upload (documents.review). */
+  getDocumentExtraction(uploadId: string): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  } | null>;
+  /**
+   * LOCAL DEMO ONLY: deterministically simulate AI extraction from a
+   * built-in fixture (no network call, clearly marked simulated). Hosted
+   * runs the real extract-pcsp edge function via extractDocumentUpload().
+   */
+  simulatePcspExtraction(uploadId: string): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  }>;
+  /** HOSTED ONLY: invoke the extract-pcsp edge function for real AI extraction. */
+  extractDocumentUpload(
+    uploadId: string,
+    documentText: string,
+  ): Promise<{ ok: boolean; fallbackUsed: boolean }>;
+  /** Edit a proposed/edited item (documents.review; status → "edited"). */
+  updateTrackableItem(
+    itemId: string,
+    patch: {
+      title: string;
+      detail?: Record<string, unknown>;
+      dueDate?: string | null;
+      needsHumanCheck?: boolean;
+    },
+  ): Promise<TrackableItem>;
+  /**
+   * Approve the whole extraction (documents.review). THE gate: items become
+   * "approved" and the upload "approved" — nothing is tracked before this.
+   */
+  approveDocumentExtraction(uploadId: string): Promise<void>;
+  /**
+   * Activate one approved item (documents.review). protocol_needs_delegation
+   * items hand off into the delegation system (template → activation →
+   * assignment → training draft); other types just become "activated".
+   */
+  activateTrackableItem(itemId: string): Promise<TrackableItem>;
+  /** Retire an upload that should never be tracked (documents.review). */
+  rejectDocumentUpload(uploadId: string, reason?: string): Promise<void>;
+  /** Per-agency AI settings read (any agency member; carries no secrets). */
+  getAgencyAiSettings(): Promise<LocalAgencyAiSettings>;
+  /** Set the AI enabled flag + model only (roles.manage; the key is never stored). */
+  setAgencyAiSettings(input: {
+    enabled: boolean;
+    model: string;
+  }): Promise<LocalAgencyAiSettings>;
+  /**
+   * Minimal Gemini key check via the extract-pcsp verify action
+   * (roles.manage; hosted only — local returns a demo result).
+   */
+  verifyAiKey(): Promise<{ ok: boolean; modelCount?: number; error?: string }>;
+  /** Add a reviewer-created trackable item (documents.review; status "proposed"). */
+  addTrackableItem(input: {
+    extractionId: string;
+    itemType: TrackableItemType;
+    title: string;
+    detail?: Record<string, unknown>;
+    dueDate?: string | null;
+    needsHumanCheck?: boolean;
+  }): Promise<TrackableItem>;
+  /** Remove a proposed/edited item (documents.review; status → "removed"). */
+  removeTrackableItem(itemId: string): Promise<TrackableItem>;
 }
 
 export type WorkspaceSite = {
@@ -1187,6 +1293,171 @@ function ensureDelegationCollections(store: MemoryStore) {
   db.individualDelegationAssignments = db.individualDelegationAssignments ?? [];
   db.delegationTrainingMaterials = db.delegationTrainingMaterials ?? [];
   db.delegationAcknowledgments = db.delegationAcknowledgments ?? [];
+}
+
+/** Backfill document-extraction collections when an older db lacks them. */
+function ensureDocumentCollections(store: MemoryStore) {
+  const db = store.db;
+  db.documentUploads = db.documentUploads ?? [];
+  db.documentExtractions = db.documentExtractions ?? [];
+  db.documentTrackableItems = db.documentTrackableItems ?? [];
+  db.documentAuditLog = db.documentAuditLog ?? [];
+  db.agencyAiSettings = db.agencyAiSettings ?? [];
+}
+
+function logDocumentAudit(
+  store: MemoryStore,
+  input: Omit<LocalDocumentAuditEntry, "id" | "at">,
+) {
+  store.db.documentAuditLog.push({
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    ...input,
+  });
+}
+
+/**
+ * LOCAL DEMO fixture: a deterministic "AI extraction" for a PCSP. Clearly
+ * marked simulated — the hosted path never uses this; it runs Gemini.
+ */
+function simulatedPcspFixture(
+  individualName: string,
+): PcspExtraction {
+  const reviewDue = "2027-09-14";
+  const expiry = "2027-09-14";
+  return {
+    individual: {
+      full_name: individualName,
+      date_of_birth: "1990-01-01",
+      medicaid_id: "SIM-000000",
+      confidence: 0.9,
+    },
+    plan: {
+      effective_date: "2026-09-14",
+      expiry_date: expiry,
+      annual_review_due_date: reviewDue,
+      confidence: 0.95,
+    },
+    outcomes: [
+      {
+        title: "Community participation",
+        description: "Attend two community activities per week.",
+        support_strategies: [
+          "Staff assist with transportation scheduling.",
+          "Staff support social interaction at events.",
+        ],
+        confidence: 0.85,
+      },
+    ],
+    protocols_referenced: [
+      { name: "Seizure protocol", category: "Health", confidence: 0.7 },
+      { name: "High fiber diet", category: "Dietary", confidence: 0.75 },
+    ],
+    dietary: { description: "High fiber diet as prescribed.", confidence: 0.8 },
+    behavioral_supports: { description: null, confidence: null },
+    staff_training_requirements: [
+      { topic: "Seizure protocol", due_date: "2026-10-14", confidence: 0.7 },
+      { topic: "CPR", due_date: null, confidence: 0.55 },
+    ],
+    physician_orders: [],
+    signatures: [
+      { role: "DPM", name: individualName, signed: true, date: "2026-09-14" },
+      { role: "RN", name: null, signed: false, date: null },
+    ],
+  };
+}
+
+function simulatedItemsFor(
+  extraction: PcspExtraction,
+  extractionId: string,
+  agencyId: string,
+): TrackableItem[] {
+  const items: TrackableItem[] = [];
+  const push = (
+    itemType: TrackableItemType,
+    title: string,
+    detail: Record<string, unknown>,
+    dueDate: string | null,
+    confidence: number | null,
+  ) => {
+    const conf =
+      confidence === null || confidence === undefined ? null : confidence;
+    items.push({
+      id: crypto.randomUUID(),
+      agencyId,
+      extractionId,
+      itemType,
+      title,
+      detail,
+      dueDate,
+      confidence: conf,
+      needsHumanCheck: conf === null || conf < 0.6,
+      status: "proposed",
+    });
+  };
+  const plan = extraction.plan;
+  if (plan?.annual_review_due_date) {
+    push(
+      "deadline",
+      "PCSP annual review due",
+      { description: "Annual review date stated in the PCSP. [SIMULATED EXTRACTION]" },
+      plan.annual_review_due_date,
+      plan.confidence ?? null,
+    );
+  }
+  if (plan?.expiry_date) {
+    push(
+      "deadline",
+      "PCSP plan expiry",
+      { description: "Plan expiry date stated in the PCSP. [SIMULATED EXTRACTION]" },
+      plan.expiry_date,
+      plan.confidence ?? null,
+    );
+  }
+  for (const t of extraction.staff_training_requirements ?? []) {
+    if (!t?.topic) continue;
+    push(
+      "training_requirement",
+      `Staff training: ${t.topic.slice(0, 120)}`,
+      { topic: t.topic, simulated: true },
+      t.due_date,
+      t.confidence ?? null,
+    );
+  }
+  for (const p of extraction.protocols_referenced ?? []) {
+    if (!p?.name) continue;
+    push(
+      "protocol_needs_delegation",
+      `Protocol needs delegation: ${p.name.slice(0, 120)}`,
+      {
+        protocol_name: p.name,
+        category: p.category ?? null,
+        description: `Protocol referenced in the PCSP: ${p.name}. [SIMULATED EXTRACTION]`,
+      },
+      null,
+      p.confidence ?? null,
+    );
+  }
+  for (const s of extraction.signatures ?? []) {
+    if (s?.signed === false) {
+      push(
+        "missing_signature",
+        `Missing signature — ${s.role ?? "unknown role"}`,
+        { role: s.role ?? null, name: s.name ?? null, signed: false },
+        null,
+        null,
+      );
+    }
+  }
+  return items;
+}
+
+/** Throw unless the session user may review document data at this site. */
+function assertDocumentSite(session: SessionUser, siteId: string) {
+  const scope = delegationSiteScope(session);
+  if (scope !== null && !scope.includes(siteId)) {
+    throw new Error("You do not have permission to do that.");
+  }
 }
 
 function siteName(store: MemoryStore, siteId: string) {
@@ -7681,6 +7952,635 @@ export class LocalApi implements ComplyraApi {
       }
     }
     return inserted;
+  }
+
+  // ================= PCSP document-extraction pipeline (local demo) =================
+
+  async registerDocumentUpload(input: {
+    individualId: string;
+    /** Optional — falls back to the individual's site when omitted. */
+    siteId?: string;
+    documentType: DocumentType;
+    originalFilename: string;
+    mimeType?: string;
+    file?: Blob | null;
+  }): Promise<DocumentUpload> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.upload");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    if (!DOCUMENT_TYPES.includes(input.documentType)) {
+      throw new Error("Unknown document type.");
+    }
+    const individual = db.individuals.find(
+      (p) => p.id === input.individualId && p.agencyId === session.agencyId,
+    );
+    if (!individual) throw new Error("Individual not found.");
+    const site = input.siteId
+      ? db.sites.find(
+          (s) => s.id === input.siteId && s.agencyId === session.agencyId,
+        )
+      : db.sites.find(
+          (s) => s.id === individual.siteId && s.agencyId === session.agencyId,
+        );
+    if (!site) throw new Error("Site not found.");
+    if (!input.originalFilename.trim()) throw new Error("A filename is required.");
+    const now = new Date().toISOString();
+    const upload: DocumentUpload = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: individual.id,
+      siteId: site.id,
+      documentType: input.documentType,
+      originalFilename: input.originalFilename.trim(),
+      mimeType: input.mimeType ?? "application/pdf",
+      storagePath: `${session.agencyId}/${input.siteId}/${input.originalFilename.trim()}`,
+      uploadedBy: session.userId,
+      uploadedAt: now,
+      status: "uploaded",
+    };
+    db.documentUploads.unshift(upload);
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: upload.id,
+      actor: session.userId,
+      action: "upload",
+      detail: {
+        document_type: upload.documentType,
+        filename: upload.originalFilename,
+      },
+    });
+    return upload;
+  }
+
+  async listDocumentUploads(filter?: {
+    individualId?: string;
+    status?: DocumentStatus;
+  }): Promise<DocumentUpload[]> {
+    const session = assertSession(this.store);
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const isReviewer = hasPermission(session, "documents.review");
+    return db.documentUploads.filter((u) => {
+      if (u.agencyId !== session.agencyId) return false;
+      if (filter?.individualId && u.individualId !== filter.individualId) return false;
+      if (filter?.status && u.status !== filter.status) return false;
+      if (isReviewer) return true;
+      // Ordinary staff: only approved/activated results at their own sites —
+      // never raw uploads or extractions.
+      if (!hasPermission(session, "documents.view")) return false;
+      if (u.status !== "approved" && u.status !== "activated") return false;
+      const scope = delegationSiteScope(session);
+      if (scope !== null && !scope.includes(u.siteId)) return false;
+      return true;
+    });
+  }
+
+  async getDocumentExtraction(uploadId: string): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  } | null> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const upload = db.documentUploads.find(
+      (u) => u.id === uploadId && u.agencyId === session.agencyId,
+    );
+    if (!upload) throw new Error("Upload not found.");
+    const extraction = db.documentExtractions.find(
+      (e) => e.uploadId === uploadId,
+    );
+    if (!extraction) return null;
+    const items = db.documentTrackableItems.filter(
+      (i) => i.extractionId === extraction.id,
+    );
+    return { extraction, items };
+  }
+
+  async simulatePcspExtraction(uploadId: string): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  }> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const upload = db.documentUploads.find(
+      (u) => u.id === uploadId && u.agencyId === session.agencyId,
+    );
+    if (!upload) throw new Error("Upload not found.");
+    const existing = db.documentExtractions.find((e) => e.uploadId === uploadId);
+    if (existing) {
+      const items = db.documentTrackableItems.filter(
+        (i) => i.extractionId === existing.id,
+      );
+      return { extraction: existing, items };
+    }
+    // LOCAL DEMO ONLY — clearly marked simulated; the hosted path calls Gemini.
+    const individualName =
+      db.individuals.find((p) => p.id === upload.individualId)?.fullName ??
+      "Unknown";
+    const fixture = simulatedPcspFixture(individualName);
+    const validated = validateExtraction(upload.documentType, fixture);
+    if (!validated.ok || !validated.value) {
+      throw new Error(`Fixture failed validation: ${validated.errors.join("; ")}`);
+    }
+    const now = new Date().toISOString();
+    const extraction: LocalDocumentExtraction = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      uploadId: upload.id,
+      schemaVersion: 1,
+      extractedData: validated.value,
+      confidence: { overall: 0.8, simulated: true },
+      model: "simulated-local-fixture",
+      createdAt: now,
+    };
+    db.documentExtractions.push(extraction);
+    const items = simulatedItemsFor(
+      validated.value as PcspExtraction,
+      extraction.id,
+      session.agencyId,
+    );
+    for (const item of items) db.documentTrackableItems.push(item);
+    upload.status = "extracted";
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: upload.id,
+      actor: null,
+      action: "extraction_complete",
+      detail: {
+        model: "simulated-local-fixture",
+        item_count: items.length,
+        schema_version: 1,
+        simulated: true,
+      },
+    });
+    // Reviewers at the site get a bell notification: nothing is tracked yet.
+    for (const userId of this.delegationHoldersAtSite(
+      session.agencyId,
+      upload.siteId,
+      "documents.review",
+    )) {
+      this.queueDelegationNotification({
+        agencyId: session.agencyId,
+        userId,
+        type: "document.extraction_ready",
+        title: "Extraction ready for review",
+        body:
+          `${upload.originalFilename} for ${individualName} finished extraction — ` +
+          "review the proposed items before anything is tracked.",
+        deepLink: `/documents/extractions/${upload.id}`,
+        entityType: "document_upload",
+        entityId: upload.id,
+        dedupeKey: `document.extraction_ready:${upload.id}:${userId}`,
+      });
+    }
+    return { extraction, items };
+  }
+
+  async extractDocumentUpload(
+    _uploadId: string,
+    _documentText: string,
+  ): Promise<{ ok: boolean; fallbackUsed: boolean }> {
+    // The local/demo backend has no Gemini key — the hosted API calls the
+    // extract-pcsp edge function instead. See simulatePcspExtraction().
+    throw new Error(
+      "Real AI extraction is hosted-only (extract-pcsp edge function). " +
+        "Use simulatePcspExtraction() for the local demo.",
+    );
+  }
+
+  async updateTrackableItem(
+    itemId: string,
+    patch: {
+      title: string;
+      detail?: Record<string, unknown>;
+      dueDate?: string | null;
+      needsHumanCheck?: boolean;
+    },
+  ): Promise<TrackableItem> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const item = db.documentTrackableItems.find(
+      (i) => i.id === itemId && i.agencyId === session.agencyId,
+    );
+    if (!item) throw new Error("Trackable item not found.");
+    if (item.status !== "proposed" && item.status !== "edited") {
+      throw new Error("Only proposed or edited items can be edited.");
+    }
+    if (!patch.title.trim()) throw new Error("A title is required.");
+    item.title = patch.title.trim();
+    item.detail = patch.detail ?? {};
+    item.dueDate = patch.dueDate ?? null;
+    item.needsHumanCheck = patch.needsHumanCheck ?? false;
+    item.status = "edited";
+    const extraction = db.documentExtractions.find(
+      (e) => e.id === item.extractionId,
+    );
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: extraction?.uploadId ?? null,
+      actor: session.userId,
+      action: "item_edited",
+      detail: { item_id: itemId, title: item.title },
+    });
+    return item;
+  }
+
+  async approveDocumentExtraction(uploadId: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const upload = db.documentUploads.find(
+      (u) => u.id === uploadId && u.agencyId === session.agencyId,
+    );
+    if (!upload) throw new Error("Upload not found.");
+    if (upload.status !== "extracted" && upload.status !== "in_review") {
+      throw new Error("Only extracted or in-review uploads can be approved.");
+    }
+    const extraction = db.documentExtractions.find(
+      (e) => e.uploadId === uploadId,
+    );
+    if (!extraction) throw new Error("No extraction recorded for this upload.");
+    let count = 0;
+    for (const item of db.documentTrackableItems) {
+      if (
+        item.extractionId === extraction.id &&
+        (item.status === "proposed" || item.status === "edited")
+      ) {
+        if (!canTransitionTrackableItem(item.status, "approved")) {
+          throw new Error("Internal error: invalid item transition.");
+        }
+        item.status = "approved";
+        count += 1;
+      }
+    }
+    if (!canTransitionUpload(upload.status, "approved")) {
+      throw new Error("Internal error: invalid upload transition.");
+    }
+    upload.status = "approved";
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: upload.id,
+      actor: session.userId,
+      action: "extraction_approved",
+      detail: { item_count: count },
+    });
+    // Reviewers at the site get a bell notification: items are now eligible
+    // for one-by-one activation (staff still see nothing until activation).
+    for (const userId of this.delegationHoldersAtSite(
+      session.agencyId,
+      upload.siteId,
+      "documents.review",
+    )) {
+      this.queueDelegationNotification({
+        agencyId: session.agencyId,
+        userId,
+        type: "document.extraction_approved",
+        title: "Extraction approved",
+        body: `${count} item(s) from ${upload.originalFilename} are ready to activate.`,
+        deepLink: `/documents/extractions/${upload.id}`,
+        entityType: "document_upload",
+        entityId: upload.id,
+        dedupeKey: `document.extraction_approved:${upload.id}:${userId}`,
+      });
+    }
+  }
+
+  async activateTrackableItem(itemId: string): Promise<TrackableItem> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const item = db.documentTrackableItems.find(
+      (i) => i.id === itemId && i.agencyId === session.agencyId,
+    );
+    if (!item) throw new Error("Trackable item not found.");
+    if (!canTransitionTrackableItem(item.status, "activated")) {
+      throw new Error("Only approved items can be activated.");
+    }
+    const extraction = db.documentExtractions.find(
+      (e) => e.id === item.extractionId,
+    );
+    const upload = extraction
+      ? db.documentUploads.find((u) => u.id === extraction.uploadId)
+      : undefined;
+    const individual = upload
+      ? db.individuals.find((p) => p.id === upload.individualId)
+      : undefined;
+    const site = upload
+      ? db.sites.find((s) => s.id === upload.siteId)
+      : undefined;
+
+    // Protocol handoff into the delegation system: ensure a template,
+    // activate it for the site, assign to the individual, and seed the
+    // editable training draft. Direct store inserts (like the SQL RPC does
+    // inside its SECURITY DEFINER boundary) so the documents.review gate
+    // that authorized activation isn't second-guessed by delegation.* gates
+    // the reviewer may not hold. The draft still enters the normal
+    // draft → review → approve → publish loop for DPM/RN sign-off.
+    if (item.itemType === "protocol_needs_delegation") {
+      if (!upload || !individual || !site) {
+        throw new Error("Upload context is incomplete for the delegation handoff.");
+      }
+      const protocolName =
+        (typeof item.detail.protocol_name === "string" &&
+          item.detail.protocol_name.trim()) ||
+        item.title.trim() ||
+        "PCSP protocol";
+      let template = db.delegationTemplates.find(
+        (t) =>
+          (t.agencyId === session.agencyId || t.agencyId === null) &&
+          t.active &&
+          t.name.toLowerCase() === protocolName.toLowerCase(),
+      );
+      if (!template) {
+        template = {
+          id: `tpl-${crypto.randomUUID()}`,
+          agencyId: session.agencyId,
+          name: protocolName,
+          category: "Health monitoring",
+          sections: {
+            purpose:
+              (typeof item.detail.description === "string" &&
+                item.detail.description) ||
+              "",
+            steps: [],
+            safetyWarnings: [],
+            documentation: [],
+          },
+          individualizationNote: `Seeded from PCSP extraction. Individualize before publication. ${DOCUMENT_DIGITAL_MARK}`,
+          active: true,
+        } satisfies import("../delegation/delegation").DelegationTemplate;
+        db.delegationTemplates.push(template);
+      }
+      let activation = db.siteDelegationActivations.find(
+        (a) =>
+          a.templateId === template.id &&
+          a.siteId === site.id &&
+          a.status === "active",
+      );
+      if (!activation) {
+        activation = {
+          id: crypto.randomUUID(),
+          agencyId: session.agencyId,
+          templateId: template.id,
+          templateName: template.name,
+          templateCategory: template.category,
+          siteId: site.id,
+          siteName: site.name,
+          status: "active",
+          activatedAt: new Date().toISOString(),
+          activatedBy: session.userId,
+        };
+        db.siteDelegationActivations.push(activation);
+      }
+      let assignment = db.individualDelegationAssignments.find(
+        (a) =>
+          a.activationId === activation.id &&
+          a.individualId === individual.id &&
+          a.status === "assigned",
+      );
+      if (!assignment) {
+        assignment = {
+          id: crypto.randomUUID(),
+          agencyId: session.agencyId,
+          activationId: activation.id,
+          templateId: template.id,
+          templateName: template.name,
+          individualId: individual.id,
+          individualName: individual.fullName,
+          siteId: site.id,
+          siteName: site.name,
+          status: "assigned",
+          assignedAt: new Date().toISOString(),
+          assignedBy: session.userId,
+        };
+        db.individualDelegationAssignments.push(assignment);
+        const draft: import("../delegation/delegation").DelegationTrainingMaterial = {
+          id: crypto.randomUUID(),
+          agencyId: session.agencyId,
+          assignmentId: assignment.id,
+          status: "draft",
+          draftContent: {
+            templateId: template.id,
+            templateName: template.name,
+            individualId: individual.id,
+            individualName: individual.fullName,
+            siteId: site.id,
+            siteName: site.name,
+            purpose: template.sections.purpose,
+            steps: [...template.sections.steps],
+            safetyWarnings: [...template.sections.safetyWarnings],
+            documentation: [...template.sections.documentation],
+            individualNotes: "",
+            individualizationNote: template.individualizationNote,
+            generatedMark: DOCUMENT_DIGITAL_MARK,
+          },
+          publishedContent: null,
+          submittedAt: null,
+          approvedAt: null,
+          approvedBy: null,
+        };
+        db.delegationTrainingMaterials.push(draft);
+      }
+      item.detail = {
+        ...item.detail,
+        delegation_assignment_id: assignment.id,
+        delegation_template_id: template.id,
+      };
+    }
+
+    item.status = "activated";
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: extraction?.uploadId ?? null,
+      actor: session.userId,
+      action: "item_activated",
+      detail: {
+        item_id: itemId,
+        item_type: item.itemType,
+        delegation_assignment_id:
+          (item.detail.delegation_assignment_id as string | undefined) ?? null,
+      },
+    });
+    // The item is now tracked: reviewers at the site get a bell notification.
+    // (Protocol items already notified training reviewers via the delegation
+    // handoff above; this covers the tracking event itself.)
+    if (upload) {
+      for (const userId of this.delegationHoldersAtSite(
+        session.agencyId,
+        upload.siteId,
+        "documents.review",
+      )) {
+        this.queueDelegationNotification({
+          agencyId: session.agencyId,
+          userId,
+          type: "document.item_activated",
+          title: "Trackable item activated",
+          body: `${item.title} is now tracked.`,
+          deepLink: `/documents/extractions/${upload.id}`,
+          entityType: "document_trackable_item",
+          entityId: item.id,
+          dedupeKey: `document.item_activated:${item.id}:${userId}`,
+        });
+      }
+    }
+    return item;
+  }
+
+  async rejectDocumentUpload(uploadId: string, reason?: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const upload = db.documentUploads.find(
+      (u) => u.id === uploadId && u.agencyId === session.agencyId,
+    );
+    if (!upload) throw new Error("Upload not found.");
+    if (!canTransitionUpload(upload.status, "rejected")) {
+      throw new Error("This upload can no longer be rejected.");
+    }
+    upload.status = "rejected";
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: upload.id,
+      actor: session.userId,
+      action: "upload_rejected",
+      detail: { reason: reason ?? "" },
+    });
+  }
+
+  async getAgencyAiSettings(): Promise<LocalAgencyAiSettings> {
+    const session = assertSession(this.store);
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const existing = db.agencyAiSettings.find(
+      (s) => s.agencyId === session.agencyId,
+    );
+    if (existing) return existing;
+    const row: LocalAgencyAiSettings = {
+      agencyId: session.agencyId,
+      aiProcessingEnabled: false,
+      model: "gemini-2.5-flash",
+      keyLastVerifiedAt: null,
+    };
+    db.agencyAiSettings.push(row);
+    return row;
+  }
+
+  async setAgencyAiSettings(input: {
+    enabled: boolean;
+    model: string;
+  }): Promise<LocalAgencyAiSettings> {
+    const session = assertSession(this.store);
+    // Model + enabled flag only — the key is NEVER stored here.
+    assertCan(session, "roles.manage");
+    if (!input.model.trim()) throw new Error("A model name is required.");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    let row = db.agencyAiSettings.find((s) => s.agencyId === session.agencyId);
+    if (!row) {
+      row = {
+        agencyId: session.agencyId,
+        aiProcessingEnabled: false,
+        model: "gemini-2.5-flash",
+        keyLastVerifiedAt: null,
+      };
+      db.agencyAiSettings.push(row);
+    }
+    row.aiProcessingEnabled = input.enabled;
+    row.model = input.model.trim();
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: null,
+      actor: session.userId,
+      action: "ai_settings_changed",
+      detail: { enabled: input.enabled, model: row.model },
+    });
+    return row;
+  }
+
+  async verifyAiKey(): Promise<{
+    ok: boolean;
+    modelCount?: number;
+    error?: string;
+  }> {
+    // Local/demo has no Gemini key — the hosted API calls the extract-pcsp
+    // verify action instead.
+    return { ok: false, error: "Key verification is hosted-only." };
+  }
+
+  async addTrackableItem(input: {
+    extractionId: string;
+    itemType: TrackableItemType;
+    title: string;
+    detail?: Record<string, unknown>;
+    dueDate?: string | null;
+    needsHumanCheck?: boolean;
+  }): Promise<TrackableItem> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const extraction = db.documentExtractions.find(
+      (e) => e.id === input.extractionId && e.agencyId === session.agencyId,
+    );
+    if (!extraction) throw new Error("Extraction not found.");
+    if (!input.title.trim()) throw new Error("A title is required.");
+    const item: TrackableItem = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      extractionId: input.extractionId,
+      itemType: input.itemType,
+      title: input.title.trim(),
+      detail: input.detail ?? {},
+      dueDate: input.dueDate ?? null,
+      confidence: null,
+      needsHumanCheck: input.needsHumanCheck ?? false,
+      status: "proposed",
+    };
+    db.documentTrackableItems.push(item);
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: extraction.uploadId,
+      actor: session.userId,
+      action: "item_added",
+      detail: { item_id: item.id, title: item.title },
+    });
+    return item;
+  }
+
+  async removeTrackableItem(itemId: string): Promise<TrackableItem> {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.review");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    const item = db.documentTrackableItems.find(
+      (i) => i.id === itemId && i.agencyId === session.agencyId,
+    );
+    if (!item) throw new Error("Trackable item not found.");
+    if (item.status !== "proposed" && item.status !== "edited") {
+      throw new Error("Only proposed or edited items can be removed.");
+    }
+    item.status = "removed";
+    const extraction = db.documentExtractions.find(
+      (e) => e.id === item.extractionId,
+    );
+    logDocumentAudit(this.store, {
+      agencyId: session.agencyId,
+      uploadId: extraction?.uploadId ?? null,
+      actor: session.userId,
+      action: "item_removed",
+      detail: { item_id: itemId },
+    });
+    return item;
   }
 }
 

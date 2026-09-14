@@ -158,6 +158,15 @@ import {
   type TemplateSections,
   type TrainingMaterialContent,
 } from "../delegation/delegation";
+// PCSP-EXTRACTION: document pipeline types.
+import type {
+  DocumentStatus,
+  DocumentType,
+  DocumentUpload,
+  TrackableItem,
+  TrackableItemType,
+} from "./documents";
+import type { LocalAgencyAiSettings, LocalDocumentExtraction } from "./seed";
 // LIFEPATH-P4 (certificates): expiry countdown + file validation helpers.
 import {
   daysRemaining,
@@ -7473,6 +7482,305 @@ export class HostedApi implements ComplyraApi {
       alreadyDecided: Boolean(agency?.already_decided),
     };
   }
+
+  // ================= PCSP document-extraction pipeline (hosted) =================
+
+  async registerDocumentUpload(input: {
+    individualId: string;
+    /** Optional — the server falls back to the individual's site when omitted. */
+    siteId?: string;
+    documentType: DocumentType;
+    originalFilename: string;
+    mimeType?: string;
+    file?: Blob | null;
+  }): Promise<DocumentUpload> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.upload");
+    const uploadId = crypto.randomUUID();
+    const filename = input.originalFilename.trim();
+    const storagePath = `${session.agencyId}/${uploadId}/${filename}`;
+    // Storage write first (path convention matches the bucket policy); the
+    // metadata row is registered after, so a failed upload leaves nothing
+    // behind.
+    if (input.file) {
+      const { error: storageError } = await this.client.storage
+        .from("pcsp-documents")
+        .upload(storagePath, input.file, {
+          contentType: input.mimeType ?? "application/pdf",
+          upsert: false,
+        });
+      throwIf(storageError, "Could not upload the document file.");
+    }
+    // The migration ships no INSERT policy on document_uploads: writes go
+    // through this SECURITY DEFINER RPC, which re-checks documents.upload.
+    const { data, error } = await this.client.rpc("register_document_upload", {
+      p_agency_id: session.agencyId,
+      p_individual_id: input.individualId,
+      p_site_id: input.siteId ?? null,
+      p_document_type: input.documentType,
+      p_original_filename: filename,
+      p_storage_path: storagePath,
+      p_mime_type: input.mimeType ?? "application/pdf",
+      p_id: uploadId,
+    });
+    throwIf(error, "Could not register the document upload.");
+    if (!data) throw new Error("Could not register the document upload.");
+    return mapDocumentUpload(data as Record<string, unknown>);
+  }
+
+  async listDocumentUploads(filter?: {
+    individualId?: string;
+    status?: DocumentStatus;
+  }): Promise<DocumentUpload[]> {
+    const session = await this.requireSession();
+    let query = this.client
+      .from("document_uploads")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("uploaded_at", { ascending: false });
+    if (filter?.individualId) query = query.eq("individual_id", filter.individualId);
+    if (filter?.status) query = query.eq("status", filter.status);
+    // RLS: reviewers see everything in the agency; ordinary staff see only
+    // approved/activated uploads at their own site(s) — enforced server-side.
+    const { data, error } = await query;
+    throwIf(error, "Could not load document uploads.");
+    return (data ?? []).map((row) =>
+      mapDocumentUpload(row as Record<string, unknown>),
+    );
+  }
+
+  async getDocumentExtraction(uploadId: string): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  } | null> {
+    await this.requireSession();
+    // RLS enforces documents.review-only reads on document_extractions.
+    const { data: extractionRow, error: extractionError } = await this.client
+      .from("document_extractions")
+      .select("*")
+      .eq("upload_id", uploadId)
+      .maybeSingle();
+    throwIf(extractionError, "Could not load the extraction.");
+    if (!extractionRow) return null;
+    const { data: itemRows, error: itemsError } = await this.client
+      .from("document_trackable_items")
+      .select("*")
+      .eq("extraction_id", (extractionRow as Record<string, unknown>).id)
+      .order("created_at", { ascending: true });
+    throwIf(itemsError, "Could not load the trackable items.");
+    const row = extractionRow as Record<string, unknown>;
+    return {
+      extraction: {
+        id: row.id as string,
+        agencyId: row.agency_id as string,
+        uploadId: row.upload_id as string,
+        schemaVersion: Number(row.schema_version ?? 1),
+        extractedData: row.extracted_data as LocalDocumentExtraction["extractedData"],
+        confidence: (row.confidence as Record<string, unknown>) ?? {},
+        model: String(row.model ?? "gemini-2.5-flash"),
+        createdAt: row.created_at as string,
+      },
+      items: ((itemRows ?? []) as Record<string, unknown>[]).map(mapTrackableItem),
+    };
+  }
+
+  async simulatePcspExtraction(
+    _uploadId: string,
+  ): Promise<{
+    extraction: LocalDocumentExtraction;
+    items: TrackableItem[];
+  }> {
+    // The hosted path runs the real extract-pcsp edge function.
+    throw new Error(
+      "Real AI extraction is hosted-only. Use extractDocumentUpload() to invoke the extract-pcsp edge function.",
+    );
+  }
+
+  /**
+   * Invoke the extract-pcsp edge function: Gemini extracts the document
+   * text into the v1 schema, records the extraction + proposed items via
+   * mark_extraction_complete (service role), and returns the result.
+   * documents.review is re-checked inside the function along with the
+   * agency's ai_processing_enabled BAA gate.
+   */
+  async extractDocumentUpload(
+    uploadId: string,
+    documentText: string,
+  ): Promise<{ ok: boolean; fallbackUsed: boolean }> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    const result = await invokeEdgeFunction<{
+      ok?: boolean;
+      fallback_used?: boolean;
+      error?: string;
+    }>(this.client, "extract-pcsp", {
+      upload_id: uploadId,
+      document_type: (
+        await this.listDocumentUploads()
+      ).find((u) => u.id === uploadId)?.documentType,
+      document_text: documentText,
+    });
+    return {
+      ok: result.ok !== false,
+      fallbackUsed: Boolean(result.fallback_used),
+    };
+  }
+
+  async updateTrackableItem(
+    itemId: string,
+    patch: {
+      title: string;
+      detail?: Record<string, unknown>;
+      dueDate?: string | null;
+      needsHumanCheck?: boolean;
+    },
+  ): Promise<TrackableItem> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    const { data, error } = await this.client.rpc("update_trackable_item", {
+      p_item_id: itemId,
+      p_title: patch.title,
+      p_detail: patch.detail ?? {},
+      p_due_date: patch.dueDate ?? null,
+      p_needs_human_check: patch.needsHumanCheck ?? false,
+    });
+    throwIf(error, "Could not update the trackable item.");
+    if (!data) throw new Error("Could not update the trackable item.");
+    return mapTrackableItem(data as Record<string, unknown>);
+  }
+
+  async approveDocumentExtraction(uploadId: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    // THE gate: nothing becomes tracked before this RPC runs.
+    const { error } = await this.client.rpc("approve_extraction", {
+      p_upload_id: uploadId,
+    });
+    throwIf(error, "Could not approve the extraction.");
+  }
+
+  async activateTrackableItem(itemId: string): Promise<TrackableItem> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    // protocol_needs_delegation items hand off into the delegation system
+    // (template → activation → assignment → training draft) inside the RPC.
+    const { data, error } = await this.client.rpc("activate_trackable_item", {
+      p_item_id: itemId,
+    });
+    throwIf(error, "Could not activate the trackable item.");
+    const result = data as { item?: Record<string, unknown> } | null;
+    if (!result?.item) throw new Error("Could not activate the trackable item.");
+    return mapTrackableItem(result.item);
+  }
+
+  async rejectDocumentUpload(uploadId: string, reason?: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    const { error } = await this.client.rpc("reject_upload", {
+      p_upload_id: uploadId,
+      p_reason: reason ?? null,
+    });
+    throwIf(error, "Could not reject the upload.");
+  }
+
+  async getAgencyAiSettings(): Promise<LocalAgencyAiSettings> {
+    const session = await this.requireSession();
+    // Carries no secrets — RLS allows any agency member to read.
+    const { data, error } = await this.client
+      .from("agency_ai_settings")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load the AI settings.");
+    const row = data as Record<string, unknown> | null;
+    return {
+      agencyId: session.agencyId,
+      aiProcessingEnabled: Boolean(row?.ai_processing_enabled),
+      model: String(row?.model ?? "gemini-2.5-flash"),
+      keyLastVerifiedAt: (row?.key_last_verified_at as string) ?? null,
+    };
+  }
+
+  async setAgencyAiSettings(input: {
+    enabled: boolean;
+    model: string;
+  }): Promise<LocalAgencyAiSettings> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "roles.manage");
+    // Model + enabled flag only — the key is NEVER stored.
+    const { data, error } = await this.client.rpc("set_agency_ai_settings", {
+      p_agency_id: session.agencyId,
+      p_enabled: input.enabled,
+      p_model: input.model,
+    });
+    throwIf(error, "Could not save the AI settings.");
+    const row = data as Record<string, unknown> | null;
+    return {
+      agencyId: session.agencyId,
+      aiProcessingEnabled: Boolean(row?.ai_processing_enabled),
+      model: String(row?.model ?? input.model),
+      keyLastVerifiedAt: (row?.key_last_verified_at as string) ?? null,
+    };
+  }
+
+  async verifyAiKey(): Promise<{
+    ok: boolean;
+    modelCount?: number;
+    error?: string;
+  }> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "roles.manage");
+    // Minimal models-list call inside the edge function — the key value
+    // never leaves the server and is never returned.
+    const result = await invokeEdgeFunction<{
+      ok?: boolean;
+      models_count?: number;
+      error?: string;
+    }>(this.client, "extract-pcsp", {
+      action: "verify",
+      agency_id: session.agencyId,
+    });
+    return {
+      ok: result.ok === true,
+      modelCount:
+        typeof result.models_count === "number" ? result.models_count : undefined,
+      error: result.error,
+    };
+  }
+
+  async addTrackableItem(input: {
+    extractionId: string;
+    itemType: TrackableItemType;
+    title: string;
+    detail?: Record<string, unknown>;
+    dueDate?: string | null;
+    needsHumanCheck?: boolean;
+  }): Promise<TrackableItem> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    const { data, error } = await this.client.rpc("add_trackable_item", {
+      p_extraction_id: input.extractionId,
+      p_item_type: input.itemType,
+      p_title: input.title,
+      p_detail: input.detail ?? {},
+      p_due_date: input.dueDate ?? null,
+      p_needs_human_check: input.needsHumanCheck ?? false,
+    });
+    throwIf(error, "Could not add the trackable item.");
+    if (!data) throw new Error("Could not add the trackable item.");
+    return mapTrackableItem(data as Record<string, unknown>);
+  }
+
+  async removeTrackableItem(itemId: string): Promise<TrackableItem> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "documents.review");
+    const { data, error } = await this.client.rpc("remove_trackable_item", {
+      p_item_id: itemId,
+    });
+    throwIf(error, "Could not remove the trackable item.");
+    if (!data) throw new Error("Could not remove the trackable item.");
+    return mapTrackableItem(data as Record<string, unknown>);
+  }
 }
 
 function mapDspHmRating(
@@ -7573,6 +7881,45 @@ function mapRequirementRow(row: Record<string, unknown>): RequirementRecord {
     status: requirementStatusFromDb(row.status as string),
     evidenceNote: (row.evidence_note as string) ?? "",
     completedAt: (row.completed_at as string) ?? undefined,
+  };
+}
+
+/* ---------------------------------------------------------------------- */
+/* PCSP document-extraction pipeline mappers: snake_case table/RPC rows  */
+/* to the domain types in src/data/documents.ts.                        */
+/* ---------------------------------------------------------------------- */
+
+function mapDocumentUpload(row: Record<string, unknown>): DocumentUpload {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    individualId: row.individual_id as string,
+    siteId: row.site_id as string,
+    documentType: row.document_type as DocumentType,
+    originalFilename: row.original_filename as string,
+    mimeType: (row.mime_type as string) ?? "application/pdf",
+    storagePath: row.storage_path as string,
+    uploadedBy: (row.uploaded_by as string) ?? null,
+    uploadedAt: row.uploaded_at as string,
+    status: row.status as DocumentStatus,
+  };
+}
+
+function mapTrackableItem(row: Record<string, unknown>): TrackableItem {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    extractionId: row.extraction_id as string,
+    itemType: row.item_type as TrackableItem["itemType"],
+    title: row.title as string,
+    detail: (row.detail as Record<string, unknown>) ?? {},
+    dueDate: (row.due_date as string) ?? null,
+    confidence:
+      row.confidence === null || row.confidence === undefined
+        ? null
+        : Number(row.confidence),
+    needsHumanCheck: Boolean(row.needs_human_check),
+    status: row.status as TrackableItem["status"],
   };
 }
 

@@ -33,6 +33,8 @@ export const PERMISSION_KEYS = [
   "individuals.view",
   "documents.view",
   "documents.upload",
+  // PCSP-EXTRACTION (documents.review goes here)
+  "documents.review",
   "requirements.approve",
   "requirements.complete",
   "acknowledgments.manage",
@@ -154,6 +156,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "individuals.view",
       "documents.view",
       "documents.upload",
+      // PCSP-EXTRACTION: review/approve AI-extracted items.
+      "documents.review",
       "requirements.approve",
       "requirements.complete",
       "acknowledgments.manage",
@@ -185,6 +189,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "individuals.view",
       "documents.view",
       "documents.upload",
+      // PCSP-EXTRACTION: review/approve AI-extracted items.
+      "documents.review",
       "requirements.approve",
       "requirements.complete",
       "acknowledgments.manage",
@@ -233,6 +239,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "individuals.view",
       "documents.view",
       "documents.upload",
+      // PCSP-EXTRACTION: review/approve AI-extracted items.
+      "documents.review",
       "requirements.approve",
       "requirements.complete",
       "acknowledgments.sign_own",
@@ -342,6 +350,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "individuals.view": "View individual records",
   "documents.view": "View plans and documents",
   "documents.upload": "Create and upload plans",
+  // PCSP-EXTRACTION (2026-09-14): review/approve AI-extracted document items.
+  "documents.review": "Review and approve extracted document items",
   "requirements.approve": "Approve requirements",
   "requirements.complete": "Record completions",
   "acknowledgments.manage": "Manage acknowledgment sheets",

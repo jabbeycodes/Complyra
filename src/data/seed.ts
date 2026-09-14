@@ -128,6 +128,44 @@ export interface LocalDatabase {
   individualDelegationAssignments: IndividualDelegationAssignment[];
   delegationTrainingMaterials: DelegationTrainingMaterial[];
   delegationAcknowledgments: DelegationAcknowledgment[];
+  // PCSP-EXTRACTION: document uploads, AI extractions, proposed trackable
+  // items, audit log, and per-agency AI settings (local demo shapes).
+  documentUploads: import("./documents").DocumentUpload[];
+  documentExtractions: LocalDocumentExtraction[];
+  documentTrackableItems: import("./documents").TrackableItem[];
+  documentAuditLog: LocalDocumentAuditEntry[];
+  agencyAiSettings: LocalAgencyAiSettings[];
+}
+
+/** Local demo shape for one AI extraction (mirrors document_extractions). */
+export interface LocalDocumentExtraction {
+  id: string;
+  agencyId: string;
+  uploadId: string;
+  schemaVersion: number;
+  extractedData: import("./documents").PcspExtraction | import("./documents").AnnualPhysicianOrderExtraction;
+  confidence: Record<string, unknown>;
+  model: string;
+  createdAt: string;
+}
+
+/** Local demo shape for one audit entry (mirrors document_audit_log). */
+export interface LocalDocumentAuditEntry {
+  id: string;
+  agencyId: string;
+  uploadId: string | null;
+  actor: string | null;
+  action: string;
+  at: string;
+  detail: Record<string, unknown>;
+}
+
+/** Local demo shape for per-agency AI settings (mirrors agency_ai_settings). */
+export interface LocalAgencyAiSettings {
+  agencyId: string;
+  aiProcessingEnabled: boolean;
+  model: string;
+  keyLastVerifiedAt: string | null;
 }
 
 /** Append-only change record for one rating/review row (local store shape). */
@@ -544,6 +582,12 @@ export function createEvergreenSeed(): LocalDatabase {
     individualDelegationAssignments: [],
     delegationTrainingMaterials: [],
     delegationAcknowledgments: [],
+    // PCSP-EXTRACTION: empty in the seed — uploads are created at runtime.
+    documentUploads: [],
+    documentExtractions: [],
+    documentTrackableItems: [],
+    documentAuditLog: [],
+    agencyAiSettings: [],
   };
 }
 
