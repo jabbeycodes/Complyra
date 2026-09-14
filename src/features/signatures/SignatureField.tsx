@@ -8,7 +8,9 @@ import type {
 } from "../../data/types";
 import SignatureAdoption from "./SignatureAdoption";
 import SignatureSeal from "./SignatureSeal";
-import { formatSignatureDate } from "./signatureUtils";
+import ReauthSheet from "./ReauthSheet";
+import { useSignatureViewLog } from "./useSignatureViewLog";
+import { formatSignatureDate, ReauthRequiredError } from "./signatureUtils";
 
 interface BaseFieldProps {
   documentType: SignableDocumentType;
@@ -61,6 +63,15 @@ function BaseSignatureField({
   const [adopting, setAdopting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /**
+   * 13 CSR 65-3.050 second identification component: when applySignature
+   * raises ReauthRequiredError, open the password sheet instead of failing;
+   * the original signing is retried automatically after confirmation.
+   */
+  const [reauthOpen, setReauthOpen] = useState(false);
+
+  // 13 CSR 65-3.050: one audit event when a signed record is viewed.
+  useSignatureViewLog(documentType, documentId, event !== null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -100,7 +111,13 @@ function BaseSignatureField({
       await refresh();
       onSigned?.();
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof ReauthRequiredError) {
+        // Open the 13 CSR 65-3.050 password sheet; sign() is retried from
+        // onVerified so the user never loses their place.
+        setReauthOpen(true);
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -172,6 +189,15 @@ function BaseSignatureField({
           onAdopted={() => {
             setAdopting(false);
             void reload();
+          }}
+        />
+      )}
+      {reauthOpen && (
+        <ReauthSheet
+          onClose={() => setReauthOpen(false)}
+          onVerified={() => {
+            setReauthOpen(false);
+            void sign();
           }}
         />
       )}

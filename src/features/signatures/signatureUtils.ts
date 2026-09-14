@@ -12,10 +12,73 @@
  */
 
 /** Current ESIGN/UETA consent text version. Bumped whenever the text changes. */
-export const ESIGN_CONSENT_VERSION = "2026-09-13-v1";
+export const ESIGN_CONSENT_VERSION = "2026-09-13-v2";
 
 export const ESIGN_CONSENT_TEXT =
-  "I agree to use electronic records and signatures in Complyrer. I understand that my electronic signature and initials have the same legal effect as my handwritten signature, and I consent to do business electronically. I understand I may withdraw this consent by contacting my administrator.";
+  "I agree to use electronic records and signatures in Complyrer. I understand that my electronic signature and initials have the same legal effect as my handwritten signature, and I consent to do business electronically. " +
+  "Each time I sign or initial a document, I will confirm my identity with two distinct components: my signed-in session plus re-entering my password. " +
+  "If I adopt a typed style for my signature or initials, I understand it is an adopted electronic symbol created through this enrollment ceremony and recorded with my intent to sign — not merely a typed name — and I adopt it as the legally binding equivalent of my handwritten signature. " +
+  "I understand I may withdraw this consent by contacting my administrator.";
+
+/**
+ * 13 CSR 65-3.050 second-ID-component window: one password re-entry covers
+ * this many milliseconds of signing (mirrors REAUTH_WINDOW_SECONDS = 300 in
+ * the apply-signature edge function, which is the authority). After the
+ * window, the next signature needs a fresh re-entry.
+ */
+export const REAUTH_WINDOW_MS = 5 * 60 * 1000;
+
+/** localStorage key for the stable per-device identifier (13 CSR 65-3.050). */
+const DEVICE_ID_KEY = "complyrer.device_id";
+
+/**
+ * Stable device identifier for the audit trail. Generated once per browser /
+ * device and reused; a client-claimed value (the server records it as-is and
+ * pairs it with the server-observed IP).
+ */
+export function getDeviceId(): string {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const existing = localStorage.getItem(DEVICE_ID_KEY);
+      if (existing) return existing;
+      const fresh =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `device-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+      localStorage.setItem(DEVICE_ID_KEY, fresh);
+      return fresh;
+    }
+  } catch {
+    // Non-browser (tests) or blocked storage: fall through to ephemeral.
+  }
+  return `ephemeral-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+}
+
+/**
+ * Thrown when the signing ceremony needs a fresh password re-entry
+ * (13 CSR 65-3.050 second identification component). The UI opens the
+ * password sheet on this error and retries afterwards. Carries the
+ * machine-readable `code` from the edge function.
+ */
+export class ReauthRequiredError extends Error {
+  readonly code = "reauth_required";
+  constructor(message = "Confirm it’s you: re-enter your password to sign.") {
+    super(message);
+    this.name = "ReauthRequiredError";
+  }
+}
+
+/** Edge-function application error with a machine-readable code. */
+export class EdgeFunctionError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+  constructor(message: string, code?: string, status?: number) {
+    super(message);
+    this.name = "EdgeFunctionError";
+    this.code = code;
+    this.status = status;
+  }
+}
 
 /** Max adopted/uploaded signature image size (task constraint). */
 export const SIGNATURE_MAX_BYTES = 200 * 1024;

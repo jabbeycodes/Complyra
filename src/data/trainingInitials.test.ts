@@ -45,6 +45,9 @@ async function adopt(api: LocalApi, username: string) {
     consentTextVersion: ESIGN_CONSENT_VERSION,
     consentGiven: true,
   });
+  // 13 CSR 65-3.050: signing requires a fresh password re-entry on top of
+  // the session, so the harness re-authenticates before signing.
+  await api.verifySigningPassword(DEMO_PASSWORD);
   return session;
 }
 
@@ -307,6 +310,10 @@ test("editing a line bumps the version and requires re-initialing; old stamp sta
   // Re-initial stamps the new version under a fresh field name — no collision.
   // (The re-initial submit re-saves the line, so v2 -> v3 with a v3 stamp;
   // the v1 stamp stays as history.)
+  // 13 CSR 65-3.050: only the assigned staff member may initial their own
+  // line, so the DSP signs back in (their password re-entry is still fresh)
+  // before re-initialling.
+  await api.signIn(login(DEMO_DSP_USERNAME));
   await initialAndStamp(fx, lineId, adoptedInitialsText);
   const restamped = await api.getSignatureEvents("training_checklist", docId);
   const restampedLineEvents = restamped.filter((event) =>

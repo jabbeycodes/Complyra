@@ -969,3 +969,39 @@ export interface ApplySignatureResult {
   signedAt: string;
   documentHash: string;
 }
+
+/**
+ * Client-observed audit actions for the 13 CSR 65-3.050 trail. Password
+ * re-entry outcomes and applied signatures are logged server-side
+ * automatically; the client reports logins, logouts, and signed-document
+ * views through logSignatureAudit.
+ */
+export type SignatureClientAuditAction = "login" | "logout" | "document_viewed";
+
+export interface LogSignatureAuditInput {
+  action: SignatureClientAuditAction;
+  documentType?: SignableDocumentType;
+  documentId?: string;
+  fieldName?: string;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * One row of the 13 CSR 65-3.050 audit trail. Hosted: mirrors the
+ * `signature_audit_log` table (sibling-owned migration); local: an in-memory
+ * collection with the same shape.
+ */
+export interface SignatureAuditRecord {
+  id: string;
+  userId: string;
+  agencyId: string;
+  action: string;
+  documentType: string | null;
+  documentId: string | null;
+  fieldName: string | null;
+  createdAt: string;
+  deviceId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  details: Record<string, unknown> | null;
+}

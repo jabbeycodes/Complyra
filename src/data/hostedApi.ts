@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { Activity, Plan, Requirement } from "../domain";
 import {
   computeRequirementStatus,
@@ -59,7 +60,9 @@ import type {
   AdoptSignatureInput,
   ApplySignatureInput,
   ApplySignatureResult,
+  LogSignatureAuditInput,
   SignableDocumentType,
+  SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
 } from "./types";
@@ -74,7 +77,10 @@ import { generateTempPassword } from "./agencyCode";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
+  EdgeFunctionError,
   formatSignatureDate,
+  getDeviceId,
+  ReauthRequiredError,
 } from "../features/signatures/signatureUtils";
 import {
   legacyTrainingDocId,
@@ -269,6 +275,62 @@ function activityKind(action: string): Activity["kind"] {
   return "document";
 }
 
+/**
+ * Invoke a Supabase edge function and surface application errors faithfully.
+ * supabase-js surfaces non-2xx responses as FunctionsHttpError with the
+ * structured body on `error.context`; this helper parses `{error, code}` so
+ * the UI can act on machine-readable codes (e.g. `reauth_required` opens the
+ * password sheet). A 200 response carrying an error envelope is handled too.
+ */
+async function invokeEdgeFunction<T>(
+  client: SupabaseClient,
+  name: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const { data, error } = await client.functions.invoke(name, { body });
+  if (!error) {
+    if (data && typeof data === "object" && "error" in data) {
+      throw edgeErrorFromBody(data as { error?: unknown; code?: unknown }, undefined);
+    }
+    return data as T;
+  }
+  if (error instanceof FunctionsHttpError) {
+    try {
+      const bodyText = await error.context.text();
+      const parsed = bodyText ? (JSON.parse(bodyText) as { error?: unknown; code?: unknown }) : {};
+      throw edgeErrorFromBody(parsed, error);
+    } catch (err) {
+      if (err instanceof EdgeFunctionError || err instanceof ReauthRequiredError) throw err;
+      // Body wasn't JSON — fall through to the generic message below.
+    }
+  }
+  throw new Error(error.message ?? "The signature service is unavailable.");
+}
+
+/**
+ * Map an edge-function `{error, code}` body to the matching client error.
+ * Exported for contract tests: the UI opens the password sheet exactly when
+ * the server answers code "reauth_required".
+ */
+export function edgeErrorFromBody(
+  parsed: { error?: unknown; code?: unknown },
+  cause: unknown,
+): Error {
+  const message =
+    typeof parsed.error === "string" && parsed.error
+      ? parsed.error
+      : "The signature service returned an unexpected response.";
+  const code = typeof parsed.code === "string" ? parsed.code : undefined;
+  if (code === "reauth_required") {
+    const err = new ReauthRequiredError(message);
+    (err as { cause?: unknown }).cause = cause;
+    return err;
+  }
+  const err = new EdgeFunctionError(message, code);
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
 export class HostedApi implements ComplyraApi {
   constructor(private readonly client: SupabaseClient) {}
 
@@ -298,10 +360,14 @@ export class HostedApi implements ComplyraApi {
     if (!session) {
       throw new Error("This account is not a member of an agency.");
     }
+    // 13 CSR 65-3.050: track user log-in (server records device + IP).
+    await this.logSignatureAudit({ action: "login" });
     return session;
   }
 
   async signOut() {
+    // 13 CSR 65-3.050: track user log-out before the session is destroyed.
+    await this.logSignatureAudit({ action: "logout" });
     await this.client.auth.signOut();
   }
 
@@ -3902,10 +3968,14 @@ export class HostedApi implements ComplyraApi {
       .maybeSingle();
     if (existingSignoff) {
       // Correction edit of a completed line: allowed only on unlocked sheets
-      // and only by roles that may update signoffs (mirrors RLS).
-      if (!canEditTrainingLine(session.roleKey)) {
+      // and only by roles that may update signoffs (mirrors RLS) — plus the
+      // assigned trainee, who must be able to re-save their own line in order
+      // to re-initial it. 13 CSR 65-3.050 attribution requires that only the
+      // trainee initials their own lines, so the save path cannot lock them
+      // out of the re-initial the stamp path demands.
+      if (!canEditTrainingLine(session.roleKey) && session.userId !== mapped.userId) {
         throw new Error(
-          "Only an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
         );
       }
       // Void-and-redo: the edit voids the previous initialing — the line must
@@ -5872,34 +5942,21 @@ export class HostedApi implements ComplyraApi {
       throw new Error("A valid signature request is required.");
     }
     // The edge-function contract is snake_case (see
-    // supabase/functions/apply-signature/index.ts).
-    const { data, error } = await this.client.functions.invoke("apply-signature", {
-      body: {
-        document_type: input.documentType.trim(),
-        document_id: input.documentId.trim(),
-        field_name: input.fieldName.trim(),
-        signature_kind: input.kind,
-        document_payload: input.documentPayload,
-        agency_id: session.agencyId,
-      },
-    });
-    if (error) {
-      throw new Error(
-        (error as { message?: string }).message ?? "Could not apply your signature.",
-      );
-    }
-    if (data && typeof data === "object" && "error" in data) {
-      throw new Error(
-        String(
-          (data as { error?: unknown }).error ?? "Could not apply your signature.",
-        ),
-      );
-    }
-    const result = (data ?? {}) as {
+    // supabase/functions/apply-signature/index.ts). 4xx bodies carry
+    // {error, code}; code "reauth_required" opens the password sheet.
+    const result = await invokeEdgeFunction<{
       event_id?: string;
       signed_at?: string;
       document_hash?: string;
-    };
+    }>(this.client, "apply-signature", {
+      document_type: input.documentType.trim(),
+      document_id: input.documentId.trim(),
+      field_name: input.fieldName.trim(),
+      signature_kind: input.kind,
+      document_payload: input.documentPayload,
+      agency_id: session.agencyId,
+      device_id: getDeviceId(),
+    });
     if (!result.event_id || !result.signed_at || !result.document_hash) {
       throw new Error("The signature service returned an unexpected response.");
     }
@@ -5908,6 +5965,79 @@ export class HostedApi implements ComplyraApi {
       signedAt: result.signed_at,
       documentHash: result.document_hash,
     };
+  }
+
+  /**
+   * 13 CSR 65-3.050 second identification component (hosted): the password is
+   * verified inside the apply-signature edge function against the Auth API —
+   * never trusted from a client-side claim, never stored. A success covers
+   * REAUTH_WINDOW_MS of signing; 401 means the password was wrong, 429 means
+   * the attempt budget is spent for now.
+   */
+  async verifySigningPassword(password: string): Promise<{ reauthAt: string }> {
+    await this.requireSession();
+    const result = await invokeEdgeFunction<{ reauth_at?: string }>(
+      this.client,
+      "apply-signature",
+      { action: "reauth", password, device_id: getDeviceId() },
+    );
+    if (!result.reauth_at) {
+      throw new Error("The signature service returned an unexpected response.");
+    }
+    return { reauthAt: result.reauth_at };
+  }
+
+  /**
+   * 13 CSR 65-3.050: report a client-observed audit event (login, logout, or
+   * a signed-document view). The edge function records it with the
+   * server-observed IP; failures are swallowed so audit logging can never
+   * break the login/logout/view it is observing.
+   */
+  async logSignatureAudit(input: LogSignatureAuditInput): Promise<void> {
+    try {
+      await this.requireSession();
+      await invokeEdgeFunction<{ ok?: boolean }>(this.client, "apply-signature", {
+        action: "log",
+        log_action: input.action,
+        document_type: input.documentType ?? null,
+        document_id: input.documentId ?? null,
+        field_name: input.fieldName ?? null,
+        device_id: getDeviceId(),
+        details: input.details ?? null,
+      });
+    } catch {
+      // Audit logging must never break the action it observes.
+    }
+  }
+
+  async getSignatureAuditLog(input?: {
+    documentType?: SignableDocumentType;
+    documentId?: string;
+  }): Promise<SignatureAuditRecord[]> {
+    const session = await this.requireSession();
+    let query = this.client
+      .from("signature_audit_log")
+      .select("*")
+      .eq("user_id", session.userId)
+      .order("created_at", { ascending: true });
+    if (input?.documentType) query = query.eq("document_type", input.documentType);
+    if (input?.documentId) query = query.eq("document_id", input.documentId);
+    const { data, error } = await query;
+    throwIf(error, "Could not load the signature audit log.");
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      userId: String(row.user_id),
+      agencyId: String(row.agency_id ?? ""),
+      action: String(row.action),
+      documentType: (row.document_type as string | null) ?? null,
+      documentId: (row.document_id as string | null) ?? null,
+      fieldName: (row.field_name as string | null) ?? null,
+      createdAt: String(row.created_at),
+      deviceId: (row.device_id as string | null) ?? null,
+      ipAddress: (row.ip_address as string | null) ?? null,
+      userAgent: (row.user_agent as string | null) ?? null,
+      details: (row.details as Record<string, unknown> | null) ?? null,
+    }));
   }
 
   async getSignatureEvents(

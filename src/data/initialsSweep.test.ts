@@ -46,6 +46,9 @@ async function adoptedApi(username: string) {
   const api = new LocalApi(store());
   await api.signIn(login(username));
   await api.adoptSignature(adoptInput());
+  // 13 CSR 65-3.050: signing requires a fresh password re-entry on top of
+  // the session, so the harness re-authenticates before signing.
+  await api.verifySigningPassword(DEMO_PASSWORD);
   return api;
 }
 
@@ -53,6 +56,7 @@ async function adoptedApi(username: string) {
 async function rnSignedDelegation(api: LocalApi, username: string) {
   const session = await api.signIn(login(username));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const ws = await api.loadWorkspace(session);
   const person = ws.individuals[0];
   const { id } = await api.createDelegation({
@@ -307,6 +311,7 @@ test("a roster row can only be initialed by the staff member named on it", async
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
   await dspApi.signIn(login(DEMO_DSP_USERNAME));
   await dspApi.adoptSignature(adoptInput());
+  await dspApi.verifySigningPassword(DEMO_PASSWORD);
   await assert.rejects(
     () =>
       dspApi.applySignature({

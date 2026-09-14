@@ -52,6 +52,9 @@ async function adoptedApi(username: string) {
   const api = new LocalApi(store());
   await api.signIn(login(username));
   await api.adoptSignature(adoptInput());
+  // 13 CSR 65-3.050: signing requires a fresh password re-entry on top of
+  // the session, so the harness re-authenticates before signing.
+  await api.verifySigningPassword(DEMO_PASSWORD);
   return api;
 }
 
@@ -282,6 +285,7 @@ test("RN signs a delegation via applySignature; the form delegatingRn is stamped
   const api = new LocalApi(store());
   await api.signIn(login(DEMO_NURSE_USERNAME));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const { session, id, payload } = await delegationWithForm(api, DEMO_NURSE_USERNAME);
   const result = await api.applySignature({
     documentType: "delegation_form",
@@ -303,6 +307,7 @@ test("a signed delegation form rejects content edits (locked)", async () => {
   const api = new LocalApi(store());
   await api.signIn(login(DEMO_NURSE_USERNAME));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const { id, payload } = await delegationWithForm(api, DEMO_NURSE_USERNAME);
   await api.applySignature({
     documentType: "delegation_form",
@@ -325,6 +330,7 @@ test("a roster row can only be signed by the staff member named on it", async ()
   const api = new LocalApi(store());
   const nurse = await api.signIn(login(DEMO_NURSE_USERNAME));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const { person, id } = await delegationWithForm(api, DEMO_NURSE_USERNAME);
   // Name row 0 for the nurse BEFORE anyone signs (edits lock after signing).
   const form = blankDelegationForm();
@@ -351,6 +357,7 @@ test("a roster row can only be signed by the staff member named on it", async ()
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
   await dspApi.signIn(login(DEMO_DSP_USERNAME));
   await dspApi.adoptSignature(adoptInput());
+  await dspApi.verifySigningPassword(DEMO_PASSWORD);
   await assert.rejects(
     () =>
       dspApi.applySignature({
@@ -382,6 +389,7 @@ test("a signed training sheet locks line edits until a correction is requested",
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const ws = await api.loadWorkspace(admin);
   const siteId = ws.sites[0].id;
   const dsp = ws.staff.find((s) => s.username === DEMO_DSP_USERNAME)!;
@@ -393,6 +401,7 @@ test("a signed training sheet locks line edits until a correction is requested",
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
   await dspApi.signIn(login(DEMO_DSP_USERNAME));
   await dspApi.adoptSignature(adoptInput());
+  await dspApi.verifySigningPassword(DEMO_PASSWORD);
   for (const line of profile.requirements) {
     await dspApi.initialRequirementLine(line.id, {
       initials: "AM",
@@ -477,6 +486,7 @@ test("a signed HM checklist rejects further answers (locked)", async () => {
   const hmApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
   await hmApi.signIn(login(hmStaff.username));
   await hmApi.adoptSignature(adoptInput());
+  await hmApi.verifySigningPassword(DEMO_PASSWORD);
   for (const item of created.items) {
     if (item.key === ITEM_21_KEY) continue;
     await hmApi.answerChecklistItem(created.id, item.key, "Y");
@@ -511,6 +521,7 @@ test("certificate acknowledgment: only the holder can sign", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   await api.adoptSignature(adoptInput());
+  await api.verifySigningPassword(DEMO_PASSWORD);
   const ws = await api.loadWorkspace(admin);
   const dsp = ws.staff.find((s) => s.username === DEMO_DSP_USERNAME)!;
   // No demo user holds certificates.manage, so seed the certificate row
@@ -546,6 +557,7 @@ test("certificate acknowledgment: only the holder can sign", async () => {
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
   await dspApi.signIn(login(DEMO_DSP_USERNAME));
   await dspApi.adoptSignature(adoptInput());
+  await dspApi.verifySigningPassword(DEMO_PASSWORD);
   const result = await dspApi.applySignature({
     documentType: "certificate",
     documentId: cert.id,

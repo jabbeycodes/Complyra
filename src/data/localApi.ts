@@ -76,7 +76,9 @@ import type {
   AdoptSignatureInput,
   ApplySignatureInput,
   ApplySignatureResult,
+  LogSignatureAuditInput,
   SignableDocumentType,
+  SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
   UserSignature,
@@ -222,6 +224,9 @@ import {
   dataUrlToBlob,
   delegationRosterRowKey,
   formatSignatureDate,
+  getDeviceId,
+  REAUTH_WINDOW_MS,
+  ReauthRequiredError,
   signatureDocumentHash,
   suggestInitials,
 } from "../features/signatures/signatureUtils";
@@ -635,6 +640,28 @@ export interface ComplyraApi {
   getSignatureSettings(): Promise<SignatureSettings>;
   /** Administrator-only: persist the agency's adoption-method toggles. */
   updateSignatureSettings(input: SignatureSettings): Promise<SignatureSettings>;
+  /**
+   * 13 CSR 65-3.050 second identification component: verify the session user's
+   * password and record a fresh re-auth covering REAUTH_WINDOW_MS of signing.
+   * The password is verified server-side (never trusted from a client claim)
+   * and never stored.
+   */
+  verifySigningPassword(password: string): Promise<{ reauthAt: string }>;
+  /**
+   * Record a client-observed 13 CSR 65-3.050 audit event (login, logout, or a
+   * signed-document view). Re-auth outcomes and applied signatures are logged
+   * automatically; the client only reports what it alone can observe.
+   */
+  logSignatureAudit(input: LogSignatureAuditInput): Promise<void>;
+  /**
+   * 13 CSR 65-3.050 audit rows visible to the session user (their own rows;
+   * hosted additionally exposes them to administrator/compliance_admin
+   * verifiers via RLS).
+   */
+  getSignatureAuditLog(input?: {
+    documentType?: SignableDocumentType;
+    documentId?: string;
+  }): Promise<SignatureAuditRecord[]>;
 }
 
 export type WorkspaceSite = {
@@ -705,6 +732,14 @@ export class MemoryStore {
   db: LocalDatabase;
   files = new Map<string, { mime: string; bytes: ArrayBuffer }>();
   sessionUserId: string | null = null;
+  /**
+   * 13 CSR 65-3.050 second-ID-component state (local/demo path): userId ->
+   * ISO timestamp of the last password re-entry for the signing ceremony.
+   * Deliberately NOT persisted (not part of db): a fresh browser session
+   * always starts with no re-auth, so a stolen device cannot sign on old
+   * re-entry. The hosted path keeps this server-side in signature_reauth.
+   */
+  signingReauthAt = new Map<string, string>();
 
   constructor(db?: LocalDatabase) {
     this.db = db ?? cloneSeed();
@@ -1581,12 +1616,24 @@ export class LocalApi implements ComplyraApi {
       throw new Error(LOGIN_FAILED_MESSAGE);
     }
     this.store.sessionUserId = credential.userId;
+    const session = currentSession(this.store)!;
+    // 13 CSR 65-3.050: track user log-in.
+    this.pushSignatureAudit(session, "login", {});
     await persistMeta(this.store);
-    return currentSession(this.store)!;
+    return session;
   }
 
   async signOut() {
+    const session = this.store.sessionUserId
+      ? currentSession(this.store)
+      : null;
     this.store.sessionUserId = null;
+    this.store.signingReauthAt.clear();
+    if (session) {
+      // 13 CSR 65-3.050: track user log-out. Re-auth state is cleared so a
+      // later session cannot sign on this session's password re-entry.
+      this.pushSignatureAudit(session, "logout", {});
+    }
     await persistMeta(this.store);
   }
 
@@ -3830,10 +3877,17 @@ export class LocalApi implements ComplyraApi {
     const existing = this.p2SignoffFor(requirementId);
     if (existing) {
       // Correction edit of a completed line: allowed only on unlocked sheets
-      // and only by roles that may update signoffs (mirrors RLS).
-      if (!canEditTrainingLine(session.roleKey)) {
+      // and only by roles that may update signoffs (mirrors RLS) — plus the
+      // assigned trainee, who must be able to re-save their own line in order
+      // to re-initial it. 13 CSR 65-3.050 attribution requires that only the
+      // trainee initials their own lines, so the save path cannot lock them
+      // out of the re-initial the stamp path demands.
+      if (
+        !canEditTrainingLine(session.roleKey) &&
+        session.userId !== requirement.userId
+      ) {
         throw new Error(
-          "Only an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
         );
       }
       Object.assign(existing, {
@@ -5455,19 +5509,23 @@ export class LocalApi implements ComplyraApi {
     userSignatures: UserSignature[];
     signatureEvents: SignatureEvent[];
     agencySignatureSettings: Record<string, SignatureSettings>;
+    signatureAuditLog: SignatureAuditRecord[];
   } {
     const db = this.store.db as unknown as {
       userSignatures?: UserSignature[];
       signatureEvents?: SignatureEvent[];
       agencySignatureSettings?: Record<string, SignatureSettings>;
+      signatureAuditLog?: SignatureAuditRecord[];
     };
     db.userSignatures ??= [];
     db.signatureEvents ??= [];
     db.agencySignatureSettings ??= {};
+    db.signatureAuditLog ??= [];
     return db as {
       userSignatures: UserSignature[];
       signatureEvents: SignatureEvent[];
       agencySignatureSettings: Record<string, SignatureSettings>;
+      signatureAuditLog: SignatureAuditRecord[];
     };
   }
 
@@ -5616,6 +5674,11 @@ export class LocalApi implements ComplyraApi {
         "Electronic-signature consent is required before signing.",
       );
     }
+    // 13 CSR 65-3.050 second identification component: even an adopted user
+    // may only affix a signature/initials with a fresh password re-entry on
+    // top of the session. The hosted edge function enforces the same gate
+    // server-side.
+    this.assertFreshReauth(session);
     const coll = this.sigCollections();
     const duplicate = coll.signatureEvents.find(
       (row) =>
@@ -5657,8 +5720,103 @@ export class LocalApi implements ComplyraApi {
       "signature_event",
       event.id,
     );
+    // 13 CSR 65-3.050 audit trail: every applied signature is recorded with
+    // the device identifier (mirrors the hosted signature_audit_log row).
+    this.pushSignatureAudit(session, "sign_applied", {
+      documentType,
+      documentId,
+      fieldName: field,
+      details: { kind },
+    });
     await persistMeta(this.store);
     return { eventId: event.id, signedAt: now, documentHash };
+  }
+
+  /**
+   * 13 CSR 65-3.050: the password re-entry that authorizes a signing session.
+   * Local/demo path — the credential check is the same one signIn uses; the
+   * hosted path verifies against the Auth API inside the edge function.
+   */
+  async verifySigningPassword(password: string): Promise<{ reauthAt: string }> {
+    const session = assertSession(this.store);
+    const credential = this.store.db.credentials.find(
+      (row) => row.userId === session.userId,
+    );
+    if (!credential || credential.password !== password) {
+      this.pushSignatureAudit(session, "reauth_failed", {
+        details: { reason: "bad_password" },
+      });
+      await persistMeta(this.store);
+      throw new Error("That password is not correct.");
+    }
+    const reauthAt = new Date().toISOString();
+    this.store.signingReauthAt.set(session.userId, reauthAt);
+    this.pushSignatureAudit(session, "reauth_success", {});
+    await persistMeta(this.store);
+    return { reauthAt };
+  }
+
+  /** Throw unless the session user re-entered their password recently. */
+  private assertFreshReauth(session: SessionUser): void {
+    const at = this.store.signingReauthAt.get(session.userId);
+    if (!at || Date.now() - new Date(at).getTime() > REAUTH_WINDOW_MS) {
+      throw new ReauthRequiredError();
+    }
+  }
+
+  async logSignatureAudit(input: LogSignatureAuditInput): Promise<void> {
+    const session = assertSession(this.store);
+    this.pushSignatureAudit(session, input.action, {
+      documentType: input.documentType,
+      documentId: input.documentId,
+      fieldName: input.fieldName,
+      details: input.details,
+    });
+    await persistMeta(this.store);
+  }
+
+  async getSignatureAuditLog(input?: {
+    documentType?: SignableDocumentType;
+    documentId?: string;
+  }): Promise<SignatureAuditRecord[]> {
+    const session = assertSession(this.store);
+    return this.sigCollections()
+      .signatureAuditLog.filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId === session.userId &&
+          (!input?.documentType || row.documentType === input.documentType) &&
+          (!input?.documentId || row.documentId === input.documentId),
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** Append one row to the local 13 CSR 65-3.050 audit collection. */
+  private pushSignatureAudit(
+    session: SessionUser,
+    action: string,
+    extra: {
+      documentType?: SignableDocumentType;
+      documentId?: string;
+      fieldName?: string;
+      details?: Record<string, unknown>;
+    } = {},
+  ): void {
+    this.sigCollections().signatureAuditLog.push({
+      id: crypto.randomUUID(),
+      userId: session.userId,
+      agencyId: session.agencyId,
+      action,
+      documentType: extra.documentType ?? null,
+      documentId: extra.documentId ?? null,
+      fieldName: extra.fieldName ?? null,
+      createdAt: new Date().toISOString(),
+      deviceId: getDeviceId(),
+      ipAddress: null,
+      userAgent:
+        typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 512) : null,
+      details: extra.details ?? null,
+    });
   }
 
   /**
@@ -5745,16 +5903,27 @@ export class LocalApi implements ComplyraApi {
             (row.siteId ?? "") === siteId,
         );
         if (!requirement) throw new Error("Unknown signature field.");
+        // 13 CSR 65-3.050 attribution: ONLY the assigned staff member may
+        // initial their own training lines. No HR/admin override — a signature
+        // must be executed by the individual it is attributed to. (The hosted
+        // edge function enforces the same rule server-side.)
         if (session.userId !== requirement.userId) {
-          assertCan(session, "hr.view_staff");
+          throw new Error(
+            "Only the assigned staff member can initial their own training lines.",
+          );
         }
         const signoff = this.p2SignoffFor(requirementId);
-        if (
-          !signoff ||
-          signoff.na ||
-          (signoff.signoffVersion ?? 1) !== version
-        ) {
+        if (!signoff || signoff.na) {
           throw new Error("This line has no matching sign-off to initial.");
+        }
+        if ((signoff.signoffVersion ?? 1) !== version) {
+          // Versioned field names (line:<id>:v<n>): a newer sign-off version
+          // supersedes the one this field was computed from, so the stamp is
+          // stale — the signer must review the current line and initial it
+          // again. Mirrors the hosted stale_version (409) code.
+          throw new Error(
+            "This line was changed after you opened it (stale version) — review the current line and initial it again.",
+          );
         }
         // A whole-document end signature still freezes per-line stamping.
         await this.assertDocumentUnlocked("training_checklist", documentId);
