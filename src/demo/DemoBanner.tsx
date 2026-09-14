@@ -23,12 +23,20 @@ export default function DemoBanner({
         <button
           type="button"
           className="demo-banner-button"
+          aria-label="Restart tour"
           onClick={onRestartTour}
         >
-          <RotateCcw size={15} aria-hidden="true" /> Restart tour
+          <RotateCcw size={15} aria-hidden="true" />
+          <span className="demo-banner-button-label">Restart tour</span>
         </button>
-        <button type="button" className="demo-banner-button" onClick={onSignOut}>
-          <LogOut size={15} aria-hidden="true" /> Sign out
+        <button
+          type="button"
+          className="demo-banner-button"
+          aria-label="Sign out"
+          onClick={onSignOut}
+        >
+          <LogOut size={15} aria-hidden="true" />
+          <span className="demo-banner-button-label">Sign out</span>
         </button>
       </span>
     </div>

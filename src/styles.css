@@ -3446,8 +3446,8 @@ td {
     max-width: 450px;
   }
   .heading-row .button {
-    font-size: 0;
-    padding: 9px;
+    min-height: 44px;
+    padding: 10px 12px;
   }
   .heading-row .button svg {
     width: 16px;
@@ -5863,8 +5863,28 @@ body.nav-open {
   font-weight: 700;
   cursor: pointer;
 }
-.demo-banner-button:hover {
-  background: rgba(255, 255, 255, 0.14);
+.demo-banner-button-label {
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .demo-banner {
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: 44px;
+    padding: 4px max(var(--page-inline-end), 12px) 4px
+      max(var(--page-inline-start), 12px);
+  }
+  .demo-banner-sub {
+    display: none;
+  }
+  .demo-banner-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+  }
+  .demo-banner-button-label {
+    display: none;
+  }
 }
 
 .demo-tour {
