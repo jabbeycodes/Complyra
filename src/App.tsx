@@ -246,6 +246,8 @@ export default function App() {
       setPage("Supply forecast");
     } else if (deepLink.startsWith("/recognition")) {
       setPage("Recognition");
+    } else if (deepLink.startsWith("/delegations")) {
+      setPage("Delegations");
     }
   }
   useEffect(() => {

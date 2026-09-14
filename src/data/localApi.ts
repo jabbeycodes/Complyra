@@ -93,6 +93,9 @@ import {
   hmReviewChangedPayload,
   hmWinnerBroadcastPayload,
   hmWinnerSelfPayload,
+  delegationReviewReadyPayload,
+  delegationPublishedPayload,
+  delegationAckOverduePayload,
 } from "../features/notifications/notify";
 import {
   addDaysIso,
@@ -129,6 +132,22 @@ import {
   type ObligationItem,
   type PlanStackView,
 } from "./planStack";
+import {
+  DIGITAL_RECORD_MARK,
+  acknowledgmentDueAt,
+  instantiateDraft,
+  isAcknowledgmentOverdue,
+  visibleMaterialForStaff,
+  type DelegationAcknowledgment,
+  type DelegationAckStatusRow,
+  type DelegationTemplate,
+  type DelegationTemplateCategory,
+  type IndividualDelegationAssignment,
+  type DelegationTrainingMaterial,
+  type SiteDelegationActivation,
+  type TemplateSections,
+  type TrainingMaterialContent,
+} from "../delegation/delegation";
 // LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
 import {
   TRAINING_TOPICS,
@@ -743,6 +762,83 @@ export interface ComplyraApi {
   runWeeklyRecognition(input?: {
     weekStart?: string;
   }): Promise<import("../recognition/recognition").WeeklyRecognitionResult>;
+  /* ------------------------------------------------------------------ */
+  /* Delegation template workflow (local): templates → site activation →  */
+  /* assignment → training review → publish → staff acknowledgment.      */
+  /* ------------------------------------------------------------------ */
+  /** All active common templates (+ agency-specific, if any). */
+  listDelegationTemplates(): Promise<DelegationTemplate[]>;
+  /** Create an agency-specific template (starts active). */
+  createDelegationTemplate(input: {
+    name: string;
+    category: DelegationTemplateCategory;
+    sections: TemplateSections;
+    individualizationNote: string;
+  }): Promise<DelegationTemplate>;
+  /** Rename / recategorize / activate-deactivate a template. */
+  updateDelegationTemplate(
+    id: string,
+    patch: { name?: string; category?: DelegationTemplateCategory; active?: boolean },
+  ): Promise<DelegationTemplate>;
+  /** Activate a template for one site. Sends no notifications. */
+  activateDelegationTemplate(templateId: string, siteId: string): Promise<SiteDelegationActivation>;
+  /** Deactivate a site activation (status -> "deactivated"). */
+  deactivateDelegationActivation(id: string): Promise<SiteDelegationActivation>;
+  /** Activations at the session user's sites (admins see all). */
+  listSiteDelegationActivations(filter?: { siteId?: string }): Promise<SiteDelegationActivation[]>;
+  /**
+   * Assign an activation to an individual. The individual must belong to the
+   * activation's site. Creates the assignment plus a draft training
+   * material and notifies reviewers at the site (not all staff).
+   */
+  assignDelegationToIndividual(
+    activationId: string,
+    individualId: string,
+  ): Promise<IndividualDelegationAssignment>;
+  /** End an assignment (status -> "ended"). */
+  endDelegationAssignment(id: string): Promise<IndividualDelegationAssignment>;
+  /** Assignments at the session user's sites (admins see all). */
+  listDelegationAssignments(filter?: { siteId?: string }): Promise<IndividualDelegationAssignment[]>;
+  /**
+   * The training material for an assignment. Reviewers see the draft at any
+   * status; ordinary site staff see it only once published — null otherwise.
+   */
+  getDelegationTrainingMaterial(assignmentId: string): Promise<DelegationTrainingMaterial | null>;
+  /** Replace the draft content (draft / in_review only). No notifications. */
+  updateDelegationTrainingDraft(
+    assignmentId: string,
+    draft: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial>;
+  /** Move a draft to in_review (sets submittedAt). No notifications. */
+  submitDelegationForReview(assignmentId: string): Promise<DelegationTrainingMaterial>;
+  /**
+   * Publish the training material (status -> "published"). Notifies every
+   * site staff member exactly once and writes an audit entry.
+   */
+  approveDelegationTrainingMaterial(
+    assignmentId: string,
+    content: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial>;
+  /** Staff: open the published material (records openedAt). */
+  openDelegationMaterial(assignmentId: string): Promise<DelegationAcknowledgment>;
+  /** The caller's own acknowledgment row, or null. */
+  getMyDelegationAck(assignmentId: string): Promise<DelegationAcknowledgment | null>;
+  /**
+   * Staff: sign their OWN acknowledgment (openedAt required; one signature
+   * only). Writes an audit entry.
+   */
+  signDelegationAcknowledgment(
+    assignmentId: string,
+    signatureName: string,
+    signatureMark: string,
+  ): Promise<DelegationAcknowledgment>;
+  /** Per-staff acknowledgment roster with overdue flags (HM/DPM/RN/admin). */
+  listDelegationAckStatus(assignmentId: string): Promise<DelegationAckStatusRow[]>;
+  /**
+   * Notify unsigned staff and site managers about past-due acknowledgments.
+   * Idempotent. Returns the number of notifications actually inserted.
+   */
+  sweepDelegationAckOverdue(): Promise<number>;
 }
 
 export type WorkspaceSite = {
@@ -958,6 +1054,11 @@ async function hydrate() {
         browserStore.db.obligationSignatures ?? [];
       browserStore.db.packetSubmissions = browserStore.db.packetSubmissions ?? [];
       browserStore.db.clinicalRenewals = browserStore.db.clinicalRenewals ?? [];
+      browserStore.db.delegationTemplates = browserStore.db.delegationTemplates ?? [];
+      browserStore.db.siteDelegationActivations = browserStore.db.siteDelegationActivations ?? [];
+      browserStore.db.individualDelegationAssignments = browserStore.db.individualDelegationAssignments ?? [];
+      browserStore.db.delegationTrainingMaterials = browserStore.db.delegationTrainingMaterials ?? [];
+      browserStore.db.delegationAcknowledgments = browserStore.db.delegationAcknowledgments ?? [];
       browserStore.db.chartFiles = browserStore.db.chartFiles ?? [];
       browserStore.db.medications = browserStore.db.medications ?? [];
       browserStore.db.medicationDeliveries = browserStore.db.medicationDeliveries ?? [];
@@ -1047,6 +1148,45 @@ function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
     throw new Error("You do not have permission to do that.");
   }
+}
+
+/**
+ * DELEGATION — site scoping for the delegation workflow.
+ *
+ * Agency administrators (and the platform operator) see every agency site.
+ * Everyone else sees their own sites: a fixed siteId narrows to that site;
+ * program-scoped roles (DPM / program manager) without a fixed site cover
+ * the agency's sites, which are their program's sites in this demo data.
+ * Returns null for "all sites".
+ */
+function delegationSiteScope(session: SessionUser): string[] | null {
+  if (
+    session.role === "administrator" ||
+    session.role === "compliance_admin" ||
+    session.platformAdmin
+  ) {
+    return null;
+  }
+  if (session.siteId) return [session.siteId];
+  return null;
+}
+
+/** Throw unless the session user may touch delegation data at this site. */
+function assertDelegationSite(session: SessionUser, siteId: string) {
+  const scope = delegationSiteScope(session);
+  if (scope !== null && !scope.includes(siteId)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/** Backfill delegation collections when an older persisted db lacks them. */
+function ensureDelegationCollections(store: MemoryStore) {
+  const db = store.db;
+  db.delegationTemplates = db.delegationTemplates ?? [];
+  db.siteDelegationActivations = db.siteDelegationActivations ?? [];
+  db.individualDelegationAssignments = db.individualDelegationAssignments ?? [];
+  db.delegationTrainingMaterials = db.delegationTrainingMaterials ?? [];
+  db.delegationAcknowledgments = db.delegationAcknowledgments ?? [];
 }
 
 function siteName(store: MemoryStore, siteId: string) {
@@ -6922,6 +7062,625 @@ export class LocalApi implements ComplyraApi {
     }
     await persistMeta(this.store);
     return outcomes;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Delegation template workflow (local)                                 */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Staff members whose membership pins them to this site (excludes
+   * agency/program-scoped users like the administrator).
+   */
+  private delegationStaffAtSite(agencyId: string, siteId: string): string[] {
+    const today = new Date().toISOString().slice(0, 10);
+    const ids = new Set<string>();
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== agencyId) continue;
+      if (m.expiresOn && m.expiresOn < today) continue;
+      if (m.siteId !== siteId) continue;
+      ids.add(m.userId);
+    }
+    return [...ids];
+  }
+
+  /**
+   * Users holding a permission at this site — site memberships plus
+   * agency/program-scoped users (their scope covers the site).
+   */
+  private delegationHoldersAtSite(
+    agencyId: string,
+    siteId: string,
+    key: PermissionKey,
+  ): string[] {
+    const today = new Date().toISOString().slice(0, 10);
+    const ids = new Set<string>();
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== agencyId) continue;
+      if (m.expiresOn && m.expiresOn < today) continue;
+      if (m.siteId !== null && m.siteId !== siteId) continue;
+      const permissions = permissionsFor(
+        this.store,
+        agencyId,
+        m.roleKey ?? m.role,
+      );
+      if (permissions[key]) ids.add(m.userId);
+    }
+    return [...ids];
+  }
+
+  /** Copy of pushRecognitionNotification's dedupe pattern; true when queued. */
+  private queueDelegationNotification(input: {
+    agencyId: string;
+    userId?: string | null;
+    roleKey?: string | null;
+    type: string;
+    title: string;
+    body: string;
+    deepLink: string;
+    entityType?: string | null;
+    entityId?: string | null;
+    dedupeKey?: string | null;
+  }): boolean {
+    const db = this.store.db;
+    const dedupeKey = input.dedupeKey ?? crypto.randomUUID();
+    // Idempotent: the same event never queues twice.
+    if (db.notifications.some((n) => n.dedupeKey === dedupeKey)) {
+      return false;
+    }
+    db.notifications.push({
+      id: crypto.randomUUID(),
+      agencyId: input.agencyId,
+      userId: input.userId ?? null,
+      roleKey: input.roleKey ?? null,
+      type: input.type,
+      title: input.title,
+      body: input.body,
+      deepLink: input.deepLink,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+      dedupeKey,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    });
+    return true;
+  }
+
+  private delegationMaterialFor(
+    assignmentId: string,
+    session: SessionUser,
+  ): {
+    assignment: IndividualDelegationAssignment;
+    material: DelegationTrainingMaterial;
+  } {
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const assignment = db.individualDelegationAssignments.find(
+      (a) => a.id === assignmentId && a.agencyId === session.agencyId,
+    );
+    if (!assignment) throw new Error("Delegation assignment not found.");
+    assertDelegationSite(session, assignment.siteId);
+    const material = db.delegationTrainingMaterials.find(
+      (m) => m.assignmentId === assignment.id,
+    );
+    if (!material) throw new Error("Training material not found.");
+    return { assignment, material };
+  }
+
+  async listDelegationTemplates(): Promise<DelegationTemplate[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.view");
+    ensureDelegationCollections(this.store);
+    return this.store.db.delegationTemplates.filter(
+      (t) =>
+        t.active && (t.agencyId === null || t.agencyId === session.agencyId),
+    );
+  }
+
+  async createDelegationTemplate(input: {
+    name: string;
+    category: DelegationTemplateCategory;
+    sections: TemplateSections;
+    individualizationNote: string;
+  }): Promise<DelegationTemplate> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.manage");
+    ensureDelegationCollections(this.store);
+    const template: DelegationTemplate = {
+      id: `tpl-${crypto.randomUUID()}`,
+      agencyId: session.agencyId,
+      name: input.name,
+      category: input.category,
+      sections: {
+        purpose: input.sections.purpose,
+        steps: [...input.sections.steps],
+        safetyWarnings: [...input.sections.safetyWarnings],
+        documentation: [...input.sections.documentation],
+      },
+      individualizationNote: input.individualizationNote,
+      active: true,
+    };
+    this.store.db.delegationTemplates.push(template);
+    return template;
+  }
+
+  async updateDelegationTemplate(
+    id: string,
+    patch: {
+      name?: string;
+      category?: DelegationTemplateCategory;
+      active?: boolean;
+    },
+  ): Promise<DelegationTemplate> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.manage");
+    ensureDelegationCollections(this.store);
+    const template = this.store.db.delegationTemplates.find(
+      (t) => t.id === id && (t.agencyId === null || t.agencyId === session.agencyId),
+    );
+    if (!template) throw new Error("Delegation template not found.");
+    if (patch.name !== undefined) template.name = patch.name;
+    if (patch.category !== undefined) template.category = patch.category;
+    if (patch.active !== undefined) template.active = patch.active;
+    return template;
+  }
+
+  async activateDelegationTemplate(
+    templateId: string,
+    siteId: string,
+  ): Promise<SiteDelegationActivation> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.activate");
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const template = db.delegationTemplates.find(
+      (t) =>
+        t.id === templateId &&
+        (t.agencyId === null || t.agencyId === session.agencyId),
+    );
+    if (!template) throw new Error("Delegation template not found.");
+    const site = db.sites.find(
+      (s) => s.id === siteId && s.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    assertDelegationSite(session, siteId);
+    const activation: SiteDelegationActivation = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      templateId: template.id,
+      templateName: template.name,
+      templateCategory: template.category,
+      siteId: site.id,
+      siteName: site.name,
+      status: "active",
+      activatedAt: new Date().toISOString(),
+      activatedBy: session.userId,
+    };
+    db.siteDelegationActivations.push(activation);
+    return activation;
+  }
+
+  async deactivateDelegationActivation(
+    id: string,
+  ): Promise<SiteDelegationActivation> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.activate");
+    ensureDelegationCollections(this.store);
+    const activation = this.store.db.siteDelegationActivations.find(
+      (a) => a.id === id && a.agencyId === session.agencyId,
+    );
+    if (!activation) throw new Error("Delegation activation not found.");
+    assertDelegationSite(session, activation.siteId);
+    activation.status = "deactivated";
+    return activation;
+  }
+
+  async listSiteDelegationActivations(filter?: {
+    siteId?: string;
+  }): Promise<SiteDelegationActivation[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.view");
+    ensureDelegationCollections(this.store);
+    const scope = delegationSiteScope(session);
+    return this.store.db.siteDelegationActivations.filter((a) => {
+      if (a.agencyId !== session.agencyId) return false;
+      if (filter?.siteId && a.siteId !== filter.siteId) return false;
+      if (scope !== null && !scope.includes(a.siteId)) return false;
+      return true;
+    });
+  }
+
+  async assignDelegationToIndividual(
+    activationId: string,
+    individualId: string,
+  ): Promise<IndividualDelegationAssignment> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.assign");
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const activation = db.siteDelegationActivations.find(
+      (a) => a.id === activationId && a.agencyId === session.agencyId,
+    );
+    if (!activation) throw new Error("Delegation activation not found.");
+    assertDelegationSite(session, activation.siteId);
+    if (activation.status !== "active") {
+      throw new Error("That template activation is no longer active.");
+    }
+    const individual = db.individuals.find(
+      (p) => p.id === individualId && p.agencyId === session.agencyId,
+    );
+    if (!individual) throw new Error("Individual not found.");
+    if (individual.siteId !== activation.siteId) {
+      throw new Error(
+        "That individual does not belong to the activation's site.",
+      );
+    }
+    const template = db.delegationTemplates.find(
+      (t) => t.id === activation.templateId,
+    );
+    if (!template) throw new Error("Delegation template not found.");
+    const now = new Date().toISOString();
+    const assignment: IndividualDelegationAssignment = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      activationId: activation.id,
+      templateId: template.id,
+      templateName: template.name,
+      individualId: individual.id,
+      individualName: individual.fullName,
+      siteId: activation.siteId,
+      siteName: activation.siteName,
+      status: "assigned",
+      assignedAt: now,
+      assignedBy: session.userId,
+    };
+    db.individualDelegationAssignments.push(assignment);
+    db.delegationTrainingMaterials.push({
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      assignmentId: assignment.id,
+      status: "draft",
+      draftContent: instantiateDraft(template, assignment),
+      publishedContent: null,
+      submittedAt: null,
+      approvedAt: null,
+      approvedBy: null,
+    });
+    // Notify reviewers at the site — not all staff.
+    for (const userId of this.delegationHoldersAtSite(
+      session.agencyId,
+      assignment.siteId,
+      "delegation.training.review",
+    )) {
+      this.queueDelegationNotification(
+        delegationReviewReadyPayload({
+          agencyId: session.agencyId,
+          userId,
+          assignmentId: assignment.id,
+          templateName: template.name,
+          individualName: individual.fullName,
+        }),
+      );
+    }
+    return assignment;
+  }
+
+  async endDelegationAssignment(
+    id: string,
+  ): Promise<IndividualDelegationAssignment> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.assign");
+    ensureDelegationCollections(this.store);
+    const assignment = this.store.db.individualDelegationAssignments.find(
+      (a) => a.id === id && a.agencyId === session.agencyId,
+    );
+    if (!assignment) throw new Error("Delegation assignment not found.");
+    assertDelegationSite(session, assignment.siteId);
+    assignment.status = "ended";
+    return assignment;
+  }
+
+  async listDelegationAssignments(filter?: {
+    siteId?: string;
+  }): Promise<IndividualDelegationAssignment[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.view");
+    ensureDelegationCollections(this.store);
+    const scope = delegationSiteScope(session);
+    return this.store.db.individualDelegationAssignments.filter((a) => {
+      if (a.agencyId !== session.agencyId) return false;
+      if (filter?.siteId && a.siteId !== filter.siteId) return false;
+      if (scope !== null && !scope.includes(a.siteId)) return false;
+      return true;
+    });
+  }
+
+  async getDelegationTrainingMaterial(
+    assignmentId: string,
+  ): Promise<DelegationTrainingMaterial | null> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.templates.view");
+    const { material } = this.delegationMaterialFor(assignmentId, session);
+    const canReview =
+      hasPermission(session, "delegation.training.review") ||
+      hasPermission(session, "delegation.training.approve");
+    return visibleMaterialForStaff(material, canReview) === null
+      ? null
+      : material;
+  }
+
+  async updateDelegationTrainingDraft(
+    assignmentId: string,
+    draft: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.training.review");
+    const { material } = this.delegationMaterialFor(assignmentId, session);
+    if (material.status !== "draft" && material.status !== "in_review") {
+      throw new Error("Only a draft or in-review material can be edited.");
+    }
+    material.draftContent = { ...draft, generatedMark: DIGITAL_RECORD_MARK };
+    return material;
+  }
+
+  async submitDelegationForReview(
+    assignmentId: string,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.training.review");
+    const { material } = this.delegationMaterialFor(assignmentId, session);
+    if (material.status !== "draft" && material.status !== "in_review") {
+      throw new Error("Only a draft or in-review material can be submitted.");
+    }
+    material.status = "in_review";
+    material.submittedAt = new Date().toISOString();
+    return material;
+  }
+
+  async approveDelegationTrainingMaterial(
+    assignmentId: string,
+    content: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.training.approve");
+    const { assignment, material } = this.delegationMaterialFor(
+      assignmentId,
+      session,
+    );
+    if (material.status !== "draft" && material.status !== "in_review") {
+      throw new Error("Only a draft or in-review material can be approved.");
+    }
+    const now = new Date().toISOString();
+    material.publishedContent = {
+      ...content,
+      generatedMark: DIGITAL_RECORD_MARK,
+    };
+    material.status = "published";
+    material.approvedAt = now;
+    material.approvedBy = session.userId;
+    // Notify every staff member at the site, exactly once each.
+    for (const staffId of this.delegationStaffAtSite(
+      session.agencyId,
+      assignment.siteId,
+    )) {
+      this.queueDelegationNotification(
+        delegationPublishedPayload({
+          agencyId: session.agencyId,
+          userId: staffId,
+          assignmentId: assignment.id,
+          templateName: assignment.templateName,
+          individualName: assignment.individualName,
+        }),
+      );
+    }
+    log(
+      this.store,
+      session,
+      "delegation.published",
+      `${session.fullName} published ${assignment.templateName} for ${assignment.individualName} at ${assignment.siteName}.`,
+      "delegation_assignment",
+      assignment.id,
+    );
+    return material;
+  }
+
+  async openDelegationMaterial(
+    assignmentId: string,
+  ): Promise<DelegationAcknowledgment> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.acknowledge");
+    const { assignment, material } = this.delegationMaterialFor(
+      assignmentId,
+      session,
+    );
+    if (material.status !== "published") {
+      throw new Error("The training material is not published yet.");
+    }
+    const db = this.store.db;
+    let row = db.delegationAcknowledgments.find(
+      (r) => r.assignmentId === assignment.id && r.staffId === session.userId,
+    );
+    if (!row) {
+      row = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        assignmentId: assignment.id,
+        staffId: session.userId,
+        staffName: session.fullName,
+        openedAt: null,
+        signedAt: null,
+        signatureName: null,
+        signatureMark: null,
+      };
+      db.delegationAcknowledgments.push(row);
+    }
+    if (!row.openedAt) row.openedAt = new Date().toISOString();
+    return row;
+  }
+
+  async getMyDelegationAck(
+    assignmentId: string,
+  ): Promise<DelegationAcknowledgment | null> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.acknowledge");
+    const { assignment } = this.delegationMaterialFor(assignmentId, session);
+    return (
+      this.store.db.delegationAcknowledgments.find(
+        (r) => r.assignmentId === assignment.id && r.staffId === session.userId,
+      ) ?? null
+    );
+  }
+
+  async signDelegationAcknowledgment(
+    assignmentId: string,
+    signatureName: string,
+    signatureMark: string,
+  ): Promise<DelegationAcknowledgment> {
+    const session = assertSession(this.store);
+    assertCan(session, "delegation.acknowledge");
+    const { assignment, material } = this.delegationMaterialFor(
+      assignmentId,
+      session,
+    );
+    if (material.status !== "published") {
+      throw new Error("The training material is not published yet.");
+    }
+    // Own row only: staffId is always the session user — there is no way to
+    // sign for someone else.
+    const row = this.store.db.delegationAcknowledgments.find(
+      (r) => r.assignmentId === assignment.id && r.staffId === session.userId,
+    );
+    if (!row || !row.openedAt) {
+      throw new Error("Open the training material before signing.");
+    }
+    if (row.signedAt) {
+      throw new Error("You have already signed this acknowledgment.");
+    }
+    row.signedAt = new Date().toISOString();
+    row.signatureName = signatureName;
+    row.signatureMark = signatureMark;
+    log(
+      this.store,
+      session,
+      "delegation.signed",
+      `${session.fullName} signed the ${assignment.templateName} delegation for ${assignment.individualName}.`,
+      "delegation_acknowledgment",
+      row.id,
+    );
+    return row;
+  }
+
+  async listDelegationAckStatus(
+    assignmentId: string,
+  ): Promise<DelegationAckStatusRow[]> {
+    const session = assertSession(this.store);
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const assignment = db.individualDelegationAssignments.find(
+      (a) => a.id === assignmentId && a.agencyId === session.agencyId,
+    );
+    if (!assignment) throw new Error("Delegation assignment not found.");
+    const mayView =
+      hasPermission(session, "delegation.training.review") ||
+      hasPermission(session, "delegation.training.approve") ||
+      hasPermission(session, "delegation.activate") ||
+      (session.roleKey === "house_manager" &&
+        session.siteId !== null &&
+        session.siteId === assignment.siteId);
+    if (!mayView) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const material = db.delegationTrainingMaterials.find(
+      (m) => m.assignmentId === assignment.id,
+    );
+    const ackByStaff = new Map(
+      db.delegationAcknowledgments
+        .filter((r) => r.assignmentId === assignment.id)
+        .map((r) => [r.staffId, r]),
+    );
+    return this.delegationStaffAtSite(session.agencyId, assignment.siteId).map(
+      (staffId) => {
+        const ack = ackByStaff.get(staffId);
+        return {
+          staffId,
+          staffName:
+            db.profiles.find((p) => p.id === staffId)?.fullName ?? "Unknown",
+          openedAt: ack?.openedAt ?? null,
+          signedAt: ack?.signedAt ?? null,
+          overdue: isAcknowledgmentOverdue(
+            ack?.signedAt ?? null,
+            material?.approvedAt ?? null,
+          ),
+        };
+      },
+    );
+  }
+
+  async sweepDelegationAckOverdue(): Promise<number> {
+    const session = assertSession(this.store);
+    if (
+      !hasPermission(session, "delegation.training.review") &&
+      !hasPermission(session, "delegation.activate")
+    ) {
+      throw new Error("You do not have permission to do that.");
+    }
+    ensureDelegationCollections(this.store);
+    const db = this.store.db;
+    const nowMs = Date.now();
+    let inserted = 0;
+    for (const material of db.delegationTrainingMaterials) {
+      if (material.agencyId !== session.agencyId) continue;
+      if (material.status !== "published" || !material.approvedAt) continue;
+      if (!isAcknowledgmentOverdue(null, material.approvedAt, nowMs)) continue;
+      const assignment = db.individualDelegationAssignments.find(
+        (a) => a.id === material.assignmentId,
+      );
+      if (!assignment || assignment.status !== "assigned") continue;
+      const dueAt = Date.parse(acknowledgmentDueAt(material.approvedAt));
+      const daysOverdue = Math.max(
+        0,
+        Math.floor((nowMs - dueAt) / 86_400_000),
+      );
+      const ackByStaff = new Map(
+        db.delegationAcknowledgments
+          .filter((r) => r.assignmentId === assignment.id)
+          .map((r) => [r.staffId, r]),
+      );
+      // Unsigned staff plus site managers; the per-(assignment, user) dedupe
+      // key collapses overlap to a single notification per person.
+      const targets = new Set<string>();
+      for (const staffId of this.delegationStaffAtSite(
+        session.agencyId,
+        assignment.siteId,
+      )) {
+        if (ackByStaff.get(staffId)?.signedAt) continue; // signed staff skip
+        targets.add(staffId);
+      }
+      for (const managerId of this.delegationHoldersAtSite(
+        session.agencyId,
+        assignment.siteId,
+        "delegation.activate",
+      )) {
+        targets.add(managerId);
+      }
+      for (const userId of targets) {
+        if (
+          this.queueDelegationNotification(
+            delegationAckOverduePayload({
+              agencyId: session.agencyId,
+              userId,
+              assignmentId: assignment.id,
+              templateName: assignment.templateName,
+              individualName: assignment.individualName,
+              daysOverdue,
+            }),
+          )
+        ) {
+          inserted += 1;
+        }
+      }
+    }
+    return inserted;
   }
 }
 

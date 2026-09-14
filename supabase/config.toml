@@ -373,3 +373,6 @@ verify_jwt = true
 
 [functions.select-weekly-winners]
 verify_jwt = true
+
+[functions.delegation-ack-sweep]
+verify_jwt = true

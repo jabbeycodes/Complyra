@@ -30,7 +30,10 @@ export type NotificationType =
   | "rating.changed"
   | "review.changed"
   | "recognition.hm_winner"
-  | "recognition.dsp_winner";
+  | "recognition.dsp_winner"
+  | "delegation.review_ready"
+  | "delegation.published"
+  | "delegation.ack_overdue";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -47,6 +50,9 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  "delegation.review_ready",
+  "delegation.published",
+  "delegation.ack_overdue",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -169,6 +175,9 @@ export const NOTIFICATION_META: Record<
   "review.changed": { status: "pending", label: "Review updated" },
   "recognition.hm_winner": { status: "compliant", label: "House Manager of the Week" },
   "recognition.dsp_winner": { status: "compliant", label: "DSP of the Week" },
+  "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
+  "delegation.published": { status: "pending", label: "Delegation training published" },
+  "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
 };
 
 export function metaForType(type: NotificationType) {
@@ -562,4 +571,81 @@ export function dspWinnerBroadcastPayload(input: {
   weekLabel: string;
 }): NotificationPayload {
   return winnerPayload({ ...input, category: "recognition.dsp_winner", self: false });
+}
+
+/* ------------------------------------------------------------------ */
+/* Delegation payloads (delegation lifecycle: review → publish → ack)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * An assignment was created and is waiting on a reviewer. Notifies the
+ * reviewer — template activation itself notifies nobody.
+ */
+export function delegationReviewReadyPayload(input: {
+  agencyId: string;
+  userId: string;
+  assignmentId: string;
+  templateName: string;
+  individualName: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId,
+    type: "delegation.review_ready",
+    title: "Delegation ready for review",
+    body: `The ${input.templateName} delegation for ${input.individualName} is ready for review.`,
+    deepLink: "/delegations/templates",
+    entityType: "delegation_assignment",
+    entityId: input.assignmentId,
+    dedupeKey: dedupeKeyFor("delegation.review_ready", input.assignmentId, input.userId),
+  };
+}
+
+/**
+ * A delegation template was published and is now in effect. Notifies site
+ * staff so they review and sign the new training.
+ */
+export function delegationPublishedPayload(input: {
+  agencyId: string;
+  userId: string;
+  assignmentId: string;
+  templateName: string;
+  individualName: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId,
+    type: "delegation.published",
+    title: "New delegation training to review",
+    body: `New delegation training published: ${input.templateName} for ${input.individualName}. Please review and sign.`,
+    deepLink: "/delegations/templates",
+    entityType: "delegation_assignment",
+    entityId: input.assignmentId,
+    dedupeKey: dedupeKeyFor("delegation.published", input.assignmentId, input.userId),
+  };
+}
+
+/**
+ * The overdue sweep fired: a staff member's acknowledgment is past due.
+ * Notifies the staff member (and managers), naming the days overdue.
+ */
+export function delegationAckOverduePayload(input: {
+  agencyId: string;
+  userId: string;
+  assignmentId: string;
+  templateName: string;
+  individualName: string;
+  daysOverdue: number;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId,
+    type: "delegation.ack_overdue",
+    title: "Delegation acknowledgment overdue",
+    body: `${input.individualName}'s acknowledgment of ${input.templateName} is ${input.daysOverdue} day${input.daysOverdue === 1 ? "" : "s"} overdue. Complete and sign it now.`,
+    deepLink: "/delegations/templates",
+    entityType: "delegation_assignment",
+    entityId: input.assignmentId,
+    dedupeKey: dedupeKeyFor("delegation.ack_overdue", input.assignmentId, input.userId),
+  };
 }

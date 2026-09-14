@@ -57,6 +57,14 @@ import {
   type SiteReview,
 } from "./siteReview";
 import type { DspHmRating, HmDspReview } from "../recognition/recognition";
+import {
+  DELEGATION_TEMPLATES,
+  type DelegationAcknowledgment,
+  type DelegationTemplate,
+  type DelegationTrainingMaterial,
+  type IndividualDelegationAssignment,
+  type SiteDelegationActivation,
+} from "../delegation/delegation";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -113,6 +121,13 @@ export interface LocalDatabase {
   hmDspReviewHistory: RecognitionHistoryRow[];
   recognitionWinners: RecognitionWinnerRow[];
   notifications: RecognitionNotificationRow[];
+  // DELEGATION: template workflow — common/agency templates, site
+  // activations, per-individual assignments, training materials, acks.
+  delegationTemplates: DelegationTemplate[];
+  siteDelegationActivations: SiteDelegationActivation[];
+  individualDelegationAssignments: IndividualDelegationAssignment[];
+  delegationTrainingMaterials: DelegationTrainingMaterial[];
+  delegationAcknowledgments: DelegationAcknowledgment[];
 }
 
 /** Append-only change record for one rating/review row (local store shape). */
@@ -516,6 +531,19 @@ export function createEvergreenSeed(): LocalDatabase {
     hmDspReviewHistory: [],
     recognitionWinners: [],
     notifications: [],
+    // DELEGATION: seed the common template library (agencyId null = every
+    // agency). Site activations, assignments, materials, and acks accrue
+    // through the workflow.
+    delegationTemplates: DELEGATION_TEMPLATES.map((template, i) => ({
+      ...template,
+      id: `tpl-${String(i + 1).padStart(2, "0")}`,
+      agencyId: null,
+      active: true,
+    })),
+    siteDelegationActivations: [],
+    individualDelegationAssignments: [],
+    delegationTrainingMaterials: [],
+    delegationAcknowledgments: [],
   };
 }
 

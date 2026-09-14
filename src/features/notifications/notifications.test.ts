@@ -9,6 +9,9 @@ import {
   certificateExpiringPayload,
   certificateExpiredPayload,
   dedupeKeyFor,
+  delegationAckOverduePayload,
+  delegationPublishedPayload,
+  delegationReviewReadyPayload,
   isNotificationType,
   isUnread,
   isWellFormedDeepLink,
@@ -31,6 +34,7 @@ const TRAINING = "00000000-0000-4000-8000-000000000010";
 const CERT = "00000000-0000-4000-8000-000000000020";
 const MED = "00000000-0000-4000-8000-000000000030";
 const CHECKLIST = "00000000-0000-4000-8000-000000000040";
+const ASSIGNMENT = "00000000-0000-4000-8000-000000000050";
 
 function row(partial: Partial<NotificationRow>): NotificationRow {
   return {
@@ -51,8 +55,8 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
   };
 }
 
-test("all fourteen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 14);
+test("all seventeen notification types are known contract types", () => {
+  assert.equal(NOTIFICATION_TYPES.length, 17);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -330,4 +334,94 @@ test("sortNotifications orders unread first, then newest", () => {
     sorted.map((r) => r.id),
     ["newer", "older", "read"],
   );
+});
+
+test("delegation payloads name template and individual and dedupe per (assignment, user)", () => {
+  const review = buildNotificationRow(
+    delegationReviewReadyPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      assignmentId: ASSIGNMENT,
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+    }),
+  );
+  assert.equal(review.type, "delegation.review_ready");
+  assert.equal(review.title, "Delegation ready for review");
+  assert.ok((review.body as string).includes("G-Tube Feedings"));
+  assert.ok((review.body as string).includes("Jodie"));
+  assert.equal(review.deep_link, "/delegations/templates");
+  assert.ok(isWellFormedDeepLink(review.deep_link as string));
+  assert.equal(review.entity_type, "delegation_assignment");
+  assert.equal(review.entity_id, ASSIGNMENT);
+
+  const published = buildNotificationRow(
+    delegationPublishedPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      assignmentId: ASSIGNMENT,
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+    }),
+  );
+  assert.equal(published.type, "delegation.published");
+  assert.equal(published.title, "New delegation training to review");
+  assert.ok((published.body as string).includes("G-Tube Feedings"));
+  assert.ok((published.body as string).includes("Jodie"));
+  assert.ok((published.body as string).toLowerCase().includes("sign"));
+  assert.equal(published.deep_link, "/delegations/templates");
+  assert.ok(isWellFormedDeepLink(published.deep_link as string));
+
+  const overdue = buildNotificationRow(
+    delegationAckOverduePayload({
+      agencyId: AGENCY,
+      userId: USER,
+      assignmentId: ASSIGNMENT,
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+      daysOverdue: 4,
+    }),
+  );
+  assert.equal(overdue.type, "delegation.ack_overdue");
+  assert.equal(overdue.title, "Delegation acknowledgment overdue");
+  assert.ok((overdue.body as string).includes("4 days"));
+  assert.equal(overdue.deep_link, "/delegations/templates");
+  assert.ok(isWellFormedDeepLink(overdue.deep_link as string));
+
+  // unique dedupe per (assignment, user); types are distinct events
+  const sameAgain = buildNotificationRow(
+    delegationReviewReadyPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      assignmentId: ASSIGNMENT,
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+    }),
+  );
+  assert.equal(review.dedupe_key, sameAgain.dedupe_key, "same event dedupes");
+
+  const otherUser = buildNotificationRow(
+    delegationReviewReadyPayload({
+      agencyId: AGENCY,
+      userId: "00000000-0000-4000-8000-000000000003",
+      assignmentId: ASSIGNMENT,
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+    }),
+  );
+  assert.notEqual(review.dedupe_key, otherUser.dedupe_key, "different user differs");
+
+  const otherAssignment = buildNotificationRow(
+    delegationReviewReadyPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      assignmentId: "00000000-0000-4000-8000-000000000051",
+      templateName: "G-Tube Feedings",
+      individualName: "Jodie",
+    }),
+  );
+  assert.notEqual(review.dedupe_key, otherAssignment.dedupe_key, "different assignment differs");
+
+  assert.notEqual(review.dedupe_key, published.dedupe_key, "different types differ");
+  assert.notEqual(published.dedupe_key, overdue.dedupe_key, "different types differ");
 });

@@ -5582,3 +5582,186 @@ body.nav-open {
   margin: 22px 0 4px;
   text-align: center;
 }
+
+/* Delegation template library */
+.button.small {
+  padding: 6px 10px;
+  font-size: 12px;
+  min-height: 30px;
+}
+.delegation-templates {
+  margin-top: 4px;
+}
+.delegation-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.delegation-template-card,
+.delegation-activation-card {
+  background: #faf6ef;
+  border: 1px solid #eae8e4;
+  border-radius: 9px;
+  padding: 18px 20px;
+  box-shadow: 0 2px 3px #5f514502;
+}
+.delegation-activation-card {
+  margin-top: 14px;
+}
+.delegation-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.delegation-card-head strong {
+  font-size: 15px;
+}
+.delegation-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  align-items: center;
+}
+.delegation-inline-form {
+  margin-top: 14px;
+  border-top: 1px solid #eae8e4;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.delegation-inline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #4a4036;
+}
+.delegation-inline-form input,
+.delegation-inline-form select,
+.delegation-inline-form textarea {
+  border: 1px solid #eae8e4;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 13px;
+  background: #ffffff;
+  color: #4a4036;
+  width: 100%;
+  box-sizing: border-box;
+}
+.delegation-inline-form textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.delegation-inline-form label.delegation-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.delegation-inline-form label.delegation-check input {
+  width: auto;
+}
+.delegation-preview {
+  margin-top: 14px;
+  background: #ffffff;
+  border: 1px solid #eae8e4;
+  border-radius: 8px;
+  padding: 16px 18px;
+  font-size: 13px;
+  color: #4a4036;
+}
+.delegation-preview h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8a7f72;
+  margin: 14px 0 6px;
+}
+.delegation-preview h4:first-child {
+  margin-top: 0;
+}
+.delegation-preview p {
+  margin: 0 0 8px;
+  line-height: 1.7;
+}
+.delegation-preview ol,
+.delegation-preview ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.delegation-individualization {
+  background: #f7f2ea;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.delegation-site-select {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+  max-width: 340px;
+}
+.delegation-assignment-list {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.delegation-assignment {
+  border: 1px solid #eae8e4;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #ffffff;
+}
+.delegation-assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.delegation-assignment-row > div:first-child {
+  flex: 1;
+}
+.delegation-detail {
+  margin-top: 12px;
+  border-top: 1px solid #eae8e4;
+  padding-top: 12px;
+}
+.delegation-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.delegation-roster {
+  margin-top: 16px;
+}
+.delegation-roster-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.delegation-roster-head h4 {
+  font-size: 14px;
+  margin: 0;
+}
+.delegation-notice {
+  font-size: 13px;
+  color: #5d8353;
+  background: #f2f7ee;
+  border: 1px solid #cfe0c6;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 0 0 10px;
+}
+.delegation-sign {
+  margin-top: 16px;
+}
+.delegation-draft-editor h4 {
+  font-size: 14px;
+  margin: 0 0 4px;
+}

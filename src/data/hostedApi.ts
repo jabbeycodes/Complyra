@@ -144,6 +144,20 @@ import {
   type Medication,
   type TrainingChecklist,
 } from "./chart";
+// Delegation template workflow: domain types + helpers.
+import {
+  DIGITAL_RECORD_MARK,
+  isAcknowledgmentOverdue,
+  type DelegationAcknowledgment,
+  type DelegationAckStatusRow,
+  type DelegationTemplate,
+  type DelegationTemplateCategory,
+  type IndividualDelegationAssignment,
+  type DelegationTrainingMaterial,
+  type SiteDelegationActivation,
+  type TemplateSections,
+  type TrainingMaterialContent,
+} from "../delegation/delegation";
 // LIFEPATH-P4 (certificates): expiry countdown + file validation helpers.
 import {
   daysRemaining,
@@ -4438,6 +4452,639 @@ export class HostedApi implements ComplyraApi {
       name: delegationFileName(item.title, person.fullName),
     };
   }
+
+  /* ------------------------------------------------------------------ */
+  /* Delegation template workflow (hosted): templates → site activation  */
+  /* → assignment → training review → publish → staff acknowledgment.   */
+  /* Reads go straight at the tables (RLS scopes them to the caller's  */
+  /* site); every write flows through a SECURITY DEFINER RPC that       */
+  /* re-checks permissions server-side.                                 */
+  /* ------------------------------------------------------------------ */
+
+  async listDelegationTemplates(): Promise<DelegationTemplate[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.view");
+    const { data, error } = await this.client
+      .from("delegation_templates")
+      .select(
+        "id, agency_id, name, category, sections, individualization_note, active",
+      )
+      .eq("active", true)
+      .order("name");
+    throwIf(error, "Could not load delegation templates.");
+    // RLS already serves the common library + the caller's agency rows;
+    // keep the local parity filter as a second check.
+    return ((data ?? []) as Record<string, unknown>[])
+      .filter(
+        (row) =>
+          row.agency_id === null || row.agency_id === session.agencyId,
+      )
+      .map(mapDelegationTemplate);
+  }
+
+  async createDelegationTemplate(input: {
+    name: string;
+    category: DelegationTemplateCategory;
+    sections: TemplateSections;
+    individualizationNote: string;
+  }): Promise<DelegationTemplate> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.manage");
+    const { data, error } = await this.client
+      .from("delegation_templates")
+      .insert({
+        agency_id: session.agencyId,
+        name: input.name,
+        category: input.category,
+        sections: JSON.parse(JSON.stringify(input.sections)),
+        individualization_note: input.individualizationNote,
+        active: true,
+      })
+      .select(
+        "id, agency_id, name, category, sections, individualization_note, active",
+      )
+      .single();
+    throwIf(error, "Could not create the delegation template.");
+    return mapDelegationTemplate(data as Record<string, unknown>);
+  }
+
+  async updateDelegationTemplate(
+    id: string,
+    patch: {
+      name?: string;
+      category?: DelegationTemplateCategory;
+      active?: boolean;
+    },
+  ): Promise<DelegationTemplate> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.manage");
+    const updates: Record<string, unknown> = {};
+    if (patch.name !== undefined) updates.name = patch.name;
+    if (patch.category !== undefined) updates.category = patch.category;
+    if (patch.active !== undefined) updates.active = patch.active;
+    const { data, error } = await this.client
+      .from("delegation_templates")
+      .update(updates)
+      .eq("id", id)
+      .select(
+        "id, agency_id, name, category, sections, individualization_note, active",
+      )
+      .maybeSingle();
+    throwIf(error, "Could not update the delegation template.");
+    if (!data) throw new Error("Delegation template not found.");
+    return mapDelegationTemplate(data as Record<string, unknown>);
+  }
+
+  async activateDelegationTemplate(
+    templateId: string,
+    siteId: string,
+  ): Promise<SiteDelegationActivation> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.activate");
+    // Returns a single JSON object (the activation row).
+    const { data, error } = await this.client.rpc(
+      "activate_delegation_template",
+      { p_template_id: templateId, p_site_id: siteId },
+    );
+    throwIf(error, "Could not activate that template.");
+    const activation = (await this.mapDelegationActivations([
+      data as Record<string, unknown>,
+    ]))[0];
+    if (!activation) throw new Error("Could not activate that template.");
+    return activation;
+  }
+
+  async deactivateDelegationActivation(
+    id: string,
+  ): Promise<SiteDelegationActivation> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.activate");
+    // Returns a single JSON object (the updated activation row).
+    const { data, error } = await this.client.rpc(
+      "deactivate_delegation_activation",
+      { p_activation_id: id },
+    );
+    throwIf(error, "Could not deactivate that activation.");
+    const activation = (await this.mapDelegationActivations([
+      data as Record<string, unknown>,
+    ]))[0];
+    if (!activation) throw new Error("Delegation activation not found.");
+    return activation;
+  }
+
+  async listSiteDelegationActivations(filter?: {
+    siteId?: string;
+  }): Promise<SiteDelegationActivation[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.view");
+    let query = this.client
+      .from("site_delegation_activations")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("activated_at", { ascending: false });
+    if (filter?.siteId) query = query.eq("site_id", filter.siteId);
+    const { data, error } = await query;
+    throwIf(error, "Could not load delegation activations.");
+    return this.mapDelegationActivations(
+      (data ?? []) as Record<string, unknown>[],
+    );
+  }
+
+  async assignDelegationToIndividual(
+    activationId: string,
+    individualId: string,
+  ): Promise<IndividualDelegationAssignment> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.assign");
+    // Returns {assignment, material}: the material is created by the RPC
+    // and read through the training-material methods below.
+    const { data, error } = await this.client.rpc("assign_delegation", {
+      p_activation_id: activationId,
+      p_individual_id: individualId,
+    });
+    throwIf(error, "Could not assign that delegation.");
+    const result = data as {
+      assignment?: Record<string, unknown>;
+    } | null;
+    if (!result?.assignment) throw new Error("Could not assign that delegation.");
+    const assignment = (
+      await this.mapDelegationAssignments([result.assignment])
+    )[0];
+    if (!assignment) throw new Error("Could not assign that delegation.");
+    return assignment;
+  }
+
+  async endDelegationAssignment(
+    id: string,
+  ): Promise<IndividualDelegationAssignment> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.assign");
+    // Returns a single JSON object (the updated assignment row).
+    const { data, error } = await this.client.rpc("end_delegation_assignment", {
+      p_assignment_id: id,
+    });
+    throwIf(error, "Could not end that delegation assignment.");
+    const assignment = (
+      await this.mapDelegationAssignments([data as Record<string, unknown>])
+    )[0];
+    if (!assignment) throw new Error("Delegation assignment not found.");
+    return assignment;
+  }
+
+  async listDelegationAssignments(filter?: {
+    siteId?: string;
+  }): Promise<IndividualDelegationAssignment[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.view");
+    let query = this.client
+      .from("individual_delegation_assignments")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("assigned_at", { ascending: false });
+    if (filter?.siteId) query = query.eq("site_id", filter.siteId);
+    const { data, error } = await query;
+    throwIf(error, "Could not load delegation assignments.");
+    return this.mapDelegationAssignments(
+      (data ?? []) as Record<string, unknown>[],
+    );
+  }
+
+  async getDelegationTrainingMaterial(
+    assignmentId: string,
+  ): Promise<DelegationTrainingMaterial | null> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.view");
+    const canReview =
+      hasPermission(session, "delegation.training.review") ||
+      hasPermission(session, "delegation.training.approve");
+    if (canReview) {
+      // Reviewers may read the full row (draft included) — RLS permits them.
+      const { data, error } = await this.client
+        .from("delegation_training_materials")
+        .select("*")
+        .eq("assignment_id", assignmentId)
+        .maybeSingle();
+      throwIf(error, "Could not load the training material.");
+      return data
+        ? mapDelegationTrainingMaterial(data as Record<string, unknown>)
+        : null;
+    }
+    // Ordinary staff only ever see published content — the RPC returns
+    // published_content only, never draft_content.
+    const { data, error } = await this.client.rpc(
+      "get_published_training_material",
+      { p_assignment_id: assignmentId },
+    );
+    throwIf(error, "Could not load the training material.");
+    if (!data) return null;
+    const published = data as Record<string, unknown>;
+    const content = published.content as TrainingMaterialContent;
+    // One material per assignment; the RPC does not return the material's
+    // own id, so the assignment id stands in as the material key.
+    return {
+      id: assignmentId,
+      agencyId: session.agencyId,
+      assignmentId,
+      status: "published",
+      draftContent: content,
+      publishedContent: content,
+      submittedAt: null,
+      approvedAt: (published.approvedAt as string) ?? null,
+      approvedBy: null,
+    };
+  }
+
+  async updateDelegationTrainingDraft(
+    assignmentId: string,
+    draft: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.training.review");
+    const { data, error } = await this.client
+      .from("delegation_training_materials")
+      .update({
+        draft_content: JSON.parse(
+          JSON.stringify({ ...draft, generatedMark: DIGITAL_RECORD_MARK }),
+        ),
+      })
+      .eq("assignment_id", assignmentId)
+      .select("*")
+      .maybeSingle();
+    throwIf(error, "Could not update the training draft.");
+    if (!data) throw new Error("Training material not found.");
+    return mapDelegationTrainingMaterial(data as Record<string, unknown>);
+  }
+
+  async submitDelegationForReview(
+    assignmentId: string,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.training.review");
+    // Returns a single JSON object (the material row).
+    const { data, error } = await this.client.rpc("submit_delegation_review", {
+      p_assignment_id: assignmentId,
+    });
+    throwIf(error, "Could not submit that training draft.");
+    if (!data) throw new Error("Training material not found.");
+    return mapDelegationTrainingMaterial(data as Record<string, unknown>);
+  }
+
+  async approveDelegationTrainingMaterial(
+    assignmentId: string,
+    content: TrainingMaterialContent,
+  ): Promise<DelegationTrainingMaterial> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.training.approve");
+    // Returns a single JSON object (the published material row).
+    const { data, error } = await this.client.rpc(
+      "approve_delegation_material",
+      {
+        p_assignment_id: assignmentId,
+        p_content: JSON.parse(
+          JSON.stringify({ ...content, generatedMark: DIGITAL_RECORD_MARK }),
+        ),
+      },
+    );
+    throwIf(error, "Could not approve that training material.");
+    if (!data) throw new Error("Training material not found.");
+    const material = mapDelegationTrainingMaterial(
+      data as Record<string, unknown>,
+    );
+    const contentName =
+      material.publishedContent?.templateName ?? "delegation training";
+    await this.audit(
+      session,
+      "delegation.published",
+      `${session.fullName} published ${contentName}.`,
+      "delegation_assignment",
+      assignmentId,
+    );
+    return material;
+  }
+
+  async openDelegationMaterial(
+    assignmentId: string,
+  ): Promise<DelegationAcknowledgment> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.acknowledge");
+    const { error } = await this.client.rpc("open_delegation_material", {
+      p_assignment_id: assignmentId,
+    });
+    throwIf(error, "Could not open the training material.");
+    const row = await this.myDelegationAckRow(session, assignmentId);
+    if (!row) throw new Error("Could not open the training material.");
+    return { ...mapDelegationAcknowledgment(row), staffName: session.fullName };
+  }
+
+  async getMyDelegationAck(
+    assignmentId: string,
+  ): Promise<DelegationAcknowledgment | null> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.acknowledge");
+    const row = await this.myDelegationAckRow(session, assignmentId);
+    if (!row) return null;
+    return { ...mapDelegationAcknowledgment(row), staffName: session.fullName };
+  }
+
+  async signDelegationAcknowledgment(
+    assignmentId: string,
+    signatureName: string,
+    signatureMark: string,
+  ): Promise<DelegationAcknowledgment> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.acknowledge");
+    // Returns a single JSON object (the caller's acknowledgment row).
+    const { data, error } = await this.client.rpc("sign_delegation_ack", {
+      p_assignment_id: assignmentId,
+      p_signature_name: signatureName,
+      p_signature_mark: signatureMark,
+    });
+    throwIf(error, "Could not sign that acknowledgment.");
+    if (!data) throw new Error("Acknowledgment not found.");
+    const ack = {
+      ...mapDelegationAcknowledgment(data as Record<string, unknown>),
+      staffName: session.fullName,
+    };
+    await this.audit(
+      session,
+      "delegation.signed",
+      `${session.fullName} signed a delegation acknowledgment.`,
+      "delegation_acknowledgment",
+      ack.id,
+    );
+    return ack;
+  }
+
+  async listDelegationAckStatus(
+    assignmentId: string,
+  ): Promise<DelegationAckStatusRow[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "delegation.templates.view");
+    // Assignment lookup (RLS scopes to the caller's own sites).
+    const { data: assignmentData, error: assignmentError } = await this.client
+      .from("individual_delegation_assignments")
+      .select("id, agency_id, site_id")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    throwIf(assignmentError, "Could not load the delegation assignment.");
+    if (!assignmentData) throw new Error("Delegation assignment not found.");
+    const siteId = (assignmentData as Record<string, unknown>)
+      .site_id as string;
+    // Roster rule (mirrors the local layer): reviewers, approvers, or
+    // activators may view; otherwise only a house manager of the site.
+    const mayView =
+      hasPermission(session, "delegation.training.review") ||
+      hasPermission(session, "delegation.training.approve") ||
+      hasPermission(session, "delegation.activate") ||
+      (await this.isHouseManagerAtSite(session, siteId));
+    if (!mayView) {
+      throw new Error("You do not have permission to do that.");
+    }
+    // Publication timestamp drives overdue. Reviewers can read the row;
+    // everyone else goes through the published-only RPC.
+    let approvedAt: string | null = null;
+    const canReview =
+      hasPermission(session, "delegation.training.review") ||
+      hasPermission(session, "delegation.training.approve");
+    if (canReview) {
+      const { data, error } = await this.client
+        .from("delegation_training_materials")
+        .select("approved_at")
+        .eq("assignment_id", assignmentId)
+        .maybeSingle();
+      throwIf(error, "Could not load the training material.");
+      approvedAt =
+        ((data as Record<string, unknown> | null)?.approved_at as string) ??
+        null;
+    } else {
+      const { data, error } = await this.client.rpc(
+        "get_published_training_material",
+        { p_assignment_id: assignmentId },
+      );
+      throwIf(error, "Could not load the training material.");
+      approvedAt =
+        ((data as Record<string, unknown> | null)?.approvedAt as string) ??
+        null;
+    }
+    // Roster: active memberships at the site (agency-wide members included),
+    // acknowledgments read through the RLS roster-viewer policy.
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: membershipData, error: membershipError } = await this.client
+      .from("memberships")
+      .select("user_id")
+      .eq("agency_id", session.agencyId)
+      .or(`site_id.eq.${siteId},site_id.is.null`)
+      .or(`expires_on.is.null,expires_on.gte.${today}`);
+    throwIf(membershipError, "Could not load the site roster.");
+    const userIds = [
+      ...new Set(
+        ((membershipData ?? []) as Record<string, unknown>[]).map(
+          (m) => m.user_id as string,
+        ),
+      ),
+    ];
+    const { data: ackData, error: ackError } = await this.client
+      .from("delegation_acknowledgments")
+      .select(
+        "staff_id, opened_at, signed_at, signature_name, signature_mark",
+      )
+      .eq("assignment_id", assignmentId);
+    throwIf(ackError, "Could not load acknowledgments.");
+    const ackByStaff = new Map(
+      ((ackData ?? []) as Record<string, unknown>[]).map((r) => [
+        r.staff_id as string,
+        r,
+      ]),
+    );
+    const names = await this.profileNames(userIds);
+    return userIds.map((userId) => {
+      const ack = ackByStaff.get(userId);
+      return {
+        staffId: userId,
+        staffName: names.get(userId) ?? "Staff member",
+        openedAt: (ack?.opened_at as string) ?? null,
+        signedAt: (ack?.signed_at as string) ?? null,
+        overdue: isAcknowledgmentOverdue(
+          (ack?.signed_at as string) ?? null,
+          approvedAt,
+        ),
+      };
+    });
+  }
+
+  async sweepDelegationAckOverdue(): Promise<number> {
+    const session = await this.requireSession();
+    if (
+      !hasPermission(session, "delegation.training.review") &&
+      !hasPermission(session, "delegation.activate")
+    ) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data, error } = await this.client.rpc(
+      "sweep_delegation_ack_overdue",
+    );
+    throwIf(error, "Could not sweep overdue acknowledgments.");
+    return Number(data ?? 0);
+  }
+
+  /** The caller's own acknowledgment row for one assignment (or null). */
+  private async myDelegationAckRow(
+    session: SessionUser,
+    assignmentId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const { data, error } = await this.client
+      .from("delegation_acknowledgments")
+      .select(
+        "id, agency_id, assignment_id, staff_id, opened_at, signed_at, signature_name, signature_mark",
+      )
+      .eq("assignment_id", assignmentId)
+      .eq("staff_id", session.userId)
+      .maybeSingle();
+    throwIf(error, "Could not load your acknowledgment.");
+    return data ? (data as Record<string, unknown>) : null;
+  }
+
+  /** True when the caller holds a house_manager membership at the site. */
+  private async isHouseManagerAtSite(
+    session: SessionUser,
+    siteId: string,
+  ): Promise<boolean> {
+    const { data } = await this.client
+      .from("memberships")
+      .select("role_key, role")
+      .eq("user_id", session.userId)
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    return ((data ?? []) as Record<string, unknown>[]).some(
+      (m) => String(m.role_key ?? m.role) === "house_manager",
+    );
+  }
+
+  /** Batch full_name lookup for a set of user ids. */
+  private async profileNames(userIds: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(userIds)];
+    const names = new Map<string, string>();
+    if (!unique.length) return names;
+    const { data, error } = await this.client
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", unique);
+    throwIf(error, "Could not load staff names.");
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      names.set(row.id as string, (row.full_name as string) ?? "Staff member");
+    }
+    return names;
+  }
+
+  /** Activation rows -> domain, enriched with template + site names. */
+  private async mapDelegationActivations(
+    rows: Record<string, unknown>[],
+  ): Promise<SiteDelegationActivation[]> {
+    const templateIds = rows.map((r) => r.template_id as string);
+    const siteIds = rows.map((r) => r.site_id as string);
+    const templates = await this.delegationTemplateNames(templateIds);
+    const sites = await this.delegationSiteNames(siteIds);
+    return rows.map((row) => {
+      const template = templates.get(row.template_id as string);
+      return {
+        id: row.id as string,
+        agencyId: row.agency_id as string,
+        templateId: row.template_id as string,
+        templateName: template?.name ?? "Unknown template",
+        templateCategory: (template?.category ??
+          "Health monitoring") as DelegationTemplateCategory,
+        siteId: row.site_id as string,
+        siteName: sites.get(row.site_id as string) ?? "Unknown site",
+        status: row.status as SiteDelegationActivation["status"],
+        activatedAt: row.activated_at as string,
+        activatedBy: (row.activated_by as string) ?? "",
+      };
+    });
+  }
+
+  /** Assignment rows -> domain, enriched with template/individual/site names. */
+  private async mapDelegationAssignments(
+    rows: Record<string, unknown>[],
+  ): Promise<IndividualDelegationAssignment[]> {
+    const templateIds = rows.map((r) => r.template_id as string);
+    const individualIds = rows.map((r) => r.individual_id as string);
+    const siteIds = rows.map((r) => r.site_id as string);
+    const templates = await this.delegationTemplateNames(templateIds);
+    const individuals = await this.delegationIndividualNames(individualIds);
+    const sites = await this.delegationSiteNames(siteIds);
+    return rows.map((row) => {
+      const template = templates.get(row.template_id as string);
+      return {
+        id: row.id as string,
+        agencyId: row.agency_id as string,
+        activationId: row.activation_id as string,
+        templateId: row.template_id as string,
+        templateName: template?.name ?? "Unknown template",
+        individualId: row.individual_id as string,
+        individualName:
+          individuals.get(row.individual_id as string) ?? "Unknown individual",
+        siteId: row.site_id as string,
+        siteName: sites.get(row.site_id as string) ?? "Unknown site",
+        status: row.status as IndividualDelegationAssignment["status"],
+        assignedAt: row.assigned_at as string,
+        assignedBy: (row.assigned_by as string) ?? "",
+      };
+    });
+  }
+
+  private async delegationTemplateNames(
+    templateIds: string[],
+  ): Promise<Map<string, { name: string; category: string }>> {
+    const unique = [...new Set(templateIds)].filter(Boolean);
+    const map = new Map<string, { name: string; category: string }>();
+    if (!unique.length) return map;
+    const { data, error } = await this.client
+      .from("delegation_templates")
+      .select("id, name, category")
+      .in("id", unique);
+    throwIf(error, "Could not load delegation templates.");
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      map.set(row.id as string, {
+        name: row.name as string,
+        category: row.category as string,
+      });
+    }
+    return map;
+  }
+
+  private async delegationIndividualNames(
+    individualIds: string[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Set(individualIds)].filter(Boolean);
+    const map = new Map<string, string>();
+    if (!unique.length) return map;
+    const { data, error } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .in("id", unique);
+    throwIf(error, "Could not load individual names.");
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      map.set(row.id as string, (row.full_name as string) ?? "Unknown");
+    }
+    return map;
+  }
+
+  private async delegationSiteNames(
+    siteIds: string[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Set(siteIds)].filter(Boolean);
+    const map = new Map<string, string>();
+    if (!unique.length) return map;
+    const { data, error } = await this.client
+      .from("sites")
+      .select("id, name")
+      .in("id", unique);
+    throwIf(error, "Could not load site names.");
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      map.set(row.id as string, (row.name as string) ?? "Unknown site");
+    }
+    return map;
+  }
   // ===== LIFEPATH-P4 HOSTED (certificates) =====
   // LIFEPATH-P4 (certificates): HR certificate tracking (HostedApi, Supabase).
   // Storage bucket is `staff-certificates` (created by the Phase 4 migration);
@@ -6923,6 +7570,55 @@ function mapRequirementRow(row: Record<string, unknown>): RequirementRecord {
     status: requirementStatusFromDb(row.status as string),
     evidenceNote: (row.evidence_note as string) ?? "",
     completedAt: (row.completed_at as string) ?? undefined,
+  };
+}
+
+/* ---------------------------------------------------------------------- */
+/* Delegation template workflow mappers: snake_case RPC/table rows to     */
+/* the domain types in src/delegation/delegation.ts.                     */
+/* ---------------------------------------------------------------------- */
+
+function mapDelegationTemplate(row: Record<string, unknown>): DelegationTemplate {
+  return {
+    id: row.id as string,
+    agencyId: (row.agency_id as string) ?? null,
+    name: row.name as string,
+    category: row.category as DelegationTemplateCategory,
+    sections: row.sections as TemplateSections,
+    individualizationNote: (row.individualization_note as string) ?? "",
+    active: Boolean(row.active),
+  };
+}
+
+function mapDelegationTrainingMaterial(
+  row: Record<string, unknown>,
+): DelegationTrainingMaterial {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    assignmentId: row.assignment_id as string,
+    status: row.status as DelegationTrainingMaterial["status"],
+    draftContent: row.draft_content as TrainingMaterialContent,
+    publishedContent: (row.published_content as TrainingMaterialContent) ?? null,
+    submittedAt: (row.submitted_at as string) ?? null,
+    approvedAt: (row.approved_at as string) ?? null,
+    approvedBy: (row.approved_by as string) ?? null,
+  };
+}
+
+function mapDelegationAcknowledgment(
+  row: Record<string, unknown>,
+): DelegationAcknowledgment {
+  return {
+    id: row.id as string,
+    agencyId: row.agency_id as string,
+    assignmentId: row.assignment_id as string,
+    staffId: row.staff_id as string,
+    staffName: (row.staff_name as string) ?? "",
+    openedAt: (row.opened_at as string) ?? null,
+    signedAt: (row.signed_at as string) ?? null,
+    signatureName: (row.signature_name as string) ?? null,
+    signatureMark: (row.signature_mark as string) ?? null,
   };
 }
 

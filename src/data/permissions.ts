@@ -50,6 +50,14 @@ export const PERMISSION_KEYS = [
   "recognition.review_dsp",
   "recognition.view_winners",
   "recognition.manage",
+  // DELEGATION (delegation.* goes here)
+  "delegation.templates.view",
+  "delegation.templates.manage",
+  "delegation.activate",
+  "delegation.assign",
+  "delegation.training.review",
+  "delegation.training.approve",
+  "delegation.acknowledge",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -129,6 +137,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.review_dsp",
       "recognition.view_winners",
+      // DELEGATION: view templates + sign own site's acknowledgments.
+      "delegation.templates.view",
+      "delegation.acknowledge",
     ]),
   },
   {
@@ -154,6 +165,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
+      // DELEGATION: full delegation workflow (activate/assign/review/approve).
+      "delegation.templates.view",
+      "delegation.activate",
+      "delegation.assign",
+      "delegation.training.review",
+      "delegation.training.approve",
+      "delegation.acknowledge",
     ]),
   },
   {
@@ -177,6 +195,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
+      // DELEGATION: activate templates + sign own acknowledgments.
+      "delegation.templates.view",
+      "delegation.activate",
+      "delegation.acknowledge",
     ]),
   },
   {
@@ -195,6 +217,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "mileage.manage",
       "recognition.rate_hm",
       "recognition.view_winners",
+      // DELEGATION: view templates + sign own acknowledgments.
+      "delegation.templates.view",
+      "delegation.acknowledge",
     ]),
   },
   {
@@ -215,6 +240,12 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "mileage.manage",
       "recognition.view_winners",
+      // DELEGATION: assign to individuals + review/approve training + sign own.
+      "delegation.templates.view",
+      "delegation.assign",
+      "delegation.training.review",
+      "delegation.training.approve",
+      "delegation.acknowledge",
     ]),
   },
   {
@@ -234,6 +265,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "certificates.manage",
       "mileage.manage",
       "recognition.view_winners",
+      // DELEGATION: view templates only.
+      "delegation.templates.view",
     ]),
   },
   {
@@ -250,6 +283,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       "recognition.view_winners",
+      // DELEGATION: view templates only.
+      "delegation.templates.view",
     ]),
   },
 ];
@@ -324,6 +359,14 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "recognition.review_dsp": "Review assigned DSPs",
   "recognition.view_winners": "See weekly winners",
   "recognition.manage": "Manage recognition scoring",
+  // DELEGATION
+  "delegation.templates.view": "View delegation templates",
+  "delegation.templates.manage": "Manage delegation templates",
+  "delegation.activate": "Activate delegation templates for sites",
+  "delegation.assign": "Assign delegation to individuals",
+  "delegation.training.review": "Review delegation training drafts",
+  "delegation.training.approve": "Approve delegation training materials",
+  "delegation.acknowledge": "Sign delegation acknowledgments",
 };
 
 /**

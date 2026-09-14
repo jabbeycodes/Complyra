@@ -10,6 +10,7 @@ import {
   delegationReviewState,
 } from "../../data/types";
 import DelegationFormDetail from "./DelegationFormDetail";
+import DelegationTemplatesSection from "./DelegationTemplatesSection";
 
 /**
  * Agency-wide delegations page: every RN delegation of a specified nursing
@@ -20,6 +21,7 @@ export default function DelegationsPage() {
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState<"library" | "forms">("library");
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -62,7 +64,26 @@ export default function DelegationsPage() {
       />
       {error && <p className="form-error">{error}</p>}
 
-      {reminders.length > 0 && (
+      <div className="tabs">
+        <button
+          className={tab === "library" ? "selected" : ""}
+          onClick={() => setTab("library")}
+        >
+          Template library
+        </button>
+        <button
+          className={tab === "forms" ? "selected" : ""}
+          onClick={() => setTab("forms")}
+        >
+          RN delegation forms
+        </button>
+      </div>
+
+      {tab === "library" ? (
+        <DelegationTemplatesSection />
+      ) : (
+        <>
+          {reminders.length > 0 && (
         <section className="panel">
           <h2>Review reminders</h2>
           <p className="stack-help">
@@ -132,6 +153,8 @@ export default function DelegationsPage() {
       </section>
 
       {openId && <DelegationFormDetail obligationId={openId} onClose={() => setOpenId(null)} />}
+        </>
+      )}
     </>
   );
 }
