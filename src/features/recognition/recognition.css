@@ -11,7 +11,7 @@
 .recognition-winner-card {
   border: 1px solid #e4ddd2;
   border-left: 4px solid #2f462e;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px;
   background: #fffdf9;
 }
@@ -79,7 +79,7 @@
 
 .recognition-partner-row {
   border: 1px solid #e4ddd2;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px;
   background: #fffdf9;
   display: flex;
@@ -148,7 +148,7 @@
 
 .recognition-aboutme-row {
   border: 1px solid #e4ddd2;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 14px 16px;
   background: #fffdf9;
   margin-bottom: 12px;
@@ -175,7 +175,7 @@
 
 .recognition-run-result {
   border: 1px solid #2f462e;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #eef3e6;
   padding: 12px 16px;
   margin: 12px 0;
@@ -193,7 +193,7 @@
 
 .recognition-manage-history {
   border: 1px solid #e4ddd2;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 16px;
   margin-top: 12px;
   background: #fff;

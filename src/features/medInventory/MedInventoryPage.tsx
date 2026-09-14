@@ -71,7 +71,7 @@ export default function MedInventoryPage() {
   return (
     <div data-tour="med-inventory">
       <PageHeading
-        eyebrow="LIFEPATH"
+        eyebrow="MEDICATION SUPPLY."
         title="Medication supply forecast"
         description="A projection of pills on hand — not a medication administration record. Delivery-day counts, daily countdowns, dose exceptions, and reorder alerts for every home."
       />

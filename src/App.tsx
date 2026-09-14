@@ -498,7 +498,8 @@ export default function App() {
       ],
     },
     {
-      title: "LIFEPATH",
+      // Section header shows the current agency's display name — never a hardcoded name.
+      title: session.agencyName.toUpperCase(),
       items: [
         // LIFEPATH-P2-NAV (training engine)
         ["Training", BookOpen],

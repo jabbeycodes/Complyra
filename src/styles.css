@@ -144,7 +144,7 @@ button:hover:not(:disabled) {
 .agency-picker {
   margin: 29px 1px 25px;
   border: 1px solid #ece9e5;
-  border-radius: 9px;
+  border-radius: 8px;
   min-height: 62px;
   display: flex;
   align-items: center;
@@ -156,20 +156,28 @@ button:hover:not(:disabled) {
 }
 .agency-picker > span:nth-child(2) {
   flex: 1;
+  min-width: 0;
 }
 .agency-picker strong {
   font-size: 14px;
   font-weight: 650;
   display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .agency-picker small {
   display: block;
   color: #9d978d;
   font-size: 12px;
   margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .agency-picker > svg {
   color: #4a4036;
+  flex-shrink: 0;
 }
 .agency-mark {
   width: 34px;
@@ -179,7 +187,7 @@ button:hover:not(:disabled) {
   justify-content: center;
   background: #e8eee0;
   color: var(--moss);
-  border-radius: 7px;
+  border-radius: 8px;
   flex-shrink: 0;
   overflow: hidden;
   font-size: 11px;
@@ -244,7 +252,7 @@ button:hover:not(:disabled) {
   min-height: 41px;
   padding: 10px 13px;
   text-align: left;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 14px;
   color: #837b70;
   margin: 3px 0;
@@ -267,7 +275,7 @@ button:hover:not(:disabled) {
   flex: 1;
 }
 .nav-count {
-  border-radius: 5px;
+  border-radius: 4px;
   background: #e8dcc8;
   color: var(--clay);
   padding: 2px 6px;
@@ -336,20 +344,28 @@ button:hover:not(:disabled) {
 }
 .profile > span:nth-child(2) {
   flex: 1;
+  min-width: 0;
 }
 .profile strong {
   display: block;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .profile small {
   display: block;
   font-size: 11px;
   color: #4a4036;
   margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .profile > svg {
   color: #4a4036;
+  flex-shrink: 0;
 }
 .avatar {
   width: 35px;
@@ -501,7 +517,7 @@ kbd {
   padding: 10px;
   background: white;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 14px 45px #39513320;
   z-index: 60;
 }
@@ -582,7 +598,7 @@ h1 {
   justify-content: center;
   gap: 8px;
   border: 1px solid #e9e6e1;
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 10px 13px;
   font-size: 13px;
   font-weight: 500;
@@ -732,7 +748,7 @@ h1 {
 .stat-card {
   background: #faf6ef;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 17px 17px 14px;
   text-align: left;
   box-shadow: 0 2px 3px #5f514502;
@@ -756,7 +772,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: 8px;
 }
 .stat-value {
   display: flex;
@@ -837,7 +853,7 @@ h1 {
 .panel {
   background: #faf6ef;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 8px;
   box-shadow: 0 2px 3px #5f514502;
   overflow: hidden;
   min-width: 0;
@@ -868,7 +884,7 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 3px 6px;
   min-width: 18px;
   background: #f8f2ef;
@@ -1178,7 +1194,7 @@ h1 {
   text-align: left;
   padding: 16px;
   border: 1px solid #e6ddd0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fffdf8;
   display: flex;
   flex-direction: column;
@@ -1359,7 +1375,7 @@ td > svg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: 8px;
   flex-shrink: 0;
 }
 .inline-progress {
@@ -1668,7 +1684,7 @@ td > svg {
   background: #ffffff;
   border: 1px solid #eeece9;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
 }
 .people-grid {
   display: grid;
@@ -1930,7 +1946,7 @@ td > svg {
   align-items: center;
   gap: 7px;
   padding: 9px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: #f1f0ed;
   color: #5d8354;
 }
@@ -2119,7 +2135,7 @@ td > svg {
   background: #605245;
   color: #f5f4f1;
   border: 1px solid #887462;
-  border-radius: 9px;
+  border-radius: 8px;
   box-shadow: 0 8px 35px #5f514530;
   z-index: 1000;
   max-width: calc(100vw - 40px);
@@ -2136,7 +2152,7 @@ td > svg {
 }
 .modal {
   border: 1px solid #e6e3df;
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 0;
   width: 560px;
   max-width: calc(100vw - 30px);
@@ -2330,7 +2346,7 @@ td > svg {
   line-height: 1.7;
   margin: 10px 0 16px;
   background: #f9f4f2;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 10px;
 }
 .evidence-confirmed {
@@ -2388,7 +2404,7 @@ td > svg {
   border: 1px dashed #d1c8be;
   background: #fbfbfa;
   padding: 24px 16px;
-  border-radius: 9px;
+  border-radius: 8px;
   gap: 10px;
   color: #bbafa1;
   position: relative;
@@ -2455,7 +2471,7 @@ td > svg {
   width: 100%;
   padding: 15px;
   border: 1px solid #eeebe7;
-  border-radius: 7px;
+  border-radius: 8px;
   text-align: left;
   margin: 10px 0;
   color: #bdb0a1;
@@ -2504,7 +2520,7 @@ td > svg {
   height: 54px;
   background: #f3f1ee;
   color: #beaf9d;
-  border-radius: 15px;
+  border-radius: 16px;
   margin: 5px 0 17px;
 }
 .copilot-welcome h2 {
@@ -2525,7 +2541,7 @@ td > svg {
   color: #c0b6ab;
   padding: 9px;
   background: #fbfaf8;
-  border-radius: 5px;
+  border-radius: 4px;
   margin-bottom: 18px;
 }
 .suggested-questions {
@@ -2553,7 +2569,7 @@ td > svg {
   align-items: center;
   gap: 10px;
   border: 1px solid #e1dcd4;
-  border-radius: 9px;
+  border-radius: 8px;
   margin-top: 23px;
   padding: 8px 8px 8px 14px;
 }
@@ -2729,7 +2745,7 @@ td > svg {
   color: #a48174;
   background: #f9f5ee;
   padding: 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   margin-bottom: 15px;
 }
 .sr-only {
@@ -3888,7 +3904,7 @@ td {
   }
   .modal {
     max-height: calc(100dvh - 30px);
-    border-radius: 11px;
+    border-radius: 12px;
   }
   .modal-head {
     padding: 18px 20px;
@@ -3971,7 +3987,6 @@ td {
 .brand-tagline {
   font-size: 9px;
   letter-spacing: 1.5px;
-  white-space: nowrap;
 }
 .panel-heading h2 {
   font-size: 16px;
@@ -4325,7 +4340,7 @@ th {
 .complyrer-lockup {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 .login-brand {
   margin-bottom: 18px;
@@ -4853,7 +4868,7 @@ th {
 .chart-widget {
   background: #faf6ef;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 16px 18px;
   display: grid;
   gap: 10px;
@@ -5293,7 +5308,7 @@ body.nav-open {
   .login-card {
     width: 100%;
     padding: 24px 18px;
-    border-radius: 20px;
+    border-radius: 28px;
   }
   .login-card h1 {
     font-size: 26px;
@@ -5430,7 +5445,7 @@ body.nav-open {
 .delegation-paper {
   background: #fff;
   border: 1px solid #e6e3df;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 24px 26px;
   color: #3c352c;
   margin: 12px 0;
@@ -5744,7 +5759,7 @@ body.nav-open {
   position: fixed;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 0 18px 44px rgba(20, 28, 24, 0.28);
   padding: 18px;
   outline: none;
