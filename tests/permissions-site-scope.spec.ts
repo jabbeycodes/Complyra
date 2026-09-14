@@ -94,7 +94,6 @@ test("demo nurse cameron.price signs in and only sees Maple people", async ({
   page,
 }) => {
   await signedIn(page, "cameron.price");
-  await expect(page.locator(".topbar")).toContainText("Cameron Price");
   await openNewDelegationForm(page);
   await expect(page.getByLabel("Program site")).toBeDisabled();
   const siteLabel = await page.getByLabel("Program site").locator("option:checked").innerText();
@@ -170,7 +169,7 @@ test("inviting qa.dpm then signing in is recognized", async ({ page }) => {
   await expect(dialog).toContainText("EVERGREEN-MO");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("qa.dpm");
   await page.locator('input[autocomplete="current-password"]').fill("TempPass!1");

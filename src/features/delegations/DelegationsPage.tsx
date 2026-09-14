@@ -234,7 +234,7 @@ function NewDelegationForm({
         onCreate({ individualId, taskTitle, purpose, procedures, observeReportDo });
       }}
     >
-      <div className="delegation-grid2">
+      <div className="delegation-grid3">
         <label className="form-label">
           Program site
           <select
@@ -272,16 +272,16 @@ function NewDelegationForm({
             ))}
           </select>
         </label>
+        <label className="form-label">
+          Delegated task
+          <input
+            value={taskTitle}
+            onChange={(e) => setTaskTitle(e.target.value)}
+            placeholder="PRN Inhaler Self-Administration and Monitoring"
+            required
+          />
+        </label>
       </div>
-      <label className="form-label">
-        Delegated task
-        <input
-          value={taskTitle}
-          onChange={(e) => setTaskTitle(e.target.value)}
-          placeholder="PRN Inhaler Self-Administration and Monitoring"
-          required
-        />
-      </label>
       <label className="form-label">
         Purpose of task
         <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} required />
