@@ -39,6 +39,8 @@ test("Overview keeps a 2x2 score grid on a phone and no hero Export", async ({
   const mixBox = await mix.locator(".status-mix-chart").boundingBox();
   expect(mixBox).toBeTruthy();
   expect(mixBox!.width).toBeLessThanOrEqual(220);
+  const shot = `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}`;
+  await page.screenshot({ path: `${shot}/overview_2x2_390.png`, fullPage: false });
 });
 
 test("Settings exports a compliance report PDF for admins", async ({ page }) => {
@@ -49,6 +51,9 @@ test("Settings exports a compliance report PDF for admins", async ({ page }) => 
   await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   const exportBtn = page.getByRole("button", { name: "Export compliance report" });
   await expect(exportBtn).toBeVisible();
+  await exportBtn.scrollIntoViewIfNeeded();
+  const shot = `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}`;
+  await page.screenshot({ path: `${shot}/settings_export_1280.png`, fullPage: false });
   const download = page.waitForEvent("download");
   await exportBtn.click();
   const file = await download;

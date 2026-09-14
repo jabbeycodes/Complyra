@@ -1709,7 +1709,6 @@ export default function App() {
                         <LockKeyhole size={20} />
                       )}
                     </div>
-                    <AgencyLogoSettings onSaved={notify} />
                     {canExportAudit && (
                       <div className="settings-row">
                         <span>
@@ -1728,6 +1727,7 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                    <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     <SignatureSettingsSection onSaved={notify} />
                     <div className="settings-row">
