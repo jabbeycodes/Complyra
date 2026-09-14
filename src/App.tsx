@@ -97,6 +97,7 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -161,6 +162,7 @@ export default function App() {
   const [certAlerts, setCertAlerts] = useState<Record<string, number>>({});
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
+  const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
@@ -203,6 +205,7 @@ export default function App() {
     setPacket(null);
     setSelectedId(null);
     setPerson(null);
+    setDetailSiteId(null);
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
@@ -402,6 +405,7 @@ export default function App() {
   );
   function navigate(next: string, nextStatus = "All statuses") {
     if (next !== "Individual chart") setPerson(null);
+    if (next !== "Site detail") setDetailSiteId(null);
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
@@ -411,6 +415,13 @@ export default function App() {
   function openPersonChart(name: string) {
     setPerson(name);
     setPage("Individual chart");
+    setQuery("");
+    setMobileOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function openSiteDetail(siteId: string) {
+    setDetailSiteId(siteId);
+    setPage("Site detail");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1006,6 +1017,13 @@ export default function App() {
                   onBack={() => navigate("Individuals")}
                 />
               )}
+              {page === "Site detail" && detailSiteId && (
+                <SiteDetailPage
+                  siteId={detailSiteId}
+                  onBack={() => navigate("Sites & programs")}
+                  onOpenIndividual={(name) => openPersonChart(name)}
+                />
+              )}
               {page === "Sites & programs" && (
                 <>
                   <PageHeading title="Sites & programs" />
@@ -1098,6 +1116,12 @@ export default function App() {
                               </span>
                             </div>
                             <div className="heading-actions">
+                              <button
+                                className="button primary"
+                                onClick={() => openSiteDetail(s.id)}
+                              >
+                                Open site <ArrowRight size={16} />
+                              </button>
                               {canAddPerson && (
                                 <button
                                   className="button"
@@ -1198,7 +1222,19 @@ export default function App() {
                                 </td>
                                 <td>{s.username || s.email}</td>
                                 <td>{s.role}</td>
-                                <td>{s.site}</td>
+                                <td>
+                                  {s.siteId ? (
+                                    <button
+                                      type="button"
+                                      className="text-button"
+                                      onClick={() => openSiteDetail(s.siteId as string)}
+                                    >
+                                      {s.site}
+                                    </button>
+                                  ) : (
+                                    s.site
+                                  )}
+                                </td>
                                 <td>
                                   {
                                     data.requirements.filter(
