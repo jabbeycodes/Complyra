@@ -17,6 +17,14 @@
   --green: #4d6b42;
   --red: #b56a4e;
   --sidebar: 236px;
+  /* Canvas inset: content and topbar share one token so they stay aligned. */
+  --page-inline: 48px;
+  --page-inline-md: 28px;
+  --page-inline-sm: 16px;
+  --page-inline-start: max(var(--page-inline), env(safe-area-inset-left, 0px));
+  --page-inline-end: max(var(--page-inline), env(safe-area-inset-right, 0px));
+  /* Inner panel chrome (headings, table edge cells, Cancel / Open form). */
+  --panel-inline: 28px;
 }
 * {
   box-sizing: border-box;
@@ -430,7 +438,7 @@ button:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 35px;
+  padding: 0 var(--page-inline-end) 0 var(--page-inline-start);
   gap: 20px;
 }
 .breadcrumb {
@@ -572,7 +580,7 @@ kbd {
 main {
   max-width: 1640px;
   margin: auto;
-  padding: 31px 35px 25px;
+  padding: 31px var(--page-inline-end) 25px var(--page-inline-start);
   min-height: calc(100vh - 108px);
 }
 .eyebrow {
@@ -876,7 +884,7 @@ h1 {
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
-  padding: 21px 21px 19px;
+  padding: 21px var(--panel-inline) 19px;
 }
 .panel-heading h2 {
   font-family: "DM Sans Variable", sans-serif;
@@ -891,6 +899,13 @@ h1 {
   font-size: 12px;
   color: #4a4036;
   margin-top: 7px;
+}
+.panel > h2 {
+  padding: 21px var(--panel-inline) 8px;
+}
+.panel > .stack-help {
+  padding-inline: var(--panel-inline);
+  padding-bottom: 12px;
 }
 .count-pill {
   font-size: 11px;
@@ -925,7 +940,7 @@ h1 {
   text-decoration: underline;
 }
 .risk-list {
-  padding: 0 20px;
+  padding: 0 var(--panel-inline);
 }
 .risk-row {
   display: flex;
@@ -1033,7 +1048,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 13px 20px;
+  padding: 13px var(--panel-inline);
   background: #fdfdfd;
   color: #b6b1aa;
   font-size: 10px;
@@ -1047,7 +1062,7 @@ h1 {
   padding-top: 1px;
 }
 .category-list {
-  padding: 2px 21px 14px;
+  padding: 2px var(--panel-inline) 14px;
 }
 .category-row {
   display: block;
@@ -1083,7 +1098,7 @@ h1 {
 }
 .category-key {
   margin-top: auto;
-  padding: 0 21px 18px;
+  padding: 0 var(--panel-inline) 18px;
   display: flex;
   gap: 13px;
   font-size: 9px;
@@ -1126,7 +1141,7 @@ h1 {
     "hint hint";
   gap: 8px 20px;
   text-align: left;
-  padding: 22px 22px 8px;
+  padding: 22px var(--panel-inline) 8px;
   background: #2f4630;
   color: #faf6ef;
 }
@@ -1328,13 +1343,21 @@ th {
   color: #4a4036;
   background: #fbfbfb;
   border-bottom: 1px solid #f2f1ef;
-  padding: 12px 20px;
+  padding: 12px 16px;
 }
 td {
   font-size: 13px;
-  padding: 16px 20px;
+  padding: 16px;
   border-bottom: 1px solid #f4f2f0;
   color: #4a4036;
+}
+th:first-child,
+td:first-child {
+  padding-left: var(--panel-inline);
+}
+th:last-child,
+td:last-child {
+  padding-right: var(--panel-inline);
 }
 tbody tr:last-child td {
   border-bottom: 0;
@@ -1354,14 +1377,18 @@ td > svg {
   padding: 11px 15px;
 }
 .sites-table th:first-child {
-  padding-left: 21px;
+  padding-left: var(--panel-inline);
 }
 .sites-table td {
   font-size: 11px;
   padding: 13px 15px;
 }
 .sites-table td:first-child {
-  padding-left: 21px;
+  padding-left: var(--panel-inline);
+}
+.sites-table th:last-child,
+.sites-table td:last-child {
+  padding-right: var(--panel-inline);
 }
 .site-name {
   display: flex;
@@ -1419,7 +1446,7 @@ td > svg {
   font-size: 10px;
 }
 .activity-list {
-  padding: 0 20px;
+  padding: 0 var(--panel-inline);
 }
 .activity-row {
   display: flex;
@@ -1544,7 +1571,7 @@ td > svg {
   color: #4a4036;
   font-size: 9px;
   letter-spacing: 0.6px;
-  padding: 10px 35px;
+  padding: 10px var(--page-inline-end) 10px var(--page-inline-start);
 }
 .demo-strip > span:nth-child(2) {
   letter-spacing: 0;
@@ -1621,7 +1648,7 @@ td > svg {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 17px 20px;
+  padding: 17px var(--panel-inline);
   border-bottom: 1px solid #f0efec;
 }
 .input-search {
@@ -2883,11 +2910,7 @@ td {
     width: calc(100% + 40px);
     padding-inline: 23px;
   }
-  .topbar {
-    padding-inline: 44px;
-  }
   main {
-    padding-inline: 44px;
     padding-top: 35px;
   }
   .stat-card {
@@ -2973,6 +2996,8 @@ td {
 @media (max-width: 1190px) {
   :root {
     --sidebar: 211px;
+    --page-inline: var(--page-inline-md);
+    --panel-inline: 24px;
   }
   .sidebar {
     padding-inline: 12px;
@@ -2991,12 +3016,6 @@ td {
   }
   .brand-tagline {
     letter-spacing: 1.4px;
-  }
-  .topbar {
-    padding-inline: 25px;
-  }
-  main {
-    padding-inline: 25px;
   }
   .stat-grid {
     gap: 11px;
@@ -3028,9 +3047,6 @@ td {
     grid-template-columns: 1.7fr 1fr;
     gap: 15px;
   }
-  .risk-list {
-    padding-inline: 16px;
-  }
   .risk-end {
     gap: 5px;
   }
@@ -3038,7 +3054,7 @@ td {
     font-size: 9px;
   }
   .panel-heading {
-    padding: 18px 16px;
+    padding: 18px var(--panel-inline);
   }
   .panel-heading h2 {
     font-size: 14px;
@@ -3051,6 +3067,14 @@ td {
   }
   .sites-table th {
     padding-inline: 10px;
+  }
+  .sites-table th:first-child,
+  .sites-table td:first-child {
+    padding-left: var(--panel-inline);
+  }
+  .sites-table th:last-child,
+  .sites-table td:last-child {
+    padding-right: var(--panel-inline);
   }
   .sites-table th:nth-child(2),
   .sites-table td:nth-child(2) {
@@ -3084,9 +3108,6 @@ td {
   .risk-copy strong {
     font-size: 12px;
   }
-  .activity-list {
-    padding-inline: 16px;
-  }
   .activity-row p {
     font-size: 10px;
   }
@@ -3097,6 +3118,7 @@ td {
 @media (max-width: 960px) {
   :root {
     --sidebar: 190px;
+    --page-inline: 24px;
   }
   .brand > span {
     font-size: 28px;
@@ -3145,10 +3167,7 @@ td {
     font-size: 12px;
   }
   main {
-    padding: 24px 20px;
-  }
-  .topbar {
-    padding-inline: 20px;
+    padding-block: 24px 25px;
   }
   .global-search {
     width: 200px;
@@ -3287,9 +3306,6 @@ td {
   .audit-summary > .button {
     margin-left: 0;
   }
-  .demo-strip {
-    padding-inline: 20px;
-  }
   .timeline-row time {
     font-size: 10px;
   }
@@ -3312,6 +3328,8 @@ td {
 @media (max-width: 720px) {
   :root {
     --sidebar: 0px;
+    --page-inline: var(--page-inline-sm);
+    --panel-inline: 20px;
   }
   .sidebar {
     width: 236px;
@@ -3374,7 +3392,6 @@ td {
   }
   .topbar {
     height: 62px;
-    padding-inline: 14px;
     gap: 5px;
   }
   .breadcrumb {
@@ -3412,7 +3429,7 @@ td {
     margin-left: 0;
   }
   main {
-    padding: 23px 18px;
+    padding-block: 23px 25px;
   }
   .eyebrow {
     font-size: 10px;
@@ -3507,7 +3524,7 @@ td {
       "copy"
       "score"
       "hint";
-    padding: 18px 16px 8px;
+    padding: 18px var(--panel-inline) 8px;
   }
   .agency-hero-copy h2 {
     font-size: 20px;
@@ -3572,7 +3589,7 @@ td {
     margin-bottom: 18px;
   }
   .panel-heading {
-    padding: 18px 16px;
+    padding: 18px var(--panel-inline);
     gap: 10px;
   }
   .panel-heading h2 {
@@ -3620,12 +3637,12 @@ td {
   }
   .priority-footer {
     font-size: 9px;
-    padding: 12px 16px;
+    padding: 12px var(--panel-inline);
   }
   .category-list {
     grid-template-columns: 1fr;
     gap: 0;
-    padding-inline: 16px;
+    padding-inline: var(--panel-inline);
   }
   .category-row > div:first-child {
     font-size: 13px;
@@ -3634,7 +3651,7 @@ td {
     padding: 7px 0 12px;
   }
   .category-key {
-    padding: 0 16px 18px;
+    padding: 0 var(--panel-inline) 18px;
   }
   .sites-table td:nth-child(2),
   .sites-table th:nth-child(2) {
@@ -3649,7 +3666,7 @@ td {
   }
   .sites-table td:first-child,
   .sites-table th:first-child {
-    padding-left: 16px;
+    padding-left: var(--panel-inline);
   }
   .sites-table th:last-child,
   .sites-table td:last-child {
@@ -3730,7 +3747,7 @@ td {
     text-align: right;
   }
   .demo-strip {
-    padding: 10px 18px;
+    padding-block: 10px;
     font-size: 6px;
   }
   .demo-strip > span:nth-child(2) {
@@ -3771,7 +3788,7 @@ td {
   .filter-bar {
     flex-wrap: wrap;
     gap: 10px;
-    padding: 15px;
+    padding: 15px var(--panel-inline);
   }
   .filter-right {
     justify-content: space-between;
@@ -5234,7 +5251,8 @@ body.nav-open {
     z-index: 30;
     height: auto;
     min-height: 58px;
-    padding: max(8px, env(safe-area-inset-top)) 12px 8px;
+    padding: max(8px, env(safe-area-inset-top)) var(--page-inline-end) 8px
+      var(--page-inline-start);
     gap: 8px;
   }
   .topbar-actions {
@@ -5295,7 +5313,8 @@ body.nav-open {
   .demo-strip {
     font-size: 11px;
     letter-spacing: 0;
-    padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+    padding: 10px var(--page-inline-end) max(10px, env(safe-area-inset-bottom))
+      var(--page-inline-start);
   }
   .demo-strip button {
     margin-left: 0;
@@ -5313,7 +5332,8 @@ body.nav-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   main {
-    padding: 16px 14px max(24px, env(safe-area-inset-bottom));
+    padding: 16px var(--page-inline-end) max(24px, env(safe-area-inset-bottom))
+      var(--page-inline-start);
   }
   .login-shell {
     display: block;
@@ -5455,6 +5475,7 @@ body.nav-open {
   .form-grid {
     grid-template-columns: 1fr;
   }
+}
 
 /* ===== LIFEPATH-P3: RN delegation forms ===== */
 .delegation-paper {
@@ -5551,6 +5572,9 @@ body.nav-open {
   font-size: 13px;
   margin: 8px 0;
 }
+.panel:has(> .delegation-table) {
+  overflow-x: auto;
+}
 .delegation-table th {
   text-align: left;
   font-size: 11px;
@@ -5558,12 +5582,20 @@ body.nav-open {
   letter-spacing: 0.4px;
   color: #6d6257;
   border-bottom: 2px solid #d9d2c6;
-  padding: 6px 8px;
+  padding: 6px 12px;
 }
 .delegation-table td {
   border-bottom: 1px solid #efedea;
-  padding: 7px 8px;
+  padding: 7px 12px;
   vertical-align: top;
+}
+.delegation-table th:first-child,
+.delegation-table td:first-child {
+  padding-left: var(--panel-inline);
+}
+.delegation-table th:last-child,
+.delegation-table td:last-child {
+  padding-right: var(--panel-inline);
 }
 .delegation-table input[type="text"],
 .delegation-table input:not([type]) {
@@ -5610,7 +5642,7 @@ body.nav-open {
   overflow: visible;
 }
 .delegation-create {
-  padding: 0 21px 12px;
+  padding: 0 var(--panel-inline) 12px;
   min-width: 0;
 }
 .delegation-editor {
@@ -5620,7 +5652,7 @@ body.nav-open {
   min-width: 0;
 }
 .panel.delegation-editor {
-  padding: 16px 21px 20px;
+  padding: 16px var(--panel-inline) 20px;
 }
 .delegation-editor input:not([type="checkbox"]):not([type="radio"]),
 .delegation-editor select,
@@ -5699,7 +5731,7 @@ body.nav-open {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 8px 0;
+  padding: 8px var(--panel-inline);
   border-bottom: 1px solid #efedea;
 }
 .delegation-details {
