@@ -14,7 +14,7 @@ export default function LoginScreen({
   onSetup?: () => void;
   prefill?: CreateAgencyResult | null;
 }) {
-  const { signIn, usingHostedBackend } = useData();
+  const { signIn } = useData();
   const [agencyCode, setAgencyCode] = useState(
     prefill?.agencyCode ?? DEMO_AGENCY_CODE,
   );
@@ -49,12 +49,7 @@ export default function LoginScreen({
         <div className="login-brand">
           <ComplyRerWordmark size={36} />
         </div>
-        <h1>Sign in to your agency workspace</h1>
-        <p>
-          {usingHostedBackend
-            ? "Use your provider code (for example EVERGREEN-MO), username, and password."
-            : "Local Evergreen demo is available. Hosted agencies use the same provider-code + username sign-in."}
-        </p>
+        <h1>Sign in</h1>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -130,10 +125,6 @@ export default function LoginScreen({
           </button>
         )}
         <div className="login-demo">
-          <strong>Try it with fictional data</strong>
-          <p className="login-demo-copy">
-            Take a guided tour of a fictional agency — no sign-up needed.
-          </p>
           <button
             type="button"
             className="button full"
@@ -143,10 +134,7 @@ export default function LoginScreen({
             <Play size={17} aria-hidden="true" />{" "}
             {demoBusy ? "Loading demo…" : "Explore the interactive demo"}
           </button>
-          <small>
-            Demo uses fictional Evergreen Care records. Your own agency data
-            stays separate.
-          </small>
+          <small>Fictional Evergreen Care data — no sign-up needed.</small>
         </div>
       </div>
     </div>
