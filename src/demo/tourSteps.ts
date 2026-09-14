@@ -62,7 +62,7 @@ export const TOUR_STEPS: TourStep[] = [
     body: "A fresh checklist for every house, every week — completed, signed off, and filed as evidence.",
   },
   {
-    page: "Med inventory",
+    page: "Supply forecast",
     target: "med-inventory",
     title: "Meds, counted down",
     body: "Pill counts drop with each pass and low-stock alerts fire before you run out.",
