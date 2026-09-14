@@ -71,12 +71,12 @@ export default function ProfileSignatureSection() {
         <>
           <div className="profile-signature-images">
             <figure>
-              {sigUrl && <img src={sigUrl} alt="Your adopted signature" />}
               <figcaption>Signature</figcaption>
+              {sigUrl && <img src={sigUrl} alt="Your adopted signature" />}
             </figure>
             <figure>
-              {iniUrl && <img src={iniUrl} alt="Your adopted initials" />}
               <figcaption>Initials</figcaption>
+              {iniUrl && <img src={iniUrl} alt="Your adopted initials" />}
             </figure>
           </div>
           <p className="muted">

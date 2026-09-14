@@ -116,15 +116,17 @@ export default function DelegationsPage() {
           )}
         </div>
         {creating && editor && (
-          <NewDelegationForm
-            onCreate={(input) =>
-              run(async () => {
-                const { id } = await api.createDelegation(input);
-                setCreating(false);
-                setOpenId(id);
-              })
-            }
-          />
+          <div className="delegation-create">
+            <NewDelegationForm
+              onCreate={(input) =>
+                run(async () => {
+                  const { id } = await api.createDelegation(input);
+                  setCreating(false);
+                  setOpenId(id);
+                })
+              }
+            />
+          </div>
         )}
         {delegations.length === 0 ? (
           <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
@@ -222,7 +224,7 @@ function NewDelegationForm({
       }}
     >
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           Individual
           <select value={individualId} onChange={(e) => setIndividualId(e.target.value)} required>
             <option value="">Select…</option>
@@ -233,7 +235,7 @@ function NewDelegationForm({
             ))}
           </select>
         </label>
-        <label>
+        <label className="form-label">
           Delegated task
           <input
             value={taskTitle}
@@ -243,16 +245,16 @@ function NewDelegationForm({
           />
         </label>
       </div>
-      <label>
+      <label className="form-label">
         Purpose of task
         <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} required />
       </label>
       <div className="delegation-grid2">
-        <label>
+        <label className="form-label">
           PROCEDURES / steps to follow
           <textarea value={procedures} onChange={(e) => setProcedures(e.target.value)} rows={3} />
         </label>
-        <label>
+        <label className="form-label">
           What to OBSERVE / REPORT / DO / CONTACT
           <textarea value={observeReportDo} onChange={(e) => setObserveReportDo(e.target.value)} rows={3} />
         </label>

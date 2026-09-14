@@ -58,6 +58,7 @@ import {
   metrics,
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
+import { searchRequirements } from "./data/search";
 import AuthEntry from "./auth/AuthEntry";
 import { ComplyRerWordmark } from "./brand/ComplyrerBrand";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
@@ -339,6 +340,7 @@ export default function App() {
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
+  const searchHits = searchRequirements(scoped, globalQuery);
   const alertItems = scoped.filter((r) =>
     ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
@@ -704,14 +706,7 @@ export default function App() {
               {globalQuery && (
                 <div className="search-results">
                   <div className="search-heading">REQUIREMENTS & RECORDS</div>
-                  {scoped
-                    .filter((r) =>
-                      `${r.person} ${r.title} ${r.site} ${r.owner}`
-                        .toLowerCase()
-                        .includes(globalQuery.toLowerCase()),
-                    )
-                    .slice(0, 6)
-                    .map((r) => (
+                  {searchHits.map((r) => (
                       <button
                         key={r.id}
                         onClick={() => {
@@ -725,15 +720,17 @@ export default function App() {
                           <small>
                             {r.person} · {r.site}
                           </small>
+                          <small className="search-meta">
+                            {r.category} · {r.status} · due {formatDate(r.due)} ·
+                            p.{r.page}
+                          </small>
                         </span>
                         <ChevronRight size={15} />
                       </button>
                     ))}
-                  {!scoped.some((r) =>
-                    `${r.person} ${r.title} ${r.site} ${r.owner}`
-                      .toLowerCase()
-                      .includes(globalQuery.toLowerCase()),
-                  ) && <p>No matching records. Try a name or site.</p>}
+                  {searchHits.length === 0 && (
+                    <p>No matching records. Try a name or site.</p>
+                  )}
                 </div>
               )}
             </div>
