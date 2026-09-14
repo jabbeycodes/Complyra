@@ -423,6 +423,35 @@ export default function App() {
   function notify(message: string) {
     setToast(message);
   }
+  function exportComplianceReport(items: Requirement[] = scoped) {
+    if (!session || !workspace) return;
+    const asOf = new Date().toISOString().slice(0, 10);
+    const card = metrics(items);
+    const pdf = buildComplianceReportPdf({
+      agencyName: session.agencyName,
+      reportDate: new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+      asOfDate: asOf,
+      siteFilter: site,
+      score: card.score,
+      total: card.total,
+      done: card.done,
+      overdue: card.overdue,
+      dueSoon: card.dueSoon,
+      review: card.review,
+      requirements: items,
+      demoMode,
+      logoDataUrl: workspace.branding.logoUrl,
+    });
+    downloadBlob(
+      complianceReportPdfName(session.agencyName, asOf),
+      pdf.output("blob"),
+    );
+    notify("Your compliance report PDF has been downloaded.");
+  }
   async function finishRequirement() {
     if (!selected) return;
     try {
@@ -594,7 +623,6 @@ export default function App() {
         >
           <ComplyRerWordmark size={33} />
         </button>
-        <div className="brand-tagline">GO PAPERLESS. STAY AUDIT-READY.</div>
         <button className="agency-picker" onClick={() => setModal("agency")}>
           <AgencyMark name={session.agencyName} logoUrl={workspace.branding.logoUrl} />
           <span>
@@ -652,13 +680,7 @@ export default function App() {
           >
             <span className="assistant-card-top">
               <Sparkles size={18} />
-              <span>RECORDS LOOKUP</span>
-            </span>
-            <strong>A little help, a lot of clarity.</strong>
-            <span>
-              Find answers in your agency’s
-              <br />
-              compliance records.
+              <span>Records</span>
             </span>
             <b>
               Ask Complyrer <ArrowUpRight size={15} />
@@ -715,8 +737,11 @@ export default function App() {
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>
           <div className="topbar-actions">
-            <div className="global-search">
-              <Search size={16} />
+            <div
+              className="global-search"
+              onClick={() => searchRef.current?.focus()}
+            >
+              <Search size={16} aria-hidden="true" />
               <input
                 ref={searchRef}
                 value={globalQuery}
@@ -784,28 +809,6 @@ export default function App() {
               onNavigate={navigate}
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
-              onExport={() => {
-                const reportData = {
-                  agencyName: session.agencyName,
-                  reportDate: new Date().toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  }),
-                  score: workspace.scorecard?.score ?? metrics(scoped).score,
-                  total: workspace.scorecard?.total ?? scoped.length,
-                  done: workspace.scorecard?.done ?? 0,
-                  overdue: workspace.scorecard?.overdue ?? 0,
-                  dueSoon: workspace.scorecard?.dueSoon ?? 0,
-                  requirements: scoped,
-                };
-                const pdf = buildComplianceReportPdf(reportData);
-                downloadBlob(
-                  complianceReportPdfName(session.agencyName, new Date().toISOString()),
-                  pdf.output("blob"),
-                );
-                notify("Your compliance report PDF has been downloaded.");
-              }}
               onCopilot={() => setModal("copilot")}
               onActivity={() => navigate("Activity log")}
             />
@@ -816,19 +819,7 @@ export default function App() {
                 isCategory) && (
                 <>
                   <PageHeading
-                    eyebrow={
-                      page === "Review queue"
-                        ? "HUMAN REVIEW. CONFIDENT DECISIONS."
-                        : "CLEAR RESPONSIBILITIES, EVERY DAY."
-                    }
-                    title={
-                      page === "Review queue" ? "Ready for your review" : page
-                    }
-                    description={
-                      page === "Review queue"
-                        ? "Review source references and responsibilities before a draft requirement becomes active."
-                        : "Know what needs to happen, who owns it, and what proves it’s done."
-                    }
+                    title={page === "Review queue" ? "Review queue" : page}
                   >
                     {canManage && (
                       <button
@@ -897,11 +888,7 @@ export default function App() {
               )}
               {page === "Individuals" && (
                 <>
-                  <PageHeading
-                    eyebrow="PEOPLE AT THE CENTER."
-                    title="Every person. One connected record."
-                    description="Care plans, responsibilities, and evidence, organized around the people you support."
-                  >
+                  <PageHeading title="Individuals">
                     {canAddPerson && (
                       <button
                         className="button primary"
@@ -1021,11 +1008,7 @@ export default function App() {
               )}
               {page === "Sites & programs" && (
                 <>
-                  <PageHeading
-                    eyebrow="ONE AGENCY. CONNECTED CARE."
-                    title="A home for every detail."
-                    description="See how each site is doing and give your team the support it needs."
-                  />
+                  <PageHeading title="Sites & programs" />
                   <div className="list-controls">
                     <span>
                       {siteSummary(sites.length, individuals.length, sites)}
@@ -1165,11 +1148,7 @@ export default function App() {
               )}
               {page === "Staff" && (
                 <>
-                  <PageHeading
-                    eyebrow="SUPPORTED TEAMS. CONSISTENT CARE."
-                    title="Your people make it possible."
-                    description="Keep every staff member connected to their assigned responsibilities."
-                  >
+                  <PageHeading title="Staff">
                     {canInvite && (
                       <button
                         className="button primary"
@@ -1301,11 +1280,7 @@ export default function App() {
               )}
               {page === "Documents" && (
                 <>
-                  <PageHeading
-                    eyebrow="THE SOURCE OF TRUTH."
-                    title="Plans change. History stays."
-                    description="A connected library of current plans, draft updates, and earlier versions."
-                  >
+                  <PageHeading title="Documents">
                     {canUpload && (
                     <button
                       className="button primary"
@@ -1414,26 +1389,11 @@ export default function App() {
               )}
               {page === "Audit center" && (
                 <>
-                  <PageHeading
-                    eyebrow="READY WHEN IT MATTERS."
-                    title="An audit starts with confidence."
-                    description="Find the records you need, see the gaps, and export a focused evidence register."
-                  >
+                  <PageHeading title="Audit">
                     <span className="audit-mode">
-                      <LockKeyhole size={15} /> Read-only audit view
+                      <LockKeyhole size={15} /> Read-only
                     </span>
                   </PageHeading>
-                  <div className="audit-intro">
-                    <ShieldCheck size={27} />
-                    <div>
-                      <strong>Your evidence, brought together.</strong>
-                      <p>
-                        Choose a scope below. The export includes each
-                        requirement, owner, source reference, and available
-                        completion evidence.
-                      </p>
-                    </div>
-                  </div>
                   <section className="panel audit-filters">
                     <label>
                       Program site
@@ -1534,6 +1494,14 @@ export default function App() {
                       <span>Open or pending items</span>
                     </div>
                     {canExportAudit && (
+                    <>
+                    <button
+                      className="button"
+                      disabled={!auditItems.length || auditFrom > auditTo}
+                      onClick={() => exportComplianceReport(auditItems)}
+                    >
+                      <Download size={17} /> Export compliance report
+                    </button>
                     <button
                       className="button primary"
                       disabled={!auditItems.length || auditFrom > auditTo}
@@ -1549,6 +1517,7 @@ export default function App() {
                     >
                       <Download size={17} /> Export audit register
                     </button>
+                    </>
                     )}
                   </div>
                   <div className="quiet-note">
@@ -1567,9 +1536,8 @@ export default function App() {
               {page === "Acknowledgments" && (
                 <>
                   <PageHeading
-                    eyebrow="ONE SHEET. EVERY SIGNATURE."
-                    title="PCSP acknowledgment sheets"
-                    description="Every assigned staff member appears on one sheet. Export includes blanks for anyone who has not signed."
+                    title="Acknowledgments"
+                    description="One sheet per person. Export includes anyone who has not signed."
                   />
                   <section className="panel">
                     {workspace.packets.length ? (
@@ -1645,11 +1613,7 @@ export default function App() {
               )}
               {page === "Activity log" && (
                 <>
-                  <PageHeading
-                    eyebrow="EVERY ACTION HAS A STORY."
-                    title="A clear record of what happened."
-                    description="Follow document changes, approvals, and completion evidence across your agency."
-                  />
+                  <PageHeading title="Activity" />
                   <section className="panel timeline-panel">
                     {data.activity.map((a) => (
                       <div className="timeline-row" key={a.id}>
@@ -1707,10 +1671,7 @@ export default function App() {
               {page === "Mileage" && <MileagePage />}
               {page === "Settings" && (
                 <>
-                  <PageHeading
-                    title="Your workspace, thoughtfully set up."
-                    description="Agency details and the boundaries of this product preview."
-                  />
+                  <PageHeading title="Settings" />
                   <section className="panel settings-panel">
                     <h2>{session.agencyName}</h2>
                     <p>
@@ -1770,6 +1731,24 @@ export default function App() {
                         <LockKeyhole size={20} />
                       )}
                     </div>
+                    {canExportAudit && (
+                      <div className="settings-row">
+                        <span>
+                          <strong>Compliance report</strong>
+                          <small>
+                            PDF of scores, site breakdown, and the current
+                            requirement register
+                            {site !== "All sites" ? ` for ${site}` : ""}.
+                          </small>
+                        </span>
+                        <button
+                          className="button"
+                          onClick={() => exportComplianceReport()}
+                        >
+                          <Download size={16} /> Export compliance report
+                        </button>
+                      </div>
+                    )}
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     <SignatureSettingsSection onSaved={notify} />
@@ -2251,10 +2230,7 @@ export default function App() {
             <span>
               <Sparkles size={26} />
             </span>
-            <h2>A clearer path to audit-ready.</h2>
-            <p>
-              Find the right requirement, the right person, and the next step.
-            </p>
+            <h2>Ask about a person, site, or requirement</h2>
           </div>
           <div className="copilot-disclosure">
             Preview · Grounded lookups in sample records · {site}
@@ -2326,10 +2302,7 @@ export default function App() {
             connected.
           </p>
           {alertItems.length === 0 ? (
-            <Empty
-              title="All caught up"
-              text="No overdue items or drafts waiting on review."
-            />
+            <Empty title="No notifications" />
           ) : (
             alertItems.map((r) => (
               <button

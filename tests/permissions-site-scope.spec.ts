@@ -35,10 +35,10 @@ async function openNav(page: Page) {
 async function openNewDelegationForm(page: Page) {
   await openNav(page);
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await page.getByRole("button", { name: "RN delegation forms" }).click();
   await page.getByRole("button", { name: "New delegation" }).click();
-  await expect(page.getByRole("button", { name: "Create delegation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create", exact: true })).toBeVisible();
 }
 
 function individualOptions(page: Page) {
@@ -75,13 +75,13 @@ test("Oakwood HM does not see Maple people in a new-delegation dropdown", async 
   await signedIn(page, "james.wilson");
   await openNav(page);
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
+  await page.getByRole("button", { name: "RN delegation forms" }).click();
   const create = page.getByRole("button", { name: "New delegation" });
   if ((await create.count()) === 0) {
     await expect(create).toHaveCount(0);
     return;
   }
-  await page.getByRole("button", { name: "RN delegation forms" }).click();
   await create.click();
   await expect(page.getByLabel("Program site")).toHaveValue(/./);
   await expect(page.getByLabel("Program site")).toBeDisabled();

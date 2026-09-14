@@ -464,14 +464,10 @@ export default function MileagePage() {
 
   return (
     <div data-tour="mileage">
-      <PageHeading
-        eyebrow="EVERY MILE LOGGED."
-        title="Mileage log"
-        description="Vehicle mileage per house: log each trip's odometer readings, split the miles equally among the individuals who rode, and download the monthly sheet as a PDF."
-      >
+      <PageHeading title="Mileage">
         {tab === "monthly" && canDownloadMonthly(session) && (
           <button className="button" onClick={downloadMonthlySheet} disabled={downloading || (trips.length === 0 && people.length === 0)}>
-            <Download size={14} /> {downloading ? "Building PDF…" : "Download monthly sheet (PDF)"}
+            <Download size={14} /> {downloading ? "Building PDF…" : "Download PDF"}
           </button>
         )}
       </PageHeading>

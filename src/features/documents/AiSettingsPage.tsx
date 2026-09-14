@@ -67,11 +67,7 @@ export default function AiSettingsPage() {
   if (!canManageAiSettings(session)) {
     return (
       <>
-        <PageHeading
-          eyebrow="AGENCY SETTINGS."
-          title="AI settings."
-          description="Model and service account status for AI document processing."
-        />
+        <PageHeading title="AI settings" />
         <section className="panel">
           <Empty title="No access" text="AI settings are limited to agency administrators." />
         </section>
@@ -137,11 +133,7 @@ export default function AiSettingsPage() {
 
   return (
     <>
-      <PageHeading
-        eyebrow="AGENCY SETTINGS."
-        title="AI settings."
-        description="Model and service account status for AI document processing."
-      />
+      <PageHeading title="AI settings" />
       {loading && (
         <section className="panel">
           <p className="doc-hint">Loading…</p>

@@ -371,6 +371,18 @@ export function metrics(items: Requirement[]) {
     review: items.filter((r) => r.status === "Pending review").length,
   };
 }
+
+/** Count mix for Overview donut + PDF status sections. Totals include drafts. */
+export function statusMix(items: Requirement[]) {
+  return {
+    compliant: items.filter((r) => r.status === "Compliant").length,
+    dueSoon: items.filter((r) => r.status === "Due soon").length,
+    overdue: items.filter((r) => ["Overdue", "Expired"].includes(r.status))
+      .length,
+    review: items.filter((r) => r.status === "Pending review").length,
+    upcoming: items.filter((r) => r.status === "Upcoming").length,
+  };
+}
 export function completeRequirement(
   items: Requirement[],
   id: string,

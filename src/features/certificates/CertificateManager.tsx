@@ -173,11 +173,7 @@ export default function CertificateManager() {
 
   return (
     <div data-tour="certificates">
-      <PageHeading
-        eyebrow="CREDENTIALS UP TO DATE."
-        title="Staff certificates"
-        description="CPR, CPI, PBS, L1MA and more — uploaded scans or manual entries with a live days-remaining countdown."
-      />
+      <PageHeading title="Certificates" />
       {error && <p className="form-error">{error}</p>}
 
       <section className="panel cert-expiring-panel">

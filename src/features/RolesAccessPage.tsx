@@ -44,11 +44,7 @@ export default function RolesAccessPage({
 
   return (
     <>
-      <PageHeading
-        eyebrow="WHO CAN DO WHAT."
-        title="Roles and access levels"
-        description="Start from the house templates. Turn access on or off for this agency without building a checkbox for every screen."
-      />
+      <PageHeading title="Roles & access" />
       <div className="role-layout">
         <section className="panel role-list">
           {(workspace?.roles ?? []).map((row) => (

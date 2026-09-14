@@ -23,7 +23,7 @@ test("priorities open their source, require evidence, and persist completion", a
   page.on("pageerror", (e) => errors.push(e.message));
   await signIn(page);
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 3" }),
+    page.getByRole("heading", { name: "Needs attention 3" }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: /Acknowledge updated PCSP Jodie/ })
@@ -52,11 +52,11 @@ test("priorities open their source, require evidence, and persist completion", a
   await expect(dialog).toContainText("Completion evidence recorded");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 2" }),
+    page.getByRole("heading", { name: "Needs attention 2" }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 2" }),
+    page.getByRole("heading", { name: "Needs attention 2" }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -209,7 +209,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   await signIn(page);
   await page.getByLabel("Filter by site").selectOption("Oakwood House");
   await expect(
-    page.getByRole("heading", { name: "No overdue requirements" }),
+    page.getByRole("heading", { name: "No overdue items" }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -298,7 +298,7 @@ test("an administrator can open role templates and invite HR without care record
   await signIn(page);
   await page.getByRole("button", { name: "Roles & access", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Roles and access levels" }),
+    page.getByRole("heading", { name: "Roles & access" }),
   ).toBeVisible();
   await page.getByRole("button", { name: /HM House manager/ }).click();
   await expect(page.getByRole("heading", { name: "House manager" })).toBeVisible();
@@ -390,7 +390,7 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await signIn(page);
   await expect(page.getByText("Agency current")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "How the whole agency is doing" }),
+    page.getByRole("heading", { name: "Agency compliance" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: /Maple House compliance/ }),
@@ -400,7 +400,7 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   ).toBeVisible();
   await page.getByRole("button", { name: /Oakwood House compliance/ }).click();
   await expect(
-    page.getByRole("heading", { name: "No overdue requirements" }),
+    page.getByRole("heading", { name: "No overdue items" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: /Your work/ })).toBeVisible();
   await page.getByLabel("Filter by site").selectOption("All sites");

@@ -7,6 +7,7 @@ import {
   exportCsv,
   metrics,
   seedRequirements,
+  statusMix,
 } from "./domain";
 
 test("unapproved drafts never increase or reduce active compliance", () => {
@@ -15,6 +16,17 @@ test("unapproved drafts never increase or reduce active compliance", () => {
   assert.equal(metrics(seedRequirements).total, 22);
   assert.equal(metrics(seedRequirements).score, metrics(active).score);
   assert.equal(metrics(seedRequirements).review, 2);
+});
+test("status mix counts compliant, due soon, overdue, review, and upcoming", () => {
+  const mix = statusMix(seedRequirements);
+  assert.equal(
+    mix.compliant + mix.dueSoon + mix.overdue + mix.review + mix.upcoming,
+    seedRequirements.length,
+  );
+  assert.equal(mix.compliant, metrics(seedRequirements).done);
+  assert.equal(mix.overdue, metrics(seedRequirements).overdue);
+  assert.equal(mix.dueSoon, metrics(seedRequirements).dueSoon);
+  assert.equal(mix.review, metrics(seedRequirements).review);
 });
 test("completion requires evidence and rejects unapproved drafts", () => {
   assert.throws(

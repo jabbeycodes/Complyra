@@ -165,7 +165,7 @@ export default function HmWeeklyChecklistPage() {
     <div data-tour="hm-checklist" aria-labelledby="hm-checklist-heading">
       <PageHeading
         title="Weekly checklist"
-        description="Your weekly compliance walkthrough. Answer every item — do not leave blanks — and submit it Monday by 4:00 p.m."
+        description="Answer every item — do not leave blanks — and submit Monday by 4:00 p.m."
       />
       {error && <p className="form-error">{error}</p>}
       {rolloverNotice && (

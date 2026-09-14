@@ -20,10 +20,10 @@ async function openNewDelegationForm(page: Page) {
     await menu.click();
   }
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "RN delegations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await page.getByRole("button", { name: "RN delegation forms" }).click();
   await page.getByRole("button", { name: "New delegation" }).click();
-  await expect(page.getByRole("button", { name: "Create delegation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create", exact: true })).toBeVisible();
 }
 
 function box(locator: Locator) {
@@ -59,7 +59,7 @@ test("new delegation fields do not overlap and Create stays visible", async ({
       ).toBe(false);
     }
   }
-  const create = page.getByRole("button", { name: "Create delegation" });
+  const create = page.getByRole("button", { name: "Create", exact: true });
   await expect(create).toBeInViewport();
   const createBox = await box(create);
   const formBox = await box(form);
@@ -81,7 +81,7 @@ test("new delegation stacks to one column on a phone", async ({ page }) => {
   const b = await box(task);
   expect(overlaps(a, b)).toBe(false);
   expect(Math.abs(a.left - b.left)).toBeLessThan(8);
-  const create = page.getByRole("button", { name: "Create delegation" });
+  const create = page.getByRole("button", { name: "Create", exact: true });
   await create.scrollIntoViewIfNeeded();
   await expect(create).toBeVisible();
   const createBox = await box(create);

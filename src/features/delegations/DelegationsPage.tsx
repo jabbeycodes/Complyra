@@ -59,9 +59,8 @@ export default function DelegationsPage() {
   return (
     <div data-tour="delegations">
       <PageHeading
-        eyebrow="ONE TASK. ONE ROSTER."
-        title="RN delegations"
-        description="One form per individual per task. Delegation is non-transferable — each task carries its own roster and signatures."
+        title="Delegations"
+        description="Delegation is non-transferable — each task has its own roster and signatures."
       />
       {error && <p className="form-error">{error}</p>}
 
@@ -129,28 +128,30 @@ export default function DelegationsPage() {
               </div>
             )}
             {delegations.length === 0 ? (
-              <Empty title="No delegations yet" text="Create the first RN delegation of a specified nursing task." />
+              <Empty title="No delegations yet" />
             ) : (
-              <table className="delegation-table">
-                <thead>
-                  <tr>
-                    <th>Task</th>
-                    <th>Individual</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {delegations.map(({ view, person }) => (
-                    <DelegationRow
-                      key={view.item.id}
-                      item={view.item}
-                      individualName={person?.name ?? ""}
-                      onOpen={() => setOpenId(view.item.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table className="delegation-table">
+                  <thead>
+                    <tr>
+                      <th>Task</th>
+                      <th>Individual</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {delegations.map(({ view, person }) => (
+                      <DelegationRow
+                        key={view.item.id}
+                        item={view.item}
+                        individualName={person?.name ?? ""}
+                        onOpen={() => setOpenId(view.item.id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
 
@@ -296,7 +297,7 @@ function NewDelegationForm({
         </label>
       </div>
       <button className="button primary" type="submit" disabled={!individualId || !taskTitle.trim() || !purpose.trim()}>
-        Create delegation
+        Create
       </button>
     </form>
   );

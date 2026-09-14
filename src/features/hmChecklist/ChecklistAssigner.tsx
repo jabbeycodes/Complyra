@@ -107,7 +107,7 @@ export default function ChecklistAssigner() {
     <div aria-labelledby="checklist-assigner-heading">
       <PageHeading
         title="Checklist assignments"
-        description="Assign the weekly checklist to house managers. It auto-renews every Sunday; the prior week locks. Turn in Monday by 4pm."
+        description="Auto-renews every Sunday. Prior week locks. Due Monday by 4 p.m."
       />
       {error && <p className="form-error">{error}</p>}
 

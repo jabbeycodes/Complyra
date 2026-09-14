@@ -372,11 +372,7 @@ export default function ExtractionReviewPage({
   if (!canReviewDocuments(session)) {
     return (
       <>
-        <PageHeading
-          eyebrow="AI DOCUMENT REVIEW."
-          title="Review extractions."
-          description="Check the AI's work before anything is tracked."
-        />
+        <PageHeading title="Review extractions" />
         <section className="panel">
           <Empty title="No access" text="Extraction review is limited to administrators, program managers, and nurses." />
         </section>
@@ -433,12 +429,11 @@ export default function ExtractionReviewPage({
   return (
     <>
       <PageHeading
-        eyebrow="AI DOCUMENT REVIEW."
-        title={uploadId ? "Review extraction." : "Extraction review queue."}
+        title={uploadId ? "Review extraction" : "Extraction review"}
         description={
           uploadId
-            ? "Compare the extracted data against the source document. Edit proposed items, then approve or reject."
-            : "Uploads waiting for a human reviewer. Nothing is tracked or visible to staff until approved."
+            ? "Nothing is tracked until a person approves it."
+            : undefined
         }
       >
         {uploadId && (

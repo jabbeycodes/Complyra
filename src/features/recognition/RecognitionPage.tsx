@@ -308,10 +308,7 @@ export default function RecognitionPage() {
 
   return (
     <div aria-labelledby="recognition-heading">
-      <PageHeading
-        title="Recognition"
-        description="Celebrate this week's standout house manager and DSP — and share private feedback that keeps the team strong."
-      />
+      <PageHeading title="Recognition" />
       {error && <p className="form-error">{error}</p>}
       {loading && <p>Loading recognition…</p>}
 
