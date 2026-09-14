@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { BellRing, CircleAlert, TriangleAlert } from "lucide-react";
+import { BellRing, TriangleAlert } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
+import StatusBadge from "../../components/StatusBadge";
+import { medSupplyStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canRecordDelivery, canSeeMeds } from "../../data/chart";
 import { inventoryCountdownLabel } from "../../data/medInventory";
@@ -105,9 +107,9 @@ export default function MedInventoryPage() {
                 key={alert.medicationId}
                 style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
               >
-                <CircleAlert
-                  size={16}
-                  color={alert.status === "out" || alert.status === "critical" ? "#b3261e" : "#9a6b00"}
+                <StatusBadge
+                  status={medSupplyStatus(alert.daysRemaining)}
+                  size="sm"
                 />
                 <span>
                   <strong>{nameById[alert.individualId] ?? "Unknown"}</strong> —{" "}

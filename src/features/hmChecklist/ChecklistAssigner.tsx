@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Download, RefreshCw } from "lucide-react";
 import { Badge, PageHeading } from "../../components";
+import StatusBadge from "../../components/StatusBadge";
 import { useData } from "../../data/DataProvider";
 import "./hmChecklist.css";
+import "./scheduler.css";
 import { downloadBlob } from "../../data/openFile";
 import { todayIso } from "../../data/chart";
 import type { HmWeeklyChecklist } from "../../data/types";
 import {
   CHECKLIST_DEADLINE_TEXT,
+  addDaysIso,
+  computeChecklistStatus,
   deadlineMondayIso,
   deadlinePassed,
+  formatDueAt,
   formatShortDate,
+  nextMondayIso,
   weekOfSundayIso,
   weekRangeLabel,
 } from "../../data/hmChecklist";
@@ -59,6 +65,8 @@ export default function ChecklistAssigner() {
   const hmName = (userId: string) =>
     workspace?.staff.find((s) => s.id === userId)?.name ?? "—";
   const pastDue = deadlinePassed(week);
+  // Next Sunday-scheduler run target (Monday-based week anchor).
+  const nextRunWeekOf = addDaysIso(nextMondayIso(todayIso()), -1);
 
   async function load(nextWeek = week) {
     setError("");
@@ -199,6 +207,7 @@ export default function ChecklistAssigner() {
                   <th>Home</th>
                   <th>Assigned HM</th>
                   <th>Status</th>
+                  <th>Due</th>
                   <th>Submitted</th>
                   <th></th>
                 </tr>
@@ -206,23 +215,35 @@ export default function ChecklistAssigner() {
               <tbody>
                 {workspace.sites.map((site) => {
                   const c = bySite.get(site.id);
+                  const computed = c
+                    ? computeChecklistStatus({
+                        submittedAt: c.submittedAt,
+                        dueAt: c.dueAt,
+                        late: c.late,
+                      })
+                    : null;
                   return (
                     <tr key={site.id}>
                       <td>{site.name}</td>
                       <td>{c ? hmName(c.assignedToUserId) : "—"}</td>
                       <td>
                         {c ? (
-                          <Badge
-                            status={
-                              c.status === "open" && pastDue
-                                ? "Overdue"
-                                : statusBadge(c.status)
-                            }
-                          />
+                          computed === "late" ? (
+                            <StatusBadge status="late" />
+                          ) : (
+                            <Badge
+                              status={
+                                c.status === "open" && pastDue
+                                  ? "Overdue"
+                                  : statusBadge(c.status)
+                              }
+                            />
+                          )
                         ) : (
                           <span className="muted">Not assigned</span>
                         )}
                       </td>
+                      <td>{c ? formatDueAt(c.dueAt) : "—"}</td>
                       <td>
                         {c?.submittedAt
                           ? formatShortDate(c.submittedAt.slice(0, 10))
@@ -245,6 +266,10 @@ export default function ChecklistAssigner() {
             </table>
           </div>
         )}
+        <p className="scheduler-next-run">
+          Auto-scheduler runs Sundays at 6:00 AM — next run creates the week
+          of {weekRangeLabel(nextRunWeekOf)}.
+        </p>
       </section>
     </div>
   );

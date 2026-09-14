@@ -96,3 +96,162 @@ test("HR-ROLES: canGrantRole keeps administrator grants with administrators", ()
   // …and unknown targets are rejected.
   assert.equal(canGrantRole("administrator", "superuser"), false);
 });
+
+// ---------------------------------------------------------------------------
+// Workstream 4 — single permission source of truth
+// ---------------------------------------------------------------------------
+import {
+  GRANT_RULES,
+  OPERATIONAL_ROLE_KEYS,
+  PERMISSION_REGISTRY,
+  PRIVILEGED_ROLE_KEYS,
+  ROLE_KEYS,
+  TEMPLATE_LOCKED_PERMISSIONS,
+  assertNoDrift,
+  canAssignOperationalRole,
+  canEditRoleTemplates,
+  checkRoleTemplateUpdate,
+  grantableRoleTemplates,
+  isTemplatePermissionLocked,
+} from "./permissions";
+
+test("WS4: registry covers every permission key with description + derived defaults", () => {
+  assert.equal(ROLE_KEYS.length, 9);
+  for (const key of PERMISSION_KEYS) {
+    const entry = PERMISSION_REGISTRY[key];
+    assert.ok(entry, `registry entry for ${key}`);
+    assert.equal(entry.key, key);
+    assert.ok(entry.description.length > 0, `description for ${key}`);
+    // defaultRoles must exactly match the templates that enable the key.
+    const expected = ROLE_KEYS.filter(
+      (roleKey) => ROLE_TEMPLATE_BY_KEY[roleKey].permissions[key],
+    );
+    assert.deepEqual(entry.defaultRoles, expected, `defaultRoles for ${key}`);
+  }
+  // Spot-checks: certificates.manage defaults to HR + compliance_admin;
+  // roles.manage to administrator + compliance_admin.
+  assert.deepEqual(PERMISSION_REGISTRY["certificates.manage"].defaultRoles, [
+    "compliance_admin",
+    "hr",
+  ]);
+  assert.deepEqual(PERMISSION_REGISTRY["roles.manage"].defaultRoles, [
+    "administrator",
+    "compliance_admin",
+  ]);
+  // Descriptions mirror PERMISSION_LABELS.
+  for (const key of PERMISSION_KEYS) {
+    assert.equal(PERMISSION_REGISTRY[key].description, PERMISSION_LABELS[key]);
+  }
+});
+
+test("WS4: GRANT_RULES data matches canGrantRole behavior", () => {
+  assert.deepEqual([...PRIVILEGED_ROLE_KEYS], ["administrator", "compliance_admin"]);
+  assert.equal(OPERATIONAL_ROLE_KEYS.length, 7);
+  assert.ok(!OPERATIONAL_ROLE_KEYS.includes("administrator"));
+  assert.ok(!OPERATIONAL_ROLE_KEYS.includes("compliance_admin"));
+  for (const target of ROLE_KEYS) {
+    const rule = GRANT_RULES[target];
+    for (const granter of ROLE_KEYS) {
+      const expected = rule === "any" ? true : rule.includes(granter);
+      assert.equal(
+        canGrantRole(granter, target),
+        expected,
+        `canGrantRole(${granter}, ${target})`,
+      );
+    }
+  }
+});
+
+test("WS4: grant rules — the required truth table", () => {
+  assert.equal(canGrantRole("administrator", "administrator"), true);
+  assert.equal(canGrantRole("hr", "administrator"), false);
+  assert.equal(canGrantRole("compliance_admin", "compliance_admin"), true);
+  assert.equal(canGrantRole("hr", "compliance_admin"), false);
+  assert.equal(canGrantRole("dsp", "administrator"), false);
+  assert.equal(canGrantRole("dsp", "compliance_admin"), false);
+  // Operational grants stay open (permission gates live in the API layer).
+  assert.equal(canGrantRole("hr", "dsp"), true);
+  assert.equal(canGrantRole("dsp", "nurse"), true);
+  assert.equal(canGrantRole(undefined, "dsp"), true);
+  assert.equal(canGrantRole("administrator", "nope"), false);
+});
+
+test("WS4: canEditRoleTemplates — only administrator / compliance_admin", () => {
+  assert.equal(canEditRoleTemplates("administrator"), true);
+  assert.equal(canEditRoleTemplates("compliance_admin"), true);
+  assert.equal(canEditRoleTemplates("hr"), false);
+  assert.equal(canEditRoleTemplates("house_manager"), false);
+  assert.equal(canEditRoleTemplates("dsp"), false);
+  assert.equal(canEditRoleTemplates("nurse"), false);
+  assert.equal(canEditRoleTemplates(undefined), false);
+  assert.equal(canEditRoleTemplates("superuser"), false);
+});
+
+test("WS4: canAssignOperationalRole — HR path excludes privileged roles", () => {
+  assert.equal(canAssignOperationalRole("hr", "dsp"), true);
+  assert.equal(canAssignOperationalRole("hr", "house_manager"), true);
+  assert.equal(canAssignOperationalRole("hr", "hr"), true);
+  assert.equal(canAssignOperationalRole("hr", "administrator"), false);
+  assert.equal(canAssignOperationalRole("hr", "compliance_admin"), false);
+  assert.equal(canAssignOperationalRole("administrator", "administrator"), false);
+  assert.equal(canAssignOperationalRole("administrator", "dsp"), true);
+});
+
+test("WS4: grantableRoleTemplates mirrors the inline filters it replaces", () => {
+  const hrRoles = grantableRoleTemplates("hr").map((row) => row.key);
+  assert.deepEqual(hrRoles, [
+    "house_manager",
+    "degreed_professional_manager",
+    "program_manager",
+    "dsp",
+    "nurse",
+    "hr",
+    "auditor",
+  ]);
+  const adminRoles = grantableRoleTemplates("administrator").map((row) => row.key);
+  assert.equal(adminRoles.length, 9);
+});
+
+test("WS4: template locks — administrator keeps assign_roles + roles.manage", () => {
+  assert.equal(isTemplatePermissionLocked("administrator", "members.assign_roles"), true);
+  assert.equal(isTemplatePermissionLocked("administrator", "roles.manage"), true);
+  assert.equal(isTemplatePermissionLocked("administrator", "audit.read"), false);
+  assert.equal(isTemplatePermissionLocked("hr", "roles.manage"), false);
+  assert.deepEqual(TEMPLATE_LOCKED_PERMISSIONS.administrator, [
+    "members.assign_roles",
+    "roles.manage",
+  ]);
+  // checkRoleTemplateUpdate returns the exact legacy messages.
+  const stripped = {
+    ...ROLE_TEMPLATE_BY_KEY.administrator.permissions,
+    "members.assign_roles": false,
+  } as typeof ROLE_TEMPLATE_BY_KEY.administrator.permissions;
+  assert.equal(
+    checkRoleTemplateUpdate("administrator", stripped),
+    "The administrator role must keep role-assignment access.",
+  );
+  const stripped2 = {
+    ...ROLE_TEMPLATE_BY_KEY.administrator.permissions,
+    "roles.manage": false,
+  } as typeof ROLE_TEMPLATE_BY_KEY.administrator.permissions;
+  assert.equal(
+    checkRoleTemplateUpdate("administrator", stripped2),
+    "The administrator role must keep role-management access.",
+  );
+  assert.equal(
+    checkRoleTemplateUpdate(
+      "administrator",
+      ROLE_TEMPLATE_BY_KEY.administrator.permissions,
+    ),
+    null,
+  );
+  assert.equal(
+    checkRoleTemplateUpdate("hr", ROLE_TEMPLATE_BY_KEY.hr.permissions),
+    null,
+  );
+});
+
+test("WS4: assertNoDrift catches undeclared permission strings", () => {
+  assert.doesNotThrow(() => assertNoDrift([...PERMISSION_KEYS]));
+  assert.throws(() => assertNoDrift(["members.invite", "bogus.key"]), /bogus\.key/);
+});

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useData } from "../data/DataProvider";
-import { ROLE_TEMPLATES, canGrantRole, type RoleKey } from "../data/permissions";
+import { ROLE_TEMPLATES, grantableRoleTemplates, type RoleKey } from "../data/permissions";
 import type { InviteMemberResult } from "../data/types";
 import { USERNAME_PATTERN, normalizeUsername } from "../data/types";
 
@@ -25,11 +25,10 @@ export default function InviteMemberForm({
 
   const template = ROLE_TEMPLATES.find((row) => row.key === roleKey)!;
 
-  // HR-ROLES (2026-09-13): HR can invite staff into operational roles, but the
-  // administrator / compliance-administrator options are hidden for HR.
-  const grantableRoles = ROLE_TEMPLATES.filter((row) =>
-    canGrantRole(session?.roleKey, row.key),
-  );
+  // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
+  // HR can invite staff into operational roles, but the administrator /
+  // compliance-administrator options are hidden for HR.
+  const grantableRoles = grantableRoleTemplates(session?.roleKey);
 
   if (created) {
     return (

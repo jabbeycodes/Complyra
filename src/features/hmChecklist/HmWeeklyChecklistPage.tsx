@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Badge, PageHeading } from "../../components";
+import StatusBadge from "../../components/StatusBadge";
 import { useData } from "../../data/DataProvider";
 import { SignatureField } from "../signatures/SignatureField";
 import { hmChecklistPayload } from "../signatures/documentPayloads";
 import "./hmChecklist.css";
+import "./scheduler.css";
 import { downloadBlob } from "../../data/openFile";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { todayIso } from "../../data/chart";
@@ -21,8 +23,10 @@ import {
   SERVICE_LOG_KINDS,
   SERVICE_LOG_KIND_LABELS,
   SERVICE_LOG_PROMPTS,
+  computeChecklistStatus,
   deadlineMondayIso,
   deadlinePassed,
+  formatDueAt,
   formatShortDate,
   weekOfSundayIso,
   weekRangeLabel,
@@ -137,6 +141,15 @@ export default function HmWeeklyChecklistPage() {
   }
 
   const overdue = openList ? deadlinePassed(openList.weekOf) : false;
+  // Scheduler-driven lifecycle status: submitted -> compliant, past due_at
+  // and unsubmitted -> late, otherwise pending.
+  const openComputedStatus = openList
+    ? computeChecklistStatus({
+        submittedAt: openList.submittedAt,
+        dueAt: openList.dueAt,
+        late: openList.late,
+      })
+    : null;
 
   return (
     <div aria-labelledby="hm-checklist-heading">
@@ -157,6 +170,19 @@ export default function HmWeeklyChecklistPage() {
       )}
       {openList && (
         <section className="panel" aria-label="Current weekly checklist">
+          {openComputedStatus === "late" && (
+            <div className="scheduler-late-banner" role="alert">
+              <StatusBadge status="late" />
+              <div className="scheduler-late-text">
+                <span className="scheduler-late-title">
+                  This checklist is past due
+                </span>
+                <span className="scheduler-late-sub">
+                  Submit it now — the late flag stays on the record.
+                </span>
+              </div>
+            </div>
+          )}
           <div className="panel-heading">
             <div>
               <h2 id="hm-checklist-heading">
@@ -168,6 +194,19 @@ export default function HmWeeklyChecklistPage() {
                 {formatShortDate(deadlineMondayIso(openList.weekOf))})
                 {overdue ? " — past due" : ""}
               </p>
+              {openList.dueAt && (
+                <p
+                  className={`scheduler-due-line${openComputedStatus === "late" ? " is-late" : ""}`}
+                >
+                  <span>
+                    Due{" "}
+                    <span className="scheduler-due-date">
+                      {formatDueAt(openList.dueAt)}
+                    </span>
+                  </span>
+                  <span>Week of {weekRangeLabel(openList.weekOf)}</span>
+                </p>
+              )}
             </div>
             <Badge status={overdue ? "Overdue" : statusBadge(openList.status)} />
           </div>
@@ -357,6 +396,7 @@ export default function HmWeeklyChecklistPage() {
                 <tr>
                   <th>Week</th>
                   <th>Status</th>
+                  <th>Due</th>
                   <th>Submitted</th>
                   <th></th>
                 </tr>
@@ -366,8 +406,13 @@ export default function HmWeeklyChecklistPage() {
                   <tr key={c.id}>
                     <td>{weekRangeLabel(c.weekOf)}</td>
                     <td>
-                      <Badge status={statusBadge(c.status)} />
+                      {c.late && !c.submittedAt ? (
+                        <StatusBadge status="late" />
+                      ) : (
+                        <Badge status={statusBadge(c.status)} />
+                      )}
                     </td>
+                    <td>{formatDueAt(c.dueAt)}</td>
                     <td>
                       {c.submittedAt
                         ? formatShortDate(c.submittedAt.slice(0, 10))

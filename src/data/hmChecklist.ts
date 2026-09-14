@@ -336,3 +336,129 @@ export function applyItem21(
       : item,
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Scheduler + late flags (Phase 1, Workstream 2)                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The scheduler-managed lifecycle status of a checklist:
+ *  - "compliant" — submitted (on time or otherwise; it was turned in).
+ *  - "late"      — past due_at and not submitted (or flagged by the
+ *                  scheduler's late sweep).
+ *  - "pending"   — open and not yet due.
+ */
+export type ChecklistComputedStatus = "compliant" | "pending" | "late";
+
+/**
+ * Minimal shape the scheduler/status helpers need. Accepts the client
+ * HmWeeklyChecklist model (fields optional there) or a raw DB row mapping.
+ */
+export interface ChecklistScheduleInfo {
+  submittedAt?: string | null;
+  dueAt?: string | null;
+  late?: boolean;
+}
+
+/**
+ * Whether a checklist counts as late right now. Submitted checklists are
+ * never late; otherwise the DB `late` flag wins, falling back to the
+ * due_at comparison for rows the scheduler hasn't swept yet.
+ * `now` is injectable for tests.
+ */
+export function isLate(
+  checklist: ChecklistScheduleInfo,
+  now: Date = new Date(),
+): boolean {
+  if (checklist.submittedAt) return false;
+  if (checklist.late) return true;
+  if (!checklist.dueAt) return false;
+  const due = new Date(checklist.dueAt);
+  return !Number.isNaN(due.getTime()) && due.getTime() < now.getTime();
+}
+
+/** Lifecycle status for badges and banners. `now` is injectable for tests. */
+export function computeChecklistStatus(
+  checklist: ChecklistScheduleInfo,
+  now: Date = new Date(),
+): ChecklistComputedStatus {
+  if (checklist.submittedAt) return "compliant";
+  if (isLate(checklist, now)) return "late";
+  return "pending";
+}
+
+/**
+ * The next Monday strictly after `iso` (ISO date). The Sunday scheduler run
+ * creates the upcoming week's row, so a Sunday input yields tomorrow's
+ * Monday; a Monday input yields the Monday a week out (never re-targets the
+ * current week).
+ */
+export function nextMondayIso(iso: string): string {
+  const dow = parseIsoDate(iso).getUTCDay();
+  const delta = dow === 1 ? 7 : (8 - dow) % 7;
+  return addDaysIso(iso, delta);
+}
+
+/** due_at for a Monday week_start: Sunday 23:59 UTC (see migration notes). */
+export function dueAtIsoForWeekStart(weekStart: string): string {
+  return `${addDaysIso(weekStart, 6)}T23:59:00.000Z`;
+}
+
+/** "Sun, Sep 20, 2026 · 11:59 PM UTC" label for a due_at instant. */
+export function formatDueAt(dueAt: string | null | undefined): string {
+  if (!dueAt) return "—";
+  const d = new Date(dueAt);
+  if (Number.isNaN(d.getTime())) return "—";
+  // Rendered in UTC to stay honest about the stored instant.
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const hh = d.getUTCHours();
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${weekdays[d.getUTCDay()]}, ${formatShortDate(d.toISOString().slice(0, 10))} · ${h12}:${mm} ${hh >= 12 ? "PM" : "AM"} UTC`;
+}
+
+/** HM-per-site assignment the scheduler consumes (from memberships). */
+export interface SchedulerSiteAssignment {
+  agencyId: string;
+  siteId: string;
+  hmUserId: string;
+}
+
+/**
+ * Build the DB insert row the Sunday scheduler upserts for one site/week.
+ * week_of is the Sunday opening the week (week_start - 1); due_at is Sunday
+ * 23:59 UTC. Mirrors the supabase/functions/schedule-hm-checklists row
+ * shape (which duplicates this for the Deno runtime).
+ */
+export function buildWeeklyChecklistRow(
+  assignment: SchedulerSiteAssignment,
+  weekStart: string,
+): Record<string, unknown> {
+  return {
+    agency_id: assignment.agencyId,
+    site_id: assignment.siteId,
+    week_of: addDaysIso(weekStart, -1),
+    week_start: weekStart,
+    due_at: dueAtIsoForWeekStart(weekStart),
+    assigned_to_user_id: assignment.hmUserId,
+    assigned_by_user_id: null,
+    status: "open",
+    items: buildChecklistItems(),
+    service_logs: [],
+    late: false,
+    late_flagged_at: null,
+    submitted_at: null,
+  };
+}
+
+/**
+ * Notification dedupe keys — unique per (event, checklist) so scheduler
+ * reruns never queue duplicates.
+ */
+export function assignedNotificationDedupeKey(checklistId: string): string {
+  return `checklist.assigned:${checklistId}`;
+}
+
+export function lateNotificationDedupeKey(checklistId: string): string {
+  return `checklist.late:${checklistId}`;
+}

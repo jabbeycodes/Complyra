@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BellRing, History, Pill, Settings2, TriangleAlert } from "lucide-react";
-import { Badge, Empty, formatDate } from "../../components";
+import { Empty, formatDate } from "../../components";
+import StatusBadge from "../../components/StatusBadge";
+import { medSupplyStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canLogDoseException, canRecordDelivery } from "../../data/chart";
 import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
@@ -9,13 +11,6 @@ import type {
   MedInventoryStatus,
   MedInventoryView,
 } from "../../data/types";
-
-const STATUS_BADGE: Record<MedInventoryStatus, string> = {
-  ok: "Active",
-  low: "Due soon",
-  critical: "Overdue",
-  out: "Expired",
-};
 
 const STATUS_LABEL: Record<MedInventoryStatus, string> = {
   ok: "Stocked",
@@ -107,7 +102,10 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             <header>
               <span className={`kind-pill ${view.kind}`}>{view.kind}</span>
               <h3>{view.medicationName}</h3>
-              <Badge status={STATUS_BADGE[view.status]} />
+              {/* WS3 (accessible status system): shared badge — the band is
+                  computed with the same thresholds as the app's reorder logic
+                  (medSupplyStatus mirrors computeInventory). */}
+              <StatusBadge status={medSupplyStatus(view.daysRemaining)} />
             </header>
             <p>
               {view.strength} · {inventoryCountdownLabel(view)}

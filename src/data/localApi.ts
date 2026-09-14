@@ -23,6 +23,7 @@ import {
   canCreateSite,
   capabilityForRoleKey,
   canGrantRole,
+  checkRoleTemplateUpdate,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -1732,7 +1733,7 @@ export class LocalApi implements ComplyraApi {
 
   async inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
     const session = assertSession(this.store);
-    if (!session.permissions["members.invite"]) {
+    if (!hasPermission(session, "members.invite")) {
       throw new Error("You do not have permission to add members.");
     }
     // HR-ROLES (2026-09-13): HR may invite staff, but only an administrator
@@ -1811,7 +1812,7 @@ export class LocalApi implements ComplyraApi {
     expiresOn?: string | null,
   ) {
     const session = assertSession(this.store);
-    if (!session.permissions["members.assign_roles"]) {
+    if (!hasPermission(session, "members.assign_roles")) {
       throw new Error("You do not have permission to assign roles.");
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
@@ -1852,17 +1853,14 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     // HR-ROLES (2026-09-13): editing the role templates themselves is a
     // separate permission from assigning roles to people, so HR cannot use
-    // role assignment to escalate its own access.
-    if (!session.permissions["roles.manage"]) {
+    // role assignment to escalate its own access. Guard via the canonical
+    // module (src/data/permissions.ts) — do not re-add ad-hoc checks here.
+    if (!hasPermission(session, "roles.manage")) {
       throw new Error("Only administrators can edit role access.");
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
-    if (roleKey === "administrator" && !permissions["members.assign_roles"]) {
-      throw new Error("The administrator role must keep role-assignment access.");
-    }
-    if (roleKey === "administrator" && !permissions["roles.manage"]) {
-      throw new Error("The administrator role must keep role-management access.");
-    }
+    const templateGuardError = checkRoleTemplateUpdate(roleKey, permissions);
+    if (templateGuardError) throw new Error(templateGuardError);
     this.store.db.agencyRoles = rolesFor(this.store, session.agencyId).map((row) =>
       row.key === roleKey ? { ...row, permissions: { ...permissions } } : row,
     );

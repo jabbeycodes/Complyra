@@ -1,0 +1,66 @@
+/* HM Weekly Checklist — scheduler + late-flag styles (Phase 1, Workstream 2).
+   Solid colors only, no gradients. Interactive targets are >= 44px. */
+
+.scheduler-late-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-left: 5px solid #dc2626;
+  border-radius: 8px;
+  color: #7f1d1d;
+}
+
+.scheduler-late-banner .scheduler-late-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+
+.scheduler-late-banner .scheduler-late-title {
+  font-weight: 700;
+}
+
+.scheduler-late-banner .scheduler-late-sub {
+  font-size: 13px;
+  color: #991b1b;
+}
+
+.scheduler-due-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #5f5145;
+}
+
+.scheduler-due-line .scheduler-due-date {
+  font-weight: 600;
+  color: #3f352c;
+}
+
+.scheduler-due-line.is-late .scheduler-due-date {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.scheduler-next-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  background: #f4f1ea;
+  border: 1px solid #e4ddd2;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #5f5145;
+}

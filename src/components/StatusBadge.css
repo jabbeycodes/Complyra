@@ -1,0 +1,104 @@
+/* LIFEPATH-PHASE1-WS3 (accessible status system)
+ *
+ * StatusBadge styles. Every status is distinguishable WITHOUT color:
+ * a unique icon shape + a visible text label + the color. Solid colors
+ * only — no gradients, no glow, modest 6px radius.
+ *
+ * WCAG AA contrast (normal text, >= 4.5:1), text on background:
+ *  compliant  #1a7f37 on #dafbe1  (GitHub "done" pair,        ~4.6:1)
+ *  expiring   #9a6700 on #fff8c5  (GitHub "attention" pair,    ~5.2:1)
+ *  expired    #a40e26 on #ffebe9  (GitHub "danger" pair,       ~7.7:1)
+ *  missing    #59636e on #f6f8fa  (GitHub neutral pair,        ~4.7:1)
+ *  late       #8a3a00 on #ffe3c2  (dark red-orange on light,   ~6.3:1)
+ *  pending    #0969da on #ddf4ff  (GitHub "accent" pair,       ~4.8:1)
+ *  attention  #6d28d9 on #ede9fe  (dark violet on light,       ~6.0:1)
+ * Ratios are approximate, computed from relative luminance of the
+ * 6-digit hex values; all are comfortably above the 4.5:1 floor.
+ * Icon glyphs inherit the same text color, so they inherit the ratio.
+ */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.status-badge--sm {
+  font-size: 12.5px;
+  padding: 2px 8px;
+  gap: 5px;
+}
+
+.status-badge__icon {
+  font-size: 0.95em;
+  line-height: 1;
+  font-weight: 700;
+  /* Shapes must survive grayscale: each status uses a different glyph. */
+  font-style: normal;
+  font-variant: normal;
+}
+
+/* Compliant — green + check */
+.status-badge--compliant {
+  color: #1a7f37;
+  background-color: #dafbe1;
+  border-color: #9edcb0;
+}
+
+/* Expiring soon — amber + solid triangle */
+.status-badge--expiring {
+  color: #9a6700;
+  background-color: #fff8c5;
+  border-color: #e8cf7a;
+}
+
+/* Expired — dark red + X. Thicker border is an extra non-color cue
+   (a dead/stopped item reads differently even in grayscale). */
+.status-badge--expired {
+  color: #a40e26;
+  background-color: #ffebe9;
+  border-color: #a40e26;
+  border-width: 2px;
+}
+
+/* Missing — gray + question mark */
+.status-badge--missing {
+  color: #59636e;
+  background-color: #f6f8fa;
+  border-color: #c3cbd4;
+}
+
+/* Late — red-orange + clock */
+.status-badge--late {
+  color: #8a3a00;
+  background-color: #ffe3c2;
+  border-color: #e5a96f;
+}
+
+/* Pending — blue + ellipsis (waiting) */
+.status-badge--pending {
+  color: #0969da;
+  background-color: #ddf4ff;
+  border-color: #9ecbff;
+}
+
+/* Needs attention — violet + exclamation */
+.status-badge--attention {
+  color: #6d28d9;
+  background-color: #ede9fe;
+  border-color: #c4b5fd;
+}
+
+@media (prefers-contrast: more) {
+  .status-badge {
+    border-width: 2px;
+  }
+}

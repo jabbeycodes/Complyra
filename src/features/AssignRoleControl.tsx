@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ROLE_TEMPLATES, canGrantRole } from "../data/permissions";
+import { ROLE_TEMPLATES, canGrantRole, grantableRoleTemplates } from "../data/permissions";
 import { useData } from "../data/DataProvider";
 
 export default function AssignRoleControl({
@@ -16,11 +16,10 @@ export default function AssignRoleControl({
   onAssigned: (message: string) => void;
 }) {
   const { api, workspace, refresh, session } = useData();
-  // HR-ROLES (2026-09-13): HR can assign operational roles but never sees the
-  // administrator / compliance-administrator options.
-  const grantableRoles = ROLE_TEMPLATES.filter((row) =>
-    canGrantRole(session?.roleKey, row.key),
-  );
+  // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
+  // HR can assign operational roles but never sees administrator /
+  // compliance-administrator.
+  const grantableRoles = grantableRoleTemplates(session?.roleKey);
   const [nextRole, setNextRole] = useState(
     canGrantRole(session?.roleKey, roleKey) ? roleKey : "dsp",
   );

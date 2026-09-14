@@ -4,9 +4,10 @@ import { PageHeading } from "../components";
 import { useData } from "../data/DataProvider";
 import {
   PERMISSION_KEYS,
-  PERMISSION_LABELS,
+  PERMISSION_REGISTRY,
   ROLE_TEMPLATE_BY_KEY,
   defaultPermissions,
+  isTemplatePermissionLocked,
   type PermissionKey,
   type PermissionMap,
   type RoleKey,
@@ -35,9 +36,9 @@ export default function RolesAccessPage({
   }
 
   function toggle(key: PermissionKey) {
-    if (selected === "administrator" && key === "members.assign_roles") return;
-    // HR-ROLES (2026-09-13): the administrator role must keep roles.manage.
-    if (selected === "administrator" && key === "roles.manage") return;
+    // Administrator-locked template permissions (canonical:
+    // isTemplatePermissionLocked) can never be stripped.
+    if (isTemplatePermissionLocked(selected, key)) return;
     setDraft({ ...permissions, [key]: !permissions[key] });
   }
 
@@ -88,14 +89,11 @@ export default function RolesAccessPage({
                   <input
                     type="checkbox"
                     checked={Boolean(permissions[key])}
-                    disabled={
-                      (selected === "administrator" && key === "members.assign_roles") ||
-                      (selected === "administrator" && key === "roles.manage")
-                    }
+                    disabled={isTemplatePermissionLocked(selected, key)}
                     onChange={() => toggle(key)}
                   />
                   <span>
-                    <strong>{PERMISSION_LABELS[key]}</strong>
+                    <strong>{PERMISSION_REGISTRY[key].description}</strong>
                     <small>{key}</small>
                   </span>
                 </label>

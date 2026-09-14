@@ -5,11 +5,11 @@ import { useData } from "../../data/DataProvider";
 import { InitialsField } from "../signatures/SignatureField";
 import { certificatePayload } from "../signatures/documentPayloads";
 import {
-  CERT_STATUS_CLASS,
   certCountdownLabel,
-  certExpiryStatus,
   daysRemaining,
 } from "../../data/certificates";
+import StatusBadge from "../../components/StatusBadge";
+import { certificateStatus } from "../../data/complianceStatus";
 import type { StaffCertificate } from "../../data/types";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 
@@ -68,15 +68,18 @@ export default function StaffCertificatesModal({
       ) : (
         <div className="cert-list">
           {certs.map((cert) => {
-            const remaining = daysRemaining(cert.expiresOn);
             return (
               <div className="cert-row" key={cert.id}>
                 <div className="cert-row-main">
                   <strong>{cert.certName}</strong>
-                  <span
-                    className={CERT_STATUS_CLASS[certExpiryStatus(remaining)]}
-                  >
-                    {certCountdownLabel(remaining)}
+                  {/* WS3 (accessible status system): shared status badge —
+                      icon + label + color, never color alone. */}
+                  <StatusBadge
+                    status={certificateStatus(cert.expiresOn)}
+                    size="sm"
+                  />
+                  <span className="muted">
+                    {certCountdownLabel(daysRemaining(cert.expiresOn))}
                   </span>
                 </div>
                 <div className="cert-row-meta muted">

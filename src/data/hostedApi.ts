@@ -4667,6 +4667,13 @@ export class HostedApi implements ComplyraApi {
       agencyId: row.agency_id as string,
       siteId: row.site_id as string,
       weekOf: (row.week_of as string).slice(0, 10),
+      weekStart:
+        row.week_start == null
+          ? null
+          : String(row.week_start).slice(0, 10),
+      dueAt: isoOrNull(row.due_at),
+      late: row.late === true,
+      lateFlaggedAt: isoOrNull(row.late_flagged_at),
       assignedToUserId: row.assigned_to_user_id as string,
       assignedByUserId: (row.assigned_by_user_id as string | null) ?? null,
       status: row.status as WeeklyChecklistStatus,

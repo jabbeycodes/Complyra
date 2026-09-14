@@ -1,0 +1,301 @@
+/* Notification engine styles (Workstream 1). Solid colors only — no gradients,
+   no glow, no floating cards. Matches the app's moss/sand palette. */
+
+.notif-bell {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.notif-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #b56a4e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  border: 2px solid #fff;
+  pointer-events: none;
+}
+
+/* The bell lives inside the app Modal, which provides the dialog frame. */
+.notif-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  min-width: min(520px, 84vw);
+}
+
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 4px;
+  border-bottom: 1px solid #f1f0ed;
+}
+
+.notif-panel-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #241e18;
+}
+
+.notif-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notif-filter-toggle,
+.notif-mark-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e0dcd6;
+  background: #fff;
+  color: #4a4036;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notif-filter-toggle:hover,
+.notif-mark-all:hover {
+  background: #f4f2f0;
+}
+
+.notif-filter-toggle[aria-pressed="true"] {
+  background: #3f5c3b;
+  border-color: #3f5c3b;
+  color: #fff;
+}
+
+.notif-close {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #4a4036;
+  cursor: pointer;
+}
+
+.notif-close:hover {
+  background: #f4f2f0;
+}
+
+.notif-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  color: #4a4036;
+}
+
+.notif-state p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #241e18;
+}
+
+.notif-state small {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 340px;
+}
+
+.notif-error {
+  color: #8f5237;
+}
+
+.notif-spin {
+  animation: notif-spin 1.2s linear infinite;
+}
+
+@keyframes notif-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 4px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notif-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #fff;
+  color: #241e18;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notif-row:hover {
+  background: #faf9f7;
+  border-color: #f1f0ed;
+}
+
+.notif-row.unread {
+  background: #f6f8f4;
+  border-color: #e3e9dd;
+}
+
+.notif-row.unread:hover {
+  background: #eef2e9;
+}
+
+.notif-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  margin-top: 2px;
+}
+
+.notif-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notif-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notif-status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f4f3f0;
+  color: #5d8353;
+}
+
+.notif-time {
+  font-size: 12px;
+  color: #8a8178;
+  flex: none;
+}
+
+.notif-text strong {
+  font-size: 14px;
+  line-height: 1.35;
+  color: #241e18;
+}
+
+.notif-text small {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4a4036;
+}
+
+/* Status tints — icon + text label always accompany the color. */
+.status-compliant .notif-icon,
+.notif-icon.status-compliant {
+  background: #eff5ed;
+  color: #4d6b42;
+}
+.notif-status.status-compliant {
+  background: #eff5ed;
+  color: #4d6b42;
+}
+
+.status-expiring .notif-icon,
+.notif-icon.status-expiring {
+  background: #f7f2ea;
+  color: #8f6b3f;
+}
+.notif-status.status-expiring {
+  background: #f7f2ea;
+  color: #8f6b3f;
+}
+
+.status-expired .notif-icon,
+.notif-icon.status-expired {
+  background: #f8f1ee;
+  color: #8f5237;
+}
+.notif-status.status-expired {
+  background: #f8f1ee;
+  color: #8f5237;
+}
+
+.status-missing .notif-icon,
+.notif-icon.status-missing {
+  background: #f2f1ef;
+  color: #4a4036;
+}
+.notif-status.status-missing {
+  background: #f2f1ef;
+  color: #4a4036;
+}
+
+.status-late .notif-icon,
+.notif-icon.status-late {
+  background: #f8f1ee;
+  color: #8f5237;
+}
+.notif-status.status-late {
+  background: #f8f1ee;
+  color: #8f5237;
+}
+
+.status-pending .notif-icon,
+.notif-icon.status-pending {
+  background: #f4f3f0;
+  color: #5d8353;
+}
+.notif-status.status-pending {
+  background: #f4f3f0;
+  color: #5d8353;
+}
+
+@media (max-width: 640px) {
+  .notif-panel {
+    min-width: 0;
+  }
+  .notif-panel-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}

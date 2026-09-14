@@ -5,12 +5,12 @@ import { useData } from "../../data/DataProvider";
 import { hasPermission } from "../../data/permissions";
 import { todayIso } from "../../data/chart";
 import {
-  CERT_STATUS_CLASS,
   CERTIFICATE_KINDS,
   certCountdownLabel,
-  certExpiryStatus,
   daysRemaining,
 } from "../../data/certificates";
+import StatusBadge from "../../components/StatusBadge";
+import { certificateStatus } from "../../data/complianceStatus";
 import type {
   ExpiringCertificate,
   StaffCertificate,
@@ -21,11 +21,17 @@ import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 // certificate lists with the days-remaining countdown, file upload + manual
 // entry, edit/delete, and the agency-wide "expiring soon" panel.
 
+// WS3 (accessible status system): the expiry verdict goes through the shared
+// <StatusBadge> — icon shape + text label + color, never color alone. The
+// existing days-remaining countdown stays as supporting detail text.
 function CertBadge({ expiresOn }: { expiresOn: string }) {
   const remaining = daysRemaining(expiresOn);
   return (
-    <span className={CERT_STATUS_CLASS[certExpiryStatus(remaining)]}>
-      {certCountdownLabel(remaining)}
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+    >
+      <StatusBadge status={certificateStatus(expiresOn)} size="sm" />
+      <span className="muted">{certCountdownLabel(remaining)}</span>
     </span>
   );
 }

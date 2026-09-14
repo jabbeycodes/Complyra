@@ -364,3 +364,9 @@ verify_jwt = false
 
 [functions.reset-member-password]
 verify_jwt = true
+
+[functions.notify-event]
+verify_jwt = true
+
+[functions.schedule-hm-checklists]
+verify_jwt = true

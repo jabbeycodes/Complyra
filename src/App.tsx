@@ -13,7 +13,6 @@ import {
   HelpCircle,
   ChevronDown,
   Search,
-  Bell,
   Sparkles,
   Plus,
   UserPlus,
@@ -89,6 +88,10 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+import NotificationBell from "./features/notifications/NotificationBell";
+import NotificationsPanel from "./features/notifications/NotificationsPanel";
+import { useNotifications } from "./features/notifications/useNotifications";
+import { createSupabaseBrowserClient } from "./data";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -210,6 +213,36 @@ export default function App() {
       setPage("Overview");
     }
   }, [session, page]);
+  // WS1 (notifications): real notification bell. Only live on the hosted
+  // backend — the local preview workspace has no notifications table, so the
+  // bell stays inert there.
+  const [notifClient] = useState(() => createSupabaseBrowserClient());
+  const notificationSession =
+    usingHostedBackend && session
+      ? { agencyId: session.agencyId, userId: session.userId }
+      : null;
+  const {
+    notifications,
+    unread: unreadNotifications,
+    loading: notificationsLoading,
+    error: notificationsError,
+    refresh: refreshNotifications,
+    markRead: markNotificationRead,
+    markAllAsRead: markAllNotificationsRead,
+  } = useNotifications(notifClient, notificationSession);
+  // Deep-link routes from notifications map to the app's page state.
+  function navigateForDeepLink(deepLink: string) {
+    setModal(null);
+    if (deepLink.startsWith("/checklists")) {
+      setPage("Weekly checklist");
+    } else if (deepLink.startsWith("/training")) {
+      setPage("Training");
+    } else if (deepLink.startsWith("/certificates")) {
+      setPage("Certificates");
+    } else if (deepLink.startsWith("/meds")) {
+      setPage("Supply forecast");
+    }
+  }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -285,9 +318,6 @@ export default function App() {
   );
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
-  );
-  const alertItems = scoped.filter((r) =>
-    ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
   const personalItems = personalQueue({
     session,
@@ -675,14 +705,11 @@ export default function App() {
               )}
             </div>
             <span className="topbar-divider" />
-            <button
-              className="notification-button icon-button"
-              aria-label="View notifications"
-              onClick={() => setModal("notifications")}
-            >
-              <Bell size={19} />
-              {alertItems.length > 0 && <i />}
-            </button>
+            <NotificationBell
+              unread={unreadNotifications}
+              onOpen={() => setModal("notifications")}
+              disabled={!usingHostedBackend}
+            />
             <Avatar name={session.fullName} color="peach" small />
           </div>
         </header>
@@ -2238,38 +2265,17 @@ export default function App() {
       )}
       {modal === "notifications" && (
         <Modal title="Your notifications" onClose={() => setModal(null)}>
-          <p className="form-help">
-            Sample activity and open priorities. Email reminders are not
-            connected.
-          </p>
-          {alertItems.length === 0 ? (
-            <Empty
-              title="All caught up"
-              text="No overdue items or drafts waiting on review."
-            />
-          ) : (
-            alertItems.map((r) => (
-              <button
-                key={r.id}
-                className="notification-row"
-                onClick={() => {
-                  setModal(null);
-                  selectRequirement(r);
-                }}
-              >
-                <span className="risk-icon red">
-                  <CircleAlert size={17} />
-                </span>
-                <span>
-                  <strong>{r.title}</strong>
-                  <small>
-                    {r.person} · {r.site}
-                  </small>
-                </span>
-                <Badge status={r.status} />
-              </button>
-            ))
-          )}
+          <NotificationsPanel
+            notifications={notifications}
+            unread={unreadNotifications}
+            loading={notificationsLoading}
+            error={notificationsError}
+            onMarkRead={(id) => void markNotificationRead(id)}
+            onMarkAllRead={() => void markAllNotificationsRead()}
+            onNavigate={navigateForDeepLink}
+            onClose={() => setModal(null)}
+            onRetry={() => void refreshNotifications()}
+          />
         </Modal>
       )}
       {modal === "help" && (

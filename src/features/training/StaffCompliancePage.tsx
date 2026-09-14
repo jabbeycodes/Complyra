@@ -9,6 +9,8 @@
  */
 import { useEffect, useState } from "react";
 import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
+import StatusBadge from "../../components/StatusBadge";
+import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
@@ -59,12 +61,16 @@ const SECTION_NAMES: Record<number, string> = {
 
 const METHODS: TrainingMethod[] = ["shadowing", "classroom", "video", "hands-on", "reading"];
 
+// WS3 (accessible status system): training line verdicts go through the
+// shared <StatusBadge>. A waived (N/A) line stays green-but-explicit — the
+// canonical label is overridden to "N/A" so it never reads as completed.
 function statusBadge(status: TrainingRequirementView["resolvedStatus"]) {
-  if (status === "complete") return <Badge status="Complete" />;
-  if (status === "waived_na") return <Badge status="N/A" />;
-  if (status === "overdue") return <Badge status="Overdue" />;
-  if (status === "in_progress") return <Badge status="In progress" />;
-  return <Badge status="Pending" />;
+  if (status === "complete") return <StatusBadge status="compliant" />;
+  if (status === "waived_na")
+    return <StatusBadge status="compliant" label="N/A" />;
+  if (status === "overdue") return <StatusBadge status="late" />;
+  if (status === "in_progress") return <StatusBadge status="pending" />;
+  return <StatusBadge status={fromRequirementStatus(status)} />;
 }
 
 export default function StaffCompliancePage({ onSaved }: { onSaved: (message: string) => void }) {
@@ -217,7 +223,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
                   <td>{row.fullName}</td>
                   <td>{row.siteName}</td>
                   <td>
-                    {row.clearedForInRatio ? <Badge status="Cleared" /> : <Badge status="Not cleared" />}
+                    {row.clearedForInRatio ? (
+                      <StatusBadge status="compliant" label="Cleared" />
+                    ) : (
+                      <StatusBadge status="attention" label="Not cleared" />
+                    )}
                   </td>
                   <td>
                     {row.pendingCount + row.overdueCount} open

@@ -772,6 +772,18 @@ export interface HmWeeklyChecklist {
   siteId: string;
   /** ISO date of the Sunday that opens the week. */
   weekOf: string;
+  /**
+   * Scheduler-owned week anchor: the Monday (ISO date) opening the week.
+   * Present on rows created by the Sunday scheduler; absent on legacy or
+   * client-created rows.
+   */
+  weekStart?: string | null;
+  /** Due instant (ISO timestamptz) for this week's checklist. */
+  dueAt?: string | null;
+  /** True once the scheduler's late sweep flagged the row past due. */
+  late?: boolean;
+  /** When the late flag was set (ISO timestamptz). */
+  lateFlaggedAt?: string | null;
   /** The HM this instance is assigned to. */
   assignedToUserId: string;
   /** The DPM (or system rollover) that created the assignment. */
