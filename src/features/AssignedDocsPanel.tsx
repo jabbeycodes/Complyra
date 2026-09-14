@@ -4,6 +4,7 @@ import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
 import { canSignTrainingAsHm } from "../data/chart";
+import { useStepUpContext } from "../security/useStepUp";
 import { openPrintable } from "../data/openFile";
 import {
   canEditCover,
@@ -44,6 +45,7 @@ export default function AssignedDocsPanel({
   hideRenewals?: boolean;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [tab, setTab] = useState<Tab>("required");
@@ -307,6 +309,9 @@ export default function AssignedDocsPanel({
           }
           onOpenTraining={async (mode) => {
             if (!stack.myTraining) return;
+            // HIPAA step-up: opening the training PDF is an export (logged
+            // by getChartFile in the PHI audit trail).
+            if (!(await requireStepUp("export"))) return;
             const file = await api.getChartFile({
               type: "training",
               id: stack.myTraining.checklist.id,

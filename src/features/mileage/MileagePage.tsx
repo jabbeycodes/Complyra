@@ -419,7 +419,7 @@ export default function MileagePage() {
   }
 
   return (
-    <div>
+    <div data-tour="mileage">
       <PageHeading
         eyebrow="LIFEPATH"
         title="Mileage log"

@@ -96,10 +96,13 @@ test("Access log is visible to administrator, compliance_admin, auditor", () => 
     assert.equal(canViewPhiAuditLog(session({ roleKey })), true);
     assert.equal(pageVisible(session({ roleKey }), "Access log"), true);
   }
-  assert.equal(canViewPhiAuditLog(session({ platformAdmin: true })), true);
 });
 
-test("Access log is hidden from care roles", () => {
+test("Access log is hidden from the platform operator and care roles", () => {
+  // The operator is not an agency: the RLS policy admits only agency
+  // administrator, compliance_admin, and auditor, so the UI matches.
+  assert.equal(canViewPhiAuditLog(session({ platformAdmin: true })), false);
+  assert.equal(pageVisible(session({ platformAdmin: true }), "Access log"), false);
   for (const roleKey of ["dsp", "house_manager", "registered_nurse", "program_manager"]) {
     assert.equal(canViewPhiAuditLog(session({ roleKey })), false);
     assert.equal(pageVisible(session({ roleKey }), "Access log"), false);

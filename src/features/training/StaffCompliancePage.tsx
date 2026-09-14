@@ -153,7 +153,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
 
   return (
-    <div>
+    <div data-tour="training">
       <PageHeading
         eyebrow="LifePath"
         title="Training & staff compliance"

@@ -16,6 +16,7 @@ import {
 } from "../data/monthlyChecks";
 import { openPrintable } from "../data/openFile";
 import { useData } from "../data/DataProvider";
+import { useStepUpContext } from "../security/useStepUp";
 
 function badgeFor(tone: MonthlyTone) {
   if (tone === "current") return "Compliant";
@@ -29,6 +30,7 @@ export default function MonthlyEquipmentCard({
   individualId: string;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const today = todayIso();
   const [monthKey, setMonthKey] = useState(monthKeyFrom(today));
   const [name, setName] = useState("");
@@ -98,6 +100,7 @@ export default function MonthlyEquipmentCard({
           disabled={!view.complete}
           onClick={() =>
             run(async () => {
+              if (!(await requireStepUp("export"))) return;
               const file = await api.downloadMonthlyCheck({
                 kind: "equipment",
                 id: individualId,

@@ -12,10 +12,11 @@ import {
  * HIPAA §164.312(a)(2)(iii) — automatic logoff after 15 minutes of
  * inactivity.
  *
- * Wraps the authenticated workspace. Mouse, keyboard, touch, and scroll
- * activity reset the clock. During the final 60 seconds a warning modal
- * counts down; "Stay signed in" resets the clock, "Sign out now" (or the
- * countdown reaching zero) ends the session via onSignOut.
+ * Wraps the authenticated workspace. Mouse (clicks and throttled pointer
+ * movement), keyboard, touch, and scroll activity reset the clock. During
+ * the final 60 seconds a warning modal counts down; "Stay signed in"
+ * resets the clock, "Sign out now" (or the countdown reaching zero) ends
+ * the session via onSignOut.
  */
 export default function InactivityGuard({
   onSignOut,
@@ -36,6 +37,17 @@ export default function InactivityGuard({
     setPhase((p) => (p === "active" ? p : "active"));
   }, []);
 
+  // Pointer movement fires constantly; throttle it so the clock resets on
+  // real mouse activity without churning on every pixel.
+  const lastMoveRef = useRef(0);
+  const touchMove = useCallback(() => {
+    const now = Date.now();
+    if (now - lastMoveRef.current < 2000) return;
+    lastMoveRef.current = now;
+    lastActivityRef.current = now;
+    setPhase((p) => (p === "active" ? p : "active"));
+  }, []);
+
   useEffect(() => {
     const events: Array<keyof WindowEventMap> = [
       "mousedown",
@@ -46,6 +58,10 @@ export default function InactivityGuard({
     for (const name of events) {
       window.addEventListener(name, touch, { passive: true, capture: true });
     }
+    window.addEventListener("mousemove", touchMove, {
+      passive: true,
+      capture: true,
+    });
     const tick = window.setInterval(() => {
       const now = Date.now();
       const next = inactivityPhase(lastActivityRef.current, now);
@@ -66,8 +82,9 @@ export default function InactivityGuard({
       for (const name of events) {
         window.removeEventListener(name, touch, true);
       }
+      window.removeEventListener("mousemove", touchMove, true);
     };
-  }, [onSignOut, touch]);
+  }, [onSignOut, touch, touchMove]);
 
   const staySignedIn = useCallback(() => {
     lastActivityRef.current = Date.now();

@@ -69,7 +69,7 @@ export default function MedInventoryPage() {
   }
 
   return (
-    <div>
+    <div data-tour="med-inventory">
       <PageHeading
         eyebrow="LIFEPATH"
         title="Medication supply forecast"

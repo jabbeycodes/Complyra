@@ -27,6 +27,7 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can } from "../data/status";
+import { useStepUpContext } from "../security/useStepUp";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
@@ -49,6 +50,7 @@ export default function IndividualChart({
   onBack: () => void;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [error, setError] = useState("");
@@ -78,6 +80,9 @@ export default function IndividualChart({
     id: string,
     mode: "download" | "print",
   ) {
+    // HIPAA step-up: every chart file download/print is an export. The
+    // export itself is recorded in the PHI audit trail by getChartFile.
+    if (!(await requireStepUp("export"))) return;
     await run(async () => {
       const file = await api.getChartFile({ type, id });
       if (!file) throw new Error("That file is not stored yet.");

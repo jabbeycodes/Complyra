@@ -109,8 +109,11 @@ import type { PacketDetail } from "./data/types";
 import MfaGate from "./security/MfaGate";
 import InactivityGuard from "./security/InactivityGuard";
 import MfaSettingsSection from "./security/MfaSettingsSection";
-import { useStepUp } from "./security/useStepUp";
+import { useStepUp, StepUpProvider } from "./security/useStepUp";
 import PhiAccessLogPage from "./features/audit/PhiAccessLogPage";
+import DemoBanner from "./demo/DemoBanner";
+import DemoTour from "./demo/DemoTour";
+import { DEMO_TOUR_SEEN_KEY, isDemoSession } from "./demo/tourSteps";
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
@@ -151,6 +154,8 @@ export default function App() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
   const [evidence, setEvidence] = useState("");
   const [formError, setFormError] = useState("");
@@ -189,6 +194,25 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
+  // Demo mode: auto-start the guided tour on first demo sign-in per browser.
+  useEffect(() => {
+    if (!demoMode) return;
+    try {
+      if (!window.localStorage.getItem(DEMO_TOUR_SEEN_KEY)) {
+        setTourOpen(true);
+      }
+    } catch {
+      setTourOpen(true);
+    }
+  }, [demoMode]);
+  function closeTour() {
+    setTourOpen(false);
+    try {
+      window.localStorage.setItem(DEMO_TOUR_SEEN_KEY, "1");
+    } catch {
+      /* tour simply won't auto-start next time */
+    }
+  }
   // LIFEPATH-P4 (certificates): preload expiring-soon badges for the Staff page.
   useEffect(() => {
     if (!session) return;
@@ -540,6 +564,7 @@ export default function App() {
   return (
     <MfaGate session={session}>
       <InactivityGuard onSignOut={() => void signOut()}>
+        <StepUpProvider requireStepUp={requireStepUp}>
         <div className="app-shell">
       {mobileOpen && (
         <button
@@ -660,6 +685,12 @@ export default function App() {
         </div>
       </aside>
       <div className="main-shell">
+        {demoMode && (
+          <DemoBanner
+            onRestartTour={() => setTourOpen(true)}
+            onSignOut={signOut}
+          />
+        )}
         <header className="topbar">
           <div className="breadcrumb">
             <button
@@ -1799,6 +1830,9 @@ export default function App() {
           </button>
         </div>
       )}
+      {demoMode && tourOpen && (
+        <DemoTour onNavigate={navigate} onExit={closeTour} />
+      )}
       {selected && (
         <Modal
           title={
@@ -2499,6 +2533,7 @@ export default function App() {
       )}
       {stepUpModal}
     </div>
+        </StepUpProvider>
       </InactivityGuard>
     </MfaGate>
   );

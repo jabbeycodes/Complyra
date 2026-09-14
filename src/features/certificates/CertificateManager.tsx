@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Modal, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { useStepUpContext } from "../../security/useStepUp";
 import { hasPermission } from "../../data/permissions";
 import { todayIso } from "../../data/chart";
 import {
@@ -99,6 +100,7 @@ function CertRow({
 
 export default function CertificateManager() {
   const { api, session, workspace } = useData();
+  const { requireStepUp } = useStepUpContext();
   const staff = workspace?.staff ?? [];
   const canManage = Boolean(
     session && hasPermission(session, "certificates.manage"),
@@ -145,6 +147,9 @@ export default function CertificateManager() {
   }, [activeStaffId]);
 
   async function downloadFile(cert: StaffCertificate) {
+    // HIPAA step-up: opening a certificate file is an export (logged by
+    // certificateFileUrl in the PHI audit trail).
+    if (!(await requireStepUp("export"))) return;
     try {
       const url = await api.certificateFileUrl(cert.id);
       window.open(url, "_blank", "noopener");
@@ -172,7 +177,7 @@ export default function CertificateManager() {
   const selectedStaff = staff.find((s) => s.id === activeStaffId);
 
   return (
-    <>
+    <div data-tour="certificates">
       <PageHeading
         eyebrow="CREDENTIALS UP TO DATE."
         title="Staff certificates"
@@ -283,7 +288,7 @@ export default function CertificateManager() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 

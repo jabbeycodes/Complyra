@@ -50,9 +50,11 @@ export function can(session: SessionUser, key: PermissionKey) {
 }
 
 /** Nav and page gates. Care records stay hidden from HR even if they guess a URL. */
-/** HIPAA PHI audit log visibility — matches the phi_access_log RLS policy. */
+/** HIPAA PHI audit log visibility — matches the phi_access_log RLS policy.
+ * The platform operator is deliberately excluded: they are not an agency
+ * and must not see agency PHI rows (the database policy only admits
+ * agency administrator, compliance_admin, and auditor). */
 export function canViewPhiAuditLog(session: SessionUser): boolean {
-  if (session.platformAdmin) return true;
   return ["administrator", "compliance_admin", "auditor"].includes(
     session.roleKey,
   );

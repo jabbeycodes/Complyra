@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, LockKeyhole } from "lucide-react";
 import { Badge, formatDate, Modal } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { useStepUpContext } from "../../security/useStepUp";
 import { openPrintable } from "../../data/openFile";
 import {
   canSignAsDelegatingRn,
@@ -38,6 +39,7 @@ export default function DelegationFormDetail({
   onClose: () => void;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -47,6 +49,20 @@ export default function DelegationFormDetail({
     .find((entry) => entry.item.id === obligationId);
   const item = view?.item;
   const person = workspace?.individuals.find((p) => p.id === item?.individualId);
+
+  // HIPAA view instrumentation: opening a delegation record is a PHI view.
+  useEffect(() => {
+    if (item) {
+      void api.logPhiAccess({
+        action: "view",
+        recordType: "obligations",
+        recordId: item.id,
+        individualId: item.individualId ?? null,
+      });
+    }
+    // Log once per opened record.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [obligationId]);
 
   if (!session || !item) return null;
 
@@ -77,6 +93,9 @@ export default function DelegationFormDetail({
     Boolean(item.rnSignedAt) || form.roster.some((row) => row.signedAt);
 
   async function downloadPdf(obligationId: string) {
+    // HIPAA step-up: the delegation PDF is an export (logged by
+    // getDelegationPdf in the PHI audit trail).
+    if (!(await requireStepUp("export"))) return;
     setPdfBusy(true);
     setError("");
     try {

@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import ReauthSheet from "../features/signatures/ReauthSheet";
 import { stepUpIsFresh } from "./stepUp";
 
@@ -70,4 +71,40 @@ export function useStepUp() {
   ) : null;
 
   return { requireStepUp, stepUpModal };
+}
+
+/**
+ * Shares one workspace-wide step-up instance with deep components (PDF
+ * downloads, file opens) so every export path can require reauthentication
+ * without prop-drilling. App creates the instance with useStepUp() and
+ * provides requireStepUp here; the modal itself is still rendered once by
+ * App. There is exactly one grace window for the whole workspace.
+ */
+const StepUpContext = createContext<{
+  requireStepUp: (reason: StepUpReason) => Promise<boolean>;
+} | null>(null);
+
+export function StepUpProvider({
+  requireStepUp,
+  children,
+}: {
+  requireStepUp: (reason: StepUpReason) => Promise<boolean>;
+  children: ReactNode;
+}) {
+  return (
+    <StepUpContext.Provider value={{ requireStepUp }}>
+      {children}
+    </StepUpContext.Provider>
+  );
+}
+
+/** requireStepUp for any component rendered inside the workspace. */
+export function useStepUpContext() {
+  const ctx = useContext(StepUpContext);
+  if (!ctx) {
+    throw new Error(
+      "useStepUpContext must be used inside the workspace StepUpProvider.",
+    );
+  }
+  return ctx;
 }

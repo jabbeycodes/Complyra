@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Badge, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
+import { useStepUpContext } from "../security/useStepUp";
 import { can, isPrivileged } from "../data/status";
 import type { PacketDetail } from "../data/types";
 import {
@@ -26,6 +27,7 @@ export default function AcknowledgmentSheet({
   onClose: () => void;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const [error, setError] = useState("");
   const [legalName, setLegalName] = useState(session?.fullName ?? "");
   const [mark, setMark] = useState("");
@@ -216,13 +218,23 @@ export default function AcknowledgmentSheet({
         )}
         <button
           className="button primary"
-          onClick={() => {
+          onClick={async () => {
+            // HIPAA step-up: the acknowledgment sheet is an export. It is
+            // generated client-side, so the export is logged here.
+            if (!(await requireStepUp("export"))) return;
             const pdf = buildAcknowledgmentPdf(
               session?.agencyName ?? "Agency",
               detail,
               workspace?.branding.logoUrl,
             );
             pdf.save(packetFileName(detail));
+            void api.logPhiAccess({
+              action: "export",
+              recordType: "workspace_export",
+              recordId: `acknowledgment-sheet:${detail.packet.id}`,
+              agencyId: session?.agencyId ?? null,
+              details: { filename: packetFileName(detail) },
+            });
           }}
         >
           <Download size={16} /> Export acknowledgment sheet

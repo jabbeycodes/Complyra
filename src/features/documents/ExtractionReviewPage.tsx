@@ -332,6 +332,16 @@ export default function ExtractionReviewPage({
     async (id: string) => {
       const ex = await docs.getExtraction(id);
       setExtraction(ex);
+      // HIPAA view instrumentation: opening an extraction review shows the
+      // individual's extracted PHI.
+      if (ex) {
+        void api.logPhiAccess({
+          action: "view",
+          recordType: "document_uploads",
+          recordId: ex.uploadId,
+          individualId: ex.individualId,
+        });
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

@@ -3,6 +3,7 @@ import { Download, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Badge, PageHeading } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { useData } from "../../data/DataProvider";
+import { useStepUpContext } from "../../security/useStepUp";
 import { SignatureField } from "../signatures/SignatureField";
 import { hmChecklistPayload } from "../signatures/documentPayloads";
 import "./hmChecklist.css";
@@ -71,6 +72,7 @@ function AnswerControl({
 
 export default function HmWeeklyChecklistPage() {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const [lists, setLists] = useState<HmWeeklyChecklist[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -136,6 +138,9 @@ export default function HmWeeklyChecklistPage() {
   }
 
   async function download(checklistId: string) {
+    // HIPAA step-up: the checklist PDF is an export (logged by
+    // exportWeeklyChecklistPdf in the PHI audit trail).
+    if (!(await requireStepUp("export"))) return;
     const file = await api.exportWeeklyChecklistPdf(checklistId);
     downloadBlob(file.name, file.blob);
   }
@@ -152,7 +157,7 @@ export default function HmWeeklyChecklistPage() {
     : null;
 
   return (
-    <div aria-labelledby="hm-checklist-heading">
+    <div data-tour="hm-checklist" aria-labelledby="hm-checklist-heading">
       <PageHeading
         title="Weekly checklist"
         description="Your weekly compliance walkthrough. Answer every item — do not leave blanks — and submit it Monday by 4:00 p.m."

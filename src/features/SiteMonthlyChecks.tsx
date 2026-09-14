@@ -25,6 +25,7 @@ import {
 } from "../data/monthlyChecks";
 import { openPrintable } from "../data/openFile";
 import { useData } from "../data/DataProvider";
+import { useStepUpContext } from "../security/useStepUp";
 
 function badgeFor(tone: MonthlyTone) {
   if (tone === "current") return "Compliant";
@@ -38,6 +39,7 @@ export default function SiteMonthlyChecks({
   siteId: string;
 }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const today = todayIso();
   const [monthKey, setMonthKey] = useState(monthKeyFrom(today));
   const [error, setError] = useState("");
@@ -122,6 +124,7 @@ export default function SiteMonthlyChecks({
               disabled={!drillsDone}
               onClick={() =>
                 run(async () => {
+                  if (!(await requireStepUp("export"))) return;
                   const file = await api.downloadMonthlyCheck({
                     kind: "drills",
                     id: siteId,
@@ -164,6 +167,7 @@ export default function SiteMonthlyChecks({
               disabled={!safetyDone}
               onClick={() =>
                 run(async () => {
+                  if (!(await requireStepUp("export"))) return;
                   const file = await api.downloadMonthlyCheck({
                     kind: "safety",
                     id: siteId,

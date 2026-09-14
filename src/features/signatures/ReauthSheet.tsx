@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Modal } from "../../components";
 import { useData } from "../../data/DataProvider";
 
@@ -38,6 +39,7 @@ export default function ReauthSheet({
 }) {
   const { api } = useData();
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -74,16 +76,32 @@ export default function ReauthSheet({
           <label className="reauth-label" htmlFor="reauth-password">
             Account password
           </label>
-          <input
-            id="reauth-password"
-            type="password"
-            className="reauth-input"
-            autoComplete="current-password"
-            autoFocus
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={busy}
-          />
+          <span className="password-field">
+            <input
+              id="reauth-password"
+              type={showPassword ? "text" : "password"}
+              className="reauth-input"
+              autoComplete="current-password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+            />
+            <button
+              type="button"
+              className="password-toggle"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((v) => !v)}
+              disabled={busy}
+            >
+              {showPassword ? (
+                <EyeOff size={20} aria-hidden="true" />
+              ) : (
+                <Eye size={20} aria-hidden="true" />
+              )}
+            </button>
+          </span>
           {error && (
             <p className="form-error" role="alert">
               {error}

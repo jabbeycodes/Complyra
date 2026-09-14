@@ -3,6 +3,7 @@ import { ClipboardList, Download, RefreshCw } from "lucide-react";
 import { Badge, PageHeading } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { useData } from "../../data/DataProvider";
+import { useStepUpContext } from "../../security/useStepUp";
 import "./hmChecklist.css";
 import "./scheduler.css";
 import { downloadBlob } from "../../data/openFile";
@@ -42,6 +43,7 @@ function weekOptions(): string[] {
 
 export default function ChecklistAssigner() {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const [lists, setLists] = useState<HmWeeklyChecklist[]>([]);
   const [week, setWeek] = useState(weekOfSundayIso(todayIso()));
   const [siteId, setSiteId] = useState("");
@@ -99,6 +101,9 @@ export default function ChecklistAssigner() {
   }
 
   async function download(checklistId: string) {
+    // HIPAA step-up: the checklist PDF is an export (logged by
+    // exportWeeklyChecklistPdf in the PHI audit trail).
+    if (!(await requireStepUp("export"))) return;
     const file = await api.exportWeeklyChecklistPdf(checklistId);
     downloadBlob(file.name, file.blob);
   }

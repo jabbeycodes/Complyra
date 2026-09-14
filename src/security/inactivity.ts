@@ -3,8 +3,8 @@
  *
  * Pure timing logic for the inactivity controller. The full 15-minute idle
  * window ends the session; the last 60 seconds show a warning modal with
- * "Stay signed in" / "Sign out now". Any mouse, keyboard, or touch activity
- * resets the clock.
+ * "Stay signed in" / "Sign out now". Any mouse (including pointer movement),
+ * keyboard, scroll, or touch activity resets the clock.
  */
 
 export const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;

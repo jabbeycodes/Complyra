@@ -5895,6 +5895,11 @@ export class HostedApi implements ComplyraApi {
       hmName,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
     });
+    this.phiExport({
+      recordType: "hm_weekly_checklists",
+      recordId: checklistId,
+      details: { export: "weekly_checklist_pdf" },
+    });
     return {
       blob: doc.output("blob"),
       name: weeklyChecklistPdfName(site?.name ?? "home", row.weekOf),

@@ -24,6 +24,7 @@ import {
   type SiteServiceType,
 } from "../data/siteReview";
 import { useData } from "../data/DataProvider";
+import { useStepUpContext } from "../security/useStepUp";
 
 const STATUS_OPTIONS: { value: SiteReviewLineStatus; label: string }[] = [
   { value: "unchecked", label: "Not marked" },
@@ -46,6 +47,7 @@ function parseYesNo(value: string): boolean | null {
 
 export default function SiteReviewPanel({ siteId }: { siteId: string }) {
   const { api, session, workspace, refresh } = useData();
+  const { requireStepUp } = useStepUpContext();
   const today = todayIso();
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<SiteReview | null>(null);
@@ -122,6 +124,7 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
             className="button"
             onClick={() =>
               run(async () => {
+                if (!(await requireStepUp("export"))) return;
                 const file = await api.downloadSiteReviewPdf(siteId);
                 await openPrintable(file.name, file.blob, "download");
               })
@@ -133,6 +136,7 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
             className="button"
             onClick={() =>
               run(async () => {
+                if (!(await requireStepUp("export"))) return;
                 const file = await api.downloadPreSurveyPdf(siteId);
                 await openPrintable(file.name, file.blob, "download");
               })
