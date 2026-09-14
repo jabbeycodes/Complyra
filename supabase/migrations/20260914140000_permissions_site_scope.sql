@@ -93,25 +93,31 @@ begin
     return;
   end if;
 
-  update public.profiles
-  set username = v_username,
-      email = coalesce(nullif(email, ''), v_email),
-      full_name = case
-        when coalesce(full_name, '') in ('', split_part(email, '@', 1)) then 'Cameron Price'
-        else full_name
-      end,
-      job_title = case
-        when job_title in ('DSP', '') then 'Nurse'
-        else job_title
-      end,
-      home_agency_id = v_agency_id,
-      must_change_password = false,
-      active = true
-  where id = v_auth_id;
+  perform set_config('complyra.allow_identity_update', 'on', true);
 
-  if not found then
-    return;
-  end if;
+  insert into public.profiles (
+    id, username, email, full_name, job_title,
+    home_agency_id, must_change_password, active
+  )
+  values (
+    v_auth_id, v_username, v_email, 'Cameron Price', 'Nurse',
+    v_agency_id, false, true
+  )
+  on conflict (id) do update
+    set username = excluded.username,
+        email = coalesce(nullif(public.profiles.email, ''), excluded.email),
+        full_name = case
+          when coalesce(public.profiles.full_name, '') in ('', split_part(excluded.email, '@', 1))
+            then excluded.full_name
+          else public.profiles.full_name
+        end,
+        job_title = case
+          when public.profiles.job_title in ('DSP', '') then 'Nurse'
+          else public.profiles.job_title
+        end,
+        home_agency_id = excluded.home_agency_id,
+        must_change_password = false,
+        active = true;
 
   insert into public.memberships (agency_id, user_id, role, role_key, site_id)
   values (v_agency_id, v_auth_id, 'nurse', 'nurse', v_site_id)

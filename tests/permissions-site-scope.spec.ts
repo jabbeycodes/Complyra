@@ -104,6 +104,15 @@ test("demo nurse cameron.price signs in and only sees Maple people", async ({
   expect(labels.join(" ")).not.toContain("Sylvester Jones");
 });
 
+test("admin staff list includes demo nurse cameron.price", async ({ page }) => {
+  await signedIn(page);
+  await openNav(page);
+  await page.getByRole("button", { name: "Staff", exact: true }).click();
+  await page.getByLabel("Search staff").fill("cameron");
+  await expect(page.getByText("Cameron Price")).toBeVisible();
+  await expect(page.getByText("cameron.price")).toBeVisible();
+});
+
 test("a person added on a new site keeps that site on a requirement", async ({
   page,
 }) => {
@@ -177,4 +186,11 @@ test("inviting qa.dpm then signing in is recognized", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
   ).toBeVisible();
+  await page.getByLabel("Temporary password").fill("TempPass!1");
+  await page.getByRole("textbox", { name: "New password", exact: true }).fill("QaDpm!own2");
+  await page.getByRole("textbox", { name: "Confirm new password" }).fill("QaDpm!own2");
+  await page.getByRole("button", { name: "Save new password" }).click();
+  await expect(page.locator(".topbar")).toBeVisible({ timeout: 15_000 });
+  await dismissTour(page);
+  await expect(page.getByText("Loading workspace…")).toHaveCount(0);
 });

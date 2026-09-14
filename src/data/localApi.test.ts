@@ -803,6 +803,12 @@ test("inviting qa.dpm creates a login that is recognized", async () => {
   });
   assert.equal(session.roleKey, "degreed_professional_manager");
   assert.equal(session.mustChangePassword, true);
+  await api.changePassword("TempPass!1", "QaDpm!own2");
+  const after = await api.getSession();
+  assert.equal(after?.mustChangePassword, false);
+  const workspace = await api.loadWorkspace(after!);
+  assert.ok(workspace.sites.length > 0);
+  assert.ok(workspace.staff.some((row) => row.username === "qa.dpm"));
 });
 
 test("sign-in names a missing membership separately from a bad password", async () => {

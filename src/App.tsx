@@ -141,6 +141,7 @@ export default function App() {
     session,
     workspace,
     loading,
+    error,
     api,
     refresh,
     signOut,
@@ -296,6 +297,27 @@ export default function App() {
     return <PendingAgencyScreen />;
   }
   if (!workspace) {
+    if (error) {
+      return (
+        <div className="login-shell">
+          <div className="login-card">
+            <div className="login-brand">
+              <ComplyRerWordmark size={36} />
+            </div>
+            <h1>Could not open the workspace</h1>
+            <p role="alert">{error}</p>
+            <button className="button primary full" type="button" onClick={() => void refresh()}>
+              <RotateCcw size={16} /> Try again
+            </button>
+            <div className="login-demo">
+              <button type="button" onClick={() => void signOut()}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return <div className="login-shell">Loading workspace…</div>;
   }
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);

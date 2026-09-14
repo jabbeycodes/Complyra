@@ -2981,14 +2981,30 @@ export class HostedApi implements ComplyraApi {
    * month, one site review per site, default clinical renewals, and training
    * checklists for assigned staff. All writes use upserts/inserts guarded by
    * unique constraints, so repeat loads add nothing.
+   *
+   * Failures are swallowed: a DPM/nurse can often SELECT every home but fail
+   * WITH CHECK on a bulk upsert. That must not strand sign-in on
+   * "Loading workspace…".
    */
   private async ensureHostedCollections(
     session: SessionUser,
     input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
   ) {
+    try {
+      await this.writeHostedCollections(session, input);
+    } catch {
+      /* best-effort — workspace reads already succeeded */
+    }
+  }
+
+  private async writeHostedCollections(
+    session: SessionUser,
+    input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
+  ) {
     const monthKey = monthKeyFrom(todayIso());
+    const writableSites = input.sites.filter((site) => canAccessSite(session, site.id));
     if (canCompleteMonthly(session.roleKey)) {
-      const drillsPayload = input.sites.flatMap((site) =>
+      const drillsPayload = writableSites.flatMap((site) =>
         drillsForMonth(monthKey).map((drillType) => ({
           agency_id: session.agencyId,
           site_id: site.id,
@@ -3006,9 +3022,9 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("emergency_drills")
           .upsert(drillsPayload, { onConflict: "site_id,month_key,drill_type", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
-      const safetyPayload = input.sites.map((site) => ({
+      const safetyPayload = writableSites.map((site) => ({
         agency_id: session.agencyId,
         site_id: site.id,
         month_key: monthKey,
@@ -3018,7 +3034,7 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("home_safety_reports")
           .upsert(safetyPayload, { onConflict: "site_id,month_key", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
       const logsPayload = input.equipment
         .filter((item) => item.active)
@@ -3035,11 +3051,11 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("equipment_month_logs")
           .upsert(logsPayload, { onConflict: "equipment_id,month_key", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
     }
     if (canEditSiteReview(session.roleKey)) {
-      const reviewsPayload = input.sites.map((site) => {
+      const reviewsPayload = writableSites.map((site) => {
         const blank = blankSiteReview({ agencyId: session.agencyId, siteId: site.id });
         return {
           id: blank.id,
@@ -3059,7 +3075,7 @@ export class HostedApi implements ComplyraApi {
         const { error } = await this.client
           .from("site_reviews")
           .upsert(reviewsPayload, { onConflict: "site_id", ignoreDuplicates: true });
-        throwIf(error, "Could not load the agency workspace.");
+        if (error) return;
       }
     }
     if (this.canSetupChartRows(session.roleKey)) {
