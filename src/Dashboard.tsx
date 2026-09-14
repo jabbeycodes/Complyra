@@ -117,7 +117,7 @@ export default function Dashboard({
       <div className="dashboard-heading">
         <div className="heading-row">
           <h1>Overview</h1>
-          <button className="button" onClick={onExport} aria-label="Export PDF report">
+          <button className="button" onClick={onExport}>
             <Download size={16} /> Export
           </button>
         </div>
