@@ -15,12 +15,8 @@ export default function LoginScreen({
   prefill?: CreateAgencyResult | null;
 }) {
   const { signIn } = useData();
-  const [agencyCode, setAgencyCode] = useState(
-    prefill?.agencyCode ?? DEMO_AGENCY_CODE,
-  );
-  const [username, setUsername] = useState(
-    prefill?.username ?? DEMO_ADMIN_USERNAME,
-  );
+  const [agencyCode, setAgencyCode] = useState(prefill?.agencyCode ?? "");
+  const [username, setUsername] = useState(prefill?.username ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -135,6 +131,27 @@ export default function LoginScreen({
             {demoBusy ? "Loading demo…" : "Explore the interactive demo"}
           </button>
           <small>Fictional Evergreen Care data — no sign-up needed.</small>
+        </div>
+        <div className="login-demo-cred">
+          <strong>Demo access</strong>
+          <p>
+            Fictional demo data. Sign in manually with these, or use the
+            interactive demo button above.
+          </p>
+          <dl>
+            <div>
+              <dt>Provider code</dt>
+              <dd>{DEMO_AGENCY_CODE}</dd>
+            </div>
+            <div>
+              <dt>Username</dt>
+              <dd>{DEMO_ADMIN_USERNAME}</dd>
+            </div>
+            <div>
+              <dt>Password</dt>
+              <dd>{DEMO_PASSWORD}</dd>
+            </div>
+          </dl>
         </div>
       </div>
     </div>

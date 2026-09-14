@@ -186,8 +186,13 @@ export default function DemoTour({
           >
             <ChevronLeft size={16} aria-hidden="true" /> Back
           </button>
-          <button type="button" className="tour-text-button" onClick={onExit}>
-            Skip tour
+          <button
+            type="button"
+            className="tour-text-button"
+            onClick={onExit}
+            aria-label="Skip the guided tour and explore the demo freely"
+          >
+            Skip tour · Explore freely
           </button>
           <button
             type="button"

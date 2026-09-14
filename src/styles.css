@@ -4373,6 +4373,47 @@ th {
 .login-demo strong {
   color: var(--muted);
 }
+.login-demo-cred {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #f7f1e6;
+  display: grid;
+  gap: 6px;
+}
+.login-demo-cred strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.login-demo-cred p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.login-demo-cred dl {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0;
+}
+.login-demo-cred dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+}
+.login-demo-cred dt {
+  min-width: 108px;
+  color: var(--muted);
+}
+.login-demo-cred dd {
+  margin: 0;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
 .setup-who {
   border: 1px solid var(--border);
   border-radius: 16px;

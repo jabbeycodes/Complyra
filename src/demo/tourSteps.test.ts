@@ -14,7 +14,7 @@ const KNOWN_PAGES = new Set([
   "Certificates",
   "Mileage",
   "Weekly checklist",
-  "Med inventory",
+  "Supply forecast",
 ]);
 
 test("every tour step has a page, target, title, and body", () => {
@@ -55,6 +55,14 @@ test("tour covers the core demo surfaces", () => {
 
 test("demo tour seen flag key is stable", () => {
   assert.equal(DEMO_TOUR_SEEN_KEY, "complyrer-demo-tour-seen");
+});
+
+// Regression: the med-inventory stop once navigated to a page name that
+// doesn't exist ("Med inventory"), rendering a blank page on the last step.
+test("med inventory stop navigates to the real page name", () => {
+  const stop = TOUR_STEPS.find((s) => s.target === "med-inventory");
+  assert.ok(stop, "tour should stop at med-inventory");
+  assert.equal(stop.page, "Supply forecast");
 });
 
 test("isDemoSession detects the fictional demo agency", () => {
