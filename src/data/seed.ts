@@ -165,7 +165,8 @@ export interface LocalAgencyAiSettings {
   agencyId: string;
   aiProcessingEnabled: boolean;
   model: string;
-  keyLastVerifiedAt: string | null;
+  serviceAccountVerifiedAt: string | null;
+  vertexProjectId: string | null;
 }
 
 /** Append-only change record for one rating/review row (local store shape). */

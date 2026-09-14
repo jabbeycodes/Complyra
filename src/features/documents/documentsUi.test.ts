@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import JSZip from "jszip";
 import {
   AI_BAA_REQUIRED_COPY,
+  aiServiceAccountStatusLabel,
   allowedUploadTransitions,
   canTransitionUpload,
   confidenceBand,
@@ -540,13 +541,14 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
       agencyId: "agency-1",
       aiProcessingEnabled: true,
       model: "gemini-2.5-flash",
-      keyLastVerifiedAt: "2026-09-14T09:00:00.000Z",
+      serviceAccountVerifiedAt: "2026-09-14T09:00:00.000Z",
+      vertexProjectId: "demo-project",
     }),
     setAgencyAiSettings: async (input: any) => {
       calls.push(["setAgencyAiSettings", input]);
-      return { agencyId: "agency-1", aiProcessingEnabled: input.enabled, model: input.model, keyLastVerifiedAt: null };
+      return { agencyId: "agency-1", aiProcessingEnabled: input.enabled, model: input.model, serviceAccountVerifiedAt: null, vertexProjectId: null };
     },
-    verifyAiKey: async () => ({ ok: true, modelCount: 12 }),
+    verifyAiServiceAccount: async () => ({ ok: true, projectId: "demo-project" }),
     ...overrides,
   };
   return { api: api as unknown as ComplyraApi, calls };
@@ -712,20 +714,25 @@ test("adapter: upload falls back to the scripted demo extraction when hosted-onl
   assert.ok(calls.some(([name]) => name === "simulatePcspExtraction"));
 });
 
-test("adapter: AI settings map; key status derives from last verification", async () => {
+test("adapter: AI settings map; service account status derives from last verification", async () => {
   const { api, calls } = fakeApi();
   const docs = getDocumentsApi(api);
   const settings = await docs.getAiSettings();
   assert.equal(settings.model, "gemini-2.5-flash");
-  assert.equal(settings.keyStatus, "verified");
-  assert.equal(settings.aiProcessingEnabled, true);
+  assert.equal(settings.serviceAccountStatus, "configured");
+  assert.equal(settings.serviceAccountVerifiedAt, "2026-09-14T09:00:00.000Z");
+  assert.equal(settings.vertexProjectId, "demo-project");
+  assert.equal(aiServiceAccountStatusLabel(settings), "Configured — verified 2026-09-14");
   const saved = await docs.setAiSettings({ model: "gemini-2.5-pro" });
   const [, input] = calls.find(([name]) => name === "setAgencyAiSettings")!;
   assert.equal(input.model, "gemini-2.5-pro");
   assert.equal(input.enabled, true); // preserves the current flag
-  assert.equal(saved.keyStatus, "not_verified"); // never verified under the new model
-  const verified = await docs.verifyAiKey();
+  assert.equal(saved.serviceAccountStatus, "not_configured"); // never verified under the new model
+  assert.equal(saved.vertexProjectId, null);
+  assert.equal(aiServiceAccountStatusLabel(saved), "Not configured");
+  const verified = await docs.verifyAiServiceAccount();
   assert.equal(verified.ok, true);
+  assert.equal(verified.projectId, "demo-project");
 });
 
 test("annual physician order review sections use order wording, not PCSP labels", () => {

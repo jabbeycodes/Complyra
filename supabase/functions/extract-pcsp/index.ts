@@ -1,17 +1,32 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  parseServiceAccount,
+  callVertexGenerate,
+  VertexAuthError,
+  VertexGenerateError,
+  type ServiceAccount,
+} from "./vertex.ts";
 
 /**
  * extract-pcsp — AI document-ingestion for PCSPs and annual physician
- * orders (Gemini).
+ * orders (Gemini via Vertex AI).
  *
- * The Gemini API key lives ONLY in the GEMINI_API_KEY environment variable
- * (set as a Supabase function secret). It is never logged, never returned,
- * and never stored in the database — agency_ai_settings deliberately has
- * no key column.
+ * The Vertex AI service-account JSON lives ONLY in the
+ * VERTEX_SERVICE_ACCOUNT_JSON environment variable (set as a Supabase
+ * function secret), alongside VERTEX_PROJECT_ID (required),
+ * VERTEX_LOCATION (default us-central1), and GEMINI_MODEL (model fallback).
+ * Credential material is never logged, never returned, and never stored
+ * in the database — agency_ai_settings deliberately carries only the
+ * verification timestamp and project id, never credentials.
+ *
+ * Vertex AI (Google Cloud) is the BAA-coverable path: the agency accepts
+ * Google's HIPAA Business Associate Addendum in Cloud Console before AI
+ * processing is enabled for real PHI. The old Gemini Developer API key
+ * path is removed.
  *
  * PHI minimization: the caller-supplied document_text is truncated
- * server-side to ~120k characters before it ever reaches Gemini, so we
+ * server-side to ~120k characters before it ever reaches the model, so we
  * send the smallest slice that can still hold a full plan.
  *
  * Auth: the JWT caller's membership must hold `documents.review` in the
@@ -32,14 +47,14 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// Characters of document_text sent to Gemini. ~120k chars ≈ 30k tokens:
+// Characters of document_text sent to the model. ~120k chars ≈ 30k tokens:
 // small enough to avoid shipping an entire plan to a third party when the
 // caller passes more, large enough for a full PCSP.
 const MAX_DOC_CHARS = 120_000;
 
 // ---------------------------------------------------------------------------
 // PCSP JSON schema (v1) — every field nullable; per-field `confidence` 0..1
-// where the model can provide it. Sent to Gemini as responseSchema and
+// where the model can provide it. Sent to Vertex AI as responseSchema and
 // re-checked below after generation.
 // ---------------------------------------------------------------------------
 const PCSP_RESPONSE_SCHEMA = {
@@ -224,7 +239,7 @@ function looksValidExtraction(documentType: string, data: unknown): boolean {
 }
 
 /**
- * Deterministic fallback when Gemini returns malformed JSON (after one
+ * Deterministic fallback when the model returns malformed JSON (after one
  * retry): record an extraction whose every item needs a human check, so the
  * pipeline never crashes and a reviewer still gets a usable draft.
  */
@@ -380,6 +395,33 @@ function toTrackableItems(
   return items;
 }
 
+/**
+ * Read the Vertex AI configuration from the function secrets. Missing
+ * service-account JSON or project id is a server misconfiguration (500) —
+ * never a user error. The JSON is parsed but never logged.
+ */
+function loadVertexConfig(): { sa: ServiceAccount; projectId: string; location: string } {
+  const saJson = Deno.env.get("VERTEX_SERVICE_ACCOUNT_JSON");
+  const projectId = Deno.env.get("VERTEX_PROJECT_ID");
+  if (!saJson || !projectId) {
+    throw json(
+      { error: "Vertex AI service account is not configured." },
+      500,
+    );
+  }
+  let sa: ServiceAccount;
+  try {
+    sa = parseServiceAccount(saJson);
+  } catch (e) {
+    throw json(
+      { error: "Vertex AI service account is not configured." },
+      500,
+    );
+  }
+  const location = Deno.env.get("VERTEX_LOCATION") || "us-central1";
+  return { sa, projectId, location };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -412,17 +454,16 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid request body." }, 400);
   }
 
-  // Verify action: minimal Gemini models-list call to prove the key works.
-  // Admin-level: the caller must hold roles.manage in some agency (the
-  // verify button lives on the admin AI settings screen). The key value is
-  // never returned.
+  // Verify action: minimal Vertex AI generateContent call to prove the
+  // service account works. Admin-level: the caller must hold roles.manage
+  // in some agency (the verify button lives on the admin AI settings
+  // screen). No credential material is ever returned.
   if (body.action === "verify") {
-    const apiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!apiKey) {
-      return json(
-        { ok: false, error: "GEMINI_API_KEY is not configured on this function." },
-        500,
-      );
+    let vertex: { sa: ServiceAccount; projectId: string; location: string };
+    try {
+      vertex = loadVertexConfig();
+    } catch (resp) {
+      return resp as Response;
     }
     const { data: memberships } = await admin
       .from("memberships")
@@ -450,41 +491,53 @@ Deno.serve(async (req) => {
     }
     if (!allowed) {
       return json(
-        { error: "Only administrators can verify the AI key." },
+        { error: "Only administrators can verify the AI service account." },
         403,
       );
     }
     try {
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models?key=" +
-          encodeURIComponent(apiKey),
-        { headers: { "Content-Type": "application/json" } },
-      );
-      if (!res.ok) {
+      const result = await callVertexGenerate({
+        sa: vertex.sa,
+        projectId: vertex.projectId,
+        location: vertex.location,
+        model:
+          Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash",
+        body: {
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: "Reply with the single word: ok" }],
+            },
+          ],
+          generationConfig: { temperature: 0, maxOutputTokens: 8 },
+        },
+      });
+      if (!result.ok) {
         return json(
           {
             ok: false,
-            error: `Gemini returned HTTP ${res.status}. Check the key.`,
+            error: `Vertex AI returned HTTP ${result.status}. Check the service account, project, and region.`,
           },
           502,
         );
       }
-      const data = (await res.json()) as { models?: unknown[] };
-      const modelCount = Array.isArray(data.models) ? data.models.length : 0;
-      // Record the verification timestamp — the settings row carries no key.
+      // Record the verification timestamp + project — the settings row
+      // carries no credential material.
       if (body.agency_id && typeof body.agency_id === "string") {
         await admin
           .from("agency_ai_settings")
           .upsert(
             {
               agency_id: body.agency_id,
-              key_last_verified_at: new Date().toISOString(),
+              service_account_verified_at: new Date().toISOString(),
+              vertex_project_id: vertex.projectId,
             },
             { onConflict: "agency_id" },
           );
       }
-      return json({ ok: true, model_count: modelCount });
+      return json({ ok: true, project_id: vertex.projectId });
     } catch (e) {
+      // VertexAuthError / VertexGenerateError carry status-only messages.
       return json(
         { ok: false, error: `Verification failed: ${(e as Error).message}` },
         502,
@@ -562,12 +615,11 @@ Deno.serve(async (req) => {
     );
   }
 
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) {
-    return json(
-      { error: "GEMINI_API_KEY is not configured on this function." },
-      500,
-    );
+  let vertex: { sa: ServiceAccount; projectId: string; location: string };
+  try {
+    vertex = loadVertexConfig();
+  } catch (resp) {
+    return resp as Response;
   }
   // Agency-selected model takes precedence; GEMINI_MODEL is a fallback for
   // environments where the agency settings row was never saved.
@@ -576,23 +628,22 @@ Deno.serve(async (req) => {
     Deno.env.get("GEMINI_MODEL") ||
     "gemini-2.5-flash";
 
-  // PHI minimization: truncate server-side before the Gemini call.
+  // PHI minimization: truncate server-side before the Vertex AI call.
   const truncated = documentText.slice(0, MAX_DOC_CHARS);
   const schema =
     documentType === "pcsp" ? PCSP_RESPONSE_SCHEMA : APO_RESPONSE_SCHEMA;
 
-  async function callGemini(): Promise<
-    { ok: true; data: unknown } | { ok: false; status: number }
+  async function callModel(): Promise<
+    { ok: true; data: unknown } | { ok: false; status: number; error: string }
   > {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
+    let result: Awaited<ReturnType<typeof callVertexGenerate>>;
+    try {
+      result = await callVertexGenerate({
+        sa: vertex.sa,
+        projectId: vertex.projectId,
+        location: vertex.location,
+        model,
+        body: {
           contents: [
             {
               role: "user",
@@ -607,11 +658,27 @@ Deno.serve(async (req) => {
             responseSchema: schema,
             temperature: 0.1,
           },
-        }),
-      },
-    );
-    if (!res.ok) return { ok: false, status: res.status };
-    const payload = (await res.json()) as {
+        },
+      });
+    } catch (e) {
+      if (e instanceof VertexAuthError) {
+        return { ok: false, status: 502, error: "Vertex AI credentials were rejected." };
+      }
+      if (e instanceof VertexGenerateError) {
+        return { ok: false, status: 502, error: "Vertex AI request failed." };
+      }
+      return { ok: false, status: 502, error: "Vertex AI request failed." };
+    }
+    if (!result.ok) {
+      // HTTP status only — never the response body (could carry PHI or
+      // credential hints).
+      return {
+        ok: false,
+        status: 502,
+        error: `Vertex AI returned HTTP ${result.status}.`,
+      };
+    }
+    const payload = result.json as {
       candidates?: Array<{
         content?: { parts?: Array<{ text?: string }> };
       }>;
@@ -619,11 +686,11 @@ Deno.serve(async (req) => {
     const text = payload.candidates?.[0]?.content?.parts
       ?.map((p) => p.text ?? "")
       .join("");
-    if (!text) return { ok: false, status: 502 };
+    if (!text) return { ok: false, status: 502, error: "Vertex AI returned no content." };
     try {
       return { ok: true, data: JSON.parse(text) };
     } catch {
-      return { ok: false, status: 502 };
+      return { ok: false, status: 502, error: "Vertex AI returned unparseable content." };
     }
   }
 
@@ -638,18 +705,26 @@ Deno.serve(async (req) => {
   // pipeline never crashes — every item gets needs_human_check.
   let parsed: unknown = null;
   let fallbackUsed = false;
-  const first = await callGemini();
+  let lastError = "extraction failed";
+  const first = await callModel();
   if (first.ok && looksValidExtraction(documentType, first.data)) {
     parsed = first.data;
   } else {
-    const second = await callGemini();
+    if (!first.ok) lastError = first.error;
+    const second = await callModel();
     if (second.ok && looksValidExtraction(documentType, second.data)) {
       parsed = second.data;
     } else {
+      if (!second.ok) lastError = second.error;
       const fb = fallbackExtraction(documentType);
       parsed = fb.extracted_data;
       fallbackUsed = true;
     }
+  }
+  if (!fallbackUsed && parsed === null) {
+    // Should be unreachable (callModel either parses or we fall back), but
+    // fail closed rather than proceeding with an empty extraction.
+    return json({ error: lastError }, 502);
   }
 
   const data = (parsed ?? {}) as Record<string, unknown>;
@@ -673,7 +748,7 @@ Deno.serve(async (req) => {
   );
   if (rpcError) {
     // The extraction rows were not written — leave the audit trail in the
-    // edge function response, not in the DB. Never leak the key.
+    // edge function response, not in the DB. Never leak credentials.
     return json(
       {
         error: "Extraction completed but could not be recorded.",

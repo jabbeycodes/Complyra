@@ -924,16 +924,20 @@ export interface ComplyraApi {
   rejectDocumentUpload(uploadId: string, reason?: string): Promise<void>;
   /** Per-agency AI settings read (any agency member; carries no secrets). */
   getAgencyAiSettings(): Promise<LocalAgencyAiSettings>;
-  /** Set the AI enabled flag + model only (roles.manage; the key is never stored). */
+  /** Set the AI enabled flag + model only (roles.manage; no credential is ever stored). */
   setAgencyAiSettings(input: {
     enabled: boolean;
     model: string;
   }): Promise<LocalAgencyAiSettings>;
   /**
-   * Minimal Gemini key check via the extract-pcsp verify action
-   * (roles.manage; hosted only — local returns a demo result).
+   * Minimal Vertex AI service-account check via the extract-pcsp verify
+   * action (roles.manage; hosted only — local returns a demo result).
    */
-  verifyAiKey(): Promise<{ ok: boolean; modelCount?: number; error?: string }>;
+  verifyAiServiceAccount(): Promise<{
+    ok: boolean;
+    projectId?: string;
+    error?: string;
+  }>;
   /** Add a reviewer-created trackable item (documents.review; status "proposed"). */
   addTrackableItem(input: {
     extractionId: string;
@@ -8469,7 +8473,8 @@ export class LocalApi implements ComplyraApi {
       agencyId: session.agencyId,
       aiProcessingEnabled: false,
       model: "gemini-2.5-flash",
-      keyLastVerifiedAt: null,
+      serviceAccountVerifiedAt: null,
+      vertexProjectId: null,
     };
     db.agencyAiSettings.push(row);
     return row;
@@ -8480,7 +8485,7 @@ export class LocalApi implements ComplyraApi {
     model: string;
   }): Promise<LocalAgencyAiSettings> {
     const session = assertSession(this.store);
-    // Model + enabled flag only — the key is NEVER stored here.
+    // Model + enabled flag only — no credential is EVER stored here.
     assertCan(session, "roles.manage");
     if (!input.model.trim()) throw new Error("A model name is required.");
     ensureDocumentCollections(this.store);
@@ -8491,7 +8496,8 @@ export class LocalApi implements ComplyraApi {
         agencyId: session.agencyId,
         aiProcessingEnabled: false,
         model: "gemini-2.5-flash",
-        keyLastVerifiedAt: null,
+        serviceAccountVerifiedAt: null,
+        vertexProjectId: null,
       };
       db.agencyAiSettings.push(row);
     }
@@ -8507,14 +8513,32 @@ export class LocalApi implements ComplyraApi {
     return row;
   }
 
-  async verifyAiKey(): Promise<{
+  async verifyAiServiceAccount(): Promise<{
     ok: boolean;
-    modelCount?: number;
+    projectId?: string;
     error?: string;
   }> {
-    // Local/demo has no Gemini key — the hosted API calls the extract-pcsp
-    // verify action instead.
-    return { ok: false, error: "Key verification is hosted-only." };
+    // Local/demo has no service account — simulate a successful
+    // verification so the settings screen can exercise the flow. Hosted
+    // calls the extract-pcsp verify action instead.
+    const session = assertSession(this.store);
+    assertCan(session, "roles.manage");
+    ensureDocumentCollections(this.store);
+    const db = this.store.db;
+    let row = db.agencyAiSettings.find((s) => s.agencyId === session.agencyId);
+    if (!row) {
+      row = {
+        agencyId: session.agencyId,
+        aiProcessingEnabled: false,
+        model: "gemini-2.5-flash",
+        serviceAccountVerifiedAt: null,
+        vertexProjectId: null,
+      };
+      db.agencyAiSettings.push(row);
+    }
+    row.serviceAccountVerifiedAt = new Date().toISOString();
+    row.vertexProjectId = "demo-project";
+    return { ok: true, projectId: "demo-project" };
   }
 
   async addTrackableItem(input: {

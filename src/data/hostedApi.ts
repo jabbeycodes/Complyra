@@ -7697,7 +7697,8 @@ export class HostedApi implements ComplyraApi {
       agencyId: session.agencyId,
       aiProcessingEnabled: Boolean(row?.ai_processing_enabled),
       model: String(row?.model ?? "gemini-2.5-flash"),
-      keyLastVerifiedAt: (row?.key_last_verified_at as string) ?? null,
+      serviceAccountVerifiedAt: (row?.service_account_verified_at as string) ?? null,
+      vertexProjectId: (row?.vertex_project_id as string) ?? null,
     };
   }
 
@@ -7707,7 +7708,7 @@ export class HostedApi implements ComplyraApi {
   }): Promise<LocalAgencyAiSettings> {
     const session = await this.requireSession();
     this.requirePermission(session, "roles.manage");
-    // Model + enabled flag only — the key is NEVER stored.
+    // Model + enabled flag only — no credential is EVER stored.
     const { data, error } = await this.client.rpc("set_agency_ai_settings", {
       p_agency_id: session.agencyId,
       p_enabled: input.enabled,
@@ -7719,22 +7720,23 @@ export class HostedApi implements ComplyraApi {
       agencyId: session.agencyId,
       aiProcessingEnabled: Boolean(row?.ai_processing_enabled),
       model: String(row?.model ?? input.model),
-      keyLastVerifiedAt: (row?.key_last_verified_at as string) ?? null,
+      serviceAccountVerifiedAt: (row?.service_account_verified_at as string) ?? null,
+      vertexProjectId: (row?.vertex_project_id as string) ?? null,
     };
   }
 
-  async verifyAiKey(): Promise<{
+  async verifyAiServiceAccount(): Promise<{
     ok: boolean;
-    modelCount?: number;
+    projectId?: string;
     error?: string;
   }> {
     const session = await this.requireSession();
     this.requirePermission(session, "roles.manage");
-    // Minimal models-list call inside the edge function — the key value
-    // never leaves the server and is never returned.
+    // Minimal generateContent call inside the edge function — the
+    // service-account JSON never leaves the server and is never returned.
     const result = await invokeEdgeFunction<{
       ok?: boolean;
-      models_count?: number;
+      project_id?: string;
       error?: string;
     }>(this.client, "extract-pcsp", {
       action: "verify",
@@ -7742,8 +7744,8 @@ export class HostedApi implements ComplyraApi {
     });
     return {
       ok: result.ok === true,
-      modelCount:
-        typeof result.models_count === "number" ? result.models_count : undefined,
+      projectId:
+        typeof result.project_id === "string" ? result.project_id : undefined,
       error: result.error,
     };
   }

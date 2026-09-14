@@ -22,7 +22,7 @@
  * raw api. Assumed names from the early UI draft (uploadDocument,
  * getExtraction, listUploads, updateTrackableItem, approveExtraction,
  * activateTrackableItem, rejectUpload, getAiSettings, setAiSettings,
- * verifyAiKey, addTrackableItem) are preserved as the adapter's method
+ * verifyAiServiceAccount, addTrackableItem) are preserved as the adapter's method
  * names so the UI code below is unchanged.
  *
  * Permissions: `documents.upload` gates upload (admin/DPM); `documents.review`
@@ -360,19 +360,21 @@ export function extractionListSections(
 
 export interface AiSettings {
   model: string;
-  keyStatus: "verified" | "not_verified";
-  lastVerifiedAt: string | null;
+  serviceAccountStatus: "configured" | "not_configured";
+  serviceAccountVerifiedAt: string | null;
+  /** GCP project id recorded at verification (Vertex AI). */
+  vertexProjectId: string | null;
   aiProcessingEnabled: boolean;
 }
 
-/** Human-readable key status — the value itself is NEVER displayed. */
-export function aiKeyStatusLabel(settings: AiSettings): string {
-  // The app cannot inspect the server-side secret: the only honest signal is
-  // whether a verification succeeded and was recorded.
-  if (settings.lastVerifiedAt) {
-    return `Verified ${settings.lastVerifiedAt.slice(0, 10)}`;
+/** Human-readable service-account status — no credential is ever displayed. */
+export function aiServiceAccountStatusLabel(settings: AiSettings): string {
+  // The app cannot inspect the server-side service-account secret: the only
+  // honest signal is whether a verification succeeded and was recorded.
+  if (settings.serviceAccountVerifiedAt) {
+    return `Configured — verified ${settings.serviceAccountVerifiedAt.slice(0, 10)}`;
   }
-  return "Not verified";
+  return "Not configured";
 }
 
 /* ------------------------------------------------------------------ */
@@ -410,9 +412,10 @@ export interface AddTrackableItemInput {
   dueDate: string | null;
 }
 
-export interface VerifyAiKeyResult {
+export interface VerifyAiServiceAccountResult {
   ok: boolean;
-  lastVerifiedAt: string | null;
+  serviceAccountVerifiedAt: string | null;
+  projectId: string | null;
   error?: string;
 }
 
@@ -438,7 +441,7 @@ export interface DocumentsLibraryApi {
   rejectUpload(uploadId: string, reason: string): Promise<void>;
   getAiSettings(): Promise<AiSettings>;
   setAiSettings(patch: { model: string }): Promise<AiSettings>;
-  verifyAiKey(): Promise<VerifyAiKeyResult>;
+  verifyAiServiceAccount(): Promise<VerifyAiServiceAccountResult>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -768,11 +771,12 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 function mapAiSettings(s: LocalAgencyAiSettings): AiSettings {
   return {
     model: s.model,
-    // The key value is never stored or readable; a successful verification
-    // timestamp is the only signal the API exposes — report "verified",
-    // never claim a key is configured.
-    keyStatus: s.keyLastVerifiedAt ? "verified" : "not_verified",
-    lastVerifiedAt: s.keyLastVerifiedAt,
+    // The service-account JSON is never stored or readable; a successful
+    // verification timestamp is the only signal the API exposes — report
+    // "configured", never claim a credential is present.
+    serviceAccountStatus: s.serviceAccountVerifiedAt ? "configured" : "not_configured",
+    serviceAccountVerifiedAt: s.serviceAccountVerifiedAt,
+    vertexProjectId: s.vertexProjectId,
     aiProcessingEnabled: s.aiProcessingEnabled,
   };
 }
@@ -968,12 +972,15 @@ export function getDocumentsApi(
       );
     },
 
-    async verifyAiKey(): Promise<VerifyAiKeyResult> {
-      const result = await api.verifyAiKey();
-      const lastVerifiedAt = result.ok
-        ? (await api.getAgencyAiSettings()).keyLastVerifiedAt
-        : null;
-      return { ok: result.ok, lastVerifiedAt, error: result.error };
+    async verifyAiServiceAccount(): Promise<VerifyAiServiceAccountResult> {
+      const result = await api.verifyAiServiceAccount();
+      const settings = result.ok ? await api.getAgencyAiSettings() : null;
+      return {
+        ok: result.ok,
+        serviceAccountVerifiedAt: settings?.serviceAccountVerifiedAt ?? null,
+        projectId: result.projectId ?? settings?.vertexProjectId ?? null,
+        error: result.error,
+      };
     },
   };
 

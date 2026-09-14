@@ -12,11 +12,14 @@ import { proposeFromPcsp, type ObligationItem } from "./planStack";
  * tracked before approval), and activates each item; protocol items hand
  * off into the delegation system.
  *
- * Keys and AI settings live server-side: GEMINI_API_KEY is a Supabase
- * function secret (never stored in agency_ai_settings), and AI processing
- * stays OFF until an administrator enables it after a BAA with Google is
- * in place. See docs/ai-model-settings.md. The edge function truncates
- * document text server-side (~120k chars) for PHI minimization.
+ * Keys and AI settings live server-side: a Vertex AI service-account JSON
+ * (VERTEX_SERVICE_ACCOUNT_JSON), project id (VERTEX_PROJECT_ID), and
+ * location (VERTEX_LOCATION) are Supabase function secrets (never stored in
+ * agency_ai_settings — only the verification timestamp and project id are),
+ * and AI processing stays OFF until an administrator enables it after a
+ * Google Cloud BAA is in place. See docs/ai-model-settings.md and
+ * docs/vertex-ai-setup.md. The edge function truncates document text
+ * server-side (~120k chars) for PHI minimization.
  *
  * This module's LOCAL path stays a pure demo: extractPlanProposal() calls
  * proposeFromPcsp() — the same proposed stack a DPM would review — never a

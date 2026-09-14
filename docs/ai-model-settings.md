@@ -1,9 +1,9 @@
 # AI model settings (PCSP extraction pipeline)
 
 The PCSP document-extraction pipeline sends uploaded PCSPs / annual
-physician orders to Google Gemini for structured extraction. This page is
-the exact secrets list for the ship step, plus the Secure Vault flow and
-the compliance notes.
+physician orders to Gemini **through Vertex AI (Google Cloud)** — not the
+Gemini Developer API. Vertex AI is the path a Google Cloud HIPAA BAA can
+cover. Full operator steps: [docs/vertex-ai-setup.md](./vertex-ai-setup.md).
 
 ## Secrets the ship step must set
 
@@ -12,43 +12,30 @@ Set these as **Supabase function secrets** for the `extract-pcsp` function
 columns and must never land in a migration, a `.env` file in the repo,
 memory, or chat.
 
-| Secret             | Required | Default            | Notes                                                         |
-| ------------------ | -------- | ------------------ | ------------------------------------------------------------- |
-| `GEMINI_API_KEY`   | yes      | —                  | Read from `Deno.env` only. Never logged, never returned, never stored. |
-| `GEMINI_MODEL`     | no       | `gemini-2.5-flash` | Falls back to the agency's `agency_ai_settings.model` row.    |
+| Secret                        | Required | Default            | Notes                                                              |
+| ----------------------------- | -------- | ------------------ | ------------------------------------------------------------------ |
+| `VERTEX_SERVICE_ACCOUNT_JSON` | yes      | —                  | Service-account JSON key. Read from `Deno.env` only. Never logged, never returned, never stored. |
+| `VERTEX_PROJECT_ID`           | yes      | —                  | GCP project id. Recorded on `agency_ai_settings.vertex_project_id` at verification (display only). |
+| `VERTEX_LOCATION`             | no       | `us-central1`      | Vertex AI region.                                                  |
+| `GEMINI_MODEL`                | no       | `gemini-2.5-flash` | Falls back to the agency's `agency_ai_settings.model` row.         |
 
-CLI (run from the repo root, after the migration is applied):
+The old `GEMINI_API_KEY` Developer-API secret is no longer read — delete
+it at ship time (`supabase secrets unset GEMINI_API_KEY`).
 
-```bash
-supabase secrets set GEMINI_API_KEY='<the key>' --project-ref <ref>
-# optional:
-supabase secrets set GEMINI_MODEL='gemini-2.5-flash' --project-ref <ref>
-```
+## Verify
 
-Then deploy the function (source only — the ship step decides when):
-
-```bash
-supabase functions deploy extract-pcsp --project-ref <ref>
-```
-
-## Secure Vault flow for the key value
-
-1. Joshua opens the Secure Vault capture page and pastes the Gemini API
-   key there himself (same pattern as his Hostinger mailbox password —
-   he types it, Anert never sees it).
-2. Anert reads the key **transiently** only for the `supabase secrets set`
-   call above, in the ship turn, then discards it. The value is not
-   written to any file, environment variable, log, or memory entry.
-3. Verification: on the admin AI settings screen, the "Verify key" button
-   calls `extract-pcsp` with `{ action: "verify" }`, which makes a minimal
-   Gemini `models.list` call and returns `{ ok: true, model_count }` — the
-   key value is never echoed back. On success the function stamps
-   `agency_ai_settings.key_last_verified_at` (a row that carries no key).
+On the admin AI settings screen, "Verify service account" calls
+`extract-pcsp` with `{ action: "verify" }`: the function mints an OAuth
+access token from the service-account JSON and runs one minimal
+`generateContent` call ("Reply with the single word: ok"). On success it
+stamps `agency_ai_settings.service_account_verified_at` and
+`vertex_project_id` and returns `{ ok: true, project_id }` — credential
+material is never echoed back.
 
 ## BAA requirement
 
 `agency_ai_settings.ai_processing_enabled` defaults to **false**.
-The `extract-pcsp` function refuses to call Gemini while it is false and
+The `extract-pcsp` function refuses to call Vertex AI while it is false and
 returns a `403` with `baa_required: true` and this message:
 
 > "AI processing is not enabled for this agency. An administrator must
@@ -56,27 +43,33 @@ returns a `403` with `baa_required: true` and this message:
 
 Sending PHI to Google without a Business Associate Agreement would be a
 HIPAA violation. The administrator flips the flag (roles.manage-gated,
-`set_agency_ai_settings` RPC, model + enabled flag only) only after the
-BAA is signed. The flag flip is written to `document_audit_log`.
+`set_agency_ai_settings` RPC, model + enabled flag only) only after
+accepting the Google Cloud HIPAA BAA (Cloud Console → IAM & Admin →
+HIPAA Business Associate Addendum). The flag flip is written to
+`document_audit_log`.
 
 ## PHI minimization
 
 - The client uploads the PDF to the private `pcsp-documents` bucket; the
   edge function receives only the **text** the client chose to send.
 - `extract-pcsp` truncates `document_text` server-side to ~120k
-  characters before the Gemini call — a full PCSP fits, but nothing extra
-  is transmitted.
+  characters before the Vertex AI call — a full PCSP fits, but nothing
+  extra is transmitted.
 - The prompt instructs the model to return `null` for anything the
   document does not state (no hallucinated PHI).
 - On malformed model output the function retries once, then records a
   deterministic fallback extraction whose every item carries
   `needs_human_check: true` — the pipeline never crashes on bad JSON.
+- On Vertex AI errors the function returns the HTTP status only — never
+  response bodies, which could carry PHI or credential hints.
 - The agency_id-scoped RLS policies mean ordinary staff only ever see
   approved/activated items at their own sites; raw extraction JSON is
   reviewers-only.
 
 ## Rotation / revocation
 
-To rotate: generate a new key in the Google AI Studio console, re-run
-`supabase secrets set GEMINI_API_KEY=...`, then revoke the old key. No
-database row carries the key, so there is nothing to clean up in the DB.
+To rotate: create a new JSON key on the same service account, re-run
+`supabase secrets set VERTEX_SERVICE_ACCOUNT_JSON=...`, then delete the
+old key in Cloud Console. No database row carries a credential, so there
+is nothing to clean up in the DB. Deleting or disabling the key in IAM &
+Admin revokes access immediately; the function fails closed with a 502.

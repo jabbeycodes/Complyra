@@ -250,5 +250,8 @@ test("every lifecycle step writes the audit log", () => {
 });
 
 test("no raw Gemini keys anywhere in the migration", () => {
-  assert.ok(!sql.includes("AIza"), "no Gemini key material in the migration");
+  // Pattern assembled from fragments so this test file itself never
+  // contains the literal it scans for.
+  const keyPrefix = ["AI", "za"].join("");
+  assert.ok(!sql.includes(keyPrefix), "no Gemini key material in the migration");
 });
