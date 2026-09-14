@@ -6,6 +6,7 @@ public/security
 public/privacy.html
 public/terms.html
 public/security.html
+public/site.html
 public/legal.css
 .vercel
 .env

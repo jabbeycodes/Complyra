@@ -9,6 +9,8 @@ const port = Number(process.env.PORT || 4175);
 
 const pretty = {
   "/": "index.html",
+  "/site": "index.html",
+  "/site/": "index.html",
   "/privacy": "privacy/index.html",
   "/terms": "terms/index.html",
   "/security": "security/index.html",
@@ -36,39 +38,7 @@ function send(res, status, body, headers = {}) {
 createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
   if (url.pathname === "/api/demo-request") {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    try {
-      req.body = chunks.length
-        ? JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")
-        : {};
-    } catch {
-      send(res, 400, JSON.stringify({ error: "Invalid JSON" }), {
-        "Content-Type": "application/json; charset=utf-8",
-      });
-      return;
-    }
-    const fake = {
-      statusCode: 200,
-      headers: {},
-      setHeader(key, value) {
-        this.headers[key] = value;
-      },
-      status(code) {
-        this.statusCode = code;
-        return this;
-      },
-      json(payload) {
-        send(res, this.statusCode, JSON.stringify(payload), {
-          "Content-Type": "application/json; charset=utf-8",
-          ...this.headers,
-        });
-      },
-      end() {
-        send(res, this.statusCode, "", this.headers);
-      },
-    };
-    await handler(req, fake);
+    await handler(req, res);
     return;
   }
 

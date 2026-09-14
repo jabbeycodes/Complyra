@@ -90,4 +90,34 @@ test.describe("app host copies", () => {
     await page.goto(`${app}/security`);
     await expect(page.getByRole("heading", { name: "Security" })).toBeVisible();
   });
+
+  test("Book a demo on legal pages and login goes to /site#contact, not SPA /#contact", async ({
+    page,
+  }) => {
+    await page.goto(`${app}/privacy`);
+    const demo = page.getByRole("link", { name: "Book a demo" }).first();
+    await expect(demo).toHaveAttribute("href", "/site#contact");
+    await demo.click();
+    await expect(page).toHaveURL(/\/site#contact$/);
+    await expect(page.locator("#demo-form")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in" })).toHaveCount(0);
+
+    await page.goto(app);
+    await expect(
+      page.getByRole("navigation", { name: "Legal" }).getByRole("link", { name: "Book a demo" }),
+    ).toHaveAttribute("href", "/site#contact");
+  });
+
+  test("app host /site#contact submits the marketing demo form", async ({ page }) => {
+    await page.goto(`${app}/site#contact`);
+    await expect(page.locator("#demo-form")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in" })).toHaveCount(0);
+    await page.getByLabel("Your name").fill("Jordan Lee");
+    await page.getByLabel("Work email").fill("jordan@agency.org");
+    await page.getByRole("textbox", { name: "Agency" }).fill("Cedar Ridge Supports");
+    await page.getByLabel("What should we look at first?").selectOption("Delegations and signatures");
+    await page.getByRole("button", { name: "Book a demo" }).click();
+    await expect(page.getByRole("heading", { name: "Request received" })).toBeVisible();
+    await expect(page.getByText("jordan@agency.org", { exact: false })).toBeVisible();
+  });
 });

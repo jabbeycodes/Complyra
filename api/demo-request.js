@@ -1,6 +1,6 @@
 /**
- * Demo requests for the marketing Vercel project (`complyrer-marketing`).
- * Keep in sync with /api/demo-request.js (Git-linked app host).
+ * Demo requests for the app Vercel host (`/api/demo-request`).
+ * Keep in sync with marketing/api/demo-request.js (marketing-only project).
  *
  * If RESEND_API_KEY is set, email hello@ (or DEMO_REQUEST_TO).
  * Otherwise the structured log is the operator inbox until mail is wired.

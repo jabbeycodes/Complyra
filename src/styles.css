@@ -4460,8 +4460,9 @@ th {
 }
 .login-legal {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 16px;
+  gap: 12px 16px;
   margin: 16px 0 4px;
   font-size: 13px;
   font-weight: 700;

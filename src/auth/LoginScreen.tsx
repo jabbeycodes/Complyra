@@ -136,6 +136,7 @@ export default function LoginScreen({
           <a href="/privacy">Privacy</a>
           <a href="/terms">Terms</a>
           <a href="/security">Security</a>
+          <a href="/site#contact">Book a demo</a>
         </nav>
         <div className="login-demo-cred">
           <strong>Demo access</strong>
