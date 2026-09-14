@@ -18,27 +18,35 @@ async function signIn(page: Page) {
       .trim();
     return window.innerWidth <= 430 && sidebar === "0px";
   });
+  await page.addStyleTag({
+    content: ".sidebar,.mobile-backdrop{transition:none!important}",
+  });
 }
 
 async function closeMobileNav(page: Page) {
-  const sidebar = page.locator(".sidebar.mobile-open");
-  if (await sidebar.isVisible()) {
-    await page.getByRole("button", { name: "Close navigation" }).first().click();
-    await expect(sidebar).toBeHidden();
+  const open = page.locator(".sidebar.mobile-open");
+  if (await open.count()) {
+    await page.locator(".sidebar-close").click();
+  }
+  const overview = page.locator(".sidebar").getByRole("button", { name: "Overview" });
+  if (await overview.count()) {
+    await expect(overview).not.toBeInViewport();
   }
 }
 
-/** Page shell must not scroll sideways; inner table-scroll is allowed (PR #13). */
+/**
+ * Page shell must not pan sideways. Inner `.table-scroll` may be wider than
+ * the viewport (PR #13). Chromium still folds that inner overflow into
+ * `documentElement.scrollWidth`, so we assert boxes — not that metric.
+ */
 async function assertNoHorizontalOverflow(page: Page) {
   await closeMobileNav(page);
   const result = await page.evaluate(() => {
     const vw = window.innerWidth;
-    const doc = document.documentElement;
     const pageShifted = window.scrollX > 0;
     window.scrollTo(0, window.scrollY);
-    const wide = [...document.querySelectorAll("body *")].filter((el) => {
-      const style = getComputedStyle(el);
-      if (style.position === "fixed") return false;
+
+    function insideHorizontalScroller(el: Element) {
       let parent = el.parentElement;
       while (
         parent &&
@@ -49,31 +57,34 @@ async function assertNoHorizontalOverflow(page: Page) {
         if (
           overflowX === "auto" ||
           overflowX === "scroll" ||
-          overflowX === "hidden"
+          overflowX === "hidden" ||
+          overflowX === "clip"
         ) {
-          return false;
+          return true;
         }
         parent = parent.parentElement;
       }
+      return false;
+    }
+
+    const wide = [...document.querySelectorAll("body *")].filter((el) => {
+      const style = getComputedStyle(el);
+      if (style.position === "fixed") return false;
+      if (insideHorizontalScroller(el)) return false;
       const box = el.getBoundingClientRect();
       return box.width > 1 && box.right > vw + 2;
     });
-    let widest = { sw: 0, name: "" };
-    for (const el of document.querySelectorAll("body *")) {
-      if (el.scrollWidth > widest.sw) {
-        widest = {
-          sw: el.scrollWidth,
-          name: `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 48)}`,
-        };
-      }
-    }
+
+    const scrollers = [...document.querySelectorAll(".table-scroll")].map((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      right: el.getBoundingClientRect().right,
+    }));
+
     return {
       vw,
       pageShifted,
-      scrollWidth: doc.scrollWidth,
-      clientWidth: doc.clientWidth,
-      sidebar: getComputedStyle(doc).getPropertyValue("--sidebar").trim(),
-      widest,
+      scrollers,
       wide: wide.slice(0, 8).map(
         (el) =>
           `${el.tagName.toLowerCase()}.${el.className?.toString().slice(0, 40)}`,
@@ -81,17 +92,23 @@ async function assertNoHorizontalOverflow(page: Page) {
     };
   });
   expect(result.pageShifted, "page should not scroll sideways").toBe(false);
-  expect(
-    result.scrollWidth,
-    `shell scrollWidth must not exceed the viewport (vw=${result.vw}, sidebar=${result.sidebar}, widest=${result.widest.name}:${result.widest.sw})`,
-  ).toBeLessThanOrEqual(result.clientWidth + 1);
   expect(result.wide, "in-flow layout should stay in the viewport").toEqual([]);
+  for (const scroller of result.scrollers) {
+    expect(
+      scroller.clientWidth,
+      "table-scroll viewport must stay on canvas",
+    ).toBeLessThanOrEqual(result.vw + 1);
+    expect(
+      scroller.right,
+      "table-scroll box must stay on canvas",
+    ).toBeLessThanOrEqual(result.vw + 2);
+  }
 }
 
 async function openPage(page: Page, name: string) {
   await closeMobileNav(page);
   await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.locator(".sidebar").getByRole("button", { name, exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name }).click();
   await closeMobileNav(page);
 }
 
@@ -154,7 +171,7 @@ test.describe("390 phone", () => {
     const bannerBox = await banner.boundingBox();
     expect(bannerBox).toBeTruthy();
     expect(bannerBox!.height).toBeLessThanOrEqual(48);
-    await expect(banner).not.toContainText("Fictional Evergreen Care data");
+    await expect(page.locator(".demo-banner-sub")).toBeHidden();
 
     const menu = page.getByRole("button", { name: "Open navigation" });
     await expect(menu).toBeVisible();
@@ -191,11 +208,18 @@ test.describe("390 phone", () => {
     expect(exportBox!.x).toBeGreaterThanOrEqual(0);
     expect(exportBox!.x + exportBox!.width).toBeLessThanOrEqual(390 + 1);
 
+    const shot = `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}`;
+    await page.screenshot({ path: `${shot}/mobile_overview_390.png`, fullPage: false });
+
     await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(
+      page.locator(".sidebar").getByRole("button", { name: "Overview" }),
+    ).toBeInViewport();
     const navItem = page.locator(".sidebar .nav-item").first();
     const navBox = await navItem.boundingBox();
     expect(navBox).toBeTruthy();
     expect(navBox!.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: `${shot}/mobile_nav_390.png`, fullPage: false });
     await closeMobileNav(page);
 
     await openPage(page, "Delegations");
@@ -205,6 +229,7 @@ test.describe("390 phone", () => {
     await create.scrollIntoViewIfNeeded();
     await expect(create).toBeInViewport();
     await assertNoHorizontalOverflow(page);
+    await page.screenshot({ path: `${shot}/mobile_delegations_create_390.png`, fullPage: false });
   });
 });
 
@@ -217,7 +242,10 @@ test.describe("430 phone", () => {
     await signIn(page);
     await assertNoHorizontalOverflow(page);
     await openPage(page, "Requirements");
+    await expect(page.locator(".sidebar.mobile-open")).toHaveCount(0);
     await assertNoHorizontalOverflow(page);
+    const shot = `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}`;
+    await page.screenshot({ path: `${shot}/mobile_requirements_430.png`, fullPage: false });
     await openPage(page, "Delegations");
     await assertNoHorizontalOverflow(page);
   });

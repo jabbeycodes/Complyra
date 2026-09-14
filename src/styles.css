@@ -1335,7 +1335,13 @@ h1 {
   margin-bottom: 20px;
 }
 .table-scroll {
-  overflow: auto;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  contain: inline-size;
 }
 table {
   width: 100%;
@@ -5435,8 +5441,10 @@ body.nav-open {
   .table-scroll {
     width: 100%;
     max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    contain: inline-size;
   }
   .table-scroll table {
     width: max-content;
