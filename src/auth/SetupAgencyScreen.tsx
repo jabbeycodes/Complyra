@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
 import { Building2 } from "lucide-react";
 import { useData } from "../data/DataProvider";
 import { buildAgencyCode, suggestAgencySlug } from "../data/agencyCode";
@@ -37,10 +38,7 @@ export default function SetupAgencyScreen({
       <div className="login-shell">
         <div className="login-card">
           <div className="login-brand">
-            <img src="/favicon.svg" alt="" />
-            <span>
-              complyrer<span className="brand-period">.</span>
-            </span>
+            <ComplyRerWordmark size={36} />
           </div>
           <h1>{pending ? "Submitted for review" : "Agency is ready"}</h1>
           <p>
@@ -84,10 +82,7 @@ export default function SetupAgencyScreen({
     <div className="login-shell">
       <div className="login-card">
         <div className="login-brand">
-          <img src="/favicon.svg" alt="" />
-          <span>
-            complyrer<span className="brand-period">.</span>
-          </span>
+          <ComplyRerWordmark size={36} />
         </div>
         <h1>Set up an agency</h1>
         <p>

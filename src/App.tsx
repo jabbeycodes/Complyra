@@ -13,6 +13,7 @@ import {
   HelpCircle,
   ChevronDown,
   Search,
+  Bell,
   Sparkles,
   Plus,
   UserPlus,
@@ -59,6 +60,7 @@ import {
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
 import AuthEntry from "./auth/AuthEntry";
+import { ComplyRerWordmark } from "./brand/ComplyrerBrand";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
 import PendingAgencyScreen from "./auth/PendingAgencyScreen";
 import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
@@ -77,11 +79,6 @@ import StaffCompliancePage from "./features/training/StaffCompliancePage";
 import DelegationsPage from "./features/delegations/DelegationsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
-// PCSP-DOCUMENTS-IMPORT (AI document ingestion)
-import DocumentUploadCard from "./features/documents/DocumentUploadCard";
-import ExtractionReviewPage from "./features/documents/ExtractionReviewPage";
-import AiSettingsPage from "./features/documents/AiSettingsPage";
-import { Bot as AiSettingsNavIcon, FileSearch as ExtractionReviewNavIcon } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
 import StaffCertificatesModal from "./features/certificates/StaffCertificatesModal";
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
@@ -93,13 +90,6 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
-// LIFEPATH-P8-PAGE (recognition)
-import { Trophy } from "lucide-react";
-import RecognitionPage from "./features/recognition/RecognitionPage";
-import NotificationBell from "./features/notifications/NotificationBell";
-import NotificationsPanel from "./features/notifications/NotificationsPanel";
-import { useNotifications } from "./features/notifications/useNotifications";
-import { createSupabaseBrowserClient } from "./data";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
 import PlatformConsole from "./features/PlatformConsole";
@@ -132,8 +122,6 @@ export default function App() {
     usingHostedBackend,
   } = useData();
   const [page, setPage] = useState("Overview");
-  // PCSP-DOCUMENTS: which upload the Extraction review page is showing (null = queue).
-  const [reviewUploadId, setReviewUploadId] = useState<string | null>(null);
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -223,47 +211,6 @@ export default function App() {
       setPage("Overview");
     }
   }, [session, page]);
-  // WS1 (notifications): real notification bell. Only live on the hosted
-  // backend — the local preview workspace has no notifications table, so the
-  // bell stays inert there.
-  const [notifClient] = useState(() => createSupabaseBrowserClient());
-  const notificationSession =
-    usingHostedBackend && session
-      ? { agencyId: session.agencyId, userId: session.userId }
-      : null;
-  const {
-    notifications,
-    unread: unreadNotifications,
-    loading: notificationsLoading,
-    error: notificationsError,
-    refresh: refreshNotifications,
-    markRead: markNotificationRead,
-    markAllAsRead: markAllNotificationsRead,
-  } = useNotifications(notifClient, notificationSession);
-  // Deep-link routes from notifications map to the app's page state.
-  function navigateForDeepLink(deepLink: string) {
-    setModal(null);
-    if (deepLink.startsWith("/checklists")) {
-      setPage("Weekly checklist");
-    } else if (deepLink.startsWith("/training")) {
-      setPage("Training");
-    } else if (deepLink.startsWith("/certificates")) {
-      setPage("Certificates");
-    } else if (deepLink.startsWith("/meds")) {
-      setPage("Supply forecast");
-    } else if (deepLink.startsWith("/recognition")) {
-      setPage("Recognition");
-    } else if (deepLink.startsWith("/delegations")) {
-      setPage("Delegations");
-      // PCSP-DOCUMENTS-DEEPLINK
-    } else if (deepLink.startsWith("/documents/extractions")) {
-      const parts = deepLink.split("/");
-      setReviewUploadId(parts.length > 3 && parts[3] ? parts[3] : null);
-      setPage("Extraction review");
-    } else if (deepLink.startsWith("/documents/upload")) {
-      setPage("Document upload");
-    }
-  }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -339,6 +286,9 @@ export default function App() {
   );
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
+  );
+  const alertItems = scoped.filter((r) =>
+    ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
   const personalItems = personalQueue({
     session,
@@ -508,8 +458,6 @@ export default function App() {
         ["Sites & programs", Building2],
         ["Staff", Users],
         ["Roles & access", KeyRound],
-        // PCSP-DOCUMENTS-NAV (AI settings, admin only)
-        ["AI settings", AiSettingsNavIcon],
       ],
     },
     {
@@ -517,9 +465,6 @@ export default function App() {
       items: [
         ["Requirements", ListChecks],
         ["Documents", FolderOpen],
-        // PCSP-DOCUMENTS-NAV (AI document ingestion)
-        ["Document upload", Upload],
-        ["Extraction review", ExtractionReviewNavIcon],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
         ["Acknowledgments", PenLine],
@@ -542,8 +487,6 @@ export default function App() {
         ["Supply forecast", MedInventoryNavIcon],
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
-        // LIFEPATH-P8-NAV (recognition)
-        ["Recognition", Trophy],
       ],
     },
   ] as const;
@@ -569,12 +512,9 @@ export default function App() {
           onClick={() => navigate("Overview")}
           aria-label="Complyrer home"
         >
-          <img src="/favicon.svg" alt="" />
-          <span>
-            complyrer<span className="brand-period">.</span>
-          </span>
+          <ComplyRerWordmark size={33} />
         </button>
-        <div className="brand-tagline">COMPLIANCE, CONNECTED.</div>
+        <div className="brand-tagline">GO PAPERLESS. STAY AUDIT-READY.</div>
         <button className="agency-picker" onClick={() => setModal("agency")}>
           <AgencyMark name={session.agencyName} logoUrl={workspace.branding.logoUrl} />
           <span>
@@ -733,11 +673,14 @@ export default function App() {
               )}
             </div>
             <span className="topbar-divider" />
-            <NotificationBell
-              unread={unreadNotifications}
-              onOpen={() => setModal("notifications")}
-              disabled={!usingHostedBackend}
-            />
+            <button
+              className="notification-button icon-button"
+              aria-label="View notifications"
+              onClick={() => setModal("notifications")}
+            >
+              <Bell size={19} />
+              {alertItems.length > 0 && <i />}
+            </button>
             <Avatar name={session.fullName} color="peach" small />
           </div>
         </header>
@@ -1664,22 +1607,6 @@ export default function App() {
               {page === "Training" && <StaffCompliancePage onSaved={notify} />}
               {/* LIFEPATH-P3-PAGE (delegation forms) */}
               {page === "Delegations" && <DelegationsPage />}
-              {/* PCSP-DOCUMENTS-PAGES (AI document ingestion) */}
-              {page === "Document upload" && (
-                <DocumentUploadCard
-                  onUploaded={(uploadId) => {
-                    setReviewUploadId(uploadId);
-                    setPage("Extraction review");
-                  }}
-                />
-              )}
-              {page === "Extraction review" && (
-                <ExtractionReviewPage
-                  initialUploadId={reviewUploadId}
-                  onSelectUpload={setReviewUploadId}
-                />
-              )}
-              {page === "AI settings" && <AiSettingsPage />}
               {/* LIFEPATH-P4-PAGE (certificates) */}
               {page === "Certificates" && <CertificateManager />}
               {/* LIFEPATH-P5-PAGE (HM weekly checklist) */}
@@ -1689,8 +1616,6 @@ export default function App() {
               {page === "Supply forecast" && <MedInventoryPage />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
-              {/* LIFEPATH-P8-PAGE (recognition) */}
-              {page === "Recognition" && <RecognitionPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading
@@ -2311,17 +2236,38 @@ export default function App() {
       )}
       {modal === "notifications" && (
         <Modal title="Your notifications" onClose={() => setModal(null)}>
-          <NotificationsPanel
-            notifications={notifications}
-            unread={unreadNotifications}
-            loading={notificationsLoading}
-            error={notificationsError}
-            onMarkRead={(id) => void markNotificationRead(id)}
-            onMarkAllRead={() => void markAllNotificationsRead()}
-            onNavigate={navigateForDeepLink}
-            onClose={() => setModal(null)}
-            onRetry={() => void refreshNotifications()}
-          />
+          <p className="form-help">
+            Sample activity and open priorities. Email reminders are not
+            connected.
+          </p>
+          {alertItems.length === 0 ? (
+            <Empty
+              title="All caught up"
+              text="No overdue items or drafts waiting on review."
+            />
+          ) : (
+            alertItems.map((r) => (
+              <button
+                key={r.id}
+                className="notification-row"
+                onClick={() => {
+                  setModal(null);
+                  selectRequirement(r);
+                }}
+              >
+                <span className="risk-icon red">
+                  <CircleAlert size={17} />
+                </span>
+                <span>
+                  <strong>{r.title}</strong>
+                  <small>
+                    {r.person} · {r.site}
+                  </small>
+                </span>
+                <Badge status={r.status} />
+              </button>
+            ))
+          )}
         </Modal>
       )}
       {modal === "help" && (

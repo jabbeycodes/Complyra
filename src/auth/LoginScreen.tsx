@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
 import { ShieldCheck } from "lucide-react";
 import { useData } from "../data/DataProvider";
 import {
@@ -35,10 +36,7 @@ export default function LoginScreen({
     <div className="login-shell">
       <div className="login-card">
         <div className="login-brand">
-          <img src="/favicon.svg" alt="" />
-          <span>
-            complyrer<span className="brand-period">.</span>
-          </span>
+          <ComplyRerWordmark size={36} />
         </div>
         <h1>Sign in to your agency workspace</h1>
         <p>
