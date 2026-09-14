@@ -62,9 +62,6 @@ import type {
   ApplySignatureResult,
   LogPhiAccessInput,
   LogSignatureAuditInput,
-  MfaAssurance,
-  MfaFactor,
-  MfaState,
   PhiAccessAction,
   PhiAccessFilters,
   PhiAccessRecord,
@@ -72,7 +69,6 @@ import type {
   SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
-  TotpEnrollment,
 } from "./types";
 import { blankDelegationForm } from "./types";
 import {
@@ -6849,66 +6845,6 @@ export class HostedApi implements ComplyraApi {
       deviceId: (row.device_id as string | null) ?? null,
       details: (row.details as Record<string, unknown> | null) ?? null,
     }));
-  }
-
-  /**
-   * Supabase Auth MFA (TOTP) state. `enrolled` is true when the session's
-   * next assurance level is AAL2 (an unverified factor is enrolled).
-   */
-  async getMfaState(): Promise<MfaState> {
-    const { data: aal, error: aalError } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aalError) throw new Error("Could not check MFA status.");
-    const { data: factors, error: factorsError } = await this.client.auth.mfa.listFactors();
-    if (factorsError) throw new Error("Could not list MFA factors.");
-    const totp = (factors?.totp ?? []).map((f) => ({
-      id: String(f.id),
-      friendlyName: String(f.friendly_name ?? "Authenticator app"),
-      factorType: String(f.factor_type),
-      status: String(f.status),
-    }));
-    return {
-      enrolled: aal?.nextLevel === "aal2" || totp.length > 0,
-      assurance: (aal?.currentLevel as MfaAssurance | undefined) ?? "aal1",
-      factors: totp,
-    };
-  }
-
-  /** Start TOTP enrollment: returns the factor id, QR code, secret, and URI. */
-  async enrollTotpFactor(friendlyName: string): Promise<TotpEnrollment> {
-    const { data, error } = await this.client.auth.mfa.enroll({
-      factorType: "totp",
-      friendlyName,
-    });
-    if (error || !data?.totp) throw new Error("Could not start authenticator setup.");
-    return {
-      factorId: String(data.id),
-      qrCode: String(data.totp.qr_code),
-      secret: String(data.totp.secret),
-      uri: String(data.totp.uri),
-    };
-  }
-
-  /** Confirm TOTP enrollment with the 6-digit code from the authenticator app. */
-  async verifyTotpEnrollment(factorId: string, code: string): Promise<void> {
-    const { data: challenge, error: challengeError } = await this.client.auth.mfa.challenge({ factorId });
-    if (challengeError || !challenge?.id) throw new Error("Could not start verification.");
-    const { error } = await this.client.auth.mfa.verify({
-      factorId,
-      challengeId: challenge.id,
-      code: code.replace(/\s+/g, ""),
-    });
-    if (error) throw new Error("That code didn't match. Try again.");
-  }
-
-  /** Step-up: verify the current session with a TOTP code. */
-  async verifyTotpForSession(factorId: string, code: string): Promise<void> {
-    await this.verifyTotpEnrollment(factorId, code);
-  }
-
-  /** Remove a TOTP factor. */
-  async unenrollMfaFactor(factorId: string): Promise<void> {
-    const { error } = await this.client.auth.mfa.unenroll({ factorId });
-    if (error) throw new Error("Could not remove that authenticator.");
   }
 
   async getSignatureAuditLog(input?: {

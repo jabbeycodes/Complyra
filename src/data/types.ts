@@ -1060,26 +1060,3 @@ export interface PhiAccessFilters {
   limit?: number;
   offset?: number;
 }
-
-/** Supabase Auth MFA (TOTP) state for the current session. */
-export type MfaAssurance = "aal1" | "aal2";
-
-export interface MfaFactor {
-  id: string;
-  friendlyName: string;
-  factorType: string;
-  status: string;
-}
-
-export interface MfaState {
-  enrolled: boolean;
-  assurance: MfaAssurance;
-  factors: MfaFactor[];
-}
-
-export interface TotpEnrollment {
-  factorId: string;
-  qrCode: string;
-  secret: string;
-  uri: string;
-}

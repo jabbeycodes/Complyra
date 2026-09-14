@@ -106,9 +106,7 @@ import { canCreateIndividual } from "./data/permissions";
 import { can, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
-import MfaGate from "./security/MfaGate";
 import InactivityGuard from "./security/InactivityGuard";
-import MfaSettingsSection from "./security/MfaSettingsSection";
 import { useStepUp, StepUpProvider } from "./security/useStepUp";
 import PhiAccessLogPage from "./features/audit/PhiAccessLogPage";
 import DemoBanner from "./demo/DemoBanner";
@@ -562,9 +560,8 @@ export default function App() {
     },
   ] as const;
   return (
-    <MfaGate session={session}>
-      <InactivityGuard onSignOut={() => void signOut()}>
-        <StepUpProvider requireStepUp={requireStepUp}>
+    <InactivityGuard onSignOut={() => void signOut()}>
+      <StepUpProvider requireStepUp={requireStepUp}>
         <div className="app-shell">
       {mobileOpen && (
         <button
@@ -1743,18 +1740,7 @@ export default function App() {
                         }
                       />
                     </div>
-                    {/* HIPAA-MFA: Settings → Security — TOTP enrollment. */}
-                    <div className="settings-row security-row">
-                      <span>
-                        <strong>Security</strong>
-                        <small>
-                          Two-factor authentication protects this account.
-                          Required for platform operators, administrators, and
-                          compliance administrators.
-                        </small>
-                      </span>
-                    </div>
-                    <MfaSettingsSection />
+                    {/* HIPAA: Settings → Security section removed with authenticator MFA. */}
                     <div className="settings-row">
                       <span>
                         <strong>Access and permissions</strong>
@@ -2535,7 +2521,6 @@ export default function App() {
     </div>
         </StepUpProvider>
       </InactivityGuard>
-    </MfaGate>
   );
 }
 function CreateForm({

@@ -99,9 +99,6 @@ import type {
   ApplySignatureResult,
   LogPhiAccessInput,
   LogSignatureAuditInput,
-  MfaAssurance,
-  MfaFactor,
-  MfaState,
   PhiAccessAction,
   PhiAccessFilters,
   PhiAccessRecord,
@@ -109,7 +106,6 @@ import type {
   SignatureAuditRecord,
   SignatureEvent,
   SignatureSettings,
-  TotpEnrollment,
   UserSignature,
 } from "./types";
 import { blankDelegationForm } from "./types";
@@ -745,16 +741,6 @@ export interface ComplyraApi {
    * auditor roles can read.
    */
   listPhiAccessLog(filters?: PhiAccessFilters): Promise<PhiAccessRecord[]>;
-  /** Supabase Auth MFA (TOTP): current enrollment + assurance level. */
-  getMfaState(): Promise<MfaState>;
-  /** Start TOTP enrollment: returns the QR code, secret, and factor id. */
-  enrollTotpFactor(friendlyName: string): Promise<TotpEnrollment>;
-  /** Confirm TOTP enrollment with the 6-digit code from the authenticator app. */
-  verifyTotpEnrollment(factorId: string, code: string): Promise<void>;
-  /** Step-up: verify the current session with a TOTP code. */
-  verifyTotpForSession(factorId: string, code: string): Promise<void>;
-  /** Remove a TOTP factor. */
-  unenrollMfaFactor(factorId: string): Promise<void>;
   /**
    * RECOGNITION (winners-only). Bidirectional 1–5 ratings/reviews: exactly
    * one current record per reviewer/subject pair and direction, append-only
@@ -6364,27 +6350,6 @@ export class LocalApi implements ComplyraApi {
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(filters?.offset ?? 0, (filters?.offset ?? 0) + (filters?.limit ?? 200));
-  }
-
-  /** Local preview has no Auth MFA: report unenrolled (never blocks). */
-  async getMfaState(): Promise<MfaState> {
-    return { enrolled: false, assurance: "aal1", factors: [] };
-  }
-
-  async enrollTotpFactor(): Promise<TotpEnrollment> {
-    throw new Error("MFA is only available in the hosted workspace.");
-  }
-
-  async verifyTotpEnrollment(): Promise<void> {
-    throw new Error("MFA is only available in the hosted workspace.");
-  }
-
-  async verifyTotpForSession(): Promise<void> {
-    throw new Error("MFA is only available in the hosted workspace.");
-  }
-
-  async unenrollMfaFactor(): Promise<void> {
-    throw new Error("MFA is only available in the hosted workspace.");
   }
 
   /** Append one row to the local 13 CSR 65-3.050 audit collection. */

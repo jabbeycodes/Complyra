@@ -5597,73 +5597,7 @@ body.nav-open {
   text-align: center;
 }
 
-/* HIPAA security: MFA enrollment, inactivity warning, PHI access log. */
-.mfa-settings {
-  padding: 8px 0 4px;
-}
-.settings-row-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #897462;
-  margin: 0 0 4px;
-}
-.mfa-factor-list {
-  list-style: none;
-  padding: 0;
-  margin: 12px 0;
-}
-.mfa-factor {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid #efedea;
-  font-size: 14px;
-  color: #4a4036;
-}
-.mfa-enroll {
-  margin-top: 12px;
-}
-.mfa-qr {
-  display: block;
-  margin: 12px 0;
-  padding: 8px;
-  background: #fff;
-  border: 1px solid #efedea;
-  border-radius: 8px;
-}
-.mfa-secret {
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  background: #f7f5f2;
-  border: 1px solid #efedea;
-  border-radius: 6px;
-  padding: 2px 8px;
-  user-select: all;
-  word-break: break-all;
-}
-.mfa-gate {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: #f7f5f2;
-}
-.mfa-gate-card {
-  max-width: 560px;
-  width: 100%;
-  background: #fff;
-  border: 1px solid #efedea;
-  border-radius: 12px;
-  padding: 32px;
-}
-.mfa-gate-card h2 {
-  margin: 0 0 8px;
-  font-size: 20px;
-  color: #4a4036;
-}
+/* HIPAA security: inactivity warning, PHI access log. */
 .page-loading {
   padding: 48px 24px;
   text-align: center;

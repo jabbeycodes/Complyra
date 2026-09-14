@@ -5,7 +5,7 @@
  * After a successful re-auth, a short grace window avoids pestering the user
  * on every click; each new sensitive action outside the window prompts
  * again. The confirmation itself is the shared ReauthSheet (password
- * re-entry) or a TOTP verification, both of which clear secrets on success.
+ * re-entry), which clears the secret on success.
  */
 
 /** How long a successful step-up stays fresh before prompting again. */

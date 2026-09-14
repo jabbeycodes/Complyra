@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getMfaRequirement, isMfaRequired } from "./mfaPolicy";
 import {
   INACTIVITY_TIMEOUT_MS,
   INACTIVITY_WARNING_MS,
@@ -33,26 +32,6 @@ function session(overrides: Partial<SessionUser> = {}): SessionUser {
     ...overrides,
   } as SessionUser;
 }
-
-// ---- MFA policy ----
-
-test("MFA is required for administrator and compliance_admin", () => {
-  assert.equal(isMfaRequired(session({ roleKey: "administrator" })), true);
-  assert.equal(isMfaRequired(session({ roleKey: "compliance_admin" })), true);
-  assert.equal(getMfaRequirement(session({ roleKey: "administrator" })), "required");
-});
-
-test("MFA is required for the platform operator", () => {
-  assert.equal(isMfaRequired(session({ platformAdmin: true, roleKey: "dsp" })), true);
-});
-
-test("MFA is optional for care roles and signed-out users", () => {
-  for (const roleKey of ["dsp", "house_manager", "auditor", "registered_nurse"]) {
-    assert.equal(isMfaRequired(session({ roleKey })), false);
-    assert.equal(getMfaRequirement(session({ roleKey })), "optional");
-  }
-  assert.equal(getMfaRequirement(null), "optional");
-});
 
 // ---- Inactivity timeout ----
 
