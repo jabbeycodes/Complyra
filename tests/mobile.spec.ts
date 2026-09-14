@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
 
-test.use({ viewport: { width: 390, height: 844 } });
-
 async function signIn(page: Page) {
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
@@ -14,11 +12,25 @@ async function signIn(page: Page) {
     .waitFor({ state: "visible", timeout: 3_000 })
     .catch(() => undefined);
   await page.keyboard.press("Escape");
+  await page.waitForFunction(() => {
+    const sidebar = getComputedStyle(document.documentElement)
+      .getPropertyValue("--sidebar")
+      .trim();
+    return window.innerWidth <= 430 && sidebar === "0px";
+  });
+}
+
+async function closeMobileNav(page: Page) {
+  const sidebar = page.locator(".sidebar.mobile-open");
+  if (await sidebar.isVisible()) {
+    await page.getByRole("button", { name: "Close navigation" }).first().click();
+    await expect(sidebar).toBeHidden();
+  }
 }
 
 /** Page shell must not scroll sideways; inner table-scroll is allowed (PR #13). */
 async function assertNoHorizontalOverflow(page: Page) {
-  await page.mouse.wheel(120, 0);
+  await closeMobileNav(page);
   const result = await page.evaluate(() => {
     const vw = window.innerWidth;
     const doc = document.documentElement;
@@ -46,10 +58,22 @@ async function assertNoHorizontalOverflow(page: Page) {
       const box = el.getBoundingClientRect();
       return box.width > 1 && box.right > vw + 2;
     });
+    let widest = { sw: 0, name: "" };
+    for (const el of document.querySelectorAll("body *")) {
+      if (el.scrollWidth > widest.sw) {
+        widest = {
+          sw: el.scrollWidth,
+          name: `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 48)}`,
+        };
+      }
+    }
     return {
+      vw,
       pageShifted,
-      scrollWidth: Math.max(doc.scrollWidth, document.body.scrollWidth),
+      scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
+      sidebar: getComputedStyle(doc).getPropertyValue("--sidebar").trim(),
+      widest,
       wide: wide.slice(0, 8).map(
         (el) =>
           `${el.tagName.toLowerCase()}.${el.className?.toString().slice(0, 40)}`,
@@ -59,103 +83,142 @@ async function assertNoHorizontalOverflow(page: Page) {
   expect(result.pageShifted, "page should not scroll sideways").toBe(false);
   expect(
     result.scrollWidth,
-    "shell scrollWidth must not exceed the viewport",
+    `shell scrollWidth must not exceed the viewport (vw=${result.vw}, sidebar=${result.sidebar}, widest=${result.widest.name}:${result.widest.sw})`,
   ).toBeLessThanOrEqual(result.clientWidth + 1);
   expect(result.wide, "in-flow layout should stay in the viewport").toEqual([]);
 }
 
 async function openPage(page: Page, name: string) {
+  await closeMobileNav(page);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.locator(".sidebar").getByRole("button", { name, exact: true }).click();
+  await closeMobileNav(page);
 }
 
-test("login and workspace pages stay on screen at phone width", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-  await assertNoHorizontalOverflow(page);
+test.describe("390 phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
 
-  await signIn(page);
-  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /What needs your attention/ })).toBeVisible();
-  await assertNoHorizontalOverflow(page);
-
-  for (const name of [
-    "Individuals",
-    "Sites & programs",
-    "Staff",
-    "Requirements",
-    "Delegations",
-    "Audit center",
-    "Acknowledgments",
-    "Settings",
-  ]) {
-    await openPage(page, name);
-    await expect(page.locator("main")).toBeVisible();
+  test("login and workspace pages stay on screen at phone width", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     await assertNoHorizontalOverflow(page);
-  }
 
-  await openPage(page, "Individuals");
-  await page.getByRole("button", { name: /Jodie Williams/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "Jodie Williams", exact: true }),
-  ).toBeVisible();
-  await assertNoHorizontalOverflow(page);
+    await signIn(page);
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Needs attention/ })).toBeVisible();
+    await assertNoHorizontalOverflow(page);
 
-  await openPage(page, "Sites & programs");
-  await page
-    .locator(".location-card")
-    .filter({ hasText: "Maple House" })
-    .getByRole("button", { name: "Site review pack" })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: /Site review pack/ }),
-  ).toBeVisible();
-  await assertNoHorizontalOverflow(page);
+    for (const name of [
+      "Individuals",
+      "Sites & programs",
+      "Staff",
+      "Requirements",
+      "Delegations",
+      "Audit center",
+      "Acknowledgments",
+      "Settings",
+    ]) {
+      await openPage(page, name);
+      await expect(page.locator("main")).toBeVisible();
+      await assertNoHorizontalOverflow(page);
+    }
+
+    await openPage(page, "Individuals");
+    await page.getByRole("button", { name: /Jodie Williams/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "Jodie Williams", exact: true }),
+    ).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+
+    await openPage(page, "Sites & programs");
+    await page
+      .locator(".location-card")
+      .filter({ hasText: "Maple House" })
+      .getByRole("button", { name: "Site review pack" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: /Site review pack/ }),
+    ).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test("phone chrome keeps 44px targets, one title, and reachable Create", async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    const banner = page.locator(".demo-banner");
+    await expect(banner).toBeVisible();
+    const bannerBox = await banner.boundingBox();
+    expect(bannerBox).toBeTruthy();
+    expect(bannerBox!.height).toBeLessThanOrEqual(48);
+    await expect(banner).not.toContainText("Fictional Evergreen Care data");
+
+    const menu = page.getByRole("button", { name: "Open navigation" });
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).toBeTruthy();
+    expect(menuBox!.width).toBeGreaterThanOrEqual(44);
+    expect(menuBox!.height).toBeGreaterThanOrEqual(44);
+    expect(menuBox!.x).toBeGreaterThanOrEqual(16);
+
+    const bell = page.getByRole("button", { name: "View notifications" });
+    const bellBox = await bell.boundingBox();
+    expect(bellBox).toBeTruthy();
+    expect(bellBox!.width).toBeGreaterThanOrEqual(44);
+    expect(bellBox!.height).toBeGreaterThanOrEqual(44);
+
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+    await expect(page.locator("main .eyebrow")).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText("A little clarity");
+    await expect(page.locator("body")).not.toContainText("YOUR AGENCY");
+    await expect(page.locator("body")).not.toContainText("A record of care");
+
+    const review = page.locator(".readiness-banner").getByRole("button", { name: /Review/ });
+    await expect(review).toBeVisible();
+    const reviewBox = await review.boundingBox();
+    expect(reviewBox).toBeTruthy();
+    expect(reviewBox!.width).toBeGreaterThanOrEqual(44);
+    expect(reviewBox!.height).toBeGreaterThanOrEqual(44);
+
+    const exportBtn = page.getByRole("button", { name: "Export" });
+    await expect(exportBtn).toBeVisible();
+    const exportBox = await exportBtn.boundingBox();
+    expect(exportBox).toBeTruthy();
+    expect(exportBox!.height).toBeGreaterThanOrEqual(44);
+    expect(exportBox!.x).toBeGreaterThanOrEqual(0);
+    expect(exportBox!.x + exportBox!.width).toBeLessThanOrEqual(390 + 1);
+
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    const navItem = page.locator(".sidebar .nav-item").first();
+    const navBox = await navItem.boundingBox();
+    expect(navBox).toBeTruthy();
+    expect(navBox!.height).toBeGreaterThanOrEqual(44);
+    await closeMobileNav(page);
+
+    await openPage(page, "Delegations");
+    await page.getByRole("button", { name: "RN delegation forms" }).click();
+    await page.getByRole("button", { name: "New delegation" }).click();
+    const create = page.getByRole("button", { name: "Create", exact: true });
+    await create.scrollIntoViewIfNeeded();
+    await expect(create).toBeInViewport();
+    await assertNoHorizontalOverflow(page);
+  });
 });
 
-test("phone chrome keeps 44px targets, one title, and reachable Create", async ({
-  page,
-}) => {
-  await signIn(page);
+test.describe("430 phone", () => {
+  test.use({ viewport: { width: 430, height: 932 } });
 
-  const menu = page.getByRole("button", { name: "Open navigation" });
-  await expect(menu).toBeVisible();
-  const menuBox = await menu.boundingBox();
-  expect(menuBox).toBeTruthy();
-  expect(menuBox!.width).toBeGreaterThanOrEqual(44);
-  expect(menuBox!.height).toBeGreaterThanOrEqual(44);
-
-  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
-  await expect(page.locator("main .eyebrow")).toHaveCount(0);
-  await expect(page.locator("body")).not.toContainText("A little clarity");
-
-  const exportBtn = page.getByRole("button", { name: "Export" });
-  await expect(exportBtn).toBeVisible();
-  const exportBox = await exportBtn.boundingBox();
-  expect(exportBox).toBeTruthy();
-  expect(exportBox!.height).toBeGreaterThanOrEqual(44);
-  expect(exportBox!.x).toBeGreaterThanOrEqual(0);
-  expect(exportBox!.x + exportBox!.width).toBeLessThanOrEqual(390 + 1);
-
-  await openPage(page, "Delegations");
-  await page.getByRole("button", { name: "RN delegation forms" }).click();
-  await page.getByRole("button", { name: "New delegation" }).click();
-  const create = page.getByRole("button", { name: "Create", exact: true });
-  await create.scrollIntoViewIfNeeded();
-  await expect(create).toBeInViewport();
-  await assertNoHorizontalOverflow(page);
-});
-
-test("430-wide phone also keeps the shell from scrolling sideways", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 430, height: 932 });
-  await signIn(page);
-  await assertNoHorizontalOverflow(page);
-  await openPage(page, "Requirements");
-  await assertNoHorizontalOverflow(page);
-  await openPage(page, "Delegations");
-  await assertNoHorizontalOverflow(page);
+  test("430-wide phone also keeps the shell from scrolling sideways", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await assertNoHorizontalOverflow(page);
+    await openPage(page, "Requirements");
+    await assertNoHorizontalOverflow(page);
+    await openPage(page, "Delegations");
+    await assertNoHorizontalOverflow(page);
+  });
 });

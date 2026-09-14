@@ -686,8 +686,11 @@ export default function App() {
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>
           <div className="topbar-actions">
-            <div className="global-search">
-              <Search size={16} />
+            <div
+              className="global-search"
+              onClick={() => searchRef.current?.focus()}
+            >
+              <Search size={16} aria-hidden="true" />
               <input
                 ref={searchRef}
                 value={globalQuery}

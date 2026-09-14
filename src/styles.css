@@ -287,6 +287,10 @@ button:hover:not(:disabled) {
 }
 .nav-item > span:nth-child(2) {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .nav-count {
   border-radius: 4px;
@@ -530,7 +534,8 @@ kbd {
   position: absolute;
   top: 42px;
   right: 0;
-  width: 440px;
+  width: min(440px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
   padding: 10px;
   background: white;
   border: 1px solid var(--border);
@@ -3371,9 +3376,9 @@ td {
     font-size: 13px;
   }
   .profile {
-    width: calc(100% + 32px);
-    margin-inline: -16px;
-    padding-inline: 20px;
+    width: 100%;
+    margin-inline: 0;
+    padding-inline: 12px;
   }
   .profile strong {
     font-size: 13px;
@@ -3407,9 +3412,6 @@ td {
   .topbar-actions {
     gap: 10px;
   }
-  .global-search {
-    width: 175px;
-  }
   .global-search kbd {
     display: none;
   }
@@ -3418,13 +3420,6 @@ td {
   }
   .topbar-actions > .avatar {
     display: none;
-  }
-  .global-search input {
-    font-size: 12px;
-  }
-  .search-results {
-    width: min(360px, calc(100vw - 28px));
-    right: -45px;
   }
   .main-shell {
     margin-left: 0;
@@ -3469,11 +3464,7 @@ td {
     gap: 5px;
   }
   .snapshot-label {
-    font-size: 10px;
-  }
-  .snapshot-label {
-    max-width: 85px;
-    line-height: 1.5;
+    display: none;
   }
   .scope-divider {
     display: none;
@@ -3499,9 +3490,12 @@ td {
     line-height: 1.7;
   }
   .readiness-banner button {
-    font-size: 0;
-    padding: 4px;
-    margin-top: 5px;
+    font-size: 13px;
+    padding: 8px 10px;
+    margin-top: 0;
+    min-height: 44px;
+    min-width: 44px;
+    flex-shrink: 0;
   }
   .readiness-banner button svg {
     height: 16px;
@@ -5257,16 +5251,64 @@ body.nav-open {
     gap: 8px;
   }
   .topbar-actions {
-    flex: 1;
+    flex: 0 0 auto;
     min-width: 0;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 4px;
   }
-  .global-search {
-    flex: 1;
-    width: auto;
+  .breadcrumb {
     min-width: 0;
-    max-width: 220px;
+    overflow: hidden;
+  }
+  .breadcrumb strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Icon-only search until focused so hamburger + title + bell stay ≥44px. */
+  .global-search {
+    flex: 0 0 auto;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    height: 44px;
+    justify-content: center;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .global-search input {
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    opacity: 0;
+    font-size: 16px;
+  }
+  .global-search:focus-within {
+    position: absolute;
+    top: max(8px, env(safe-area-inset-top));
+    right: var(--page-inline-end);
+    left: var(--page-inline-start);
+    width: auto;
+    max-width: none;
+    height: 44px;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 0 12px;
+    overflow: visible;
+    background: #f3ead8;
+    border: 1px solid #d2c2a8;
+    border-radius: 10px;
+    z-index: 40;
+  }
+  .global-search:focus-within input {
+    width: 100%;
+    opacity: 1;
+    padding: 8px 0;
+  }
+  .search-results {
+    width: min(360px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
+    right: 0;
+    left: auto;
   }
   .icon-button,
   .mobile-menu,
@@ -5412,11 +5454,24 @@ body.nav-open {
   }
   .location-card .heading-actions .button {
     flex: unset;
-    min-height: 36px;
+    min-height: 44px;
   }
   .tabs {
     padding-bottom: 2px;
     -webkit-overflow-scrolling: touch;
+  }
+  .readiness-banner {
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .copilot-banner {
+    flex-wrap: wrap;
+  }
+  .copilot-banner-action {
+    margin-left: 0;
+  }
+  .sidebar {
+    overflow-x: hidden;
   }
 }
 
@@ -5835,11 +5890,13 @@ body.nav-open {
   padding: 8px 16px;
   min-height: 48px;
   font-size: 14px;
+  min-width: 0;
 }
 .demo-banner-text {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .demo-banner-sub {
   opacity: 0.85;
@@ -5848,6 +5905,7 @@ body.nav-open {
 .demo-banner-actions {
   display: inline-flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 .demo-banner-button {
   display: inline-flex;
@@ -5869,9 +5927,10 @@ body.nav-open {
 @media (max-width: 720px) {
   .demo-banner {
     flex-wrap: nowrap;
-    gap: 8px;
+    gap: 6px;
     min-height: 44px;
-    padding: 4px max(var(--page-inline-end), 12px) 4px
+    max-height: 44px;
+    padding: 0 max(var(--page-inline-end), 12px) 0
       max(var(--page-inline-start), 12px);
   }
   .demo-banner-sub {
@@ -5880,7 +5939,7 @@ body.nav-open {
   .demo-banner-button {
     min-width: 44px;
     min-height: 44px;
-    padding: 0 10px;
+    padding: 0;
   }
   .demo-banner-button-label {
     display: none;

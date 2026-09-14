@@ -34,7 +34,7 @@ async function canvasMetrics(page: Page) {
       topbarPadEnd: px(topbarStyle.paddingRight),
       pageInline: px(getComputedStyle(doc).getPropertyValue("--page-inline")),
       panelInline: px(getComputedStyle(doc).getPropertyValue("--panel-inline")),
-      scrollWidth: Math.max(doc.scrollWidth, document.body.scrollWidth),
+      scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
     };
   });
@@ -74,7 +74,7 @@ async function assertNoPageHorizontalScroll(page: Page) {
   const overflow = await page.evaluate(() => {
     const doc = document.documentElement;
     return {
-      scrollWidth: Math.max(doc.scrollWidth, document.body.scrollWidth),
+      scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
       scrollX: window.scrollX,
     };

@@ -23,7 +23,7 @@ test("priorities open their source, require evidence, and persist completion", a
   page.on("pageerror", (e) => errors.push(e.message));
   await signIn(page);
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 3" }),
+    page.getByRole("heading", { name: "Needs attention 3" }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: /Acknowledge updated PCSP Jodie/ })
@@ -52,11 +52,11 @@ test("priorities open their source, require evidence, and persist completion", a
   await expect(dialog).toContainText("Completion evidence recorded");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 2" }),
+    page.getByRole("heading", { name: "Needs attention 2" }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "What needs your attention 2" }),
+    page.getByRole("heading", { name: "Needs attention 2" }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });

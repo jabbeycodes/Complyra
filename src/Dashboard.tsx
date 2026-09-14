@@ -416,7 +416,7 @@ export default function Dashboard({
           <div className="panel-heading">
             <div>
               <h2>
-                What needs your attention{" "}
+                Needs attention{" "}
                 <span className="count-pill">{risks.length}</span>
               </h2>
             </div>
@@ -524,7 +524,6 @@ export default function Dashboard({
         <div className="panel-heading">
           <div>
             <h2>Recent activity</h2>
-            <p>A record of care in action.</p>
           </div>
           <button
             className="icon-button"

@@ -1,4 +1,15 @@
-import { FlaskConical, LogOut, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { FlaskConical, LogOut, RotateCcw, X } from "lucide-react";
+
+const DISMISS_KEY = "complyrer.demo-banner";
+
+function readDismissed() {
+  try {
+    return sessionStorage.getItem(DISMISS_KEY) === "hidden";
+  } catch {
+    return false;
+  }
+}
 
 export default function DemoBanner({
   onRestartTour,
@@ -7,12 +18,25 @@ export default function DemoBanner({
   onRestartTour: () => void;
   onSignOut: () => void;
 }) {
+  const [dismissed, setDismissed] = useState(readDismissed);
+
+  if (dismissed) return null;
+
+  function hide() {
+    try {
+      sessionStorage.setItem(DISMISS_KEY, "hidden");
+    } catch {
+      /* private mode — still hide for this visit */
+    }
+    setDismissed(true);
+  }
+
   return (
     <div className="demo-banner" role="status">
       <span className="demo-banner-text">
         <FlaskConical size={16} aria-hidden="true" />
         <span>
-          <strong>Interactive demo</strong>
+          <strong>Demo</strong>
           <span className="demo-banner-sub">
             {" "}
             · Fictional Evergreen Care data
@@ -37,6 +61,14 @@ export default function DemoBanner({
         >
           <LogOut size={15} aria-hidden="true" />
           <span className="demo-banner-button-label">Sign out</span>
+        </button>
+        <button
+          type="button"
+          className="demo-banner-button demo-banner-dismiss"
+          aria-label="Hide demo banner"
+          onClick={hide}
+        >
+          <X size={15} aria-hidden="true" />
         </button>
       </span>
     </div>
