@@ -593,7 +593,7 @@ export default function App() {
   }
   const navItems = [
     {
-      title: "WORKSPACE",
+      title: "PROGRAMS",
       items: [
         ["Overview", LayoutDashboard],
         ["Platform", ShieldCheck],
@@ -772,7 +772,7 @@ export default function App() {
             >
               <Menu size={21} />
             </button>
-            <span>Workspace</span>
+            <span>Programs</span>
             <ChevronRight size={13} />
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>

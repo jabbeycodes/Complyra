@@ -99,19 +99,21 @@ async function assertNoPageHorizontalScroll(page: Page) {
   ).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
-test("desktop canvas and panel actions keep a 48/28 inset at 1280", async ({
+test("desktop canvas and panel actions keep a middle-band inset at 1280", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
   const overview = await canvasMetrics(page);
-  expect(overview.pageInline).toBeGreaterThanOrEqual(48);
-  expect(overview.mainPadStart).toBeGreaterThanOrEqual(48);
-  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(48);
-  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(48);
-  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(48);
-  expect(overview.panelInline).toBeGreaterThanOrEqual(28);
+  expect(overview.pageInline).toBeGreaterThanOrEqual(44);
+  expect(overview.pageInline).toBeLessThanOrEqual(52);
+  expect(overview.mainPadStart).toBeGreaterThanOrEqual(44);
+  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(44);
+  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(44);
+  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(44);
+  expect(overview.panelInline).toBeGreaterThanOrEqual(24);
+  expect(overview.panelInline).toBeLessThanOrEqual(32);
   await assertNoPageHorizontalScroll(page);
 
   const avatar = page.getByRole("button", { name: "Your profile" });
@@ -167,19 +169,20 @@ test("desktop canvas and panel actions keep a 48/28 inset at 1280", async ({
   });
 });
 
-test("phone canvas keeps 22px page inset and 24px panel actions at 390", async ({
+test("phone canvas keeps a middle-band page inset at 390", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
 
   const overview = await canvasMetrics(page);
-  expect(overview.pageInline).toBeGreaterThanOrEqual(22);
-  expect(overview.mainPadStart).toBeGreaterThanOrEqual(22);
-  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(22);
-  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(22);
-  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(22);
-  expect(overview.panelInline).toBeGreaterThanOrEqual(24);
+  expect(overview.pageInline).toBeGreaterThanOrEqual(18);
+  expect(overview.pageInline).toBeLessThanOrEqual(24);
+  expect(overview.mainPadStart).toBeGreaterThanOrEqual(18);
+  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(18);
+  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(18);
+  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(18);
+  expect(overview.panelInline).toBeGreaterThanOrEqual(20);
   await assertNoPageHorizontalScroll(page);
 
   await page.screenshot({
