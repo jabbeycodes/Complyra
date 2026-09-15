@@ -59,7 +59,7 @@ export default function DemoBanner({
           aria-label="Sign out"
           onClick={onSignOut}
         >
-          <LogOut size={15} aria-hidden="true" />
+          <LogOut size={16} aria-hidden="true" />
           <span className="demo-banner-button-label">Sign out</span>
         </button>
         <button
@@ -68,7 +68,7 @@ export default function DemoBanner({
           aria-label="Hide demo banner"
           onClick={hide}
         >
-          <X size={15} aria-hidden="true" />
+          <X size={16} aria-hidden="true" />
         </button>
       </span>
     </div>

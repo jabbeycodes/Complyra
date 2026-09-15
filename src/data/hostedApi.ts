@@ -2866,6 +2866,7 @@ export class HostedApi implements ComplyraApi {
     file?: File;
     pageCount?: number;
     effectiveOn?: string;
+    enrolledOn?: string;
   }): Promise<{ id: string; name: string }> {
     const session = await this.requireSession();
     if (!canCreateIndividual(session.roleKey)) {
@@ -2889,8 +2890,10 @@ export class HostedApi implements ComplyraApi {
         (row) => String(row.full_name).toLowerCase() === fullName.toLowerCase(),
       )
     ) {
-      throw new Error("Someone with that name is already on the roster.");
+      throw new Error("An Individual with that name is already on the roster.");
     }
+    const enrolledOn = input.enrolledOn?.trim() || todayIso();
+    assertCalendarDate(enrolledOn, "Enter a valid enrollment date.");
     const { data: person, error: personError } = await this.client
       .from("individuals")
       .insert({
@@ -2911,6 +2914,7 @@ export class HostedApi implements ComplyraApi {
           ...emptyProfile(record),
           goesBy: input.goesBy?.trim() || fullName.split(" ")[0] || fullName,
           dmhId: input.dmhId?.trim() || "",
+          enrolledOn,
         },
       },
       { onConflict: "individual_id" },

@@ -140,7 +140,7 @@ test("a person added on a new site keeps that site on a requirement", async ({
   expect(selectedSite).not.toContain("Maple House");
   await personDialog.getByLabel("Legal name").fill("QA Person One");
   await personDialog.getByLabel("Date of birth").fill("1990-01-15");
-  await personDialog.getByRole("button", { name: "Add person", exact: true }).click();
+  await personDialog.getByRole("button", { name: "Add Individual", exact: true }).click();
   await expect(page.getByRole("heading", { name: "QA Person One" })).toBeVisible();
   await expect(page.locator(".individual-chart")).toContainText("QA Audit House");
 

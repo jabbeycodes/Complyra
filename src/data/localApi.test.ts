@@ -374,6 +374,21 @@ test("a DSP cannot add a site or an individual", async () => {
   );
 });
 
+test("intake stores enrollment date on the Individual profile", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const site = (await api.loadWorkspace(session)).sites[0];
+  const created = await api.createIndividual({
+    fullName: "Riley Quinn",
+    dateOfBirth: "1994-02-08",
+    siteId: site.id,
+    enrolledOn: "2026-09-12",
+  });
+  const workspace = await api.loadWorkspace(session);
+  const stack = workspace.planStacks.find((row) => row.individualId === created.id);
+  assert.equal(stack?.profile.enrolledOn, "2026-09-12");
+});
+
 test("the platform owner can approve a pending agency", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

@@ -275,4 +275,5 @@ test("profileFromRow fills person fallbacks when no profile row exists", () => {
   assert.equal(profile?.legalName, "Jordan B. Avery");
   assert.equal(profile?.language, "Spanish");
   assert.equal(profile?.goesBy, "Jordan");
+  assert.equal(profile?.enrolledOn, "");
 });

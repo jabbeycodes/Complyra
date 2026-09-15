@@ -42,6 +42,8 @@ export interface IndividualProfile {
   behaviorSupports: string;
   dailyActivities: string;
   visitHours: string;
+  /** Optional program enrollment / admit date. Intake defaults this to today. */
+  enrolledOn: string;
 }
 
 export interface ObligationItem {
@@ -172,6 +174,7 @@ const SURVEY_PROFILE_DEFAULTS = {
   behaviorSupports: "",
   dailyActivities: "",
   visitHours: "",
+  enrolledOn: "",
 };
 
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
@@ -208,6 +211,7 @@ export function normalizeProfile(
     behaviorSupports: profile?.behaviorSupports ?? "",
     dailyActivities: profile?.dailyActivities ?? "",
     visitHours: profile?.visitHours ?? "",
+    enrolledOn: profile?.enrolledOn ?? "",
   };
 }
 

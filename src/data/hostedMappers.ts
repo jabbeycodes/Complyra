@@ -368,5 +368,6 @@ export function profileFromRow(
     behaviorSupports: typeof stored.behaviorSupports === "string" ? stored.behaviorSupports : "",
     dailyActivities: typeof stored.dailyActivities === "string" ? stored.dailyActivities : "",
     visitHours: typeof stored.visitHours === "string" ? stored.visitHours : "",
+    enrolledOn: typeof stored.enrolledOn === "string" ? stored.enrolledOn : "",
   };
 }
