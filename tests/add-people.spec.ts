@@ -27,8 +27,8 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await expect(page.getByRole("heading", { name: "Poplar House", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: "Add a person" }).first().click();
-  const personDialog = page.getByRole("dialog", { name: "Add a person" });
+  await page.getByRole("button", { name: "Add an individual" }).first().click();
+  const personDialog = page.getByRole("dialog", { name: "Add an individual" });
   await page.screenshot({ path: shot("add_person_paths.png") });
   await personDialog.getByRole("tab", { name: /Add by hand/ }).click();
   await personDialog.getByLabel("Legal name").fill("Nora Fields");
@@ -40,8 +40,8 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await expect(page.locator(".individual-chart")).toContainText("Nora");
 
   await page.getByRole("button", { name: "Back to individuals" }).click();
-  await page.getByRole("button", { name: "Add a person" }).click();
-  const uploadDialog = page.getByRole("dialog", { name: "Add a person" });
+  await page.getByRole("button", { name: "Add an individual" }).click();
+  const uploadDialog = page.getByRole("dialog", { name: "Add an individual" });
   await uploadDialog.getByRole("tab", { name: /Upload a PCSP/ }).click();
   await uploadDialog.getByLabel("Legal name").fill("Eli Navarro");
   await uploadDialog.getByLabel("Date of birth").fill("1988-11-02");
@@ -60,7 +60,7 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
 test("DSP does not see add-site or add-person actions", async ({ page }) => {
   await signIn(page, "alex.morgan");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Add a person" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add an individual" })).toHaveCount(0);
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.getByRole("button", { name: "Add a site" })).toHaveCount(0);
 });

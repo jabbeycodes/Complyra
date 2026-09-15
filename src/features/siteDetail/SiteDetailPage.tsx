@@ -338,7 +338,7 @@ export default function SiteDetailPage({
             </div>
             <div className="site-hero-stat">
               <strong>{siteIndividuals.length}</strong>
-              <span>People</span>
+              <span>Individuals</span>
             </div>
             <div className="site-hero-stat">
               <strong>{siteStaff.length}</strong>
@@ -354,7 +354,7 @@ export default function SiteDetailPage({
             </div>
           </div>
         </div>
-        <div className="site-hero-people" aria-label="People in this house">
+        <div className="site-hero-people" aria-label="Individuals in this house">
           {siteIndividuals.length === 0 ? (
             <p className="site-hero-empty">No one is placed at this home yet.</p>
           ) : (

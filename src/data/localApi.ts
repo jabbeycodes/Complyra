@@ -4185,7 +4185,7 @@ export class LocalApi implements ComplyraApi {
     );
     if (!site) throw new Error("Choose a program site.");
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
-      throw new Error("House managers can add people to their own site.");
+      throw new Error("House managers can add individuals to their own site.");
     }
     if (
       this.store.db.individuals.some(
@@ -4983,7 +4983,7 @@ export class LocalApi implements ComplyraApi {
     if (!person) throw new Error("Individual not found.");
     accessibleIndividual(this.store, session, person.id);
     if (!canAccessSite(session, person.siteId)) {
-      throw new Error("Choose a person at a site you can manage.");
+      throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");

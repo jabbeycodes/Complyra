@@ -5991,6 +5991,7 @@ body.nav-open {
   min-width: 0;
   margin-top: 10px;
   border-radius: 10px;
+  line-height: 1;
 }
 .demo-banner-text {
   display: inline-flex;
@@ -5998,18 +5999,24 @@ body.nav-open {
   gap: 8px;
   min-width: 0;
 }
+.demo-banner-text svg {
+  display: block;
+  flex-shrink: 0;
+}
 .demo-banner-sub {
   opacity: 0.85;
   font-weight: 400;
 }
 .demo-banner-actions {
   display: inline-flex;
+  align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
 .demo-banner-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   min-height: 36px;
   padding: 0 12px;
@@ -6020,6 +6027,11 @@ body.nav-open {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+  line-height: 1;
+}
+.demo-banner-button svg {
+  display: block;
+  flex-shrink: 0;
 }
 .demo-banner-button-label {
   white-space: nowrap;
@@ -6027,18 +6039,23 @@ body.nav-open {
 @media (max-width: 720px) {
   .demo-banner {
     flex-wrap: nowrap;
-    gap: 6px;
+    gap: 8px;
     min-height: 44px;
-    max-height: 44px;
-    padding: 0 12px;
+    padding: 0 8px;
   }
   .demo-banner-sub {
     display: none;
   }
+  .demo-banner-actions {
+    gap: 2px;
+  }
   .demo-banner-button {
+    width: 44px;
     min-width: 44px;
+    height: 44px;
     min-height: 44px;
     padding: 0;
+    gap: 0;
   }
   .demo-banner-button-label {
     display: none;
