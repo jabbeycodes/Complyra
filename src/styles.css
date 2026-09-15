@@ -16,7 +16,7 @@
   --text: #241e18;
   --green: #4d6b42;
   --red: #b56a4e;
-  --sidebar: 236px;
+  --sidebar: 240px;
   /* Canvas inset: content and topbar share one token so they stay aligned.
      Middle band: enough air that chrome is not flush, not a giant empty rail. */
   --page-inline: 48px;
@@ -254,15 +254,37 @@ button:hover:not(:disabled) {
   padding: 4px;
 }
 .nav-group {
-  margin-bottom: 23px;
+  margin-bottom: 12px;
+}
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 8px 4px 10px;
+  border: 0;
+  background: transparent;
+  color: #4a4036;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.nav-group-toggle:hover {
+  background: #e6d8c4;
+}
+.nav-group-toggle > svg {
+  flex-shrink: 0;
+  color: #6b6156;
 }
 .nav-label {
   font-size: 11px;
   letter-spacing: 1.4px;
-  font-weight: 600;
+  font-weight: 700;
   color: #4a4036;
-  padding: 0 14px 10px;
+  padding: 0;
   text-transform: uppercase;
+  text-align: left;
 }
 .nav-item {
   display: flex;
@@ -2981,7 +3003,7 @@ td {
 }
 @media (min-width: 1500px) {
   :root {
-    --sidebar: 252px;
+    --sidebar: 240px;
   }
   .sidebar {
     padding-inline: 20px;
@@ -3076,7 +3098,7 @@ td {
 }
 @media (max-width: 1190px) {
   :root {
-    --sidebar: 211px;
+    --sidebar: 228px;
     --page-inline: var(--page-inline-md);
     --panel-inline: 28px;
   }
@@ -3198,7 +3220,7 @@ td {
 }
 @media (max-width: 960px) {
   :root {
-    --sidebar: 190px;
+    --sidebar: 220px;
     --page-inline: var(--page-inline-md);
   }
   .brand > span {
@@ -3413,7 +3435,7 @@ td {
     --panel-inline: 24px;
   }
   .sidebar {
-    width: 236px;
+    width: 240px;
     transform: translateX(-100%);
     transition: transform 0.2s;
     padding-inline: 16px;

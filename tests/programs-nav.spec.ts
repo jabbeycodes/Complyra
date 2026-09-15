@@ -40,18 +40,36 @@ function shotPath(name: string) {
   return `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}/${name}`;
 }
 
-test("sidebar group is PROGRAMS and the header chip says Programs", async ({
+test("sidebar groups expand Programs Care Compliance; Admin stays collapsed for HM", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
-  const programsLabel = page.locator(".sidebar .nav-label").first();
-  await expect(programsLabel).toHaveText("PROGRAMS");
+  const programs = page.locator(".sidebar").getByRole("button", { name: "Programs" });
+  await expect(programs).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".sidebar .nav-label").first()).toHaveText("Programs");
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Care" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Compliance" })).toBeVisible();
+  const admin = page.locator(".sidebar").getByRole("button", { name: "Admin" });
+  if ((await admin.count()) > 0) {
+    await expect(admin).toHaveAttribute("aria-expanded", "false");
+  }
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
+
+  await page.locator(".sidebar").getByRole("button", { name: "Care" }).click();
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Care" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await page.locator(".sidebar").getByRole("button", { name: "Care" }).click();
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage" })).toBeVisible();
 
   await openNav(page, "Sites & programs");
   await expect(page.getByRole("heading", { name: "Sites & programs" })).toBeVisible();
@@ -71,7 +89,7 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
   await page.screenshot({ path: shotPath("site_detail_after_1280.png"), fullPage: false });
 });
 
-test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
+test("phone drawer shows Programs groups, not WORKSPACE", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   await page.addStyleTag({
@@ -79,9 +97,10 @@ test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar.mobile-open .nav-label").first()).toHaveText(
-    "PROGRAMS",
+    "Programs",
   );
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
+  await expect(page.locator(".sidebar.mobile-open").getByRole("button", { name: "Care" })).toBeVisible();
   await expect(
     page.locator(".sidebar.mobile-open").getByRole("button", { name: "Overview" }),
   ).toBeInViewport();

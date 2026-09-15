@@ -36,8 +36,8 @@
 }
 
 .site-hero .status-mix-chart {
-  width: 148px;
-  max-width: 148px;
+  width: 160px;
+  max-width: 160px;
 }
 
 .site-hero .status-mix-legend {
@@ -133,7 +133,9 @@
 
 .site-detail-title h1 {
   margin: 0 0 4px;
-  font-size: 22px;
+  font-size: 18px;
+  font-weight: 650;
+  color: #4a4036;
 }
 
 .site-detail-title p {
@@ -147,20 +149,37 @@
 .site-detail-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  gap: 6px;
   overflow: visible;
   max-width: 100%;
-  margin-bottom: 16px;
+  margin: 0 0 16px;
+  padding: 8px 4px 0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #e8dcc8;
+  border-bottom: 1px solid #c9b48a;
 }
 
 .site-detail-tabs > button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 44px;
+  gap: 8px;
+  min-height: 48px;
   white-space: nowrap;
-  padding-left: 2px;
-  padding-right: 2px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 650;
+  color: #6b6156;
+  border-radius: 10px 10px 0 0;
+  border-bottom: 3px solid transparent;
+}
+
+.site-detail-tabs > button.selected,
+.site-detail-tabs > button[aria-selected="true"] {
+  color: #2f4630;
+  background: #efe4d4;
+  border-bottom-color: #3f5c3b;
 }
 
 .site-detail-tabs > button:focus-visible {
@@ -289,7 +308,7 @@
   align-items: center;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 900px) {
   .site-tab-icon {
     display: none;
   }
@@ -320,9 +339,9 @@
   }
 
   .site-detail-tabs > button {
-    padding-left: 4px;
-    padding-right: 4px;
-    font-size: 13px;
+    padding: 10px 12px;
+    font-size: 14px;
+    min-height: 48px;
   }
 
   .site-detail-tabs::after {
