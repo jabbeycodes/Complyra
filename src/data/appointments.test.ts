@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   appointmentChangeDetail,
   appointmentStatus,
+  appointmentStatusLabel,
   canCompleteAppointments,
   canEditAllergies,
   canManageAppointments,
   canSeeAppointments,
+  caseloadAppointmentsFromWorkspace,
   filterCaseloadAppointments,
   formatAppointmentWhen,
   formatCompletedBy,
@@ -15,6 +17,7 @@ import {
   formatUpdatedBy,
   monthCells,
   thirtyDayRange,
+  uniqueProgramNames,
   validateAppointmentDraft,
   visibleAppointments,
   type Appointment,
@@ -145,12 +148,13 @@ test("30-day range and month cells are calendar-stable", () => {
   assert.equal(cells.filter((cell) => cell.date).length, 30);
 });
 
-test("caseload filters match name, range, status, and site", () => {
-  const upcoming = {
+test("caseload filters AND name, range, scheduled status, site, and program", () => {
+  const scheduled = {
     ...sample,
     individualName: "Jodie Williams",
     siteId: "maple",
     siteName: "Maple House",
+    programName: "Residential services",
   };
   const completed = {
     ...sample,
@@ -163,17 +167,21 @@ test("caseload filters match name, range, status, and site", () => {
     individualName: "Jodie Williams",
     siteId: "maple",
     siteName: "Maple House",
+    programName: "Residential services",
   };
   const otherSite = {
-    ...upcoming,
+    ...scheduled,
     id: "appt-oak",
     individualName: "Marcus Chen",
     siteId: "oak",
     siteName: "Oak House",
+    programName: "Supported living",
+    createdBy: "u-hm",
+    createdByName: "Sarah Mitchell",
   };
-  assert.equal(appointmentStatus(upcoming), "upcoming");
+  assert.equal(appointmentStatus(scheduled), "scheduled");
   assert.equal(appointmentStatus(completed), "completed");
-  const named = filterCaseloadAppointments([upcoming, completed, otherSite], {
+  const named = filterCaseloadAppointments([scheduled, completed, otherSite], {
     name: "jodie",
     from: "2026-09-12",
     to: "2026-10-11",
@@ -183,14 +191,46 @@ test("caseload filters match name, range, status, and site", () => {
     named.map((row) => row.id),
     ["appt-done", "appt-1"],
   );
-  const mapleUpcoming = filterCaseloadAppointments([upcoming, completed, otherSite], {
-    status: "upcoming",
+  const mapleScheduled = filterCaseloadAppointments([scheduled, completed, otherSite], {
+    status: "scheduled",
     siteId: "maple",
+    programName: "Residential services",
+    individualId: "i1",
   });
   assert.deepEqual(
-    mapleUpcoming.map((row) => row.id),
+    mapleScheduled.map((row) => row.id),
     ["appt-1"],
   );
+  const programAndStaff = filterCaseloadAppointments([scheduled, completed, otherSite], {
+    programName: "Supported living",
+    status: "scheduled",
+    createdBy: "u-hm",
+  });
+  assert.deepEqual(
+    programAndStaff.map((row) => row.id),
+    ["appt-oak"],
+  );
+  const mismatch = filterCaseloadAppointments([scheduled, completed, otherSite], {
+    programName: "Residential services",
+    siteId: "oak",
+  });
+  assert.deepEqual(mismatch.map((row) => row.id), []);
+  assert.equal(appointmentStatusLabel("scheduled"), "Scheduled");
+  assert.equal(appointmentStatusLabel("completed"), "Completed");
+  assert.deepEqual(
+    uniqueProgramNames([
+      { program: "Supported living" },
+      { program: "Residential services" },
+      { program: "Residential services" },
+    ]),
+    ["Residential services", "Supported living"],
+  );
+  const fromWorkspace = caseloadAppointmentsFromWorkspace(
+    [{ individualId: "i1", appointments: [sample] }],
+    [{ id: "i1", name: "Jodie Williams", siteId: "maple", site: "Maple House" }],
+    [{ id: "maple", program: "Residential services" }],
+  );
+  assert.equal(fromWorkspace[0]?.programName, "Residential services");
 });
 
 test("DSP does not see soft-deleted appointments; RN still does", () => {

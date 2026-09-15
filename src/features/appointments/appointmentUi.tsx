@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CalendarDays, Download, Pencil, Printer, Trash2, Upload } from "lucide-react";
 import {
   appointmentStatus,
+  appointmentStatusLabel,
   formatAppointmentWhen,
   formatCompletedBy,
   formatLoggedBy,
@@ -49,7 +50,7 @@ export function WhoWhen({
 export function AppointmentStatusPill({ appointment }: { appointment: Appointment }) {
   const removed = isAppointmentRemoved(appointment);
   const status = appointmentStatus(appointment);
-  const label = removed ? "Removed" : status === "completed" ? "Completed" : "Upcoming";
+  const label = removed ? "Removed" : appointmentStatusLabel(status);
   const tone = removed ? "overdue" : status === "completed" ? "current" : "due_soon";
   return (
     <span className={`kind-pill renewal ${tone}`}>

@@ -15,6 +15,7 @@ import {
   monthStart,
   shiftMonth,
   thirtyDayRange,
+  uniqueProgramNames,
   type Appointment,
   type AppointmentStatus,
   type CaseloadAppointment,
@@ -36,31 +37,39 @@ export default function AppointmentsPage({
   const [error, setError] = useState("");
   const today = todayIso();
   const range = thirtyDayRange(today);
-  const [name, setName] = useState("");
+  const [individualId, setIndividualId] = useState("");
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
   const [status, setStatus] = useState<AppointmentStatus | "all">("all");
   const [siteId, setSiteId] = useState("");
+  const [programName, setProgramName] = useState("");
+  const [createdBy, setCreatedBy] = useState("");
   const [month, setMonth] = useState(monthStart(today));
   const [selectedDay, setSelectedDay] = useState(today);
 
   const caseload = useMemo(
     () =>
       workspace
-        ? caseloadAppointmentsFromWorkspace(workspace.planStacks, workspace.individuals)
+        ? caseloadAppointmentsFromWorkspace(
+            workspace.planStacks,
+            workspace.individuals,
+            workspace.sites,
+          )
         : [],
     [workspace],
   );
   const filtered = useMemo(
     () =>
       filterCaseloadAppointments(caseload, {
-        name,
+        individualId: individualId || undefined,
         from,
         to,
         status,
         siteId: siteId || undefined,
+        programName: programName || undefined,
+        createdBy: createdBy || undefined,
       }),
-    [caseload, name, from, to, status, siteId],
+    [caseload, individualId, from, to, status, siteId, programName, createdBy],
   );
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -76,6 +85,13 @@ export default function AppointmentsPage({
   const cells = monthCells(month);
   const canComplete = canCompleteAppointments(session.roleKey);
   const sites = workspace.sites;
+  const programs = uniqueProgramNames(sites);
+  const individuals = [...workspace.individuals].sort((a, b) => a.name.localeCompare(b.name));
+  const staffOptions = [...new Map(
+    caseload
+      .filter((row) => row.createdBy && row.createdByName)
+      .map((row) => [row.createdBy, row.createdByName] as const),
+  )].sort((a, b) => a[1].localeCompare(b[1]));
   const activeSession = session;
   const activeWorkspace = workspace;
 
@@ -121,23 +137,6 @@ export default function AppointmentsPage({
 
       <section className="panel appointments-filters" aria-label="Appointment filters">
         <label>
-          Individual
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name"
-            aria-label="Filter by individual name"
-          />
-        </label>
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
-          To
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <label>
           Status
           <select
             value={status}
@@ -145,25 +144,82 @@ export default function AppointmentsPage({
             aria-label="Filter by status"
           >
             <option value="all">All statuses</option>
-            <option value="upcoming">Upcoming</option>
+            <option value="scheduled">Scheduled</option>
             <option value="completed">Completed</option>
           </select>
         </label>
         <label>
-          Site
+          Program
           <select
-            value={siteId}
-            onChange={(e) => setSiteId(e.target.value)}
-            aria-label="Filter by site"
+            value={programName}
+            onChange={(e) => setProgramName(e.target.value)}
+            aria-label="Filter by program"
           >
-            <option value="">All sites</option>
-            {sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
+            <option value="">All programs</option>
+            {programs.map((program) => (
+              <option key={program} value={program}>
+                {program}
               </option>
             ))}
           </select>
         </label>
+        <label>
+          Individual
+          <select
+            value={individualId}
+            onChange={(e) => setIndividualId(e.target.value)}
+            aria-label="Filter by individual"
+          >
+            <option value="">All individuals</option>
+            {individuals.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {sites.length > 1 ? (
+          <label>
+            Site
+            <select
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+              aria-label="Filter by site"
+            >
+              <option value="">All sites</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <label>
+          From
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+        </label>
+        <label>
+          To
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+        </label>
+        {staffOptions.length > 0 ? (
+          <label>
+            Staff
+            <select
+              value={createdBy}
+              onChange={(e) => setCreatedBy(e.target.value)}
+              aria-label="Filter by staff"
+            >
+              <option value="">All staff</option>
+              {staffOptions.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </section>
 
       <section className="panel appointments-calendar" aria-label="Appointment calendar">

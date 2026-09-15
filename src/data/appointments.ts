@@ -41,12 +41,14 @@ export interface Appointment {
   consultationFileId: string | null;
 }
 
-export type AppointmentStatus = "upcoming" | "completed";
+/** UI and filters use Scheduled vs Completed — never "upcoming". */
+export type AppointmentStatus = "scheduled" | "completed";
 
 export type CaseloadAppointment = Appointment & {
   individualName: string;
   siteId: string;
   siteName: string;
+  programName: string;
 };
 
 export type AppointmentDraft = {
@@ -167,7 +169,11 @@ export function isAppointmentRemoved(row: Pick<Appointment, "deletedAt">) {
 }
 
 export function appointmentStatus(row: Pick<Appointment, "completedAt" | "deletedAt">): AppointmentStatus {
-  return row.completedAt ? "completed" : "upcoming";
+  return row.completedAt ? "completed" : "scheduled";
+}
+
+export function appointmentStatusLabel(status: AppointmentStatus) {
+  return status === "completed" ? "Completed" : "Scheduled";
 }
 
 export function addCalendarDays(isoDate: string, days: number) {
@@ -214,19 +220,28 @@ export function monthCells(monthIso: string) {
   return cells;
 }
 
+/**
+ * Workspace Appointments filters AND together. Callers already scoped `rows`
+ * to caseload; this does not widen visibility.
+ */
 export function filterCaseloadAppointments(
   rows: CaseloadAppointment[],
   filters: {
     name?: string;
+    individualId?: string;
     from?: string;
     to?: string;
     status?: AppointmentStatus | "all";
     siteId?: string;
+    programName?: string;
+    createdBy?: string;
   },
 ) {
   const name = filters.name?.trim().toLowerCase() ?? "";
+  const program = filters.programName?.trim().toLowerCase() ?? "";
   const filtered = rows.filter((row) => {
     if (isAppointmentRemoved(row)) return false;
+    if (filters.individualId && row.individualId !== filters.individualId) return false;
     if (name && !row.individualName.toLowerCase().includes(name)) return false;
     if (filters.from && row.startsOn < filters.from) return false;
     if (filters.to && row.startsOn > filters.to) return false;
@@ -234,6 +249,8 @@ export function filterCaseloadAppointments(
       return false;
     }
     if (filters.siteId && row.siteId !== filters.siteId) return false;
+    if (program && row.programName.trim().toLowerCase() !== program) return false;
+    if (filters.createdBy && row.createdBy !== filters.createdBy) return false;
     return true;
   });
   return sortAppointments(filtered) as CaseloadAppointment[];
@@ -246,8 +263,10 @@ export function formatAppointmentDate(isoDate: string) {
 export function caseloadAppointmentsFromWorkspace(
   stacks: { individualId: string; appointments: Appointment[] }[],
   people: { id: string; name: string; siteId: string; site: string }[],
+  sites: { id: string; program: string }[] = [],
 ): CaseloadAppointment[] {
   const byId = new Map(people.map((person) => [person.id, person]));
+  const programBySite = new Map(sites.map((site) => [site.id, site.program]));
   const rows: CaseloadAppointment[] = [];
   for (const stack of stacks) {
     const person = byId.get(stack.individualId);
@@ -258,10 +277,17 @@ export function caseloadAppointmentsFromWorkspace(
         individualName: person.name,
         siteId: person.siteId,
         siteName: person.site,
+        programName: programBySite.get(person.siteId) ?? "",
       });
     }
   }
   return sortAppointments(rows) as CaseloadAppointment[];
+}
+
+export function uniqueProgramNames(sites: { program: string }[]) {
+  return [...new Set(sites.map((site) => site.program.trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b),
+  );
 }
 
 const CONSULTATION_NAME_RE = /\.(pdf|png|jpe?g)$/i;
