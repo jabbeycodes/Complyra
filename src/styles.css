@@ -682,6 +682,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 17px;
+  flex-wrap: wrap;
 }
 .select-shell {
   display: flex;
@@ -699,7 +700,22 @@ h1 {
   padding: 8px 18px 8px 0;
   color: #826f5e;
   font-size: 12px;
-  min-height: 32px;
+  min-height: 44px;
+}
+.filter-reset {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-empty-panel {
+  padding: 32px 24px;
+  text-align: center;
+}
+.filter-empty-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
 }
 .scope-divider {
   height: 17px;

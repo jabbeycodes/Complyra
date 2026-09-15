@@ -12,16 +12,35 @@ import {
   Building2,
   MoreHorizontal,
   CalendarDays,
+  CalendarClock,
+  CircleDot,
   FileText,
   Activity as ActivityIcon,
   ClipboardCheck,
+  Layers,
   PenLine,
   BookOpen,
+  Tags,
+  X,
 } from "lucide-react";
 import { categories, metrics } from "./domain";
-import type { Requirement, Activity } from "./domain";
+import type { Requirement, Activity, Category } from "./domain";
 import { Badge, Empty } from "./components";
 import StatusMixDonut from "./components/StatusMixDonut";
+import {
+  ALL_CATEGORIES,
+  ALL_PROGRAMS,
+  ALL_STATUSES,
+  CATEGORY_OPTIONS,
+  DEFAULT_FILTERS,
+  DUE_WINDOW_OPTIONS,
+  STATUS_OPTIONS,
+  applyDashboardFilters,
+  filtersActive,
+  programOptions,
+  type DashboardFilters,
+  type DueWindow,
+} from "./data/dashboardFilters";
 import type { PersonalWorkItem } from "./data/dashboard";
 import type { SiteReview } from "./data/siteReview";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
@@ -61,6 +80,8 @@ interface Props {
   onOpenPerson: (name: string) => void;
   onCopilot: () => void;
   onActivity: () => void;
+  /** Test/embedding hook: starting values for the dashboard filter bar. */
+  initialFilters?: Partial<DashboardFilters>;
 }
 
 function scoreTone(score: number, overdue: number) {
@@ -70,7 +91,6 @@ function scoreTone(score: number, overdue: number) {
 }
 
 export default function Dashboard({
-  items,
   allItems,
   scorecard,
   activity,
@@ -85,10 +105,54 @@ export default function Dashboard({
   onOpenPerson,
   onCopilot,
   onActivity,
+  initialFilters,
 }: Props) {
   const [sitesOpen, setSitesOpen] = useState(true);
-  const agency = scorecard ?? metrics(allItems);
-  const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
+  const [programFilter, setProgramFilter] = useState(
+    initialFilters?.program ?? DEFAULT_FILTERS.program,
+  );
+  const [categoryFilter, setCategoryFilter] = useState(
+    initialFilters?.category ?? DEFAULT_FILTERS.category,
+  );
+  const [statusFilter, setStatusFilter] = useState(
+    initialFilters?.status ?? DEFAULT_FILTERS.status,
+  );
+  const [dueFilter, setDueFilter] = useState<DueWindow>(
+    initialFilters?.due ?? DEFAULT_FILTERS.due,
+  );
+  const filters: DashboardFilters = {
+    program: programFilter,
+    category: categoryFilter,
+    status: statusFilter,
+    due: dueFilter,
+  };
+  const extraFiltersActive = filtersActive(filters);
+  // Every visualization slices this one filtered set: site selector AND the
+  // four dashboard filters combine. `allItems` is already permission-scoped.
+  const filtered = applyDashboardFilters(allItems, { site, sites, filters });
+  const hasResults = filtered.length > 0;
+  const sliceActive = site !== "All sites" || extraFiltersActive;
+  // Preserve the existing agency-wide scorecard exactly when nothing is
+  // sliced; otherwise every number on the page comes from the filtered set.
+  const agency = sliceActive ? metrics(filtered) : (scorecard ?? metrics(allItems));
+  const risks = filtered.filter((r) => ["Overdue", "Expired"].includes(r.status));
+  const visibleSites =
+    programFilter === ALL_PROGRAMS
+      ? sites
+      : sites.filter((s) => (s.program ?? "").trim() === programFilter);
+  const shownCategories: Category[] =
+    categoryFilter === ALL_CATEGORIES
+      ? categories
+      : (CATEGORY_OPTIONS as string[]).includes(categoryFilter)
+        ? [categoryFilter as Category]
+        : [];
+
+  function resetFilters() {
+    setProgramFilter(DEFAULT_FILTERS.program);
+    setCategoryFilter(DEFAULT_FILTERS.category);
+    setStatusFilter(DEFAULT_FILTERS.status);
+    setDueFilter(DEFAULT_FILTERS.due);
+  }
 
   function openPersonal(item: PersonalWorkItem) {
     if (item.requirementId) {
@@ -132,6 +196,68 @@ export default function Dashboard({
               ))}
             </select>
           </label>
+          <label className="select-shell">
+            <Layers size={16} />
+            <select
+              aria-label="Filter by program"
+              value={programFilter}
+              onChange={(e) => setProgramFilter(e.target.value)}
+            >
+              <option>{ALL_PROGRAMS}</option>
+              {programOptions(sites).map((program) => (
+                <option key={program}>{program}</option>
+              ))}
+            </select>
+          </label>
+          <label className="select-shell">
+            <Tags size={16} />
+            <select
+              aria-label="Filter by category"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option>{ALL_CATEGORIES}</option>
+              {CATEGORY_OPTIONS.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+          </label>
+          <label className="select-shell">
+            <CircleDot size={16} />
+            <select
+              aria-label="Filter by requirement status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option>{ALL_STATUSES}</option>
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+          <label className="select-shell">
+            <CalendarClock size={16} />
+            <select
+              aria-label="Filter by due window"
+              value={dueFilter}
+              onChange={(e) => setDueFilter(e.target.value as DueWindow)}
+            >
+              {DUE_WINDOW_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {extraFiltersActive && (
+            <button
+              type="button"
+              className="text-button filter-reset"
+              onClick={resetFilters}
+            >
+              <X size={14} /> Reset filters
+            </button>
+          )}
           <span className="scope-divider" />
           <span className="date-label">
             <CalendarDays size={15} />{" "}
@@ -146,22 +272,25 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
-      {agency.overdue > 0 && (
-      <div className="readiness-banner">
-        <div className="readiness-symbol">
-          <ShieldCheck size={25} />
-        </div>
-        <div>
-          <strong>
-            {agency.overdue} {agency.overdue === 1 ? "item needs" : "items need"}{" "}
-            attention
-          </strong>
-        </div>
-        <button onClick={() => onNavigate("Requirements", "Overdue")}>
-          Review <ArrowRight size={16} />
-        </button>
-      </div>
-      )}
+      {hasResults ? (
+        <>
+          {agency.overdue > 0 && (
+          <div className="readiness-banner">
+            <div className="readiness-symbol">
+              <ShieldCheck size={25} />
+            </div>
+            <div>
+              <strong>
+                {agency.overdue}{" "}
+                {agency.overdue === 1 ? "item needs" : "items need"}{" "}
+                attention
+              </strong>
+            </div>
+            <button onClick={() => onNavigate("Requirements", "Overdue")}>
+              Review <ArrowRight size={16} />
+            </button>
+          </div>
+          )}
       <div className="stat-grid">
         <button
           className="stat-card"
@@ -248,7 +377,7 @@ export default function Dashboard({
             <h2>Status mix</h2>
           </div>
         </div>
-        <StatusMixDonut items={allItems} />
+        <StatusMixDonut items={filtered} />
       </section>
       <section className="panel agency-hero" data-tour="command-center">
         <button
@@ -298,10 +427,12 @@ export default function Dashboard({
                 All sites <ArrowRight size={14} />
               </button>
             </div>
-            {sites.length ? (
+            {visibleSites.length ? (
               <div className="site-score-grid">
-                {sites.map((s) => {
-                  const sm = metrics(allItems.filter((r) => r.site === s.name));
+                {visibleSites.map((s) => {
+                  const sm = metrics(
+                    filtered.filter((r) => r.site === s.name),
+                  );
                   const people = individuals.filter((p) => p.site === s.name).length;
                   const selected = site === s.name;
                   const reviewInPlace = isSiteReviewInPlace(
@@ -354,6 +485,11 @@ export default function Dashboard({
                   );
                 })}
               </div>
+            ) : sites.length ? (
+              <Empty
+                title="No program sites match"
+                text="Adjust the program filter to see site scores."
+              />
             ) : (
               <Empty
                 title="No assigned program sites"
@@ -363,6 +499,20 @@ export default function Dashboard({
           </div>
         )}
       </section>
+        </>
+      ) : (
+        <section className="panel filter-empty-panel">
+          <Empty
+            title="No matching requirements"
+            text="No requirements match the current filters. Adjust or reset the filters to see results."
+          />
+          <div className="filter-empty-actions">
+            <button type="button" className="button" onClick={resetFilters}>
+              <X size={14} /> Reset filters
+            </button>
+          </div>
+        </section>
+      )}
       <section className="panel personal-queue">
         <div className="panel-heading">
           <div>
@@ -414,6 +564,7 @@ export default function Dashboard({
           <Empty title="Nothing pending" />
         )}
       </section>
+      {hasResults && (
       <div className="dashboard-middle">
         <section className="panel priorities-panel" data-tour="risk-list">
           <div className="panel-heading">
@@ -480,8 +631,8 @@ export default function Dashboard({
             </span>
           </div>
           <div className="category-list">
-            {categories.map((category, i) => {
-              const group = items.filter((r) => r.category === category);
+            {shownCategories.map((category, i) => {
+              const group = filtered.filter((r) => r.category === category);
               const cm = metrics(group);
               return (
                 <button
@@ -523,6 +674,7 @@ export default function Dashboard({
           </div>
         </section>
       </div>
+      )}
       <section className="panel activity-panel dashboard-activity">
         <div className="panel-heading">
           <div>
