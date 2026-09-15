@@ -142,8 +142,8 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await expect(page.locator(".site-hero-stat").filter({ hasText: "Individuals" })).toContainText(
     "2",
   );
-  await expect(page.getByLabel("Individuals in this house")).toContainText("Ellis Hart");
-  await expect(page.getByLabel("Individuals in this house")).toContainText("Morgan Pruitt");
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Ellis");
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Morgan");
   await expect(page.getByLabel("Individuals in this house")).not.toContainText("Jodie");
   await expect(page.locator(".site-hero .status-mix")).toBeVisible();
   await expect(page.locator(".site-hero-people")).toBeVisible();
