@@ -50,7 +50,7 @@ export default function DemoBanner({
           aria-label="Restart tour"
           onClick={onRestartTour}
         >
-          <RotateCcw size={15} aria-hidden="true" />
+          <RotateCcw size={16} aria-hidden="true" />
           <span className="demo-banner-button-label">Restart tour</span>
         </button>
         <button

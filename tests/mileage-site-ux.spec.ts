@@ -143,6 +143,9 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await expect(page.locator(".site-hero-people")).toBeVisible();
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   await expect(page.locator(".site-hero-scores")).toContainText("Ready");
+  await expect(page.locator(".site-hero-scores")).toContainText("Individuals");
+  await expect(page.locator(".site-hero-scores")).not.toContainText("People");
+  await expect(page.getByLabel("Individuals in this house")).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Open record");
   const tabs = page.locator(".site-detail-tabs [role='tab']");
   await expect(tabs.last()).toHaveText(/Staff/);

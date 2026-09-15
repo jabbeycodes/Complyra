@@ -173,6 +173,37 @@ test.describe("390 phone", () => {
     expect(bannerBox!.height).toBeLessThanOrEqual(48);
     await expect(page.locator(".demo-banner-sub")).toBeHidden();
 
+    const bannerButtons = page.locator(".demo-banner-button");
+    await expect(bannerButtons).toHaveCount(3);
+    const buttonBoxes = await bannerButtons.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        const icon = el.querySelector("svg");
+        const ir = icon?.getBoundingClientRect();
+        return {
+          width: r.width,
+          height: r.height,
+          y: r.y,
+          iconOffsetY: ir ? ir.top - r.top : 0,
+          iconOffsetX: ir ? ir.left - r.left : 0,
+        };
+      }),
+    );
+    for (const box of buttonBoxes) {
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    const ys = buttonBoxes.map((b) => b.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(2);
+    for (const box of buttonBoxes) {
+      expect(box.iconOffsetY).toBeGreaterThan(8);
+      expect(box.iconOffsetX).toBeGreaterThan(8);
+    }
+    await page.screenshot({
+      path: `${process.env.WALKTHROUGH_DIR || "playwright-report/screenshots"}/demo_banner_390.png`,
+      fullPage: false,
+    });
+
     const menu = page.getByRole("button", { name: "Open navigation" });
     await expect(menu).toBeVisible();
     const menuBox = await menu.boundingBox();

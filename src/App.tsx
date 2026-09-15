@@ -931,7 +931,7 @@ export default function App() {
                         className="button primary"
                         onClick={() => setModal("add-person")}
                       >
-                        <UserPlus size={16} /> Add a person
+                        <UserPlus size={16} /> Add an individual
                       </button>
                     )}
                     {canUpload && (
@@ -1156,7 +1156,7 @@ export default function App() {
                                     setModal("add-person");
                                   }}
                                 >
-                                  <UserPlus size={16} /> Add a person
+                                  <UserPlus size={16} /> Add an individual
                                 </button>
                               )}
                               <button
@@ -2189,14 +2189,14 @@ export default function App() {
             onCreated={(name) => {
               setModal(null);
               setSite(name);
-              notify(`${name} is ready. Add people to this home next.`);
+              notify(`${name} is ready. Add individuals to this home next.`);
             }}
           />
         </Modal>
       )}
       {modal === "add-person" && (
         <Modal
-          title="Add a person"
+          title="Add an individual"
           onClose={() => {
             setModal(null);
             setAddPersonSiteId(null);
@@ -2302,7 +2302,7 @@ export default function App() {
             <span>
               <Sparkles size={26} />
             </span>
-            <h2>Ask about a person, site, or requirement</h2>
+            <h2>Ask about an individual, site, or requirement</h2>
           </div>
           <div className="copilot-disclosure">
             Preview · Grounded lookups in sample records · {site}

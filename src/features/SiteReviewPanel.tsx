@@ -338,7 +338,7 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
       </div>
 
       <p className="site-review-people">
-        People at this home: {people.map((row) => row.name).join(", ") || "none yet"}.
+        Individuals at this home: {people.map((row) => row.name).join(", ") || "none yet"}.
         Keep diets, equipment, and visit hours on each chart so the pre-survey
         sheet stays current.
       </p>

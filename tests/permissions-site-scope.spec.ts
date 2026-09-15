@@ -128,8 +128,8 @@ test("a person added on a new site keeps that site on a requirement", async ({
 
   await openNav(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: "Add a person" }).first().click();
-  const personDialog = page.getByRole("dialog", { name: "Add a person" });
+  await page.getByRole("button", { name: "Add an individual" }).first().click();
+  const personDialog = page.getByRole("dialog", { name: "Add an individual" });
   await personDialog.getByRole("tab", { name: /Add by hand/ }).click();
   await expect(personDialog.getByLabel("Program site")).toHaveValue(/./);
   const selectedSite = await personDialog
