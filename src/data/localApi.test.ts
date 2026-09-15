@@ -423,7 +423,7 @@ test("Evergreen demo sites hard-cap at 2 Individuals", async () => {
         dateOfBirth: "1990-01-01",
         siteId: cedar.id,
       }),
-    /Cedar House is at its 2-Individual limit/,
+    /This site already has 2 Individuals \(max 2\)/,
   );
   const site = await api.createSite({
     name: "Cypress House",
@@ -447,7 +447,7 @@ test("Evergreen demo sites hard-cap at 2 Individuals", async () => {
         dateOfBirth: "1993-04-04",
         siteId: site.id,
       }),
-    /Cypress House is at its 2-Individual limit/,
+    /This site already has 2 Individuals \(max 2\)/,
   );
 });
 
@@ -474,7 +474,31 @@ test("production sites hard-cap at 3 Individuals", async () => {
         dateOfBirth: "1991-02-02",
         siteId: cedar.id,
       }),
-    /Cedar House is at its 3-Individual limit/,
+    /This site already has 3 Individuals \(max 3\)/,
+  );
+});
+
+test("reassign onto a full demo house is blocked; empty house accepts the transfer", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const workspace = await api.loadWorkspace(session);
+  const cedar = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const willow = workspace.sites.find((row) => row.name === "Willow House")!;
+  const willowPerson = workspace.individuals.find((row) => row.siteId === willow.id)!;
+  await assert.rejects(
+    () => api.reassignIndividualToSite(willowPerson.id, cedar.id),
+    /This site already has 2 Individuals \(max 2\)/,
+  );
+  const empty = await api.createSite({
+    name: "Birch House",
+    address: "4 Birch Street",
+    programName: "Residential services",
+  });
+  await api.reassignIndividualToSite(willowPerson.id, empty.id);
+  const after = await api.loadWorkspace(session);
+  assert.equal(
+    after.individuals.find((row) => row.id === willowPerson.id)?.siteId,
+    empty.id,
   );
 });
 

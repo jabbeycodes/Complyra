@@ -51,7 +51,7 @@ test("Intake blocks a demo house that is already at 2 Individuals", async ({ pag
   await page.getByLabel("Program site").selectOption({ label: "Cedar House" });
   await expect(page.getByText("2 of 2 Individuals")).toBeVisible();
   await expect(
-    page.getByRole("alert").filter({ hasText: "Cedar House is at its 2-Individual limit" }),
+    page.getByRole("alert").filter({ hasText: "This site already has 2 Individuals (max 2)." }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Add Individual", exact: true })).toBeDisabled();
 });

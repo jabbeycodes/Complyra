@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
 import { useData } from "../data/DataProvider";
 import { todayIso } from "../data/chart";
-import { countIndividualsAtSite, siteIndividualCap } from "../data/siteCapacity";
+import { countIndividualsAtSite, siteAtCapacityMessage, siteIndividualCap } from "../data/siteCapacity";
 
 type Mode = "pcsp" | "manual";
 
@@ -51,9 +51,7 @@ export default function AddIndividualForm({
       onSubmit={async (e) => {
         e.preventDefault();
         if (atCap) {
-          setError(
-            `${selectedSite?.name} is at its ${cap}-Individual limit. This site cannot take another Individual.`,
-          );
+          setError(siteAtCapacityMessage(occupancy, cap));
           return;
         }
         setBusy(true);
@@ -180,8 +178,7 @@ export default function AddIndividualForm({
       )}
       {atCap && (
         <p className="inline-error" role="alert">
-          {selectedSite?.name} is at its {cap}-Individual limit. This site cannot take another
-          Individual.
+          {siteAtCapacityMessage(occupancy, cap)}
         </p>
       )}
       {mode === "pcsp" && (

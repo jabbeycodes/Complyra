@@ -26,6 +26,10 @@ export function countIndividualsAtSite<T extends { siteId?: string | null }>(
   return people.filter((person) => person.siteId === siteId).length;
 }
 
+export function siteAtCapacityMessage(currentCount: number, cap: number) {
+  return `This site already has ${currentCount} Individuals (max ${cap}).`;
+}
+
 /**
  * Block Intake / add / reassign onto a site that is already at cap.
  * `currentCount` is everyone currently on that site, excluding the person
@@ -40,7 +44,5 @@ export function assertSiteHasCapacity(input: {
   const cap = siteIndividualCap(input.agencyCode);
   const next = input.currentCount + (input.adding ?? 1);
   if (next <= cap) return;
-  throw new Error(
-    `${input.siteName} is at its ${cap}-Individual limit. This site cannot take another Individual.`,
-  );
+  throw new Error(siteAtCapacityMessage(input.currentCount, cap));
 }

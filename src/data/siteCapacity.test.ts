@@ -5,6 +5,7 @@ import {
   PRODUCTION_SITE_INDIVIDUAL_CAP,
   assertSiteHasCapacity,
   countIndividualsAtSite,
+  siteAtCapacityMessage,
   siteIndividualCap,
 } from "./siteCapacity";
 
@@ -30,7 +31,7 @@ test("assertSiteHasCapacity blocks the seat past the cap with a clear error", ()
         agencyCode: "EVERGREEN-MO",
         currentCount: 2,
       }),
-    /Cedar House is at its 2-Individual limit/,
+    /This site already has 2 Individuals \(max 2\)/,
   );
   assert.doesNotThrow(() =>
     assertSiteHasCapacity({
@@ -46,8 +47,9 @@ test("assertSiteHasCapacity blocks the seat past the cap with a clear error", ()
         agencyCode: "ACME-TX",
         currentCount: 3,
       }),
-    /North House is at its 3-Individual limit/,
+    /This site already has 3 Individuals \(max 3\)/,
   );
+  assert.equal(siteAtCapacityMessage(2, 2), "This site already has 2 Individuals (max 2).");
 });
 
 test("countIndividualsAtSite uses site id, not leftover names", () => {
