@@ -93,22 +93,22 @@ test("Appointments calendar lists caseload days and opens that day's visits", as
   await expect(page.getByRole("button", { name: "Generate consultation packet" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New appointment" })).toHaveCount(0);
 
-  const jodieOption = await filters
-    .getByLabel("Filter by individual")
-    .locator("option", { hasText: "Jodie Williams" })
-    .getAttribute("value");
   const mapleOption = await filters
     .getByLabel("Filter by site")
     .locator("option", { hasText: "Maple House" })
     .getAttribute("value");
-  await filters.getByLabel("Filter by status").selectOption("scheduled");
+  await filters.getByRole("button", { name: "Scheduled", exact: true }).click();
   await filters.getByLabel("Filter by program").selectOption("Residential services");
-  await filters.getByLabel("Filter by individual").selectOption(jodieOption ?? "");
+  await filters.getByLabel("Filter by individual").fill("Jodie Williams");
   await filters.getByLabel("Filter by site").selectOption(mapleOption ?? "");
   await expect(page.locator(".appointments-page")).toContainText("Dr. Priya Shah");
+  await expect(filters.getByRole("button", { name: "Clear filters" })).toBeVisible();
   await page.screenshot({ path: shot("appointments_calendar.png"), fullPage: true });
-  await filters.getByLabel("Filter by status").selectOption("completed");
+  await filters.getByRole("button", { name: "Completed", exact: true }).click();
   await expect(page.locator(".appointments-page")).not.toContainText("Dr. Priya Shah");
+  await expect(page.locator(".appointments-page")).toContainText(
+    "No appointments match these filters.",
+  );
 });
 
 test("uploading a consultation form completes the appointment", async ({ page }) => {

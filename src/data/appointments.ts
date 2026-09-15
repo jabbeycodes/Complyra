@@ -221,6 +221,38 @@ export function monthCells(monthIso: string) {
 }
 
 /**
+ * Exclusive Scheduled / Completed chips: selecting the active chip again
+ * clears the status constraint (same as both off / both on = all).
+ */
+export function nextStatusChip(current: AppointmentStatus | "all", clicked: AppointmentStatus) {
+  return current === clicked ? "all" : clicked;
+}
+
+export function hasActiveCaseloadFilters(
+  filters: {
+    name?: string;
+    individualId?: string;
+    from?: string;
+    to?: string;
+    status?: AppointmentStatus | "all";
+    siteId?: string;
+    programName?: string;
+    createdBy?: string;
+  },
+  defaults: { from: string; to: string },
+) {
+  if (filters.status && filters.status !== "all") return true;
+  if (filters.individualId) return true;
+  if (filters.name?.trim()) return true;
+  if (filters.siteId) return true;
+  if (filters.programName?.trim()) return true;
+  if (filters.createdBy) return true;
+  if (filters.from && filters.from !== defaults.from) return true;
+  if (filters.to && filters.to !== defaults.to) return true;
+  return false;
+}
+
+/**
  * Workspace Appointments filters AND together. Callers already scoped `rows`
  * to caseload; this does not widen visibility.
  */

@@ -11,6 +11,8 @@ import {
   caseloadAppointmentsFromWorkspace,
   filterCaseloadAppointments,
   formatAppointmentWhen,
+  hasActiveCaseloadFilters,
+  nextStatusChip,
   formatCompletedBy,
   formatGeneratedBy,
   formatLoggedBy,
@@ -217,6 +219,13 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
   assert.deepEqual(mismatch.map((row) => row.id), []);
   assert.equal(appointmentStatusLabel("scheduled"), "Scheduled");
   assert.equal(appointmentStatusLabel("completed"), "Completed");
+  assert.equal(nextStatusChip("all", "scheduled"), "scheduled");
+  assert.equal(nextStatusChip("scheduled", "scheduled"), "all");
+  assert.equal(nextStatusChip("scheduled", "completed"), "completed");
+  const window = { from: "2026-09-12", to: "2026-10-11" };
+  assert.equal(hasActiveCaseloadFilters({ status: "all", from: window.from, to: window.to }, window), false);
+  assert.equal(hasActiveCaseloadFilters({ status: "scheduled", from: window.from, to: window.to }, window), true);
+  assert.equal(hasActiveCaseloadFilters({ name: "jodie", from: window.from, to: window.to }, window), true);
   assert.deepEqual(
     uniqueProgramNames([
       { program: "Supported living" },

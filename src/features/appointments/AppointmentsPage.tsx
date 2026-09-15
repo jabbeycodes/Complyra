@@ -10,9 +10,11 @@ import {
   filterCaseloadAppointments,
   formatAppointmentDate,
   formatAppointmentWhen,
+  hasActiveCaseloadFilters,
   monthCells,
   monthLabel,
   monthStart,
+  nextStatusChip,
   shiftMonth,
   thirtyDayRange,
   uniqueProgramNames,
@@ -37,7 +39,7 @@ export default function AppointmentsPage({
   const [error, setError] = useState("");
   const today = todayIso();
   const range = thirtyDayRange(today);
-  const [individualId, setIndividualId] = useState("");
+  const [individualQuery, setIndividualQuery] = useState("");
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
   const [status, setStatus] = useState<AppointmentStatus | "all">("all");
@@ -61,7 +63,7 @@ export default function AppointmentsPage({
   const filtered = useMemo(
     () =>
       filterCaseloadAppointments(caseload, {
-        individualId: individualId || undefined,
+        name: individualQuery || undefined,
         from,
         to,
         status,
@@ -69,7 +71,19 @@ export default function AppointmentsPage({
         programName: programName || undefined,
         createdBy: createdBy || undefined,
       }),
-    [caseload, individualId, from, to, status, siteId, programName, createdBy],
+    [caseload, individualQuery, from, to, status, siteId, programName, createdBy],
+  );
+  const filtersActive = hasActiveCaseloadFilters(
+    {
+      name: individualQuery,
+      from,
+      to,
+      status,
+      siteId,
+      programName,
+      createdBy,
+    },
+    range,
   );
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -87,6 +101,15 @@ export default function AppointmentsPage({
   const sites = workspace.sites;
   const programs = uniqueProgramNames(sites);
   const individuals = [...workspace.individuals].sort((a, b) => a.name.localeCompare(b.name));
+  function clearFilters() {
+    setStatus("all");
+    setProgramName("");
+    setIndividualQuery("");
+    setSiteId("");
+    setFrom(range.from);
+    setTo(range.to);
+    setCreatedBy("");
+  }
   const staffOptions = [...new Map(
     caseload
       .filter((row) => row.createdBy && row.createdByName)
@@ -136,18 +159,27 @@ export default function AppointmentsPage({
       {error && <p className="form-error">{error}</p>}
 
       <section className="panel appointments-filters" aria-label="Appointment filters">
-        <label>
-          Status
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as AppointmentStatus | "all")}
-            aria-label="Filter by status"
-          >
-            <option value="all">All statuses</option>
-            <option value="scheduled">Scheduled</option>
-            <option value="completed">Completed</option>
-          </select>
-        </label>
+        <div className="appointments-filter-group">
+          <span>Status</span>
+          <div className="appointments-status-chips" role="group" aria-label="Filter by status">
+            <button
+              type="button"
+              className="appointments-status-chip"
+              aria-pressed={status === "scheduled"}
+              onClick={() => setStatus((current) => nextStatusChip(current, "scheduled"))}
+            >
+              Scheduled
+            </button>
+            <button
+              type="button"
+              className="appointments-status-chip"
+              aria-pressed={status === "completed"}
+              onClick={() => setStatus((current) => nextStatusChip(current, "completed"))}
+            >
+              Completed
+            </button>
+          </div>
+        </div>
         <label>
           Program
           <select
@@ -165,18 +197,20 @@ export default function AppointmentsPage({
         </label>
         <label>
           Individual
-          <select
-            value={individualId}
-            onChange={(e) => setIndividualId(e.target.value)}
+          <input
+            type="search"
+            value={individualQuery}
+            onChange={(e) => setIndividualQuery(e.target.value)}
+            placeholder="All Individuals"
             aria-label="Filter by individual"
-          >
-            <option value="">All individuals</option>
+            list="appointment-individual-options"
+            autoComplete="off"
+          />
+          <datalist id="appointment-individual-options">
             {individuals.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
+              <option key={person.id} value={person.name} />
             ))}
-          </select>
+          </datalist>
         </label>
         {sites.length > 1 ? (
           <label>
@@ -219,6 +253,11 @@ export default function AppointmentsPage({
               ))}
             </select>
           </label>
+        ) : null}
+        {filtersActive ? (
+          <button className="button appointments-clear-filters" type="button" onClick={clearFilters}>
+            Clear filters
+          </button>
         ) : null}
       </section>
 
@@ -281,7 +320,11 @@ export default function AppointmentsPage({
       <section className="panel" aria-labelledby="appointments-day-heading">
         <h2 id="appointments-day-heading">{formatAppointmentDate(selectedDay)}</h2>
         {dayRows.length === 0 ? (
-          <p>No caseload appointments on this day.</p>
+          <p>
+            {filtersActive
+              ? "No appointments match these filters."
+              : "No caseload appointments on this day."}
+          </p>
         ) : (
           dayRows.map((row) => (
             <DayAppointmentCard
