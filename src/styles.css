@@ -1871,9 +1871,14 @@ td > svg {
 }
 .site-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr;
+  gap: 16px;
   align-items: stretch;
+}
+@media (min-width: 960px) {
+  .site-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .add-site-tile {
   min-height: 0;
@@ -3176,9 +3181,6 @@ td {
   .people-grid {
     grid-template-columns: repeat(3, 1fr);
   }
-  .site-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
   h1 {
     font-size: 26px;
   }
@@ -3879,8 +3881,7 @@ td {
   .filter-right > svg {
     display: none;
   }
-  .people-grid,
-  .site-grid {
+  .people-grid {
     grid-template-columns: 1fr 1fr;
     gap: 12px;
   }

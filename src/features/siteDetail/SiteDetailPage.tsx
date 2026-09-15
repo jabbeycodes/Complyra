@@ -399,6 +399,7 @@ export default function SiteDetailPage({
         </div>
       </header>
 
+      <div className="site-detail-tabstrip">
       <div
         className="tabs site-detail-tabs"
         role="tablist"
@@ -423,6 +424,7 @@ export default function SiteDetailPage({
             </button>
           );
         })}
+      </div>
       </div>
 
       <section
