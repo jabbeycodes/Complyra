@@ -6,6 +6,7 @@ import {
   type SiteDetailTabId,
 } from "./siteTabs";
 import { auditPeriodLabel, auditScoreDisplay } from "./SiteDetailPage";
+import { metrics } from "../../domain";
 import { defaultPermissions } from "../../data/permissions";
 import type { SessionUser } from "../../data/types";
 
@@ -120,6 +121,19 @@ describe("site detail tabs", () => {
     // still be last.
     assert.ok(ids.includes("staff"), "HM sees the staff tab");
     assert.equal(ids[ids.length - 1], "staff", "staff remains last for HM");
+  });
+});
+
+describe("site hero scores", () => {
+  it("uses the same ready percent as the program-site cards", () => {
+    assert.equal(
+      metrics([
+        { status: "Compliant" },
+        { status: "Compliant" },
+        { status: "Overdue" },
+      ] as Parameters<typeof metrics>[0]).score,
+      67,
+    );
   });
 });
 

@@ -640,13 +640,14 @@ test("assertCanViewMileageYearlySummary throws for HM/DSP but not for administra
   );
 });
 
-test("canDownloadMileageMonthly allows house managers and platform admins only", () => {
+test("canDownloadMileageMonthly allows house managers, administrators, and platform admins", () => {
   assert.equal(canDownloadMileageMonthly({ roleKey: "house_manager", platformAdmin: false }), true);
+  assert.equal(canDownloadMileageMonthly({ roleKey: "administrator", platformAdmin: false }), true);
   assert.equal(canDownloadMileageMonthly({ roleKey: "dsp", platformAdmin: true }), true);
 });
 
-test("canDownloadMileageMonthly blocks DSP, administrator, DPM, and everyone else", () => {
-  for (const roleKey of ["dsp", "administrator", "degreed_professional_manager", "compliance_admin", "nurse", "hr", "auditor"]) {
+test("canDownloadMileageMonthly blocks DSP, DPM, and everyone else", () => {
+  for (const roleKey of ["dsp", "degreed_professional_manager", "compliance_admin", "nurse", "hr", "auditor", "program_manager"]) {
     assert.equal(canDownloadMileageMonthly({ roleKey, platformAdmin: false }), false, roleKey);
   }
   assert.equal(canDownloadMileageMonthly(null), false);

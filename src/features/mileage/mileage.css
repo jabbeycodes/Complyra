@@ -1,5 +1,33 @@
 /* LIFEPATH-P7 (mileage tracking) styles. */
 
+.mileage-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.mileage-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+}
+
+.mileage-toolbar label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mileage-toolbar-stat {
+  align-self: end;
+  padding-bottom: 6px;
+  color: var(--muted, #4a4036);
+}
+
 .mileage-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -123,4 +151,56 @@
   color: #92400e;
   border: 1px solid #fcd34d;
   vertical-align: middle;
+}
+
+@media print {
+  .sidebar,
+  .topbar,
+  .demo-banner,
+  .mileage-no-print,
+  .mileage-heading-actions,
+  .page-heading .heading-actions {
+    display: none !important;
+  }
+
+  .main-shell {
+    margin-left: 0 !important;
+    padding-inline: 0.4in !important;
+    background: #fff !important;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+
+  .mileage-page .panel {
+    box-shadow: none;
+    border: 1px solid #222;
+    break-inside: avoid;
+  }
+
+  body[data-mileage-print="weekly"] .mileage-print-monthly {
+    display: none !important;
+  }
+
+  body[data-mileage-print="monthly"] .mileage-print-weekly {
+    display: none !important;
+  }
+
+  .mileage-table {
+    font-size: 11pt;
+  }
+
+  .mileage-table th,
+  .mileage-table td {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .mileage-heading-actions .button {
+    min-height: 44px;
+  }
 }

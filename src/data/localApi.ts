@@ -1150,6 +1150,7 @@ export interface WorkspaceView {
     initials: string;
     color: string;
     profile: IndividualProfile | null;
+    photoUrl?: string | null;
   }[];
   staff: {
     id: string;
@@ -2236,6 +2237,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           .join(""),
         color: colors[i % 4],
         profile: normalizeProfile(person, person.profile),
+        photoUrl: person.photoUrl ?? null,
       };
     }),
     staff: memberships.map((membership) => {

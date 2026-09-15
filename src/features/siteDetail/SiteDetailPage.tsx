@@ -18,6 +18,7 @@ import { Avatar, Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
+import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
@@ -268,6 +269,9 @@ export default function SiteDetailPage({
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
   const latestQaPct = latestQaScore?.pct;
+  const siteReqMetrics = metrics(
+    (workspace.requirements ?? []).filter((r) => r.site === siteName),
+  );
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -301,21 +305,67 @@ export default function SiteDetailPage({
         <ArrowLeft size={16} /> Back to sites
       </button>
 
-      <header className="panel site-detail-head">
-        <Avatar name={site.name} color={site.color} />
-        <div className="site-detail-title">
-          <h1>{site.name}</h1>
-          <p>
-            <MapPin size={14} /> {site.address}
-            <span className="program-tag">{site.program}</span>
-          </p>
-          {site.sitePhone && (
-            <p className="muted">
-              <Phone size={14} /> {site.sitePhone}
+      <header className="panel site-hero">
+        <div className="site-hero-top">
+          <div className="site-detail-title">
+            <h1>{site.name}</h1>
+            <p>
+              <MapPin size={14} /> {site.address}
+              <span className="program-tag">{site.program}</span>
             </p>
+            {site.sitePhone && (
+              <p>
+                <Phone size={14} /> {site.sitePhone}
+              </p>
+            )}
+          </div>
+          <Badge status={openRequirements.length ? "Needs attention" : "On track"} />
+        </div>
+        <div className="site-hero-scores" aria-label={`${site.name} status`}>
+          <div className="site-hero-score">
+            <strong>
+              {siteReqMetrics.score}
+              <small>%</small>
+            </strong>
+            <span>Ready</span>
+            <div className="progress-track" aria-hidden="true">
+              <span style={{ width: `${siteReqMetrics.score}%` }} />
+            </div>
+          </div>
+          <div className="site-hero-stat">
+            <strong>{siteIndividuals.length}</strong>
+            <span>People</span>
+          </div>
+          <div className="site-hero-stat">
+            <strong>{siteStaff.length}</strong>
+            <span>Staff</span>
+          </div>
+          <div className="site-hero-stat">
+            <strong>{openRequirements.length}</strong>
+            <span>Open</span>
+          </div>
+          <div className="site-hero-stat">
+            <strong>{latestQaPct ?? "—"}</strong>
+            <span>{latestQa ? auditPeriodLabel(latestQa) : "QA score"}</span>
+          </div>
+        </div>
+        <div className="site-hero-people" aria-label="People in this house">
+          {siteIndividuals.length === 0 ? (
+            <p className="site-hero-empty">No one is placed at this home yet.</p>
+          ) : (
+            siteIndividuals.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="site-hero-person"
+                onClick={() => onOpenIndividual(p.name)}
+              >
+                <Avatar name={p.name} color={p.color} src={p.photoUrl} />
+                <span>{p.name.split(" ")[0]}</span>
+              </button>
+            ))
           )}
         </div>
-        <Badge status={openRequirements.length ? "Needs attention" : "On track"} />
       </header>
 
       <div
@@ -364,22 +414,8 @@ export default function SiteDetailPage({
         {activeTab === "overview" && !loading.overview && (
           <>
             <div className="stat-grid">
-              <div className="panel stat-card">
-                <strong>{siteIndividuals.length}</strong>
-                <span>Individuals</span>
-              </div>
-              <div className="panel stat-card">
-                <strong>{siteStaff.length}</strong>
-                <span>Staff assigned</span>
-              </div>
-              <div className="panel stat-card">
-                <strong>{openRequirements.length}</strong>
-                <span>Open items</span>
-              </div>
-              {/* QA-REVIEW-BADGE (2026-09-14): the QA Review score is a
-                  projection of this home's compliance score — it sits next
-                  to the other site stats, never blended into requirement
-                  tracking. */}
+              {/* QA-REVIEW-BADGE (2026-09-14): overnight module — keep the
+                  section breakdown here. Headcount lives in the site hero. */}
               <div className="panel stat-card qa-review-badge">
                 <strong>{latestQaPct ?? "—"}</strong>
                 <span>
@@ -469,11 +505,10 @@ export default function SiteDetailPage({
                 onClick={() => onOpenIndividual(p.name)}
               >
                 <div className="person-card-top">
-                  <Avatar name={p.name} color={p.color} />
+                  <Avatar name={p.name} color={p.color} src={p.photoUrl} />
                   <ArrowUpRight size={18} />
                 </div>
                 <h2>{p.name}</h2>
-                <p className="muted">Open record</p>
               </button>
             ))}
           </div>

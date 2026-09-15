@@ -974,6 +974,7 @@ export class HostedApi implements ComplyraApi {
             .join(""),
           color: colors[i % 4],
           profile: individualProfiles.get(person.id) ?? null,
+          photoUrl: person.photoUrl ?? null,
         };
       }),
       staff: memberships.map((membership) => {
@@ -8817,6 +8818,10 @@ function mapIndividual(row: Record<string, unknown>): IndividualRecord {
     siteId: row.site_id as string,
     fullName: row.full_name as string,
     dateOfBirth: String(row.date_of_birth).slice(0, 10),
+    photoUrl:
+      typeof row.photo_url === "string" && row.photo_url
+        ? row.photo_url
+        : null,
   };
 }
 

@@ -6,10 +6,89 @@
   gap: 16px;
 }
 
-.site-detail-head {
+.site-detail-head,
+.site-hero {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 16px;
+  padding: 20px var(--panel-inline) 18px;
+}
+
+.site-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.site-hero-scores {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) repeat(4, minmax(72px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.site-hero-score,
+.site-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.site-hero-score strong,
+.site-hero-stat strong {
+  font-size: 26px;
+  line-height: 1;
+  color: #3f5c3b;
+}
+
+.site-hero-score small {
+  font-size: 16px;
+}
+
+.site-hero-score span,
+.site-hero-stat span {
+  font-size: 12px;
+  color: #4a4036;
+}
+
+.site-hero-people {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.site-hero-person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 64px;
+  padding: 4px;
+  color: inherit;
+}
+
+.site-hero-person .avatar {
+  width: 52px;
+  height: 52px;
+  font-size: 16px;
+}
+
+.site-hero-person span {
+  font-size: 12px;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-hero-empty {
+  margin: 0;
+  color: #4a4036;
+  font-size: 13px;
 }
 
 .site-detail-title {
@@ -33,6 +112,8 @@
 .site-detail-tabs {
   overflow-x: auto;
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 16px;
 }
 
 .site-detail-tabs > button {
@@ -171,7 +252,26 @@
 }
 
 @media (max-width: 640px) {
-  .site-detail-head {
+  .site-detail-head,
+  .site-hero-top {
     flex-wrap: wrap;
+  }
+
+  .site-hero-scores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .site-hero-score {
+    grid-column: 1 / -1;
+  }
+
+  .site-detail-tabs {
+    gap: 16px;
+    padding-bottom: 2px;
+  }
+
+  .site-detail-tabs > button {
+    padding-left: 4px;
+    padding-right: 4px;
   }
 }

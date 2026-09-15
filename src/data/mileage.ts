@@ -246,15 +246,31 @@ export function assertCanViewMileageYearlySummary(session: {
 }
 
 /**
- * Whether this session may download/print the monthly mileage sheet: house
- * managers and platform admins only. HM and DSP both see the sheet, but the
- * download is HM-only.
+ * Roles that may download the monthly and weekly mileage PDFs.
+ * House managers print the home sheet; agency administrators and the
+ * platform operator must also be able to — the demo Admin account is
+ * otherwise locked out of printable sheets.
+ */
+export const MILEAGE_MONTHLY_DOWNLOAD_ROLE_KEYS = [
+  "house_manager",
+  "administrator",
+] as const;
+
+/**
+ * Whether this session may download the monthly/weekly mileage PDFs:
+ * house managers, agency administrators, and platform admins.
+ * DSP and other site staff still see the sheets and can use Print.
  */
 export function canDownloadMileageMonthly(
   session: { roleKey: string; platformAdmin: boolean } | null,
 ): boolean {
   if (!session) return false;
-  return session.platformAdmin || session.roleKey === "house_manager";
+  return (
+    session.platformAdmin ||
+    (MILEAGE_MONTHLY_DOWNLOAD_ROLE_KEYS as readonly string[]).includes(
+      session.roleKey,
+    )
+  );
 }
 
 // ---------- Backfill marking ----------
