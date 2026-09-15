@@ -78,6 +78,7 @@ import {
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
+import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import {
   assertAdoptableSignature,
@@ -974,7 +975,7 @@ export class HostedApi implements ComplyraApi {
             .join(""),
           color: colors[i % 4],
           profile: individualProfiles.get(person.id) ?? null,
-          photoUrl: person.photoUrl ?? null,
+          photoUrl: person.photoUrl || portraitSrc(person.fullName),
         };
       }),
       staff: memberships.map((membership) => {

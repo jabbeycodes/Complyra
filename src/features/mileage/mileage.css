@@ -1,10 +1,24 @@
 /* LIFEPATH-P7 (mileage tracking) styles. */
 
-.mileage-heading-actions {
+.mileage-heading-actions,
+.mileage-sheet-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.mileage-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.mileage-sheet-head h2 {
+  margin: 0;
 }
 
 .mileage-toolbar {
@@ -94,6 +108,26 @@
 }
 
 .mileage-table th {
+  white-space: normal;
+}
+
+.mileage-print-monthly .mileage-table td:nth-last-child(3) {
+  white-space: normal;
+  min-width: 7rem;
+  max-width: 14rem;
+}
+
+.mileage-print-monthly .mileage-table th:first-child,
+.mileage-print-monthly .mileage-table td:first-child,
+.mileage-print-weekly .mileage-table th:first-child,
+.mileage-print-weekly .mileage-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fffaf2;
+}
+
+.mileage-table th {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -119,6 +153,9 @@
 
 .table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-inline: calc(-1 * var(--panel-inline));
+  padding-inline: var(--panel-inline);
 }
 
 /* Admin backfill: out-of-sequence trip checkbox + row badge. */
@@ -200,7 +237,17 @@
 }
 
 @media (max-width: 640px) {
-  .mileage-heading-actions .button {
+  .mileage-heading-actions .button,
+  .mileage-sheet-actions .button {
     min-height: 44px;
+  }
+
+  .mileage-table th,
+  .mileage-table td {
+    padding: 6px 7px;
+  }
+
+  .table-scroll {
+    mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }

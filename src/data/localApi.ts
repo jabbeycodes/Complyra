@@ -29,6 +29,7 @@ import {
   evergreenDemoLogoDataUrl,
   validateLogoFile,
 } from "./branding";
+import { portraitSrc } from "./personPortrait";
 import { metrics } from "../domain";
 import {
   computeRequirementStatus,
@@ -2237,7 +2238,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           .join(""),
         color: colors[i % 4],
         profile: normalizeProfile(person, person.profile),
-        photoUrl: person.photoUrl ?? null,
+        photoUrl: person.photoUrl || portraitSrc(person.fullName),
       };
     }),
     staff: memberships.map((membership) => {

@@ -33,23 +33,30 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
   await signIn(page);
   await openNav(page, "Mileage");
   await expect(page.getByRole("heading", { level: 1, name: "Mileage" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Print weekly" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Print monthly" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Weekly PDF" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Monthly PDF" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Weekly sheet/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Weekly sheet" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Monthly log" })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Week 1: days 1–7");
-  await page.screenshot({ path: shotPath("mileage_admin_sheets.png"), fullPage: false });
+  await expect(page.locator("body")).not.toContainText("Continues from last trip");
 
-  const weekly = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Weekly PDF" }).click();
-  const weeklyFile = await weekly;
-  expect(weeklyFile.suggestedFilename()).toMatch(/mileage-weekly.*\.pdf$/);
+  await expect(page.getByRole("button", { name: "Print monthly" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Monthly PDF" })).toBeVisible();
+  await page.screenshot({ path: shotPath("mileage_admin_monthly.png"), fullPage: false });
 
   const monthly = page.waitForEvent("download");
   await page.getByRole("button", { name: "Monthly PDF" }).click();
   const monthlyFile = await monthly;
   expect(monthlyFile.suggestedFilename()).toMatch(/mileage-log.*\.pdf$/);
+
+  await page.getByRole("tab", { name: "Weekly sheet" }).click();
+  await expect(page.getByRole("heading", { name: /Weekly sheet/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Print weekly" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Weekly PDF" })).toBeVisible();
+  await page.screenshot({ path: shotPath("mileage_admin_weekly.png"), fullPage: false });
+
+  const weekly = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Weekly PDF" }).click();
+  const weeklyFile = await weekly;
+  expect(weeklyFile.suggestedFilename()).toMatch(/mileage-weekly.*\.pdf$/);
 });
 
 test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
@@ -69,8 +76,11 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await signIn(page);
   await openMaple();
   await expect(page.locator(".site-hero")).toBeVisible();
+  await expect(page.locator(".site-hero .status-mix")).toBeVisible();
   await expect(page.locator(".site-hero-people")).toBeVisible();
+  await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   await expect(page.locator(".site-hero-scores")).toContainText("Ready");
+  await expect(page.locator("body")).not.toContainText("Open record");
   const tabs = page.locator(".site-detail-tabs [role='tab']");
   await expect(tabs.last()).toHaveText(/Staff/);
   await page.screenshot({ path: shotPath("site_hero_1280.png"), fullPage: false });
@@ -88,6 +98,7 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
     )
     .toBe(true);
   await expect(page.locator(".site-hero")).toBeVisible();
+  await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   const tablist = page.locator(".site-detail-tabs");
   await expect(tablist).toBeVisible();
   const box = await tablist.boundingBox();

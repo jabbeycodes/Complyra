@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { Avatar, Badge, Empty, formatDate } from "../../components";
+import StatusMixDonut from "../../components/StatusMixDonut";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
@@ -269,9 +270,10 @@ export default function SiteDetailPage({
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
   const latestQaPct = latestQaScore?.pct;
-  const siteReqMetrics = metrics(
-    (workspace.requirements ?? []).filter((r) => r.site === siteName),
+  const siteRequirements = (workspace.requirements ?? []).filter(
+    (r) => r.site === siteName,
   );
+  const siteReqMetrics = metrics(siteRequirements);
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -321,32 +323,35 @@ export default function SiteDetailPage({
           </div>
           <Badge status={openRequirements.length ? "Needs attention" : "On track"} />
         </div>
-        <div className="site-hero-scores" aria-label={`${site.name} status`}>
-          <div className="site-hero-score">
-            <strong>
-              {siteReqMetrics.score}
-              <small>%</small>
-            </strong>
-            <span>Ready</span>
-            <div className="progress-track" aria-hidden="true">
-              <span style={{ width: `${siteReqMetrics.score}%` }} />
+        <div className="site-hero-dash">
+          <StatusMixDonut items={siteRequirements} />
+          <div className="site-hero-scores site-hero-kpis" aria-label={`${site.name} status`}>
+            <div className="site-hero-score">
+              <strong>
+                {siteReqMetrics.score}
+                <small>%</small>
+              </strong>
+              <span>Ready</span>
+              <div className="progress-track" aria-hidden="true">
+                <span style={{ width: `${siteReqMetrics.score}%` }} />
+              </div>
             </div>
-          </div>
-          <div className="site-hero-stat">
-            <strong>{siteIndividuals.length}</strong>
-            <span>People</span>
-          </div>
-          <div className="site-hero-stat">
-            <strong>{siteStaff.length}</strong>
-            <span>Staff</span>
-          </div>
-          <div className="site-hero-stat">
-            <strong>{openRequirements.length}</strong>
-            <span>Open</span>
-          </div>
-          <div className="site-hero-stat">
-            <strong>{latestQaPct ?? "—"}</strong>
-            <span>{latestQa ? auditPeriodLabel(latestQa) : "QA score"}</span>
+            <div className="site-hero-stat">
+              <strong>{siteIndividuals.length}</strong>
+              <span>People</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{siteStaff.length}</strong>
+              <span>Staff</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{openRequirements.length}</strong>
+              <span>Open</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{latestQaPct ?? "—"}</strong>
+              <span>{latestQa ? auditPeriodLabel(latestQa) : "QA"}</span>
+            </div>
           </div>
         </div>
         <div className="site-hero-people" aria-label="People in this house">
@@ -388,7 +393,7 @@ export default function SiteDetailPage({
               onClick={() => selectTab(t.id)}
               onKeyDown={(e) => onTabKeyDown(e, t.id)}
             >
-              <Icon size={15} aria-hidden="true" /> {t.label}
+              <Icon className="site-tab-icon" size={15} aria-hidden="true" /> {t.label}
             </button>
           );
         })}

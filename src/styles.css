@@ -30,8 +30,8 @@
   box-sizing: border-box;
 }
 html {
-  /* Modest rem bump from the 16px browser default. Do not change gutter tokens. */
-  font-size: 17px;
+  /* Slightly larger than the 16px default. Do not change gutter tokens. */
+  font-size: 18px;
 }
 html,
 body {

@@ -80,7 +80,7 @@ export default function MileagePage() {
   const { api, session, workspace, refresh } = useData();
   const [siteId, setSiteId] = useState("");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
-  const [tab, setTab] = useState<"monthly" | "yearly">("monthly");
+  const [tab, setTab] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [trips, setTrips] = useState<MileageTripView[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -377,7 +377,6 @@ export default function MileagePage() {
     }));
   }
 
-  const continuityHint = editingId ? editExpectedStart : expectedStart;
   const weekColumns = WEEK_LABELS; // exactly Week 1–Week 4 per the tracker workbook
 
   // ---- Monthly sheet PDF: build and download a real file, no dead-end views ----
@@ -496,49 +495,36 @@ export default function MileagePage() {
   }
 
 
-  const sheetBusy = downloading || (trips.length === 0 && people.length === 0);
   const canDownloadSheets = canDownloadMonthly(session);
+
+  function sheetActions(kind: "weekly" | "monthly") {
+    const printLabel = kind === "weekly" ? "Print weekly" : "Print monthly";
+    const pdfLabel = kind === "weekly" ? "Weekly PDF" : "Monthly PDF";
+    return (
+      <div className="mileage-sheet-actions">
+        <button
+          className="button"
+          onClick={() => printSheet(kind)}
+          disabled={downloading}
+        >
+          <Printer size={14} /> {printLabel}
+        </button>
+        {canDownloadSheets && (
+          <button
+            className="button"
+            onClick={kind === "weekly" ? downloadWeeklySheet : downloadMonthlySheet}
+            disabled={downloading}
+          >
+            <Download size={14} /> {downloading ? "Building…" : pdfLabel}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div data-tour="mileage" className="mileage-page">
-      <PageHeading title="Mileage">
-        {tab === "monthly" && (
-          <div className="mileage-heading-actions">
-            <button
-              className="button"
-              onClick={() => printSheet("weekly")}
-              disabled={sheetBusy}
-            >
-              <Printer size={14} /> Print weekly
-            </button>
-            <button
-              className="button"
-              onClick={() => printSheet("monthly")}
-              disabled={sheetBusy}
-            >
-              <Printer size={14} /> Print monthly
-            </button>
-            {canDownloadSheets && (
-              <>
-                <button
-                  className="button"
-                  onClick={downloadWeeklySheet}
-                  disabled={sheetBusy}
-                >
-                  <Download size={14} /> {downloading ? "Building…" : "Weekly PDF"}
-                </button>
-                <button
-                  className="button"
-                  onClick={downloadMonthlySheet}
-                  disabled={sheetBusy}
-                >
-                  <Download size={14} /> {downloading ? "Building…" : "Monthly PDF"}
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </PageHeading>
+      <PageHeading title="Mileage" />
       {error && <p className="form-error mileage-no-print">{error}</p>}
 
       <div className="tabs mileage-no-print" role="tablist" aria-label="Mileage views">
@@ -549,6 +535,14 @@ export default function MileagePage() {
           onClick={() => setTab("monthly")}
         >
           Monthly log
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "weekly"}
+          className={tab === "weekly" ? "selected" : ""}
+          onClick={() => setTab("weekly")}
+        >
+          Weekly sheet
         </button>
         {showYearly && (
           <button
@@ -591,16 +585,7 @@ export default function MileagePage() {
             </select>
           </label>
         )}
-        {tab === "monthly" ? (
-          <label>
-            Month
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => e.target.value && setMonth(e.target.value)}
-            />
-          </label>
-        ) : (
+        {tab === "yearly" ? (
           <label>
             Year
             <input
@@ -614,13 +599,57 @@ export default function MileagePage() {
               }}
             />
           </label>
+        ) : (
+          <label>
+            Month
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => e.target.value && setMonth(e.target.value)}
+            />
+          </label>
         )}
-        {tab === "monthly" && (
+        {tab !== "yearly" && (
           <span className="mileage-toolbar-stat">
             {summary.tripCount} trip{summary.tripCount === 1 ? "" : "s"} · {summary.totalMiles} mi
           </span>
         )}
       </div>
+
+      {tab === "weekly" && (
+        <section className="panel mileage-print-weekly" aria-label="Weekly mileage sheet">
+          <div className="mileage-sheet-head">
+            <h2>Weekly sheet — {monthLabel(month)}</h2>
+            {sheetActions("weekly")}
+          </div>
+          <div className="table-scroll">
+            <table className="mileage-table mileage-table-compact">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  {weekColumns.map((label) => (
+                    <th key={label}>{label}</th>
+                  ))}
+                  <th>Monthly Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weekly.rows.map((row) => (
+                  <tr key={row.individualId}>
+                    <td>{nameById[row.individualId] ?? row.individualId}</td>
+                    {weekColumns.map((label, index) => (
+                      <td key={label}>{row.weeks[index]}</td>
+                    ))}
+                    <td>
+                      <strong>{row.monthlyTotal}</strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {tab === "yearly" && showYearly && (
         <>
@@ -769,16 +798,6 @@ export default function MileagePage() {
                   onChange={(e) => setForm({ ...form, odometerStart: e.target.value })}
                   placeholder="e.g. 45210"
                 />
-                {continuityHint !== null && !editingId && (
-                  <span className="stack-help">
-                    Continues from the last trip's end: {continuityHint.toLocaleString("en-US")}
-                  </span>
-                )}
-                {editingId && continuityHint !== null && (
-                  <span className="stack-help">
-                    Must match the previous trip's end: {continuityHint.toLocaleString("en-US")}
-                  </span>
-                )}
               </label>
               <label>
                 Odometer stop
@@ -801,7 +820,7 @@ export default function MileagePage() {
                     checked={form.backfill}
                     onChange={(e) => setForm({ ...form, backfill: e.target.checked })}
                   />
-                  Backfill — this trip is out of sequence
+                  Backfill — out of sequence
                 </label>
               )}
               <fieldset className="mileage-riders">
@@ -861,9 +880,12 @@ export default function MileagePage() {
           </section>
 
           <section className="panel mileage-print-monthly" aria-label="Monthly mileage log">
-            <h2>
-              {monthLabel(month)} — {activeSite?.name}
-            </h2>
+            <div className="mileage-sheet-head">
+              <h2>
+                {monthLabel(month)} — {activeSite?.name}
+              </h2>
+              {sheetActions("monthly")}
+            </div>
             {trips.length === 0 ? (
               <Empty title="No trips logged" text="Log the first trip for this month above." />
             ) : (
@@ -946,36 +968,6 @@ export default function MileagePage() {
                 </table>
               </div>
             )}
-          </section>
-
-          <section className="panel mileage-print-weekly" aria-label="Weekly mileage sheet">
-            <h2>Weekly sheet — {monthLabel(month)}</h2>
-            <div className="table-scroll">
-              <table className="mileage-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    {weekColumns.map((label) => (
-                      <th key={label}>{label}</th>
-                    ))}
-                    <th>Monthly Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekly.rows.map((row) => (
-                    <tr key={row.individualId}>
-                      <td>{nameById[row.individualId] ?? row.individualId}</td>
-                      {weekColumns.map((label, index) => (
-                        <td key={label}>{row.weeks[index]}</td>
-                      ))}
-                      <td>
-                        <strong>{row.monthlyTotal}</strong>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </section>
         </>
       )}
