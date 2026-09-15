@@ -261,7 +261,7 @@ export function FilterBar({
         <Search size={17} />
         <input
           aria-label="Search this list"
-          placeholder="Search requirements, people, or sites…"
+          placeholder="Search requirements, individuals, or sites…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

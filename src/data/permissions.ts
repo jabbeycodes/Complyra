@@ -227,7 +227,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: "dsp",
     name: "Direct support professional",
     shortCode: "DSP",
-    description: "Sees assigned people, completes assigned work, and signs their own acknowledgments.",
+    description: "Sees assigned individuals, completes assigned work, and signs their own acknowledgments.",
     defaultScope: "assigned",
     capability: "dsp",
     permissions: pack([

@@ -52,7 +52,7 @@ export default function AddSiteForm({
       }}
     >
       <p className="form-help">
-        Add a home or program site first. People and PCSPs attach to a site.
+        Add a home or program site first. Individuals and PCSPs attach to a site.
       </p>
       <label className="form-label">
         Site name
