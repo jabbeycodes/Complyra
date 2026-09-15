@@ -31,6 +31,7 @@ import {
   Menu,
   CheckCheck,
   BookOpen,
+  BadgeCheck,
   CircleAlert,
   ChevronRight,
   RotateCcw,
@@ -89,6 +90,7 @@ import {
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
 import DelegationsPage from "./features/delegations/DelegationsPage";
+import QaAuditsPage from "./features/qa/QaAuditsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
@@ -604,6 +606,9 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
+        // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
+        // system-verified items, auditor scoring, and photo disputes.
+        ["QA audits", BadgeCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
         ["AI settings", ServerCog],
@@ -1721,6 +1726,8 @@ export default function App() {
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {page === "AI settings" && <AiSettingsPage />}
+              {/* QA-AUDIT-PAGE (2026-09-14) */}
+              {page === "QA audits" && <QaAuditsPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading title="Settings" />

@@ -170,6 +170,26 @@ import {
   type TemplateSections,
   type TrainingMaterialContent,
 } from "../delegation/delegation";
+// QA-AUDIT (2026-09-14): pure checklist/scoring module + API helpers.
+import {
+  QA_ITEM_MAP,
+  nextQaDueDate,
+  qaQuarterMonths,
+  qaUndecidedItems,
+  raiseQaDisputeState,
+  rankQaSites,
+  resolveQaDisputeState,
+  scoreQaAudit,
+  scoreQaItemState,
+  type QaAudit,
+  type QaAuditItemState,
+  type QaAuditSchedule,
+  type StoredQaAuditItem,
+  type QaAutoVerifyContext,
+  type QaRankedSite,
+  type QaPhotoInput,
+} from "./qaAudit";
+import { expandAndVerifyQaItems } from "./qaAuditApi";
 // LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
 import {
   TRAINING_TOPICS,
@@ -886,6 +906,81 @@ export interface ComplyraApi {
    */
   sweepDelegationAckOverdue(): Promise<number>;
   /* ------------------------------------------------------------------ */
+  /* QA-AUDIT (2026-09-14): quarterly program-site quality assurance.   */
+  /* Items the system can prove from its own records are pre-filled and */
+  /* locked; the auditor scores the rest, DPM/HM dispute with photo    */
+  /* evidence, and the auditor resolves disputes.                       */
+  /* ------------------------------------------------------------------ */
+  /** Start (or reopen) a draft audit for a site + quarter (qa.audit). */
+  createQaAudit(
+    siteId: string,
+    year: number,
+    quarter: number,
+  ): Promise<QaAudit>;
+  /** Audits visible to the session user (qa.audit / audit.read / audit.export). */
+  listQaAudits(filter?: {
+    siteId?: string;
+    year?: number;
+    quarter?: number;
+  }): Promise<QaAudit[]>;
+  /** One audit, or null. */
+  getQaAudit(id: string): Promise<QaAudit | null>;
+  /** All item states for an audit (locked system items included). */
+  getQaAuditItems(auditId: string): Promise<QaAuditItemState[]>;
+  /**
+   * Score one auditor-scored item (yes / no / na / skipped). qa.audit.
+   * Throws on locked system items or while a dispute is open.
+   */
+  scoreQaItem(
+    auditId: string,
+    itemKey: string,
+    result: "yes" | "no" | "na" | "skipped",
+    comment: string,
+  ): Promise<QaAuditItemState>;
+  /**
+   * Finalize the audit with the auditor's adopted signature. qa.audit.
+   * Throws while any item is undecided.
+   */
+  finalizeQaAudit(
+    auditId: string,
+    signature: { name: string; mark: string },
+  ): Promise<QaAudit>;
+  /**
+   * Challenge a scored item with a note + at least one photo. qa.dispute
+   * (DPM / HM). Locked system items cannot be disputed.
+   */
+  raiseQaDispute(
+    auditId: string,
+    itemKey: string,
+    note: string,
+    photos: QaPhotoInput[],
+  ): Promise<QaAuditItemState>;
+  /**
+   * Approve or reject a dispute with a recorded reason. qa.audit.
+   * Approving flips an incorrect No to Yes.
+   */
+  resolveQaDispute(
+    auditId: string,
+    itemKey: string,
+    approved: boolean,
+    reason: string,
+  ): Promise<QaAuditItemState>;
+  /** Schedules visible to the session user. */
+  listQaSchedules(filter?: { siteId?: string }): Promise<QaAuditSchedule[]>;
+  /** Create/update a site's QA schedule (qa.schedule). */
+  upsertQaSchedule(input: {
+    siteId: string;
+    nextDue: string;
+    assignedAuditorId?: string | null;
+    assignedAuditorName?: string | null;
+  }): Promise<QaAuditSchedule>;
+  /** Program-site ranking by latest QA score, with trend tie-breaks. */
+  getQaSiteRanking(): Promise<QaRankedSite[]>;
+  /** Finalized audits for one site, newest first. */
+  getQaSiteHistory(siteId: string): Promise<QaAudit[]>;
+  /** Queue due/overdue schedule reminders once per day (qa.schedule). */
+  sweepQaScheduleReminders(today?: string): Promise<number>;
+  /* ------------------------------------------------------------------ */
   /* PCSP document-extraction pipeline: upload → extract → edit →       */
   /* approve → activate. NOTHING is tracked before approveDocument-     */
   /* Extraction(); activation hands protocol items into the delegation  */
@@ -1359,6 +1454,18 @@ function ensureDelegationCollections(store: MemoryStore) {
   db.individualDelegationAssignments = db.individualDelegationAssignments ?? [];
   db.delegationTrainingMaterials = db.delegationTrainingMaterials ?? [];
   db.delegationAcknowledgments = db.delegationAcknowledgments ?? [];
+}
+
+/** QA-AUDIT (2026-09-14): local store shapes (item states gain their row ids). */
+type StoredQaAudit = QaAudit;
+type StoredQaAuditSchedule = QaAuditSchedule;
+
+/** Backfill QA collections when an older persisted db lacks them. */
+function ensureQaCollections(store: MemoryStore) {
+  const db = store.db;
+  db.qaAudits = db.qaAudits ?? [];
+  db.qaAuditItems = db.qaAuditItems ?? [];
+  db.qaSchedules = db.qaSchedules ?? [];
 }
 
 /** Backfill document-extraction collections when an older db lacks them. */
@@ -8121,6 +8228,504 @@ export class LocalApi implements ComplyraApi {
       }
     }
     return inserted;
+  }
+
+  // ================= QA audits (local) =================
+
+  private qaSiteScope(session: SessionUser): string[] | null {
+    if (
+      session.role === "administrator" ||
+      session.role === "compliance_admin" ||
+      session.platformAdmin
+    ) {
+      return null;
+    }
+    if (session.siteId) return [session.siteId];
+    return null;
+  }
+
+  private assertQaSite(session: SessionUser, siteId: string): void {
+    const scope = this.qaSiteScope(session);
+    if (scope !== null && !scope.includes(siteId)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private getQaAuditOrThrow(
+    session: SessionUser,
+    auditId: string,
+  ): StoredQaAudit {
+    ensureQaCollections(this.store);
+    const audit = this.store.db.qaAudits.find(
+      (a) => a.id === auditId && a.agencyId === session.agencyId,
+    );
+    if (!audit) throw new Error("QA audit not found.");
+    this.assertQaSite(session, audit.siteId);
+    return audit;
+  }
+
+  /** Proof context for the five approved auto-verification mappings. */
+  private qaAutoContext(
+    session: SessionUser,
+    siteId: string,
+    year: number,
+    quarter: number,
+  ): QaAutoVerifyContext {
+    const db = this.store.db;
+    const agencyId = session.agencyId;
+    const months = qaQuarterMonths(year, quarter);
+    return {
+      siteId,
+      months,
+      auditYear: year,
+      drills: db.emergencyDrills
+        .filter(
+          (d) =>
+            d.agencyId === agencyId &&
+            d.siteId === siteId &&
+            months.includes(d.monthKey),
+        )
+        .map((d) => ({ ...d })),
+      trips: db.mileageTrips
+        .filter(
+          (t) =>
+            t.agencyId === agencyId &&
+            t.siteId === siteId &&
+            months.includes(t.tripDate.slice(0, 7)),
+        )
+        .map((t) => ({ siteId: t.siteId, date: t.tripDate })),
+      packets: db.packets
+        .filter(
+          (p) =>
+            p.agencyId === agencyId && p.startsOn.slice(0, 4) === String(year),
+        )
+        .map((p) => ({
+          individualId: p.individualId,
+          startsOn: p.startsOn,
+          rows: db.rows
+            .filter((r) => r.packetId === p.id)
+            .map((r) => ({ staffName: r.staffName, signedAt: r.signedAt })),
+        })),
+      assignments: db.individualDelegationAssignments
+        .filter((a) => a.agencyId === agencyId && a.status === "assigned")
+        .map((a) => ({
+          individualId: a.individualId,
+          status: a.status,
+          acks: db.delegationAcknowledgments
+            .filter((k) => k.assignmentId === a.id)
+            .map((k) => ({ signedAt: k.signedAt })),
+        })),
+      safetyReports: db.homeSafetyReports
+        .filter(
+          (r) =>
+            r.agencyId === agencyId &&
+            r.siteId === siteId &&
+            months.includes(r.monthKey),
+        )
+        .map((r) => ({
+          siteId: r.siteId,
+          monthKey: r.monthKey,
+          lines: r.lines.map((l) => ({ dateChecked: l.dateChecked })),
+        })),
+    };
+  }
+
+  async createQaAudit(
+    siteId: string,
+    year: number,
+    quarter: number,
+  ): Promise<QaAudit> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.audit");
+    this.assertQaSite(session, siteId);
+    if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
+      throw new Error("That quarter is not valid.");
+    }
+    const q = quarter as 1 | 2 | 3 | 4;
+    ensureQaCollections(this.store);
+    const db = this.store.db;
+    const existing = db.qaAudits.find(
+      (a) =>
+        a.agencyId === session.agencyId &&
+        a.siteId === siteId &&
+        a.year === year &&
+        a.quarter === q,
+    );
+    if (existing) return existing;
+    const individuals = db.individuals
+      .filter((p) => p.agencyId === session.agencyId && p.siteId === siteId)
+      .map((p) => ({ id: p.id, fullName: p.fullName }));
+    const ctx = this.qaAutoContext(session, siteId, year, quarter);
+    const items = expandAndVerifyQaItems(individuals, ctx);
+    const now = new Date().toISOString();
+    const audit: StoredQaAudit = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId,
+      year,
+      quarter: q,
+      status: "in_progress",
+      auditorId: session.userId,
+      auditorName: session.fullName,
+      auditorSignatureName: null,
+      auditorSignatureMark: null,
+      signedAt: null,
+      score: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.qaAudits.push(audit);
+    for (const item of items) {
+      db.qaAuditItems.push({
+        ...item,
+        id: crypto.randomUUID(),
+        auditId: audit.id,
+        agencyId: session.agencyId,
+      });
+    }
+    return audit;
+  }
+
+  async listQaAudits(filter?: {
+    siteId?: string;
+    year?: number;
+    quarter?: number;
+  }): Promise<QaAudit[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    ensureQaCollections(this.store);
+    const scope = this.qaSiteScope(session);
+    return this.store.db.qaAudits
+      .filter((a) => {
+        if (a.agencyId !== session.agencyId) return false;
+        if (filter?.siteId && a.siteId !== filter.siteId) return false;
+        if (filter?.year && a.year !== filter.year) return false;
+        if (filter?.quarter && a.quarter !== filter.quarter) return false;
+        if (scope !== null && !scope.includes(a.siteId)) return false;
+        return true;
+      })
+      .sort((a, b) => b.year - a.year || b.quarter - a.quarter);
+  }
+
+  async getQaAudit(id: string): Promise<QaAudit | null> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    ensureQaCollections(this.store);
+    const audit = this.store.db.qaAudits.find(
+      (a) => a.id === id && a.agencyId === session.agencyId,
+    );
+    if (!audit) return null;
+    this.assertQaSite(session, audit.siteId);
+    return audit;
+  }
+
+  async getQaAuditItems(auditId: string): Promise<QaAuditItemState[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    const audit = this.getQaAuditOrThrow(session, auditId);
+    void audit;
+    return this.store.db.qaAuditItems
+      .filter((i) => i.auditId === auditId && i.agencyId === session.agencyId)
+      .map((i) => ({ ...i }));
+  }
+
+  private qaItemOrThrow(
+    session: SessionUser,
+    auditId: string,
+    itemKey: string,
+  ): StoredQaAuditItem {
+    this.getQaAuditOrThrow(session, auditId);
+    const item = this.store.db.qaAuditItems.find(
+      (i) =>
+        i.auditId === auditId &&
+        i.key === itemKey &&
+        i.agencyId === session.agencyId,
+    );
+    if (!item) throw new Error("QA audit item not found.");
+    return item;
+  }
+
+  async scoreQaItem(
+    auditId: string,
+    itemKey: string,
+    result: "yes" | "no" | "na" | "skipped",
+    comment: string,
+  ): Promise<QaAuditItemState> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.audit");
+    const audit = this.getQaAuditOrThrow(session, auditId);
+    if (audit.status === "finalized") {
+      throw new Error("That audit is finalized — it can no longer be scored.");
+    }
+    const updated = scoreQaItemState(
+      this.qaItemOrThrow(session, auditId, itemKey),
+      result,
+      comment,
+      session.userId,
+      session.fullName || "Auditor",
+    );
+    Object.assign(this.qaItemOrThrow(session, auditId, itemKey), updated);
+    audit.updatedAt = new Date().toISOString();
+    return { ...updated };
+  }
+
+  async finalizeQaAudit(
+    auditId: string,
+    signature: { name: string; mark: string },
+  ): Promise<QaAudit> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.audit");
+    const audit = this.getQaAuditOrThrow(session, auditId);
+    if (audit.status === "finalized") {
+      throw new Error("That audit is already finalized.");
+    }
+    const items = this.store.db.qaAuditItems.filter(
+      (i) => i.auditId === auditId && i.agencyId === session.agencyId,
+    );
+    const undecided = qaUndecidedItems(items);
+    if (undecided.length > 0) {
+      throw new Error(
+        `${undecided.length} item${undecided.length === 1 ? " is" : "s are"} still undecided. Score or skip every item before finalizing.`,
+      );
+    }
+    if (!signature.name.trim() || !signature.mark.trim()) {
+      throw new Error("An adopted signature is required to finalize.");
+    }
+    const now = new Date().toISOString();
+    audit.status = "finalized";
+    audit.auditorSignatureName = signature.name.trim();
+    audit.auditorSignatureMark = signature.mark.trim();
+    audit.signedAt = now;
+    audit.score = scoreQaAudit(items);
+    audit.updatedAt = now;
+    // Roll the site's schedule forward one quarter so the next audit is due
+    // on time (system action — no extra permission needed to finalize).
+    const schedule = this.store.db.qaSchedules.find(
+      (s) => s.agencyId === session.agencyId && s.siteId === audit.siteId && s.active,
+    );
+    if (schedule) {
+      schedule.nextDue = nextQaDueDate(schedule.nextDue);
+      schedule.updatedAt = now;
+    }
+    return audit;
+  }
+
+  async raiseQaDispute(
+    auditId: string,
+    itemKey: string,
+    note: string,
+    photos: QaPhotoInput[],
+  ): Promise<QaAuditItemState> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.dispute");
+    const audit = this.getQaAuditOrThrow(session, auditId);
+    const updated = raiseQaDisputeState(
+      this.qaItemOrThrow(session, auditId, itemKey),
+      note,
+      photos,
+      session.userId,
+      session.fullName || "Staff",
+    );
+    Object.assign(this.qaItemOrThrow(session, auditId, itemKey), updated);
+    audit.updatedAt = new Date().toISOString();
+    // Notify auditors at the agency that a dispute needs review.
+    this.queueDelegationNotification({
+      agencyId: session.agencyId,
+      roleKey: "auditor",
+      type: "qa.dispute_raised",
+      title: "QA finding disputed",
+      body: `${updated.individualName ? `${updated.individualName} — ` : ""}${this.qaItemLabel(updated.itemId)} was disputed with photo evidence.`,
+      deepLink: `/qa-audits/${auditId}`,
+      entityType: "qa_audit",
+      entityId: auditId,
+      dedupeKey: `qa-dispute-${auditId}-${itemKey}-${updated.disputeRaisedAt}`,
+    });
+    return { ...updated };
+  }
+
+  private qaItemLabel(itemId: string): string {
+    return QA_ITEM_MAP[itemId]?.text ?? itemId;
+  }
+
+  async resolveQaDispute(
+    auditId: string,
+    itemKey: string,
+    approved: boolean,
+    reason: string,
+  ): Promise<QaAuditItemState> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.audit");
+    const audit = this.getQaAuditOrThrow(session, auditId);
+    const updated = resolveQaDisputeState(
+      this.qaItemOrThrow(session, auditId, itemKey),
+      approved,
+      reason,
+      session.userId,
+      session.fullName || "Auditor",
+    );
+    Object.assign(this.qaItemOrThrow(session, auditId, itemKey), updated);
+    // Keep the finalized score snapshot honest when a dispute changes it.
+    if (audit.status === "finalized") {
+      const items = this.store.db.qaAuditItems.filter(
+        (i) => i.auditId === auditId && i.agencyId === session.agencyId,
+      );
+      audit.score = scoreQaAudit(items);
+    }
+    audit.updatedAt = new Date().toISOString();
+    return { ...updated };
+  }
+
+  async listQaSchedules(filter?: { siteId?: string }): Promise<QaAuditSchedule[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    ensureQaCollections(this.store);
+    const scope = this.qaSiteScope(session);
+    return this.store.db.qaSchedules
+      .filter((s) => {
+        if (s.agencyId !== session.agencyId) return false;
+        if (filter?.siteId && s.siteId !== filter.siteId) return false;
+        if (scope !== null && !scope.includes(s.siteId)) return false;
+        return true;
+      })
+      .sort((a, b) => a.nextDue.localeCompare(b.nextDue));
+  }
+
+  async upsertQaSchedule(input: {
+    siteId: string;
+    nextDue: string;
+    assignedAuditorId?: string | null;
+    assignedAuditorName?: string | null;
+  }): Promise<QaAuditSchedule> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.schedule");
+    this.assertQaSite(session, input.siteId);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.nextDue)) {
+      throw new Error("The due date must be a calendar date.");
+    }
+    ensureQaCollections(this.store);
+    const db = this.store.db;
+    const now = new Date().toISOString();
+    const existing = db.qaSchedules.find(
+      (s) => s.agencyId === session.agencyId && s.siteId === input.siteId,
+    );
+    if (existing) {
+      existing.nextDue = input.nextDue;
+      existing.assignedAuditorId = input.assignedAuditorId ?? null;
+      existing.assignedAuditorName = input.assignedAuditorName ?? null;
+      existing.active = true;
+      existing.updatedAt = now;
+      return existing;
+    }
+    const schedule: StoredQaAuditSchedule = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      nextDue: input.nextDue,
+      assignedAuditorId: input.assignedAuditorId ?? null,
+      assignedAuditorName: input.assignedAuditorName ?? null,
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.qaSchedules.push(schedule);
+    return schedule;
+  }
+
+  /**
+   * Queue due/overdue reminders for active QA schedules. Idempotent per
+   * schedule per day — safe to run on login and on a daily sweep.
+   */
+  async sweepQaScheduleReminders(today = new Date().toISOString().slice(0, 10)): Promise<number> {
+    const session = assertSession(this.store);
+    assertCan(session, "qa.schedule");
+    ensureQaCollections(this.store);
+    let queued = 0;
+    for (const schedule of this.store.db.qaSchedules) {
+      if (schedule.agencyId !== session.agencyId || !schedule.active) continue;
+      const overdue = schedule.nextDue < today;
+      const dueSoon =
+        !overdue &&
+        schedule.nextDue <=
+          new Date(new Date(`${today}T00:00:00Z`).getTime() + 14 * 86400000)
+            .toISOString()
+            .slice(0, 10);
+      if (!overdue && !dueSoon) continue;
+      const siteName =
+        this.store.db.sites.find((s) => s.id === schedule.siteId)?.name ??
+        "a program site";
+      const dedupeKey = `qa-schedule-${schedule.id}-${today}`;
+      const ok = this.queueDelegationNotification({
+        agencyId: session.agencyId,
+        roleKey: "auditor",
+        type: overdue ? "qa.schedule_overdue" : "qa.schedule_due",
+        title: overdue ? "QA audit overdue" : "QA audit due soon",
+        body: `${siteName} — quarterly QA audit ${overdue ? "was due" : "is due"} ${schedule.nextDue}.`,
+        deepLink: `/qa-audits?siteId=${schedule.siteId}`,
+        entityType: "qa_schedule",
+        entityId: schedule.id,
+        dedupeKey,
+      });
+      if (ok) queued += 1;
+    }
+    return queued;
+  }
+
+  async getQaSiteRanking(): Promise<QaRankedSite[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    ensureQaCollections(this.store);
+    const db = this.store.db;
+    const scope = this.qaSiteScope(session);
+    const sites = db.sites.filter((s) => {
+      if (s.agencyId !== session.agencyId) return false;
+      if (scope !== null && !scope.includes(s.id)) return false;
+      return true;
+    });
+    const finalized = db.qaAudits.filter(
+      (a) => a.agencyId === session.agencyId && a.status === "finalized",
+    );
+    const bySite = new Map<string, QaAudit[]>();
+    for (const audit of finalized) {
+      const list = bySite.get(audit.siteId) ?? [];
+      list.push(audit);
+      bySite.set(audit.siteId, list);
+    }
+    const inputs = sites.map((site) => {
+      const audits = (bySite.get(site.id) ?? []).sort(
+        (a, b) => b.year - a.year || b.quarter - a.quarter,
+      );
+      const latest = audits[0] ?? null;
+      const previous = audits[1] ?? null;
+      return {
+        siteId: site.id,
+        siteName: site.name,
+        score: latest?.score?.pct ?? null,
+        previousScore: previous?.score?.pct ?? null,
+        trend:
+          latest?.score?.pct != null && previous?.score?.pct != null
+            ? latest.score.pct - previous.score.pct
+            : null,
+        criticalFails: latest?.score?.criticalFails.length ?? 0,
+        auditId: latest?.id ?? null,
+        finalizedAt: latest?.signedAt ?? null,
+      };
+    });
+    return rankQaSites(inputs);
+  }
+
+  async getQaSiteHistory(siteId: string): Promise<QaAudit[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "audit.read");
+    this.assertQaSite(session, siteId);
+    ensureQaCollections(this.store);
+    return this.store.db.qaAudits
+      .filter(
+        (a) =>
+          a.agencyId === session.agencyId &&
+          a.siteId === siteId &&
+          a.status === "finalized",
+      )
+      .sort((a, b) => b.year - a.year || b.quarter - a.quarter);
   }
 
   // ================= PCSP document-extraction pipeline (local demo) =================
