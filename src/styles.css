@@ -4756,6 +4756,8 @@ th {
   padding: 14px 16px;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .obligation-card header {
   display: flex;
@@ -4822,15 +4824,19 @@ th {
 }
 .renewal-upload {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   align-items: end;
+  min-width: 0;
+  max-width: 100%;
 }
 .renewal-upload label {
   display: grid;
   gap: 4px;
   font-size: 13px;
   color: #4a4036;
+  min-width: 0;
+  max-width: 100%;
 }
 .renewal-upload select,
 .renewal-upload input[type="text"],
@@ -4987,9 +4993,12 @@ th {
 }
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Stack before two columns squeeze native file inputs past .page-shell.
+     480px min → 1280 content (~948px) is one column; wider desktops keep two. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
   gap: 14px;
   min-width: 0;
+  max-width: 100%;
 }
 .chart-widget {
   background: #faf6ef;
@@ -4999,6 +5008,21 @@ th {
   display: grid;
   gap: 10px;
   color: #241e18;
+  min-width: 0;
+  max-width: 100%;
+}
+/* Native file inputs ignore grid shrinking unless the track and control
+   both have a 0 min-width. Stack upload fields on the chart so the
+   renewals column cannot paint past the shell. */
+.individual-chart .renewal-upload {
+  grid-template-columns: minmax(0, 1fr);
+}
+.individual-chart .renewal-upload input,
+.individual-chart .renewal-upload select,
+.individual-chart .renewal-upload input[type="file"],
+.individual-chart .plan-stack input[type="file"] {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 .individual-chart .page-heading,

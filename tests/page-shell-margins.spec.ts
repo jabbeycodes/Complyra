@@ -107,6 +107,51 @@ async function assertPageHasNoSecondGutter(page: Page, selector: string) {
   expect(extra, `${selector} must not add a second page gutter`).toBe(0);
 }
 
+async function assertChartFitsShell(page: Page) {
+  const renewals = page.locator("#annuals-heading");
+  if (await renewals.count()) {
+    await renewals.scrollIntoViewIfNeeded();
+  }
+  const bounds = await page.evaluate(() => {
+    const shell = document.querySelector(".page-shell");
+    const chart = document.querySelector(".individual-chart");
+    if (!shell || !chart) throw new Error("missing .page-shell or .individual-chart");
+    const shellBox = shell.getBoundingClientRect();
+    const style = getComputedStyle(shell);
+    const contentLeft =
+      shellBox.left + Number.parseFloat(style.paddingInlineStart);
+    const contentRight =
+      shellBox.right - Number.parseFloat(style.paddingInlineEnd);
+    const renewalsWidget = document
+      .querySelector("#annuals-heading")
+      ?.closest(".chart-widget");
+    const widgets = [
+      ...document.querySelectorAll(
+        ".individual-chart .chart-widget, .individual-chart .health-widget",
+      ),
+    ];
+    const rights = [
+      chart.getBoundingClientRect().right,
+      renewalsWidget?.getBoundingClientRect().right ?? 0,
+      ...widgets.map((widget) => widget.getBoundingClientRect().right),
+    ];
+    return {
+      contentLeft,
+      contentRight,
+      chartLeft: chart.getBoundingClientRect().left,
+      rightMost: Math.max(...rights),
+    };
+  });
+  expect(
+    bounds.chartLeft,
+    "chart should share the shell content edge",
+  ).toBeGreaterThanOrEqual(bounds.contentLeft - 1);
+  expect(
+    bounds.rightMost,
+    "chart widgets must stay inside .page-shell (overflow-x:hidden can clip otherwise)",
+  ).toBeLessThanOrEqual(bounds.contentRight + 1);
+}
+
 const VIEWPORTS = [
   { width: 1280, height: 800, pageInline: 48, panelInline: 28 },
   { width: 960, height: 800, pageInline: 32, panelInline: 28 },
@@ -191,6 +236,7 @@ for (const viewport of VIEWPORTS) {
     });
     expect(chartPad).toBeTruthy();
     expect(chartPad!.pad).toBe(chartPad!.token);
+    await assertChartFitsShell(page);
     await assertNoPageHorizontalScroll(page);
     await page.screenshot({
       path: shotPath(`chart_shell_${viewport.width}.png`),
