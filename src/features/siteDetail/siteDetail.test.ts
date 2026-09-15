@@ -171,3 +171,23 @@ describe("audit score display", () => {
     );
   });
 });
+
+describe("site detail copy", () => {
+  it("labels drill types without raw slugs", async () => {
+    const { formatDrillTypeLabel } = await import("./siteDetailCopy");
+    assert.equal(formatDrillTypeLabel("fire"), "Fire");
+    assert.equal(formatDrillTypeLabel("severe_weather"), "Severe weather");
+  });
+
+  it("does not print 0/0 for empty training checklists", async () => {
+    const { trainingProgressLine } = await import("./siteDetailCopy");
+    assert.equal(
+      trainingProgressLine({ counts: { complete: 0, required: 0 } }, false),
+      "No required training items yet.",
+    );
+    assert.equal(
+      trainingProgressLine({ counts: { complete: 2, required: 5 } }, false),
+      "2 of 5 training items complete",
+    );
+  });
+});

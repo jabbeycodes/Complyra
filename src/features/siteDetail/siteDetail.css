@@ -10,8 +10,8 @@
 .site-hero {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 20px var(--panel-inline) 18px;
+  gap: 14px;
+  padding: 16px var(--panel-inline) 14px;
 }
 
 .site-hero-top {
@@ -106,9 +106,9 @@
 }
 
 .site-hero-person .avatar {
-  width: 72px;
-  height: 72px;
-  font-size: 20px;
+  width: 64px;
+  height: 64px;
+  font-size: 18px;
   box-shadow: 0 0 0 3px #f4efe4;
 }
 
@@ -195,9 +195,17 @@
   font-size: 14px;
   color: #4a4036;
   background: transparent;
+  /* Global buttons fade background 160ms — that left the previous tab
+     looking selected. Selected must snap moss immediately. */
+  transition: none;
 }
 
-.tabs.site-detail-tabs > button.selected {
+.tabs.site-detail-tabs > button:hover:not([aria-selected="true"]) {
+  background: #f4efe4;
+}
+
+.tabs.site-detail-tabs > button.selected,
+.tabs.site-detail-tabs > button[aria-selected="true"] {
   color: #f4efe4;
   background: #3f5c3b;
   border-bottom-color: transparent;
@@ -209,12 +217,84 @@
   outline-offset: 2px;
 }
 
-.tabs.site-detail-tabs > button.selected:focus-visible {
+.tabs.site-detail-tabs > button.selected:focus-visible,
+.tabs.site-detail-tabs > button[aria-selected="true"]:focus-visible {
   outline-color: #2f4630;
 }
 
-.site-detail-panel > .panel {
+/* Panel children already use --panel-inline. Do not pad the card again. */
+.site-detail-panel .empty {
+  padding: 20px var(--panel-inline) 24px;
+}
+
+.site-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px 16px;
+  margin: 8px 0 12px;
+  padding: 0 var(--panel-inline);
+}
+
+.site-kpi-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.site-kpi-grid strong {
+  font-size: 26px;
+  line-height: 1;
+  color: #3f5c3b;
+}
+
+.site-kpi-grid span {
+  font-size: 13px;
+  color: #4a4036;
+}
+
+.site-detail-panel .person-card {
+  min-height: 44px;
+  padding: 16px var(--panel-inline) 14px;
+}
+
+.site-detail-panel .person-card h2 {
+  margin-top: 12px;
+  color: #2f4630;
+}
+
+.site-person-open {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #6b6156;
+}
+
+.site-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 var(--panel-inline) 16px;
+}
+
+.site-qa-body {
+  padding: 0 var(--panel-inline) 20px;
+}
+
+.site-qa-body .qa-filter-row {
+  align-items: flex-start;
+}
+
+.site-detail-panel .qa-badge-sections {
+  padding: 0 var(--panel-inline) 16px;
+}
+
+.site-detail-panel .panel-heading {
   padding-inline: var(--panel-inline);
+}
+
+.site-detail-panel .panel-heading input[type="month"] {
+  min-height: 44px;
+  max-width: 100%;
 }
 
 .stat-grid {
@@ -300,6 +380,15 @@
   font-size: 13px;
 }
 
+.record-row {
+  flex-wrap: wrap;
+}
+
+.site-detail-note {
+  margin: 0;
+  padding: 0 var(--panel-inline) 16px;
+}
+
 .score-figure {
   font-size: 20px;
   color: #3f5c3b;
@@ -320,6 +409,7 @@
 
 .section-note {
   margin: 4px 0 0;
+  padding-inline: var(--panel-inline);
   font-size: 13px;
 }
 

@@ -1050,6 +1050,7 @@ export default function App() {
                   siteId={detailSiteId}
                   onBack={() => navigate("Sites & programs")}
                   onOpenIndividual={(name) => openPersonChart(name)}
+                  onOpenPage={(next) => navigate(next)}
                 />
               )}
               {page === "Sites & programs" && (
