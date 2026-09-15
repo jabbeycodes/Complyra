@@ -89,6 +89,8 @@ export interface IndividualRecord {
   fullName: string;
   dateOfBirth: string;
   profile?: import("./planStack").IndividualProfile;
+  /** Uploaded portrait URL when a photo has been stored for this person. */
+  photoUrl?: string | null;
 }
 
 export interface StaffAssignment {

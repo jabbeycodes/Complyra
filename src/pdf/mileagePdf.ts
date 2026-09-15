@@ -221,6 +221,124 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
   return doc;
 }
 
+export interface MileageWeekPdfInput {
+  agencyName: string;
+  siteName: string;
+  monthKey: string;
+  people: MileagePdfPerson[];
+  rows: Array<{ individualId: string; weeks: number[]; monthlyTotal: number }>;
+}
+
+export function mileageWeekFileName(siteName: string, monthKey: string) {
+  return `complyrer-mileage-weekly-${slug(siteName)}-${monthKey}.pdf`;
+}
+
+const WEEK_SHORT = ["Week 1", "Week 2", "Week 3", "Week 4"] as const;
+
+/** Weekly mileage sheet: one row per individual, Week 1–4 + monthly total. */
+export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
+  const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
+  let y = 48;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...EVERGREEN);
+  doc.text("COMPLYRER", MARGIN, y);
+  doc.setFontSize(10);
+  doc.setTextColor(...INK);
+  doc.text(input.agencyName, MARGIN, y + 14);
+  y += 34;
+  doc.setFontSize(16);
+  doc.text("Weekly Mileage Sheet", MARGIN, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`Home: ${input.siteName}    Month: ${monthLabel(input.monthKey)}`, MARGIN, y + 18);
+  y += 34;
+
+  const nameW = 180;
+  const totalW = 80;
+  const weekW = Math.max(80, (CONTENT_W - nameW - totalW) / 4);
+  const columns: Column[] = [
+    { key: "name", label: "Name", width: nameW },
+    ...WEEK_SHORT.map((label, i) => ({ key: `w${i}`, label, width: weekW })),
+    { key: "total", label: "Monthly Total", width: totalW },
+  ];
+  const lineH = 12;
+  const rowById = new Map(input.rows.map((row) => [row.individualId, row]));
+
+  function drawRow(
+    cells: Record<string, string>,
+    opts: { bold?: boolean; fill?: RGB | null } = {},
+  ) {
+    const fontSize = 9;
+    doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+    doc.setFontSize(fontSize);
+    let rowH = fontSize + 10;
+    const wrapped = columns.map((col) => {
+      const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 8);
+      rowH = Math.max(rowH, lines.length * lineH + 8);
+      return lines as string[];
+    });
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+    }
+    let x = MARGIN;
+    columns.forEach((col, i) => {
+      if (opts.fill) {
+        doc.setFillColor(...opts.fill);
+        doc.rect(x, y, col.width, rowH, "F");
+      }
+      doc.setDrawColor(0, 0, 0);
+      doc.rect(x, y, col.width, rowH);
+      doc.setTextColor(...INK);
+      doc.text(wrapped[i], x + 4, y + lineH + 1);
+      x += col.width;
+    });
+    y += rowH;
+  }
+
+  drawRow(
+    Object.fromEntries(columns.map((c) => [c.key, c.label])),
+    { bold: true, fill: HEADER_FILL },
+  );
+
+  for (const person of input.people) {
+    const row = rowById.get(person.id);
+    const cells: Record<string, string> = {
+      name: person.name,
+      total: String(row?.monthlyTotal ?? 0),
+    };
+    for (let w = 0; w < 4; w++) {
+      cells[`w${w}`] = String(row?.weeks[w] ?? 0);
+    }
+    drawRow(cells);
+  }
+
+  const grandWeeks = [0, 0, 0, 0];
+  let grandTotal = 0;
+  for (const row of input.rows) {
+    row.weeks.forEach((miles, i) => {
+      grandWeeks[i] = Math.round((grandWeeks[i] + miles) * 10) / 10;
+    });
+    grandTotal = Math.round((grandTotal + row.monthlyTotal) * 10) / 10;
+  }
+  const grand: Record<string, string> = {
+    name: "Total",
+    total: String(grandTotal),
+  };
+  grandWeeks.forEach((miles, i) => {
+    grand[`w${i}`] = String(miles);
+  });
+  drawRow(grand, { bold: true, fill: HEADER_FILL });
+
+  stampRecordMark(doc, {
+    documentId: `mileage-weekly-${slug(input.siteName)}-${input.monthKey}`,
+    margin: MARGIN,
+    footerY: FOOTER_Y,
+  });
+  return doc;
+}
+
 /**
  * Yearly mileage tracking sheet PDF (Complyrer's own yearly summary).
  *

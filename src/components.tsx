@@ -22,18 +22,22 @@ export function Avatar({
   name,
   color = "purple",
   small = false,
+  src,
 }: {
   name: string;
   color?: string;
   small?: boolean;
+  /** Uploaded portrait when present; initials stay the fallback. */
+  src?: string | null;
 }) {
+  const initials = name
+    .split(" ")
+    .map((x) => x[0])
+    .slice(0, 2)
+    .join("");
   return (
-    <span className={`avatar ${color} ${small ? "small" : ""}`}>
-      {name
-        .split(" ")
-        .map((x) => x[0])
-        .slice(0, 2)
-        .join("")}
+    <span className={`avatar ${color} ${small ? "small" : ""} ${src ? "has-photo" : ""}`}>
+      {src ? <img src={src} alt="" /> : initials}
     </span>
   );
 }

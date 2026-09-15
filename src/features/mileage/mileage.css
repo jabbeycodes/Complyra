@@ -1,10 +1,71 @@
 /* LIFEPATH-P7 (mileage tracking) styles. */
 
+.mileage-page .tabs {
+  max-width: 100%;
+}
+
+.mileage-heading-actions,
+.mileage-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Headings, forms, and sheets share --panel-inline so nothing sits on the card edge. */
+.mileage-page .panel > h2,
+.mileage-page .panel > p,
+.mileage-page .panel > ul,
+.mileage-page .panel > .empty {
+  padding-inline: var(--panel-inline);
+}
+
+.mileage-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 21px var(--panel-inline) 0;
+}
+
+.mileage-sheet-head h2 {
+  margin: 0;
+  padding: 0;
+}
+
+.mileage-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+}
+
+.mileage-toolbar .mileage-sheet-actions {
+  margin-left: auto;
+}
+
+.mileage-toolbar label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mileage-toolbar-stat {
+  align-self: end;
+  padding-bottom: 6px;
+  color: var(--muted, #4a4036);
+}
+
 .mileage-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   margin-top: 12px;
+  padding: 0 var(--panel-inline) 20px;
 }
 
 .mileage-form label {
@@ -25,6 +86,7 @@
 
 .mileage-riders {
   grid-column: 1 / -1;
+  min-width: 0;
   border: 1px solid var(--border, #e2e2e2);
   border-radius: 8px;
   padding: 10px 12px;
@@ -66,6 +128,26 @@
 }
 
 .mileage-table th {
+  white-space: normal;
+}
+
+.mileage-print-monthly .mileage-table td:nth-last-child(3) {
+  white-space: normal;
+  min-width: 7rem;
+  max-width: 14rem;
+}
+
+.mileage-print-monthly .mileage-table th:first-child,
+.mileage-print-monthly .mileage-table td:first-child,
+.mileage-print-weekly .mileage-table th:first-child,
+.mileage-print-weekly .mileage-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fffaf2;
+}
+
+.mileage-table th {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -89,8 +171,12 @@
   gap: 4px;
 }
 
-.table-scroll {
+.mileage-page .table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-inline: 0;
+  padding: 0 var(--panel-inline) 16px;
+  max-width: 100%;
 }
 
 /* Admin backfill: out-of-sequence trip checkbox + row badge. */
@@ -123,4 +209,93 @@
   color: #92400e;
   border: 1px solid #fcd34d;
   vertical-align: middle;
+}
+
+@media print {
+  .sidebar,
+  .topbar,
+  .demo-banner,
+  .mileage-no-print,
+  .mileage-heading-actions,
+  .page-heading .heading-actions {
+    display: none !important;
+  }
+
+  .main-shell {
+    margin-left: 0 !important;
+    padding-inline: 0.4in !important;
+    background: #fff !important;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+
+  .mileage-page .panel {
+    box-shadow: none;
+    border: 1px solid #222;
+    break-inside: avoid;
+  }
+
+  body[data-mileage-print="weekly"] .mileage-print-monthly {
+    display: none !important;
+  }
+
+  body[data-mileage-print="monthly"] .mileage-print-weekly {
+    display: none !important;
+  }
+
+  .mileage-table {
+    font-size: 11pt;
+  }
+
+  .mileage-table th,
+  .mileage-table td {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .mileage-heading-actions .button,
+  .mileage-sheet-actions .button {
+    min-height: 44px;
+  }
+
+  .mileage-form {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .mileage-toolbar {
+    align-items: stretch;
+  }
+
+  .mileage-toolbar label {
+    flex: 1 1 148px;
+    min-width: 0;
+  }
+
+  .mileage-toolbar select,
+  .mileage-toolbar input[type="month"],
+  .mileage-toolbar input[type="number"] {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mileage-toolbar .mileage-sheet-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mileage-table th,
+  .mileage-table td {
+    padding: 6px 8px;
+  }
+
+  .mileage-page .table-scroll {
+    mask-image: linear-gradient(to right, #000 86%, transparent);
+  }
 }
