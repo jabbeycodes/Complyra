@@ -9,7 +9,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  *     agency_id: string,          // uuid, required
  *     user_id?: string | null,    // targeted member (exactly one of user_id / role_key)
  *     role_key?: string | null,   // broadcast role, e.g. "house_manager"
- *     type: NotificationType,     // required, one of the 10 known types
+ *     type: NotificationType,     // required, one of the 16 known types
  *     title: string,              // required
  *     body: string,               // required
  *     deep_link: string,          // required, app route like "/checklists/<id>"
@@ -62,6 +62,8 @@ const NOTIFICATION_TYPES = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  "qa.dispute_raised",
+  "qa.dispute_resolved",
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {

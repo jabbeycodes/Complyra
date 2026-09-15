@@ -33,7 +33,9 @@ export type NotificationType =
   | "recognition.dsp_winner"
   | "delegation.review_ready"
   | "delegation.published"
-  | "delegation.ack_overdue";
+  | "delegation.ack_overdue"
+  | "qa.dispute_raised"
+  | "qa.dispute_resolved";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -53,6 +55,8 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "delegation.review_ready",
   "delegation.published",
   "delegation.ack_overdue",
+  "qa.dispute_raised",
+  "qa.dispute_resolved",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -178,6 +182,8 @@ export const NOTIFICATION_META: Record<
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
+  "qa.dispute_raised": { status: "pending", label: "QA finding disputed" },
+  "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
 };
 
 export function metaForType(type: NotificationType) {
@@ -400,6 +406,56 @@ export function checklistSubmittedPayload(input: {
     entityType: "checklist",
     entityId: input.checklistId,
     dedupeKey: dedupeKeyFor("checklist.submitted", input.checklistId),
+  };
+}
+
+/**
+ * An HM/DPM disputed a scored QA item with photo evidence. Notifies the
+ * agency's auditors so the dispute gets a ruling.
+ */
+export function qaDisputeRaisedPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  auditId: string;
+  siteName: string;
+  itemText: string;
+  actorName: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey,
+    type: "qa.dispute_raised",
+    title: "QA finding disputed",
+    body: `${input.actorName} disputed a QA finding at ${input.siteName}: ${input.itemText}. Review the photo evidence and rule on the dispute.`,
+    deepLink: `/qa-audits/${input.auditId}`,
+    entityType: "qa_audit",
+    entityId: input.auditId,
+    dedupeKey: dedupeKeyFor("qa.dispute_raised", input.auditId, input.itemText),
+  };
+}
+
+/**
+ * The auditor ruled on a disputed QA item. Notifies the disputing side
+ * (HM/DPM) with the outcome visible on the QA Review page.
+ */
+export function qaDisputeResolvedPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  auditId: string;
+  siteName: string;
+  itemText: string;
+  actorName: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey,
+    type: "qa.dispute_resolved",
+    title: "QA dispute resolved",
+    body: `${input.actorName} ruled on the disputed QA finding at ${input.siteName}: ${input.itemText}. See the QA Review page for the ruling and reason.`,
+    deepLink: `/qa-audits/${input.auditId}`,
+    entityType: "qa_audit",
+    entityId: input.auditId,
+    dedupeKey: dedupeKeyFor("qa.dispute_resolved", input.auditId, input.itemText),
   };
 }
 

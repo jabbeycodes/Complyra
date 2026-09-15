@@ -16,7 +16,9 @@ import {
 } from "lucide-react";
 import { Avatar, Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { can } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
+import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
@@ -33,6 +35,7 @@ import type {
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { DocumentUpload } from "../../data/documents";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
+import SiteQaReview from "../qa/SiteQaReview";
 import "./siteDetail.css";
 
 interface SiteDetailPageProps {
@@ -56,7 +59,9 @@ export function auditScoreDisplay(scoreJson: unknown): string | null {
   return null;
 }
 
-export function auditPeriodLabel(audit: QaAuditSummary): string {
+export function auditPeriodLabel(
+  audit: QaAuditSummary | { quarter: number; year: number },
+): string {
   return `Q${audit.quarter} ${audit.year}`;
 }
 
@@ -92,7 +97,7 @@ export default function SiteDetailPage({
   const [tab, setTab] = useState<SiteDetailTabId>("overview");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
 
-  const [audits, setAudits] = useState<QaAuditSummary[] | null>(null);
+  const [qaHistory, setQaHistory] = useState<QaAudit[] | null>(null);
   const [checklists, setChecklists] = useState<HmWeeklyChecklist[] | null>(null);
   const [delegations, setDelegations] = useState<SiteDelegationActivation[] | null>(null);
   const [trainingRows, setTrainingRows] = useState<TrainingRow[] | null>(null);
@@ -137,7 +142,24 @@ export default function SiteDetailPage({
       setTabError((prev) => ({ ...prev, [tabId]: undefined }));
       try {
         if (tabId === "overview" || tabId === "audits") {
-          if (audits === null) setAudits(await api.listQaAuditHistory(siteId));
+          if (qaHistory === null) {
+            // Latest finalized QA Review scores power the Overview badge.
+            // Read-gated: no audit.read, no score.
+            if (
+              session &&
+              (can(session, "audit.read") ||
+                can(session, "qa.audit") ||
+                can(session, "audit.export"))
+            ) {
+              try {
+                setQaHistory(await api.getQaSiteHistory(siteId));
+              } catch {
+                setQaHistory([]);
+              }
+            } else {
+              setQaHistory([]);
+            }
+          }
         }
         if (tabId === "checklists" && checklists === null) {
           setChecklists(await api.listWeeklyChecklists({ siteId }));
@@ -207,9 +229,10 @@ export default function SiteDetailPage({
     [
       api,
       hasAccess,
+      session,
       siteId,
       siteStaff,
-      audits,
+      qaHistory,
       checklists,
       delegations,
       documents,
@@ -242,8 +265,9 @@ export default function SiteDetailPage({
     );
   }
 
-  const latestAudit = audits?.[0] ?? null;
-  const latestScore = latestAudit ? auditScoreDisplay(latestAudit.scoreJson) : null;
+  const latestQa = qaHistory?.[0] ?? null;
+  const latestQaScore = latestQa?.score ?? null;
+  const latestQaPct = latestQaScore?.pct;
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -352,12 +376,39 @@ export default function SiteDetailPage({
                 <strong>{openRequirements.length}</strong>
                 <span>Open items</span>
               </div>
-              <div className="panel stat-card">
-                <strong>{latestScore ?? "—"}</strong>
+              {/* QA-REVIEW-BADGE (2026-09-14): the QA Review score is a
+                  projection of this home's compliance score — it sits next
+                  to the other site stats, never blended into requirement
+                  tracking. */}
+              <div className="panel stat-card qa-review-badge">
+                <strong>{latestQaPct ?? "—"}</strong>
                 <span>
-                  Latest QA score
-                  {latestAudit ? ` (${auditPeriodLabel(latestAudit)})` : ""}
+                  QA Review score
+                  {latestQa ? ` (${auditPeriodLabel(latestQa)})` : ""}
                 </span>
+                <span className="qa-badge-caption">
+                  Projects this home's compliance score
+                </span>
+                {latestQaScore && (
+                  <ul className="qa-badge-sections">
+                    {QA_SECTIONS.map((s) => {
+                      const sec = latestQaScore.sections[s.id];
+                      if (!sec || sec.pct === null) return null;
+                      return (
+                        <li key={s.id}>
+                          <span>{s.title}</span>
+                          <strong>{sec.pct}%</strong>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {latestQaScore && latestQaScore.criticalFails.length > 0 && (
+                  <span className="qa-badge-critical">
+                    ⚠ {latestQaScore.criticalFails.length} critical item
+                    {latestQaScore.criticalFails.length === 1 ? "" : "s"} failed
+                  </span>
+                )}
               </div>
             </div>
             <div className="panel">
@@ -429,36 +480,7 @@ export default function SiteDetailPage({
         )}
 
         {activeTab === "audits" && !loading.audits && (
-          <div className="panel">
-            <h2>QA audit history</h2>
-            {audits && audits.length === 0 && (
-              <Empty
-                title="No audits yet"
-                text="No QA audits have been recorded for this home."
-              />
-            )}
-            {audits && audits.length > 0 && (
-              <ul className="record-list">
-                {audits.map((a) => {
-                  const score = auditScoreDisplay(a.scoreJson);
-                  return (
-                    <li key={a.id} className="record-row">
-                      <div>
-                        <strong>{auditPeriodLabel(a)}</strong>
-                        <span className="muted">
-                          {" "}
-                          · {a.status === "finalized" ? "Finalized" : a.status === "in_progress" ? "In progress" : "Draft"}
-                          {a.auditorName ? ` · ${a.auditorName}` : ""}
-                          {a.signedAt ? ` · signed ${formatDate(a.signedAt)}` : ""}
-                        </span>
-                      </div>
-                      <strong className="score-figure">{score ?? "—"}</strong>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+          <SiteQaReview siteId={siteId} siteName={site.name} />
         )}
 
         {activeTab === "checklists" && !loading.checklists && (

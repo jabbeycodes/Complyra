@@ -31,6 +31,7 @@ import {
   Menu,
   CheckCheck,
   BookOpen,
+  BadgeCheck,
   CircleAlert,
   ChevronRight,
   RotateCcw,
@@ -85,6 +86,7 @@ import {
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
 import DelegationsPage from "./features/delegations/DelegationsPage";
+import QaAuditsPage from "./features/qa/QaAuditsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
@@ -110,7 +112,7 @@ import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboa
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
-import { can, pageVisible } from "./data/status";
+import { can, defaultLandingPage, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
 import DemoBanner from "./demo/DemoBanner";
@@ -258,8 +260,8 @@ export default function App() {
   }, [session, page, api]);
   useEffect(() => {
     if (!session) return;
-    if (page !== "Overview" && !pageVisible(session, page)) {
-      setPage("Overview");
+    if (!pageVisible(session, page)) {
+      setPage(defaultLandingPage(session));
     }
   }, [session, page]);
   useEffect(() => {
@@ -374,6 +376,20 @@ export default function App() {
   const visibleRequirements = data.requirements.filter((r) =>
     visibleSiteNames.has(r.site),
   );
+  // QA-AUDIT (2026-09-14): HMs may view other houses' compliance scores, so the
+  // Dashboard gets the agency-wide site list plus the agency-wide requirement
+  // and people counts its score cards and status mix compute from. Care
+  // records everywhere else stay locked to the HM's own house via
+  // `sites`/`individuals`/`visibleRequirements` — the Dashboard only uses
+  // `individuals` for per-site counts, never names.
+  const dashboardSites =
+    session.roleKey === "house_manager" ? workspace.sites : sites;
+  const dashboardScoreItems =
+    session.roleKey === "house_manager"
+      ? workspace.requirements
+      : visibleRequirements;
+  const dashboardPeople =
+    session.roleKey === "house_manager" ? workspace.individuals : individuals;
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -598,6 +614,9 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
+        // QA-REVIEW-NAV (2026-09-14): quarterly site QA reviews with
+        // system-verified items, auditor scoring, and photo disputes.
+        ["QA Review", BadgeCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
         ["AI settings", ServerCog],
@@ -821,12 +840,12 @@ export default function App() {
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
-              allItems={visibleRequirements}
+              allItems={dashboardScoreItems}
               scorecard={workspace.scorecard}
               activity={data.activity}
-              sites={sites}
+              sites={dashboardSites}
               siteReviews={workspace.siteReviews}
-              individuals={individuals}
+              individuals={dashboardPeople}
               site={site}
               personalItems={personalItems}
               onSite={setSite}
@@ -1719,6 +1738,8 @@ export default function App() {
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {page === "AI settings" && <AiSettingsPage />}
+              {/* QA-REVIEW-PAGE (2026-09-14) */}
+              {page === "QA Review" && <QaAuditsPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading title="Settings" />
