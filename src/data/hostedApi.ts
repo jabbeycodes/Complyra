@@ -10,6 +10,15 @@ import {
   roleLabel,
 } from "./status";
 import type { ComplyraApi, QaAuditSummary, WorkspaceView } from "./localApi";
+import {
+  ISP_AMENDABLE_FIELDS,
+  ISP_MONTHLY_FLOW,
+  ispDueOn,
+  ispEscalationTitle,
+  ispMonthLabel,
+  ispPriorMonth,
+  ispTallySummary,
+} from "./localApi";
 import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
@@ -210,6 +219,54 @@ import {
   canManageAgencyLogo,
   validateLogoFile,
 } from "./branding";
+// ISP DATA (§6, stream B): API types + pure logic reused by both API layers.
+import type {
+  AmendIspNoteInput,
+  HouseShiftBoard,
+  IspEscalation,
+  IspEscalationInput,
+  IspEscalationKind,
+  IspExpectationFilter,
+  IspExpectationView,
+  IspGoal,
+  IspGoalInput,
+  IspMonthlyReport,
+  IspMonthlySections,
+  IspMonthlySignerRole,
+  IspMonthlySignature,
+  IspMonthlyStatus,
+  IspMonthlyTallies,
+  IspNote,
+  IspNoteAmendment,
+  IspNoteDetail,
+  IspNoteExpectation,
+  IspNoteFilter,
+  IspNoteSettings,
+  IspNoteStatus,
+  IspNoteTrackableScore,
+  IspObjective,
+  IspObjectiveInput,
+  IspObjectiveTally,
+  IspRepeatOffender,
+  IspShiftAssignment,
+  IspShiftAssignmentInput,
+  IspShiftPattern,
+  IspShiftPatternInput,
+  IspTrackable,
+  IspTrackableInput,
+  SubmitIspNoteInput,
+} from "./types";
+import {
+  blankMonthlySections,
+  buildExpectations,
+  computeEscalationDecisions,
+  expectationStatus,
+  hoursOverdue,
+  repeatOffenders,
+  tallyMonthly,
+  validateIspNote,
+  type IspEscalationDecision,
+} from "./ispData";
 import {
   applyItem21,
   applyItemAnswer,
@@ -7969,6 +8026,1775 @@ export class HostedApi implements ComplyraApi {
     if (!data) throw new Error("Could not remove the trackable item.");
     return mapTrackableItem(data as Record<string, unknown>);
   }
+
+  // ================= ISP DATA (hosted, §6) =================
+
+  private ispScopeSite(session: SessionUser, siteId: string) {
+    if (
+      session.roleKey === "house_manager" &&
+      session.siteId &&
+      session.siteId !== siteId
+    ) {
+      throw new Error("You can only access your own site.");
+    }
+  }
+
+  private async ispIndividual(session: SessionUser, individualId: string) {
+    const { data, error } = await this.client
+      .from("individuals")
+      .select("id, full_name, date_of_birth, site_id")
+      .eq("id", individualId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "Individual not found.");
+    const row = data as unknown as IspDbRow;
+    this.ispScopeSite(session, row.site_id as string);
+    return row;
+  }
+
+  private async ispExpectationViews(
+    exps: IspNoteExpectation[],
+    now: Date,
+  ): Promise<IspExpectationView[]> {
+    if (exps.length === 0) return [];
+    const uniq = (values: Array<string | null>): string[] => [
+      ...new Set(values.filter((v): v is string => Boolean(v))),
+    ];
+    const [individualsRes, sitesRes, patternsRes, profilesRes, notesRes] =
+      await Promise.all([
+        this.client
+          .from("individuals")
+          .select("id, full_name")
+          .in("id", uniq(exps.map((e) => e.individualId))),
+        this.client
+          .from("sites")
+          .select("id, name")
+          .in("id", uniq(exps.map((e) => e.siteId))),
+        this.client
+          .from("isp_shift_patterns")
+          .select("id, name, start_time, end_time")
+          .in("id", uniq(exps.map((e) => e.shiftPatternId))),
+        this.client
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", uniq(exps.map((e) => e.userId))),
+        this.client
+          .from("isp_notes")
+          .select("id, submitted_at")
+          .in("id", uniq(exps.map((e) => e.noteId))),
+      ]);
+    throwIf(individualsRes.error, "Could not load individuals.");
+    throwIf(sitesRes.error, "Could not load sites.");
+    throwIf(patternsRes.error, "Could not load shift patterns.");
+    throwIf(profilesRes.error, "Could not load staff.");
+    throwIf(notesRes.error, "Could not load notes.");
+    const byId = (rows: IspDbRow[]) =>
+      new Map(rows.map((r) => [r.id as string, r]));
+    const individualById = byId((individualsRes.data ?? []) as IspDbRow[]);
+    const siteById = byId((sitesRes.data ?? []) as IspDbRow[]);
+    const patternById = byId((patternsRes.data ?? []) as IspDbRow[]);
+    const profileById = byId((profilesRes.data ?? []) as IspDbRow[]);
+    const noteById = byId((notesRes.data ?? []) as IspDbRow[]);
+    return exps.map((exp) => {
+      const noteSubmittedAt = exp.noteId
+        ? ((noteById.get(exp.noteId)?.submitted_at as string | null) ?? null)
+        : null;
+      const status = expectationStatus(
+        {
+          dueAt: exp.dueAt,
+          noteId: exp.noteId,
+          noteSubmittedAt,
+          excused: exp.excused,
+        },
+        now,
+      );
+      const pattern = patternById.get(exp.shiftPatternId);
+      return {
+        ...exp,
+        status,
+        staffName:
+          (profileById.get(exp.userId)?.full_name as string) ?? "Unknown staff",
+        individualName:
+          (individualById.get(exp.individualId)?.full_name as string) ??
+          "Unknown individual",
+        siteName: (siteById.get(exp.siteId)?.name as string) ?? "Unknown site",
+        shiftName: (pattern?.name as string) ?? "Unknown shift",
+        shiftStart: String(pattern?.start_time ?? "").slice(0, 5),
+        shiftEnd: String(pattern?.end_time ?? "").slice(0, 5),
+        noteSubmittedAt,
+        hoursOverdue: status === "overdue" ? hoursOverdue(exp.dueAt, now) : null,
+      };
+    });
+  }
+
+  /** Amendment note ids for a batch of notes (drives the derived 'amended' status). */
+  private async ispAmendedNoteIds(
+    session: SessionUser,
+    noteIds: string[],
+  ): Promise<Set<string>> {
+    if (noteIds.length === 0) return new Set();
+    const { data, error } = await this.client
+      .from("isp_note_amendments")
+      .select("note_id")
+      .eq("agency_id", session.agencyId)
+      .in("note_id", noteIds);
+    throwIf(error, "Could not load amendments.");
+    return new Set(
+      ((data ?? []) as unknown as IspDbRow[]).map((r) => r.note_id as string),
+    );
+  }
+
+  /**
+   * Effective note status, mirroring LocalApi: the note row is never updated,
+   * so a note with amendments reads back as 'amended'.
+   */
+  private ispNoteWithStatus(note: IspNote, amendedIds: Set<string>): IspNote {
+    return amendedIds.has(note.id) ? { ...note, status: "amended" } : note;
+  }
+
+  private async ispSettingsRow(session: SessionUser): Promise<IspNoteSettings> {
+    const { data, error } = await this.client
+      .from("isp_note_settings")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load note settings.");
+    if (data) return mapIspNoteSettings(data as unknown as IspDbRow);
+    // The settings write policy needs isp.manage_plan; viewers without it get
+    // the defaults in memory so the read never fails for them.
+    if (!hasPermission(session, "isp.manage_plan")) {
+      return {
+        agencyId: session.agencyId,
+        noteGraceMinutes: 0,
+        nudgeBeforeMinutes: 60,
+        hmAlertAfterMinutes: 60,
+        dpmEscalationHours: 24,
+        contemporaneousDays: 5,
+      };
+    }
+    const { data: inserted, error: insertError } = await this.client
+      .from("isp_note_settings")
+      .insert({ agency_id: session.agencyId })
+      .select("*")
+      .single();
+    throwIf(insertError, "Could not load note settings.");
+    return mapIspNoteSettings(inserted as unknown as IspDbRow);
+  }
+
+  private async ispGoalsAndObjectives(
+    session: SessionUser,
+    individualId: string,
+  ): Promise<{ goals: IspGoal[]; objectives: IspObjective[] }> {
+    const { data: goalRows, error: goalError } = await this.client
+      .from("isp_goals")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("sort_order");
+    throwIf(goalError, "Could not load goals.");
+    const goals = ((goalRows ?? []) as IspDbRow[]).map(mapIspGoal);
+    const goalIds = goals.map((g) => g.id);
+    let objectives: IspObjective[] = [];
+    if (goalIds.length > 0) {
+      const { data: objRows, error: objError } = await this.client
+        .from("isp_objectives")
+        .select("*")
+        .in("goal_id", goalIds)
+        .order("sort_order");
+      throwIf(objError, "Could not load objectives.");
+      objectives = ((objRows ?? []) as IspDbRow[]).map(mapIspObjective);
+    }
+    return { goals, objectives };
+  }
+
+  /**
+   * Monthly tallies. Note→objective links derive from scores (a note counts
+   * for an objective when it carries a score for one of that objective's
+   * trackables) — the schema stores no separate note/objective link rows.
+   */
+  private async ispTallies(
+    session: SessionUser,
+    individualId: string,
+    serviceMonth: string,
+  ) {
+    const prefix = serviceMonth.slice(0, 7);
+    const monthStart = `${prefix}-01`;
+    const [yy, mm] = prefix.split("-").map(Number);
+    const nextStart = `${mm === 12 ? yy + 1 : yy}-${String(
+      mm === 12 ? 1 : mm + 1,
+    ).padStart(2, "0")}-01`;
+    const { goals, objectives } = await this.ispGoalsAndObjectives(
+      session,
+      individualId,
+    );
+    const objectiveIds = objectives.map((o) => o.id);
+    const [trackablesRes, notesRes, expectationsRes, priorRes] =
+      await Promise.all([
+        objectiveIds.length > 0
+          ? this.client
+              .from("isp_trackables")
+              .select("*")
+              .in("objective_id", objectiveIds)
+          : Promise.resolve({ data: [] as IspDbRow[], error: null }),
+        this.client
+          .from("isp_notes")
+          .select("*")
+          .eq("agency_id", session.agencyId)
+          .eq("individual_id", individualId)
+          .gte("work_date", monthStart)
+          .lt("work_date", nextStart),
+        this.client
+          .from("isp_note_expectations")
+          .select("*")
+          .eq("agency_id", session.agencyId)
+          .eq("individual_id", individualId)
+          .gte("work_date", monthStart)
+          .lt("work_date", nextStart),
+        this.client
+          .from("isp_monthly_reports")
+          .select("tallies")
+          .eq("agency_id", session.agencyId)
+          .eq("individual_id", individualId)
+          .eq("service_month", ispPriorMonth(serviceMonth))
+          .maybeSingle(),
+      ]);
+    throwIf(trackablesRes.error, "Could not load trackables.");
+    throwIf(notesRes.error, "Could not load notes.");
+    throwIf(expectationsRes.error, "Could not load expectations.");
+    throwIf(priorRes.error, "Could not load the prior month.");
+    const trackables = ((trackablesRes.data ?? []) as IspDbRow[]).map(
+      mapIspTrackable,
+    );
+    const notes = ((notesRes.data ?? []) as IspDbRow[]).map(mapIspNote);
+    const expectations = ((expectationsRes.data ?? []) as IspDbRow[]).map(
+      mapIspExpectation,
+    );
+    const trackableById = new Map(trackables.map((t) => [t.id, t]));
+    const noteIds = notes.map((n) => n.id);
+    let scores: IspNoteTrackableScore[] = [];
+    if (noteIds.length > 0) {
+      const { data: scoreRows, error: scoreError } = await this.client
+        .from("isp_note_trackable_scores")
+        .select("*")
+        .in("note_id", noteIds);
+      throwIf(scoreError, "Could not load scores.");
+      scores = ((scoreRows ?? []) as IspDbRow[]).map(mapIspNoteScore);
+    }
+    const seen = new Set<string>();
+    const noteObjectives: Array<{ noteId: string; objectiveId: string }> = [];
+    for (const score of scores) {
+      const objectiveId = trackableById.get(score.trackableId)?.objectiveId;
+      if (!objectiveId) continue;
+      const key = `${score.noteId}:${objectiveId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      noteObjectives.push({ noteId: score.noteId, objectiveId });
+    }
+    const priorTallies = (priorRes.data as unknown as IspDbRow | null)
+      ?.tallies as unknown as IspMonthlyTallies | null;
+    return tallyMonthly({
+      notes,
+      scores,
+      trackables,
+      objectives,
+      goals,
+      expectations,
+      serviceMonth,
+      priorTallies: priorTallies ?? null,
+      noteObjectives,
+    });
+  }
+
+  /**
+   * Write one escalation row plus its notification-bell row. Shared by
+   * ispSendEscalation and the sweep (the sweep checks isp.message_staff once
+   * up front rather than per decision).
+   */
+  private async ispQueueEscalation(args: {
+    agencyId: string;
+    fromUserId: string | null;
+    expectationId: string | null;
+    kind: IspEscalationKind;
+    toUserId: string;
+    message: string;
+    channel: string;
+  }): Promise<IspEscalation> {
+    const { data, error } = await this.client
+      .from("isp_escalations")
+      .insert({
+        agency_id: args.agencyId,
+        expectation_id: args.expectationId,
+        kind: args.kind,
+        from_user_id: args.fromUserId,
+        to_user_id: args.toUserId,
+        message: args.message,
+        channel: args.channel,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not send the escalation.");
+    const row = data as unknown as IspDbRow;
+    const { error: notifyError } = await this.client
+      .from("notifications")
+      .insert({
+        agency_id: args.agencyId,
+        user_id: args.toUserId,
+        role_key: null,
+        type: "isp_escalation",
+        title: ispEscalationTitle(args.kind),
+        body: args.message,
+        deep_link: "/isp-data",
+        entity_type: args.expectationId ? "isp_expectation" : null,
+        entity_id: args.expectationId,
+        dedupe_key: `isp_escalation:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${row.sent_at as string}`,
+        read_at: null,
+      });
+    throwIf(
+      notifyError,
+      "Escalation saved, but the notification could not be queued.",
+    );
+    return mapIspEscalation(row);
+  }
+
+  // ---- shift patterns & assignments ----
+
+  async ispListShiftPatterns(siteId: string): Promise<IspShiftPattern[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    const { data, error } = await this.client
+      .from("isp_shift_patterns")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .order("sort_order");
+    throwIf(error, "Could not load shift patterns.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspShiftPattern);
+  }
+
+  async ispSaveShiftPattern(
+    input: IspShiftPatternInput,
+  ): Promise<IspShiftPattern> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    this.ispScopeSite(session, input.siteId);
+    if (!input.name.trim()) throw new Error("Give the shift a name.");
+    const payload = {
+      agency_id: session.agencyId,
+      site_id: input.siteId,
+      name: input.name.trim(),
+      start_time: input.startTime,
+      end_time: input.endTime,
+      sort_order: input.sortOrder ?? 0,
+      active: input.active ?? true,
+    };
+    if (input.id) {
+      const { data, error } = await this.client
+        .from("isp_shift_patterns")
+        .update(payload)
+        .eq("id", input.id)
+        .eq("agency_id", session.agencyId)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the shift pattern.");
+      return mapIspShiftPattern(data as unknown as IspDbRow);
+    }
+    const { data, error } = await this.client
+      .from("isp_shift_patterns")
+      .insert(payload)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the shift pattern.");
+    return mapIspShiftPattern(data as unknown as IspDbRow);
+  }
+
+  async ispDeleteShiftPattern(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    const { data: pattern, error: findError } = await this.client
+      .from("isp_shift_patterns")
+      .select("id, site_id")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(findError, "Shift pattern not found.");
+    this.ispScopeSite(session, (pattern as unknown as IspDbRow).site_id as string);
+    // Notes are append-only (the hosted trigger forbids ANY direct note
+    // update, including the FK's SET NULL), so deletion is refused whenever
+    // a note links to one of this pattern's expectations.
+    const { data: assignmentRows, error: assignmentError } = await this.client
+      .from("isp_shift_assignments")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("shift_pattern_id", id);
+    throwIf(assignmentError, "Could not check the shift pattern.");
+    const assignmentIds = ((assignmentRows ?? []) as IspDbRow[]).map(
+      (r) => r.id as string,
+    );
+    if (assignmentIds.length > 0) {
+      const { data: expectationRows, error: expectationError } =
+        await this.client
+          .from("isp_note_expectations")
+          .select("id")
+          .eq("agency_id", session.agencyId)
+          .in("assignment_id", assignmentIds);
+      throwIf(expectationError, "Could not check the shift pattern.");
+      const expectationIds = ((expectationRows ?? []) as unknown as IspDbRow[]).map(
+        (r) => r.id as string,
+      );
+      if (expectationIds.length > 0) {
+        const { data: noteRows, error: noteError } = await this.client
+          .from("isp_notes")
+          .select("id")
+          .eq("agency_id", session.agencyId)
+          .in("expectation_id", expectationIds)
+          .limit(1);
+        throwIf(noteError, "Could not check the shift pattern.");
+        if ((noteRows ?? []).length > 0) {
+          throw new Error(
+            "This shift pattern has recorded notes and cannot be deleted.",
+          );
+        }
+      }
+    }
+    // Mirror the hosted cascade: assignments go, then their expectations.
+    const { error } = await this.client
+      .from("isp_shift_patterns")
+      .delete()
+      .eq("id", id)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not delete the shift pattern.");
+  }
+
+  async ispListShiftAssignments(
+    siteId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<IspShiftAssignment[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    const { data, error } = await this.client
+      .from("isp_shift_assignments")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .gte("work_date", fromDate)
+      .lte("work_date", toDate)
+      .order("work_date");
+    throwIf(error, "Could not load shift assignments.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspShiftAssignment);
+  }
+
+  async ispSaveShiftAssignment(
+    input: IspShiftAssignmentInput,
+  ): Promise<IspShiftAssignment> {
+    const session = await this.requireSession();
+    const canManagePlan = hasPermission(session, "isp.manage_plan");
+    const ownSiteHm =
+      session.roleKey === "house_manager" && session.siteId === input.siteId;
+    if (!canManagePlan && !ownSiteHm) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data: patternRow, error: patternError } = await this.client
+      .from("isp_shift_patterns")
+      .select("id, site_id, active")
+      .eq("id", input.shiftPatternId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(patternError, "Shift pattern not found.");
+    const pattern = patternRow as unknown as IspDbRow;
+    if ((pattern.site_id as string) !== input.siteId) {
+      throw new Error("The shift pattern belongs to a different site.");
+    }
+    const payload = {
+      agency_id: session.agencyId,
+      site_id: input.siteId,
+      shift_pattern_id: input.shiftPatternId,
+      work_date: input.workDate,
+      user_id: input.userId,
+      role_at_shift: input.roleAtShift ?? "DSP",
+      coverage_type: input.coverageType ?? "scheduled",
+      note: input.note ?? null,
+      created_by: session.userId,
+    };
+    const { data, error } = await this.client
+      .from("isp_shift_assignments")
+      .upsert(payload, {
+        onConflict: "site_id,shift_pattern_id,work_date,user_id",
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the shift assignment.");
+    const assignment = mapIspShiftAssignment(data as unknown as IspDbRow);
+    // Regenerate expectations: assignment × every individual at the site.
+    // Pending (note-less, unexcused) expectations for this assignment are
+    // rebuilt; expectations that already have a note or were excused stay.
+    const { error: clearError } = await this.client
+      .from("isp_note_expectations")
+      .delete()
+      .eq("agency_id", session.agencyId)
+      .eq("assignment_id", assignment.id)
+      .is("note_id", null)
+      .eq("excused", false);
+    throwIf(clearError, "Assignment saved, but expectations could not be rebuilt.");
+    const [{ data: individualRows }, { data: patternRows }] = await Promise.all([
+      this.client
+        .from("individuals")
+        .select("id")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", input.siteId),
+      this.client
+        .from("isp_shift_patterns")
+        .select("*")
+        .eq("agency_id", session.agencyId),
+    ]);
+    const settings = await this.ispSettingsRow(session);
+    const built = buildExpectations({
+      assignments: [assignment],
+      individuals: ((individualRows ?? []) as IspDbRow[]).map((r) => ({
+        id: r.id as string,
+      })),
+      patterns: new Map(
+        ((patternRows ?? []) as IspDbRow[]).map((r) => [
+          r.id as string,
+          mapIspShiftPattern(r),
+        ]),
+      ),
+      settings,
+    });
+    // Rebuilt rows that would duplicate a protected (assignment ×
+    // individual) pair — an expectation with a note or an excused one —
+    // are skipped.
+    let kept = built;
+    if (built.length > 0) {
+      const { data: remainingRows, error: remainingError } = await this.client
+        .from("isp_note_expectations")
+        .select("individual_id")
+        .eq("agency_id", session.agencyId)
+        .eq("assignment_id", assignment.id);
+      throwIf(remainingError, "Assignment saved, but expectations could not be rebuilt.");
+      const protectedIds = new Set(
+        ((remainingRows ?? []) as unknown as IspDbRow[]).map(
+          (r) => r.individual_id as string,
+        ),
+      );
+      kept = built.filter((row) => !protectedIds.has(row.individualId));
+    }
+    if (kept.length > 0) {
+      const { error: insertError } = await this.client
+        .from("isp_note_expectations")
+        .insert(
+          kept.map((row) => ({
+            agency_id: session.agencyId,
+            site_id: row.siteId,
+            individual_id: row.individualId,
+            assignment_id: row.assignmentId,
+            work_date: row.workDate,
+            shift_pattern_id: row.shiftPatternId,
+            user_id: row.userId,
+            due_at: row.dueAt,
+          })),
+        );
+      throwIf(insertError, "Assignment saved, but expectations could not be rebuilt.");
+    }
+    return assignment;
+  }
+
+  async ispDeleteShiftAssignment(id: string): Promise<void> {
+    const session = await this.requireSession();
+    const canManagePlan = hasPermission(session, "isp.manage_plan");
+    const { data: assignmentRow, error: findError } = await this.client
+      .from("isp_shift_assignments")
+      .select("id, site_id")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(findError, "Shift assignment not found.");
+    const assignment = assignmentRow as unknown as IspDbRow;
+    const ownSiteHm =
+      session.roleKey === "house_manager" &&
+      session.siteId === (assignment.site_id as string);
+    if (!canManagePlan && !ownSiteHm) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data: withNotes, error: checkError } = await this.client
+      .from("isp_note_expectations")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("assignment_id", id)
+      .not("note_id", "is", null)
+      .limit(1);
+    throwIf(checkError, "Could not check the shift assignment.");
+    if ((withNotes ?? []).length > 0) {
+      throw new Error(
+        "This shift already has recorded notes and cannot be deleted.",
+      );
+    }
+    const { error: clearError } = await this.client
+      .from("isp_note_expectations")
+      .delete()
+      .eq("agency_id", session.agencyId)
+      .eq("assignment_id", id);
+    throwIf(clearError, "Could not delete the shift assignment.");
+    const { error } = await this.client
+      .from("isp_shift_assignments")
+      .delete()
+      .eq("id", id)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not delete the shift assignment.");
+  }
+
+  // ---- expectations ----
+
+  async ispListExpectations(
+    filter: IspExpectationFilter,
+  ): Promise<IspExpectationView[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    let siteId = filter.siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    } else if (siteId) {
+      this.ispScopeSite(session, siteId);
+    }
+    let query = this.client
+      .from("isp_note_expectations")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("due_at");
+    if (siteId) query = query.eq("site_id", siteId);
+    if (filter.userId) query = query.eq("user_id", filter.userId);
+    if (filter.individualId) query = query.eq("individual_id", filter.individualId);
+    if (filter.fromDate) query = query.gte("work_date", filter.fromDate);
+    if (filter.toDate) query = query.lte("work_date", filter.toDate);
+    const { data, error } = await query;
+    throwIf(error, "Could not load expectations.");
+    const views = await this.ispExpectationViews(
+      ((data ?? []) as IspDbRow[]).map(mapIspExpectation),
+      new Date(),
+    );
+    return filter.status ? views.filter((v) => v.status === filter.status) : views;
+  }
+
+  async ispExcuseExpectation(id: string, reason: string): Promise<void> {
+    const session = await this.requireSession();
+    const allowed =
+      hasPermission(session, "isp.manage_plan") ||
+      session.roleKey === "house_manager";
+    if (!allowed) {
+      throw new Error("You do not have permission to do that.");
+    }
+    if (!reason?.trim()) {
+      throw new Error("A reason is required to excuse an expectation.");
+    }
+    const { data, error } = await this.client
+      .from("isp_note_expectations")
+      .select("id, site_id, note_id")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "Expectation not found.");
+    const exp = data as unknown as IspDbRow;
+    this.ispScopeSite(session, exp.site_id as string);
+    if (exp.note_id) {
+      throw new Error("An expectation with a recorded note cannot be excused.");
+    }
+    const { error: updateError } = await this.client
+      .from("isp_note_expectations")
+      .update({
+        excused: true,
+        excused_reason: reason.trim(),
+        excused_by: session.userId,
+        excused_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("agency_id", session.agencyId);
+    throwIf(updateError, "Could not excuse the expectation.");
+  }
+
+  // ---- goals / objectives / trackables ----
+
+  async ispListGoals(individualId: string): Promise<IspGoal[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    await this.ispIndividual(session, individualId);
+    const { goals } = await this.ispGoalsAndObjectives(session, individualId);
+    return goals;
+  }
+
+  async ispSaveGoal(input: IspGoalInput): Promise<IspGoal> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    await this.ispIndividual(session, input.individualId);
+    if (!input.title.trim()) throw new Error("Give the goal a title.");
+    const payload = {
+      agency_id: session.agencyId,
+      individual_id: input.individualId,
+      title: input.title.trim(),
+      description: input.description ?? "",
+      status: input.status ?? "active",
+      effective_from: input.effectiveFrom,
+      effective_to: input.effectiveTo ?? null,
+      created_by: session.userId,
+    };
+    if (input.id) {
+      const { data, error } = await this.client
+        .from("isp_goals")
+        .update(payload)
+        .eq("id", input.id)
+        .eq("agency_id", session.agencyId)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the goal.");
+      return mapIspGoal(data as unknown as IspDbRow);
+    }
+    const { data, error } = await this.client
+      .from("isp_goals")
+      .insert(payload)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the goal.");
+    return mapIspGoal(data as unknown as IspDbRow);
+  }
+
+  async ispListObjectives(goalId: string): Promise<IspObjective[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    const { data: goalRow, error: goalError } = await this.client
+      .from("isp_goals")
+      .select("id, individual_id")
+      .eq("id", goalId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(goalError, "Goal not found.");
+    await this.ispIndividual(
+      session,
+      (goalRow as unknown as IspDbRow).individual_id as string,
+    );
+    const { data, error } = await this.client
+      .from("isp_objectives")
+      .select("*")
+      .eq("goal_id", goalId)
+      .order("sort_order");
+    throwIf(error, "Could not load objectives.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspObjective);
+  }
+
+  async ispSaveObjective(input: IspObjectiveInput): Promise<IspObjective> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    const { data: goalRow, error: goalError } = await this.client
+      .from("isp_goals")
+      .select("id, individual_id")
+      .eq("id", input.goalId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(goalError, "Goal not found.");
+    await this.ispIndividual(
+      session,
+      (goalRow as unknown as IspDbRow).individual_id as string,
+    );
+    if (!input.title.trim()) throw new Error("Give the objective a title.");
+    const payload = {
+      agency_id: session.agencyId,
+      goal_id: input.goalId,
+      title: input.title.trim(),
+      measure_of_success: input.measureOfSuccess ?? "",
+      responsible_party: input.responsibleParty ?? "",
+      target_date: input.targetDate ?? null,
+      status: input.status ?? "active",
+    };
+    if (input.id) {
+      const { data, error } = await this.client
+        .from("isp_objectives")
+        .update(payload)
+        .eq("id", input.id)
+        .eq("agency_id", session.agencyId)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the objective.");
+      return mapIspObjective(data as unknown as IspDbRow);
+    }
+    const { data, error } = await this.client
+      .from("isp_objectives")
+      .insert(payload)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the objective.");
+    return mapIspObjective(data as unknown as IspDbRow);
+  }
+
+  async ispListTrackables(objectiveId: string): Promise<IspTrackable[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    const { data: objectiveRow, error: objectiveError } = await this.client
+      .from("isp_objectives")
+      .select("id, goal_id")
+      .eq("id", objectiveId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(objectiveError, "Objective not found.");
+    const { data: goalRow, error: goalError } = await this.client
+      .from("isp_goals")
+      .select("individual_id")
+      .eq("id", (objectiveRow as unknown as IspDbRow).goal_id as string)
+      .single();
+    throwIf(goalError, "Goal not found.");
+    await this.ispIndividual(
+      session,
+      (goalRow as unknown as IspDbRow).individual_id as string,
+    );
+    const { data, error } = await this.client
+      .from("isp_trackables")
+      .select("*")
+      .eq("objective_id", objectiveId)
+      .order("sort_order");
+    throwIf(error, "Could not load trackables.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspTrackable);
+  }
+
+  async ispListIndividualTrackables(
+    individualId: string,
+  ): Promise<IspTrackable[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    await this.ispIndividual(session, individualId);
+    const { objectives } = await this.ispGoalsAndObjectives(
+      session,
+      individualId,
+    );
+    const objectiveIds = objectives.map((o) => o.id);
+    if (objectiveIds.length === 0) return [];
+    const { data, error } = await this.client
+      .from("isp_trackables")
+      .select("*")
+      .in("objective_id", objectiveIds)
+      .eq("active", true)
+      .order("sort_order");
+    throwIf(error, "Could not load trackables.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspTrackable);
+  }
+
+  async ispSaveTrackable(input: IspTrackableInput): Promise<IspTrackable> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    const { data: objectiveRow, error: objectiveError } = await this.client
+      .from("isp_objectives")
+      .select("id, goal_id")
+      .eq("id", input.objectiveId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(objectiveError, "Objective not found.");
+    const { data: goalRow, error: goalError } = await this.client
+      .from("isp_goals")
+      .select("individual_id")
+      .eq("id", (objectiveRow as unknown as IspDbRow).goal_id as string)
+      .single();
+    throwIf(goalError, "Goal not found.");
+    await this.ispIndividual(
+      session,
+      (goalRow as unknown as IspDbRow).individual_id as string,
+    );
+    if (!input.name.trim()) throw new Error("Give the trackable a name.");
+    const payload = {
+      agency_id: session.agencyId,
+      objective_id: input.objectiveId,
+      name: input.name.trim(),
+      prompt: input.prompt ?? "",
+      measurement_method: input.measurementMethod,
+      rating_min: input.ratingMin ?? null,
+      rating_max: input.ratingMax ?? null,
+      rating_labels: input.ratingLabels ?? null,
+      frequency: input.frequency ?? "per_shift",
+      max_per_shift: input.maxPerShift ?? null,
+      active: input.active ?? true,
+    };
+    if (input.id) {
+      const { data, error } = await this.client
+        .from("isp_trackables")
+        .update(payload)
+        .eq("id", input.id)
+        .eq("agency_id", session.agencyId)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the trackable.");
+      return mapIspTrackable(data as unknown as IspDbRow);
+    }
+    const { data, error } = await this.client
+      .from("isp_trackables")
+      .insert(payload)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the trackable.");
+    return mapIspTrackable(data as unknown as IspDbRow);
+  }
+
+  async ispAssignTrackable(trackableId: string, userId: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    const { data: trackable, error: trackableError } = await this.client
+      .from("isp_trackables")
+      .select("id")
+      .eq("id", trackableId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(trackableError, "Trackable not found.");
+    void trackable;
+    const { error } = await this.client.from("isp_trackable_assignments").upsert(
+      {
+        trackable_id: trackableId,
+        user_id: userId,
+        assigned_by: session.userId,
+      },
+      { onConflict: "trackable_id,user_id" },
+    );
+    throwIf(error, "Could not assign the trackable.");
+  }
+
+  async ispListMyTrackables(individualId: string): Promise<IspTrackable[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    const all = await this.ispListIndividualTrackables(individualId);
+    if (all.length === 0) return [];
+    const { data, error } = await this.client
+      .from("isp_trackable_assignments")
+      .select("trackable_id")
+      .eq("user_id", session.userId)
+      .in(
+        "trackable_id",
+        all.map((t) => t.id),
+      );
+    throwIf(error, "Could not load trackable assignments.");
+    const assignedIds = new Set(
+      ((data ?? []) as unknown as IspDbRow[]).map((r) => r.trackable_id as string),
+    );
+    const mine = all.filter((t) => assignedIds.has(t.id));
+    return mine.length > 0 ? mine : all;
+  }
+
+  // ---- notes ----
+
+  async ispSubmitNote(input: SubmitIspNoteInput): Promise<IspNote> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.record_notes");
+    const individual = await this.ispIndividual(session, input.individualId);
+    if ((individual.site_id as string) !== input.siteId) {
+      throw new Error("The individual does not live at that site.");
+    }
+    const { objectives } = await this.ispGoalsAndObjectives(
+      session,
+      individual.id as string,
+    );
+    const objectiveById = new Map(objectives.map((o) => [o.id, o]));
+    for (const objectiveId of input.objectiveIds ?? []) {
+      if (!objectiveById.has(objectiveId)) {
+        throw new Error(
+          "A linked objective does not belong to this individual.",
+        );
+      }
+    }
+    const objectiveIds = objectives.map((o) => o.id);
+    const { data: trackableRows, error: trackableError } =
+      objectiveIds.length > 0
+        ? await this.client
+            .from("isp_trackables")
+            .select(
+              "id, name, measurement_method, rating_min, rating_max, objective_id",
+            )
+            .in("objective_id", objectiveIds)
+            .eq("active", true)
+        : { data: [] as IspDbRow[], error: null };
+    throwIf(trackableError, "Could not load trackables.");
+    const trackables = (trackableRows ?? []) as IspDbRow[];
+    const requiredTrackables = trackables
+      .filter((t) => (input.objectiveIds ?? []).includes(t.objective_id as string))
+      .map((t) => ({
+        id: t.id as string,
+        name: t.name as string,
+        measurementMethod: t.measurement_method as IspTrackable["measurementMethod"],
+        ratingMin: (t.rating_min as number | null) ?? null,
+        ratingMax: (t.rating_max as number | null) ?? null,
+      }));
+    const issues = validateIspNote(input, {
+      individualName: individual.full_name as string,
+      individualDob: individual.date_of_birth as string,
+      requiredTrackables,
+    });
+    if (issues.length > 0) {
+      throw new Error(
+        "The shift note is incomplete:\n" +
+          issues
+            .map((i) => `- ${i.field}: ${i.message} (${i.checkId})`)
+            .join("\n"),
+      );
+    }
+    const trackableIds = new Set(trackables.map((t) => t.id as string));
+    for (const score of input.scores ?? []) {
+      if (!trackableIds.has(score.trackableId)) {
+        throw new Error("A score points at an unknown trackable.");
+      }
+    }
+    let expectation: IspNoteExpectation | undefined;
+    if (input.expectationId) {
+      const { data: expRow, error: expError } = await this.client
+        .from("isp_note_expectations")
+        .select("*")
+        .eq("id", input.expectationId)
+        .eq("agency_id", session.agencyId)
+        .single();
+      throwIf(expError, "Expectation not found.");
+      expectation = mapIspExpectation(expRow as unknown as IspDbRow);
+      if (expectation.noteId) {
+        throw new Error(
+          "A note has already been recorded for this expectation.",
+        );
+      }
+      if (expectation.excused) {
+        throw new Error("This expectation was excused — no note is due.");
+      }
+    }
+    const submittedAt = new Date().toISOString();
+    const late =
+      !!expectation && Date.parse(submittedAt) > Date.parse(expectation.dueAt);
+    const { data: noteRow, error: noteError } = await this.client
+      .from("isp_notes")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: individual.id as string,
+        site_id: input.siteId,
+        assignment_id: expectation?.assignmentId ?? input.assignmentId ?? null,
+        expectation_id: expectation?.id ?? input.expectationId ?? null,
+        work_date: input.workDate,
+        shift_pattern_id:
+          input.shiftPatternId ?? expectation?.shiftPatternId ?? null,
+        service_title: input.serviceTitle.trim(),
+        setting: input.setting.trim(),
+        time_in: input.timeIn,
+        time_out: input.timeOut,
+        services_provided: input.servicesProvided.trim(),
+        individual_response: input.individualResponse.trim(),
+        author_user_id: session.userId,
+        author_name: session.fullName,
+        author_title: session.jobTitle || roleLabel(session.roleKey, ""),
+        signature_mark: input.signatureMark.trim(),
+        signature_event_id: null,
+        status: late ? "late" : "submitted",
+        submitted_at: submittedAt,
+      })
+      .select("*")
+      .single();
+    throwIf(noteError, "Could not save the shift note.");
+    const note = mapIspNote(noteRow as unknown as IspDbRow);
+    if ((input.scores ?? []).length > 0) {
+      const { error: scoreError } = await this.client
+        .from("isp_note_trackable_scores")
+        .insert(
+          (input.scores ?? []).map((s) => ({
+            note_id: note.id,
+            trackable_id: s.trackableId,
+            score_yes_no: s.yesNo ?? null,
+            score_count: s.count ?? null,
+            score_rating: s.rating ?? null,
+            score_percentage: s.percentage ?? null,
+            score_text: s.text ?? null,
+            comment: s.comment ?? null,
+          })),
+        );
+      throwIf(scoreError, "Note saved, but the trackable scores could not be written.");
+    }
+    if (expectation) {
+      const { error: linkError } = await this.client
+        .from("isp_note_expectations")
+        .update({ note_id: note.id })
+        .eq("id", expectation.id)
+        .eq("agency_id", session.agencyId);
+      throwIf(linkError, "Note saved, but the expectation could not be linked.");
+    }
+    return note;
+  }
+
+  async ispListNotes(filter: IspNoteFilter): Promise<IspNote[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    let siteId = filter.siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    } else if (siteId) {
+      this.ispScopeSite(session, siteId);
+    }
+    let query = this.client
+      .from("isp_notes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("work_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (siteId) query = query.eq("site_id", siteId);
+    if (filter.individualId) query = query.eq("individual_id", filter.individualId);
+    if (filter.fromDate) query = query.gte("work_date", filter.fromDate);
+    if (filter.toDate) query = query.lte("work_date", filter.toDate);
+    const { data, error } = await query;
+    throwIf(error, "Could not load notes.");
+    const notes = ((data ?? []) as IspDbRow[]).map(mapIspNote);
+    const amendedIds = await this.ispAmendedNoteIds(
+      session,
+      notes.map((n) => n.id),
+    );
+    return notes
+      .map((n) => this.ispNoteWithStatus(n, amendedIds))
+      .filter((n) => !filter.status || n.status === filter.status);
+  }
+
+  async ispGetNote(id: string): Promise<IspNoteDetail> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    const { data: noteRow, error: noteError } = await this.client
+      .from("isp_notes")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(noteError, "Note not found.");
+    const note = mapIspNote(noteRow as unknown as IspDbRow);
+    this.ispScopeSite(session, note.siteId);
+    const [scoresRes, amendmentsRes, expRes, individualRes, patternRes] =
+      await Promise.all([
+        this.client
+          .from("isp_note_trackable_scores")
+          .select("*")
+          .eq("note_id", note.id),
+        this.client
+          .from("isp_note_amendments")
+          .select("*")
+          .eq("agency_id", session.agencyId)
+          .eq("note_id", note.id)
+          .order("created_at"),
+        note.expectationId
+          ? this.client
+              .from("isp_note_expectations")
+              .select("*")
+              .eq("id", note.expectationId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        this.client
+          .from("individuals")
+          .select("full_name")
+          .eq("id", note.individualId)
+          .maybeSingle(),
+        note.shiftPatternId
+          ? this.client
+              .from("isp_shift_patterns")
+              .select("name")
+              .eq("id", note.shiftPatternId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+    throwIf(scoresRes.error, "Could not load scores.");
+    throwIf(amendmentsRes.error, "Could not load amendments.");
+    const amendments = ((amendmentsRes.data ?? []) as IspDbRow[]).map(
+      mapIspNoteAmendment,
+    );
+    return {
+      note: this.ispNoteWithStatus(
+        note,
+        new Set(amendments.map((a) => a.noteId)),
+      ),
+      scores: ((scoresRes.data ?? []) as IspDbRow[]).map(mapIspNoteScore),
+      amendments,
+      expectation: expRes.data
+        ? mapIspExpectation(expRes.data as unknown as IspDbRow)
+        : null,
+      individualName:
+        ((individualRes.data as unknown as IspDbRow | null)?.full_name as string) ??
+        "Unknown individual",
+      shiftName:
+        ((patternRes.data as unknown as IspDbRow | null)?.name as string) ?? null,
+    };
+  }
+
+  /**
+   * Append-only corrections. The note row is never touched — not even for a
+   * status flip — mirroring the hosted trigger that forbids any UPDATE of a
+   * submitted/late/amended note. Consumers see the note as 'amended' through
+   * the derived status.
+   */
+  async ispAmendNote(input: AmendIspNoteInput): Promise<IspNoteAmendment> {
+    const session = await this.requireSession();
+    const { data: noteRow, error: noteError } = await this.client
+      .from("isp_notes")
+      .select("*")
+      .eq("id", input.noteId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(noteError, "Note not found.");
+    const note = mapIspNote(noteRow as unknown as IspDbRow);
+    const canManage = hasPermission(session, "isp.manage_plan");
+    const ownNote =
+      hasPermission(session, "isp.record_notes") &&
+      note.authorUserId === session.userId;
+    if (!canManage && !ownNote) {
+      throw new Error("You do not have permission to do that.");
+    }
+    this.ispScopeSite(session, note.siteId);
+    if (!input.reason?.trim()) {
+      throw new Error("An amendment reason is required.");
+    }
+    const changes = input.changes ?? {};
+    const keys = Object.keys(changes);
+    if (keys.length === 0) throw new Error("No changes were provided.");
+    for (const key of keys) {
+      if (!ISP_AMENDABLE_FIELDS.has(key)) {
+        throw new Error(`"${key}" cannot be amended.`);
+      }
+    }
+    const fieldToColumn: Record<string, string> = {
+      setting: "setting",
+      timeIn: "time_in",
+      timeOut: "time_out",
+      servicesProvided: "services_provided",
+      individualResponse: "individual_response",
+      serviceTitle: "service_title",
+    };
+    const row = noteRow as unknown as IspDbRow;
+    const recorded: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of keys) {
+      recorded[key] = {
+        from: row[fieldToColumn[key] as string] ?? null,
+        to: changes[key].to,
+      };
+    }
+    const { data, error } = await this.client
+      .from("isp_note_amendments")
+      .insert({
+        agency_id: session.agencyId,
+        note_id: note.id,
+        author_user_id: session.userId,
+        reason: input.reason.trim(),
+        changes: recorded,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the amendment.");
+    return mapIspNoteAmendment(data as unknown as IspDbRow);
+  }
+
+  // ---- monthly reports ----
+
+  async ispGenerateMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.review_monthly");
+    await this.ispIndividual(session, individualId);
+    const month = `${serviceMonth.slice(0, 7)}-01`;
+    if (!/^\d{4}-\d{2}-01$/.test(month)) {
+      throw new Error("Enter the service month (yyyy-mm).");
+    }
+    const { data: existingRow, error: findError } = await this.client
+      .from("isp_monthly_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("service_month", month)
+      .maybeSingle();
+    throwIf(findError, "Could not load the monthly report.");
+    if (
+      existingRow &&
+      (existingRow as unknown as IspDbRow).status === "finalized"
+    ) {
+      return mapIspMonthlyReport(existingRow as unknown as IspDbRow);
+    }
+    const tallies = await this.ispTallies(session, individualId, month);
+    const { goals, objectives } = await this.ispGoalsAndObjectives(
+      session,
+      individualId,
+    );
+    const goalById = new Map(goals.map((g) => [g.id, g]));
+    const activeObjectives = objectives.filter((o) => o.status === "active");
+    const tallyByObjective = new Map(
+      tallies.perObjective.map((t) => [t.objectiveId, t]),
+    );
+    const progressRow = (o: IspObjective) => {
+      const tally = tallyByObjective.get(o.id);
+      return {
+        objectiveId: o.id,
+        objectiveTitle: o.title,
+        goalTitle: goalById.get(o.goalId)?.title ?? "",
+        tallySummary: ispTallySummary(
+          tally ?? {
+            objectiveId: o.id,
+            objectiveTitle: o.title,
+            goalTitle: goalById.get(o.goalId)?.title ?? "",
+            opportunities: 0,
+            completions: 0,
+            refusals: 0,
+            notOffered: 0,
+            successRate: null,
+            avgRating: null,
+            totalCount: 0,
+            trend: null,
+          },
+        ),
+        progress: "",
+        reasonIfNone: "",
+      };
+    };
+    if (!existingRow) {
+      const sections = blankMonthlySections(ispMonthLabel(month));
+      sections.programProgress = activeObjectives.map(progressRow);
+      const { data, error } = await this.client
+        .from("isp_monthly_reports")
+        .insert({
+          agency_id: session.agencyId,
+          individual_id: individualId,
+          service_month: month,
+          status: "draft",
+          sections,
+          tallies,
+          prepared_by: session.userId,
+          prepared_at: new Date().toISOString(),
+          due_on: ispDueOn(month),
+        })
+        .select("*")
+        .single();
+      throwIf(error, "Could not generate the monthly report.");
+      return mapIspMonthlyReport(data as unknown as IspDbRow);
+    }
+    const existing = mapIspMonthlyReport(existingRow as unknown as IspDbRow);
+    const byObjective = new Map(
+      existing.sections.programProgress.map((r) => [r.objectiveId, r]),
+    );
+    for (const o of activeObjectives) {
+      const summary = progressRow(o).tallySummary;
+      const row = byObjective.get(o.id);
+      if (row) {
+        row.tallySummary = summary;
+      } else {
+        existing.sections.programProgress.push(progressRow(o));
+      }
+    }
+    const { data, error } = await this.client
+      .from("isp_monthly_reports")
+      .update({ sections: existing.sections, tallies })
+      .eq("id", existing.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not refresh the monthly report.");
+    return mapIspMonthlyReport(data as unknown as IspDbRow);
+  }
+
+  async ispGetMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport | null> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    await this.ispIndividual(session, individualId);
+    const month = `${serviceMonth.slice(0, 7)}-01`;
+    const { data, error } = await this.client
+      .from("isp_monthly_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("service_month", month)
+      .maybeSingle();
+    throwIf(error, "Could not load the monthly report.");
+    return data ? mapIspMonthlyReport(data as unknown as IspDbRow) : null;
+  }
+
+  async ispUpdateMonthlySections(
+    reportId: string,
+    sections: IspMonthlySections,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.review_monthly");
+    const { data, error } = await this.client
+      .from("isp_monthly_reports")
+      .select("id, status")
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "Monthly report not found.");
+    if ((data as unknown as IspDbRow).status === "finalized") {
+      throw new Error("A finalized report cannot be changed.");
+    }
+    const { error: updateError } = await this.client
+      .from("isp_monthly_reports")
+      .update({ sections })
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId);
+    throwIf(updateError, "Could not update the report.");
+  }
+
+  async ispSubmitMonthlyForReview(
+    reportId: string,
+    next: IspMonthlyStatus,
+  ): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.review_monthly");
+    const { data, error } = await this.client
+      .from("isp_monthly_reports")
+      .select("id, status")
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "Monthly report not found.");
+    const status = (data as unknown as IspDbRow).status as IspMonthlyStatus;
+    const currentIndex = ISP_MONTHLY_FLOW.indexOf(status);
+    if (ISP_MONTHLY_FLOW[currentIndex + 1] !== next) {
+      throw new Error(
+        `A report moves forward one step at a time (currently ${status}).`,
+      );
+    }
+    if (next === "finalized") {
+      const { data: signatures, error: sigError } = await this.client
+        .from("isp_monthly_signatures")
+        .select("role")
+        .eq("report_id", reportId);
+      throwIf(sigError, "Could not load signatures.");
+      const hasPm = ((signatures ?? []) as unknown as IspDbRow[]).some(
+        (s) => s.role === "pm",
+      );
+      if (!hasPm) {
+        throw new Error(
+          "A program manager signature is required before finalizing.",
+        );
+      }
+    }
+    const { error: updateError } = await this.client
+      .from("isp_monthly_reports")
+      .update({
+        status: next,
+        finalized_at: next === "finalized" ? new Date().toISOString() : null,
+      })
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId);
+    throwIf(updateError, "Could not move the report forward.");
+  }
+
+  async ispSignMonthlyReport(
+    reportId: string,
+    role: IspMonthlySignerRole,
+  ): Promise<IspMonthlySignature> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.review_monthly");
+    const { data: reportRow, error: reportError } = await this.client
+      .from("isp_monthly_reports")
+      .select("id, status")
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(reportError, "Monthly report not found.");
+    if ((reportRow as unknown as IspDbRow).status === "finalized") {
+      throw new Error("A finalized report cannot be signed.");
+    }
+    const adopted = await this.getMySignature();
+    if (!adopted) {
+      throw new Error("Adopt your electronic signature before signing.");
+    }
+    const { data, error } = await this.client
+      .from("isp_monthly_signatures")
+      .upsert(
+        {
+          report_id: reportId,
+          role,
+          user_id: session.userId,
+          signer_name: session.fullName,
+          signature_mark: adopted.signaturePath,
+        },
+        { onConflict: "report_id,role,user_id" },
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not sign the report.");
+    return mapIspMonthlySignature(data as unknown as IspDbRow);
+  }
+
+  async ispListMonthlySignatures(
+    reportId: string,
+  ): Promise<IspMonthlySignature[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    const { data, error } = await this.client
+      .from("isp_monthly_signatures")
+      .select("*")
+      .eq("report_id", reportId)
+      .order("signed_at");
+    throwIf(error, "Could not load signatures.");
+    return ((data ?? []) as IspDbRow[]).map(mapIspMonthlySignature);
+  }
+
+  // ---- boards, escalations, sweeps ----
+
+  async ispOverdueNotes(siteId?: string): Promise<IspExpectationView[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    let scoped = siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      scoped = session.siteId;
+    } else if (scoped) {
+      this.ispScopeSite(session, scoped);
+    }
+    let query = this.client
+      .from("isp_note_expectations")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    if (scoped) query = query.eq("site_id", scoped);
+    const { data, error } = await query;
+    throwIf(error, "Could not load expectations.");
+    const views = await this.ispExpectationViews(
+      ((data ?? []) as IspDbRow[]).map(mapIspExpectation),
+      new Date(),
+    );
+    return views
+      .filter((v) => v.status === "overdue")
+      .sort((a, b) => (b.hoursOverdue ?? 0) - (a.hoursOverdue ?? 0));
+  }
+
+  async ispHouseShiftBoard(
+    siteId: string,
+    date: string,
+  ): Promise<HouseShiftBoard> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    const now = new Date();
+    const [
+      { data: patternRows, error: patternError },
+      { data: assignmentRows, error: assignmentError },
+      { data: profileRows, error: profileError },
+    ] = await Promise.all([
+      this.client
+        .from("isp_shift_patterns")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .order("sort_order"),
+      this.client
+        .from("isp_shift_assignments")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .eq("work_date", date),
+      this.client.from("profiles").select("id, full_name"),
+    ]);
+    throwIf(patternError, "Could not load shift patterns.");
+    throwIf(assignmentError, "Could not load shift assignments.");
+    throwIf(profileError, "Could not load staff.");
+    const patterns = ((patternRows ?? []) as IspDbRow[]).map(mapIspShiftPattern);
+    const assignments = ((assignmentRows ?? []) as IspDbRow[]).map(
+      mapIspShiftAssignment,
+    );
+    const profileById = new Map(
+      ((profileRows ?? []) as IspDbRow[]).map((r) => [
+        r.id as string,
+        r.full_name as string,
+      ]),
+    );
+    const assignmentIds = assignments.map((a) => a.id);
+    let expectations: IspNoteExpectation[] = [];
+    if (assignmentIds.length > 0) {
+      const { data: expRows, error: expError } = await this.client
+        .from("isp_note_expectations")
+        .select("*")
+        .in("assignment_id", assignmentIds);
+      throwIf(expError, "Could not load expectations.");
+      expectations = ((expRows ?? []) as IspDbRow[]).map(mapIspExpectation);
+    }
+    const views = await this.ispExpectationViews(expectations, now);
+    const viewsByAssignment = new Map<string, IspExpectationView[]>();
+    for (const view of views) {
+      const list = viewsByAssignment.get(view.assignmentId) ?? [];
+      list.push(view);
+      viewsByAssignment.set(view.assignmentId, list);
+    }
+    return {
+      siteId,
+      date,
+      shifts: patterns.map((pattern) => ({
+        patternId: pattern.id,
+        name: pattern.name,
+        startTime: pattern.startTime,
+        endTime: pattern.endTime,
+        cells: assignments
+          .filter((a) => a.shiftPatternId === pattern.id)
+          .map((a) => {
+            const cellViews = viewsByAssignment.get(a.id) ?? [];
+            return {
+              assignmentId: a.id,
+              userId: a.userId,
+              staffName: profileById.get(a.userId) ?? "Unknown staff",
+              total: cellViews.length,
+              submitted: cellViews.filter((v) => v.status === "submitted").length,
+              lateSubmitted: cellViews.filter(
+                (v) => v.status === "late_submitted",
+              ).length,
+              overdue: cellViews.filter((v) => v.status === "overdue").length,
+              pending: cellViews.filter((v) => v.status === "pending").length,
+              excused: cellViews.filter((v) => v.status === "excused").length,
+            };
+          }),
+      })),
+    };
+  }
+
+  async ispSendEscalation(input: IspEscalationInput): Promise<IspEscalation> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.message_staff");
+    if (!input.toUserId) throw new Error("Choose who the message goes to.");
+    if (!input.message?.trim()) throw new Error("Write the message first.");
+    return this.ispQueueEscalation({
+      agencyId: session.agencyId,
+      fromUserId: session.userId,
+      expectationId: input.expectationId ?? null,
+      kind: input.kind,
+      toUserId: input.toUserId,
+      message: input.message.trim(),
+      channel: input.channel ?? "in_app",
+    });
+  }
+
+  async ispRunEscalationSweep(): Promise<IspEscalationDecision[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.message_staff");
+    const now = new Date();
+    const settings = await this.ispSettingsRow(session);
+    const [{ data: expRows, error: expError }, { data: sentRows, error: sentError }, { data: memberRows, error: memberError }] =
+      await Promise.all([
+        this.client
+          .from("isp_note_expectations")
+          .select("*")
+          .eq("agency_id", session.agencyId),
+        this.client
+          .from("isp_escalations")
+          .select("expectation_id, kind")
+          .eq("agency_id", session.agencyId),
+        this.client
+          .from("memberships")
+          .select("user_id, role_key, site_id, expires_on")
+          .eq("agency_id", session.agencyId),
+      ]);
+    throwIf(expError, "Could not load expectations.");
+    throwIf(sentError, "Could not load sent escalations.");
+    throwIf(memberError, "Could not load staff.");
+    const views = await this.ispExpectationViews(
+      ((expRows ?? []) as IspDbRow[]).map(mapIspExpectation),
+      now,
+    );
+    const sent = ((sentRows ?? []) as unknown as IspDbRow[]).map((r) => ({
+      expectationId: (r.expectation_id as string | null) ?? null,
+      kind: r.kind as IspEscalationKind,
+    }));
+    const today = new Date().toISOString().slice(0, 10);
+    const active = ((memberRows ?? []) as unknown as IspDbRow[]).filter(
+      (m) => !m.expires_on || (m.expires_on as string) >= today,
+    );
+    const hmBySite = new Map<string, string[]>();
+    for (const m of active) {
+      if (m.role_key === "house_manager" && m.site_id) {
+        const siteId = m.site_id as string;
+        const list = hmBySite.get(siteId) ?? [];
+        list.push(m.user_id as string);
+        hmBySite.set(siteId, list);
+      }
+    }
+    const dpmIds = active
+      .filter((m) => m.role_key === "degreed_professional_manager")
+      .map((m) => m.user_id as string);
+    const bySite = new Map<string, IspExpectationView[]>();
+    for (const view of views) {
+      const list = bySite.get(view.siteId) ?? [];
+      list.push(view);
+      bySite.set(view.siteId, list);
+    }
+    const decisions: IspEscalationDecision[] = [];
+    for (const [siteId, siteViews] of bySite) {
+      decisions.push(
+        ...computeEscalationDecisions({
+          expectations: siteViews,
+          sent,
+          settings,
+          now,
+          houseManagerIds: hmBySite.get(siteId) ?? [],
+          dpmIds,
+        }),
+      );
+    }
+    for (const decision of decisions) {
+      await this.ispQueueEscalation({
+        agencyId: session.agencyId,
+        fromUserId: session.userId,
+        expectationId: decision.expectationId,
+        kind: decision.kind,
+        toUserId: decision.toUserId,
+        message: decision.message,
+        channel: "in_app",
+      });
+    }
+    return decisions;
+  }
+
+  async ispRepeatOffenders(days = 30): Promise<IspRepeatOffender[]> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    let siteId: string | undefined;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    }
+    let query = this.client
+      .from("isp_note_expectations")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    if (siteId) query = query.eq("site_id", siteId);
+    const { data, error } = await query;
+    throwIf(error, "Could not load expectations.");
+    const views = await this.ispExpectationViews(
+      ((data ?? []) as IspDbRow[]).map(mapIspExpectation),
+      new Date(),
+    );
+    return repeatOffenders(views, days, new Date());
+  }
+
+  // ---- settings ----
+
+  async ispGetNoteSettings(): Promise<IspNoteSettings> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.view");
+    return this.ispSettingsRow(session);
+  }
+
+  async ispSaveNoteSettings(
+    input: Partial<IspNoteSettings>,
+  ): Promise<IspNoteSettings> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "isp.manage_plan");
+    const payload: Record<string, number> = {};
+    const mapping: Array<[keyof IspNoteSettings, string]> = [
+      ["noteGraceMinutes", "note_grace_minutes"],
+      ["nudgeBeforeMinutes", "nudge_before_minutes"],
+      ["hmAlertAfterMinutes", "hm_alert_after_minutes"],
+      ["dpmEscalationHours", "dpm_escalation_hours"],
+      ["contemporaneousDays", "contemporaneous_days"],
+    ];
+    for (const [key, column] of mapping) {
+      const value = input[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        payload[column] = Math.round(value);
+      }
+    }
+    if (Object.keys(payload).length === 0) {
+      return this.ispSettingsRow(session);
+    }
+    const { data, error } = await this.client
+      .from("isp_note_settings")
+      .upsert({ agency_id: session.agencyId, ...payload }, { onConflict: "agency_id" })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save note settings.");
+    return mapIspNoteSettings(data as unknown as IspDbRow);
+  }
 }
 
 function mapDspHmRating(
@@ -8206,5 +10032,210 @@ function mapAckRow(row: Record<string, unknown>): AcknowledgmentRow {
     signedAt: (row.signed_at as string) ?? null,
     signatureName: (row.signature_name as string) ?? null,
     signatureMark: (row.signature_mark as string) ?? null,
+  };
+}
+
+// ================= ISP DATA mappers (hosted, §6) =================
+
+/** Raw snake_case ISP row from PostgREST. */
+interface IspDbRow {
+  id: string;
+  [key: string]: unknown;
+}
+
+function mapIspShiftPattern(row: IspDbRow): IspShiftPattern {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    siteId: row.site_id as string,
+    name: row.name as string,
+    startTime: String(row.start_time ?? "").slice(0, 5),
+    endTime: String(row.end_time ?? "").slice(0, 5),
+    sortOrder: (row.sort_order as number) ?? 0,
+    active: (row.active as boolean) ?? true,
+  };
+}
+
+function mapIspShiftAssignment(row: IspDbRow): IspShiftAssignment {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    siteId: row.site_id as string,
+    shiftPatternId: row.shift_pattern_id as string,
+    workDate: row.work_date as string,
+    userId: row.user_id as string,
+    roleAtShift: row.role_at_shift as string,
+    coverageType: row.coverage_type as IspShiftAssignment["coverageType"],
+    note: (row.note as string | null) ?? null,
+  };
+}
+
+function mapIspExpectation(row: IspDbRow): IspNoteExpectation {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    siteId: row.site_id as string,
+    individualId: row.individual_id as string,
+    assignmentId: (row.assignment_id as string | null) ?? "",
+    workDate: row.work_date as string,
+    shiftPatternId: row.shift_pattern_id as string,
+    userId: row.user_id as string,
+    dueAt: row.due_at as string,
+    noteId: (row.note_id as string | null) ?? null,
+    excused: (row.excused as boolean) ?? false,
+    excusedReason: (row.excused_reason as string | null) ?? null,
+  };
+}
+
+function mapIspGoal(row: IspDbRow): IspGoal {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    individualId: row.individual_id as string,
+    title: row.title as string,
+    description: (row.description as string) ?? "",
+    status: row.status as IspGoal["status"],
+    effectiveFrom: row.effective_from as string,
+    effectiveTo: (row.effective_to as string | null) ?? null,
+    sortOrder: (row.sort_order as number) ?? 0,
+  };
+}
+
+function mapIspObjective(row: IspDbRow): IspObjective {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    goalId: row.goal_id as string,
+    title: row.title as string,
+    measureOfSuccess: (row.measure_of_success as string) ?? "",
+    responsibleParty: (row.responsible_party as string) ?? "",
+    targetDate: (row.target_date as string | null) ?? null,
+    status: row.status as IspObjective["status"],
+    sortOrder: (row.sort_order as number) ?? 0,
+  };
+}
+
+function mapIspTrackable(row: IspDbRow): IspTrackable {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    objectiveId: row.objective_id as string,
+    name: row.name as string,
+    prompt: (row.prompt as string) ?? "",
+    measurementMethod: row.measurement_method as IspTrackable["measurementMethod"],
+    ratingMin: (row.rating_min as number | null) ?? null,
+    ratingMax: (row.rating_max as number | null) ?? null,
+    ratingLabels:
+      (row.rating_labels as Record<string, string> | null) ?? null,
+    frequency: (row.frequency as IspTrackable["frequency"]) ?? "per_shift",
+    maxPerShift: (row.max_per_shift as number | null) ?? null,
+    active: (row.active as boolean) ?? true,
+    sortOrder: (row.sort_order as number) ?? 0,
+  };
+}
+
+function mapIspNote(row: IspDbRow): IspNote {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    individualId: row.individual_id as string,
+    siteId: row.site_id as string,
+    assignmentId: (row.assignment_id as string | null) ?? null,
+    expectationId: (row.expectation_id as string | null) ?? null,
+    workDate: row.work_date as string,
+    shiftPatternId: (row.shift_pattern_id as string | null) ?? null,
+    serviceTitle: row.service_title as string,
+    setting: row.setting as string,
+    timeIn: row.time_in as string,
+    timeOut: row.time_out as string,
+    servicesProvided: row.services_provided as string,
+    individualResponse: row.individual_response as string,
+    authorUserId: row.author_user_id as string,
+    authorName: row.author_name as string,
+    authorTitle: row.author_title as string,
+    signatureMark: row.signature_mark as string,
+    signatureEventId: (row.signature_event_id as string | null) ?? null,
+    status: row.status as IspNote["status"],
+    submittedAt: row.submitted_at as string,
+    createdAt: (row.created_at as string) ?? new Date().toISOString(),
+  };
+}
+
+function mapIspNoteScore(row: IspDbRow): IspNoteTrackableScore {
+  return {
+    id: row.id,
+    noteId: row.note_id as string,
+    trackableId: row.trackable_id as string,
+    scoreYesNo: (row.score_yes_no as boolean | null) ?? null,
+    scoreCount: (row.score_count as number | null) ?? null,
+    scoreRating: (row.score_rating as number | null) ?? null,
+    scorePercentage: (row.score_percentage as number | null) ?? null,
+    scoreText: (row.score_text as string | null) ?? null,
+    comment: (row.comment as string | null) ?? null,
+  };
+}
+
+function mapIspNoteAmendment(row: IspDbRow): IspNoteAmendment {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    noteId: row.note_id as string,
+    authorUserId: row.author_user_id as string,
+    reason: row.reason as string,
+    changes: (row.changes as Record<string, { from: unknown; to: unknown }>) ?? {},
+    createdAt: (row.created_at as string) ?? new Date().toISOString(),
+  };
+}
+
+function mapIspMonthlyReport(row: IspDbRow): IspMonthlyReport {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    individualId: row.individual_id as string,
+    serviceMonth: row.service_month as string,
+    status: row.status as IspMonthlyReport["status"],
+    sections: row.sections as IspMonthlySections,
+    tallies: row.tallies as IspMonthlyTallies,
+    preparedBy: (row.prepared_by as string | null) ?? null,
+    preparedAt: (row.prepared_at as string | null) ?? null,
+    dueOn: row.due_on as string,
+    finalizedAt: (row.finalized_at as string | null) ?? null,
+  };
+}
+
+function mapIspMonthlySignature(row: IspDbRow): IspMonthlySignature {
+  return {
+    id: row.id,
+    reportId: row.report_id as string,
+    role: row.role as IspMonthlySignature["role"],
+    userId: (row.user_id as string | null) ?? null,
+    signerName: row.signer_name as string,
+    signatureMark: (row.signature_mark as string | null) ?? null,
+    signedAt: (row.signed_at as string) ?? new Date().toISOString(),
+  };
+}
+
+function mapIspEscalation(row: IspDbRow): IspEscalation {
+  return {
+    id: row.id,
+    agencyId: row.agency_id as string,
+    expectationId: (row.expectation_id as string | null) ?? null,
+    kind: row.kind as IspEscalationKind,
+    fromUserId: (row.from_user_id as string | null) ?? null,
+    toUserId: row.to_user_id as string,
+    message: row.message as string,
+    channel: row.channel as string,
+    sentAt: (row.sent_at as string) ?? new Date().toISOString(),
+  };
+}
+
+function mapIspNoteSettings(row: IspDbRow): IspNoteSettings {
+  return {
+    agencyId: row.agency_id as string,
+    noteGraceMinutes: (row.note_grace_minutes as number) ?? 0,
+    nudgeBeforeMinutes: (row.nudge_before_minutes as number) ?? 60,
+    hmAlertAfterMinutes: (row.hm_alert_after_minutes as number) ?? 60,
+    dpmEscalationHours: (row.dpm_escalation_hours as number) ?? 24,
+    contemporaneousDays: (row.contemporaneous_days as number) ?? 5,
   };
 }

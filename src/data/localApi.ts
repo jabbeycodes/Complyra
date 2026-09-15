@@ -105,6 +105,53 @@ import type {
   SignatureSettings,
   UserSignature,
 } from "./types";
+// ISP DATA (§6, stream B): API types + pure logic reused by both API layers.
+import type {
+  AmendIspNoteInput,
+  HouseShiftBoard,
+  IspEscalation,
+  IspEscalationInput,
+  IspEscalationKind,
+  IspExpectationFilter,
+  IspExpectationView,
+  IspGoal,
+  IspGoalInput,
+  IspMonthlyReport,
+  IspMonthlySections,
+  IspMonthlySignerRole,
+  IspMonthlySignature,
+  IspMonthlyStatus,
+  IspNote,
+  IspNoteAmendment,
+  IspNoteDetail,
+  IspNoteExpectation,
+  IspNoteFilter,
+  IspNoteSettings,
+  IspNoteStatus,
+  IspNoteTrackableScore,
+  IspObjective,
+  IspObjectiveInput,
+  IspObjectiveTally,
+  IspRepeatOffender,
+  IspShiftAssignment,
+  IspShiftAssignmentInput,
+  IspShiftPattern,
+  IspShiftPatternInput,
+  IspTrackable,
+  IspTrackableInput,
+  SubmitIspNoteInput,
+} from "./types";
+import {
+  blankMonthlySections,
+  buildExpectations,
+  computeEscalationDecisions,
+  expectationStatus,
+  hoursOverdue,
+  repeatOffenders,
+  tallyMonthly,
+  validateIspNote,
+  type IspEscalationDecision,
+} from "./ispData";
 import { blankDelegationForm } from "./types";
 import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
 import {
@@ -972,6 +1019,126 @@ export interface ComplyraApi {
   }): Promise<TrackableItem>;
   /** Remove a proposed/edited item (documents.review; status → "removed"). */
   removeTrackableItem(itemId: string): Promise<TrackableItem>;
+
+  // ================= ISP DATA (§6) =================
+  /** List shift patterns for a site (isp.view; HM: own site only). */
+  ispListShiftPatterns(siteId: string): Promise<IspShiftPattern[]>;
+  /** Create or update a shift pattern (isp.manage_plan). */
+  ispSaveShiftPattern(input: IspShiftPatternInput): Promise<IspShiftPattern>;
+  /** Delete a shift pattern and its assignments (isp.manage_plan). */
+  ispDeleteShiftPattern(id: string): Promise<void>;
+  /**
+   * List shift assignments for a site in a date range
+   * (isp.view; HM: own site only).
+   */
+  ispListShiftAssignments(
+    siteId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<IspShiftAssignment[]>;
+  /**
+   * Save a shift assignment (isp.manage_plan, or a house_manager for their own
+   * site); regenerates note expectations for assignment × site individuals.
+   */
+  ispSaveShiftAssignment(
+    input: IspShiftAssignmentInput,
+  ): Promise<IspShiftAssignment>;
+  /** Delete a shift assignment and its pending (note-less) expectations. */
+  ispDeleteShiftAssignment(id: string): Promise<void>;
+  /**
+   * List note expectations with joined names + lifecycle status
+   * (isp.view; HM: own site only).
+   */
+  ispListExpectations(filter: IspExpectationFilter): Promise<IspExpectationView[]>;
+  /** Excuse an expectation (HM/DPM/admin); reason required. */
+  ispExcuseExpectation(id: string, reason: string): Promise<void>;
+  /** ISP goals for an individual (isp.view). */
+  ispListGoals(individualId: string): Promise<IspGoal[]>;
+  /** Create or update an ISP goal (isp.manage_plan). */
+  ispSaveGoal(input: IspGoalInput): Promise<IspGoal>;
+  /** ISP objectives for a goal (isp.view). */
+  ispListObjectives(goalId: string): Promise<IspObjective[]>;
+  /** Create or update an ISP objective (isp.manage_plan). */
+  ispSaveObjective(input: IspObjectiveInput): Promise<IspObjective>;
+  /** Trackables for an objective (isp.view). */
+  ispListTrackables(objectiveId: string): Promise<IspTrackable[]>;
+  /** All active trackables across an individual's objectives (isp.view). */
+  ispListIndividualTrackables(individualId: string): Promise<IspTrackable[]>;
+  /** Create or update a trackable (isp.manage_plan). */
+  ispSaveTrackable(input: IspTrackableInput): Promise<IspTrackable>;
+  /** Assign a trackable to a staff member (isp.manage_plan). */
+  ispAssignTrackable(trackableId: string, userId: string): Promise<void>;
+  /**
+   * Trackables assigned to the signed-in user for the individual; when none
+   * are assigned, all active trackables for the individual (isp.view).
+   */
+  ispListMyTrackables(individualId: string): Promise<IspTrackable[]>;
+  /**
+   * Submit a shift note (isp.record_notes). Author name/title come from the
+   * session; validateIspNote failures throw an Error listing every issue.
+   */
+  ispSubmitNote(input: SubmitIspNoteInput): Promise<IspNote>;
+  /** List shift notes (isp.view; HM: own site only). */
+  ispListNotes(filter: IspNoteFilter): Promise<IspNote[]>;
+  /** Full note detail: scores, amendments, expectation, names (isp.view). */
+  ispGetNote(id: string): Promise<IspNoteDetail>;
+  /**
+   * Amend a note (isp.record_notes on the author's own note, or
+   * isp.manage_plan). Reason required; only allowlisted fields; writes an
+   * amendment row — the note row itself is never updated (a note with
+   * amendments reads back with status 'amended').
+   */
+  ispAmendNote(input: AmendIspNoteInput): Promise<IspNoteAmendment>;
+  /**
+   * Generate (upsert) the monthly report draft and refresh its tallies
+   * (isp.review_monthly). Finalized reports are returned untouched.
+   */
+  ispGenerateMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport>;
+  /** Fetch a monthly report or null (isp.view). */
+  ispGetMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport | null>;
+  /** Update report sections; rejected once finalized (isp.review_monthly). */
+  ispUpdateMonthlySections(
+    reportId: string,
+    sections: IspMonthlySections,
+  ): Promise<void>;
+  /**
+   * Move the report one step forward through review; finalizing requires at
+   * least one 'pm' signature (isp.review_monthly).
+   */
+  ispSubmitMonthlyForReview(
+    reportId: string,
+    next: IspMonthlyStatus,
+  ): Promise<void>;
+  /** Sign the report with the caller's adopted signature (isp.review_monthly). */
+  ispSignMonthlyReport(
+    reportId: string,
+    role: IspMonthlySignerRole,
+  ): Promise<IspMonthlySignature>;
+  /** Signatures on a monthly report (isp.view). */
+  ispListMonthlySignatures(reportId: string): Promise<IspMonthlySignature[]>;
+  /** Overdue expectations, most overdue first (isp.view; HM: own site only). */
+  ispOverdueNotes(siteId?: string): Promise<IspExpectationView[]>;
+  /** Shift board grid for a site × date (isp.view; HM: own site only). */
+  ispHouseShiftBoard(siteId: string, date: string): Promise<HouseShiftBoard>;
+  /**
+   * Send one escalation (isp.message_staff); writes the escalation row plus a
+   * notification row for the recipient.
+   */
+  ispSendEscalation(input: IspEscalationInput): Promise<IspEscalation>;
+  /** Agency-wide escalation sweep; idempotent via sent rows (isp.message_staff). */
+  ispRunEscalationSweep(): Promise<IspEscalationDecision[]>;
+  /** Staff with the worst missing-note record over `days` days (default 30). */
+  ispRepeatOffenders(days?: number): Promise<IspRepeatOffender[]>;
+  /** Agency note settings; creates the default row when missing (isp.view). */
+  ispGetNoteSettings(): Promise<IspNoteSettings>;
+  /** Update agency note settings (isp.manage_plan). */
+  ispSaveNoteSettings(input: Partial<IspNoteSettings>): Promise<IspNoteSettings>;
 }
 
 /**
@@ -2123,6 +2290,99 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
       )))),
     branding: { logoUrl: null },
   };
+}
+
+/** In-memory ISP collections for the local/demo path (stream B, §6). */
+interface IspLocalCollections {
+  shiftPatterns: IspShiftPattern[];
+  shiftAssignments: IspShiftAssignment[];
+  expectations: IspNoteExpectation[];
+  goals: IspGoal[];
+  objectives: IspObjective[];
+  trackables: IspTrackable[];
+  trackableAssignments: Array<{ trackableId: string; userId: string }>;
+  notes: IspNote[];
+  noteScores: IspNoteTrackableScore[];
+  noteAmendments: IspNoteAmendment[];
+  monthlyReports: IspMonthlyReport[];
+  monthlySignatures: IspMonthlySignature[];
+  escalations: IspEscalation[];
+  noteSettings: IspNoteSettings | null;
+}
+
+/** Forward-only monthly review flow: draft → hm_review → dpm_review → sc_review → finalized. */
+export const ISP_MONTHLY_FLOW: IspMonthlyStatus[] = [
+  "draft",
+  "hm_review",
+  "dpm_review",
+  "sc_review",
+  "finalized",
+];
+
+/** Fields a note amendment may touch (§6 allowlist). */
+export const ISP_AMENDABLE_FIELDS = new Set([
+  "setting",
+  "timeIn",
+  "timeOut",
+  "servicesProvided",
+  "individualResponse",
+  "serviceTitle",
+]);
+
+export function ispMonthLabel(serviceMonth: string): string {
+  const names = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const m = Number(serviceMonth.slice(5, 7));
+  return `${names[m - 1] ?? ""} ${serviceMonth.slice(0, 4)}`.trim();
+}
+
+/** due_on for a monthly report: the 15th of the month after the service month. */
+export function ispDueOn(serviceMonth: string): string {
+  let y = Number(serviceMonth.slice(0, 4));
+  let m = Number(serviceMonth.slice(5, 7));
+  m += 1;
+  if (m > 12) {
+    m = 1;
+    y += 1;
+  }
+  return `${y}-${String(m).padStart(2, "0")}-15`;
+}
+
+export function ispPriorMonth(serviceMonth: string): string {
+  let y = Number(serviceMonth.slice(0, 4));
+  let m = Number(serviceMonth.slice(5, 7));
+  m -= 1;
+  if (m < 1) {
+    m = 12;
+    y -= 1;
+  }
+  return `${y}-${String(m).padStart(2, "0")}-01`;
+}
+
+export function ispTallySummary(tally: IspObjectiveTally): string {
+  const rate =
+    tally.successRate === null
+      ? "no data yet"
+      : `${Math.round(tally.successRate * 100)}% success`;
+  return (
+    `${tally.completions} of ${tally.opportunities} ` +
+    `opportunit${tally.opportunities === 1 ? "y" : "ies"} — ${rate}.`
+  );
+}
+
+export function ispEscalationTitle(kind: IspEscalationKind): string {
+  switch (kind) {
+    case "nudge":
+      return "Shift note reminder";
+    case "hm_alert":
+      return "Overdue shift note";
+    case "dpm_escalation":
+      return "Shift note escalation";
+    case "message":
+      return "Message from your team";
+  }
 }
 
 export class LocalApi implements ComplyraApi {
@@ -8710,6 +8970,1385 @@ export class LocalApi implements ComplyraApi {
       detail: { item_id: itemId },
     });
     return item;
+  }
+
+  // ================= ISP DATA (local, §6) =================
+
+  private ispData(): IspLocalCollections {
+    const db = this.store.db as unknown as {
+      ispCollections?: IspLocalCollections;
+    };
+    db.ispCollections ??= {
+      shiftPatterns: [],
+      shiftAssignments: [],
+      expectations: [],
+      goals: [],
+      objectives: [],
+      trackables: [],
+      trackableAssignments: [],
+      notes: [],
+      noteScores: [],
+      noteAmendments: [],
+      monthlyReports: [],
+      monthlySignatures: [],
+      escalations: [],
+      noteSettings: null,
+    };
+    return db.ispCollections;
+  }
+
+  /**
+   * House-manager site scoping: HMs stay on their own site everywhere in the
+   * ISP API (mirrors the "HM: own site only" rule for ispListExpectations).
+   */
+  private ispScopeSite(session: SessionUser, siteId: string) {
+    if (
+      session.roleKey === "house_manager" &&
+      session.siteId &&
+      session.siteId !== siteId
+    ) {
+      throw new Error("You can only access your own site.");
+    }
+  }
+
+  /**
+   * Effective note status. Submitted/late/amended notes are append-only — the
+   * note row is never updated — so 'amended' is derived: a note with at least
+   * one amendment reads back as amended, mirroring the hosted trigger which
+   * forbids any direct UPDATE of a submitted note (including a status flip).
+   */
+  private ispEffectiveNote(note: IspNote): IspNote {
+    const amended = this.ispData().noteAmendments.some(
+      (a) => a.noteId === note.id,
+    );
+    return amended ? { ...note, status: "amended" } : note;
+  }
+
+  private ispSettingsRow(session: SessionUser): IspNoteSettings {
+    const coll = this.ispData();
+    if (!coll.noteSettings || coll.noteSettings.agencyId !== session.agencyId) {
+      coll.noteSettings = {
+        agencyId: session.agencyId,
+        noteGraceMinutes: 0,
+        nudgeBeforeMinutes: 60,
+        hmAlertAfterMinutes: 60,
+        dpmEscalationHours: 24,
+        contemporaneousDays: 5,
+      };
+    }
+    return coll.noteSettings;
+  }
+
+  private ispIndividualOrThrow(session: SessionUser, individualId: string) {
+    const individual = this.store.db.individuals.find(
+      (p) => p.id === individualId && p.agencyId === session.agencyId,
+    );
+    if (!individual) throw new Error("Individual not found.");
+    this.ispScopeSite(session, individual.siteId);
+    return individual;
+  }
+
+  private ispExpectationView(
+    exp: IspNoteExpectation,
+    now: Date,
+  ): IspExpectationView {
+    const db = this.store.db;
+    const coll = this.ispData();
+    const profile = db.profiles.find((p) => p.id === exp.userId);
+    const individual = db.individuals.find((p) => p.id === exp.individualId);
+    const site = db.sites.find((s) => s.id === exp.siteId);
+    const pattern = coll.shiftPatterns.find((p) => p.id === exp.shiftPatternId);
+    const note = exp.noteId
+      ? coll.notes.find((n) => n.id === exp.noteId)
+      : undefined;
+    const status = expectationStatus(
+      {
+        dueAt: exp.dueAt,
+        noteId: exp.noteId,
+        noteSubmittedAt: note?.submittedAt ?? null,
+        excused: exp.excused,
+      },
+      now,
+    );
+    return {
+      ...exp,
+      status,
+      staffName: profile?.fullName ?? "Unknown staff",
+      individualName: individual?.fullName ?? "Unknown individual",
+      siteName: site?.name ?? "Unknown site",
+      shiftName: pattern?.name ?? "Unknown shift",
+      shiftStart: pattern?.startTime ?? "",
+      shiftEnd: pattern?.endTime ?? "",
+      noteSubmittedAt: note?.submittedAt ?? null,
+      hoursOverdue: status === "overdue" ? hoursOverdue(exp.dueAt, now) : null,
+    };
+  }
+
+  private ispGoalsAndObjectives(
+    session: SessionUser,
+    individualId: string,
+  ): { goals: IspGoal[]; objectives: IspObjective[] } {
+    const coll = this.ispData();
+    const goals = coll.goals
+      .filter(
+        (g) => g.agencyId === session.agencyId && g.individualId === individualId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const goalIds = new Set(goals.map((g) => g.id));
+    const objectives = coll.objectives
+      .filter((o) => goalIds.has(o.goalId))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    return { goals, objectives };
+  }
+
+  /**
+   * Monthly tallies for an individual. Note→objective links are derived from
+   * scores: a note counts for an objective when it carries a score for one of
+   * that objective's trackables (the schema stores no separate note/objective
+   * link rows).
+   */
+  private ispTallies(
+    session: SessionUser,
+    individualId: string,
+    serviceMonth: string,
+  ) {
+    const coll = this.ispData();
+    const prefix = serviceMonth.slice(0, 7);
+    const { goals, objectives } = this.ispGoalsAndObjectives(
+      session,
+      individualId,
+    );
+    const objectiveIds = new Set(objectives.map((o) => o.id));
+    const trackables = coll.trackables.filter((t) =>
+      objectiveIds.has(t.objectiveId),
+    );
+    const trackableById = new Map(trackables.map((t) => [t.id, t]));
+    const notes = coll.notes.filter(
+      (n) =>
+        n.agencyId === session.agencyId &&
+        n.individualId === individualId &&
+        n.workDate.startsWith(prefix),
+    );
+    const noteIds = new Set(notes.map((n) => n.id));
+    const scores = coll.noteScores.filter((s) => noteIds.has(s.noteId));
+    const expectations = coll.expectations.filter(
+      (e) =>
+        e.agencyId === session.agencyId &&
+        e.individualId === individualId &&
+        e.workDate.startsWith(prefix),
+    );
+    const seen = new Set<string>();
+    const noteObjectives: Array<{ noteId: string; objectiveId: string }> = [];
+    for (const score of scores) {
+      const objectiveId = trackableById.get(score.trackableId)?.objectiveId;
+      if (!objectiveId) continue;
+      const key = `${score.noteId}:${objectiveId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      noteObjectives.push({ noteId: score.noteId, objectiveId });
+    }
+    const prior = coll.monthlyReports.find(
+      (r) =>
+        r.agencyId === session.agencyId &&
+        r.individualId === individualId &&
+        r.serviceMonth === ispPriorMonth(serviceMonth),
+    );
+    return tallyMonthly({
+      notes,
+      scores,
+      trackables,
+      objectives,
+      goals,
+      expectations,
+      serviceMonth,
+      priorTallies: prior?.tallies ?? null,
+      noteObjectives,
+    });
+  }
+
+  /**
+   * Write one escalation row plus its notification-bell row. Shared by
+   * ispSendEscalation and the sweep (the sweep checks isp.message_staff once
+   * up front rather than per decision).
+   */
+  private ispQueueEscalation(args: {
+    agencyId: string;
+    fromUserId: string | null;
+    expectationId: string | null;
+    kind: IspEscalationKind;
+    toUserId: string;
+    message: string;
+    channel: string;
+  }): IspEscalation {
+    const sentAt = new Date().toISOString();
+    const escalation: IspEscalation = {
+      id: crypto.randomUUID(),
+      agencyId: args.agencyId,
+      expectationId: args.expectationId,
+      kind: args.kind,
+      fromUserId: args.fromUserId,
+      toUserId: args.toUserId,
+      message: args.message,
+      channel: args.channel,
+      sentAt,
+    };
+    this.ispData().escalations.push(escalation);
+    this.store.db.notifications.push({
+      id: crypto.randomUUID(),
+      agencyId: args.agencyId,
+      userId: args.toUserId,
+      roleKey: null,
+      type: "isp_escalation",
+      title: ispEscalationTitle(args.kind),
+      body: args.message,
+      deepLink: "/isp-data",
+      entityType: args.expectationId ? "isp_expectation" : null,
+      entityId: args.expectationId,
+      dedupeKey: `isp_escalation:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${sentAt}`,
+      createdAt: sentAt,
+      readAt: null,
+    });
+    return escalation;
+  }
+
+  private ispActiveMemberships(session: SessionUser) {
+    const today = todayIso();
+    return this.store.db.memberships.filter(
+      (m) =>
+        m.agencyId === session.agencyId &&
+        (!m.expiresOn || m.expiresOn >= today),
+    );
+  }
+
+  // ---- shift patterns & assignments ----
+
+  async ispListShiftPatterns(siteId: string): Promise<IspShiftPattern[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    return this.ispData()
+      .shiftPatterns.filter(
+        (p) => p.agencyId === session.agencyId && p.siteId === siteId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async ispSaveShiftPattern(
+    input: IspShiftPatternInput,
+  ): Promise<IspShiftPattern> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    this.ispScopeSite(session, input.siteId);
+    if (!input.name.trim()) throw new Error("Give the shift a name.");
+    const coll = this.ispData();
+    const existing = input.id
+      ? coll.shiftPatterns.find(
+          (p) => p.id === input.id && p.agencyId === session.agencyId,
+        )
+      : undefined;
+    if (existing) {
+      existing.name = input.name.trim();
+      existing.startTime = input.startTime;
+      existing.endTime = input.endTime;
+      if (input.sortOrder !== undefined) existing.sortOrder = input.sortOrder;
+      if (input.active !== undefined) existing.active = input.active;
+      return existing;
+    }
+    const pattern: IspShiftPattern = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      name: input.name.trim(),
+      startTime: input.startTime,
+      endTime: input.endTime,
+      sortOrder: input.sortOrder ?? 0,
+      active: input.active ?? true,
+    };
+    coll.shiftPatterns.push(pattern);
+    return pattern;
+  }
+
+  async ispDeleteShiftPattern(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    const coll = this.ispData();
+    const pattern = coll.shiftPatterns.find(
+      (p) => p.id === id && p.agencyId === session.agencyId,
+    );
+    if (!pattern) throw new Error("Shift pattern not found.");
+    this.ispScopeSite(session, pattern.siteId);
+    // Mirror the hosted cascade: assignments go, then their expectations.
+    // Notes are append-only (the hosted trigger forbids ANY direct note
+    // update, including the FK's SET NULL), so deletion is refused whenever
+    // a note links to one of this pattern's expectations.
+    const assignmentIds = new Set(
+      coll.shiftAssignments
+        .filter((a) => a.shiftPatternId === id)
+        .map((a) => a.id),
+    );
+    const expectationIds = new Set(
+      coll.expectations
+        .filter((e) => assignmentIds.has(e.assignmentId))
+        .map((e) => e.id),
+    );
+    const hasLinkedNotes = coll.notes.some(
+      (n) => n.expectationId && expectationIds.has(n.expectationId),
+    );
+    if (hasLinkedNotes) {
+      throw new Error(
+        "This shift pattern has recorded notes and cannot be deleted.",
+      );
+    }
+    coll.expectations = coll.expectations.filter(
+      (e) => !assignmentIds.has(e.assignmentId),
+    );
+    coll.shiftAssignments = coll.shiftAssignments.filter(
+      (a) => a.shiftPatternId !== id,
+    );
+    coll.shiftPatterns = coll.shiftPatterns.filter((p) => p.id !== id);
+  }
+
+  async ispListShiftAssignments(
+    siteId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<IspShiftAssignment[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    return this.ispData()
+      .shiftAssignments.filter(
+        (a) =>
+          a.agencyId === session.agencyId &&
+          a.siteId === siteId &&
+          a.workDate >= fromDate &&
+          a.workDate <= toDate,
+      )
+      .sort((a, b) => a.workDate.localeCompare(b.workDate));
+  }
+
+  async ispSaveShiftAssignment(
+    input: IspShiftAssignmentInput,
+  ): Promise<IspShiftAssignment> {
+    const session = assertSession(this.store);
+    const canManagePlan = hasPermission(session, "isp.manage_plan");
+    const ownSiteHm =
+      session.roleKey === "house_manager" && session.siteId === input.siteId;
+    if (!canManagePlan && !ownSiteHm) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const coll = this.ispData();
+    const pattern = coll.shiftPatterns.find(
+      (p) => p.id === input.shiftPatternId && p.agencyId === session.agencyId,
+    );
+    if (!pattern) throw new Error("Shift pattern not found.");
+    if (pattern.siteId !== input.siteId) {
+      throw new Error("The shift pattern belongs to a different site.");
+    }
+    let assignment = coll.shiftAssignments.find(
+      (a) =>
+        a.agencyId === session.agencyId &&
+        a.siteId === input.siteId &&
+        a.shiftPatternId === input.shiftPatternId &&
+        a.workDate === input.workDate &&
+        a.userId === input.userId,
+    );
+    if (assignment) {
+      assignment.roleAtShift = input.roleAtShift ?? assignment.roleAtShift;
+      assignment.coverageType = input.coverageType ?? assignment.coverageType;
+      assignment.note = input.note ?? assignment.note;
+    } else {
+      assignment = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        siteId: input.siteId,
+        shiftPatternId: input.shiftPatternId,
+        workDate: input.workDate,
+        userId: input.userId,
+        roleAtShift: input.roleAtShift ?? "DSP",
+        coverageType: input.coverageType ?? "scheduled",
+        note: input.note ?? null,
+      };
+      coll.shiftAssignments.push(assignment);
+    }
+    // Regenerate expectations: assignment × every individual at the site.
+    // Pending (note-less, unexcused) expectations for this assignment are
+    // rebuilt; expectations that already have a note or were excused stay —
+    // rebuilt rows that would duplicate a protected (assignmentId,
+    // individualId) pair are skipped.
+    coll.expectations = coll.expectations.filter(
+      (e) =>
+        !(
+          e.assignmentId === assignment.id &&
+          !e.noteId &&
+          !e.excused
+        ),
+    );
+    const protectedPairs = new Set(
+      coll.expectations
+        .filter((e) => e.assignmentId === assignment.id)
+        .map((e) => e.individualId),
+    );
+    const individuals = this.store.db.individuals.filter(
+      (p) => p.agencyId === session.agencyId && p.siteId === input.siteId,
+    );
+    const built = buildExpectations({
+      assignments: [assignment],
+      individuals: individuals.map((p) => ({ id: p.id })),
+      patterns: new Map(
+        coll.shiftPatterns
+          .filter((p) => p.agencyId === session.agencyId)
+          .map((p) => [p.id, p]),
+      ),
+      settings: this.ispSettingsRow(session),
+    });
+    for (const row of built) {
+      if (protectedPairs.has(row.individualId)) continue;
+      coll.expectations.push({
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        siteId: row.siteId,
+        individualId: row.individualId,
+        assignmentId: row.assignmentId,
+        workDate: row.workDate,
+        shiftPatternId: row.shiftPatternId,
+        userId: row.userId,
+        dueAt: row.dueAt,
+        noteId: null,
+        excused: false,
+        excusedReason: null,
+      });
+    }
+    return assignment;
+  }
+
+  async ispDeleteShiftAssignment(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    const canManagePlan = hasPermission(session, "isp.manage_plan");
+    const coll = this.ispData();
+    const assignment = coll.shiftAssignments.find(
+      (a) => a.id === id && a.agencyId === session.agencyId,
+    );
+    if (!assignment) throw new Error("Shift assignment not found.");
+    const ownSiteHm =
+      session.roleKey === "house_manager" &&
+      session.siteId === assignment.siteId;
+    if (!canManagePlan && !ownSiteHm) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const withNotes = coll.expectations.filter(
+      (e) => e.assignmentId === id && e.noteId,
+    );
+    if (withNotes.length > 0) {
+      throw new Error(
+        "This shift already has recorded notes and cannot be deleted.",
+      );
+    }
+    coll.expectations = coll.expectations.filter((e) => e.assignmentId !== id);
+    coll.shiftAssignments = coll.shiftAssignments.filter((a) => a.id !== id);
+  }
+
+  // ---- expectations ----
+
+  async ispListExpectations(
+    filter: IspExpectationFilter,
+  ): Promise<IspExpectationView[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    let siteId = filter.siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    } else if (siteId) {
+      this.ispScopeSite(session, siteId);
+    }
+    const now = new Date();
+    const views = this.ispData()
+      .expectations.filter(
+        (e) =>
+          e.agencyId === session.agencyId &&
+          (!siteId || e.siteId === siteId) &&
+          (!filter.userId || e.userId === filter.userId) &&
+          (!filter.individualId || e.individualId === filter.individualId) &&
+          (!filter.fromDate || e.workDate >= filter.fromDate) &&
+          (!filter.toDate || e.workDate <= filter.toDate),
+      )
+      .map((e) => this.ispExpectationView(e, now))
+      .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+    return filter.status ? views.filter((v) => v.status === filter.status) : views;
+  }
+
+  async ispExcuseExpectation(id: string, reason: string): Promise<void> {
+    const session = assertSession(this.store);
+    const allowed =
+      hasPermission(session, "isp.manage_plan") ||
+      session.roleKey === "house_manager";
+    if (!allowed) {
+      throw new Error("You do not have permission to do that.");
+    }
+    if (!reason?.trim()) {
+      throw new Error("A reason is required to excuse an expectation.");
+    }
+    const exp = this.ispData().expectations.find(
+      (e) => e.id === id && e.agencyId === session.agencyId,
+    );
+    if (!exp) throw new Error("Expectation not found.");
+    this.ispScopeSite(session, exp.siteId);
+    if (exp.noteId) {
+      throw new Error("An expectation with a recorded note cannot be excused.");
+    }
+    exp.excused = true;
+    exp.excusedReason = reason.trim();
+  }
+
+  // ---- goals / objectives / trackables ----
+
+  async ispListGoals(individualId: string): Promise<IspGoal[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispIndividualOrThrow(session, individualId);
+    return this.ispData()
+      .goals.filter(
+        (g) => g.agencyId === session.agencyId && g.individualId === individualId,
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async ispSaveGoal(input: IspGoalInput): Promise<IspGoal> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    this.ispIndividualOrThrow(session, input.individualId);
+    if (!input.title.trim()) throw new Error("Give the goal a title.");
+    const coll = this.ispData();
+    const existing = input.id
+      ? coll.goals.find(
+          (g) => g.id === input.id && g.agencyId === session.agencyId,
+        )
+      : undefined;
+    if (existing) {
+      existing.title = input.title.trim();
+      existing.description = input.description ?? existing.description;
+      existing.effectiveFrom = input.effectiveFrom;
+      if (input.effectiveTo !== undefined) existing.effectiveTo = input.effectiveTo;
+      if (input.status !== undefined) existing.status = input.status;
+      return existing;
+    }
+    const goal: IspGoal = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: input.individualId,
+      title: input.title.trim(),
+      description: input.description ?? "",
+      status: input.status ?? "active",
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo ?? null,
+      sortOrder: coll.goals.filter((g) => g.individualId === input.individualId).length,
+    };
+    coll.goals.push(goal);
+    return goal;
+  }
+
+  async ispListObjectives(goalId: string): Promise<IspObjective[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    const coll = this.ispData();
+    const goal = coll.goals.find(
+      (g) => g.id === goalId && g.agencyId === session.agencyId,
+    );
+    if (!goal) throw new Error("Goal not found.");
+    this.ispIndividualOrThrow(session, goal.individualId);
+    return coll.objectives
+      .filter((o) => o.goalId === goalId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async ispSaveObjective(input: IspObjectiveInput): Promise<IspObjective> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    const coll = this.ispData();
+    const goal = coll.goals.find(
+      (g) => g.id === input.goalId && g.agencyId === session.agencyId,
+    );
+    if (!goal) throw new Error("Goal not found.");
+    this.ispIndividualOrThrow(session, goal.individualId);
+    if (!input.title.trim()) throw new Error("Give the objective a title.");
+    const existing = input.id
+      ? coll.objectives.find(
+          (o) => o.id === input.id && o.agencyId === session.agencyId,
+        )
+      : undefined;
+    if (existing) {
+      existing.title = input.title.trim();
+      if (input.measureOfSuccess !== undefined)
+        existing.measureOfSuccess = input.measureOfSuccess;
+      if (input.responsibleParty !== undefined)
+        existing.responsibleParty = input.responsibleParty;
+      if (input.targetDate !== undefined) existing.targetDate = input.targetDate;
+      if (input.status !== undefined) existing.status = input.status;
+      return existing;
+    }
+    const objective: IspObjective = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      goalId: input.goalId,
+      title: input.title.trim(),
+      measureOfSuccess: input.measureOfSuccess ?? "",
+      responsibleParty: input.responsibleParty ?? "",
+      targetDate: input.targetDate ?? null,
+      status: input.status ?? "active",
+      sortOrder: coll.objectives.filter((o) => o.goalId === input.goalId).length,
+    };
+    coll.objectives.push(objective);
+    return objective;
+  }
+
+  async ispListTrackables(objectiveId: string): Promise<IspTrackable[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    const coll = this.ispData();
+    const objective = coll.objectives.find(
+      (o) => o.id === objectiveId && o.agencyId === session.agencyId,
+    );
+    if (!objective) throw new Error("Objective not found.");
+    const goal = coll.goals.find((g) => g.id === objective.goalId);
+    if (goal) this.ispIndividualOrThrow(session, goal.individualId);
+    return coll.trackables
+      .filter((t) => t.objectiveId === objectiveId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async ispListIndividualTrackables(
+    individualId: string,
+  ): Promise<IspTrackable[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispIndividualOrThrow(session, individualId);
+    const { objectives } = this.ispGoalsAndObjectives(session, individualId);
+    const objectiveIds = new Set(objectives.map((o) => o.id));
+    return this.ispData()
+      .trackables.filter((t) => objectiveIds.has(t.objectiveId) && t.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async ispSaveTrackable(input: IspTrackableInput): Promise<IspTrackable> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    const coll = this.ispData();
+    const objective = coll.objectives.find(
+      (o) => o.id === input.objectiveId && o.agencyId === session.agencyId,
+    );
+    if (!objective) throw new Error("Objective not found.");
+    const goal = coll.goals.find((g) => g.id === objective.goalId);
+    if (goal) this.ispIndividualOrThrow(session, goal.individualId);
+    if (!input.name.trim()) throw new Error("Give the trackable a name.");
+    const existing = input.id
+      ? coll.trackables.find(
+          (t) => t.id === input.id && t.agencyId === session.agencyId,
+        )
+      : undefined;
+    if (existing) {
+      existing.name = input.name.trim();
+      if (input.prompt !== undefined) existing.prompt = input.prompt;
+      existing.measurementMethod = input.measurementMethod;
+      if (input.ratingMin !== undefined) existing.ratingMin = input.ratingMin;
+      if (input.ratingMax !== undefined) existing.ratingMax = input.ratingMax;
+      if (input.ratingLabels !== undefined) existing.ratingLabels = input.ratingLabels;
+      if (input.frequency !== undefined) existing.frequency = input.frequency;
+      if (input.maxPerShift !== undefined) existing.maxPerShift = input.maxPerShift;
+      if (input.active !== undefined) existing.active = input.active;
+      return existing;
+    }
+    const trackable: IspTrackable = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      objectiveId: input.objectiveId,
+      name: input.name.trim(),
+      prompt: input.prompt ?? "",
+      measurementMethod: input.measurementMethod,
+      ratingMin: input.ratingMin ?? null,
+      ratingMax: input.ratingMax ?? null,
+      ratingLabels: input.ratingLabels ?? null,
+      frequency: input.frequency ?? "per_shift",
+      maxPerShift: input.maxPerShift ?? null,
+      active: input.active ?? true,
+      sortOrder: coll.trackables.filter((t) => t.objectiveId === input.objectiveId)
+        .length,
+    };
+    coll.trackables.push(trackable);
+    return trackable;
+  }
+
+  async ispAssignTrackable(trackableId: string, userId: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    const coll = this.ispData();
+    const trackable = coll.trackables.find(
+      (t) => t.id === trackableId && t.agencyId === session.agencyId,
+    );
+    if (!trackable) throw new Error("Trackable not found.");
+    const member = this.store.db.memberships.find(
+      (m) => m.userId === userId && m.agencyId === session.agencyId,
+    );
+    if (!member) throw new Error("Staff member not found.");
+    const already = coll.trackableAssignments.some(
+      (a) => a.trackableId === trackableId && a.userId === userId,
+    );
+    if (!already) coll.trackableAssignments.push({ trackableId, userId });
+  }
+
+  async ispListMyTrackables(individualId: string): Promise<IspTrackable[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispIndividualOrThrow(session, individualId);
+    const all = await this.ispListIndividualTrackables(individualId);
+    const assignedIds = new Set(
+      this.ispData()
+        .trackableAssignments.filter((a) => a.userId === session.userId)
+        .map((a) => a.trackableId),
+    );
+    const mine = all.filter((t) => assignedIds.has(t.id));
+    return mine.length > 0 ? mine : all;
+  }
+
+  // ---- notes ----
+
+  async ispSubmitNote(input: SubmitIspNoteInput): Promise<IspNote> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.record_notes");
+    const individual = this.ispIndividualOrThrow(session, input.individualId);
+    if (individual.siteId !== input.siteId) {
+      throw new Error("The individual does not live at that site.");
+    }
+    const coll = this.ispData();
+    const { objectives } = this.ispGoalsAndObjectives(session, individual.id);
+    const objectiveById = new Map(objectives.map((o) => [o.id, o]));
+    for (const objectiveId of input.objectiveIds ?? []) {
+      if (!objectiveById.has(objectiveId)) {
+        throw new Error("A linked objective does not belong to this individual.");
+      }
+    }
+    // Required trackables: every active trackable under the note's objectives
+    // needs a score of the right type.
+    const requiredTrackables = coll.trackables
+      .filter((t) => t.active && (input.objectiveIds ?? []).includes(t.objectiveId))
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        measurementMethod: t.measurementMethod,
+        ratingMin: t.ratingMin,
+        ratingMax: t.ratingMax,
+      }));
+    const issues = validateIspNote(input, {
+      individualName: individual.fullName,
+      individualDob: individual.dateOfBirth,
+      requiredTrackables,
+    });
+    if (issues.length > 0) {
+      throw new Error(
+        "The shift note is incomplete:\n" +
+          issues.map((i) => `- ${i.field}: ${i.message} (${i.checkId})`).join("\n"),
+      );
+    }
+    // Every score must point at a real trackable for this individual.
+    const trackableById = new Map(
+      coll.trackables
+        .filter((t) => t.agencyId === session.agencyId)
+        .map((t) => [t.id, t]),
+    );
+    for (const score of input.scores ?? []) {
+      if (!trackableById.has(score.trackableId)) {
+        throw new Error("A score points at an unknown trackable.");
+      }
+    }
+    let expectation: IspNoteExpectation | undefined;
+    if (input.expectationId) {
+      expectation = coll.expectations.find(
+        (e) => e.id === input.expectationId && e.agencyId === session.agencyId,
+      );
+      if (!expectation) throw new Error("Expectation not found.");
+      if (expectation.noteId) {
+        throw new Error("A note has already been recorded for this expectation.");
+      }
+      if (expectation.excused) {
+        throw new Error("This expectation was excused — no note is due.");
+      }
+    }
+    const submittedAt = new Date().toISOString();
+    const late =
+      !!expectation && Date.parse(submittedAt) > Date.parse(expectation.dueAt);
+    const note: IspNote = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: individual.id,
+      siteId: input.siteId,
+      assignmentId: expectation?.assignmentId ?? input.assignmentId ?? null,
+      expectationId: expectation?.id ?? input.expectationId ?? null,
+      workDate: input.workDate,
+      shiftPatternId: input.shiftPatternId ?? expectation?.shiftPatternId ?? null,
+      serviceTitle: input.serviceTitle.trim(),
+      setting: input.setting.trim(),
+      timeIn: input.timeIn,
+      timeOut: input.timeOut,
+      servicesProvided: input.servicesProvided.trim(),
+      individualResponse: input.individualResponse.trim(),
+      authorUserId: session.userId,
+      authorName: session.fullName,
+      authorTitle: session.jobTitle || roleLabel(session.roleKey, ""),
+      signatureMark: input.signatureMark.trim(),
+      signatureEventId: null,
+      status: late ? "late" : "submitted",
+      submittedAt,
+      createdAt: submittedAt,
+    };
+    coll.notes.push(note);
+    for (const score of input.scores ?? []) {
+      coll.noteScores.push({
+        id: crypto.randomUUID(),
+        noteId: note.id,
+        trackableId: score.trackableId,
+        scoreYesNo: score.yesNo ?? null,
+        scoreCount: score.count ?? null,
+        scoreRating: score.rating ?? null,
+        scorePercentage: score.percentage ?? null,
+        scoreText: score.text ?? null,
+        comment: score.comment ?? null,
+      });
+    }
+    if (expectation) expectation.noteId = note.id;
+    return this.ispEffectiveNote(note);
+  }
+
+  async ispListNotes(filter: IspNoteFilter): Promise<IspNote[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    let siteId = filter.siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    } else if (siteId) {
+      this.ispScopeSite(session, siteId);
+    }
+    return this.ispData()
+      .notes.filter(
+        (n) =>
+          n.agencyId === session.agencyId &&
+          (!siteId || n.siteId === siteId) &&
+          (!filter.individualId || n.individualId === filter.individualId) &&
+          (!filter.fromDate || n.workDate >= filter.fromDate) &&
+          (!filter.toDate || n.workDate <= filter.toDate),
+      )
+      .map((n) => this.ispEffectiveNote(n))
+      .filter((n) => !filter.status || n.status === filter.status)
+      .sort(
+        (a, b) =>
+          b.workDate.localeCompare(a.workDate) ||
+          b.createdAt.localeCompare(a.createdAt),
+      );
+  }
+
+  async ispGetNote(id: string): Promise<IspNoteDetail> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    const coll = this.ispData();
+    const note = coll.notes.find(
+      (n) => n.id === id && n.agencyId === session.agencyId,
+    );
+    if (!note) throw new Error("Note not found.");
+    this.ispScopeSite(session, note.siteId);
+    const individual = this.store.db.individuals.find(
+      (p) => p.id === note.individualId,
+    );
+    const pattern = note.shiftPatternId
+      ? coll.shiftPatterns.find((p) => p.id === note.shiftPatternId)
+      : undefined;
+    return {
+      note: this.ispEffectiveNote(note),
+      scores: coll.noteScores
+        .filter((s) => s.noteId === note.id)
+        .sort((a, b) => a.id.localeCompare(b.id)),
+      amendments: coll.noteAmendments
+        .filter((a) => a.noteId === note.id)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      expectation:
+        coll.expectations.find((e) => e.id === note.expectationId) ?? null,
+      individualName: individual?.fullName ?? "Unknown individual",
+      shiftName: pattern?.name ?? null,
+    };
+  }
+
+  /**
+   * Append-only corrections. The note row is never touched — not even for a
+   * status flip — mirroring the hosted trigger that forbids any UPDATE of a
+   * submitted/late/amended note. Consumers see the note as 'amended' through
+   * ispEffectiveNote.
+   */
+  async ispAmendNote(input: AmendIspNoteInput): Promise<IspNoteAmendment> {
+    const session = assertSession(this.store);
+    const coll = this.ispData();
+    const note = coll.notes.find(
+      (n) => n.id === input.noteId && n.agencyId === session.agencyId,
+    );
+    if (!note) throw new Error("Note not found.");
+    const canManage = hasPermission(session, "isp.manage_plan");
+    const ownNote =
+      hasPermission(session, "isp.record_notes") &&
+      note.authorUserId === session.userId;
+    if (!canManage && !ownNote) {
+      throw new Error("You do not have permission to do that.");
+    }
+    this.ispScopeSite(session, note.siteId);
+    if (!input.reason?.trim()) {
+      throw new Error("An amendment reason is required.");
+    }
+    const changes = input.changes ?? {};
+    const keys = Object.keys(changes);
+    if (keys.length === 0) throw new Error("No changes were provided.");
+    for (const key of keys) {
+      if (!ISP_AMENDABLE_FIELDS.has(key)) {
+        throw new Error(`"${key}" cannot be amended.`);
+      }
+    }
+    const recorded: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of keys) {
+      recorded[key] = {
+        from: (note as unknown as Record<string, unknown>)[key] ?? null,
+        to: changes[key].to,
+      };
+    }
+    const amendment: IspNoteAmendment = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      noteId: note.id,
+      authorUserId: session.userId,
+      reason: input.reason.trim(),
+      changes: recorded,
+      createdAt: new Date().toISOString(),
+    };
+    coll.noteAmendments.push(amendment);
+    return amendment;
+  }
+
+  // ---- monthly reports ----
+
+  async ispGenerateMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.review_monthly");
+    const individual = this.ispIndividualOrThrow(session, individualId);
+    const month = `${serviceMonth.slice(0, 7)}-01`;
+    if (!/^\d{4}-\d{2}-01$/.test(month)) {
+      throw new Error("Enter the service month (yyyy-mm).");
+    }
+    const coll = this.ispData();
+    const existing = coll.monthlyReports.find(
+      (r) =>
+        r.agencyId === session.agencyId &&
+        r.individualId === individualId &&
+        r.serviceMonth === month,
+    );
+    // Finalized reports are frozen: the DB trigger rejects any UPDATE, so the
+    // API returns the report untouched instead of refreshing tallies.
+    if (existing?.status === "finalized") return existing;
+    const tallies = this.ispTallies(session, individualId, month);
+    const { goals, objectives } = this.ispGoalsAndObjectives(session, individualId);
+    const goalById = new Map(goals.map((g) => [g.id, g]));
+    const activeObjectives = objectives.filter((o) => o.status === "active");
+    const tallyByObjective = new Map(
+      tallies.perObjective.map((t) => [t.objectiveId, t]),
+    );
+    if (!existing) {
+      const sections = blankMonthlySections(ispMonthLabel(month));
+      sections.programProgress = activeObjectives.map((o) => ({
+        objectiveId: o.id,
+        objectiveTitle: o.title,
+        goalTitle: goalById.get(o.goalId)?.title ?? "",
+        tallySummary: ispTallySummary(
+          tallyByObjective.get(o.id) ?? {
+            objectiveId: o.id,
+            objectiveTitle: o.title,
+            goalTitle: goalById.get(o.goalId)?.title ?? "",
+            opportunities: 0,
+            completions: 0,
+            refusals: 0,
+            notOffered: 0,
+            successRate: null,
+            avgRating: null,
+            totalCount: 0,
+            trend: null,
+          },
+        ),
+        progress: "",
+        reasonIfNone: "",
+      }));
+      const now = new Date().toISOString();
+      const report: IspMonthlyReport = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        individualId,
+        serviceMonth: month,
+        status: "draft",
+        sections,
+        tallies,
+        preparedBy: session.userId,
+        preparedAt: now,
+        dueOn: ispDueOn(month),
+        finalizedAt: null,
+      };
+      coll.monthlyReports.push(report);
+      return report;
+    }
+    existing.tallies = tallies;
+    // Refresh tally summaries; add rows for newly active objectives. The
+    // preparer's own progress text is never overwritten.
+    const byObjective = new Map(
+      existing.sections.programProgress.map((r) => [r.objectiveId, r]),
+    );
+    for (const o of activeObjectives) {
+      const summary = ispTallySummary(
+        tallyByObjective.get(o.id) ?? {
+          objectiveId: o.id,
+          objectiveTitle: o.title,
+          goalTitle: goalById.get(o.goalId)?.title ?? "",
+          opportunities: 0,
+          completions: 0,
+          refusals: 0,
+          notOffered: 0,
+          successRate: null,
+          avgRating: null,
+          totalCount: 0,
+          trend: null,
+        },
+      );
+      const row = byObjective.get(o.id);
+      if (row) {
+        row.tallySummary = summary;
+      } else {
+        existing.sections.programProgress.push({
+          objectiveId: o.id,
+          objectiveTitle: o.title,
+          goalTitle: goalById.get(o.goalId)?.title ?? "",
+          tallySummary: summary,
+          progress: "",
+          reasonIfNone: "",
+        });
+      }
+    }
+    return existing;
+  }
+
+  async ispGetMonthlyReport(
+    individualId: string,
+    serviceMonth: string,
+  ): Promise<IspMonthlyReport | null> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispIndividualOrThrow(session, individualId);
+    const month = `${serviceMonth.slice(0, 7)}-01`;
+    return (
+      this.ispData().monthlyReports.find(
+        (r) =>
+          r.agencyId === session.agencyId &&
+          r.individualId === individualId &&
+          r.serviceMonth === month,
+      ) ?? null
+    );
+  }
+
+  async ispUpdateMonthlySections(
+    reportId: string,
+    sections: IspMonthlySections,
+  ): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.review_monthly");
+    const report = this.ispData().monthlyReports.find(
+      (r) => r.id === reportId && r.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Monthly report not found.");
+    if (report.status === "finalized") {
+      throw new Error("A finalized report cannot be changed.");
+    }
+    report.sections = sections;
+  }
+
+  async ispSubmitMonthlyForReview(
+    reportId: string,
+    next: IspMonthlyStatus,
+  ): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.review_monthly");
+    const report = this.ispData().monthlyReports.find(
+      (r) => r.id === reportId && r.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Monthly report not found.");
+    const currentIndex = ISP_MONTHLY_FLOW.indexOf(report.status);
+    if (ISP_MONTHLY_FLOW[currentIndex + 1] !== next) {
+      throw new Error(
+        `A report moves forward one step at a time (currently ${report.status}).`,
+      );
+    }
+    if (next === "finalized") {
+      const signatures = this.ispData().monthlySignatures.filter(
+        (s) => s.reportId === report.id,
+      );
+      if (!signatures.some((s) => s.role === "pm")) {
+        throw new Error(
+          "A program manager signature is required before finalizing.",
+        );
+      }
+      report.finalizedAt = new Date().toISOString();
+    }
+    report.status = next;
+  }
+
+  async ispSignMonthlyReport(
+    reportId: string,
+    role: IspMonthlySignerRole,
+  ): Promise<IspMonthlySignature> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.review_monthly");
+    const report = this.ispData().monthlyReports.find(
+      (r) => r.id === reportId && r.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Monthly report not found.");
+    if (report.status === "finalized") {
+      throw new Error("A finalized report cannot be signed.");
+    }
+    const adopted = this.sigCollections().userSignatures.find(
+      (row) => row.userId === session.userId && row.agencyId === session.agencyId,
+    );
+    if (!adopted) {
+      throw new Error("Adopt your electronic signature before signing.");
+    }
+    const coll = this.ispData().monthlySignatures;
+    const now = new Date().toISOString();
+    let signature = coll.find(
+      (s) => s.reportId === reportId && s.role === role && s.userId === session.userId,
+    );
+    if (signature) {
+      signature.signatureMark = adopted.signaturePath;
+      signature.signerName = session.fullName;
+      signature.signedAt = now;
+    } else {
+      signature = {
+        id: crypto.randomUUID(),
+        reportId,
+        role,
+        userId: session.userId,
+        signerName: session.fullName,
+        signatureMark: adopted.signaturePath,
+        signedAt: now,
+      };
+      coll.push(signature);
+    }
+    return signature;
+  }
+
+  async ispListMonthlySignatures(
+    reportId: string,
+  ): Promise<IspMonthlySignature[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    const report = this.ispData().monthlyReports.find(
+      (r) => r.id === reportId && r.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Monthly report not found.");
+    return this.ispData()
+      .monthlySignatures.filter((s) => s.reportId === reportId)
+      .sort((a, b) => a.signedAt.localeCompare(b.signedAt));
+  }
+
+  // ---- boards, escalations, sweeps ----
+
+  async ispOverdueNotes(siteId?: string): Promise<IspExpectationView[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    let scoped = siteId;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      scoped = session.siteId;
+    } else if (scoped) {
+      this.ispScopeSite(session, scoped);
+    }
+    const now = new Date();
+    return this.ispData()
+      .expectations.filter(
+        (e) =>
+          e.agencyId === session.agencyId && (!scoped || e.siteId === scoped),
+      )
+      .map((e) => this.ispExpectationView(e, now))
+      .filter((v) => v.status === "overdue")
+      .sort((a, b) => (b.hoursOverdue ?? 0) - (a.hoursOverdue ?? 0));
+  }
+
+  async ispHouseShiftBoard(
+    siteId: string,
+    date: string,
+  ): Promise<HouseShiftBoard> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    this.ispScopeSite(session, siteId);
+    const coll = this.ispData();
+    const now = new Date();
+    const patterns = coll.shiftPatterns
+      .filter((p) => p.agencyId === session.agencyId && p.siteId === siteId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const assignments = coll.shiftAssignments.filter(
+      (a) =>
+        a.agencyId === session.agencyId &&
+        a.siteId === siteId &&
+        a.workDate === date,
+    );
+    const profiles = new Map(
+      this.store.db.profiles.map((p) => [p.id, p.fullName]),
+    );
+    return {
+      siteId,
+      date,
+      shifts: patterns.map((pattern) => ({
+        patternId: pattern.id,
+        name: pattern.name,
+        startTime: pattern.startTime,
+        endTime: pattern.endTime,
+        cells: assignments
+          .filter((a) => a.shiftPatternId === pattern.id)
+          .map((a) => {
+            const views = coll.expectations
+              .filter((e) => e.assignmentId === a.id)
+              .map((e) => this.ispExpectationView(e, now));
+            return {
+              assignmentId: a.id,
+              userId: a.userId,
+              staffName: profiles.get(a.userId) ?? "Unknown staff",
+              total: views.length,
+              submitted: views.filter((v) => v.status === "submitted").length,
+              lateSubmitted: views.filter((v) => v.status === "late_submitted")
+                .length,
+              overdue: views.filter((v) => v.status === "overdue").length,
+              pending: views.filter((v) => v.status === "pending").length,
+              excused: views.filter((v) => v.status === "excused").length,
+            };
+          }),
+      })),
+    };
+  }
+
+  async ispSendEscalation(input: IspEscalationInput): Promise<IspEscalation> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.message_staff");
+    if (!input.toUserId) throw new Error("Choose who the message goes to.");
+    if (!input.message?.trim()) throw new Error("Write the message first.");
+    return this.ispQueueEscalation({
+      agencyId: session.agencyId,
+      fromUserId: session.userId,
+      expectationId: input.expectationId ?? null,
+      kind: input.kind,
+      toUserId: input.toUserId,
+      message: input.message.trim(),
+      channel: input.channel ?? "in_app",
+    });
+  }
+
+  async ispRunEscalationSweep(): Promise<IspEscalationDecision[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.message_staff");
+    const coll = this.ispData();
+    const now = new Date();
+    const settings = this.ispSettingsRow(session);
+    const views = coll.expectations
+      .filter((e) => e.agencyId === session.agencyId)
+      .map((e) => this.ispExpectationView(e, now));
+    const sent = coll.escalations
+      .filter((e) => e.agencyId === session.agencyId)
+      .map((e) => ({ expectationId: e.expectationId, kind: e.kind }));
+    const memberships = this.ispActiveMemberships(session);
+    const hmBySite = new Map<string, string[]>();
+    for (const m of memberships) {
+      if (m.roleKey === "house_manager" && m.siteId) {
+        const list = hmBySite.get(m.siteId) ?? [];
+        list.push(m.userId);
+        hmBySite.set(m.siteId, list);
+      }
+    }
+    const dpmIds = memberships
+      .filter((m) => m.roleKey === "degreed_professional_manager")
+      .map((m) => m.userId);
+    const bySite = new Map<string, IspExpectationView[]>();
+    for (const view of views) {
+      const list = bySite.get(view.siteId) ?? [];
+      list.push(view);
+      bySite.set(view.siteId, list);
+    }
+    const decisions: IspEscalationDecision[] = [];
+    for (const [siteId, siteViews] of bySite) {
+      decisions.push(
+        ...computeEscalationDecisions({
+          expectations: siteViews,
+          sent,
+          settings,
+          now,
+          houseManagerIds: hmBySite.get(siteId) ?? [],
+          dpmIds,
+        }),
+      );
+    }
+    for (const decision of decisions) {
+      this.ispQueueEscalation({
+        agencyId: session.agencyId,
+        fromUserId: session.userId,
+        expectationId: decision.expectationId,
+        kind: decision.kind,
+        toUserId: decision.toUserId,
+        message: decision.message,
+        channel: "in_app",
+      });
+    }
+    return decisions;
+  }
+
+  async ispRepeatOffenders(days = 30): Promise<IspRepeatOffender[]> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    let siteId: string | undefined;
+    if (session.roleKey === "house_manager" && session.siteId) {
+      siteId = session.siteId;
+    }
+    const now = new Date();
+    const views = this.ispData()
+      .expectations.filter(
+        (e) =>
+          e.agencyId === session.agencyId && (!siteId || e.siteId === siteId),
+      )
+      .map((e) => this.ispExpectationView(e, now));
+    return repeatOffenders(views, days, now);
+  }
+
+  // ---- settings ----
+
+  async ispGetNoteSettings(): Promise<IspNoteSettings> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.view");
+    return this.ispSettingsRow(session);
+  }
+
+  async ispSaveNoteSettings(
+    input: Partial<IspNoteSettings>,
+  ): Promise<IspNoteSettings> {
+    const session = assertSession(this.store);
+    assertCan(session, "isp.manage_plan");
+    const settings = this.ispSettingsRow(session);
+    const numeric: Array<keyof IspNoteSettings> = [
+      "noteGraceMinutes",
+      "nudgeBeforeMinutes",
+      "hmAlertAfterMinutes",
+      "dpmEscalationHours",
+      "contemporaneousDays",
+    ];
+    for (const key of numeric) {
+      const value = input[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        (settings as unknown as Record<string, number>)[key] = Math.round(value);
+      }
+    }
+    return settings;
   }
 }
 
