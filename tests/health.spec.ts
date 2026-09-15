@@ -21,10 +21,19 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
-  await expect(chart.getByRole("button", { name: "New appointment" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Appointments" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await expect(chart.getByRole("button", { name: "Edit allergies" })).toBeVisible();
-  await expect(chart).toContainText("Dr. Priya Shah");
   await expect(chart).toContainText("Tree nuts");
+  await expect(chart.getByRole("button", { name: "New appointment" })).toHaveCount(0);
+  await page.screenshot({ path: shot("health_overview.png"), fullPage: true });
+  await chart.getByRole("tab", { name: "Appointments" }).click();
+  await expect(chart.getByRole("button", { name: "New appointment" })).toBeVisible();
+  await expect(chart).toContainText("Dr. Priya Shah");
   await expect(chart).toContainText("Logged by Cameron Price");
   await expect(chart.getByRole("heading", { name: "Shift notes" })).toHaveCount(0);
   await expect(chart.getByRole("heading", { name: "Vitals" })).toHaveCount(0);
@@ -45,11 +54,13 @@ test("DSP can view Health and generate a packet but cannot create appointments",
   await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
-  await expect(chart.getByRole("button", { name: "New appointment" })).toHaveCount(0);
+  await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
   await expect(chart.getByRole("button", { name: "Edit allergies" })).toHaveCount(0);
+  await expect(chart).toContainText("Tree nuts");
+  await chart.getByRole("tab", { name: "Appointments" }).click();
+  await expect(chart.getByRole("button", { name: "New appointment" })).toHaveCount(0);
   await expect(chart.getByRole("button", { name: "Generate consultation packet" })).toBeVisible();
   await expect(chart.getByRole("button", { name: "Upload consultation form" })).toBeVisible();
-  await expect(chart).toContainText("Tree nuts");
 });
 
 test("Appointments calendar lists caseload days and opens that day's visits", async ({
@@ -75,6 +86,7 @@ test("uploading a consultation form completes the appointment", async ({ page })
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
   const chart = page.locator(".individual-chart");
+  await chart.getByRole("tab", { name: "Appointments" }).click();
   await chart.getByRole("button", { name: "Upload consultation form" }).click();
   await chart.getByLabel("Consultation form").setInputFiles({
     name: "shah-visit.pdf",

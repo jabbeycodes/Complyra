@@ -6677,6 +6677,9 @@ button.qa-row:hover {
   color: #2f4630;
   font-size: 1.05rem;
 }
+.health-tabs {
+  margin: 4px 0 12px;
+}
 .appointment-form {
   display: grid;
   gap: 10px;

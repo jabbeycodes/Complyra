@@ -44,32 +44,73 @@ export default function HealthCard({
   onOpenConsultation: (fileId: string) => Promise<void>;
   onSaveAllergies: (allergies: Allergy[]) => Promise<void>;
 }) {
+  const [tab, setTab] = useState<"overview" | "appointments">("overview");
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [editingAllergies, setEditingAllergies] = useState(false);
 
   return (
     <section className="chart-widget health-widget" aria-labelledby="health-heading">
       <h2 id="health-heading">Health</h2>
+      <div className="tabs health-tabs" role="tablist" aria-label="Health sections">
+        <button
+          id="health-tab-overview"
+          role="tab"
+          type="button"
+          aria-selected={tab === "overview"}
+          aria-controls="health-panel-overview"
+          className={tab === "overview" ? "selected" : ""}
+          onClick={() => setTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          id="health-tab-appointments"
+          role="tab"
+          type="button"
+          aria-selected={tab === "appointments"}
+          aria-controls="health-panel-appointments"
+          className={tab === "appointments" ? "selected" : ""}
+          onClick={() => setTab("appointments")}
+        >
+          Appointments
+        </button>
+      </div>
+
+      {tab === "overview" && (
+        <div
+          id="health-panel-overview"
+          role="tabpanel"
+          aria-labelledby="health-tab-overview"
+        >
+          <p className="stack-help">
+            Allergies for {individualName} live on this Overview. Consultation
+            packets read them from the live chart.
+          </p>
+          <AllergiesBlock
+            allergies={profile.allergies}
+            stamp={profile.allergiesStamp}
+            canEdit={canManage}
+            editing={editingAllergies}
+            onEdit={() => setEditingAllergies(true)}
+            onCancel={() => setEditingAllergies(false)}
+            onSave={async (allergies) => {
+              await onSaveAllergies(allergies);
+              setEditingAllergies(false);
+            }}
+          />
+        </div>
+      )}
+
+      {tab === "appointments" && (
+        <div
+          id="health-panel-appointments"
+          role="tabpanel"
+          aria-labelledby="health-tab-appointments"
+        >
       <p className="stack-help">
-        Appointments and allergies for {individualName}. Generate a consultation
-        packet from this chart before a visit. Upload the consultation form after
-        the visit to complete it.
+        Appointments for {individualName} only. Generate a consultation packet
+        before a visit. Upload the form after to complete it.
       </p>
-
-      <AllergiesBlock
-        allergies={profile.allergies}
-        stamp={profile.allergiesStamp}
-        canEdit={canManage}
-        editing={editingAllergies}
-        onEdit={() => setEditingAllergies(true)}
-        onCancel={() => setEditingAllergies(false)}
-        onSave={async (allergies) => {
-          await onSaveAllergies(allergies);
-          setEditingAllergies(false);
-        }}
-      />
-
-      <h3 id="health-appointments-heading">Appointments</h3>
       <div className="chart-actions">
         {canManage && (
           <button
@@ -134,6 +175,8 @@ export default function HealthCard({
           </article>
         );
       })}
+        </div>
+      )}
     </section>
   );
 }
