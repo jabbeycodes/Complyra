@@ -146,6 +146,15 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await expect(page.locator("body")).not.toContainText("Open record");
   const tabs = page.locator(".site-detail-tabs [role='tab']");
   await expect(tabs.last()).toHaveText(/Staff/);
+  const dashFill = await page.evaluate(() => {
+    const hero = document.querySelector(".site-hero");
+    const dash = document.querySelector(".site-hero-dash");
+    if (!hero || !dash) return 0;
+    const h = hero.getBoundingClientRect();
+    const d = dash.getBoundingClientRect();
+    return (d.right - h.left) / h.width;
+  });
+  expect(dashFill, "hero dash should fill the panel").toBeGreaterThan(0.78);
   await page.screenshot({ path: shotPath("site_hero_1280.png"), fullPage: false });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -168,6 +177,13 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   const box = await tablist.boundingBox();
   expect(box?.width).toBeLessThanOrEqual(390);
   await expect(tabs.last()).toHaveText(/Staff/);
+  const legendToKpis = await page.evaluate(() => {
+    const legend = document.querySelector(".site-hero .status-mix-legend");
+    const kpis = document.querySelector(".site-hero-kpis");
+    if (!legend || !kpis) return 999;
+    return kpis.getBoundingClientRect().top - legend.getBoundingClientRect().bottom;
+  });
+  expect(legendToKpis, "legend-to-KPI gap on phone").toBeLessThan(24);
   await assertNoPageHorizontalScroll(page);
   await page.screenshot({ path: shotPath("site_hero_390.png"), fullPage: false });
   await tablist.scrollIntoViewIfNeeded();

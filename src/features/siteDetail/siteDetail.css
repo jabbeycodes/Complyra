@@ -22,15 +22,17 @@
 }
 
 .site-hero-dash {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.75fr);
+  gap: 20px 40px;
+  align-items: center;
 }
 
 .site-hero .status-mix {
   padding: 0;
-  gap: 20px;
-  max-width: 520px;
+  gap: 24px;
+  max-width: none;
+  width: 100%;
 }
 
 .site-hero .status-mix-chart {
@@ -39,14 +41,15 @@
 }
 
 .site-hero .status-mix-legend {
-  flex: 0 1 240px;
+  flex: 1 1 0;
 }
 
 .site-hero-kpis {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 28px;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  align-items: end;
+  width: 100%;
 }
 
 .site-hero-score,
@@ -54,15 +57,15 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 72px;
+  min-width: 0;
 }
 
 .site-hero-score {
-  min-width: 120px;
+  grid-column: 1 / -1;
 }
 
 .site-hero-score .progress-track {
-  max-width: 160px;
+  max-width: 180px;
 }
 
 .site-hero-score strong,
@@ -84,7 +87,7 @@
 
 .site-hero-people {
   display: flex;
-  gap: 14px;
+  gap: 20px;
   overflow-x: auto;
   padding: 4px 0 6px;
   -webkit-overflow-scrolling: touch;
@@ -293,6 +296,11 @@
 }
 
 @media (max-width: 900px) {
+  .site-hero-dash {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
   .site-hero .status-mix-chart {
     width: 128px;
     max-width: 128px;
@@ -329,13 +337,39 @@
     flex-wrap: wrap;
   }
 
+  .site-hero {
+    gap: 12px;
+  }
+
+  .site-hero-dash {
+    gap: 8px;
+  }
+
   .site-hero .status-mix {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
     max-width: none;
+    width: 100%;
+    gap: 12px;
+  }
+
+  .site-hero .status-mix-chart {
+    width: 104px;
+    max-width: 104px;
+    height: 104px;
+  }
+
+  .site-hero .status-mix-legend {
+    flex: 1 1 auto;
+    gap: 4px;
+  }
+
+  .site-hero-kpis {
+    gap: 8px 16px;
   }
 
   .site-hero-people {
+    gap: 14px;
     mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }
