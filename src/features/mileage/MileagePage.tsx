@@ -827,7 +827,7 @@ export default function MileagePage() {
                 </label>
               )}
               <fieldset className="mileage-riders">
-                <legend>Individuals who rode (miles split equally)</legend>
+                <legend>Riders</legend>
                 {people.length === 0 && (
                   <p className="stack-help">No individuals are assigned to this home yet.</p>
                 )}

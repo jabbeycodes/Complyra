@@ -14,12 +14,26 @@ async function signIn(page: Page) {
   await page.keyboard.press("Escape");
 }
 
+async function closeMobileNav(page: Page) {
+  const close = page.locator(".sidebar-close");
+  if (await close.count()) await close.click({ force: true });
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const el = document.querySelector(".sidebar");
+        if (!el) return true;
+        return el.getBoundingClientRect().right <= 4;
+      }),
+    )
+    .toBe(true);
+}
+
 async function openNav(page: Page, name: string) {
   const menu = page.getByRole("button", { name: "Open navigation" });
   if (await menu.isVisible()) await menu.click();
   await page.locator(".sidebar").getByRole("button", { name, exact: true }).click();
-  const close = page.locator(".sidebar.mobile-open");
-  if (await close.isVisible()) await page.locator(".sidebar-close").click();
+  const open = page.locator(".sidebar.mobile-open");
+  if (await open.isVisible()) await closeMobileNav(page);
 }
 
 function shotPath(name: string) {
@@ -98,6 +112,7 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await closeMobileNav(page);
   await assertNoPageHorizontalScroll(page);
   await expect(weeklyBar.getByRole("button", { name: "Print weekly" })).toBeVisible();
   await page.screenshot({ path: shotPath("mileage_admin_weekly_390.png"), fullPage: false });
@@ -146,7 +161,7 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
     )
     .toBe(true);
   await expect(page.locator(".site-hero")).toBeVisible();
-  await page.locator(".site-hero-people").scrollIntoViewIfNeeded();
+  await page.locator(".site-hero").scrollIntoViewIfNeeded();
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   const tablist = page.locator(".site-detail-tabs");
   await expect(tablist).toBeVisible();

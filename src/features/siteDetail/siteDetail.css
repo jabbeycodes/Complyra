@@ -331,6 +331,8 @@
 
   .site-hero .status-mix {
     flex-wrap: wrap;
+    align-items: flex-start;
+    max-width: none;
   }
 
   .site-hero-people {
