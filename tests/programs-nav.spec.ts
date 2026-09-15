@@ -74,11 +74,17 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
 test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
+  await page.addStyleTag({
+    content: ".sidebar,.mobile-backdrop{transition:none!important}",
+  });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar.mobile-open .nav-label").first()).toHaveText(
     "PROGRAMS",
   );
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
+  await expect(
+    page.locator(".sidebar.mobile-open").getByRole("button", { name: "Overview" }),
+  ).toBeInViewport();
   await page.screenshot({ path: shotPath("programs_drawer_390.png"), fullPage: false });
   await closeMobileNav(page);
   await page.screenshot({ path: shotPath("overview_programs_390.png"), fullPage: false });
