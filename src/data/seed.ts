@@ -577,6 +577,8 @@ export function createEvergreenSeed(): LocalDatabase {
     ),
     appointments: [
       {
+        // Same seed id as hosted Ellis Hart after the Cedar/Willow repair.
+        // Playwright clock is 2026-09-12, so 2026-09-22 stays in the 30-day window.
         id: padId(940),
         agencyId: AGENCY_ID,
         individualId: jodie.id,
