@@ -76,6 +76,17 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await page.screenshot({ path: shotPath("site_hero_1280.png"), fullPage: false });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  const close = page.locator(".sidebar-close");
+  if (await close.count()) await close.click({ force: true });
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const el = document.querySelector(".sidebar");
+        if (!el) return true;
+        return el.getBoundingClientRect().right <= 4;
+      }),
+    )
+    .toBe(true);
   await expect(page.locator(".site-hero")).toBeVisible();
   const tablist = page.locator(".site-detail-tabs");
   await expect(tablist).toBeVisible();
