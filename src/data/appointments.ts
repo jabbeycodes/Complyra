@@ -34,7 +34,20 @@ export interface Appointment {
   deletedBy: string;
   deletedByName: string;
   deletedAt: string | null;
+  completedBy: string;
+  completedByName: string;
+  completedAt: string | null;
+  visitComments: string;
+  consultationFileId: string | null;
 }
+
+export type AppointmentStatus = "upcoming" | "completed";
+
+export type CaseloadAppointment = Appointment & {
+  individualName: string;
+  siteId: string;
+  siteName: string;
+};
 
 export type AppointmentDraft = {
   startsOn: string;
@@ -74,6 +87,11 @@ export function canManageAppointments(roleKey: string) {
 
 export function canEditAllergies(roleKey: string) {
   return canManageAppointments(roleKey);
+}
+
+/** RN/HM/admin complete, and assigned DSP may upload/complete. DSP cannot create. */
+export function canCompleteAppointments(roleKey: string) {
+  return canManageAppointments(roleKey) || roleKey === "dsp";
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
@@ -146,6 +164,119 @@ export function sortAppointments(rows: Appointment[]) {
 
 export function isAppointmentRemoved(row: Pick<Appointment, "deletedAt">) {
   return Boolean(row.deletedAt);
+}
+
+export function appointmentStatus(row: Pick<Appointment, "completedAt" | "deletedAt">): AppointmentStatus {
+  return row.completedAt ? "completed" : "upcoming";
+}
+
+export function addCalendarDays(isoDate: string, days: number) {
+  const parsed = Date.parse(`${isoDate.slice(0, 10)}T12:00:00Z`);
+  if (!Number.isFinite(parsed)) return isoDate.slice(0, 10);
+  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+export function thirtyDayRange(today: string) {
+  return { from: today.slice(0, 10), to: addCalendarDays(today, 29) };
+}
+
+export function monthStart(isoDate: string) {
+  return `${isoDate.slice(0, 7)}-01`;
+}
+
+export function shiftMonth(monthIso: string, delta: number) {
+  const [year, month] = monthIso.slice(0, 7).split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+export function monthLabel(monthIso: string) {
+  const parsed = Date.parse(`${monthStart(monthIso)}T12:00:00Z`);
+  if (!Number.isFinite(parsed)) return monthIso;
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(
+    parsed,
+  );
+}
+
+export const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function monthCells(monthIso: string) {
+  const start = monthStart(monthIso);
+  const [year, month] = start.split("-").map(Number);
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const cells: { date: string | null }[] = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push({ date: null });
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({ date: `${start.slice(0, 8)}${String(day).padStart(2, "0")}` });
+  }
+  while (cells.length % 7 !== 0) cells.push({ date: null });
+  return cells;
+}
+
+export function filterCaseloadAppointments(
+  rows: CaseloadAppointment[],
+  filters: {
+    name?: string;
+    from?: string;
+    to?: string;
+    status?: AppointmentStatus | "all";
+    siteId?: string;
+  },
+) {
+  const name = filters.name?.trim().toLowerCase() ?? "";
+  const filtered = rows.filter((row) => {
+    if (isAppointmentRemoved(row)) return false;
+    if (name && !row.individualName.toLowerCase().includes(name)) return false;
+    if (filters.from && row.startsOn < filters.from) return false;
+    if (filters.to && row.startsOn > filters.to) return false;
+    if (filters.status && filters.status !== "all" && appointmentStatus(row) !== filters.status) {
+      return false;
+    }
+    if (filters.siteId && row.siteId !== filters.siteId) return false;
+    return true;
+  });
+  return sortAppointments(filtered) as CaseloadAppointment[];
+}
+
+export function formatAppointmentDate(isoDate: string) {
+  return formatLongDate(isoDate);
+}
+
+export function caseloadAppointmentsFromWorkspace(
+  stacks: { individualId: string; appointments: Appointment[] }[],
+  people: { id: string; name: string; siteId: string; site: string }[],
+): CaseloadAppointment[] {
+  const byId = new Map(people.map((person) => [person.id, person]));
+  const rows: CaseloadAppointment[] = [];
+  for (const stack of stacks) {
+    const person = byId.get(stack.individualId);
+    if (!person) continue;
+    for (const appointment of stack.appointments) {
+      rows.push({
+        ...appointment,
+        individualName: person.name,
+        siteId: person.siteId,
+        siteName: person.site,
+      });
+    }
+  }
+  return sortAppointments(rows) as CaseloadAppointment[];
+}
+
+const CONSULTATION_NAME_RE = /\.(pdf|png|jpe?g)$/i;
+
+/** Consultation form: PDF or a photo of the signed visit sheet. */
+export function assertConsultationUpload(file: File) {
+  const mime = (file.type || "").toLowerCase();
+  const allowedMime =
+    mime === "application/pdf" || mime === "image/png" || mime === "image/jpeg";
+  if (allowedMime || CONSULTATION_NAME_RE.test(file.name)) return;
+  throw new Error("Upload the consultation form as a PDF, PNG, or JPG.");
+}
+
+export function formatCompletedBy(name: string, at: string) {
+  return `Completed by ${name} · ${formatHealthDateTime(at)}`;
 }
 
 /** DSP sees live rows only. RN/HM/admin still see removed appointments. */
@@ -241,6 +372,11 @@ export function blankAppointmentStamps(
   | "deletedBy"
   | "deletedByName"
   | "deletedAt"
+  | "completedBy"
+  | "completedByName"
+  | "completedAt"
+  | "visitComments"
+  | "consultationFileId"
 > {
   return {
     createdBy: actor.userId,
@@ -252,5 +388,10 @@ export function blankAppointmentStamps(
     deletedBy: "",
     deletedByName: "",
     deletedAt: null,
+    completedBy: "",
+    completedByName: "",
+    completedAt: null,
+    visitComments: "",
+    consultationFileId: null,
   };
 }

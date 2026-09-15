@@ -243,6 +243,11 @@ export function mapAppointment(row: Row): Appointment {
     deletedBy: str(row.deleted_by),
     deletedByName: str(row.deleted_by_name),
     deletedAt: isoDateTime(row.deleted_at),
+    completedBy: str(row.completed_by),
+    completedByName: str(row.completed_by_name),
+    completedAt: isoDateTime(row.completed_at),
+    visitComments: str(row.visit_comments),
+    consultationFileId: strOrNull(row.consultation_file_id),
   };
 }
 

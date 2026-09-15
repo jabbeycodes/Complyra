@@ -305,6 +305,11 @@ async function main() {
       deleted_by: row.deletedBy ? uid(row.deletedBy) : null,
       deleted_by_name: row.deletedByName,
       deleted_at: row.deletedAt,
+      completed_by: row.completedBy ? uid(row.completedBy) : null,
+      completed_by_name: row.completedByName,
+      completed_at: row.completedAt,
+      visit_comments: row.visitComments,
+      consultation_file_id: row.consultationFileId,
     })),
   );
   await upsert(

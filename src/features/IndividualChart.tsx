@@ -18,6 +18,7 @@ import {
   countdownLabel,
 } from "../data/chart";
 import {
+  canCompleteAppointments,
   canManageAppointments,
   canSeeAppointments,
 } from "../data/appointments";
@@ -31,11 +32,8 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can } from "../data/status";
-import {
-  buildConsultationPacketPdf,
-  consultationPacketFileName,
-} from "../pdf/consultationPacketPdf";
 import AssignedDocsPanel from "./AssignedDocsPanel";
+import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import HealthCard from "./HealthCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
@@ -74,6 +72,7 @@ export default function IndividualChart({
   const showMeds = canSeeMeds(chartSession.roleKey);
   const showHealth = canSeeAppointments(chartSession.roleKey);
   const manageAppointments = canManageAppointments(chartSession.roleKey);
+  const completeAppointments = canCompleteAppointments(chartSession.roleKey);
   const profile = chartStack.profile;
   const delegations = chartStack.required.filter((view) => view.item.kind === "delegation");
 
@@ -88,7 +87,7 @@ export default function IndividualChart({
   }
 
   async function openFile(
-    type: "renewal" | "discontinue" | "training" | "version",
+    type: "renewal" | "discontinue" | "training" | "version" | "consultation",
     id: string,
     mode: "download" | "print",
   ) {
@@ -103,30 +102,19 @@ export default function IndividualChart({
     appointment: (typeof chartStack.appointments)[number],
     mode: "download" | "print",
   ) {
+    if (!workspace) return;
     setError("");
     try {
-      const generatedAt = new Date().toISOString();
-      await api.recordConsultationPacketGenerated(appointment.id);
-      const site = workspace?.sites.find((row) => row.id === chartPerson.siteId);
-      const doc = buildConsultationPacketPdf({
-        agencyName: chartSession.agencyName,
-        individualName: chartPerson.name,
-        dateOfBirth: chartPerson.dateOfBirth,
-        siteName: chartPerson.site,
-        programName: site?.program ?? "",
+      await generateConsultationPacket({
+        recordGenerated: (id) => api.recordConsultationPacketGenerated(id),
+        session: chartSession,
+        workspace,
+        person: chartPerson,
         profile,
         appointment,
         medications: chartStack.medications,
-        generatedByName: chartSession.fullName,
-        generatedAt,
-        logoDataUrl: workspace?.branding.logoUrl ?? null,
-      });
-      const blob = doc.output("blob") as Blob;
-      await openPrintable(
-        consultationPacketFileName(chartPerson.name, appointment.startsOn),
-        blob,
         mode,
-      );
+      });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -299,6 +287,7 @@ export default function IndividualChart({
             appointments={stack.appointments}
             profile={profile}
             canManage={manageAppointments}
+            canComplete={completeAppointments}
             onCreate={(draft) =>
               run(() =>
                 api.createAppointment({
@@ -310,6 +299,16 @@ export default function IndividualChart({
             onUpdate={(id, draft) => run(() => api.updateAppointment(id, draft))}
             onDelete={(id) => run(() => api.deleteAppointment(id))}
             onGenerate={generatePacket}
+            onComplete={(appointment, file, comments) =>
+              run(() =>
+                api.completeAppointment({
+                  appointmentId: appointment.id,
+                  file,
+                  comments,
+                }),
+              )
+            }
+            onOpenConsultation={(fileId) => openFile("consultation", fileId, "download")}
             onSaveAllergies={(allergies) =>
               run(() => api.updateIndividualAllergies(individualId, allergies))
             }

@@ -510,6 +510,46 @@ test("removing an appointment is a soft-delete RN can still see", async () => {
   );
 });
 
+test("assigned DSP can upload a consultation form and complete the visit", async () => {
+  const api = new LocalApi(store());
+  const dsp = await api.signIn(dspLogin());
+  const jodie = (await api.loadWorkspace(dsp)).individuals.find((p) =>
+    p.name.includes("Jodie"),
+  )!;
+  const seedAppt = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === jodie.id,
+  )!.appointments.find((row) => row.consultant === "Dr. Priya Shah")!;
+  const file = new File(["%PDF-1.4 consultation"], "shah-visit.pdf", {
+    type: "application/pdf",
+  });
+  await api.completeAppointment({
+    appointmentId: seedAppt.id,
+    file,
+    comments: "Brought seizure log.",
+  });
+  const after = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === jodie.id,
+  )!.appointments.find((row) => row.id === seedAppt.id)!;
+  assert.equal(after.completedBy, dsp.userId);
+  assert.equal(after.completedByName, dsp.fullName);
+  assert.ok(after.completedAt);
+  assert.equal(after.visitComments, "Brought seizure log.");
+  assert.ok(after.consultationFileId);
+  const stored = await api.getChartFile({
+    type: "consultation",
+    id: after.consultationFileId!,
+  });
+  assert.equal(stored?.name, "shah-visit.pdf");
+  await assert.rejects(
+    () =>
+      api.completeAppointment({
+        appointmentId: seedAppt.id,
+        file,
+      }),
+    /already completed/,
+  );
+});
+
 test("the platform owner can approve a pending agency", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

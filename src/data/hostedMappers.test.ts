@@ -302,6 +302,11 @@ test("mapAppointment reads date, clock, visit address, and who/when stamps", () 
     deleted_by: "",
     deleted_by_name: "",
     deleted_at: null,
+    completed_by: "",
+    completed_by_name: "",
+    completed_at: null,
+    visit_comments: "",
+    consultation_file_id: null,
   });
   assert.equal(row.startTime, "09:30");
   assert.equal(row.endTime, "10:15");
@@ -309,4 +314,6 @@ test("mapAppointment reads date, clock, visit address, and who/when stamps", () 
   assert.equal(row.visitAddress, "3201 Pompey Drive");
   assert.equal(row.createdByName, "Cameron Price");
   assert.equal(row.deletedAt, null);
+  assert.equal(row.completedAt, null);
+  assert.equal(row.consultationFileId, null);
 });

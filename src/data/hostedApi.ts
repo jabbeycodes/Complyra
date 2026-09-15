@@ -82,6 +82,8 @@ import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import {
   appointmentChangeDetail,
+  assertConsultationUpload,
+  canCompleteAppointments,
   canEditAllergies,
   canManageAppointments,
   canSeeAppointments,
@@ -1990,7 +1992,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async getChartFile(input: {
-    type: "renewal" | "discontinue" | "training" | "version";
+    type: "renewal" | "discontinue" | "training" | "version" | "consultation";
     id: string;
   }): Promise<{ blob: Blob; name: string } | null> {
     const session = await this.requireSession();
@@ -2068,6 +2070,9 @@ export class HostedApi implements ComplyraApi {
     throwIf(fileError, "Chart file not found.");
     if (!fileRow) return null;
     const file = mapChartFile(fileRow);
+    if (input.type === "consultation" && !canSeeAppointments(session.roleKey)) {
+      throw new Error("You cannot view Health records.");
+    }
     const { data: blob, error: downloadError } = await this.client.storage
       .from(CHART_BUCKET)
       .download(file.storagePath);
@@ -3054,6 +3059,50 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+  async completeAppointment(input: {
+    appointmentId: string;
+    file: File;
+    comments?: string;
+  }) {
+    const session = await this.requireSession();
+    if (!canCompleteAppointments(session.roleKey)) {
+      throw new Error("You cannot complete this appointment.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, input.appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    if (existing.completedAt) throw new Error("That appointment is already completed.");
+    const person = await this.individualRecord(existing.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    assertConsultationUpload(input.file);
+    const fileId = await this.saveChartFile(session, person.id, "other", input.file);
+    const now = new Date().toISOString();
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        consultation_file_id: fileId,
+        visit_comments: input.comments?.trim() ?? "",
+        completed_by: session.userId,
+        completed_by_name: session.fullName,
+        completed_at: now,
+        updated_by: session.userId,
+        updated_by_name: session.fullName,
+      })
+      .eq("id", input.appointmentId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .is("completed_at", null);
+    throwIf(error, "Could not complete that appointment.");
+    await this.audit(
+      session,
+      "appointment.completed",
+      `${existing.consultant} visit completed for ${person.fullName} · ${input.file.name}`,
+      "appointment",
+      input.appointmentId,
+    );
+  }
+
   async updateIndividualAllergies(individualId: string, allergies: Allergy[]) {
     const session = await this.requireSession();
     if (!canEditAllergies(session.roleKey)) {
@@ -3153,14 +3202,15 @@ export class HostedApi implements ComplyraApi {
   private async saveChartFile(
     session: SessionUser,
     individualId: string,
-    kind: "renewal" | "discontinue",
+    kind: "renewal" | "discontinue" | "other",
     file: File,
   ): Promise<string> {
     const fileId = crypto.randomUUID();
     const storagePath = `${session.agencyId}/${individualId}/chart/${fileId}/${file.name}`;
+    const mime = file.type || (kind === "other" ? "application/octet-stream" : "application/pdf");
     const { error: uploadError } = await this.client.storage
       .from(CHART_BUCKET)
-      .upload(storagePath, file, { contentType: "application/pdf", upsert: false });
+      .upload(storagePath, file, { contentType: mime, upsert: false });
     throwIf(uploadError, "Could not store the file.");
     const { error: insertError } = await this.client.from("chart_files").insert({
       id: fileId,
@@ -3168,7 +3218,7 @@ export class HostedApi implements ComplyraApi {
       individual_id: individualId,
       kind,
       name: file.name,
-      mime: "application/pdf",
+      mime,
       storage_path: storagePath,
     });
     throwIf(insertError, "File stored, but the chart record could not be saved.");

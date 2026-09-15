@@ -27,6 +27,11 @@ const appointment = {
   deletedBy: "",
   deletedByName: "",
   deletedAt: null,
+  completedBy: "",
+  completedByName: "",
+  completedAt: null,
+  visitComments: "",
+  consultationFileId: null,
 };
 
 test("consultation packet names the Individual and leaves missing fields blank on purpose", () => {

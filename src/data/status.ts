@@ -7,6 +7,7 @@ import {
   isRoleKey,
   type PermissionKey,
 } from "./permissions";
+import { canSeeAppointments } from "./appointments";
 
 const MS_PER_DAY = 86400000;
 
@@ -64,12 +65,11 @@ export function pageVisible(session: SessionUser, page: string) {
     return true;
   }
   if (page === "Intake") return canCreateIndividual(session.roleKey);
-  if (
-    page === "Individuals" ||
-    page === "Requirements" ||
-    page === "Individual chart"
-  ) {
+  if (page === "Individuals" || page === "Requirements" || page === "Individual chart") {
     return can(session, "individuals.view");
+  }
+  if (page === "Appointments") {
+    return can(session, "individuals.view") && canSeeAppointments(session.roleKey);
   }
   if (page === "Staff") {
     return (
@@ -153,6 +153,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Overview",
   "Platform",
   "Individuals",
+  "Appointments",
   "Sites & programs",
   "Intake",
   "Staff",

@@ -6672,9 +6672,19 @@ button.qa-row:hover {
 .health-widget {
   grid-column: 1 / -1;
 }
+.health-widget h3 {
+  margin: 18px 0 8px;
+  color: #2f4630;
+  font-size: 1.05rem;
+}
 .appointment-form {
   display: grid;
   gap: 10px;
+}
+.appointment-form textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
 }
 .appointment-form strong {
   color: #2f4630;

@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { CalendarDays, Download, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import {
   APPOINTMENT_TIMEZONES,
   DEFAULT_APPOINTMENT_TIMEZONE,
   formatAppointmentWhen,
-  formatLoggedBy,
-  formatRemovedBy,
-  formatUpdatedBy,
   isAppointmentRemoved,
   type Appointment,
   type AppointmentDraft,
 } from "../data/appointments";
 import type { Allergy, AllergiesStamp, IndividualProfile } from "../data/planStack";
+import {
+  AppointmentActions,
+  AppointmentStatusPill,
+  WhoWhen,
+} from "./appointments/appointmentUi";
 
 export default function HealthCard({
   individualName,
@@ -19,10 +21,13 @@ export default function HealthCard({
   appointments,
   profile,
   canManage,
+  canComplete,
   onCreate,
   onUpdate,
   onDelete,
   onGenerate,
+  onComplete,
+  onOpenConsultation,
   onSaveAllergies,
 }: {
   individualName: string;
@@ -30,10 +35,13 @@ export default function HealthCard({
   appointments: Appointment[];
   profile: IndividualProfile;
   canManage: boolean;
+  canComplete: boolean;
   onCreate: (draft: AppointmentDraft) => Promise<void>;
   onUpdate: (id: string, draft: AppointmentDraft) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onGenerate: (appointment: Appointment, mode: "download" | "print") => Promise<void>;
+  onComplete: (appointment: Appointment, file: File, comments: string) => Promise<void>;
+  onOpenConsultation: (fileId: string) => Promise<void>;
   onSaveAllergies: (allergies: Allergy[]) => Promise<void>;
 }) {
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
@@ -44,7 +52,8 @@ export default function HealthCard({
       <h2 id="health-heading">Health</h2>
       <p className="stack-help">
         Appointments and allergies for {individualName}. Generate a consultation
-        packet from this chart before a visit.
+        packet from this chart before a visit. Upload the consultation form after
+        the visit to complete it.
       </p>
 
       <AllergiesBlock
@@ -60,6 +69,7 @@ export default function HealthCard({
         }}
       />
 
+      <h3 id="health-appointments-heading">Appointments</h3>
       <div className="chart-actions">
         {canManage && (
           <button
@@ -93,15 +103,12 @@ export default function HealthCard({
             className={`obligation-card appointment-card${removed ? " appointment-removed" : ""}`}
           >
             <header>
-              <span className={`kind-pill renewal ${removed ? "overdue" : "current"}`}>
-                <CalendarDays size={12} /> {removed ? "Removed" : "Appointment"}
-              </span>
+              <AppointmentStatusPill appointment={row} />
               <h3>{row.consultant}</h3>
             </header>
             <p>{formatAppointmentWhen(row)}</p>
             {row.specialty ? <p>{row.specialty}</p> : null}
             {row.reason ? <p>{row.reason}</p> : null}
-            <WhoWhen stamp={row} />
             {editingId === row.id ? (
               <AppointmentForm
                 title="Edit appointment"
@@ -113,84 +120,21 @@ export default function HealthCard({
                 }}
               />
             ) : (
-              <div className="chart-actions">
-                {!removed && (
-                  <>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => onGenerate(row, "download")}
-                    >
-                      <Download size={16} /> Generate consultation packet
-                    </button>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => onGenerate(row, "print")}
-                    >
-                      <Printer size={16} /> Print packet
-                    </button>
-                  </>
-                )}
-                {canManage && !removed && (
-                  <>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => setEditingId(row.id)}
-                    >
-                      <Pencil size={16} /> Edit
-                    </button>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            "Remove this appointment? It stays on the chart as removed.",
-                          )
-                        ) {
-                          void onDelete(row.id);
-                        }
-                      }}
-                    >
-                      <Trash2 size={16} /> Remove
-                    </button>
-                  </>
-                )}
-              </div>
+              <AppointmentActions
+                appointment={row}
+                canManage={canManage}
+                canComplete={canComplete}
+                onGenerate={onGenerate}
+                onComplete={onComplete}
+                onOpenFile={onOpenConsultation}
+                onEdit={() => setEditingId(row.id)}
+                onDelete={() => onDelete(row.id)}
+              />
             )}
           </article>
         );
       })}
     </section>
-  );
-}
-
-function WhoWhen({
-  stamp,
-}: {
-  stamp: {
-    createdByName: string;
-    createdAt: string;
-    updatedByName: string;
-    updatedAt: string;
-    deletedByName?: string;
-    deletedAt?: string | null;
-  };
-}) {
-  return (
-    <>
-      {stamp.createdByName && stamp.createdAt ? (
-        <p className="health-stamp">{formatLoggedBy(stamp.createdByName, stamp.createdAt)}</p>
-      ) : null}
-      {stamp.updatedByName && stamp.updatedAt && stamp.updatedAt !== stamp.createdAt ? (
-        <p className="health-stamp">{formatUpdatedBy(stamp.updatedByName, stamp.updatedAt)}</p>
-      ) : null}
-      {stamp.deletedAt && stamp.deletedByName ? (
-        <p className="health-stamp">{formatRemovedBy(stamp.deletedByName, stamp.deletedAt)}</p>
-      ) : null}
-    </>
   );
 }
 
