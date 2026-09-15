@@ -19,6 +19,8 @@ import {
   skipQaItemState,
   type QaAuditItemState,
   type QaAutoVerifyContext,
+  QaBlockedError,
+  recheckQaItemForScoring,
 } from "./qaAudit";
 import { drillComplete } from "./monthlyChecks";
 
@@ -344,5 +346,57 @@ describe("scheduling", () => {
   it("undecided items block finalization", () => {
     const items = [blankItem({ key: "a" }), blankItem({ key: "b", result: "yes", status: "scored" })];
     assert.deepEqual(qaUndecidedItems(items), ["a"]);
+  });
+});
+
+describe("blocking rule", () => {
+  const baseCtx: QaAutoVerifyContext = {
+    siteId: "s1",
+    months: ["2026-07", "2026-08"],
+    auditYear: 2026,
+    drills: [],
+    trips: [],
+    packets: [],
+    assignments: [],
+    safetyReports: [],
+  };
+  const mileageItem = () =>
+    blankItem({ key: "vehicle.mileage-log", itemId: "vehicle.mileage-log" });
+
+  it("blocks scoring when the system can prove presence", () => {
+    const ctx = {
+      ...baseCtx,
+      trips: [
+        { siteId: "s1", date: "2026-07-05" },
+        { siteId: "s1", date: "2026-08-06" },
+      ],
+    };
+    const item = mileageItem();
+    assert.throws(
+      () => recheckQaItemForScoring(item, ctx),
+      (err: unknown) => {
+        assert.ok(err instanceof QaBlockedError);
+        assert.equal(err.name, "QaBlockedError");
+        assert.match(err.evidence, /Trips logged/);
+        assert.match(err.message, /vehicle\.mileage-log/);
+        return true;
+      },
+    );
+  });
+
+  it("passes through silently when the system cannot prove presence", () => {
+    const ctx = { ...baseCtx, trips: [{ siteId: "s1", date: "2026-07-05" }] };
+    assert.doesNotThrow(() => recheckQaItemForScoring(mileageItem(), ctx));
+  });
+
+  it("passes through silently for items with no autoVerify kind", () => {
+    const item = blankItem(); // safety.flashlight — no autoVerify kind
+    const ctx = { ...baseCtx, trips: [{ siteId: "s1", date: "2026-07-05" }] };
+    assert.doesNotThrow(() => recheckQaItemForScoring(item, ctx));
+  });
+
+  it("passes through silently for unknown item ids", () => {
+    const item = blankItem({ key: "nope", itemId: "does.not.exist" });
+    assert.doesNotThrow(() => recheckQaItemForScoring(item, baseCtx));
   });
 });

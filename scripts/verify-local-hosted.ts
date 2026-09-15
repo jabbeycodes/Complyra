@@ -53,11 +53,24 @@ assert.ok((await api.listQaAuditHistory(site.id)).some(a => a.id === qa.id), 'si
 const action = await api.addCorrectiveAction({ title: `Audit action ${suffix}`, assignedToUserId: session.userId, dueOn: '2026-10-01' });
 await api.resolveCorrectiveAction(action.id);
 assert.equal((await api.listCorrectiveActions()).find(a => a.id === action.id)?.storedStatus, 'resolved');
+const template = await api.createDelegationTemplate({ name: `Verification ${suffix}`, category: 'Health monitoring', sections: { purpose: 'Fictional test', steps: ['Observe'], safetyWarnings: [], documentation: ['Record'] }, individualizationNote: 'Test only' });
+const activation = await api.activateDelegationTemplate(template.id, site.id);
+const assignment = await api.assignDelegationToIndividual(activation.id, person.id);
+const material = await api.getDelegationTrainingMaterial(assignment.id);
+assert.ok(material);
+await api.updateDelegationTrainingDraft(assignment.id, { ...material.draftContent, individualNotes: 'Fictional individualized instructions' });
+await api.submitDelegationForReview(assignment.id);
+await api.approveDelegationTrainingMaterial(assignment.id, { ...material.draftContent, individualNotes: 'Fictional individualized instructions' });
+await api.openDelegationMaterial(assignment.id);
+await api.signDelegationAcknowledgment(assignment.id, session.fullName, 'Test signature');
+assert.ok((await api.getMyDelegationAck(assignment.id))?.signedAt);
+assert.equal((await api.getDelegationTrainingMaterial(assignment.id))?.publishedContent?.individualNotes, 'Fictional individualized instructions');
+console.log('PASS hosted delegation template → activation → individual assignment → draft → review → publish → open → acknowledgment');
 console.log('PASS hosted setup → site facts → individual → requirement draft → approval → evidence → QA scoring/history → corrective action resolution');
 await client.auth.signOut();
 
 const service = createClient(config.API_URL, config.SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-// Synthetic role accounts are removed even if a check fails.
+// Always revoke temporary memberships; a local database reset clears all fixtures.
 for (const roleKey of ['compliance_admin','degreed_professional_manager','program_manager','hr','auditor']) {
   const username = `audit.${roleKey.replaceAll('_','')}.${suffix}`;
   const email = `${username}@example.invalid`;
@@ -78,7 +91,8 @@ for (const roleKey of ['compliance_admin','degreed_professional_manager','progra
     console.log(`PASS hosted ${roleKey}: sign-in, workspace, care-data permission`);
     await client.auth.signOut();
   } finally {
-    await service.from('memberships').delete().eq('user_id', id);
+    const { error: cleanupError } = await service.from('memberships').delete().eq('user_id', id);
+    assert.ifError(cleanupError);
     await service.auth.admin.deleteUser(id);
   }
 }

@@ -51,7 +51,9 @@ export function can(session: SessionUser, key: PermissionKey) {
 
 /** Nav and page gates. Care records stay hidden from HR even if they guess a URL. */
 export function pageVisible(session: SessionUser, page: string) {
-  if (page === "Overview" || page === "Settings" || page === "Sites & programs" || page === "Help") {
+  // QA-AUDIT (2026-09-14): DSPs get no Overview dashboard.
+  if (page === "Overview") return session.roleKey !== "dsp";
+  if (page === "Settings" || page === "Sites & programs" || page === "Help") {
     return true;
   }
   // Site detail is a drill-down, not a nav destination: always "visible" as a
@@ -126,9 +128,10 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Extraction review")
     return can(session, "documents.review" as PermissionKey);
   if (page === "AI settings") return Boolean(session.platformAdmin);
-  // QA-AUDIT-PAGEVIS (2026-09-14): auditors, DPMs, HMs, and anyone with
-  // audit access can reach the QA audit views; each action is permission-gated.
-  if (page === "QA audits")
+  // QA-AUDIT (2026-09-14): QA Review is reachable by auditors, DPMs, HMs, and
+  // anyone with audit access; every scoring/finalize/dispute action is
+  // permission-gated behind qa.audit / qa.dispute / qa.schedule.
+  if (page === "QA Review")
     return (
       can(session, "qa.audit") ||
       can(session, "qa.dispute") ||
@@ -136,6 +139,46 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "audit.read")
     );
   return ["PCSP acknowledgments", "Nursing delegations", "Equipment checks", "Behavior plan training", "Emergency drills", "Required forms"].includes(page) && can(session, "individuals.view");
+}
+
+/**
+ * QA-AUDIT (2026-09-14): canonical nav page order. `defaultLandingPage` is the
+ * first page in this order the session can see — used as the safe redirect
+ * target when a requested page is invisible (e.g. a DSP, who gets no Overview
+ * dashboard, always lands on the first page they can actually open).
+ */
+export const CANONICAL_PAGE_ORDER = [
+  "Overview",
+  "Platform",
+  "Individuals",
+  "Sites & programs",
+  "Staff",
+  "Roles & access",
+  "Requirements",
+  "Documents",
+  "Review queue",
+  "Audit center",
+  "Audit Me",
+  "Acknowledgments",
+  "Activity log",
+  "AI settings",
+  "Training",
+  "Delegations",
+  "Certificates",
+  "Weekly checklist",
+  "Checklist assignments",
+  "Supply forecast",
+  "Mileage",
+  "QA Review",
+  "Recognition",
+  "Settings",
+] as const;
+
+export function defaultLandingPage(session: SessionUser): string {
+  for (const page of CANONICAL_PAGE_ORDER) {
+    if (pageVisible(session, page)) return page;
+  }
+  return "Overview";
 }
 
 export function roleLabel(role: string, jobTitle?: string) {

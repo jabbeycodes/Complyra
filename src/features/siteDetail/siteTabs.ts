@@ -37,8 +37,10 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
   },
   {
     id: "audits",
-    label: "Audits",
-    visible: (s) => !!s && pageVisible(s, "Audit center"),
+    label: "QA Review",
+    // Mirrors the QA Review page gate so the tab never shows more than the
+    // standalone page would. Tab id stays "audits" (tests depend on it).
+    visible: (s) => !!s && pageVisible(s, "QA Review"),
   },
   {
     id: "checklists",

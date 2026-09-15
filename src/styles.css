@@ -6126,7 +6126,7 @@ body.nav-open {
   color: var(--text);
 }
 
-/* QA AUDITS (2026-09-14) */
+/* QA REVIEW (2026-09-14) */
 .qa-filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -6577,4 +6577,58 @@ button.qa-row:hover {
   margin-top: 24px;
   font-size: 12px;
   color: #8a7f72;
+}
+
+/* QA REVIEW blocking-rule prompt + site badge additions (2026-09-14) */
+.qa-blocked-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 20, 16, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 60;
+}
+.qa-blocked {
+  background: #ffffff;
+  border: 1px solid #e9e6e1;
+  border-radius: 12px;
+  max-width: 480px;
+  width: 100%;
+  padding: 20px;
+}
+.qa-blocked h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.qa-blocked p {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.qa-review-badge .qa-badge-caption {
+  font-size: 12px;
+  color: #6b6156;
+}
+.qa-review-badge .qa-badge-sections {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  width: 100%;
+}
+.qa-review-badge .qa-badge-sections li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.qa-review-badge .qa-badge-critical {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a3d2b;
 }

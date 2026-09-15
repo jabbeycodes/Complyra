@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#234238" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="canonical" href="https://complyrer.com/security" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/legal.css" />
+  <title>Security — ComplyRer</title>
+  <meta name="description" content="How ComplyRer protects agency workspaces today, what we do not claim, and what agencies remain responsible for." />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="/" aria-label="ComplyRer home">
+        <svg class="brand-mark" aria-hidden="true" viewBox="0 0 120 120" fill="none">
+          <g stroke-linecap="round" stroke-linejoin="round">
+            <path d="M103.3 35 60 10 16.7 35 16.7 85 60 110 103.3 85" stroke="#3f5c3b" stroke-width="16"/>
+            <path d="M60 10 103.3 35" stroke="#6f815c" stroke-width="16"/>
+            <path d="M60 110 103.3 85" stroke="#2f4630" stroke-width="16"/>
+            <path d="M42 58l10 11 22-26" stroke="#8b5e3c" stroke-width="11"/>
+          </g>
+        </svg>
+        <span class="brand-copy"><span class="brand-word"><span class="brand-word-main">Comply</span><span class="brand-word-tail">Rer</span></span><span class="brand-tagline">Go paperless. Stay audit-ready.</span></span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open navigation">
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav class="nav-links" id="nav-links" aria-label="Primary navigation">
+        <a href="/site#readiness">Audit readiness</a>
+        <a href="/site#paperless">How it works</a>
+        <a href="/site#missouri">Missouri DMH</a>
+        <a href="/security" aria-current="page">Security</a>
+        <a href="https://secure.complyrer.com">Sign in</a>
+      </nav>
+      <a class="nav-action" href="/site#contact">Book a demo</a>
+    </div>
+  </header>
+  <main id="main" class="legal">
+    <article class="legal-card">
+      <p class="kicker">ComplyRer</p>
+      <h1>Security</h1>
+      <p class="updated">Effective September 14, 2026 · Last updated September 14, 2026</p>
+      
+      <p>ComplyRer is built for care-agency operations: tenant isolation, role-aware access, private document storage, and an audit trail of privileged actions. This page describes controls that exist in the hosted product and the limits of those controls. It is not a certification package, a HIPAA declaration, or a penetration-test report.</p>
+
+      <h2>What we will not claim</h2>
+      <ul>
+        <li>We are <strong>not</strong> HIPAA-certified and we do not state that the product is “HIPAA compliant” until a Business Associate Agreement, the safeguards below, and the agency’s procedures are in place.</li>
+        <li>We do not advertise SOC 2, HITRUST, FedRAMP, or similar reports on this site unless a dated report is actually issued and linked.</li>
+        <li>Readiness percentages in the product are a view of recorded work, not a guarantee of survey outcome.</li>
+      </ul>
+
+      <h2>Controls in the hosted product</h2>
+      <ul>
+        <li><strong>Transport.</strong> The marketing site and application are served over HTTPS.</li>
+        <li><strong>Tenant isolation.</strong> Agency records carry an agency identifier. Postgres row-level security is deny-by-default. Application APIs resolve the caller’s membership; they must not trust a client-supplied agency id as authorization.</li>
+        <li><strong>Access control.</strong> Roles (including administrator, house manager, nurse, DSP, and platform operator) combine with site and assignment scope. Staff should see only the homes and people they are assigned to.</li>
+        <li><strong>Authentication.</strong> Provider code, username, and password. New administrators must change a temporary password. Pending agencies cannot open care records until activated.</li>
+        <li><strong>Documents.</strong> Uploaded source files are hashed and stored in a private bucket using agency-scoped paths. They are not placed in a public CDN folder.</li>
+        <li><strong>Audit.</strong> Sensitive events are written to an append-only store. Corrections append; they do not silently rewrite history.</li>
+        <li><strong>Human review.</strong> Extracted plan items stay drafts until an authorized reviewer activates them. Signatures and delegations are named actions, not a generic checkbox.</li>
+      </ul>
+
+      <h2>Infrastructure processors</h2>
+      <p>Production hosting runs on Vercel. Hosted authentication, database, and private storage run on Supabase. We do not send workspace contents to a public generative-AI provider unless an agency enables that pipeline and the contractual terms for that provider are acceptable to the agency.</p>
+
+      <h2>Customer responsibilities</h2>
+      <ul>
+        <li>Assign least-privilege roles and keep site rosters current.</li>
+        <li>Do not share passwords or leave a signed-in session on a shared workstation.</li>
+        <li>Keep real protected records out of demo and unverified environments.</li>
+        <li>Export and retain records according to the agency’s own retention schedule; ComplyRer is not the agency’s sole legal archive unless a contract says so.</li>
+        <li>Complete a BAA (or equivalent) before placing PHI in the workspace.</li>
+      </ul>
+
+      <h2>Incidents</h2>
+      <p>If we confirm a security incident that affects your agency’s data, we will notify the agency administrator at the email we have on file and follow applicable law. Report suspected vulnerabilities or incidents to <a href="mailto:security@complyrer.com">security@complyrer.com</a>. Please do not attach real PHI to that email.</p>
+
+      <h2>Work still in front of us</h2>
+      <p>Before ComplyRer should be used as a system of record for real sensitive data, we still expect: MFA for privileged users, a completed security review, contractual BAAs where required, verified backup restoration, and malware handling on inbound files. Those items are product and operations work—not marketing claims.</p>
+
+      <h2>Related policies</h2>
+      <p><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
+    
+    </article>
+  </main>
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-copy">
+          <a class="brand footer-brand" href="/" aria-label="ComplyRer home">
+            <svg class="brand-mark" aria-hidden="true" viewBox="0 0 120 120" fill="none">
+          <g stroke-linecap="round" stroke-linejoin="round">
+            <path d="M103.3 35 60 10 16.7 35 16.7 85 60 110 103.3 85" stroke="#3f5c3b" stroke-width="16"/>
+            <path d="M60 10 103.3 35" stroke="#6f815c" stroke-width="16"/>
+            <path d="M60 110 103.3 85" stroke="#2f4630" stroke-width="16"/>
+            <path d="M42 58l10 11 22-26" stroke="#8b5e3c" stroke-width="11"/>
+          </g>
+        </svg>
+            <span class="brand-copy"><span class="brand-word"><span class="brand-word-main">Comply</span><span class="brand-word-tail">Rer</span></span><span class="brand-tagline">Go paperless. Stay audit-ready.</span></span>
+          </a>
+          <p>Compliance visibility, paperless workflows, and audit readiness for care providers.</p>
+        </div>
+        <nav class="footer-links" aria-label="Footer navigation">
+          <a href="/site#readiness">Audit readiness</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/security">Security</a>
+          <a href="https://secure.complyrer.com">Sign in</a>
+          <a href="/site#contact">Book a demo</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 ComplyRer</span>
+        <nav aria-label="Legal"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/security">Security</a></nav>
+      </div>
+    </div>
+  </footer>
+  <script>
+    const navToggle = document.querySelector('.nav-toggle');
+    const navLinks = document.querySelector('#nav-links');
+    navToggle.addEventListener('click', () => {
+      const open = navToggle.getAttribute('aria-expanded') === 'true';
+      navToggle.setAttribute('aria-expanded', String(!open));
+      navToggle.setAttribute('aria-label', open ? 'Open navigation' : 'Close navigation');
+      navLinks.classList.toggle('open', !open);
+    });
+  </script>
+</body>
+</html>

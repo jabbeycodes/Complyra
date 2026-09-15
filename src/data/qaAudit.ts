@@ -815,3 +815,42 @@ export function qaFileName(siteName: string, year: number, quarter: number): str
   const slug = siteName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site";
   return `complyrer-qa-audit-${slug}-${year}-q${quarter}.pdf`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Blocking rule: scoring-time presence re-check                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Thrown when an auditor tries to score an item "no" but Complyrer's own
+ * records prove the item is already present. Carries the detected
+ * evidence so the caller can prompt the auditor with what was found
+ * instead of recording the fail.
+ */
+export class QaBlockedError extends Error {
+  evidence: string;
+  constructor(itemId: string, evidence: string) {
+    super(
+      `QA scoring blocked: Complyrer's records show "${itemId}" is already met. Evidence: ${evidence}`,
+    );
+    this.name = "QaBlockedError";
+    this.evidence = evidence;
+  }
+}
+
+/**
+ * Re-runs system auto-verification for an item right before a "no" score
+ * is recorded. When the item's definition is system-provable and the
+ * proof passes, throws QaBlockedError so the fail can never be written.
+ * Items with no autoVerify kind, or where the system cannot prove
+ * presence, pass through silently — the auditor's call stands.
+ */
+export function recheckQaItemForScoring(
+  item: QaAuditItemState,
+  ctx: QaAutoVerifyContext,
+): void {
+  const def = QA_ITEM_MAP[item.itemId];
+  const kind = def?.autoVerify;
+  if (!kind) return;
+  const proof = autoVerifyItem(kind, ctx, item.individualId);
+  if (proof) throw new QaBlockedError(item.itemId, proof.evidence);
+}

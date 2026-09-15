@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
+import { QaBlockedError } from "./qaAudit";
 import { createEvergreenSeed } from "./seed";
 import {
   DEMO_ADMIN_USERNAME,
@@ -100,7 +101,7 @@ test("QA audit: scoring, locked enforcement, and finalize gate", async () => {
     mark: "AA",
   });
   assert.equal(finalized.status, "finalized");
-  assert.equal(finalized.auditorSignatureName, "Auditor Ann");
+  assert.equal(finalized.auditorSignatureName, admin.fullName);
   assert.ok(finalized.signedAt);
   assert.equal(finalized.score?.pct, 100);
   assert.deepEqual(finalized.score?.criticalFails, []);
@@ -206,4 +207,53 @@ test("QA audit: schedules, reminders, ranking, and history", async () => {
   assert.equal(ranked[0].siteId, maple);
   assert.equal(ranked[0].score, 100);
   assert.equal(ranked[1].score, null);
+});
+
+test("QA audit: scoring 'no' is blocked when the system can prove presence", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const oakwood = await siteId(api, admin, "Oakwood House");
+  const audit = await api.createQaAudit(oakwood, 2026, 3);
+  const items = await api.getQaAuditItems(audit.id);
+  const mileage = items.find((i) => i.itemId === "vehicle.mileage-log" && !i.locked);
+  assert.ok(mileage, "mileage item starts unlocked (no trips in seed)");
+
+  // With no trips on file, the system cannot prove presence — the "no" stands.
+  const scored = await api.scoreQaItem(audit.id, mileage.key, "no", "binder empty");
+  assert.equal(scored.result, "no");
+
+  // Log trips covering every audit month after the audit was created, then
+  // retry the "no" on a fresh unlocked item state: the re-check must block it.
+  const db = (api as unknown as { store: MemoryStore }).store.db;
+  const agencyId = db.agencies[0].id;
+  for (const month of ["2026-07", "2026-08", "2026-09"]) {
+    db.mileageTrips.push({
+      id: `qa-trip-${month}`,
+      agencyId,
+      siteId: oakwood,
+      tripDate: `${month}-10`,
+      odometerStart: 100,
+      odometerEnd: 120,
+      miles: 20,
+      riderIds: [],
+      reason: "qa recheck test",
+      backfilled: false,
+      driverName: "Driver",
+      signatureName: "Driver",
+      createdBy: admin.userId,
+      createdAt: new Date().toISOString(),
+    });
+  }
+  const err = await api
+    .scoreQaItem(audit.id, mileage.key, "no", "still empty")
+    .then(
+      () => null,
+      (e: unknown) => e,
+    );
+  assert.ok(err instanceof QaBlockedError, "expected QaBlockedError");
+  assert.match(err.evidence, /Trips logged/);
+
+  // A "yes" on the same item is unaffected by the blocking rule.
+  const yes = await api.scoreQaItem(audit.id, mileage.key, "yes", "binder found");
+  assert.equal(yes.result, "yes");
 });

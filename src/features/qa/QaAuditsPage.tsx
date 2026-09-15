@@ -44,7 +44,7 @@ export default function QaAuditsPage() {
   const [creating, setCreating] = useState(false);
   const [newSiteId, setNewSiteId] = useState("");
   const [newYear, setNewYear] = useState(String(new Date().getUTCFullYear()));
-  const [newQuarter, setNewQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
+  const [newQuarter, setNewQuarter] = useState(String(currentQuarter().quarter));
   const [siteFilter, setSiteFilter] = useState("");
   // Schedule editing state
   const [editingSite, setEditingSite] = useState("");
@@ -80,7 +80,7 @@ export default function QaAuditsPage() {
 
   useEffect(() => {
     void load();
-    // QA-AUDIT: queue due/overdue reminders once per day on page entry.
+    // QA-REVIEW: queue due/overdue reminders once per day on page entry.
     if (can(session!, "qa.schedule")) {
       api.sweepQaScheduleReminders().catch(() => {});
     }
@@ -157,12 +157,12 @@ export default function QaAuditsPage() {
     <div>
       <PageHeading
         eyebrow="Compliance"
-        title="QA audits"
+        title="QA Review"
         description="Quarterly quality reviews of every program site. Items Complyrer can prove from its own records are pre-filled and locked; the auditor scores the rest."
       />
       {error && <p className="form-error">{error}</p>}
 
-      <div className="tabs" role="tablist" aria-label="QA audit views">
+      <div className="tabs" role="tablist" aria-label="QA Review views">
         {(["audits", "schedules", "ranking"] as const).map((t) => (
           <button
             key={t}
@@ -171,7 +171,7 @@ export default function QaAuditsPage() {
             className={tab === t ? "selected" : ""}
             onClick={() => setTab(t)}
           >
-            {t === "audits" ? "Audits" : t === "schedules" ? "Schedules" : "Site ranking"}
+            {t === "audits" ? "Reviews" : t === "schedules" ? "Schedules" : "Site ranking"}
           </button>
         ))}
       </div>
@@ -226,18 +226,18 @@ export default function QaAuditsPage() {
                   disabled={creating || !newSiteId || newYear.length !== 4}
                   onClick={() => void startAudit()}
                 >
-                  <Plus size={16} /> {creating ? "Starting…" : "Start audit"}
+                  <Plus size={16} /> {creating ? "Starting…" : "Start review"}
                 </button>
               </div>
             )}
           </div>
 
           {loading ? (
-            <Empty title="Loading audits…" text="Fetching QA audits." />
+            <Empty title="Loading QA reviews…" text="Fetching QA reviews." />
           ) : audits.length === 0 ? (
             <Empty
-              title="No QA audits yet"
-              text="Start the first quarterly audit for a program site above."
+              title="No QA reviews yet"
+              text="Start the first quarterly QA review for a program site above."
             />
           ) : (
             <div className="qa-list">

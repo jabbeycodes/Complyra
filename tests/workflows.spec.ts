@@ -418,14 +418,10 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await page.getByRole("button", { name: "Your profile" }).click();
   await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await signIn(page, "alex.morgan");
-  await expect(
-    page.getByRole("button", { name: /Maple House compliance/ }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Oakwood House compliance/ }),
-  ).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: /Your work/ })).toBeVisible();
-  await expect(page.locator(".personal-queue-row").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveCount(0);
+  await page.goto('/#Overview');
+  await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.locator(".location-card")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();

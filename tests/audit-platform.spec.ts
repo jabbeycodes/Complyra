@@ -29,9 +29,9 @@ test('Audit Me persists corrective actions and opens their risk sources', async 
 
 test('Quarterly QA creates, scores, reloads and exports a site audit', async ({ page }) => {
   await login(page);
-  await page.getByRole('button', { name: 'QA audits', exact: true }).click();
+  await page.getByRole('button', { name: 'QA Review', exact: true }).click();
   await page.locator('.qa-new-audit').getByRole('combobox').first().selectOption({ label: 'Maple House' });
-  await page.getByRole('button', { name: 'Start audit', exact: true }).click();
+  await page.getByRole('button', { name: 'Start review', exact: true }).click();
   await page.getByRole('button', { name: /Home environment/ }).click();
   const item = page.locator('.qa-item:not(.qa-item--locked)').first();
   await item.getByRole('button', { name: 'Yes', exact: true }).click();
@@ -53,8 +53,8 @@ test('Audit pages stay usable on a phone and invalid routes recover', async ({ p
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: `${process.env.WALKTHROUGH_DIR}/audit-me-phone.png`, fullPage: false });
   await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
-  await page.getByRole('button', { name: 'QA audits', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Start audit', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'QA Review', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Start review', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.goto('/#nonexistent-page');
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();

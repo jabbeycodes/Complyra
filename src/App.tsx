@@ -117,7 +117,7 @@ import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboa
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
-import { can, pageVisible } from "./data/status";
+import { can, defaultLandingPage, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
 import DemoBanner from "./demo/DemoBanner";
@@ -267,8 +267,8 @@ export default function App() {
   }, [session, page, api]);
   useEffect(() => {
     if (!session) return;
-    if (page !== "Overview" && !pageVisible(session, page)) {
-      setPage("Overview");
+    if (!pageVisible(session, page)) {
+      setPage(defaultLandingPage(session));
     }
   }, [session, page]);
   useEffect(() => {
@@ -613,7 +613,7 @@ export default function App() {
         ["Audit Me", ClipboardCheck],
         // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
         // system-verified items, auditor scoring, and photo disputes.
-        ["QA audits", BadgeCheck],
+        ["QA Review", BadgeCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
         ["AI settings", ServerCog],
@@ -1734,7 +1734,7 @@ export default function App() {
               {page === "Mileage" && <MileagePage />}
               {page === "AI settings" && <AiSettingsPage />}
               {/* QA-AUDIT-PAGE (2026-09-14) */}
-              {page === "QA audits" && <QaAuditsPage />}
+              {page === "QA Review" && <QaAuditsPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading title="Settings" />

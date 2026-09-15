@@ -69,3 +69,59 @@ test('audit: expired requirements and medication risks contribute to one site sc
   assert.equal(facts.reduce((n,f) => n + f.medications.length, 0), meds.length);
   assert.ok(facts.some(f => f.requirements.includes('overdue')));
 });
+
+test('audit: document reviews and delegation drafts survive save and reload', async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const saved = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    setItem: (key: string, value: string) => saved.set(key, value),
+    getItem: (key: string) => saved.get(key) ?? null,
+    removeItem: (key: string) => saved.delete(key),
+  } });
+  try {
+    const { store, api } = setup();
+    await api.signIn(login('sarah.mitchell'));
+    const person = store.db.individuals[0];
+    const upload = await api.registerDocumentUpload({ individualId: person.id, documentType: 'pcsp', originalFilename: 'test.pdf' });
+    const extraction = await api.simulatePcspExtraction(upload.id);
+    const item = await api.addTrackableItem({ extractionId: extraction.extraction.id, itemType: 'deadline', title: 'Follow up', dueDate: '2026-12-01' });
+    const snapshot = () => JSON.parse(saved.get('complyra-v2-meta')!);
+    assert.ok(snapshot().db.documentTrackableItems.some((i: {id: string}) => i.id === item.id));
+    await api.approveDocumentExtraction(upload.id);
+    await api.activateTrackableItem(item.id);
+    assert.equal(snapshot().db.documentTrackableItems.find((i: {id: string}) => i.id === item.id).status, 'activated');
+    const template = await api.createDelegationTemplate({ name: 'Persistence check', category: 'Health monitoring', sections: { purpose: 'Check', steps: ['Observe'], safetyWarnings: [], documentation: ['Record'] }, individualizationNote: 'Review first' });
+    const activation = await api.activateDelegationTemplate(template.id, person.siteId);
+    const assignment = await api.assignDelegationToIndividual(activation.id, person.id);
+    const material = await api.getDelegationTrainingMaterial(assignment.id);
+    assert.ok(material);
+    await api.updateDelegationTrainingDraft(assignment.id, { ...material.draftContent, individualNotes: 'Saved personal instructions' });
+    const restored = new LocalApi(new MemoryStore(snapshot().db));
+    await restored.signIn(login('sarah.mitchell'));
+    assert.equal((await restored.getDelegationTrainingMaterial(assignment.id))?.draftContent.individualNotes, 'Saved personal instructions');
+    assert.equal((await restored.getDocumentExtraction(upload.id))?.items.find(i => i.id === item.id)?.status, 'activated');
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('audit: document actions inherit the individual boundary even with review permission', async () => {
+  const { store, api } = setup();
+  await api.signIn(login('sarah.mitchell'));
+  const manager = store.db.memberships.find(m => m.userId === store.db.profiles.find(p => p.username === 'james.wilson')!.id)!;
+  const other = store.db.individuals.find(p => p.siteId !== manager.siteId)!;
+  const upload = await api.registerDocumentUpload({ individualId: other.id, documentType: 'pcsp', originalFilename: 'other.pdf' });
+  const { extraction, items } = await api.simulatePcspExtraction(upload.id);
+  await api.signIn(login('james.wilson'));
+  assert.equal((await api.listDocumentUploads()).some(u => u.id === upload.id), false);
+  await assert.rejects(() => api.registerDocumentUpload({ individualId: other.id, documentType: 'pcsp', originalFilename: 'bad.pdf' }), /assigned access/);
+  // A review grant enables the action but must preserve the user's site scope.
+  const role = store.db.agencyRoles.find(r => r.agencyId === manager.agencyId && r.key === manager.roleKey)!;
+  assert.ok(role);
+  role.permissions['documents.review'] = true;
+  await api.signIn(login('james.wilson'));
+  await assert.rejects(() => api.getDocumentExtraction(upload.id), /assigned access/);
+  await assert.rejects(() => api.updateTrackableItem(items[0].id, { title: 'Unauthorized change' }), /assigned access/);
+  await assert.rejects(() => api.addTrackableItem({ extractionId: extraction.id, itemType: 'deadline', title: 'Unauthorized task' }), /assigned access/);
+});

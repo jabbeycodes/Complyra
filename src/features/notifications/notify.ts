@@ -151,7 +151,7 @@ export function notificationPage(link: string): string | null {
   if (/^\/requirements(?:\/|$)/.test(path)) return "Requirements";
   if (/^\/corrective-actions(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
-  if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA audits";
+  if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;

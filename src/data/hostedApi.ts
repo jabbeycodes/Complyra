@@ -1,3 +1,4 @@
+import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { Activity, Plan, Requirement } from "../domain";
@@ -5359,6 +5360,7 @@ export class HostedApi implements ComplyraApi {
     }
     const row = await this.qaItemRowOrThrow(audit, itemKey);
     // Client-side precheck gives the clear error; RLS + state machine enforce it.
+    if (result === "no") recheckQaItemForScoring(mapQaAuditItemRow(row), await this.qaAutoContext(session, audit.siteId, audit.year, audit.quarter));
     const updated = scoreQaItemState(
       mapQaAuditItemRow(row),
       result,
