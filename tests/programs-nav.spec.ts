@@ -40,7 +40,7 @@ function shotPath(name: string) {
   return `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}/${name}`;
 }
 
-test("sidebar groups expand Programs Care Compliance; Admin stays collapsed for HM", async ({
+test("sidebar groups expand Programs Care Compliance; Admin starts open for agency admin", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -55,7 +55,7 @@ test("sidebar groups expand Programs Care Compliance; Admin stays collapsed for 
   await expect(page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Compliance" })).toBeVisible();
   const admin = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Admin" });
   if ((await admin.count()) > 0) {
-    await expect(admin).toHaveAttribute("aria-expanded", "false");
+    await expect(admin).toHaveAttribute("aria-expanded", "true");
   }
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
