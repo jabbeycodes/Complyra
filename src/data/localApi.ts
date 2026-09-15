@@ -32,13 +32,6 @@ import {
 import { portraitSrc } from "./personPortrait";
 import { metrics } from "../domain";
 import {
-  canManageAppointments,
-  sortAppointments,
-  validateAppointmentDraft,
-  type Appointment,
-  type AppointmentDraft,
-} from "./appointments";
-import {
   computeRequirementStatus,
   isPrivileged,
   requirementStatusFromDb,
@@ -537,14 +530,6 @@ export interface ComplyraApi {
     effectiveOn?: string;
     enrolledOn?: string;
   }): Promise<{ id: string; name: string }>;
-  createAppointment(
-    input: AppointmentDraft & { individualId: string },
-  ): Promise<{ id: string }>;
-  updateAppointment(
-    appointmentId: string,
-    patch: AppointmentDraft,
-  ): Promise<void>;
-  deleteAppointment(appointmentId: string): Promise<void>;
   // ===== LIFEPATH-P2 API (training engine) =====
   /** All training topics (checklist verbatim + A1–A6 supplemental sets). */
   listTrainingTopics(scope?: "agency" | "site"): Promise<TrainingTopic[]>;
@@ -1813,7 +1798,6 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.emergencyDrills = store.db.emergencyDrills ?? [];
   store.db.homeSafetyReports = store.db.homeSafetyReports ?? [];
   store.db.siteReviews = store.db.siteReviews ?? [];
-  store.db.appointments = store.db.appointments ?? [];
 }
 
 function ensureClinicalRenewals(store: MemoryStore) {
@@ -2035,9 +2019,6 @@ function mapPlanStack(
         if (!checklist) return true;
         return allLinesInitialed(checklist) && Boolean(checklist.staffSignedAt);
       })(),
-    appointments: sortAppointments(
-      (store.db.appointments ?? []).filter((row) => row.individualId === person.id),
-    ),
   };
 }
 
@@ -4269,88 +4250,6 @@ export class LocalApi implements ComplyraApi {
       });
     }
     return { id: person.id, name: fullName };
-  }
-
-  async createAppointment(input: AppointmentDraft & { individualId: string }) {
-    const session = assertSession(this.store);
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    const person = accessibleIndividual(this.store, session, input.individualId);
-    const draft = validateAppointmentDraft(input);
-    ensurePlanCollections(this.store);
-    const now = new Date().toISOString();
-    const row: Appointment = {
-      id: crypto.randomUUID(),
-      agencyId: session.agencyId,
-      individualId: person.id,
-      ...draft,
-      specialty: draft.specialty ?? "",
-      reason: draft.reason ?? "",
-      visitAddress: draft.visitAddress ?? "",
-      createdBy: session.userId,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.store.db.appointments.push(row);
-    log(
-      this.store,
-      session,
-      "appointment.created",
-      `${draft.consultant} for ${person.fullName}`,
-      "appointment",
-      row.id,
-    );
-    await persistMeta(this.store);
-    return { id: row.id };
-  }
-
-  async updateAppointment(appointmentId: string, patch: AppointmentDraft) {
-    const session = assertSession(this.store);
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    ensurePlanCollections(this.store);
-    const row = this.store.db.appointments.find(
-      (item) => item.id === appointmentId && item.agencyId === session.agencyId,
-    );
-    if (!row) throw new Error("Appointment not found.");
-    accessibleIndividual(this.store, session, row.individualId);
-    const draft = validateAppointmentDraft(patch);
-    Object.assign(row, draft, { updatedAt: new Date().toISOString() });
-    log(
-      this.store,
-      session,
-      "appointment.updated",
-      `${draft.consultant} appointment updated`,
-      "appointment",
-      row.id,
-    );
-    await persistMeta(this.store);
-  }
-
-  async deleteAppointment(appointmentId: string) {
-    const session = assertSession(this.store);
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    ensurePlanCollections(this.store);
-    const index = this.store.db.appointments.findIndex(
-      (item) => item.id === appointmentId && item.agencyId === session.agencyId,
-    );
-    if (index < 0) throw new Error("Appointment not found.");
-    const row = this.store.db.appointments[index];
-    accessibleIndividual(this.store, session, row.individualId);
-    this.store.db.appointments.splice(index, 1);
-    log(
-      this.store,
-      session,
-      "appointment.deleted",
-      "Appointment removed",
-      "appointment",
-      appointmentId,
-    );
-    await persistMeta(this.store);
   }
 
   async resetWorkspace() {

@@ -110,13 +110,6 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
-import {
-  canManageAppointments,
-  sortAppointments,
-  validateAppointmentDraft,
-  type Appointment,
-  type AppointmentDraft,
-} from "./appointments";
 import { isValidRating } from "../recognition/scoring";
 import {
   applyRenewalUpload,
@@ -293,7 +286,6 @@ import {
 } from "../pdf/siteReviewPdf";
 import {
   mapAdaptiveEquipment,
-  mapAppointment,
   mapChartFile,
   mapClinicalRenewal,
   mapEmergencyDrill,
@@ -736,7 +728,6 @@ export class HostedApi implements ComplyraApi {
       reviewsRes,
       brandingRes,
       assignmentsRes,
-      appointmentsRes,
     ] = await Promise.all([
       this.client.from("sites").select("*").eq("agency_id", agencyId),
       this.client.from("programs").select("*").eq("agency_id", agencyId),
@@ -772,7 +763,6 @@ export class HostedApi implements ComplyraApi {
       this.client.from("site_reviews").select("*").eq("agency_id", agencyId),
       this.client.from("agency_branding").select("*").eq("agency_id", agencyId).maybeSingle(),
       this.client.from("staff_assignments").select("*").eq("agency_id", agencyId),
-      this.client.from("appointments").select("*").eq("agency_id", agencyId),
     ]);
 
     for (const result of [
@@ -808,8 +798,6 @@ export class HostedApi implements ComplyraApi {
     ]) {
       throwIf(result.error, "Could not load the agency workspace.");
     }
-    // Appointments ship with this Health P0; ignore until the migration is applied.
-    const appointmentRows = appointmentsRes.error ? [] : (appointmentsRes.data ?? []);
 
     const canViewPeople = hasPermission(session, "individuals.view");
     const canReadAudit = hasPermission(session, "audit.read") || canViewPeople;
@@ -920,7 +908,6 @@ export class HostedApi implements ComplyraApi {
             })),
             renewals: (renewalsRes.data ?? []).map(mapClinicalRenewal),
             medications: (medsRes.data ?? []).map(mapMedication),
-            appointments: appointmentRows.map(mapAppointment),
             checklists: (checklistsRes.data ?? []).map(mapTrainingChecklist),
             versionLabelById,
           }),
@@ -2955,115 +2942,6 @@ export class HostedApi implements ComplyraApi {
     return { id: record.id, name: fullName };
   }
 
-  async createAppointment(input: AppointmentDraft & { individualId: string }) {
-    const session = await this.requireSession();
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    const person = await this.individualRecord(input.individualId);
-    if (!person || person.agencyId !== session.agencyId) {
-      throw new Error("Individual not found or outside your assigned access.");
-    }
-    const draft = validateAppointmentDraft(input);
-    const { data, error } = await this.client
-      .from("appointments")
-      .insert(this.appointmentRow(session.agencyId, person.id, session.userId, draft))
-      .select("id")
-      .single();
-    throwIf(error, "Could not save that appointment.");
-    await this.audit(
-      session,
-      "appointment.created",
-      `${draft.consultant} for ${person.fullName}`,
-      "appointment",
-      data!.id as string,
-    );
-    return { id: data!.id as string };
-  }
-
-  async updateAppointment(appointmentId: string, patch: AppointmentDraft) {
-    const session = await this.requireSession();
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
-    const person = await this.individualRecord(existing.individualId);
-    if (!person || person.agencyId !== session.agencyId) {
-      throw new Error("Individual not found or outside your assigned access.");
-    }
-    const draft = validateAppointmentDraft(patch);
-    const { error } = await this.client
-      .from("appointments")
-      .update({
-        starts_on: draft.startsOn,
-        start_time: `${draft.startTime}:00`,
-        end_time: `${draft.endTime}:00`,
-        timezone: draft.timezone,
-        consultant: draft.consultant,
-        specialty: draft.specialty ?? "",
-        reason: draft.reason ?? "",
-        visit_address: draft.visitAddress ?? "",
-      })
-      .eq("id", appointmentId)
-      .eq("agency_id", session.agencyId);
-    throwIf(error, "Could not update that appointment.");
-    await this.audit(
-      session,
-      "appointment.updated",
-      `${draft.consultant} appointment updated`,
-      "appointment",
-      appointmentId,
-    );
-  }
-
-  async deleteAppointment(appointmentId: string) {
-    const session = await this.requireSession();
-    if (!canManageAppointments(session.roleKey)) {
-      throw new Error("You cannot create or edit appointments.");
-    }
-    await this.appointmentRecord(session.agencyId, appointmentId);
-    const { error } = await this.client
-      .from("appointments")
-      .delete()
-      .eq("id", appointmentId)
-      .eq("agency_id", session.agencyId);
-    throwIf(error, "Could not remove that appointment.");
-    await this.audit(session, "appointment.deleted", "Appointment removed", "appointment", appointmentId);
-  }
-
-  private appointmentRow(
-    agencyId: string,
-    individualId: string,
-    createdBy: string,
-    draft: AppointmentDraft,
-  ) {
-    return {
-      agency_id: agencyId,
-      individual_id: individualId,
-      starts_on: draft.startsOn,
-      start_time: `${draft.startTime}:00`,
-      end_time: `${draft.endTime}:00`,
-      timezone: draft.timezone,
-      consultant: draft.consultant,
-      specialty: draft.specialty ?? "",
-      reason: draft.reason ?? "",
-      visit_address: draft.visitAddress ?? "",
-      created_by: createdBy,
-    };
-  }
-
-  private async appointmentRecord(agencyId: string, appointmentId: string) {
-    const { data, error } = await this.client
-      .from("appointments")
-      .select("*")
-      .eq("agency_id", agencyId)
-      .eq("id", appointmentId)
-      .maybeSingle();
-    throwIf(error, "Could not load that appointment.");
-    if (!data) throw new Error("Appointment not found.");
-    return mapAppointment(data);
-  }
-
   // ---- Hosted plan-stack helpers ----
 
   private requirePdfFile(file: File, message: string) {
@@ -3244,7 +3122,6 @@ export class HostedApi implements ComplyraApi {
       submissions: { individualId: string; userId: string; submittedAt: string | null }[];
       renewals: ClinicalRenewal[];
       medications: Medication[];
-      appointments: Appointment[];
       checklists: TrainingChecklist[];
       versionLabelById: Map<string, string | null>;
     },
@@ -3315,9 +3192,6 @@ export class HostedApi implements ComplyraApi {
         myRequired.every((row) => row?.signedAt) &&
         !submission &&
         (!myChecklist || (allLinesInitialed(myChecklist) && Boolean(myChecklist.staffSignedAt))),
-      appointments: sortAppointments(
-        input.appointments.filter((row) => row.individualId === person.id),
-      ),
     };
   }
 

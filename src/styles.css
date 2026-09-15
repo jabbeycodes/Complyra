@@ -6666,16 +6666,3 @@ button.qa-row:hover {
 .intake-panel {
   max-width: 640px;
 }
-.health-widget {
-  grid-column: 1 / -1;
-}
-.appointment-form {
-  display: grid;
-  gap: 10px;
-}
-.appointment-form strong {
-  color: #2f4630;
-}
-.appointment-card p {
-  margin: 0;
-}

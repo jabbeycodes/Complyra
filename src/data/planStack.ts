@@ -1,4 +1,3 @@
-import type { Appointment } from "./appointments";
 import type { DelegationForm, IndividualRecord } from "./types";
 
 export type ObligationKind =
@@ -143,7 +142,6 @@ export interface PlanStackView {
   myTraining: import("./chart").TrainingRowView | null;
   mySubmissionAt: string | null;
   canSubmit: boolean;
-  appointments: Appointment[];
 }
 
 export interface ClinicalRenewalView extends ClinicalRenewal {

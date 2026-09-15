@@ -389,52 +389,6 @@ test("intake stores enrollment date on the Individual profile", async () => {
   assert.equal(stack?.profile.enrolledOn, "2026-09-12");
 });
 
-test("nurse can create an appointment; DSP cannot", async () => {
-  const api = new LocalApi(store());
-  const admin = await api.signIn(adminLogin());
-  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
-  )!;
-  await api.signOut();
-  const nurse = await api.signIn({
-    agencyCode: DEMO_AGENCY_CODE,
-    username: DEMO_NURSE_USERNAME,
-    password: DEMO_PASSWORD,
-  });
-  const created = await api.createAppointment({
-    individualId: jodie.id,
-    startsOn: "2026-09-24",
-    startTime: "13:00",
-    endTime: "13:45",
-    timezone: "America/Chicago",
-    consultant: "Dr. Elena Ruiz",
-    specialty: "Primary care",
-    reason: "Well visit",
-    visitAddress: "3201 Pompey Drive",
-  });
-  const afterNurse = await api.loadWorkspace(nurse);
-  const stack = afterNurse.planStacks.find((row) => row.individualId === jodie.id);
-  assert.ok(stack?.appointments.some((row) => row.id === created.id));
-  await api.signOut();
-  const dsp = await api.signIn(dspLogin());
-  const dspStack = (await api.loadWorkspace(dsp)).planStacks.find(
-    (row) => row.individualId === jodie.id,
-  );
-  assert.ok(dspStack?.appointments.some((row) => row.consultant === "Dr. Priya Shah"));
-  await assert.rejects(
-    () =>
-      api.createAppointment({
-        individualId: jodie.id,
-        startsOn: "2026-09-25",
-        startTime: "09:00",
-        endTime: "09:30",
-        timezone: "America/Chicago",
-        consultant: "Should Fail",
-      }),
-    /cannot create or edit appointments/,
-  );
-});
-
 test("the platform owner can approve a pending agency", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

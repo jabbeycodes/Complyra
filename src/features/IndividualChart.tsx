@@ -17,10 +17,6 @@ import {
   canSignTrainingAsHm,
   countdownLabel,
 } from "../data/chart";
-import {
-  canManageAppointments,
-  canSeeAppointments,
-} from "../data/appointments";
 import { openPrintable } from "../data/openFile";
 import {
   canSeeRenewals,
@@ -31,12 +27,7 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can } from "../data/status";
-import {
-  buildConsultationPacketPdf,
-  consultationPacketFileName,
-} from "../pdf/consultationPacketPdf";
 import AssignedDocsPanel from "./AssignedDocsPanel";
-import AppointmentsCard from "./AppointmentsCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
 // LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
@@ -66,16 +57,11 @@ export default function IndividualChart({
 
   if (!session || !stack || !person) return null;
 
-  const chartSession = session;
-  const chartStack = stack;
-  const chartPerson = person;
-  const widgets = canSeeChartWidgets(chartSession.roleKey);
-  const showAnnuals = canSeeRenewals(chartSession.roleKey);
-  const showMeds = canSeeMeds(chartSession.roleKey);
-  const showHealth = canSeeAppointments(chartSession.roleKey);
-  const manageAppointments = canManageAppointments(chartSession.roleKey);
-  const profile = chartStack.profile;
-  const delegations = chartStack.required.filter((view) => view.item.kind === "delegation");
+  const widgets = canSeeChartWidgets(session.roleKey);
+  const showAnnuals = canSeeRenewals(session.roleKey);
+  const showMeds = canSeeMeds(session.roleKey);
+  const profile = stack.profile;
+  const delegations = stack.required.filter((view) => view.item.kind === "delegation");
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -97,35 +83,6 @@ export default function IndividualChart({
       if (!file) throw new Error("That file is not stored yet.");
       await openPrintable(file.name, file.blob, mode);
     });
-  }
-
-  async function generatePacket(
-    appointment: (typeof chartStack.appointments)[number],
-    mode: "download" | "print",
-  ) {
-    setError("");
-    try {
-      const site = workspace?.sites.find((row) => row.id === chartPerson.siteId);
-      const doc = buildConsultationPacketPdf({
-        agencyName: chartSession.agencyName,
-        individualName: chartPerson.name,
-        dateOfBirth: chartPerson.dateOfBirth,
-        siteName: chartPerson.site,
-        programName: site?.program ?? "",
-        profile,
-        appointment,
-        medications: chartStack.medications,
-        logoDataUrl: workspace?.branding.logoUrl ?? null,
-      });
-      const blob = doc.output("blob") as Blob;
-      await openPrintable(
-        consultationPacketFileName(chartPerson.name, appointment.startsOn),
-        blob,
-        mode,
-      );
-    } catch (err) {
-      setError((err as Error).message);
-    }
   }
 
   return (
@@ -286,26 +243,6 @@ export default function IndividualChart({
               </article>
             ))}
           </section>
-        )}
-
-        {showHealth && (
-          <AppointmentsCard
-            individualName={person.name}
-            defaultVisitAddress={profile.address}
-            appointments={stack.appointments}
-            canManage={manageAppointments}
-            onCreate={(draft) =>
-              run(() =>
-                api.createAppointment({
-                  individualId,
-                  ...draft,
-                }).then(() => undefined),
-              )
-            }
-            onUpdate={(id, draft) => run(() => api.updateAppointment(id, draft))}
-            onDelete={(id) => run(() => api.deleteAppointment(id))}
-            onGenerate={generatePacket}
-          />
         )}
 
         {showMeds && (
