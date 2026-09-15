@@ -9,6 +9,7 @@ import {
   Flame,
   GraduationCap,
   MapPin,
+  NotebookPen,
   Phone,
   Pill,
   User,
@@ -63,6 +64,9 @@ export function auditPeriodLabel(audit: QaAuditSummary): string {
 const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   overview: Building2,
   individuals: User,
+  // ISP-DATA: icon placeholder so the union stays exhaustive; the tab
+  // content itself is stream C's (isp-data-ui).
+  isp_data: NotebookPen,
   audits: ClipboardCheck,
   checklists: ClipboardCheck,
   training: GraduationCap,

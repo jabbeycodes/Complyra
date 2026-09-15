@@ -48,6 +48,7 @@ function sessionFor(
 const EXPECTED_ORDER: SiteDetailTabId[] = [
   "overview",
   "individuals",
+  "isp_data",
   "audits",
   "checklists",
   "training",

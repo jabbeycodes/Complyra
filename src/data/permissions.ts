@@ -60,6 +60,12 @@ export const PERMISSION_KEYS = [
   "delegation.training.review",
   "delegation.training.approve",
   "delegation.acknowledge",
+  // ISP-DATA (isp.* goes here)
+  "isp.view",
+  "isp.record_notes",
+  "isp.manage_plan",
+  "isp.review_monthly",
+  "isp.message_staff",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -117,7 +123,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     description: "Owns the compliance loop: plans, approvals, acknowledgments, and audit exports.",
     defaultScope: "agency",
     capability: "compliance_admin",
-    permissions: pack(ALL.filter((key) => key !== "hr.view_staff")),
+    // ISP-DATA: compliance_admin holds isp.view only (read-only on ISP data).
+    permissions: pack(
+      ALL.filter(
+        (key) =>
+          key !== "hr.view_staff" &&
+          !(key.startsWith("isp.") && key !== "isp.view"),
+      ),
+    ),
   },
   {
     key: "house_manager",
@@ -142,6 +155,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // DELEGATION: view templates + sign own site's acknowledgments.
       "delegation.templates.view",
       "delegation.acknowledge",
+      // ISP-DATA: view + record shift notes + review monthly + message staff.
+      "isp.view",
+      "isp.record_notes",
+      "isp.review_monthly",
+      "isp.message_staff",
     ]),
   },
   {
@@ -176,6 +194,12 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.training.review",
       "delegation.training.approve",
       "delegation.acknowledge",
+      // ISP-DATA: full ISP access.
+      "isp.view",
+      "isp.record_notes",
+      "isp.manage_plan",
+      "isp.review_monthly",
+      "isp.message_staff",
     ]),
   },
   {
@@ -205,6 +229,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.templates.view",
       "delegation.activate",
       "delegation.acknowledge",
+      // ISP-DATA: read-only.
+      "isp.view",
     ]),
   },
   {
@@ -226,6 +252,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // DELEGATION: view templates + sign own acknowledgments.
       "delegation.templates.view",
       "delegation.acknowledge",
+      // ISP-DATA: view + record shift notes.
+      "isp.view",
+      "isp.record_notes",
     ]),
   },
   {
@@ -254,6 +283,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.training.review",
       "delegation.training.approve",
       "delegation.acknowledge",
+      // ISP-DATA: read-only.
+      "isp.view",
     ]),
   },
   {
@@ -293,6 +324,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "recognition.view_winners",
       // DELEGATION: view templates only.
       "delegation.templates.view",
+      // ISP-DATA: read-only.
+      "isp.view",
     ]),
   },
 ];
@@ -377,6 +410,12 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "delegation.training.review": "Review delegation training drafts",
   "delegation.training.approve": "Approve delegation training materials",
   "delegation.acknowledge": "Sign delegation acknowledgments",
+  // ISP-DATA
+  "isp.view": "View ISP data",
+  "isp.record_notes": "Record ISP shift notes",
+  "isp.manage_plan": "Manage ISP plans and shift setup",
+  "isp.review_monthly": "Review ISP monthly reports",
+  "isp.message_staff": "Message staff about ISP notes",
 };
 
 /**

@@ -125,6 +125,8 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Extraction review")
     return can(session, "documents.review" as PermissionKey);
   if (page === "AI settings") return isAgencyAdmin(session.role);
+  // ISP-DATA
+  if (page === "ISP data") return can(session, "isp.view");
   return can(session, "individuals.view");
 }
 

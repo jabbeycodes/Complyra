@@ -1022,3 +1022,107 @@ export interface SignatureAuditRecord {
   userAgent: string | null;
   details: Record<string, unknown> | null;
 }
+
+// ===== ISP DATA TYPES =====
+
+export type IspMeasurementMethod = "yes_no" | "count" | "rating_scale" | "narrative" | "percentage";
+export type IspTrackableFrequency = "per_shift" | "daily" | "per_service";
+export type IspGoalStatus = "active" | "completed" | "discontinued";
+export type IspNoteStatus = "draft" | "submitted" | "late" | "amended";
+export type IspExpectationStatus = "pending" | "submitted" | "late_submitted" | "overdue" | "excused";
+export type IspMonthlyStatus = "draft" | "hm_review" | "dpm_review" | "sc_review" | "finalized";
+export type IspEscalationKind = "nudge" | "hm_alert" | "dpm_escalation" | "message";
+export type IspCoverageType = "scheduled" | "swap" | "call_in" | "overtime";
+export type IspMonthlySignerRole = "preparer" | "hm" | "pm" | "support_coordinator" | "individual";
+
+export interface IspShiftPattern { id: string; agencyId: string; siteId: string; name: string;
+  startTime: string; endTime: string; sortOrder: number; active: boolean; }
+export interface IspShiftAssignment { id: string; agencyId: string; siteId: string; shiftPatternId: string;
+  workDate: string; userId: string; roleAtShift: string; coverageType: IspCoverageType; note: string | null; }
+export interface IspNoteExpectation { id: string; agencyId: string; siteId: string; individualId: string;
+  assignmentId: string; workDate: string; shiftPatternId: string; userId: string; dueAt: string;
+  noteId: string | null; excused: boolean; excusedReason: string | null; }
+export interface IspExpectationView extends IspNoteExpectation {
+  status: IspExpectationStatus; staffName: string; individualName: string; siteName: string;
+  shiftName: string; shiftStart: string; shiftEnd: string;
+  noteSubmittedAt: string | null; hoursOverdue: number | null; }
+export interface IspGoal { id: string; agencyId: string; individualId: string; title: string;
+  description: string; status: IspGoalStatus; effectiveFrom: string; effectiveTo: string | null; sortOrder: number; }
+export interface IspObjective { id: string; agencyId: string; goalId: string; title: string;
+  measureOfSuccess: string; responsibleParty: string; targetDate: string | null;
+  status: IspGoalStatus; sortOrder: number; }
+export interface IspTrackable { id: string; agencyId: string; objectiveId: string; name: string;
+  prompt: string; measurementMethod: IspMeasurementMethod;
+  ratingMin: number | null; ratingMax: number | null; ratingLabels: Record<string,string> | null;
+  frequency: IspTrackableFrequency; maxPerShift: number | null; active: boolean; sortOrder: number; }
+export interface IspNote { id: string; agencyId: string; individualId: string; siteId: string;
+  assignmentId: string | null; expectationId: string | null; workDate: string; shiftPatternId: string | null;
+  serviceTitle: string; setting: string; timeIn: string; timeOut: string;
+  servicesProvided: string; individualResponse: string;
+  authorUserId: string; authorName: string; authorTitle: string;
+  signatureMark: string | null; signatureEventId: string | null;
+  status: IspNoteStatus; submittedAt: string | null; createdAt: string; }
+export interface IspNoteTrackableScore { id: string; noteId: string; trackableId: string;
+  scoreYesNo: boolean | null; scoreCount: number | null; scoreRating: number | null;
+  scorePercentage: number | null; scoreText: string | null; comment: string | null; }
+export interface IspNoteAmendment { id: string; agencyId: string; noteId: string; authorUserId: string;
+  reason: string; changes: Record<string, { from: unknown; to: unknown }>; createdAt: string; }
+export interface IspNoteDetail { note: IspNote; scores: IspNoteTrackableScore[];
+  amendments: IspNoteAmendment[]; expectation: IspNoteExpectation | null;
+  individualName: string; shiftName: string | null; }
+export interface IspMonthlyProgramProgressRow { objectiveId: string; objectiveTitle: string; goalTitle: string;
+  tallySummary: string; progress: string; reasonIfNone: string; }
+export interface IspMonthlySections { serviceTitle: string; selfDetermination: string; healthMedical: string;
+  rights: string; communityActivities: string; programProgress: IspMonthlyProgramProgressRow[];
+  supportCoordinator: string; personVisitedDates: string; overallConcerns: string;
+  changesNeeded: string; rnFollowUp: string; }
+export interface IspObjectiveTally { objectiveId: string; objectiveTitle: string; goalTitle: string;
+  opportunities: number; completions: number; refusals: number; notOffered: number;
+  successRate: number | null; avgRating: number | null; totalCount: number;
+  trend: "up" | "down" | "flat" | null; }
+export interface IspMonthlyTallies { serviceMonth: string; notesExpected: number; notesSubmitted: number;
+  notesLate: number; notesMissing: number; perObjective: IspObjectiveTally[]; narrativeRollup: string; }
+export interface IspMonthlyReport { id: string; agencyId: string; individualId: string; serviceMonth: string;
+  status: IspMonthlyStatus; sections: IspMonthlySections; tallies: IspMonthlyTallies;
+  preparedBy: string | null; preparedAt: string | null; dueOn: string; finalizedAt: string | null; }
+export interface IspMonthlySignature { id: string; reportId: string; role: IspMonthlySignerRole;
+  userId: string | null; signerName: string; signatureMark: string | null; signedAt: string; }
+export interface IspEscalation { id: string; agencyId: string; expectationId: string | null;
+  kind: IspEscalationKind; fromUserId: string | null; toUserId: string; message: string;
+  channel: string; sentAt: string; }
+export interface IspNoteSettings { agencyId: string; noteGraceMinutes: number; nudgeBeforeMinutes: number;
+  hmAlertAfterMinutes: number; dpmEscalationHours: number; contemporaneousDays: number; }
+export interface IspShiftPatternInput { siteId: string; name: string; startTime: string; endTime: string;
+  sortOrder?: number; active?: boolean; id?: string; }
+export interface IspShiftAssignmentInput { siteId: string; shiftPatternId: string; workDate: string;
+  userId: string; roleAtShift?: string; coverageType?: IspCoverageType; note?: string; }
+export interface IspGoalInput { individualId: string; title: string; description?: string;
+  effectiveFrom: string; effectiveTo?: string | null; id?: string; status?: IspGoalStatus; }
+export interface IspObjectiveInput { goalId: string; title: string; measureOfSuccess?: string;
+  responsibleParty?: string; targetDate?: string | null; id?: string; status?: IspGoalStatus; }
+export interface IspTrackableInput { objectiveId: string; name: string; prompt?: string;
+  measurementMethod: IspMeasurementMethod; ratingMin?: number | null; ratingMax?: number | null;
+  ratingLabels?: Record<string,string> | null; frequency?: IspTrackableFrequency;
+  maxPerShift?: number | null; active?: boolean; id?: string; }
+export interface IspTrackableScoreInput { trackableId: string; yesNo?: boolean | null; count?: number | null;
+  rating?: number | null; percentage?: number | null; text?: string | null; comment?: string | null; }
+export interface SubmitIspNoteInput { individualId: string; siteId: string;
+  assignmentId?: string | null; expectationId?: string | null; workDate: string;
+  shiftPatternId?: string | null; serviceTitle: string; setting: string;
+  timeIn: string; timeOut: string; servicesProvided: string; individualResponse: string;
+  objectiveIds: string[]; scores: IspTrackableScoreInput[]; signatureMark: string; }
+export interface AmendIspNoteInput { noteId: string; reason: string;
+  changes: Record<string, { from: unknown; to: unknown }>; }
+export interface IspEscalationInput { expectationId?: string | null; kind: IspEscalationKind;
+  toUserId: string; message: string; channel?: string; }
+export interface HouseShiftBoardCell { assignmentId: string; userId: string; staffName: string;
+  total: number; submitted: number; lateSubmitted: number; overdue: number; pending: number; excused: number; }
+export interface HouseShiftBoardShift { patternId: string; name: string; startTime: string; endTime: string;
+  cells: HouseShiftBoardCell[]; }
+export interface HouseShiftBoard { siteId: string; date: string; shifts: HouseShiftBoardShift[]; }
+export interface IspRepeatOffender { userId: string; staffName: string; siteName: string;
+  overdueCount: number; lateCount: number; totalExpected: number; }
+export interface IspExpectationFilter { siteId?: string; userId?: string; individualId?: string;
+  fromDate?: string; toDate?: string; status?: IspExpectationStatus; }
+export interface IspNoteFilter { individualId?: string; siteId?: string; fromDate?: string;
+  toDate?: string; status?: IspNoteStatus; }

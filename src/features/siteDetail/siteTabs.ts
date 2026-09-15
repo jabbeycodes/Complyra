@@ -4,6 +4,7 @@ import type { SessionUser } from "../../data/types";
 export type SiteDetailTabId =
   | "overview"
   | "individuals"
+  | "isp_data"
   | "audits"
   | "checklists"
   | "training"
@@ -34,6 +35,11 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "individuals",
     label: "Individuals",
     visible: (s) => !!s && pageVisible(s, "Individuals"),
+  },
+  {
+    id: "isp_data",
+    label: "ISP data",
+    visible: (s) => !!s && pageVisible(s, "ISP data"),
   },
   {
     id: "audits",
