@@ -106,14 +106,14 @@ test("workflows: missed checklist triggers once per checklist", () => {
   const hits = evaluateWorkflowTriggers({
     ...emptyFacts(),
     missedChecklists: [
-      { id: "w1", checklistTitle: "Weekly checklist", siteName: "Maple House" },
+      { id: "w1", checklistTitle: "Weekly checklist", siteName: "Cedar House" },
     ],
   });
   assert.equal(hits.length, 1);
   assert.equal(hits[0].templateId, "checklist-missed");
   assert.ok(hits[0].dedupeKey.includes("w1"));
   const { body } = buildWorkflowMessage(hits[0]);
-  assert.ok(body.includes("Maple House"));
+  assert.ok(body.includes("Cedar House"));
 });
 
 test("workflows: delegation + training + renewal + incident triggers", () => {

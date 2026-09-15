@@ -22,11 +22,11 @@ async function signOut(page: Page) {
   await expect(page.getByLabel("Provider code")).toBeVisible();
 }
 
-async function openJodie(page: Page) {
+async function openEllis(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
-  await expect(chart.getByRole("heading", { name: "Jodie Williams", exact: true })).toBeVisible();
+  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true })).toBeVisible();
   return chart;
 }
 
@@ -47,7 +47,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
   await signIn(page, "sarah.mitchell");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  const jodieCard = page.getByRole("button", { name: /Jodie Williams/ }).first();
+  const jodieCard = page.getByRole("button", { name: /Ellis Hart/ }).first();
   await expect(jodieCard).toContainText("Vision exam");
   await expect(jodieCard).toContainText("Annual physical");
   await expect(jodieCard).not.toContainText("Dental exam");
@@ -56,7 +56,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
     fullPage: true,
   });
 
-  const chart = await openJodie(page);
+  const chart = await openEllis(page);
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Must acknowledge" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Checked in plan" })).toBeVisible();
@@ -92,10 +92,10 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   await signOut(page);
   await signIn(page, "alex.morgan");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.getByRole("button", { name: /Jodie Williams/ }).first()).not.toContainText(
+  await expect(page.getByRole("button", { name: /Ellis Hart/ }).first()).not.toContainText(
     "Annual physical",
   );
-  const dspChart = await openJodie(page);
+  const dspChart = await openEllis(page);
   await expect(dspChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
   const dspDelegation = dspChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
@@ -106,7 +106,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
 
   await signOut(page);
   await signIn(page, "cameron.price");
-  const rnChart = await openJodie(page);
+  const rnChart = await openEllis(page);
   await expect(rnChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
   const rnDelegation = rnChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
@@ -129,7 +129,7 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
 
   await signOut(page);
   await signIn(page, "alex.morgan");
-  const after = await openJodie(page);
+  const after = await openEllis(page);
   const afterDelegation = after.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });

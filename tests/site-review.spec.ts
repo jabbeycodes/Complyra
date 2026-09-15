@@ -22,25 +22,25 @@ test("DPM sees an open site review and can download Maple working copies", async
     .getByRole("button", { name: /Confirm site-review checks are in place/ })
     .click();
   await expect(
-    page.getByRole("heading", { name: /Site review pack · Oakwood House/ }),
+    page.getByRole("heading", { name: /Site review pack · Willow House/ }),
   ).toBeVisible();
   await expect(page.getByText("Site review open")).toBeVisible();
 
   await page.getByLabel("Select site").selectOption("All sites");
   await page.getByRole("button", { name: "Site review pack" }).first().click();
   await expect(
-    page.getByRole("heading", { name: /Site review pack · Maple House/ }),
+    page.getByRole("heading", { name: /Site review pack · Cedar House/ }),
   ).toBeVisible();
   await expect(page.getByText("Site review in place")).toBeVisible();
   const reviewDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download site review" }).click();
   expect((await reviewDownload).suggestedFilename()).toMatch(
-    /site-review-maple-house/,
+    /site-review-cedar-house/,
   );
   const surveyDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download pre-survey sheet" }).click();
   expect((await surveyDownload).suggestedFilename()).toMatch(
-    /pre-survey-maple-house/,
+    /pre-survey-cedar-house/,
   );
 });
 
@@ -49,7 +49,7 @@ test("chart pre-survey facts stay on the individual cover page", async ({
 }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("heading", { name: "Jodie Williams" }).click();
+  await page.getByRole("heading", { name: "Ellis Hart" }).click();
   await expect(page.getByText("Pre-survey facts")).toBeVisible();
   await expect(page.getByLabel("Medicaid status")).toHaveValue("yes");
   await expect(
@@ -62,7 +62,7 @@ test("DSP can view a site review but cannot save it", async ({ page }) => {
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await page.getByRole("button", { name: "Site review pack" }).click();
   await expect(
-    page.getByRole("heading", { name: /Site review pack · Maple House/ }),
+    page.getByRole("heading", { name: /Site review pack · Cedar House/ }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Save site review" })).toHaveCount(0);
 });

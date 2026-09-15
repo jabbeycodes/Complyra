@@ -26,7 +26,7 @@ test("priorities open their source, require evidence, and persist completion", a
     page.getByRole("heading", { name: "Needs attention 3" }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: /Acknowledge updated PCSP Jodie/ })
+    .getByRole("button", { name: /Acknowledge updated PCSP Ellis/ })
     .click();
   const dialog = page.getByRole("dialog", { name: "Requirement details" });
   await dialog
@@ -34,7 +34,7 @@ test("priorities open their source, require evidence, and persist completion", a
     .click();
   await expect(dialog.getByRole("alert")).toContainText("completion record");
   await dialog
-    .getByRole("button", { name: /Jodie Williams · PCSP 2026 · v2/ })
+    .getByRole("button", { name: /Ellis Hart · PCSP 2026 · v2/ })
     .click();
   await expect(
     page.getByRole("dialog", { name: "Source reference" }),
@@ -83,7 +83,7 @@ test("plan approval keeps earlier versions in the document history", async ({
     "Earlier plan versions are retained",
   );
   await page.getByRole("button", { name: "Documents", exact: true }).click();
-  await page.getByLabel("Search documents").fill("Jodie");
+  await page.getByLabel("Search documents").fill("Ellis");
   const rows = page.locator("tbody tr");
   await expect(rows).toHaveCount(3);
   await expect(rows.filter({ hasText: "v3" })).toContainText("Active");
@@ -100,15 +100,15 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
     .getByRole("button", { name: "Add requirement", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Program site").selectOption({ label: "Maple House" });
-  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Jodie Williams" });
+  await dialog.getByLabel("Program site").selectOption({ label: "Cedar House" });
+  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Ellis Hart" });
   await dialog
     .getByLabel("Requirement", { exact: true })
     .fill("Verify sample wheelchair maintenance log");
   await dialog.getByLabel("Responsible person").selectOption({ label: "Alex Morgan" });
   await dialog
     .getByLabel("Source document & version")
-    .fill("Jodie Williams · PCSP 2026 · v2");
+    .fill("Ellis Hart · PCSP 2026 · v2");
   await dialog.getByLabel("Source page").fill("14");
   await dialog.getByRole("button", { name: "Save draft for review" }).click();
   await page
@@ -125,10 +125,10 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   await page
     .getByRole("button", { name: "Audit center", exact: true })
     .click();
-  await page.getByLabel("Program site").selectOption("Maple House");
+  await page.getByLabel("Program site").selectOption("Cedar House");
   await page
     .getByRole("combobox", { name: "Individual", exact: true })
-    .selectOption("Jodie Williams");
+    .selectOption("Ellis Hart");
   const dl = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export audit register" }).click();
   const download = await dl;
@@ -156,8 +156,8 @@ test("sample plan upload retains its PDF separately and creates an indexed draft
   await page.getByRole("button", { name: "Documents", exact: true }).click();
   await page.getByRole("button", { name: "Add document", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Program site").selectOption({ label: "Maple House" });
-  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Jodie Williams" });
+  await dialog.getByLabel("Program site").selectOption({ label: "Cedar House" });
+  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Ellis Hart" });
   await dialog
     .getByLabel("Choose sample PDF")
     .setInputFiles({
@@ -191,7 +191,7 @@ test("search and copilot answers lead to the correct sample records", async ({
   await page.getByLabel("Search all requirements").fill("medication");
   await page
     .locator(".search-results")
-    .getByRole("button", { name: /Renew medication delegation Brandon Miller/ })
+    .getByRole("button", { name: /Renew medication delegation Morgan Pruitt/ })
     .click();
   await expect(page.getByRole("dialog")).toContainText("Taylor Reed");
   await page.getByRole("button", { name: "Close dialog" }).click();
@@ -206,7 +206,7 @@ test("search and copilot answers lead to the correct sample records", async ({
     .locator(".answer-source")
     .filter({ hasText: "Renew medication delegation" })
     .click();
-  await expect(page.getByRole("dialog")).toContainText("Brandon Miller");
+  await expect(page.getByRole("dialog")).toContainText("Morgan Pruitt");
 });
 
 test("site scope updates readiness and mobile navigation remains usable", async ({
@@ -214,7 +214,7 @@ test("site scope updates readiness and mobile navigation remains usable", async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  await page.getByLabel("Filter by site").selectOption("Oakwood House");
+  await page.getByLabel("Filter by site").selectOption("Willow House");
   await expect(
     page.getByRole("heading", { name: "No overdue items" }),
   ).toBeVisible();
@@ -241,7 +241,7 @@ test("acknowledgment sheet lists assigned staff and exports one PDF", async ({
 }) => {
   await signIn(page);
   await page.getByRole("button", { name: /Acknowledgments/ }).click();
-  await page.getByRole("button", { name: "Jodie Williams", exact: true }).click();
+  await page.getByRole("button", { name: "Ellis Hart", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "PCSP acknowledgment sheet" });
   await expect(sheet).toContainText("Alex Morgan");
   await expect(sheet).toContainText("Pending");
@@ -251,7 +251,7 @@ test("acknowledgment sheet lists assigned staff and exports one PDF", async ({
     .getByRole("button", { name: "Export acknowledgment sheet" })
     .click();
   expect((await download).suggestedFilename()).toMatch(
-    /complyrer-acknowledgment-jodie-williams/,
+    /complyrer-acknowledgment-ellis-hart/,
   );
 });
 
@@ -261,7 +261,7 @@ test("a DSP cannot add or approve requirements", async ({ page }) => {
     page.getByRole("button", { name: "Add requirement", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("button", { name: /Acknowledgments/ }).click();
-  await page.getByRole("button", { name: "Jodie Williams", exact: true }).click();
+  await page.getByRole("button", { name: "Ellis Hart", exact: true }).click();
   await expect(
     page.getByRole("dialog"),
   ).toContainText("Your signature");
@@ -400,12 +400,12 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
     page.getByRole("heading", { name: "Agency compliance" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Maple House compliance/ }),
+    page.getByRole("button", { name: /Cedar House compliance/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Oakwood House compliance/ }),
+    page.getByRole("button", { name: /Willow House compliance/ }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Oakwood House compliance/ }).click();
+  await page.getByRole("button", { name: /Willow House compliance/ }).click();
   await expect(
     page.getByRole("heading", { name: "No overdue items" }),
   ).toBeVisible();
@@ -424,6 +424,6 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.locator(".location-card")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Oakwood House" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Willow House" })).toHaveCount(0);
 });

@@ -129,16 +129,22 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
     await openNav(page, "Sites & programs");
     await page
       .locator(".location-card")
-      .filter({ hasText: "Maple House" })
+      .filter({ hasText: "Cedar House" })
       .getByRole("button", { name: /Open site/ })
       .click();
-    await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
   }
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
   await openMaple();
   await expect(page.locator(".site-hero")).toBeVisible();
+  await expect(page.locator(".site-hero-stat").filter({ hasText: "Individuals" })).toContainText(
+    "2",
+  );
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Ellis Hart");
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Morgan Pruitt");
+  await expect(page.getByLabel("Individuals in this house")).not.toContainText("Jodie");
   await expect(page.locator(".site-hero .status-mix")).toBeVisible();
   await expect(page.locator(".site-hero-people")).toBeVisible();
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();

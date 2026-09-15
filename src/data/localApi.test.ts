@@ -38,7 +38,7 @@ test("assigned staff appear on one acknowledgment sheet and unsigned rows stay v
   const session = await api.signIn(adminLogin());
   const workspace = await api.loadWorkspace(session);
   const packet = workspace.packets.find((p) =>
-    p.individual.fullName.includes("Jodie"),
+    p.individual.fullName.includes("Ellis"),
   );
   assert.ok(packet);
   assert.ok(packet.rows.length >= 3);
@@ -76,15 +76,15 @@ test("a DSP cannot approve a draft or sign another person's row", async () => {
   const memory = store();
   const api = new LocalApi(memory);
   const admin = await api.signIn(adminLogin());
-  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const ellis = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
   await api.createRequirementDraft({
-    individualId: jodie.id,
+    individualId: ellis.id,
     title: "Review transport instructions",
     category: "PCSP acknowledgments",
     ownerUserId: admin.userId,
-    source: "Jodie Williams · PCSP 2026 · v2",
+    source: "Ellis Hart · PCSP 2026 · v2",
     sourcePage: 4,
     dueOn: "2026-09-20",
     frequency: "On plan update",
@@ -202,15 +202,15 @@ test("HR does not receive individual care records", async () => {
 test("an auditor cannot approve requirements", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(adminLogin());
-  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const ellis = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
   await api.createRequirementDraft({
-    individualId: jodie.id,
+    individualId: ellis.id,
     title: "Review medication storage",
     category: "PCSP acknowledgments",
     ownerUserId: admin.userId,
-    source: "Jodie Williams · PCSP 2026 · v2",
+    source: "Ellis Hart · PCSP 2026 · v2",
     sourcePage: 4,
     dueOn: "2026-09-20",
     frequency: "On plan update",
@@ -254,15 +254,15 @@ test("an administrator can edit template access and cannot demote the last admin
 test("a house manager can upload but cannot approve", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(adminLogin());
-  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const ellis = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
   await api.createRequirementDraft({
-    individualId: jodie.id,
+    individualId: ellis.id,
     title: "House-created plan item",
     category: "PCSP acknowledgments",
     ownerUserId: admin.userId,
-    source: "Jodie Williams · PCSP 2026 · v2",
+    source: "Ellis Hart · PCSP 2026 · v2",
     sourcePage: 4,
     dueOn: "2026-09-20",
     frequency: "On plan update",
@@ -378,7 +378,11 @@ test("a DSP cannot add a site or an individual", async () => {
 test("intake stores enrollment date on the Individual profile", async () => {
   const api = new LocalApi(store());
   const session = await api.signIn(adminLogin());
-  const site = (await api.loadWorkspace(session)).sites[0];
+  const site = await api.createSite({
+    name: "Birch House",
+    address: "10 Birch Way",
+    programName: "Residential services",
+  });
   const created = await api.createIndividual({
     fullName: "Riley Quinn",
     dateOfBirth: "1994-02-08",
@@ -393,7 +397,11 @@ test("intake stores enrollment date on the Individual profile", async () => {
 test("intake defaults enrollment date to today when omitted", async () => {
   const api = new LocalApi(store());
   const session = await api.signIn(adminLogin());
-  const site = (await api.loadWorkspace(session)).sites[0];
+  const site = await api.createSite({
+    name: "Aspen House",
+    address: "22 Aspen Court",
+    programName: "Residential services",
+  });
   const created = await api.createIndividual({
     fullName: "Avery Patel",
     dateOfBirth: "1992-11-19",
@@ -402,6 +410,72 @@ test("intake defaults enrollment date to today when omitted", async () => {
   const workspace = await api.loadWorkspace(session);
   const stack = workspace.planStacks.find((row) => row.individualId === created.id);
   assert.equal(stack?.profile.enrolledOn, todayIso());
+});
+
+test("Evergreen demo sites hard-cap at 2 Individuals", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const cedar = (await api.loadWorkspace(session)).sites.find((row) => row.name === "Cedar House")!;
+  await assert.rejects(
+    () =>
+      api.createIndividual({
+        fullName: "Should Not Fit",
+        dateOfBirth: "1990-01-01",
+        siteId: cedar.id,
+      }),
+    /Cedar House is at its 2-Individual limit/,
+  );
+  const site = await api.createSite({
+    name: "Cypress House",
+    address: "8 Cypress Lane",
+    programName: "Residential services",
+  });
+  await api.createIndividual({
+    fullName: "First Cypress",
+    dateOfBirth: "1991-02-02",
+    siteId: site.id,
+  });
+  await api.createIndividual({
+    fullName: "Second Cypress",
+    dateOfBirth: "1992-03-03",
+    siteId: site.id,
+  });
+  await assert.rejects(
+    () =>
+      api.createIndividual({
+        fullName: "Third Cypress",
+        dateOfBirth: "1993-04-04",
+        siteId: site.id,
+      }),
+    /Cypress House is at its 2-Individual limit/,
+  );
+});
+
+test("production sites hard-cap at 3 Individuals", async () => {
+  const memory = store();
+  const evergreen = memory.db.agencies.find((row) => row.agencyCode === DEMO_AGENCY_CODE)!;
+  evergreen.agencyCode = "ACME-TX";
+  const api = new LocalApi(memory);
+  const session = await api.signIn({
+    agencyCode: "ACME-TX",
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const cedar = (await api.loadWorkspace(session)).sites.find((row) => row.name === "Cedar House")!;
+  await api.createIndividual({
+    fullName: "Third Seat",
+    dateOfBirth: "1990-01-01",
+    siteId: cedar.id,
+  });
+  await assert.rejects(
+    () =>
+      api.createIndividual({
+        fullName: "Fourth Seat",
+        dateOfBirth: "1991-02-02",
+        siteId: cedar.id,
+      }),
+    /Cedar House is at its 3-Individual limit/,
+  );
 });
 
 test("the platform owner can approve a pending agency", async () => {
@@ -438,15 +512,15 @@ test("the platform owner can approve a pending agency", async () => {
 test("managers can correct a requirement and the fix is audit-logged", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(adminLogin());
-  const jodie = (await api.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const ellis = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
   await api.createRequirementDraft({
-    individualId: jodie.id,
+    individualId: ellis.id,
     title: "Reveiw transport instructions",
     category: "PCSP acknowledgments",
     ownerUserId: admin.userId,
-    source: "Jodie Williams · PCSP 2026 · v2",
+    source: "Ellis Hart · PCSP 2026 · v2",
     sourcePage: 4,
     dueOn: "2026-09-20",
     frequency: "On plan update",
@@ -756,7 +830,7 @@ test("demo nurse cameron.price can sign in and is a Maple member", async () => {
   assert.equal(nurse.roleKey, "nurse");
   assert.equal(nurse.username, DEMO_NURSE_USERNAME);
   const workspace = await api.loadWorkspace(nurse);
-  const maple = workspace.sites.find((site) => site.name === "Maple House");
+  const maple = workspace.sites.find((site) => site.name === "Cedar House");
   assert.ok(maple);
   assert.equal(nurse.siteId, maple.id);
 });
@@ -765,7 +839,7 @@ test("createDelegation refuses a person outside the nurse's site", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(adminLogin());
   const workspace = await api.loadWorkspace(admin);
-  const oakwoodPerson = workspace.individuals.find((row) => row.site === "Oakwood House")!;
+  const oakwoodPerson = workspace.individuals.find((row) => row.site === "Willow House")!;
   await api.signOut();
   await api.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -792,7 +866,7 @@ test("a requirement draft inherits the individual's site, not the first agency s
     programName: "Residential services",
   });
   const person = await api.createIndividual({
-    fullName: "QA Person One",
+    fullName: "Nia Brooks",
     dateOfBirth: "1990-01-15",
     siteId: site.id,
   });
@@ -801,7 +875,7 @@ test("a requirement draft inherits the individual's site, not the first agency s
     title: "QA acknowledgment",
     category: "PCSP acknowledgments",
     ownerUserId: session.userId,
-    source: "QA Person One · PCSP 2026 · v1",
+    source: "Nia Brooks · PCSP 2026 · v1",
     sourcePage: 1,
     dueOn: "2026-09-20",
     frequency: "On plan update",
@@ -811,9 +885,9 @@ test("a requirement draft inherits the individual's site, not the first agency s
   const requirement = workspace.requirements.find((row) => row.title === "QA acknowledgment")!;
   assert.equal(individual.site, "QA Audit House");
   assert.equal(individual.siteId, site.id);
-  assert.equal(requirement.person, "QA Person One");
+  assert.equal(requirement.person, "Nia Brooks");
   assert.equal(requirement.site, "QA Audit House");
-  assert.notEqual(requirement.site, "Maple House");
+  assert.notEqual(requirement.site, "Cedar House");
 });
 
 test("inviting qa.dpm creates a login that is recognized", async () => {

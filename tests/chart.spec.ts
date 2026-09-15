@@ -15,21 +15,21 @@ async function signIn(
   });
 }
 
-async function openJodie(page: Page) {
+async function openEllis(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
-  await expect(chart.getByRole("heading", { name: "Jodie Williams", exact: true })).toBeVisible();
+  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true })).toBeVisible();
   return chart;
 }
 
-test("Jodie opens as a full chart with widgets, download, and med count", async ({
+test("Ellis opens as a full chart with widgets, download, and med count", async ({
   page,
 }, testInfo) => {
   const shot = (name: string) =>
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
   await signIn(page);
-  const chart = await openJodie(page);
+  const chart = await openEllis(page);
   await expect(chart.getByRole("heading", { name: "Care plan" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
@@ -46,7 +46,7 @@ test("Jodie opens as a full chart with widgets, download, and med count", async 
     .filter({ hasText: "Care plan" })
     .getByRole("button", { name: "Download" })
     .click();
-  expect((await download).suggestedFilename()).toMatch(/complyrer-care-plan-jodie-williams/);
+  expect((await download).suggestedFilename()).toMatch(/complyrer-care-plan-ellis-hart/);
 
   const keppra = chart.locator(".med-card").filter({ has: page.getByLabel("Pills remaining") }).filter({ hasText: "Levetiracetam" });
   await keppra.getByLabel("Pills remaining").fill("40");
@@ -61,13 +61,13 @@ test("Jodie opens as a full chart with widgets, download, and med count", async 
     .getByRole("button", { name: "Download" })
     .click();
   expect((await trainingDownload).suggestedFilename()).toMatch(
-    /complyrer-training-alex-morgan-jodie-williams/,
+    /complyrer-training-alex-morgan-ellis-hart/,
   );
 });
 
 test("DSP sees meds and their training row, not annuals", async ({ page }) => {
   await signIn(page, "alex.morgan");
-  const chart = await openJodie(page);
+  const chart = await openEllis(page);
   await expect(chart.getByRole("heading", { name: "Medication board" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toHaveCount(0);
   await expect(chart.getByRole("heading", { name: "Delegations" })).toHaveCount(0);

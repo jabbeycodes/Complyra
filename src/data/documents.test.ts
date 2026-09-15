@@ -40,7 +40,7 @@ const DEMO_PASSWORD_VALUE: string = (
 
 const VALID_PCSP = {
   individual: {
-    full_name: "Jodie Williams",
+    full_name: "Ellis Hart",
     date_of_birth: "1988-04-02",
     medicaid_id: "12345678",
     confidence: 0.9,
@@ -114,7 +114,7 @@ test("validateExtraction: unknown document type fails", () => {
 
 test("validateExtraction: annual physician order schema", () => {
   const r = validateExtraction("annual_physician_order", {
-    individual: { full_name: "Jodie Williams", date_of_birth: null, medicaid_id: null, confidence: 0.9 },
+    individual: { full_name: "Ellis Hart", date_of_birth: null, medicaid_id: null, confidence: 0.9 },
     order_date: "2026-09-14",
     expiry_date: "2027-09-13",
     orders: [{ description: "Daily multivitamin", frequency: "daily", confidence: 0.8 }],
@@ -189,19 +189,19 @@ function login(username: string) {
 }
 
 function mapleSiteId(s: MemoryStore): string {
-  return s.db.sites.find((row) => row.name === "Maple House")!.id;
+  return s.db.sites.find((row) => row.name === "Cedar House")!.id;
 }
 
 test("lifecycle: nothing tracked before approve_extraction (local API)", async () => {
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId: mapleSiteId(s),
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   assert.equal(upload.status, "uploaded");
 
@@ -236,13 +236,13 @@ test("delegation handoff: activating a protocol item creates the delegation draf
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const siteId = mapleSiteId(s);
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId,
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   const { items } = await api.simulatePcspExtraction(upload.id);
   const protocolItem = items.find(
@@ -276,12 +276,12 @@ test("edit + reject paths (local API)", async () => {
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId: mapleSiteId(s),
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   const { items } = await api.simulatePcspExtraction(upload.id);
   const edited = await api.updateTrackableItem(items[0].id, {
@@ -319,7 +319,7 @@ test("permission denial: DSP cannot upload or review documents", async () => {
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_DSP_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   await assert.rejects(() =>
     api.registerDocumentUpload({
       individualId: individual.id,
@@ -335,11 +335,11 @@ test("registerDocumentUpload: siteId falls back to the individual's site when om
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   assert.equal(upload.siteId, individual.siteId);
 });
@@ -348,12 +348,12 @@ test("addTrackableItem: a reviewer can add a proposed item to an extraction", as
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId: mapleSiteId(s),
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   const { extraction } = await api.simulatePcspExtraction(upload.id);
   const before = (await api.getDocumentExtraction(upload.id))!.items.length;
@@ -386,12 +386,12 @@ test("removeTrackableItem: a reviewer can remove a proposed item (status -> remo
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId: mapleSiteId(s),
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
   const { items } = await api.simulatePcspExtraction(upload.id);
   const target = items[0];
@@ -412,12 +412,12 @@ test("notifications: extraction ready, approval, and activation notify reviewers
   const s = store();
   const api = new LocalApi(s);
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const individual = s.db.individuals.find((p) => p.fullName === "Jodie Williams")!;
+  const individual = s.db.individuals.find((p) => p.fullName === "Ellis Hart")!;
   const upload = await api.registerDocumentUpload({
     individualId: individual.id,
     siteId: mapleSiteId(s),
     documentType: "pcsp",
-    originalFilename: "pcsp-jodie.pdf",
+    originalFilename: "pcsp-ellis.pdf",
   });
 
   const { items } = await api.simulatePcspExtraction(upload.id);

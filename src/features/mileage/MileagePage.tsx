@@ -28,7 +28,7 @@ import {
 } from "../../data/mileage";
 import type { MileageYearlySummary, MileageAgencyYearlySummary } from "../../data/mileage";
 import type { MileageTrip, MileageTripView } from "../../data/types";
-import { todayIso } from "../../data/chart";
+import { individualsAtSite } from "../../data/dashboard";
 import "./mileage.css";
 
 interface FormState {
@@ -108,10 +108,7 @@ export default function MileagePage() {
    * may log a forgotten trip out of sequence. Regular staff never see it. */
   const showBackfill = canBackfillMileage(session);
   const people = useMemo(
-    () =>
-      (workspace?.individuals ?? []).filter(
-        (person) => person.site === activeSite?.name,
-      ),
+    () => individualsAtSite(workspace?.individuals ?? [], activeSite),
     [workspace, activeSite],
   );
   const peopleIds = useMemo(() => people.map((person) => person.id), [people]);
@@ -125,14 +122,15 @@ export default function MileagePage() {
   );
   /** Individuals at one site, by site id — for the yearly scope selector. */
   const peopleBySiteId = useMemo(() => {
-    const byName = new Map(sites.map((site) => [site.name, site.id]));
     const out = new Map<string, Array<{ id: string; name: string }>>();
-    for (const person of workspace?.individuals ?? []) {
-      const siteId = byName.get(person.site);
-      if (!siteId) continue;
-      const list = out.get(siteId) ?? [];
-      list.push({ id: person.id, name: person.name });
-      out.set(siteId, list);
+    for (const site of sites) {
+      out.set(
+        site.id,
+        individualsAtSite(workspace?.individuals ?? [], site).map((person) => ({
+          id: person.id,
+          name: person.name,
+        })),
+      );
     }
     return out;
   }, [workspace, sites]);

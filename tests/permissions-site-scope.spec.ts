@@ -54,19 +54,19 @@ test("admin new-delegation dropdown is site-scoped across two homes", async ({
   await expect(site).toHaveValue("");
   await expect(page.getByLabel("Individual")).toBeDisabled();
 
-  await site.selectOption({ label: "Maple House" });
+  await site.selectOption({ label: "Cedar House" });
   const mapleLabels = await individualOptions(page).allTextContents();
-  expect(mapleLabels.join(" ")).toContain("Jodie Williams");
-  expect(mapleLabels.join(" ")).toContain("Brandon Miller");
-  expect(mapleLabels.join(" ")).not.toContain("Maya Johnson");
-  expect(mapleLabels.join(" ")).not.toContain("Sylvester Jones");
+  expect(mapleLabels.join(" ")).toContain("Ellis Hart");
+  expect(mapleLabels.join(" ")).toContain("Morgan Pruitt");
+  expect(mapleLabels.join(" ")).not.toContain("Harper Soto");
+  expect(mapleLabels.join(" ")).not.toContain("Reese Lang");
 
-  await site.selectOption({ label: "Oakwood House" });
+  await site.selectOption({ label: "Willow House" });
   const oakwoodLabels = await individualOptions(page).allTextContents();
-  expect(oakwoodLabels.join(" ")).toContain("Maya Johnson");
-  expect(oakwoodLabels.join(" ")).toContain("Sylvester Jones");
-  expect(oakwoodLabels.join(" ")).not.toContain("Jodie Williams");
-  expect(oakwoodLabels.join(" ")).not.toContain("Brandon Miller");
+  expect(oakwoodLabels.join(" ")).toContain("Harper Soto");
+  expect(oakwoodLabels.join(" ")).toContain("Reese Lang");
+  expect(oakwoodLabels.join(" ")).not.toContain("Ellis Hart");
+  expect(oakwoodLabels.join(" ")).not.toContain("Morgan Pruitt");
 });
 
 test("Oakwood HM does not see Maple people in a new-delegation dropdown", async ({
@@ -86,8 +86,8 @@ test("Oakwood HM does not see Maple people in a new-delegation dropdown", async 
   await expect(page.getByLabel("Program site")).toHaveValue(/./);
   await expect(page.getByLabel("Program site")).toBeDisabled();
   const labels = await individualOptions(page).allTextContents();
-  expect(labels.join(" ")).not.toContain("Jodie Williams");
-  expect(labels.join(" ")).not.toContain("Brandon Miller");
+  expect(labels.join(" ")).not.toContain("Ellis Hart");
+  expect(labels.join(" ")).not.toContain("Morgan Pruitt");
 });
 
 test("demo nurse cameron.price signs in and only sees Maple people", async ({
@@ -97,11 +97,11 @@ test("demo nurse cameron.price signs in and only sees Maple people", async ({
   await openNewDelegationForm(page);
   await expect(page.getByLabel("Program site")).toBeDisabled();
   const siteLabel = await page.getByLabel("Program site").locator("option:checked").innerText();
-  expect(siteLabel).toContain("Maple House");
+  expect(siteLabel).toContain("Cedar House");
   const labels = await individualOptions(page).allTextContents();
-  expect(labels.join(" ")).toContain("Jodie Williams");
-  expect(labels.join(" ")).not.toContain("Maya Johnson");
-  expect(labels.join(" ")).not.toContain("Sylvester Jones");
+  expect(labels.join(" ")).toContain("Ellis Hart");
+  expect(labels.join(" ")).not.toContain("Harper Soto");
+  expect(labels.join(" ")).not.toContain("Reese Lang");
 });
 
 test("admin staff list includes demo nurse cameron.price", async ({ page }) => {
@@ -137,11 +137,11 @@ test("a person added on a new site keeps that site on a requirement", async ({
     .locator("option:checked")
     .innerText();
   expect(selectedSite).toContain("QA Audit House");
-  expect(selectedSite).not.toContain("Maple House");
-  await personDialog.getByLabel("Legal name").fill("QA Person One");
+  expect(selectedSite).not.toContain("Cedar House");
+  await personDialog.getByLabel("Legal name").fill("Nia Brooks");
   await personDialog.getByLabel("Date of birth").fill("1990-01-15");
   await personDialog.getByRole("button", { name: "Add Individual", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "QA Person One" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Nia Brooks" })).toBeVisible();
   await expect(page.locator(".individual-chart")).toContainText("QA Audit House");
 
   await openNav(page);
@@ -149,18 +149,18 @@ test("a person added on a new site keeps that site on a requirement", async ({
   await page.getByRole("button", { name: "Add requirement", exact: true }).click();
   const reqDialog = page.getByRole("dialog", { name: "Create a requirement draft" });
   await reqDialog.getByLabel("Program site").selectOption({ label: "QA Audit House" });
-  await reqDialog.getByLabel("Individual").selectOption({ label: "QA Person One" });
+  await reqDialog.getByLabel("Individual").selectOption({ label: "Nia Brooks" });
   await reqDialog.getByPlaceholder("e.g. Acknowledge the updated supervision plan").fill(
     "QA acknowledgment",
   );
-  await reqDialog.getByPlaceholder("e.g. Jodie Williams · PCSP 2026 · v2").fill(
-    "QA Person One · PCSP 2026 · v1",
+  await reqDialog.getByPlaceholder("e.g. Ellis Hart · PCSP 2026 · v2").fill(
+    "Nia Brooks · PCSP 2026 · v1",
   );
   await reqDialog.getByRole("button", { name: "Save draft for review" }).click();
   await expect(page.getByText("QA acknowledgment")).toBeVisible();
   const row = page.locator("tr").filter({ hasText: "QA acknowledgment" }).first();
   await expect(row).toContainText("QA Audit House");
-  await expect(row).not.toContainText("Maple House");
+  await expect(row).not.toContainText("Cedar House");
 });
 
 test("inviting qa.dpm then signing in is recognized", async ({ page }) => {

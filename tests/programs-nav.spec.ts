@@ -64,10 +64,10 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
   await openNav(page, "Sites & programs");
   await page
     .locator(".location-card")
-    .filter({ hasText: "Maple House" })
+    .filter({ hasText: "Cedar House" })
     .getByRole("button", { name: /Open site/ })
     .click();
-  await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
   await page.screenshot({ path: shotPath("site_detail_after_1280.png"), fullPage: false });
 });
 

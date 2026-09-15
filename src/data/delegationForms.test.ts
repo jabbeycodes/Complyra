@@ -135,17 +135,17 @@ test("delegation PDF builds in the single Complyrer view", () => {
   form.roster[0].initials = "AM";
   const filled = buildDelegationPdf({
     agencyName: "Test Agency",
-    individualName: "Sylvester Drummer",
+    individualName: "Andre Drummer",
     dmhId: "",
-    individualLocation: "3201 Pompey dr",
+    individualLocation: "418 Cedar Court",
     taskTitle: "PRN Inhaler Self-Administration and Monitoring",
     form,
     documentId: "delegation-1",
   });
   assert.match(filled.output("datauristring"), /application\/pdf/);
   assert.equal(
-    delegationFileName("PRN Inhaler Self-Administration and Monitoring", "Sylvester Drummer"),
-    "complyrer-delegation-prn-inhaler-self-administration-and-moni-sylvester-drummer.pdf",
+    delegationFileName("PRN Inhaler Self-Administration and Monitoring", "Andre Drummer"),
+    "complyrer-delegation-prn-inhaler-self-administration-and-moni-andre-drummer.pdf",
   );
 });
 

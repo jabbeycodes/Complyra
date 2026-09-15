@@ -46,7 +46,7 @@ function scoredItems(): QaAuditItemState[] {
 }
 
 test("QA audit PDF: filename carries site, year, and quarter", () => {
-  assert.equal(qaFileName("3201 Pompey", 2026, 3), "complyrer-qa-audit-3201-pompey-2026-q3.pdf");
+  assert.equal(qaFileName("418 Cedar", 2026, 3), "complyrer-qa-audit-418-cedar-2026-q3.pdf");
 });
 
 test("QA audit PDF: builds a white report covering sections and items", () => {
@@ -56,7 +56,7 @@ test("QA audit PDF: builds a white report covering sections and items", () => {
   audit.score = score;
   const doc = buildQaAuditPdf({
     agencyName: "LifePath Test Agency",
-    siteName: "3201 Pompey",
+    siteName: "418 Cedar",
     audit,
     items,
   });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
 import { useData } from "../data/DataProvider";
 import { todayIso } from "../data/chart";
+import { countIndividualsAtSite, siteIndividualCap } from "../data/siteCapacity";
 
 type Mode = "pcsp" | "manual";
 
@@ -33,6 +34,11 @@ export default function AddIndividualForm({
     () => sites.find((site) => site.id === siteId),
     [sites, siteId],
   );
+  const occupancy = selectedSite
+    ? countIndividualsAtSite(workspace?.individuals ?? [], selectedSite.id)
+    : 0;
+  const cap = siteIndividualCap(session?.agencyCode ?? "");
+  const atCap = Boolean(selectedSite) && occupancy >= cap;
 
   useEffect(() => {
     const next = lockedSiteId ?? initialSiteId ?? "";
@@ -44,8 +50,10 @@ export default function AddIndividualForm({
       className="setup-form"
       onSubmit={async (e) => {
         e.preventDefault();
-        if (mode === "pcsp" && !file) {
-          setError("Choose the PCSP PDF, or add this Individual by hand.");
+        if (atCap) {
+          setError(
+            `${selectedSite?.name} is at its ${cap}-Individual limit. This site cannot take another Individual.`,
+          );
           return;
         }
         setBusy(true);
@@ -107,7 +115,7 @@ export default function AddIndividualForm({
         <input
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          placeholder="e.g. Corey Williams"
+          placeholder="e.g. Ellis Hart"
           required
         />
       </label>
@@ -166,7 +174,14 @@ export default function AddIndividualForm({
       </label>
       {selectedSite && (
         <p className="quiet-note">
-          {selectedSite.name} · {selectedSite.program || "Program site"}
+          {selectedSite.name} · {selectedSite.program || "Program site"} · {occupancy} of {cap}{" "}
+          Individuals
+        </p>
+      )}
+      {atCap && (
+        <p className="inline-error" role="alert">
+          {selectedSite?.name} is at its {cap}-Individual limit. This site cannot take another
+          Individual.
         </p>
       )}
       {mode === "pcsp" && (
@@ -225,7 +240,7 @@ export default function AddIndividualForm({
           {error}
         </p>
       )}
-      <button className="button primary full" type="submit" disabled={busy}>
+      <button className="button primary full" type="submit" disabled={busy || atCap}>
         {mode === "pcsp"
           ? "Add Individual and send plan for review"
           : "Add Individual"}

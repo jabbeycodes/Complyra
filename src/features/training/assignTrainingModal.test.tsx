@@ -24,7 +24,7 @@ const STAFF = [
   { id: "staff-2", name: "Kofi Mensah" },
 ];
 const SITES = [
-  { id: "site-1", name: "Maple House" },
+  { id: "site-1", name: "Cedar House" },
   { id: "site-2", name: "Oak House" },
 ];
 const INDIVIDUALS = [{ id: "ind-1", name: "Jordan Lee" }];

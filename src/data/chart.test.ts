@@ -131,7 +131,7 @@ test("turning a delegation off without an order fails", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(admin)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   const delegation = stack.required.find((view) => view.item.kind === "delegation")!;
   await client.updateObligation(delegation.item.id, { enabled: true });
@@ -149,7 +149,7 @@ test("a discontinuation order turns the delegation off and stays downloadable", 
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(admin)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   const delegation = stack.required.find((view) => view.item.kind === "delegation")!;
   await client.updateObligation(delegation.item.id, { enabled: true });
@@ -181,7 +181,7 @@ test("DSP cannot discontinue a delegation", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(admin)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   const delegation = stack.required.find((view) => view.item.kind === "delegation")!;
   await client.updateObligation(delegation.item.id, { enabled: true });
@@ -202,11 +202,11 @@ test("DSP cannot discontinue a delegation", async () => {
   );
 });
 
-test("chart seed includes Jodie meds and Alex training", async () => {
+test("chart seed includes Ellis meds and Alex training", async () => {
   const memory = new MemoryStore(structuredClone(createEvergreenSeed()));
   const hmProfile = memory.db.profiles.find((p) => p.username === DEMO_HM_USERNAME)!;
   memory.db.memberships.find((m) => m.userId === hmProfile.id)!.siteId =
-    memory.db.individuals.find((p) => p.fullName.includes("Jodie"))!.siteId;
+    memory.db.individuals.find((p) => p.fullName.includes("Ellis"))!.siteId;
   const client = new LocalApi(memory);
   const hm = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -214,7 +214,7 @@ test("chart seed includes Jodie meds and Alex training", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(hm)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   assert.ok(stack.carePlan);
   assert.ok(stack.medications.some((row) => row.name === "Levetiracetam"));
@@ -241,11 +241,11 @@ test("first site assignment gives every home staff a check-off sheet", async () 
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
-  const outsider = workspace.staff.find((s) => s.site !== jodie.site)!;
-  await client.assignStaff(jodie.id, outsider.id);
+  const ellis = workspace.individuals.find((p) => p.name.includes("Ellis"))!;
+  const outsider = workspace.staff.find((s) => s.site !== ellis.site)!;
+  await client.assignStaff(ellis.id, outsider.id);
   const after = await client.loadWorkspace(admin);
-  const maplePeople = after.individuals.filter((p) => p.site === jodie.site);
+  const maplePeople = after.individuals.filter((p) => p.site === ellis.site);
   for (const person of maplePeople) {
     const stack = after.planStacks.find((item) => item.individualId === person.id)!;
     assert.equal(
@@ -264,7 +264,7 @@ test("staff check off each training line before they can sign", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(dsp)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   assert.ok(stack.myTraining);
   assert.equal(stack.canSubmit, false);
@@ -289,7 +289,7 @@ test("training lines come from required obligations", () => {
       individualId: "i",
       kind: "pcsp",
       mode: "required",
-      title: "PCSP for Jodie Williams",
+      title: "PCSP for Ellis Hart",
       detail: "",
       sourcePage: 1,
       documentVersionId: "v",

@@ -80,6 +80,7 @@ import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
+import { assertSiteHasCapacity } from "./siteCapacity";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
@@ -2881,6 +2882,17 @@ export class HostedApi implements ComplyraApi {
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
       throw new Error("House managers can add individuals to their own site.");
     }
+    const { count: rosterCount, error: rosterCountError } = await this.client
+      .from("individuals")
+      .select("id", { count: "exact", head: true })
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", site.id);
+    throwIf(rosterCountError, "Could not check this site’s Individual limit.");
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount: rosterCount ?? 0,
+    });
     const { data: roster } = await this.client
       .from("individuals")
       .select("id, full_name")

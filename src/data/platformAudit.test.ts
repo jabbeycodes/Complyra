@@ -52,7 +52,7 @@ test('audit: private corrective actions are visible only to management and assig
 test('audit: site history uses saved quarterly audits and omits other homes', async () => {
   const { store, api } = setup();
   await api.signIn(login('sarah.mitchell'));
-  const site = store.db.sites.find(s => s.name === 'Maple House')!;
+  const site = store.db.sites.find(s => s.name === 'Cedar House')!;
   const audit = await api.createQaAudit(site.id, 2026, 3);
   assert.equal((await api.listQaAuditHistory(site.id))[0].id, audit.id);
   await api.signIn(login('james.wilson'));

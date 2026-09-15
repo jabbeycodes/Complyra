@@ -9,7 +9,7 @@ test("staff training checklist PDF shows actual initials, never the word 'initia
   const doc = buildStaffTrainingChecklistPdf({
     agencyName: "Evergreen Care",
     staffName: "Jordan Ellis",
-    siteNames: ["Maple House"],
+    siteNames: ["Cedar House"],
     hoursTotal: 22,
     hoursWithHm: 9,
     lines: [
@@ -43,7 +43,7 @@ test("staff training checklist PDF shows actual initials, never the word 'initia
     ],
     signatures: [
       {
-        siteName: "Maple House",
+        siteName: "Cedar House",
         staff: { name: "Jordan Ellis", signedAt: "2026-09-12T14:30:00Z" },
         hm: { name: "Sam Rivera", signedAt: "2026-09-13T09:15:00Z" },
       },

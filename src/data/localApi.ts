@@ -56,6 +56,7 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
+import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
@@ -4189,6 +4190,11 @@ export class LocalApi implements ComplyraApi {
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
       throw new Error("House managers can add individuals to their own site.");
     }
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount: countIndividualsAtSite(this.store.db.individuals, site.id),
+    });
     if (
       this.store.db.individuals.some(
         (row) =>

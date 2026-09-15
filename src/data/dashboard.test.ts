@@ -47,7 +47,7 @@ test("agency-wide roles see every site; site-scoped staff only see assigned home
   const dspSites = sitesVisibleTo(dsp, dspWorkspace.sites, dspWorkspace.staff);
   assert.deepEqual(
     dspSites.map((site) => site.name),
-    ["Maple House"],
+    ["Cedar House"],
   );
 
   const hm = await client.signIn({
@@ -58,7 +58,7 @@ test("agency-wide roles see every site; site-scoped staff only see assigned home
   const hmWorkspace = await client.loadWorkspace(hm);
   assert.deepEqual(
     sitesVisibleTo(hm, hmWorkspace.sites, hmWorkspace.staff).map((site) => site.name),
-    ["Oakwood House"],
+    ["Willow House"],
   );
 });
 
@@ -106,7 +106,7 @@ test("personal queue lists work owned by or assigned to the signed-in user", asy
   );
 });
 
-test("individualsAtSite keeps Maple people off an Oakwood list", async () => {
+test("individualsAtSite keeps Cedar people off a Willow list", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -114,14 +114,20 @@ test("individualsAtSite keeps Maple people off an Oakwood list", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const maple = workspace.sites.find((site) => site.name === "Maple House")!;
-  const oakwood = workspace.sites.find((site) => site.name === "Oakwood House")!;
-  const maplePeople = individualsAtSite(workspace.individuals, maple);
-  const oakwoodPeople = individualsAtSite(workspace.individuals, oakwood);
-  assert.ok(maplePeople.some((row) => row.name === "Jodie Williams"));
-  assert.equal(maplePeople.some((row) => row.name === "Maya Johnson"), false);
-  assert.ok(oakwoodPeople.some((row) => row.name === "Maya Johnson"));
-  assert.equal(oakwoodPeople.some((row) => row.name === "Jodie Williams"), false);
+  const cedar = workspace.sites.find((site) => site.name === "Cedar House")!;
+  const willow = workspace.sites.find((site) => site.name === "Willow House")!;
+  const cedarPeople = individualsAtSite(workspace.individuals, cedar);
+  const willowPeople = individualsAtSite(workspace.individuals, willow);
+  assert.equal(cedarPeople.length, 2);
+  assert.equal(willowPeople.length, 2);
+  assert.deepEqual(
+    cedarPeople.map((row) => row.name).sort(),
+    ["Ellis Hart", "Morgan Pruitt"],
+  );
+  assert.deepEqual(
+    willowPeople.map((row) => row.name).sort(),
+    ["Harper Soto", "Reese Lang"],
+  );
   assert.deepEqual(individualsAtSite(workspace.individuals, undefined), []);
 });
 
@@ -133,8 +139,8 @@ test("site-scoped staff are locked to their home site; admins are not", async ()
     password: DEMO_PASSWORD,
   });
   const adminWorkspace = await client.loadWorkspace(admin);
-  const maple = adminWorkspace.sites.find((site) => site.name === "Maple House")!;
-  const oakwood = adminWorkspace.sites.find((site) => site.name === "Oakwood House")!;
+  const maple = adminWorkspace.sites.find((site) => site.name === "Cedar House")!;
+  const oakwood = adminWorkspace.sites.find((site) => site.name === "Willow House")!;
   assert.equal(canAccessSite(admin, maple.id), true);
   assert.equal(canAccessSite(admin, oakwood.id), true);
   assert.equal(lockedSiteIdFor(admin), null);

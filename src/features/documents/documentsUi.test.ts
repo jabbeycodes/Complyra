@@ -448,16 +448,16 @@ const ADAPTER_UPLOAD = {
   individualId: "ind-1",
   siteId: "site-1",
   documentType: "pcsp",
-  originalFilename: "pcsp-jodie.pdf",
+  originalFilename: "pcsp-ellis.pdf",
   mimeType: "application/pdf",
-  storagePath: "agency-1/upload-1/pcsp-jodie.pdf",
+  storagePath: "agency-1/upload-1/pcsp-ellis.pdf",
   uploadedBy: "admin-1",
   uploadedAt: "2026-09-14T10:00:00.000Z",
   status: "extracted",
 };
 
 const ADAPTER_EXTRACTION_DATA = {
-  individual: { full_name: "Jodie Williams", date_of_birth: "1988-04-02", medicaid_id: null, confidence: 0.9 },
+  individual: { full_name: "Ellis Hart", date_of_birth: "1988-04-02", medicaid_id: null, confidence: 0.9 },
   plan: { effective_date: "2026-09-14", expiry_date: "2027-09-13", annual_review_due_date: "2027-08-14", confidence: 0.95 },
   outcomes: [
     { title: "Community participation", description: "Two activities weekly.", support_strategies: ["Staff assist."], confidence: 0.85 },
@@ -556,7 +556,7 @@ function fakeApi(overrides: Record<string, unknown> = {}) {
 
 test("adapter: upload statuses map onto the review queue states", async () => {
   const { api } = fakeApi();
-  const docs = getDocumentsApi(api, { resolveIndividualName: () => "Jodie Williams" });
+  const docs = getDocumentsApi(api, { resolveIndividualName: () => "Ellis Hart" });
   const cases = [
     ["uploaded", "uploading"],
     ["extracting", "extracting"],
@@ -637,7 +637,7 @@ test("adapter: the v1 PCSP schema maps into review sections with confidence", as
   const { api } = fakeApi();
   const docs = getDocumentsApi(api);
   const ex = (await docs.getExtraction("upload-1"))!;
-  assert.equal(ex.structured.individualName.value, "Jodie Williams");
+  assert.equal(ex.structured.individualName.value, "Ellis Hart");
   assert.equal(ex.structured.individualName.confidence, 0.9);
   assert.equal(ex.structured.planEndDate.value, "2027-09-13");
   assert.equal(ex.structured.annualReviewDate.value, "2027-08-14");
@@ -654,7 +654,7 @@ test("adapter: the v1 PCSP schema maps into review sections with confidence", as
 
 test("adapter: annual physician order maps orders + physician signature", async () => {
   const apoData = {
-    individual: { full_name: "Jodie Williams", date_of_birth: null, medicaid_id: null, confidence: 0.8 },
+    individual: { full_name: "Ellis Hart", date_of_birth: null, medicaid_id: null, confidence: 0.8 },
     order_date: "2026-09-01",
     expiry_date: "2027-09-01",
     orders: [{ description: "Lisinopril 10mg daily", frequency: "daily", confidence: 0.9 }],

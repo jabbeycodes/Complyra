@@ -29,14 +29,14 @@ test("monthly equipment, drills, and safety are due by the 7th and downloadable 
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("heading", { name: "Jodie Williams" }).click();
+  await page.getByRole("heading", { name: "Ellis Hart" }).click();
   await expect(page.getByRole("heading", { name: "Adaptive equipment log" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Wheelchair" })).toBeVisible();
   await page.getByLabel("Equipment log month").selectOption("2026-08");
   const equipmentDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: /Download August/ }).click();
   expect((await equipmentDownload).suggestedFilename()).toMatch(
-    /adaptive-equipment-jodie-williams-2026-08/,
+    /adaptive-equipment-ellis-hart-2026-08/,
   );
 
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
@@ -49,12 +49,12 @@ test("monthly equipment, drills, and safety are due by the 7th and downloadable 
   const drillDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download drills" }).click();
   expect((await drillDownload).suggestedFilename()).toMatch(
-    /emergency-drills-maple-house-2026-08/,
+    /emergency-drills-cedar-house-2026-08/,
   );
   const safetyDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download safety" }).click();
   expect((await safetyDownload).suggestedFilename()).toMatch(
-    /home-safety-maple-house-2026-08/,
+    /home-safety-cedar-house-2026-08/,
   );
 });
 
@@ -70,7 +70,7 @@ test("DPM can change monthly due days in settings", async ({ page }) => {
   await page.getByRole("button", { name: "Save due dates" }).click();
   await expect(page.getByRole("status")).toContainText("Monthly due dates saved");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("heading", { name: "Jodie Williams" }).click();
+  await page.getByRole("heading", { name: "Ellis Hart" }).click();
   await expect(page.getByText(/checked by the 15th of each month/)).toBeVisible();
 });
 
@@ -79,7 +79,7 @@ test("people without equipment do not get an equipment log unless DPM adds one",
 }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("heading", { name: "Sylvester Jones" }).click();
+  await page.getByRole("heading", { name: "Reese Lang" }).click();
   await expect(page.getByRole("heading", { name: "Adaptive equipment log" })).toBeVisible();
   await expect(page.getByText("No adaptive equipment on this chart yet.")).toBeVisible();
   await page.getByLabel("Adaptive equipment name").fill("Walker");
