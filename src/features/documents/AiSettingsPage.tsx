@@ -1,5 +1,5 @@
 /**
- * AiSettingsPage — agency administrators only.
+ * AiSettingsPage — platform operator only.
  *
  * Shows the AI model in use (editable, saved per agency), the Vertex AI
  * service-account status ("Configured — verified <date>" / "Not configured" —
@@ -69,7 +69,7 @@ export default function AiSettingsPage() {
       <>
         <PageHeading title="AI settings" />
         <section className="panel">
-          <Empty title="No access" text="AI settings are limited to agency administrators." />
+          <Empty title="No access" text="AI settings are limited to the Complyrer operator." />
         </section>
       </>
     );

@@ -18,13 +18,13 @@
   --red: #b56a4e;
   --sidebar: 236px;
   /* Canvas inset: content and topbar share one token so they stay aligned. */
-  --page-inline: 48px;
-  --page-inline-md: 28px;
-  --page-inline-sm: 16px;
+  --page-inline: 56px;
+  --page-inline-md: 36px;
+  --page-inline-sm: 22px;
   --page-inline-start: max(var(--page-inline), env(safe-area-inset-left, 0px));
   --page-inline-end: max(var(--page-inline), env(safe-area-inset-right, 0px));
   /* Inner panel chrome (headings, table edge cells, Cancel / Open form). */
-  --panel-inline: 28px;
+  --panel-inline: 32px;
 }
 * {
   box-sizing: border-box;
@@ -2169,7 +2169,7 @@ td > svg {
 }
 .settings-panel {
   max-width: 850px;
-  padding: 28px;
+  padding: 28px var(--panel-inline);
 }
 .settings-panel h2 {
   font-size: 22px;
@@ -3061,7 +3061,7 @@ td {
   :root {
     --sidebar: 211px;
     --page-inline: var(--page-inline-md);
-    --panel-inline: 24px;
+    --panel-inline: 28px;
   }
   .sidebar {
     padding-inline: 12px;
@@ -3182,7 +3182,7 @@ td {
 @media (max-width: 960px) {
   :root {
     --sidebar: 190px;
-    --page-inline: 24px;
+    --page-inline: var(--page-inline-md);
   }
   .brand > span {
     font-size: 28px;
@@ -3393,7 +3393,7 @@ td {
   :root {
     --sidebar: 0px;
     --page-inline: var(--page-inline-sm);
-    --panel-inline: 20px;
+    --panel-inline: 24px;
   }
   .sidebar {
     width: 236px;
@@ -3982,7 +3982,7 @@ td {
     width: 100%;
   }
   .settings-panel {
-    padding: 20px;
+    padding: 20px var(--panel-inline);
   }
   .settings-row small {
     font-size: 11px;

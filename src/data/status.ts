@@ -124,7 +124,7 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Document upload") return can(session, "documents.upload");
   if (page === "Extraction review")
     return can(session, "documents.review" as PermissionKey);
-  if (page === "AI settings") return isAgencyAdmin(session.role);
+  if (page === "AI settings") return Boolean(session.platformAdmin);
   return can(session, "individuals.view");
 }
 

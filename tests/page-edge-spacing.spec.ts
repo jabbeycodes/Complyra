@@ -86,19 +86,19 @@ async function assertNoPageHorizontalScroll(page: Page) {
   ).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
-test("desktop canvas and panel actions keep a 40/20 inset at 1280", async ({
+test("desktop canvas and panel actions keep a 48/28 inset at 1280", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
   const overview = await canvasMetrics(page);
-  expect(overview.pageInline).toBeGreaterThanOrEqual(40);
-  expect(overview.mainPadStart).toBeGreaterThanOrEqual(40);
-  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(40);
-  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(40);
-  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(40);
-  expect(overview.panelInline).toBeGreaterThanOrEqual(20);
+  expect(overview.pageInline).toBeGreaterThanOrEqual(48);
+  expect(overview.mainPadStart).toBeGreaterThanOrEqual(48);
+  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(48);
+  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(48);
+  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(48);
+  expect(overview.panelInline).toBeGreaterThanOrEqual(28);
   await assertNoPageHorizontalScroll(page);
 
   const avatar = page.getByRole("button", { name: "Your profile" });
@@ -113,6 +113,24 @@ test("desktop canvas and panel actions keep a 40/20 inset at 1280", async ({
   });
 
   const menu = page.getByRole("button", { name: "Open navigation" });
+  if (await menu.isVisible()) await menu.click();
+  await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await assertNoPageHorizontalScroll(page);
+  await page.screenshot({
+    path: shotPath("settings_after_1280.png"),
+    fullPage: false,
+  });
+
+  if (await menu.isVisible()) await menu.click();
+  await page.locator(".sidebar").getByRole("button", { name: "Individuals", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Individuals" })).toBeVisible();
+  await assertNoPageHorizontalScroll(page);
+  await page.screenshot({
+    path: shotPath("individuals_after_1280.png"),
+    fullPage: false,
+  });
+
   if (await menu.isVisible()) await menu.click();
   await page.locator(".sidebar").getByRole("button", { name: "Delegations", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Delegations" })).toBeVisible();
@@ -136,23 +154,43 @@ test("desktop canvas and panel actions keep a 40/20 inset at 1280", async ({
   });
 });
 
-test("phone canvas keeps 16px page inset and 20px panel actions at 390", async ({
+test("phone canvas keeps 22px page inset and 24px panel actions at 390", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
 
   const overview = await canvasMetrics(page);
-  expect(overview.pageInline).toBeGreaterThanOrEqual(16);
-  expect(overview.mainPadStart).toBeGreaterThanOrEqual(16);
-  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(16);
-  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(16);
-  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(16);
-  expect(overview.panelInline).toBeGreaterThanOrEqual(20);
+  expect(overview.pageInline).toBeGreaterThanOrEqual(22);
+  expect(overview.mainPadStart).toBeGreaterThanOrEqual(22);
+  expect(overview.mainPadEnd).toBeGreaterThanOrEqual(22);
+  expect(overview.topbarPadStart).toBeGreaterThanOrEqual(22);
+  expect(overview.topbarPadEnd).toBeGreaterThanOrEqual(22);
+  expect(overview.panelInline).toBeGreaterThanOrEqual(24);
   await assertNoPageHorizontalScroll(page);
 
   await page.screenshot({
     path: shotPath("overview_after_390.png"),
+    fullPage: false,
+  });
+
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
+  await closeMobileNav(page);
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await assertNoPageHorizontalScroll(page);
+  await page.screenshot({
+    path: shotPath("settings_after_390.png"),
+    fullPage: false,
+  });
+
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "Individuals", exact: true }).click();
+  await closeMobileNav(page);
+  await expect(page.getByRole("heading", { name: "Individuals" })).toBeVisible();
+  await assertNoPageHorizontalScroll(page);
+  await page.screenshot({
+    path: shotPath("individuals_after_390.png"),
     fullPage: false,
   });
 
