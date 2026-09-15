@@ -1299,6 +1299,12 @@ function assertCan(session: SessionUser, key: PermissionKey) {
   }
 }
 
+function assertPlatformOperator(session: SessionUser) {
+  if (!session.platformAdmin) {
+    throw new Error("Only the Complyrer operator can manage AI settings.");
+  }
+}
+
 /**
  * DELEGATION — site scoping for the delegation workflow.
  *
@@ -8591,7 +8597,7 @@ export class LocalApi implements ComplyraApi {
   }): Promise<LocalAgencyAiSettings> {
     const session = assertSession(this.store);
     // Model + enabled flag only — no credential is EVER stored here.
-    assertCan(session, "roles.manage");
+    assertPlatformOperator(session);
     if (!input.model.trim()) throw new Error("A model name is required.");
     ensureDocumentCollections(this.store);
     const db = this.store.db;
@@ -8627,7 +8633,7 @@ export class LocalApi implements ComplyraApi {
     // verification so the settings screen can exercise the flow. Hosted
     // calls the extract-pcsp verify action instead.
     const session = assertSession(this.store);
-    assertCan(session, "roles.manage");
+    assertPlatformOperator(session);
     ensureDocumentCollections(this.store);
     const db = this.store.db;
     let row = db.agencyAiSettings.find((s) => s.agencyId === session.agencyId);

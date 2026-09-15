@@ -3419,6 +3419,12 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
+  private requirePlatformOperator(session: SessionUser) {
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can manage AI settings.");
+    }
+  }
+
   private async sessionFromUser(
     userId: string,
     email: string,
@@ -7893,7 +7899,7 @@ export class HostedApi implements ComplyraApi {
     model: string;
   }): Promise<LocalAgencyAiSettings> {
     const session = await this.requireSession();
-    this.requirePermission(session, "roles.manage");
+    this.requirePlatformOperator(session);
     // Model + enabled flag only — no credential is EVER stored.
     const { data, error } = await this.client.rpc("set_agency_ai_settings", {
       p_agency_id: session.agencyId,
@@ -7917,7 +7923,7 @@ export class HostedApi implements ComplyraApi {
     error?: string;
   }> {
     const session = await this.requireSession();
-    this.requirePermission(session, "roles.manage");
+    this.requirePlatformOperator(session);
     // Minimal generateContent call inside the edge function — the
     // service-account JSON never leaves the server and is never returned.
     const result = await invokeEdgeFunction<{

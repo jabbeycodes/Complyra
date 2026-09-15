@@ -37,6 +37,7 @@ import {
   PenLine,
   LogOut,
   KeyRound,
+  ServerCog,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import {
@@ -261,6 +262,17 @@ export default function App() {
       setPage("Overview");
     }
   }, [session, page]);
+  useEffect(() => {
+    const applyHash = () => {
+      const fromHash = decodeURIComponent(
+        window.location.hash.replace(/^#/, ""),
+      ).trim();
+      if (fromHash) setPage(fromHash);
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -588,6 +600,7 @@ export default function App() {
         ["Audit center", ShieldCheck],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
+        ["AI settings", ServerCog],
       ],
     },
     {
@@ -1705,6 +1718,7 @@ export default function App() {
               {page === "Supply forecast" && <MedInventoryPage />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
+              {page === "AI settings" && <AiSettingsPage />}
               {page === "Settings" && (
                 <>
                   <PageHeading title="Settings" />

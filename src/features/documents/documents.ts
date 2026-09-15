@@ -46,11 +46,9 @@ export function canReviewDocuments(session: SessionUser | null): boolean {
 }
 
 export function canManageAiSettings(session: SessionUser | null): boolean {
-  // Mirrors the backend gate: the settings RPCs require roles.manage.
-  return (
-    !!session &&
-    (can(session, "roles.manage") || Boolean(session.platformAdmin))
-  );
+  // Vertex / model / verify are platform-operator only — not agency admins
+  // and not anyone who happens to hold roles.manage.
+  return Boolean(session?.platformAdmin);
 }
 
 /* ------------------------------------------------------------------ */

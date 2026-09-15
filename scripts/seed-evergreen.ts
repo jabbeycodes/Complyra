@@ -56,47 +56,67 @@ async function findAuthUserIdByEmail(email: string): Promise<string | undefined>
   return undefined;
 }
 
+function authMetadata(input: {
+  username: string;
+  fullName: string;
+  jobTitle: string;
+  homeAgencyId: string;
+}) {
+  return {
+    full_name: input.fullName,
+    username: input.username,
+    job_title: input.jobTitle,
+    home_agency_id: input.homeAgencyId,
+    must_change_password: false,
+    email_verified: true,
+  };
+}
+
+async function setAuthPassword(userId: string, input: {
+  email: string;
+  username: string;
+  fullName: string;
+  jobTitle: string;
+  homeAgencyId: string;
+}) {
+  // Always write the password + email identity. createUser with a fixed UUID
+  // can leave auth.identities empty, which makes signInWithPassword fail.
+  const { error } = await admin.auth.admin.updateUserById(userId, {
+    email: input.email,
+    password: DEMO_PASSWORD,
+    email_confirm: true,
+    user_metadata: authMetadata(input),
+  });
+  if (error) throw new Error(`auth ${input.email}: ${error.message}`);
+}
+
 async function ensureAuthUser(input: {
   id: string;
   email: string;
   username: string;
   fullName: string;
   jobTitle: string;
+  homeAgencyId: string;
 }): Promise<string> {
   const { data, error } = await admin.auth.admin.createUser({
     id: input.id,
     email: input.email,
     password: DEMO_PASSWORD,
     email_confirm: true,
-    user_metadata: {
-      full_name: input.fullName,
-      username: input.username,
-      job_title: input.jobTitle,
-      home_agency_id: AGENCY_ID,
-      must_change_password: false,
-    },
+    user_metadata: authMetadata(input),
   });
-  if (!error && data.user) return data.user.id;
-  if (!error || !/already been registered|already exists/i.test(error.message)) {
-    throw new Error(`auth ${input.email}: ${error?.message ?? "could not create"}`);
+  let userId = !error && data.user ? data.user.id : undefined;
+  if (!userId) {
+    if (!error || !/already been registered|already exists/i.test(error.message)) {
+      throw new Error(`auth ${input.email}: ${error?.message ?? "could not create"}`);
+    }
+    userId = await findAuthUserIdByEmail(input.email);
+    if (!userId) {
+      throw new Error(`auth ${input.email}: already exists but could not be loaded`);
+    }
   }
-  const existingId = await findAuthUserIdByEmail(input.email);
-  if (!existingId) {
-    throw new Error(`auth ${input.email}: already exists but could not be loaded`);
-  }
-  const { error: updateError } = await admin.auth.admin.updateUserById(existingId, {
-    password: DEMO_PASSWORD,
-    email_confirm: true,
-    user_metadata: {
-      full_name: input.fullName,
-      username: input.username,
-      job_title: input.jobTitle,
-      home_agency_id: AGENCY_ID,
-      must_change_password: false,
-    },
-  });
-  if (updateError) throw new Error(`auth ${input.email}: ${updateError.message}`);
-  return existingId;
+  await setAuthPassword(userId, input);
+  return userId;
 }
 
 async function main() {
@@ -120,6 +140,7 @@ async function main() {
       username: profile.username,
       fullName: profile.fullName,
       jobTitle: profile.jobTitle,
+      homeAgencyId: profile.homeAgencyId,
     });
     authIdBySeedId.set(profile.id, authId);
   }
@@ -271,7 +292,9 @@ async function main() {
   console.log(
     `Seeded Evergreen Care (${AGENCY_ID}). Demo login: agency EVERGREEN-MO / sarah.mitchell / ${DEMO_PASSWORD}`,
   );
-  console.log("A second agency can be added later with a different agency_code.");
+  console.log(
+    `Operator login: agency COMPLYRER-MO / platform.owner / ${DEMO_PASSWORD}`,
+  );
 }
 
 main().catch((error) => {

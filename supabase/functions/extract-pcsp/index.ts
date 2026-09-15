@@ -455,9 +455,8 @@ Deno.serve(async (req) => {
   }
 
   // Verify action: minimal Vertex AI generateContent call to prove the
-  // service account works. Admin-level: the caller must hold roles.manage
-  // in some agency (the verify button lives on the admin AI settings
-  // screen). No credential material is ever returned.
+  // service account works. Platform-operator only — agency admins and
+  // roles.manage must not reach this path. No credential material is returned.
   if (body.action === "verify") {
     let vertex: { sa: ServiceAccount; projectId: string; location: string };
     try {
@@ -465,33 +464,14 @@ Deno.serve(async (req) => {
     } catch (resp) {
       return resp as Response;
     }
-    const { data: memberships } = await admin
-      .from("memberships")
-      .select("agency_id, role_key, role")
-      .eq("user_id", user.id);
-    let allowed = false;
-    if (memberships && memberships.length > 0) {
-      const { data: roles } = await admin
-        .from("agency_roles")
-        .select("permissions")
-        .in(
-          "agency_id",
-          memberships.map((m: { agency_id: string }) => m.agency_id),
-        )
-        .in(
-          "template_key",
-          memberships.map((m: { role_key?: string; role?: string }) =>
-            m.role_key ?? String(m.role),
-          ),
-        );
-      allowed = (roles ?? []).some(
-        (r: { permissions?: Record<string, boolean> }) =>
-          r.permissions?.["roles.manage"] === true,
-      );
-    }
-    if (!allowed) {
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("platform_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!profile?.platform_admin) {
       return json(
-        { error: "Only administrators can verify the AI service account." },
+        { error: "Only the Complyrer operator can verify the AI service account." },
         403,
       );
     }
