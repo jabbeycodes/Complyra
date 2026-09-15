@@ -37,9 +37,10 @@ async function closeMobileNav(page: Page) {
 
 async function openNavPage(page: Page, name: string) {
   const menu = page.getByRole("button", { name: "Open navigation" });
-  if (await menu.isVisible()) await menu.click();
+  const usedDrawer = await menu.isVisible();
+  if (usedDrawer) await menu.click();
   await page.locator(".sidebar").getByRole("button", { name, exact: true }).click();
-  await closeMobileNav(page);
+  if (usedDrawer) await closeMobileNav(page);
 }
 
 async function shellMetrics(page: Page) {
@@ -56,8 +57,6 @@ async function shellMetrics(page: Page) {
     return {
       padStart: px(shellStyle.paddingInlineStart),
       padEnd: px(shellStyle.paddingInlineEnd),
-      tokenStart: px(root.getPropertyValue("--page-inline-start")),
-      tokenEnd: px(root.getPropertyValue("--page-inline-end")),
       pageInline: px(root.getPropertyValue("--page-inline")),
       panelInline: px(root.getPropertyValue("--panel-inline")),
       mainInlineStart: px(mainStyle.paddingInlineStart),
@@ -127,9 +126,8 @@ for (const viewport of VIEWPORTS) {
     const metrics = await shellMetrics(page);
     expect(metrics.pageInline).toBe(viewport.pageInline);
     expect(metrics.panelInline).toBe(viewport.panelInline);
-    expect(metrics.padStart).toBe(metrics.tokenStart);
-    expect(metrics.padEnd).toBe(metrics.tokenEnd);
     expect(metrics.padStart).toBe(viewport.pageInline);
+    expect(metrics.padEnd).toBe(viewport.pageInline);
     expect(metrics.mainInlineStart).toBe(0);
     expect(metrics.topbarInlineStart).toBe(0);
     await assertTitleInheritsShell(page);
@@ -170,11 +168,8 @@ for (const viewport of VIEWPORTS) {
       name: "Appointments",
       exact: true,
     });
-    const menu = page.getByRole("button", { name: "Open navigation" });
     if (await appointmentsNav.count()) {
-      if (await menu.isVisible()) await menu.click();
-      await appointmentsNav.click();
-      await closeMobileNav(page);
+      await openNavPage(page, "Appointments");
       await expect(page.getByRole("heading", { name: "Appointments" })).toBeVisible();
       await assertPageHasNoSecondGutter(page, ".appointments-page");
       await assertNoPageHorizontalScroll(page);
