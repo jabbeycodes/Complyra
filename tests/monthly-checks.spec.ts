@@ -4,7 +4,7 @@ async function signIn(page: Page, username = "sarah.mitchell") {
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill("Evergreen!demo1");
+  await page.getByLabel("Password", { exact: true }).fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,

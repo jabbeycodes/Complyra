@@ -121,6 +121,7 @@ export interface LocalDatabase {
   hmDspReviewHistory: RecognitionHistoryRow[];
   recognitionWinners: RecognitionWinnerRow[];
   notifications: RecognitionNotificationRow[];
+  notificationReads?: Record<string, string>;
   // DELEGATION: template workflow — common/agency templates, site
   // activations, per-individual assignments, training materials, acks.
   delegationTemplates: DelegationTemplate[];

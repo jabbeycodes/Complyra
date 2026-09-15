@@ -52,7 +52,8 @@ import {
   type PermissionMap,
 } from "./permissions";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { canReadIndividual, assertCalendarDate } from "./access";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
@@ -306,6 +307,8 @@ const META_KEY = "complyra-v2-meta";
 const FILE_PREFIX = "complyra-v2-file:";
 
 export interface ComplyraApi {
+  listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]>;
+  markNotificationsRead(ids: string[]): Promise<void>;
   getSession(): Promise<SessionUser | null>;
   signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
@@ -1243,6 +1246,7 @@ function currentSession(store: MemoryStore): SessionUser | null {
     (m) => m.userId === store.sessionUserId,
   );
   if (!profile || !membership) return null;
+  if (membership.expiresOn && membership.expiresOn < todayIso()) return null;
   const agency = store.db.agencies.find((row) => row.id === membership.agencyId);
   if (!agency) return null;
   return {
@@ -1315,15 +1319,28 @@ function assertPlatformOperator(session: SessionUser) {
  * Returns null for "all sites".
  */
 function delegationSiteScope(session: SessionUser): string[] | null {
-  if (
-    session.role === "administrator" ||
-    session.role === "compliance_admin" ||
-    session.platformAdmin
-  ) {
-    return null;
+  if (isAgencyWideViewer(session)) return null;
+  return session.siteId ? [session.siteId] : [];
+}
+
+function accessibleIndividual(store: MemoryStore, session: SessionUser, id: string) {
+  const person = store.db.individuals.find((row) => row.id === id);
+  if (!person || !canReadIndividual(session, person, store.db.assignments)) {
+    throw new Error("Individual not found or outside your assigned access.");
   }
-  if (session.siteId) return [session.siteId];
-  return null;
+  return person;
+}
+
+function accessibleRequirement(store: MemoryStore, session: SessionUser, id: string) {
+  const row = store.db.requirements.find((item) => item.id === id && item.agencyId === session.agencyId);
+  if (!row || !canAccessSite(session, row.siteId)) throw new Error("Requirement not found or outside your assigned access.");
+  if (row.individualId) accessibleIndividual(store, session, row.individualId);
+  return row;
+}
+
+function assertRequirementOwner(store: MemoryStore, session: SessionUser, userId: string) {
+  if (!store.db.memberships.some((m) => m.agencyId === session.agencyId && m.userId === userId &&
+    (!m.expiresOn || m.expiresOn >= todayIso()))) throw new Error("Choose an active staff member in this agency.");
 }
 
 /** Throw unless the session user may touch delegation data at this site. */
@@ -1997,23 +2014,29 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensureSiteReviews(store.db);
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
-  const canReadAudit =
-    hasPermission(session, "audit.read") || canViewPeople;
-  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId);
+  const canReadAudit = hasPermission(session, "audit.read") && isAgencyWideViewer(session);
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
   const individuals = canViewPeople
-    ? store.db.individuals.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments))
     : [];
-  const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId);
+  const personIds = new Set(individuals.map((row) => row.id));
+  const siteIds = new Set(sites.map((row) => row.id));
+  const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId &&
+    (isAgencyWideViewer(session) || row.userId === session.userId || (row.siteId && siteIds.has(row.siteId))));
   const allRequirements = store.db.requirements.filter(
-    (row) => row.agencyId === session.agencyId,
+    (row) => row.agencyId === session.agencyId && canViewPeople &&
+      (row.individualId ? personIds.has(row.individualId) : siteIds.has(row.siteId)),
   );
-  const scorecard = metrics(allRequirements.map((row) => mapRequirement(store, row)));
+  const scorecard = metrics((session.roleKey === "hr"
+    ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)
+    : allRequirements).map((row) => mapRequirement(store, row)));
   const requirements = canViewPeople ? allRequirements : [];
   const versions = canViewPeople
-    ? store.db.versions.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.versions.filter((row) => row.agencyId === session.agencyId && hasPermission(session, "documents.view") &&
+        store.db.documents.some((doc) => doc.id === row.documentId && personIds.has(doc.individualId)))
     : [];
   const packets = canViewPeople
-    ? store.db.packets.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.packets.filter((row) => row.agencyId === session.agencyId && personIds.has(row.individualId))
     : [];
   const audit = canReadAudit
     ? store.db.audit.filter((row) => row.agencyId === session.agencyId)
@@ -2104,20 +2127,20 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     roles: rolesFor(store, session.agencyId),
     scorecard,
     monthly: {
-      equipment: store.db.adaptiveEquipment.filter((row) => row.agencyId === session.agencyId),
+      equipment: store.db.adaptiveEquipment.filter((row) => row.agencyId === session.agencyId && personIds.has(row.individualId)),
       equipmentLogs: store.db.equipmentMonthLogs.filter((log) =>
         store.db.adaptiveEquipment.some(
-          (item) => item.id === log.equipmentId && item.agencyId === session.agencyId,
+          (item) => item.id === log.equipmentId && item.agencyId === session.agencyId && personIds.has(item.individualId),
         ),
       ),
-      drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId),
-      safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId),
+      drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId)),
+      safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId)),
     },
     monthlyDue: normalizeMonthlyDue(
       store.db.agencies.find((row) => row.id === session.agencyId)?.monthlyDue,
     ),
     siteReviews: (store.db.siteReviews ?? [])
-      .filter((row) => row.agencyId === session.agencyId)
+      .filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId))
       .map((row) => normalizeSiteReview(applyWellWaterDefault(row, siteFactsFrom(
         sites.find((site) => site.id === row.siteId) ?? {
           id: row.siteId,
@@ -2133,6 +2156,32 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
 
 export class LocalApi implements ComplyraApi {
   constructor(private store: MemoryStore = browserStore) {}
+
+  async listNotifications() {
+    const session = assertSession(this.store);
+    return (this.store.db.notifications ?? []).filter((row) => row.agencyId === session.agencyId &&
+      (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
+      .map((row) => ({
+        id: row.id, agency_id: row.agencyId, user_id: row.userId, role_key: row.roleKey,
+        type: row.type as import("../features/notifications/notify").NotificationType,
+        title: row.title, body: row.body, deep_link: row.deepLink, entity_type: row.entityType,
+        entity_id: row.entityId, dedupe_key: row.dedupeKey, created_at: row.createdAt,
+        read_at: row.userId ? row.readAt : this.store.db.notificationReads?.[`${session.userId}:${row.id}`] ?? null,
+      })).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100);
+  }
+
+  async markNotificationsRead(ids: string[]) {
+    const session = assertSession(this.store);
+    const visible = new Set((await this.listNotifications()).map((row) => row.id));
+    const now = new Date().toISOString();
+    this.store.db.notificationReads ??= {};
+    for (const row of this.store.db.notifications ?? []) {
+      if (!ids.includes(row.id) || !visible.has(row.id)) continue;
+      if (row.userId === session.userId) row.readAt ??= now;
+      else this.store.db.notificationReads[`${session.userId}:${row.id}`] ??= now;
+    }
+    await persistMeta(this.store);
+  }
 
   async getSession() {
     await hydrate();
@@ -2163,7 +2212,7 @@ export class LocalApi implements ComplyraApi {
     const membership = this.store.db.memberships.find(
       (row) => row.userId === profile.id && row.agencyId === agency.id,
     );
-    if (!membership) {
+    if (!membership || (membership.expiresOn && membership.expiresOn < todayIso())) {
       throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
     this.store.sessionUserId = credential.userId;
@@ -2487,6 +2536,11 @@ export class LocalApi implements ComplyraApi {
 
   async loadWorkspace(session: SessionUser) {
     await hydrate();
+    const active = assertSession(this.store);
+    if (active.userId !== session.userId || active.agencyId !== session.agencyId) {
+      throw new Error("Sign in to this workspace to continue.");
+    }
+    session = active;
     seedDemoLogoPath(this.store);
     const view = toWorkspace(this.store, session);
     view.branding = {
@@ -2498,11 +2552,13 @@ export class LocalApi implements ComplyraApi {
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = assertSession(this.store);
     assertCan(session, "documents.upload");
-    const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
-    if (!individual) throw new Error("Individual not found.");
+    const individual = accessibleIndividual(this.store, session, input.individualId);
+    if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
+    assertCalendarDate(input.dueOn, "Use a valid due date.");
+    assertRequirementOwner(this.store, session, input.ownerUserId);
     const version = this.store.db.versions.find((v) => {
       const document = this.store.db.documents.find((d) => d.id === v.documentId);
-      return `${document?.title} · ${v.versionLabel}` === input.source;
+      return document?.individualId === individual.id && v.agencyId === session.agencyId && `${document?.title} · ${v.versionLabel}` === input.source;
     });
     this.store.db.requirements.unshift({
       id: `REQ-${crypto.randomUUID().slice(0, 8)}`,
@@ -2510,7 +2566,7 @@ export class LocalApi implements ComplyraApi {
       documentVersionId: version?.id ?? null,
       individualId: individual.id,
       siteId: individual.siteId,
-      title: input.title,
+      title: input.title.trim(),
       category: input.category,
       ownerUserId: input.ownerUserId,
       dueOn: input.dueOn,
@@ -2532,7 +2588,7 @@ export class LocalApi implements ComplyraApi {
   async approveRequirement(id: string) {
     const session = assertSession(this.store);
     assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item || item.status !== "Pending review") {
       throw new Error("Only draft requirements can be approved.");
     }
@@ -2569,14 +2625,13 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     assertCan(session, "requirements.complete");
     if (!evidence.trim()) throw new Error("A completion record is required.");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item) throw new Error("Requirement not found.");
     if (item.status === "Pending review") {
       throw new Error("Approve this requirement before recording completion.");
     }
     if (
       session.role === "dsp" &&
-      item.ownerUserId &&
       item.ownerUserId !== session.userId
     ) {
       throw new Error("You can only complete requirements assigned to you.");
@@ -2596,12 +2651,7 @@ export class LocalApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    const session = assertSession(this.store);
-    assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
-    if (!item) throw new Error("Requirement not found.");
-    item.ownerUserId = ownerUserId;
-    await persistMeta(this.store);
+    await this.updateRequirement(id, { ownerUserId });
   }
 
   async updateRequirement(
@@ -2615,8 +2665,12 @@ export class LocalApi implements ComplyraApi {
   ) {
     const session = assertSession(this.store);
     assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item) throw new Error("Requirement not found.");
+    // Validate the entire edit before changing the stored record.
+    if (patch.title !== undefined && !patch.title.trim()) throw new Error("Enter a title for the requirement.");
+    if (patch.dueOn !== undefined) assertCalendarDate(patch.dueOn, "Use a valid due date.");
+    if (patch.ownerUserId !== undefined) assertRequirementOwner(this.store, session, patch.ownerUserId);
     const changes: string[] = [];
     if (patch.title !== undefined) {
       const title = patch.title.trim();

@@ -122,7 +122,20 @@ export function dedupeKeyFor(
 export function isWellFormedDeepLink(deepLink: string): boolean {
   if (typeof deepLink !== "string") return false;
   if (!deepLink.startsWith("/")) return false;
-  return !deepLink.includes("://") && !deepLink.includes(" ");
+  return !deepLink.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(deepLink) && !deepLink.includes("://");
+}
+
+export function notificationPage(link: string): string | null {
+  if (!isWellFormedDeepLink(link)) return null;
+  const path = link.split(/[?#]/)[0];
+  if (/^\/training(?:\/|$)/.test(path)) return "Training";
+  if (/^\/certificates(?:\/|$)/.test(path)) return "Certificates";
+  if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
+  if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
+  if (/^\/recognition(?:\/|$)/.test(path)) return "Recognition";
+  if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
+  if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
+  return null;
 }
 
 /** DB row as the client reads it. */

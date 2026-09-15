@@ -27,6 +27,7 @@ export default function LoginScreen({
     setDemoBusy(true);
     setError("");
     try {
+      window.sessionStorage.setItem("complyrer-start-tour", "1");
       await signIn({
         agencyCode: DEMO_AGENCY_CODE,
         username: DEMO_ADMIN_USERNAME,
@@ -81,10 +82,11 @@ export default function LoginScreen({
               required
             />
           </label>
-          <label className="form-label">
-            Password
+          <div className="form-label">
+            <label htmlFor="login-password">Password</label>
             <span className="password-field">
               <input
+                id="login-password"
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
                 value={password}
@@ -105,13 +107,13 @@ export default function LoginScreen({
                 )}
               </button>
             </span>
-          </label>
+          </div>
           {error && (
             <p className="inline-error" role="alert">
               {error}
             </p>
           )}
-          <button className="button primary full" type="submit" disabled={busy}>
+          <button className="button primary full" type="submit" disabled={busy || demoBusy}>
             <ShieldCheck size={17} /> {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>

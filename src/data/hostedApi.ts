@@ -77,6 +77,7 @@ import {
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
+import { assertCalendarDate } from "./access";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
@@ -365,6 +366,36 @@ export function edgeErrorFromBody(
 
 export class HostedApi implements ComplyraApi {
   constructor(private readonly client: SupabaseClient) {}
+
+  async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client.from("notifications")
+      .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
+      .order("created_at", { ascending: false }).limit(100);
+    throwIf(error, "Could not load notifications.");
+    return (data ?? []).map((row) => ({ ...row,
+      read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
+    })) as import("../features/notifications/notify").NotificationRow[];
+  }
+
+  async markNotificationsRead(ids: string[]) {
+    const session = await this.requireSession();
+    const visible = (await this.listNotifications()).filter((row) => ids.includes(row.id) && !row.read_at);
+    const direct = visible.filter((row) => row.user_id === session.userId);
+    const broadcasts = visible.filter((row) => !row.user_id);
+    const now = new Date().toISOString();
+    if (direct.length) {
+      const { error } = await this.client.from("notifications").update({ read_at: now })
+        .eq("agency_id", session.agencyId).eq("user_id", session.userId).in("id", direct.map((row) => row.id));
+      throwIf(error, "Could not mark notifications read.");
+    }
+    if (broadcasts.length) {
+      const { error } = await this.client.from("notification_reads").upsert(broadcasts.map((row) => ({
+        notification_id: row.id, user_id: session.userId, read_at: now,
+      })), { onConflict: "notification_id,user_id", ignoreDuplicates: true });
+      throwIf(error, "Could not mark notifications read.");
+    }
+  }
 
   async getSession() {
     const { data } = await this.client.auth.getUser();
@@ -706,6 +737,7 @@ export class HostedApi implements ComplyraApi {
       packetsRes,
       rowsRes,
       auditRes,
+      scoreRes,
       rolesRes,
       indProfilesRes,
       obligationsRes,
@@ -886,17 +918,7 @@ export class HostedApi implements ComplyraApi {
           .split(" ")
           .map((part) => part[0])
           .join(""),
-        serviceType: "ISL",
-        staffed24h: false,
-        overnightSleepStaff: false,
-        wellWater: false,
-        lastWaterTestOn: "",
-        sitePhone: "",
-        contactName: "",
-        contactPhone: "",
-        city: "",
-        county: "",
-        zip: "",
+        ...normalizeSiteFacts(factsBySite.get(site.id)),
       })),
       individuals: individuals.map((person, i) => {
         const site = siteById[person.siteId];
@@ -1038,6 +1060,8 @@ export class HostedApi implements ComplyraApi {
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = await this.requireSession();
     this.requirePermission(session, "documents.upload");
+    if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
+    assertCalendarDate(input.dueOn, "Use a valid due date.");
     const { data: individual, error: personError } = await this.client
       .from("individuals")
       .select("id, site_id, full_name")
@@ -1050,7 +1074,7 @@ export class HostedApi implements ComplyraApi {
       document_version_id: versionId,
       individual_id: individual!.id,
       site_id: individual!.site_id,
-      title: input.title,
+      title: input.title.trim(),
       category: input.category,
       owner_user_id: input.ownerUserId,
       due_on: input.dueOn,
@@ -1144,7 +1168,6 @@ export class HostedApi implements ComplyraApi {
     }
     if (
       session.role === "dsp" &&
-      item!.owner_user_id &&
       item!.owner_user_id !== session.userId
     ) {
       throw new Error("You can only complete requirements assigned to you.");
@@ -1169,13 +1192,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    const session = await this.requireSession();
-    this.requirePermission(session, "requirements.approve");
-    const { error } = await this.client
-      .from("requirement_definitions")
-      .update({ owner_user_id: ownerUserId })
-      .eq("id", id);
-    throwIf(error, "Could not reassign that requirement.");
+    await this.updateRequirement(id, { ownerUserId });
   }
 
   async updateRequirement(
@@ -1206,9 +1223,7 @@ export class HostedApi implements ComplyraApi {
       }
     }
     if (patch.dueOn !== undefined) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.dueOn)) {
-        throw new Error("Use a valid due date.");
-      }
+      assertCalendarDate(patch.dueOn, "Use a valid due date.");
       if (patch.dueOn !== item!.due_on) {
         update.due_on = patch.dueOn;
         changes.push(`due ${item!.due_on} → ${patch.dueOn}`);

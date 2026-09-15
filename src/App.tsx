@@ -40,6 +40,10 @@ import {
   ServerCog,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
+import NotificationBell from "./features/notifications/NotificationBell";
+import NotificationsPanel from "./features/notifications/NotificationsPanel";
+import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
+import { notificationPage } from "./features/notifications/notify";
 import {
   Avatar,
   Badge,
@@ -150,6 +154,7 @@ export default function App() {
     usingHostedBackend,
   } = useData();
   const [page, setPage] = useState("Overview");
+  const notifications = useWorkspaceNotifications();
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -210,15 +215,16 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
-  // Demo mode: auto-start the guided tour on first demo sign-in per browser.
+  // Only the explicit demo action starts a tour; ordinary sign-in stays direct.
   useEffect(() => {
     if (!demoMode) return;
     try {
-      if (!window.localStorage.getItem(DEMO_TOUR_SEEN_KEY)) {
+      if (window.sessionStorage.getItem("complyrer-start-tour")) {
+        window.sessionStorage.removeItem("complyrer-start-tour");
         setTourOpen(true);
       }
     } catch {
-      setTourOpen(true);
+      /* The tour remains available from the demo banner. */
     }
   }, [demoMode]);
   function closeTour() {
@@ -321,7 +327,7 @@ export default function App() {
             </div>
             <h1>Could not open the workspace</h1>
             <p role="alert">{error}</p>
-            <button className="button primary full" type="button" onClick={() => void refresh()}>
+            <button className="button primary full" type="button" onClick={() => void refresh().catch(() => {})}>
               <RotateCcw size={16} /> Try again
             </button>
             <div className="login-demo">
@@ -806,14 +812,10 @@ export default function App() {
               )}
             </div>
             <span className="topbar-divider" />
-            <button
-              className="notification-button icon-button"
-              aria-label="View notifications"
-              onClick={() => setModal("notifications")}
-            >
-              <Bell size={19} />
-              {alertItems.length > 0 && <i />}
-            </button>
+            <NotificationBell unread={notifications.unread} onOpen={() => {
+              setModal("notifications");
+              void notifications.refresh();
+            }} />
             <Avatar name={session.fullName} color="peach" small />
           </div>
         </header>
@@ -2347,13 +2349,22 @@ export default function App() {
       )}
       {modal === "notifications" && (
         <Modal title="Your notifications" onClose={() => setModal(null)}>
-          <p className="form-help">
-            Sample activity and open priorities. Email reminders are not
-            connected.
-          </p>
-          {alertItems.length === 0 ? (
-            <Empty title="No notifications" />
-          ) : (
+          <NotificationsPanel {...notifications}
+            onMarkRead={(id) => void notifications.markRead(id)}
+            onMarkAllRead={() => void notifications.markAllAsRead()}
+            onRetry={() => void notifications.refresh()}
+            onClose={() => setModal(null)}
+            onNavigate={(link) => {
+              const target = notificationPage(link);
+              if (!target || !pageVisible(session, target)) {
+                notify("This notification's destination is unavailable for your current access.");
+                return;
+              }
+              setModal(null);
+              navigate(target);
+            }} />
+          {alertItems.length > 0 && <h3>Open priorities</h3>}
+          {alertItems.length > 0 && (
             alertItems.map((r) => (
               <button
                 key={r.id}

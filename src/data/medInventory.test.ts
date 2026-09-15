@@ -324,6 +324,9 @@ test("all-clear summary reads clean", () => {
 
 async function hmClient() {
   const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  const hm = store.db.profiles.find((p) => p.username === DEMO_HM_USERNAME)!;
+  store.db.memberships.find((m) => m.userId === hm.id)!.siteId =
+    store.db.individuals.find((p) => p.fullName.includes("Jodie"))!.siteId;
   const client = new LocalApi(store);
   const session = await client.signIn(hmLogin());
   const workspace = await client.loadWorkspace(session);

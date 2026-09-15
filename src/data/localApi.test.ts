@@ -276,8 +276,9 @@ test("a house manager can upload but cannot approve", async () => {
   assert.equal(hm.permissions["requirements.approve"], false);
   const draft = (await api.loadWorkspace(hm)).requirements.find(
     (r) => r.title === "House-created plan item",
-  )!;
-  await assert.rejects(() => api.approveRequirement(draft.id), /permission/);
+  );
+  assert.equal(draft, undefined, "An Oakwood manager must not receive a Maple draft.");
+  await assert.rejects(() => api.approveRequirement("outside-site-draft"), /permission/);
 });
 
 test("a DPM can reset another staff member’s password", async () => {

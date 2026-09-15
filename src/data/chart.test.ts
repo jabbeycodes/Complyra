@@ -203,7 +203,11 @@ test("DSP cannot discontinue a delegation", async () => {
 });
 
 test("chart seed includes Jodie meds and Alex training", async () => {
-  const client = api();
+  const memory = new MemoryStore(structuredClone(createEvergreenSeed()));
+  const hmProfile = memory.db.profiles.find((p) => p.username === DEMO_HM_USERNAME)!;
+  memory.db.memberships.find((m) => m.userId === hmProfile.id)!.siteId =
+    memory.db.individuals.find((p) => p.fullName.includes("Jodie"))!.siteId;
+  const client = new LocalApi(memory);
   const hm = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
     username: DEMO_HM_USERNAME,

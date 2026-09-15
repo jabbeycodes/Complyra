@@ -9,7 +9,7 @@ async function signIn(
   await page.goto("/");
   await page.getByLabel("Provider code").fill(agencyCode);
   await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
@@ -278,7 +278,7 @@ test("an administrator adds a member who must change the temporary password", as
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("jordan.blake");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -316,7 +316,7 @@ test("an administrator can open role templates and invite HR without care record
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("riley.hart");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -353,7 +353,7 @@ test("an agency can set itself up with a state agency code", async ({
   await expect(page.getByText("MAPLEWOOD-MO", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Continue to sign in" }).click();
   await expect(page.getByLabel("Provider code")).toHaveValue("MAPLEWOOD-MO");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -368,7 +368,7 @@ test("an agency can set itself up with a state agency code", async ({
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("COMPLYRER-MO");
   await page.getByLabel("Username").fill("platform.owner");
-  await page.getByLabel("Password").fill("Evergreen!demo1");
+  await page.getByLabel("Password", { exact: true }).fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("button", { name: "Platform", exact: true }).click();
   await expect(page.getByText("MAPLEWOOD-MO")).toBeVisible();
@@ -377,7 +377,7 @@ test("an agency can set itself up with a state agency code", async ({
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("MAPLEWOOD-MO");
   await page.getByLabel("Username").fill("pat.okonkwo");
-  await page.getByLabel("Password").fill("Pat!own2");
+  await page.getByLabel("Password", { exact: true }).fill("Pat!own2");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
