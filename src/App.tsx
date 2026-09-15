@@ -117,6 +117,15 @@ import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboa
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
+import {
+  NAV_GROUPS,
+  isNavAdminSession,
+  navBreadcrumbGroup,
+  navGroupIdForPage,
+  readNavGroupOpen,
+  writeNavGroupOpen,
+  type NavGroupId,
+} from "./data/navGroups";
 import { can, defaultLandingPage, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -177,6 +186,7 @@ export default function App() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(() => readNavGroupOpen(false));
   const [tourOpen, setTourOpen] = useState(false);
   const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -209,6 +219,10 @@ export default function App() {
     const t = setTimeout(() => setToast(""), 4500);
     return () => clearTimeout(t);
   }, [toast]);
+  useEffect(() => {
+    if (!session) return;
+    setNavOpen(readNavGroupOpen(isNavAdminSession(session)));
+  }, [session?.userId, session?.roleKey, session?.platformAdmin]);
   useEffect(() => {
     setModal(null);
     setPacket(null);
@@ -429,6 +443,8 @@ export default function App() {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
     if (next !== "Site detail") setDetailSiteId(null);
+    const groupId = navGroupIdForPage(next);
+    if (groupId) ensureNavGroupOpen(groupId);
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
@@ -439,6 +455,7 @@ export default function App() {
   function openPersonChart(name: string) {
     setPerson(name);
     setPage("Individual chart");
+    ensureNavGroupOpen("programs");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -446,6 +463,7 @@ export default function App() {
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
     setPage("Site detail");
+    ensureNavGroupOpen("programs");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -591,55 +609,47 @@ export default function App() {
           },
     );
   }
-  const navItems = [
-    {
-      title: "PROGRAMS",
-      items: [
-        ["Overview", LayoutDashboard],
-        ["Platform", ShieldCheck],
-        ["Individuals", Users],
-        ["Sites & programs", Building2],
-        ["Intake", UserPlus],
-        ["Staff", Users],
-        ["Roles & access", KeyRound],
-      ],
-    },
-    {
-      title: "COMPLIANCE",
-      items: [
-        ["Requirements", ListChecks],
-        ["Documents", FolderOpen],
-        ["Review queue", ClipboardCheck],
-        ["Audit center", ShieldCheck],
-        ["Audit Me", ClipboardCheck],
-        // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
-        // system-verified items, auditor scoring, and photo disputes.
-        ["QA Review", BadgeCheck],
-        ["Acknowledgments", PenLine],
-        ["Activity log", History],
-        ["AI settings", ServerCog],
-      ],
-    },
-    {
-      // Section header shows the current agency's display name — never a hardcoded name.
-      title: session.agencyName.toUpperCase(),
-      items: [
-        // LIFEPATH-P2-NAV (training engine)
-        ["Training", BookOpen],
-        // LIFEPATH-P3-NAV (delegation forms)
-        ["Delegations", FileText],
-        // LIFEPATH-P4-NAV (certificates)
-        ["Certificates", Award],
-        // LIFEPATH-P5-NAV (HM weekly checklist)
-        ["Weekly checklist", ClipboardCheck],
-        ["Checklist assignments", ClipboardList],
-        // LIFEPATH-P6-NAV (med supply forecast)
-        ["Supply forecast", MedInventoryNavIcon],
-        // LIFEPATH-P7-NAV (mileage tracking)
-        ["Mileage", MileageNavIcon],
-      ],
-    },
-  ] as const;
+  const navIcons = {
+    Overview: LayoutDashboard,
+    "Sites & programs": Building2,
+    Individuals: Users,
+    Intake: UserPlus,
+    Appointments: CalendarDays,
+    Training: BookOpen,
+    Delegations: FileText,
+    Certificates: Award,
+    "Weekly checklist": ClipboardCheck,
+    "Checklist assignments": ClipboardList,
+    "Supply forecast": MedInventoryNavIcon,
+    Mileage: MileageNavIcon,
+    Requirements: ListChecks,
+    Documents: FolderOpen,
+    "Review queue": ClipboardCheck,
+    "Audit center": ShieldCheck,
+    "Audit Me": ClipboardCheck,
+    "QA Review": BadgeCheck,
+    Acknowledgments: PenLine,
+    "Activity log": History,
+    Staff: Users,
+    "Roles & access": KeyRound,
+    Platform: ShieldCheck,
+    "AI settings": ServerCog,
+  } as const;
+  function toggleNavGroup(id: NavGroupId) {
+    setNavOpen((current) => {
+      const next = { ...current, [id]: !current[id] };
+      writeNavGroupOpen(next);
+      return next;
+    });
+  }
+  function ensureNavGroupOpen(id: NavGroupId) {
+    setNavOpen((current) => {
+      if (current[id]) return current;
+      const next = { ...current, [id]: true };
+      writeNavGroupOpen(next);
+      return next;
+    });
+  }
   return (
     <div className="app-shell">
       {mobileOpen && (
@@ -673,15 +683,42 @@ export default function App() {
           <ChevronDown size={15} />
         </button>
         <nav>
-          {navItems.map((group) => {
-            const items = group.items.filter(([name]) =>
-              pageVisible(session, name),
-            );
+          {NAV_GROUPS.map((group) => {
+            const items = group.pages.filter((name) => pageVisible(session, name));
             if (!items.length) return null;
+            const expanded = navOpen[group.id];
             return (
-            <div className="nav-group" key={group.title}>
-              <div className="nav-label">{group.title}</div>
-              {items.map(([name, Icon]) => (
+            <div className="nav-group" key={group.id}>
+              <button
+                type="button"
+                className="nav-group-toggle"
+                aria-expanded={expanded}
+                aria-controls={`nav-group-${group.id}`}
+                onClick={() => toggleNavGroup(group.id)}
+              >
+                <span className="nav-label">{group.title}</span>
+                <span className="nav-group-meta">
+                  {!expanded ? (
+                    <span className="nav-group-count">{items.length}</span>
+                  ) : null}
+                  {expanded ? (
+                    <ChevronDown size={16} aria-hidden="true" />
+                  ) : (
+                    <ChevronRight size={16} aria-hidden="true" />
+                  )}
+                </span>
+              </button>
+              {expanded ? (
+              <div
+                id={`nav-group-${group.id}`}
+                className="nav-group-items"
+                role="group"
+                aria-label={group.title}
+              >
+              {items.map((name) => {
+                const Icon = navIcons[name as keyof typeof navIcons];
+                if (!Icon) return null;
+                return (
                 <button
                   key={name}
                   onClick={() => navigate(name)}
@@ -709,7 +746,10 @@ export default function App() {
                       </span>
                     )}
                 </button>
-              ))}
+                );
+              })}
+              </div>
+              ) : null}
             </div>
             );
           })}
@@ -773,7 +813,7 @@ export default function App() {
             >
               <Menu size={21} />
             </button>
-            <span>Programs</span>
+            <span>{navBreadcrumbGroup(page, isCategory)}</span>
             <ChevronRight size={13} />
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>

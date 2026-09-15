@@ -40,18 +40,51 @@ function shotPath(name: string) {
   return `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}/${name}`;
 }
 
-test("sidebar group is PROGRAMS and the header chip says Programs", async ({
+test("sidebar groups expand Programs Care Compliance; Admin starts open for agency admin", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
-  const programsLabel = page.locator(".sidebar .nav-label").first();
-  await expect(programsLabel).toHaveText("PROGRAMS");
+  const programs = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Programs" });
+  await expect(programs).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".sidebar .nav-label").first()).toHaveText("Programs");
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
+  const care = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Care" });
+  await expect(care).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Compliance" })).toBeVisible();
+  const admin = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Admin" });
+  if ((await admin.count()) > 0) {
+    await expect(admin).toHaveAttribute("aria-expanded", "true");
+  }
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
+  const agencyName = page.locator(".agency-picker strong");
+  await expect(agencyName).toHaveText(/Evergreen Care/);
+  const agencyFit = await agencyName.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    text: el.textContent,
+  }));
+  expect(agencyFit.scrollWidth, `agency name clipped: ${agencyFit.text}`).toBeLessThanOrEqual(
+    agencyFit.clientWidth + 1,
+  );
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
+
+  const assignments = page.locator(".sidebar").getByRole("button", { name: "Checklist assignments", exact: true });
+  await expect(assignments).toBeVisible();
+  const assignmentFit = await assignments.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }));
+  expect(assignmentFit.scrollWidth).toBeLessThanOrEqual(assignmentFit.clientWidth + 1);
+
+  await care.click();
+  await expect(care).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage", exact: true })).toHaveCount(0);
+  await expect(care.locator(".nav-group-count")).toHaveText("7");
+  await care.click();
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage", exact: true })).toBeVisible();
 
   await openNav(page, "Sites & programs");
   await expect(page.getByRole("heading", { name: "Sites & programs" })).toBeVisible();
@@ -59,6 +92,8 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
 
   await openNav(page, "Mileage");
   await expect(page.getByRole("heading", { level: 1, name: "Mileage" })).toBeVisible();
+  await expect(page.locator(".breadcrumb")).toContainText("Care");
+  await expect(page.locator(".breadcrumb")).toContainText("Mileage");
   await page.screenshot({ path: shotPath("mileage_after_1280.png"), fullPage: false });
 
   await openNav(page, "Sites & programs");
@@ -71,7 +106,7 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
   await page.screenshot({ path: shotPath("site_detail_after_1280.png"), fullPage: false });
 });
 
-test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
+test("phone drawer shows Programs groups, not WORKSPACE", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   await page.addStyleTag({
@@ -79,9 +114,10 @@ test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar.mobile-open .nav-label").first()).toHaveText(
-    "PROGRAMS",
+    "Programs",
   );
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
+  await expect(page.locator(".sidebar.mobile-open .nav-group-toggle").filter({ hasText: "Care" })).toBeVisible();
   await expect(
     page.locator(".sidebar.mobile-open").getByRole("button", { name: "Overview" }),
   ).toBeInViewport();
@@ -94,4 +130,23 @@ test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   await openNav(page, "Mileage");
   await expect(page.getByRole("heading", { level: 1, name: "Mileage" })).toBeVisible();
   await page.screenshot({ path: shotPath("mileage_after_390.png"), fullPage: false });
+});
+
+test("house manager starts with Admin collapsed", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByLabel("Provider code").fill("EVERGREEN-MO");
+  await page.getByLabel("Username").fill("james.wilson");
+  await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
+  await page
+    .getByRole("dialog", { name: "Interactive demo tour" })
+    .waitFor({ state: "visible", timeout: 3_000 })
+    .catch(() => undefined);
+  await page.keyboard.press("Escape");
+  const admin = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Admin" });
+  if ((await admin.count()) > 0) {
+    await expect(admin).toHaveAttribute("aria-expanded", "false");
+  }
 });

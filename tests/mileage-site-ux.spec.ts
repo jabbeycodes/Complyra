@@ -149,6 +149,18 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await expect(page.locator("body")).not.toContainText("Open record");
   const tabs = page.locator(".site-detail-tabs [role='tab']");
   await expect(tabs.last()).toHaveText(/Staff/);
+  await expect(page.locator(".tabs.site-detail-tabs")).toHaveCount(0);
+  const selectedTab = page.locator(".site-detail-tabs [aria-selected='true']");
+  await expect(selectedTab).toHaveText(/Overview/);
+  const selectedBg = await selectedTab.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(selectedBg, "selected tab should have a filled background").not.toMatch(/^(rgba?\(0,\s*0,\s*0,\s*0\)|transparent)$/);
+  const heroAboveTabs = await page.evaluate(() => {
+    const hero = document.querySelector(".site-hero");
+    const tablist = document.querySelector(".site-detail-tabs");
+    if (!hero || !tablist) return -999;
+    return tablist.getBoundingClientRect().top - hero.getBoundingClientRect().bottom;
+  });
+  expect(heroAboveTabs, "hero viz should sit above the tab strip").toBeGreaterThanOrEqual(-1);
   const dashFill = await page.evaluate(() => {
     const hero = document.querySelector(".site-hero");
     const dash = document.querySelector(".site-hero-dash");
@@ -180,6 +192,11 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   const box = await tablist.boundingBox();
   expect(box?.width).toBeLessThanOrEqual(390);
   await expect(tabs.last()).toHaveText(/Staff/);
+  await expect(page.getByRole("tab", { name: "Training" })).toBeVisible();
+  const clippedTabs = await tabs.evaluateAll((nodes) =>
+    nodes.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent?.trim()),
+  );
+  expect(clippedTabs, "tab labels must not truncate at 390").toEqual([]);
   const legendToKpis = await page.evaluate(() => {
     const legend = document.querySelector(".site-hero .status-mix-legend");
     const kpis = document.querySelector(".site-hero-kpis");

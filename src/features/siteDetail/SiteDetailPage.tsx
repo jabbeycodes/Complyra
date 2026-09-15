@@ -374,7 +374,7 @@ export default function SiteDetailPage({
       </header>
 
       <div
-        className="tabs site-detail-tabs"
+        className="site-detail-tabs"
         role="tablist"
         aria-label={`${site.name} sections`}
       >
@@ -393,7 +393,7 @@ export default function SiteDetailPage({
               onClick={() => selectTab(t.id)}
               onKeyDown={(e) => onTabKeyDown(e, t.id)}
             >
-              <Icon className="site-tab-icon" size={15} aria-hidden="true" /> {t.label}
+              <Icon className="site-tab-icon" size={17} aria-hidden="true" /> {t.label}
             </button>
           );
         })}
