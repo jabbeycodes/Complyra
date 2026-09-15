@@ -22,16 +22,18 @@ async function canvasMetrics(page: Page) {
   return page.evaluate(() => {
     const main = document.querySelector("main");
     const topbar = document.querySelector(".topbar");
-    if (!main || !topbar) throw new Error("missing main or topbar");
+    const shell = document.querySelector(".main-shell");
+    if (!main || !topbar || !shell) throw new Error("missing main, topbar, or shell");
     const mainStyle = getComputedStyle(main);
     const topbarStyle = getComputedStyle(topbar);
+    const shellStyle = getComputedStyle(shell);
     const px = (value: string) => Number.parseFloat(value);
     const doc = document.documentElement;
     return {
-      mainPadStart: px(mainStyle.paddingLeft),
-      mainPadEnd: px(mainStyle.paddingRight),
-      topbarPadStart: px(topbarStyle.paddingLeft),
-      topbarPadEnd: px(topbarStyle.paddingRight),
+      mainPadStart: px(shellStyle.paddingLeft) + px(mainStyle.paddingLeft),
+      mainPadEnd: px(shellStyle.paddingRight) + px(mainStyle.paddingRight),
+      topbarPadStart: px(shellStyle.paddingLeft) + px(topbarStyle.paddingLeft),
+      topbarPadEnd: px(shellStyle.paddingRight) + px(topbarStyle.paddingRight),
       pageInline: px(getComputedStyle(doc).getPropertyValue("--page-inline")),
       panelInline: px(getComputedStyle(doc).getPropertyValue("--panel-inline")),
       scrollWidth: doc.scrollWidth,

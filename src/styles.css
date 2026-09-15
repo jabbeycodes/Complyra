@@ -435,6 +435,8 @@ button:hover:not(:disabled) {
   margin-left: var(--sidebar);
   min-height: 100vh;
   background: #e8dcc8;
+  /* One gutter for banner, topbar, and page so chrome is not flush. */
+  padding-inline: var(--page-inline-start) var(--page-inline-end);
 }
 .topbar {
   height: 73px;
@@ -443,7 +445,7 @@ button:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--page-inline-end) 0 var(--page-inline-start);
+  padding: 0;
   gap: 20px;
 }
 .breadcrumb {
@@ -586,7 +588,7 @@ kbd {
 main {
   max-width: 1640px;
   margin: auto;
-  padding: 31px var(--page-inline-end) 25px var(--page-inline-start);
+  padding: 31px 0 25px;
   min-height: calc(100vh - 108px);
 }
 .eyebrow {
@@ -1635,7 +1637,7 @@ td > svg {
   color: #4a4036;
   font-size: 9px;
   letter-spacing: 0.6px;
-  padding: 10px var(--page-inline-end) 10px var(--page-inline-start);
+  padding: 10px 0;
 }
 .demo-strip > span:nth-child(2) {
   letter-spacing: 0;
@@ -3601,6 +3603,9 @@ td {
   .stat-card {
     padding: 15px 13px;
   }
+  .stat-foot {
+    white-space: normal;
+  }
   .stat-label {
     font-size: 11px;
     gap: 3px;
@@ -5320,8 +5325,7 @@ body.nav-open {
     z-index: 30;
     height: auto;
     min-height: 58px;
-    padding: max(8px, env(safe-area-inset-top)) var(--page-inline-end) 8px
-      var(--page-inline-start);
+    padding: max(8px, env(safe-area-inset-top)) 0 8px;
     gap: 8px;
   }
   .topbar-actions {
@@ -5359,8 +5363,8 @@ body.nav-open {
   .global-search:focus-within {
     position: absolute;
     top: max(8px, env(safe-area-inset-top));
-    right: var(--page-inline-end);
-    left: var(--page-inline-start);
+    right: 0;
+    left: 0;
     width: auto;
     max-width: none;
     height: 44px;
@@ -5430,8 +5434,7 @@ body.nav-open {
   .demo-strip {
     font-size: 11px;
     letter-spacing: 0;
-    padding: 10px var(--page-inline-end) max(10px, env(safe-area-inset-bottom))
-      var(--page-inline-start);
+    padding: 10px 0 max(10px, env(safe-area-inset-bottom));
   }
   .demo-strip button {
     margin-left: 0;
@@ -5459,8 +5462,7 @@ body.nav-open {
     margin-inline: auto;
   }
   main {
-    padding: 16px var(--page-inline-end) max(24px, env(safe-area-inset-bottom))
-      var(--page-inline-start);
+    padding: 16px 0 max(24px, env(safe-area-inset-bottom));
   }
   .login-shell {
     display: block;
@@ -5970,10 +5972,12 @@ body.nav-open {
   flex-wrap: wrap;
   background: var(--moss);
   color: #fff;
-  padding: 8px 16px;
+  padding: 8px 12px;
   min-height: 48px;
   font-size: 14px;
   min-width: 0;
+  margin-top: 10px;
+  border-radius: 10px;
 }
 .demo-banner-text {
   display: inline-flex;
@@ -6013,8 +6017,7 @@ body.nav-open {
     gap: 6px;
     min-height: 44px;
     max-height: 44px;
-    padding: 0 max(var(--page-inline-end), 12px) 0
-      max(var(--page-inline-start), 12px);
+    padding: 0 12px;
   }
   .demo-banner-sub {
     display: none;
