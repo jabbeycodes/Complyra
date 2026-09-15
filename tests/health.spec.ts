@@ -21,6 +21,7 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
+  await expect(chart.locator(".health-tabs").getByRole("tab")).toHaveCount(2);
   await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Appointments" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Overview" })).toHaveAttribute(
