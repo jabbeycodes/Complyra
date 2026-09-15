@@ -6,6 +6,17 @@
   gap: 16px;
 }
 
+.site-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 2px;
+  color: #4a4036;
+  font-size: 14px;
+}
+
 .site-detail-head,
 .site-hero {
   display: flex;
@@ -178,9 +189,13 @@
   margin: 0;
   padding: 0 0 2px;
   border-bottom: 0;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   mask-image: linear-gradient(to right, #000 88%, transparent);
+}
+
+.tabs.site-detail-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tabs.site-detail-tabs > button {
@@ -455,7 +470,7 @@
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 4px;
     scroll-padding-inline: 8px;

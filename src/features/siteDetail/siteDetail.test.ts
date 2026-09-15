@@ -190,4 +190,11 @@ describe("site detail copy", () => {
       "2 of 5 training items complete",
     );
   });
+
+  it("uses Not logged when a drill has no date", async () => {
+    const { formatDrillDateStatus } = await import("./siteDetailCopy");
+    assert.equal(formatDrillDateStatus(null), "Not logged");
+    assert.equal(formatDrillDateStatus(""), "Not logged");
+    assert.equal(formatDrillDateStatus("2026-08-05"), "2026-08-05");
+  });
 });

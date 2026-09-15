@@ -85,17 +85,23 @@ export function Modal({
 export function Empty({
   title = "No matching requirements",
   text,
+  mark = "check",
+  actions,
 }: {
   title?: string;
   text?: string;
+  /** "check" is the all-clear empty. Filed-nothing states must use quiet/none. */
+  mark?: "check" | "quiet" | "none";
+  actions?: ReactNode;
 }) {
   return (
-    <div className="empty">
-      <span>
-        <Check size={26} />
-      </span>
+    <div className={`empty${mark === "none" ? " empty-bare" : ""}${mark === "quiet" ? " empty-quiet" : ""}`}>
+      {mark !== "none" && (
+        <span aria-hidden="true">{mark === "check" ? <Check size={26} /> : null}</span>
+      )}
       <h3>{title}</h3>
       {text ? <p>{text}</p> : null}
+      {actions ? <div className="empty-actions">{actions}</div> : null}
     </div>
   );
 }

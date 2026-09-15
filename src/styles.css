@@ -2255,6 +2255,23 @@ td > svg {
   font-size: 13px;
   margin-top: 8px;
 }
+.empty-quiet > span {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  background: #d2c2a8;
+  margin-bottom: 12px;
+}
+.empty-bare > span {
+  display: none;
+}
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
 .toast {
   position: fixed;
   bottom: 24px;

@@ -100,6 +100,25 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
       await expect(tab).toHaveAttribute("aria-selected", "true");
       await expect(page.locator(".site-detail-panel")).toBeVisible();
       await page.locator(".muted").filter({ hasText: "Loading" }).waitFor({ state: "hidden", timeout: 8_000 }).catch(() => undefined);
+      if (label === "Overview") {
+        await expect(page.locator(".site-detail-panel")).toContainText("Needs attention");
+        await expect(page.locator(".site-detail-panel")).not.toContainText("Projects this home");
+      }
+      if (label === "Checklists") {
+        await expect(page.getByRole("heading", { name: /Monthly home checks/ })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Start weekly checklist" })).toBeVisible();
+      }
+      if (label === "Drills") {
+        await expect(page.locator(".site-detail-panel")).not.toContainText("severe_weather");
+        await expect(page.locator(".site-detail-panel")).not.toContainText("date not set");
+      }
+      if (label === "QA Review") {
+        await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
+        await expect(page.getByRole("button", { name: /Start review/ })).toBeVisible();
+      }
+      if (label === "Documents") {
+        await expect(page.getByRole("button", { name: "Upload a document" })).toBeVisible();
+      }
       const slug = label.toLowerCase().replace(/\s+/g, "_");
       await page.locator(".site-detail-panel").scrollIntoViewIfNeeded();
       const selectedBg = await tab.evaluate((el) => getComputedStyle(el).backgroundColor);

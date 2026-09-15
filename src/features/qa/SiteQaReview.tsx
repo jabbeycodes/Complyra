@@ -126,6 +126,7 @@ export default function SiteQaReview({
         <Empty title="Loading QA reviews…" text="Fetching this site's reviews." />
       ) : !audits || audits.length === 0 ? (
         <Empty
+          mark="none"
           title="No QA reviews yet"
           text="No QA reviews have been recorded for this home."
         />

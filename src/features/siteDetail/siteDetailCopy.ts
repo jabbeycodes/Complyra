@@ -17,6 +17,29 @@ export function trainingProgressLine(
   return `${profile.counts.complete} of ${profile.counts.required} training items complete`;
 }
 
+export function formatDrillDateStatus(date: string | null | undefined): string {
+  const trimmed = date?.trim() ?? "";
+  return trimmed ? trimmed : "Not logged";
+}
+
+const OPEN_STATUS_RANK: Record<string, number> = {
+  Overdue: 0,
+  Expired: 1,
+  "Due soon": 2,
+  "Pending review": 3,
+  Upcoming: 4,
+};
+
+export function sortOpenRequirements<T extends { status: string; due?: string }>(
+  rows: T[],
+): T[] {
+  return [...rows].sort((a, b) => {
+    const rank = (OPEN_STATUS_RANK[a.status] ?? 8) - (OPEN_STATUS_RANK[b.status] ?? 8);
+    if (rank !== 0) return rank;
+    return (a.due ?? "").localeCompare(b.due ?? "");
+  });
+}
+
 export function documentStatusLabel(status: string): string {
   if (status === "pending_review" || status === "active" || status === "archived") {
     return reviewStatusLabel(status);
