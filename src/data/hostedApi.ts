@@ -14,6 +14,7 @@ import {
   ISP_AMENDABLE_FIELDS,
   ISP_MONTHLY_FLOW,
   ispDueOn,
+  ispEscalationNotificationType,
   ispEscalationTitle,
   ispMonthLabel,
   ispPriorMonth,
@@ -8334,25 +8335,28 @@ export class HostedApi implements ComplyraApi {
       .single();
     throwIf(error, "Could not send the escalation.");
     const row = data as unknown as IspDbRow;
-    const { error: notifyError } = await this.client
-      .from("notifications")
-      .insert({
+    // Bell notifications are written server-side only (the notifications
+    // table has no authenticated insert policy by design): queue through
+    // the notify-event edge function.
+    try {
+      await invokeEdgeFunction(this.client, "notify-event", {
         agency_id: args.agencyId,
         user_id: args.toUserId,
-        role_key: null,
-        type: "isp_escalation",
+        type: ispEscalationNotificationType(args.kind),
         title: ispEscalationTitle(args.kind),
         body: args.message,
         deep_link: "/isp-data",
         entity_type: args.expectationId ? "isp_expectation" : null,
-        entity_id: args.expectationId,
-        dedupe_key: `isp_escalation:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${row.sent_at as string}`,
-        read_at: null,
+        entity_id: args.expectationId ?? null,
+        dedupe_key: `isp:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${row.sent_at as string}`,
       });
-    throwIf(
-      notifyError,
-      "Escalation saved, but the notification could not be queued.",
-    );
+    } catch (notifyError) {
+      throw new Error(
+        `Escalation saved, but the notification could not be queued: ${
+          notifyError instanceof Error ? notifyError.message : "unknown error"
+        }`,
+      );
+    }
     return mapIspEscalation(row);
   }
 

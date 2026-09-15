@@ -55,13 +55,22 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
   };
 }
 
-test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 17);
+test("all twenty-one notification types are known contract types", () => {
+  assert.equal(NOTIFICATION_TYPES.length, 21);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
   assert.ok(!isNotificationType("invoice.paid"));
   assert.ok(!isNotificationType(""));
+  for (const t of [
+    "isp.note_nudge",
+    "isp.note_overdue",
+    "isp.escalation",
+    "isp.message",
+  ]) {
+    assert.ok(isNotificationType(t), t);
+    assert.ok(NOTIFICATION_TYPES.includes(t as (typeof NOTIFICATION_TYPES)[number]), t);
+  }
 });
 
 test("training.assigned payload maps to a snake_case DB row", () => {

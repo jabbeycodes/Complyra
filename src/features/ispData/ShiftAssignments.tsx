@@ -57,6 +57,9 @@ export default function ShiftAssignments({
   const canEdit =
     !!session &&
     (can(session, "isp.manage_plan") || session.roleKey === "house_manager");
+  // Shift patterns themselves are DPM/admin-owned: an HM can staff their
+  // house's shifts but cannot create the shift patterns.
+  const canSeedPatterns = !!session && can(session, "isp.manage_plan");
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDaysIso(weekStart, i)),
@@ -198,7 +201,7 @@ export default function ShiftAssignments({
               title="No shift patterns"
               text="This home has no shift patterns yet. Seed the standard Day / Evening / Night pattern, or ask your DPM to add custom ones."
             />
-            {canEdit && (
+            {canSeedPatterns && (
               <div className="isp-btn-row">
                 <button
                   type="button"

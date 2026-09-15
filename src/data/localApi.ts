@@ -164,6 +164,7 @@ import {
   delegationReviewReadyPayload,
   delegationPublishedPayload,
   delegationAckOverduePayload,
+  type NotificationType,
 } from "../features/notifications/notify";
 import {
   addDaysIso,
@@ -2382,6 +2383,22 @@ export function ispEscalationTitle(kind: IspEscalationKind): string {
       return "Shift note escalation";
     case "message":
       return "Message from your team";
+  }
+}
+
+/** Bell-notification type for an escalation kind (shared with HostedApi). */
+export function ispEscalationNotificationType(
+  kind: IspEscalationKind,
+): NotificationType {
+  switch (kind) {
+    case "nudge":
+      return "isp.note_nudge";
+    case "hm_alert":
+      return "isp.note_overdue";
+    case "dpm_escalation":
+      return "isp.escalation";
+    case "message":
+      return "isp.message";
   }
 }
 
@@ -9198,13 +9215,13 @@ export class LocalApi implements ComplyraApi {
       agencyId: args.agencyId,
       userId: args.toUserId,
       roleKey: null,
-      type: "isp_escalation",
+      type: ispEscalationNotificationType(args.kind),
       title: ispEscalationTitle(args.kind),
       body: args.message,
       deepLink: "/isp-data",
       entityType: args.expectationId ? "isp_expectation" : null,
       entityId: args.expectationId,
-      dedupeKey: `isp_escalation:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${sentAt}`,
+      dedupeKey: `isp:${args.kind}:${args.expectationId ?? "none"}:${args.toUserId}:${sentAt}`,
       createdAt: sentAt,
       readAt: null,
     });

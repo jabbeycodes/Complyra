@@ -62,6 +62,13 @@ const NOTIFICATION_TYPES = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  "delegation.review_ready",
+  "delegation.published",
+  "delegation.ack_overdue",
+  "isp.note_nudge",
+  "isp.note_overdue",
+  "isp.escalation",
+  "isp.message",
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {

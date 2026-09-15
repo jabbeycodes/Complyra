@@ -33,7 +33,11 @@ export type NotificationType =
   | "recognition.dsp_winner"
   | "delegation.review_ready"
   | "delegation.published"
-  | "delegation.ack_overdue";
+  | "delegation.ack_overdue"
+  | "isp.note_nudge"
+  | "isp.note_overdue"
+  | "isp.escalation"
+  | "isp.message";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -53,6 +57,10 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "delegation.review_ready",
   "delegation.published",
   "delegation.ack_overdue",
+  "isp.note_nudge",
+  "isp.note_overdue",
+  "isp.escalation",
+  "isp.message",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -178,6 +186,10 @@ export const NOTIFICATION_META: Record<
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
+  "isp.note_nudge": { status: "pending", label: "Shift note reminder" },
+  "isp.note_overdue": { status: "late", label: "Overdue shift note" },
+  "isp.escalation": { status: "late", label: "Shift note escalation" },
+  "isp.message": { status: "pending", label: "Message from your team" },
 };
 
 export function metaForType(type: NotificationType) {
