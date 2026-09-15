@@ -54,7 +54,10 @@
 
 .site-hero-score {
   min-width: 120px;
-  flex: 1 1 140px;
+}
+
+.site-hero-score .progress-track {
+  max-width: 160px;
 }
 
 .site-hero-score strong,

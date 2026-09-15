@@ -108,4 +108,6 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   expect(box?.width).toBeLessThanOrEqual(390);
   await expect(tabs.last()).toHaveText(/Staff/);
   await page.screenshot({ path: shotPath("site_hero_390.png"), fullPage: false });
+  await tablist.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: shotPath("site_tabs_390.png"), fullPage: false });
 });
