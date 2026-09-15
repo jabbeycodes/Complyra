@@ -22,6 +22,7 @@ import { canAccessSite, individualsAtSite } from "../../data/dashboard";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
+import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
 import { todayIso } from "../../data/chart";
@@ -111,6 +112,15 @@ export default function SiteDetailPage({
 
   const site = workspace?.sites.find((s) => s.id === siteId) ?? null;
   const siteName = site?.name ?? "";
+  const siteAddressLine = site
+    ? siteHeroAddressLine({
+        name: site.name,
+        address: site.address,
+        city: site.city,
+        zip: site.zip,
+        stateCode: agencyStateCode(null, session?.agencyCode),
+      })
+    : "";
   const siteIndividuals = useMemo(
     () => individualsAtSite(workspace?.individuals ?? [], site),
     [workspace, site],
@@ -301,6 +311,17 @@ export default function SiteDetailPage({
     .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
+  if (!site) {
+    return (
+      <div className="site-detail">
+        <button type="button" className="button" onClick={onBack}>
+          <ArrowLeft size={16} /> Back to sites
+        </button>
+        <p>That site is not in this workspace.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="site-detail">
       <button type="button" className="button" onClick={onBack}>
@@ -311,12 +332,17 @@ export default function SiteDetailPage({
         <div className="site-hero-top">
           <div className="site-detail-title">
             <h1>{site.name}</h1>
-            <p>
-              <MapPin size={14} /> {site.address}
+            <p className="site-hero-address">
+              {siteAddressLine ? (
+                <>
+                  <MapPin size={14} />
+                  <span className="site-hero-address-text">{siteAddressLine}</span>
+                </>
+              ) : null}
               <span className="program-tag">{site.program}</span>
             </p>
             {site.sitePhone && (
-              <p>
+              <p className="site-hero-phone">
                 <Phone size={14} /> {site.sitePhone}
               </p>
             )}
@@ -466,7 +492,11 @@ export default function SiteDetailPage({
                 <div>
                   <dt>Location</dt>
                   <dd>
-                    {[site.city, site.county, site.zip].filter(Boolean).join(", ") || "—"}
+                    {siteAddressLine ||
+                      site.address ||
+                      [site.city, site.county, site.zip].filter(Boolean).join(", ") ||
+                      "—"}
+                    {site.county ? ` · ${site.county} County` : ""}
                   </dd>
                 </div>
                 <div>

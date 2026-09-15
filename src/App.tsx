@@ -115,6 +115,7 @@ import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
+import { agencyStateCode, siteHeroAddressLine } from "./data/siteAddress";
 import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible } from "./data/status";
@@ -1122,8 +1123,14 @@ export default function App() {
                               </span>
                               <div className="location-title">
                                 <h2>{s.name}</h2>
-                                <p>
-                                  {s.address}
+                                <p className="location-address">
+                                  {siteHeroAddressLine({
+                                    name: s.name,
+                                    address: s.address,
+                                    city: s.city,
+                                    zip: s.zip,
+                                    stateCode: agencyStateCode(null, session.agencyCode),
+                                  }) || s.address}
                                   <span className="program-tag">{s.program}</span>
                                 </p>
                               </div>

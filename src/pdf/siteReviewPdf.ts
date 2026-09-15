@@ -10,6 +10,9 @@ import {
   type SiteReview,
 } from "../data/siteReview";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import {
+  siteLocationFields,
+} from "../data/siteAddress";
 
 function field(doc: jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -40,6 +43,7 @@ export function buildSiteReviewPdf(input: {
   review: SiteReview;
   monthlySafetyOnFile: boolean;
   logoDataUrl?: string | null;
+  stateCode?: string;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("Environmental site review", {
     agencyName: input.agencyName,
@@ -59,18 +63,19 @@ export function buildSiteReviewPdf(input: {
   y += 28;
   field(doc, "Agency", input.agencyName, margin, y);
   y += 14;
-  field(doc, "Home", input.siteName, margin, y);
+  const location = siteLocationFields({
+    name: input.siteName,
+    address: input.address,
+    city: input.facts.city,
+    zip: input.facts.zip,
+    stateCode: input.stateCode,
+  });
+  field(doc, "Home", location.name, margin, y);
   y += 14;
-  field(
-    doc,
-    "Address",
-    [input.address, input.facts.city, input.facts.county, input.facts.zip]
-      .filter(Boolean)
-      .join(", "),
-    margin,
-    y,
-  );
-  y += 14;
+  if (location.address) {
+    field(doc, "Address", location.address, margin, y);
+    y += 14;
+  }
   field(doc, "Service type", SERVICE_TYPE_LABELS[input.facts.serviceType], margin, y);
   y += 14;
   field(doc, "Individuals", input.residents.join(", ") || "None listed", margin, y);
@@ -142,6 +147,7 @@ export function buildPreSurveyPdf(input: {
   facts: SiteFacts;
   rows: PreSurveyRow[];
   logoDataUrl?: string | null;
+  stateCode?: string;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc(
     "Pre-survey individual information",
@@ -164,18 +170,19 @@ export function buildPreSurveyPdf(input: {
   y += 26;
   field(doc, "Provider", input.agencyName, margin, y);
   y += 14;
-  field(doc, "Location", input.siteName, margin, y);
+  const location = siteLocationFields({
+    name: input.siteName,
+    address: input.address,
+    city: input.facts.city,
+    zip: input.facts.zip,
+    stateCode: input.stateCode,
+  });
+  field(doc, "Location", location.name, margin, y);
   y += 14;
-  field(
-    doc,
-    "Address",
-    [input.address, input.facts.city, input.facts.county, input.facts.zip]
-      .filter(Boolean)
-      .join(", "),
-    margin,
-    y,
-  );
-  y += 14;
+  if (location.address) {
+    field(doc, "Address", location.address, margin, y);
+    y += 14;
+  }
   field(doc, "Service type", SERVICE_TYPE_LABELS[input.facts.serviceType], margin, y);
   y += 14;
   field(doc, "24-hour staff", yesNo(input.facts.staffed24h), margin, y);

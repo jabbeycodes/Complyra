@@ -139,6 +139,11 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   await signIn(page);
   await openMaple();
   await expect(page.locator(".site-hero")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+  await expect(page.locator(".site-hero-address-text")).toContainText(
+    "3201 Pompey Drive, Columbia, MO 65202",
+  );
+  await expect(page.locator(".site-hero")).not.toContainText("undefined");
   await expect(page.locator(".site-hero .status-mix")).toBeVisible();
   await expect(page.locator(".site-hero-people")).toBeVisible();
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();
@@ -174,6 +179,10 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
     .toBe(true);
   await expect(page.locator(".site-hero")).toBeVisible();
   await page.locator(".site-hero").scrollIntoViewIfNeeded();
+  await expect(page.locator(".site-hero-address-text")).toContainText("Columbia, MO 65202");
+  const addressBox = await page.locator(".site-hero-address-text").boundingBox();
+  expect(addressBox).toBeTruthy();
+  expect(addressBox!.width).toBeLessThanOrEqual(370);
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   const tablist = page.locator(".site-detail-tabs");
   await expect(tablist).toBeVisible();

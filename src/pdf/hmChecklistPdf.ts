@@ -14,6 +14,8 @@ import {
   weekRangeLabel,
 } from "../data/hmChecklist";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { drawSiteLocationFields } from "./siteLocation";
+import type { SiteAddressParts } from "../data/siteAddress";
 
 type Doc = import("jspdf").jsPDF;
 
@@ -113,6 +115,7 @@ export function buildWeeklyChecklistPdf(input: {
   checklist: HmWeeklyChecklist;
   hmName: string;
   logoDataUrl?: string | null;
+  siteLocation?: SiteAddressParts;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("House Manager Weekly Review", {
     agencyName: input.agencyName,
@@ -123,8 +126,8 @@ export function buildWeeklyChecklistPdf(input: {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
+  y = drawSiteLocationFields(doc, margin, y, input.siteLocation ?? { name: input.siteName });
   const header: Array<[string, string]> = [
-    ["Home", input.siteName],
     ["Week of", `${weekRangeLabel(input.weekOf)} (Sunday ${formatShortDate(input.weekOf)})`],
     ["House manager", input.hmName || "—"],
     ["Status", c.status],
@@ -191,6 +194,7 @@ export function buildWeeklyServiceLogPdf(input: {
   checklist: HmWeeklyChecklist;
   hmName: string;
   logoDataUrl?: string | null;
+  siteLocation?: SiteAddressParts;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("Weekly Service Log", {
     agencyName: input.agencyName,
@@ -201,8 +205,8 @@ export function buildWeeklyServiceLogPdf(input: {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
+  y = drawSiteLocationFields(doc, margin, y, input.siteLocation ?? { name: input.siteName });
   const header: Array<[string, string]> = [
-    ["Home", input.siteName],
     ["Week of", `${weekRangeLabel(input.weekOf)} (Sunday ${formatShortDate(input.weekOf)})`],
     ["House manager", input.hmName || "—"],
   ];

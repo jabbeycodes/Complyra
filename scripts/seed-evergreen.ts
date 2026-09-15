@@ -7,6 +7,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { AGENCY_ID, createEvergreenSeed } from "../src/data/seed.ts";
+import { siteFactsFrom } from "../src/data/siteReview.ts";
 import { requirementStatusToDb } from "../src/data/status.ts";
 import { DEMO_PASSWORD } from "../src/data/types.ts";
 
@@ -178,6 +179,15 @@ async function main() {
       name: row.name,
       address: row.address,
     })),
+  );
+  await upsertOnConflict(
+    "site_facts",
+    seed.sites.map((row) => ({
+      site_id: row.id,
+      agency_id: row.agencyId,
+      facts: siteFactsFrom(row),
+    })),
+    "site_id",
   );
   await upsertOnConflict(
     "memberships",
