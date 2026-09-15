@@ -6,6 +6,7 @@ import {
   sites as demoSites,
   staff as demoStaff,
 } from "../domain";
+import { demoSiteLocality, isPrimaryDemoHouse } from "./evergreenSiteAddress";
 import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
@@ -226,7 +227,7 @@ export function createEvergreenSeed(): LocalDatabase {
     { id: SUPPORTED_ID, agencyId: AGENCY_ID, name: "Supported living" },
   ];
   const sites: SiteRecord[] = demoSites.map((site, i) => {
-    const maple = site.name === "Maple House";
+    const locality = demoSiteLocality(site.name);
     return {
       id: padId(11 + i),
       agencyId: AGENCY_ID,
@@ -239,12 +240,12 @@ export function createEvergreenSeed(): LocalDatabase {
       overnightSleepStaff: false,
       wellWater: false,
       lastWaterTestOn: "",
-      sitePhone: maple ? "573-555-0144" : "573-555-0188",
-      contactName: maple ? "Sarah Mitchell" : "James Wilson",
-      contactPhone: maple ? "573-555-0144" : "573-555-0188",
-      city: maple ? "Columbia" : "Columbia",
-      county: "Boone",
-      zip: maple ? "65202" : "65203",
+      sitePhone: locality.sitePhone,
+      contactName: locality.contactName,
+      contactPhone: locality.contactPhone,
+      city: locality.city,
+      county: locality.county,
+      zip: locality.zip,
     };
   });
   const siteByName = Object.fromEntries(sites.map((s) => [s.name, s]));
@@ -755,7 +756,7 @@ function buildSiteReviewSeed(sites: SiteRecord[]): SiteReview[] {
       siteId: site.id,
       updatedAt: "2026-07-15T16:00:00.000Z",
     });
-    if (site.name !== "Maple House") return blank;
+    if (!isPrimaryDemoHouse(site.name)) return blank;
     const complete = applyWellWaterDefault(
       {
         ...blank,
@@ -858,9 +859,9 @@ function buildMonthlySeed(
         date: "2026-08-05",
         time: "14:20",
         evacTime: "2:05",
-        leaderName: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
+        leaderName: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
         participants:
-          site.name === "Maple House"
+          isPrimaryDemoHouse(site.name)
             ? "Alex Morgan, Taylor Reed, Jodie Williams, Brandon Miller"
             : "James Wilson, Jordan Lee, Sylvester Jones, Maya Johnson",
         awakeOrSleep: drillType === "fire" ? "awake" : "",
@@ -882,8 +883,8 @@ function buildMonthlySeed(
               : "",
         temp: line.key.includes("faucet") ? "116 F" : "",
         extra: line.key === "fire_extinguisher" ? "2027-03 / full" : "",
-        checkedBy: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
-        signature: site.name === "Maple House" ? "Alex Morgan" : "James Wilson",
+        checkedBy: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
+        signature: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
       })),
     });
   }

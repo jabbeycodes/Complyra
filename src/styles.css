@@ -1960,11 +1960,12 @@ td > svg {
 .location-title p {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   font-size: 12px;
-  color: #4a4036;
+  color: #6b6156;
   margin-top: 3px;
+  overflow-wrap: anywhere;
 }
 .program-tag {
   display: inline-flex;

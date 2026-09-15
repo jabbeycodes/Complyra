@@ -10,6 +10,7 @@ import {
   type QaAuditItemState,
 } from "../data/qaAudit";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
 
 /**
  * QA-AUDIT report PDF (2026-09-14). White and print-friendly: black text on
@@ -41,6 +42,7 @@ export function buildQaAuditPdf(input: {
   audit: QaAudit;
   items: QaAuditItemState[];
   logoDataUrl?: string | null;
+  siteLocation?: SiteAddressParts;
 }) {
   const { agencyName, siteName, audit, items } = input;
   const { doc, margin, y: startY } = startBrandedDoc(
@@ -51,13 +53,15 @@ export function buildQaAuditPdf(input: {
   const width = 612 - margin * 2;
 
   const score = scoreQaAudit(items);
+  const loc = siteLocationFields(input.siteLocation ?? { name: siteName });
 
   // Header facts.
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  doc.setFontSize(10);
   doc.setTextColor(36, 30, 24);
   const facts: Array<[string, string]> = [
-    ["Site", siteName],
+    ["Site", loc.name],
+    ...(loc.address ? [["Address", loc.address] as [string, string]] : []),
     ["Period", qaPeriodLabel(audit.year, audit.quarter)],
     ["Auditor", audit.auditorName ?? "—"],
     ["Status", audit.status === "finalized" ? "Finalized" : "In progress"],

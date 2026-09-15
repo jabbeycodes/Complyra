@@ -8,6 +8,8 @@ import {
   type HomeSafetyReport,
 } from "../data/monthlyChecks";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { drawSiteLocationFields } from "./siteLocation";
+import type { SiteAddressParts } from "../data/siteAddress";
 
 function line(doc: import("jspdf").jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -89,6 +91,7 @@ export function buildDrillsMonthPdf(input: {
   monthKey: string;
   drills: EmergencyDrill[];
   logoDataUrl?: string | null;
+  siteLocation?: SiteAddressParts;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("Emergency Drills", {
     agencyName: input.agencyName,
@@ -97,8 +100,7 @@ export function buildDrillsMonthPdf(input: {
   let y = startY;
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
-  line(doc, "Home", input.siteName, margin, y);
-  y += 16;
+  y = drawSiteLocationFields(doc, margin, y, input.siteLocation ?? { name: input.siteName });
   line(doc, "Month", monthLabel(input.monthKey), margin, y);
   y += 16;
   doc.setFont("helvetica", "italic");
@@ -140,6 +142,7 @@ export function buildSafetyMonthPdf(input: {
   monthKey: string;
   report: HomeSafetyReport;
   logoDataUrl?: string | null;
+  siteLocation?: SiteAddressParts;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("Monthly Home Safety Report", {
     agencyName: input.agencyName,
@@ -148,8 +151,7 @@ export function buildSafetyMonthPdf(input: {
   let y = startY;
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
-  line(doc, "Home", input.siteName, margin, y);
-  y += 16;
+  y = drawSiteLocationFields(doc, margin, y, input.siteLocation ?? { name: input.siteName });
   line(doc, "Month", monthLabel(input.monthKey), margin, y);
   y += 24;
   for (const def of SAFETY_LINE_DEFS) {

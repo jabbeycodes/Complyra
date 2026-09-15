@@ -1,5 +1,6 @@
 import type { TrainingChecklist } from "../data/chart";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
 
 /** Format an ISO timestamp as "M/D/YY h:mm AM/PM" for signature lines. */
 function formatSignatureTimestamp(iso: string): string {
@@ -17,6 +18,7 @@ export function buildTrainingChecklistPdf(input: {
   logoDataUrl?: string | null;
   /** Actual initials per line (lineId -> initials text, e.g. "TSO"). */
   lineInitials?: Record<string, string>;
+  siteLocation?: SiteAddressParts;
 }) {
   const { doc, margin, y: startY } = startBrandedDoc("In-Home Staff Training Record", {
     agencyName: input.agencyName,
@@ -25,16 +27,19 @@ export function buildTrainingChecklistPdf(input: {
   let y = startY;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  for (const [label, value] of [
+  const loc = siteLocationFields(input.siteLocation ?? { name: input.siteName });
+  const headerRows: Array<[string, string]> = [
     ["Agency", input.agencyName],
     ["Individual", input.individualName],
-    ["Program site", input.siteName],
-    ["Staff", input.checklist.staffName],
-  ]) {
+    ["Program site", loc.name],
+  ];
+  if (loc.address) headerRows.push(["Address", loc.address]);
+  headerRows.push(["Staff", input.checklist.staffName]);
+  for (const [label, value] of headerRows) {
     doc.setFont("helvetica", "bold");
     doc.text(`${label}:`, margin, y);
     doc.setFont("helvetica", "normal");
-    doc.text(value, margin + 140, y);
+    doc.text(value, margin + 140, y, { maxWidth: 360 });
     y += 18;
   }
   y += 10;

@@ -249,6 +249,7 @@ import {
   normalizeSiteReview,
   type SiteFacts,
 } from "./siteReview";
+import { agencyStateCode, siteLocationFrom, type SiteAddressParts } from "./siteAddress";
 import {
   blobToDataUrl,
   canManageAgencyLogo,
@@ -1995,6 +1996,7 @@ export class HostedApi implements ComplyraApi {
         siteName: await this.siteName(person.siteId),
         checklist,
         logoDataUrl,
+        siteLocation: await this.siteLocationParts(person.siteId),
       });
       return { blob: pdf.output("blob"), name: trainingFileName(checklist.staffName, person.fullName) };
     }
@@ -2530,6 +2532,7 @@ export class HostedApi implements ComplyraApi {
         monthKey: input.monthKey,
         drills,
         logoDataUrl,
+        siteLocation: await this.siteLocationParts(site.id),
       });
       return { blob: pdf.output("blob"), name: drillsFileName(site.name, input.monthKey) };
     }
@@ -2549,6 +2552,7 @@ export class HostedApi implements ComplyraApi {
       monthKey: input.monthKey,
       report,
       logoDataUrl,
+      siteLocation: await this.siteLocationParts(site.id),
     });
     return { blob: pdf.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
@@ -2644,6 +2648,7 @@ export class HostedApi implements ComplyraApi {
       review: normalizeSiteReview(applyWellWaterDefault(mapSiteReview(reviewRow), facts)),
       monthlySafetyOnFile: monthlySafetyOnFile(safety),
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      stateCode: await this.agencyState(session.agencyId),
     });
     return { blob: pdf.output("blob"), name: siteReviewFileName(site.name) };
   }
@@ -2689,6 +2694,7 @@ export class HostedApi implements ComplyraApi {
       facts,
       rows,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      stateCode: await this.agencyState(session.agencyId),
     });
     return { blob: pdf.output("blob"), name: preSurveyFileName(site.name) };
   }
@@ -3209,6 +3215,25 @@ export class HostedApi implements ComplyraApi {
     if (!row) return null;
     const site = mapSite(row);
     return { id: site.id, agencyId: site.agencyId, name: site.name, address: site.address };
+  }
+
+  private async agencyState(agencyId: string): Promise<string> {
+    const { data } = await this.client
+      .from("agencies")
+      .select("state_code")
+      .eq("id", agencyId)
+      .maybeSingle();
+    return agencyStateCode({ stateCode: data?.state_code as string | undefined });
+  }
+
+  private async siteLocationParts(siteId: string): Promise<SiteAddressParts> {
+    const site = await this.siteRecord(siteId);
+    const facts = site ? await this.siteFacts(site.id) : normalizeSiteFacts();
+    const stateCode = site ? await this.agencyState(site.agencyId) : "";
+    return siteLocationFrom(
+      { name: site?.name ?? "Home", address: site?.address, city: facts.city, zip: facts.zip },
+      stateCode,
+    );
   }
 
   private async siteFacts(siteId: string): Promise<SiteFacts> {
@@ -6723,6 +6748,7 @@ export class HostedApi implements ComplyraApi {
       checklist: row,
       hmName,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: site ? await this.siteLocationParts(site.id) : { name: "Home" },
     });
     return {
       blob: doc.output("blob"),
@@ -6744,6 +6770,7 @@ export class HostedApi implements ComplyraApi {
       checklist: row,
       hmName,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: site ? await this.siteLocationParts(site.id) : { name: "Home" },
     });
     return {
       blob: doc.output("blob"),

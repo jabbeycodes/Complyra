@@ -301,6 +301,7 @@ import {
   type SiteReview,
   type SiteReviewLineStatus,
 } from "./siteReview";
+import { agencyStateCode, siteLocationFrom } from "./siteAddress";
 import {
   buildPreSurveyPdf,
   buildSiteReviewPdf,
@@ -1681,6 +1682,10 @@ function assertDocumentSite(session: SessionUser, siteId: string) {
 
 function siteName(store: MemoryStore, siteId: string) {
   return store.db.sites.find((s) => s.id === siteId)?.name ?? "Unknown site";
+}
+
+function agencyState(store: MemoryStore, agencyId: string) {
+  return agencyStateCode(store.db.agencies.find((row) => row.id === agencyId));
 }
 
 function personName(store: MemoryStore, individualId: string | null) {
@@ -3412,6 +3417,7 @@ export class LocalApi implements ComplyraApi {
         checklist,
         logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
         lineInitials,
+        siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
       });
       return {
         blob: pdf.output("blob"),
@@ -3898,6 +3904,7 @@ export class LocalApi implements ComplyraApi {
         monthKey: input.monthKey,
         drills,
         logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+        siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
       });
       return { blob: doc.output("blob"), name: drillsFileName(site.name, input.monthKey) };
     }
@@ -3913,6 +3920,7 @@ export class LocalApi implements ComplyraApi {
       monthKey: input.monthKey,
       report,
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
     });
     return { blob: doc.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
@@ -4023,6 +4031,7 @@ export class LocalApi implements ComplyraApi {
       review: normalizeSiteReview(applyWellWaterDefault(review, facts)),
       monthlySafetyOnFile: monthlySafetyOnFile(safety),
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      stateCode: agencyState(this.store, session.agencyId),
     });
     return { blob: doc.output("blob"), name: siteReviewFileName(site.name) };
   }
@@ -4057,6 +4066,7 @@ export class LocalApi implements ComplyraApi {
       facts,
       rows,
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      stateCode: agencyState(this.store, session.agencyId),
     });
     return { blob: doc.output("blob"), name: preSurveyFileName(site.name) };
   }
@@ -5971,6 +5981,7 @@ export class LocalApi implements ComplyraApi {
       checklist: row,
       hmName: hm?.fullName ?? "",
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
     });
     return {
       blob: doc.output("blob"),
@@ -5992,6 +6003,7 @@ export class LocalApi implements ComplyraApi {
       checklist: row,
       hmName: hm?.fullName ?? "",
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
     });
     return {
       blob: doc.output("blob"),

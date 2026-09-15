@@ -25,6 +25,7 @@ import {
   type QaPhotoInput,
 } from "../../data/qaAudit";
 import { buildQaAuditPdf, qaFileName } from "../../pdf/qaAuditPdf";
+import { agencyStateCode, siteLocationFrom } from "../../data/siteAddress";
 import { asQaBlockedError } from "./qaApiShim";
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -382,7 +383,7 @@ export default function QaAuditDetail({
   onBack: () => void;
   onChanged: (audit: QaAudit) => void;
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [items, setItems] = useState<QaAuditItemState[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -474,11 +475,15 @@ export default function QaAuditDetail({
     setDownloading(true);
     setError("");
     try {
+      const liveSite = workspace?.sites.find((row) => row.name === siteName || row.id === audit.siteId);
       const doc = buildQaAuditPdf({
         agencyName: session!.agencyName,
         siteName,
         audit,
         items,
+        siteLocation: liveSite
+          ? siteLocationFrom(liveSite, agencyStateCode(null, session?.agencyCode))
+          : { name: siteName },
       });
       doc.save(qaFileName(siteName, audit.year, audit.quarter));
     } catch (err) {

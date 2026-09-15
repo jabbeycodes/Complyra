@@ -139,9 +139,24 @@
 .site-detail-title p {
   margin: 2px 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   flex-wrap: wrap;
+}
+.site-hero-address {
+  color: #6b6156;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.site-hero-address-text {
+  min-width: 0;
+  flex: 1 1 12rem;
+  overflow-wrap: anywhere;
+}
+.site-hero-phone {
+  color: #6b6156;
+  font-size: 14px;
 }
 
 .site-detail-tabs {
