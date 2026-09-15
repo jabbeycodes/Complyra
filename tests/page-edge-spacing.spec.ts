@@ -41,11 +41,22 @@ async function canvasMetrics(page: Page) {
 }
 
 async function closeMobileNav(page: Page) {
-  const sidebar = page.locator(".sidebar.mobile-open");
-  if (await sidebar.isVisible()) {
+  const open = page.locator(".sidebar.mobile-open");
+  if (await open.count()) {
     await page.locator(".sidebar-close").click();
-    await expect(sidebar).toBeHidden();
   }
+  await expect(page.locator(".sidebar.mobile-open")).toHaveCount(0);
+  // Navigate already drops mobileOpen; wait out the 0.2s slide so shots
+  // are of the page, not the half-closed drawer.
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const el = document.querySelector(".sidebar");
+        if (!el) return true;
+        return el.getBoundingClientRect().right <= 4;
+      }),
+    )
+    .toBe(true);
 }
 
 async function panelActionGap(
