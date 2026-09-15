@@ -599,6 +599,7 @@ export default function App() {
         ["Platform", ShieldCheck],
         ["Individuals", Users],
         ["Sites & programs", Building2],
+        ["Intake", UserPlus],
         ["Staff", Users],
         ["Roles & access", KeyRound],
       ],
@@ -1033,6 +1034,22 @@ export default function App() {
                         );
                       })}
                   </div>
+                </>
+              )}
+              {page === "Intake" && (
+                <>
+                  <PageHeading
+                    title="Intake"
+                    description="Intake creates an Individual and places them on a program site."
+                  />
+                  <section className="panel intake-panel">
+                    <AddIndividualForm
+                      onCreated={(name, _uploaded, siteName) => {
+                        openPersonChart(name);
+                        notify(`Individual added to ${siteName}.`);
+                      }}
+                    />
+                  </section>
                 </>
               )}
               {page === "Individual chart" && person && (
@@ -2209,14 +2226,14 @@ export default function App() {
                 ? sites.find((row) => row.name === site)?.id ?? null
                 : null)
             }
-            onCreated={(name, uploaded) => {
+            onCreated={(name, uploaded, siteName) => {
               setAddPersonSiteId(null);
               setModal(null);
               openPersonChart(name);
               notify(
                 uploaded
-                  ? `${name} was added. The PCSP is in Review queue.`
-                  : `${name} was added. Upload a PCSP when you have it.`,
+                  ? `Individual added to ${siteName}. The PCSP is in Review queue.`
+                  : `Individual added to ${siteName}.`,
               );
             }}
           />

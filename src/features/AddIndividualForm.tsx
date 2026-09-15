@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
 import { useData } from "../data/DataProvider";
+import { todayIso } from "../data/chart";
 
 type Mode = "pcsp" | "manual";
 
@@ -9,7 +10,7 @@ export default function AddIndividualForm({
   onCreated,
 }: {
   initialSiteId?: string | null;
-  onCreated?: (name: string, uploaded: boolean) => void;
+  onCreated?: (name: string, uploaded: boolean, siteName: string) => void;
 }) {
   const { api, session, workspace, refresh } = useData();
   const lockedSiteId =
@@ -21,6 +22,7 @@ export default function AddIndividualForm({
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [dmhId, setDmhId] = useState("");
   const [siteId, setSiteId] = useState(lockedSiteId ?? initialSiteId ?? "");
+  const [enrolledOn, setEnrolledOn] = useState(todayIso());
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState("12");
   const [effectiveOn, setEffectiveOn] = useState("2026-09-12");
@@ -43,7 +45,7 @@ export default function AddIndividualForm({
       onSubmit={async (e) => {
         e.preventDefault();
         if (mode === "pcsp" && !file) {
-          setError("Choose the PCSP PDF, or add this person by hand.");
+          setError("Choose the PCSP PDF, or add this Individual by hand.");
           return;
         }
         setBusy(true);
@@ -55,12 +57,17 @@ export default function AddIndividualForm({
             siteId,
             goesBy,
             dmhId,
+            enrolledOn,
             file: mode === "pcsp" ? file ?? undefined : undefined,
             pageCount: Number(pageCount) || 1,
             effectiveOn,
           });
           await refresh();
-          onCreated?.(created.name, mode === "pcsp");
+          onCreated?.(
+            created.name,
+            mode === "pcsp",
+            selectedSite?.name ?? "this site",
+          );
         } catch (err) {
           setError((err as Error).message);
           setBusy(false);
@@ -68,10 +75,10 @@ export default function AddIndividualForm({
       }}
     >
       <p className="form-help">
-        Start from a PCSP when you have one. Or add the person now and attach
-        the plan later.
+        Start from a PCSP when you have one. Or add the Individual now and
+        attach the plan later.
       </p>
-      <div className="choice-row" role="tablist" aria-label="How to add this person">
+      <div className="choice-row" role="tablist" aria-label="How to add this Individual">
         <button
           type="button"
           role="tab"
@@ -81,7 +88,7 @@ export default function AddIndividualForm({
         >
           <FileText size={20} />
           <strong>Upload a PCSP</strong>
-          <span>Creates the person and a plan draft for review.</span>
+          <span>Creates the Individual and a plan draft for review.</span>
         </button>
         <button
           type="button"
@@ -141,14 +148,22 @@ export default function AddIndividualForm({
           </select>
         </label>
         <label className="form-label">
-          DMH ID (optional)
+          Enrollment date (optional)
           <input
-            value={dmhId}
-            onChange={(e) => setDmhId(e.target.value)}
-            placeholder="If known"
+            type="date"
+            value={enrolledOn}
+            onChange={(e) => setEnrolledOn(e.target.value)}
           />
         </label>
       </div>
+      <label className="form-label">
+        DMH ID (optional)
+        <input
+          value={dmhId}
+          onChange={(e) => setDmhId(e.target.value)}
+          placeholder="If known"
+        />
+      </label>
       {selectedSite && (
         <p className="quiet-note">
           {selectedSite.name} · {selectedSite.program || "Program site"}
@@ -211,7 +226,9 @@ export default function AddIndividualForm({
         </p>
       )}
       <button className="button primary full" type="submit" disabled={busy}>
-        {mode === "pcsp" ? "Add person and send plan for review" : "Add person"}
+        {mode === "pcsp"
+          ? "Add Individual and send plan for review"
+          : "Add Individual"}
       </button>
     </form>
   );

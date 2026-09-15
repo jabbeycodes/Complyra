@@ -11,6 +11,7 @@ import {
 import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE, LOGIN_NO_MEMBERSHIP_MESSAGE } from "./types";
 import { defaultPermissions } from "./permissions";
 import { buildAcknowledgmentPdf } from "../pdf/acknowledgmentPdf";
+import { todayIso } from "./chart";
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));
@@ -372,6 +373,35 @@ test("a DSP cannot add a site or an individual", async () => {
       }),
     /house manager/,
   );
+});
+
+test("intake stores enrollment date on the Individual profile", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const site = (await api.loadWorkspace(session)).sites[0];
+  const created = await api.createIndividual({
+    fullName: "Riley Quinn",
+    dateOfBirth: "1994-02-08",
+    siteId: site.id,
+    enrolledOn: "2026-09-12",
+  });
+  const workspace = await api.loadWorkspace(session);
+  const stack = workspace.planStacks.find((row) => row.individualId === created.id);
+  assert.equal(stack?.profile.enrolledOn, "2026-09-12");
+});
+
+test("intake defaults enrollment date to today when omitted", async () => {
+  const api = new LocalApi(store());
+  const session = await api.signIn(adminLogin());
+  const site = (await api.loadWorkspace(session)).sites[0];
+  const created = await api.createIndividual({
+    fullName: "Avery Patel",
+    dateOfBirth: "1992-11-19",
+    siteId: site.id,
+  });
+  const workspace = await api.loadWorkspace(session);
+  const stack = workspace.planStacks.find((row) => row.individualId === created.id);
+  assert.equal(stack?.profile.enrolledOn, todayIso());
 });
 
 test("the platform owner can approve a pending agency", async () => {
