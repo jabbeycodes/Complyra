@@ -34,6 +34,7 @@ import type {
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { DocumentUpload } from "../../data/documents";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
+import IspDataTab from "../ispData/IspDataTab";
 import "./siteDetail.css";
 
 interface SiteDetailPageProps {
@@ -429,6 +430,12 @@ export default function SiteDetailPage({
                 <p className="muted">Open record</p>
               </button>
             ))}
+          </div>
+        )}
+
+        {activeTab === "isp_data" && (
+          <div className="panel">
+            <IspDataTab siteId={siteId} />
           </div>
         )}
 
