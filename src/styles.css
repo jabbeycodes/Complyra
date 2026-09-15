@@ -181,18 +181,18 @@ button:hover:not(:disabled) {
   font-size: 14px;
   font-weight: 650;
   display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.25;
 }
 .agency-picker small {
   display: block;
   color: #9d978d;
   font-size: 12px;
   margin-top: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.25;
 }
 .agency-picker > svg {
   color: #4a4036;

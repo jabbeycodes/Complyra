@@ -59,6 +59,16 @@ test("sidebar groups expand Programs Care Compliance; Admin starts open for agen
   }
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
+  const agencyName = page.locator(".agency-picker strong");
+  await expect(agencyName).toHaveText(/Evergreen Care/);
+  const agencyFit = await agencyName.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    text: el.textContent,
+  }));
+  expect(agencyFit.scrollWidth, `agency name clipped: ${agencyFit.text}`).toBeLessThanOrEqual(
+    agencyFit.clientWidth + 1,
+  );
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
 
   const assignments = page.locator(".sidebar").getByRole("button", { name: "Checklist assignments", exact: true });
@@ -82,6 +92,8 @@ test("sidebar groups expand Programs Care Compliance; Admin starts open for agen
 
   await openNav(page, "Mileage");
   await expect(page.getByRole("heading", { level: 1, name: "Mileage" })).toBeVisible();
+  await expect(page.locator(".breadcrumb")).toContainText("Care");
+  await expect(page.locator(".breadcrumb")).toContainText("Mileage");
   await page.screenshot({ path: shotPath("mileage_after_1280.png"), fullPage: false });
 
   await openNav(page, "Sites & programs");

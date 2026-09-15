@@ -5,6 +5,7 @@ import {
   defaultNavGroupOpen,
   emptyNavGroupOpen,
   isNavAdminSession,
+  navBreadcrumbGroup,
   navGroupContainsPage,
   navGroupIdForPage,
   readNavGroupOpen,
@@ -36,6 +37,15 @@ test("page names resolve to the expected sidebar group", () => {
   assert.equal(navGroupIdForPage("QA Review"), "compliance");
   assert.equal(navGroupIdForPage("Staff"), "admin");
   assert.equal(navGroupIdForPage("Individual chart"), null);
+});
+
+test("breadcrumb group follows Programs / Care / Compliance / Admin, never Workspace", () => {
+  assert.equal(navBreadcrumbGroup("Overview"), "Programs");
+  assert.equal(navBreadcrumbGroup("Mileage"), "Care");
+  assert.equal(navBreadcrumbGroup("QA Review"), "Compliance");
+  assert.equal(navBreadcrumbGroup("Staff"), "Admin");
+  assert.equal(navBreadcrumbGroup("Site detail"), "Programs");
+  assert.equal(navBreadcrumbGroup("PCSP acknowledgments", true), "Compliance");
 });
 
 test("Admin is collapsed for non-admins and open for agency admins", () => {

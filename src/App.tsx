@@ -120,6 +120,7 @@ import { canCreateIndividual } from "./data/permissions";
 import {
   NAV_GROUPS,
   isNavAdminSession,
+  navBreadcrumbGroup,
   navGroupIdForPage,
   readNavGroupOpen,
   writeNavGroupOpen,
@@ -812,7 +813,7 @@ export default function App() {
             >
               <Menu size={21} />
             </button>
-            <span>Programs</span>
+            <span>{navBreadcrumbGroup(page, isCategory)}</span>
             <ChevronRight size={13} />
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>

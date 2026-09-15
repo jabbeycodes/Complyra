@@ -110,3 +110,10 @@ export function navGroupContainsPage(group: NavGroupDef, page: string) {
 export function navGroupIdForPage(page: string): NavGroupId | null {
   return NAV_GROUPS.find((group) => group.pages.includes(page))?.id ?? null;
 }
+
+/** Topbar section label. Site/chart drill-ins live under Programs, not a "Workspace" stack. */
+export function navBreadcrumbGroup(page: string, isCategory = false) {
+  if (isCategory) return "Compliance";
+  if (page === "Site detail" || page === "Individual chart") return "Programs";
+  return NAV_GROUPS.find((group) => group.pages.includes(page))?.title ?? "Programs";
+}
