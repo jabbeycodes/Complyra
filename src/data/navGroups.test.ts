@@ -6,6 +6,7 @@ import {
   emptyNavGroupOpen,
   isNavAdminSession,
   navGroupContainsPage,
+  navGroupIdForPage,
   readNavGroupOpen,
   writeNavGroupOpen,
 } from "./navGroups";
@@ -27,6 +28,14 @@ test("sidebar groups match Programs / Care / Compliance / Admin and Staff is not
   assert.equal(navGroupContainsPage(NAV_GROUPS[3]!, "AI settings"), true);
   assert.equal(navGroupContainsPage(NAV_GROUPS[1]!, "Mileage"), true);
   assert.equal(navGroupContainsPage(NAV_GROUPS[2]!, "QA Review"), true);
+});
+
+test("page names resolve to the expected sidebar group", () => {
+  assert.equal(navGroupIdForPage("Overview"), "programs");
+  assert.equal(navGroupIdForPage("Mileage"), "care");
+  assert.equal(navGroupIdForPage("QA Review"), "compliance");
+  assert.equal(navGroupIdForPage("Staff"), "admin");
+  assert.equal(navGroupIdForPage("Individual chart"), null);
 });
 
 test("Admin is collapsed for non-admins and open for agency admins", () => {

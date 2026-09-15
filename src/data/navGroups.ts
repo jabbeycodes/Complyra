@@ -106,3 +106,7 @@ export function writeNavGroupOpen(state: Record<NavGroupId, boolean>) {
 export function navGroupContainsPage(group: NavGroupDef, page: string) {
   return group.pages.includes(page);
 }
+
+export function navGroupIdForPage(page: string): NavGroupId | null {
+  return NAV_GROUPS.find((group) => group.pages.includes(page))?.id ?? null;
+}

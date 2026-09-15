@@ -61,8 +61,18 @@ test("sidebar groups expand Programs Care Compliance; Admin starts open for agen
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
 
+  const assignments = page.locator(".sidebar").getByRole("button", { name: "Checklist assignments", exact: true });
+  await expect(assignments).toBeVisible();
+  const assignmentFit = await assignments.evaluate((el) => ({
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }));
+  expect(assignmentFit.scrollWidth).toBeLessThanOrEqual(assignmentFit.clientWidth + 1);
+
   await care.click();
   await expect(care).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage", exact: true })).toHaveCount(0);
+  await expect(care.locator(".nav-group-count")).toHaveText("7");
   await care.click();
   await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage", exact: true })).toBeVisible();
 

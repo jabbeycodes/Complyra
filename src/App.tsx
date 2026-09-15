@@ -120,6 +120,7 @@ import { canCreateIndividual } from "./data/permissions";
 import {
   NAV_GROUPS,
   isNavAdminSession,
+  navGroupIdForPage,
   readNavGroupOpen,
   writeNavGroupOpen,
   type NavGroupId,
@@ -441,6 +442,8 @@ export default function App() {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
     if (next !== "Site detail") setDetailSiteId(null);
+    const groupId = navGroupIdForPage(next);
+    if (groupId) ensureNavGroupOpen(groupId);
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
@@ -451,6 +454,7 @@ export default function App() {
   function openPersonChart(name: string) {
     setPerson(name);
     setPage("Individual chart");
+    ensureNavGroupOpen("programs");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -458,6 +462,7 @@ export default function App() {
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
     setPage("Site detail");
+    ensureNavGroupOpen("programs");
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -636,6 +641,14 @@ export default function App() {
       return next;
     });
   }
+  function ensureNavGroupOpen(id: NavGroupId) {
+    setNavOpen((current) => {
+      if (current[id]) return current;
+      const next = { ...current, [id]: true };
+      writeNavGroupOpen(next);
+      return next;
+    });
+  }
   return (
     <div className="app-shell">
       {mobileOpen && (
@@ -683,10 +696,24 @@ export default function App() {
                 onClick={() => toggleNavGroup(group.id)}
               >
                 <span className="nav-label">{group.title}</span>
-                {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                <span className="nav-group-meta">
+                  {!expanded ? (
+                    <span className="nav-group-count">{items.length}</span>
+                  ) : null}
+                  {expanded ? (
+                    <ChevronDown size={16} aria-hidden="true" />
+                  ) : (
+                    <ChevronRight size={16} aria-hidden="true" />
+                  )}
+                </span>
               </button>
               {expanded ? (
-              <div id={`nav-group-${group.id}`} role="group" aria-label={group.title}>
+              <div
+                id={`nav-group-${group.id}`}
+                className="nav-group-items"
+                role="group"
+                aria-label={group.title}
+              >
               {items.map((name) => {
                 const Icon = navIcons[name as keyof typeof navIcons];
                 if (!Icon) return null;

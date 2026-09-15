@@ -374,7 +374,7 @@ export default function SiteDetailPage({
       </header>
 
       <div
-        className="tabs site-detail-tabs"
+        className="site-detail-tabs"
         role="tablist"
         aria-label={`${site.name} sections`}
       >
