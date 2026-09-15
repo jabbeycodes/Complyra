@@ -2,7 +2,7 @@
 
 Audit date: September 14, 2026. Working branch: `codex/platform-audit`.
 
-This pass repairs the existing application and integrates previously separate QA and Audit Me work. It includes the other agent's latest `main` build, `b67a8a4` (QA Review), verified against GitHub on the audit date. Changes are prepared for review; they have not been deployed to the live application or its database.
+This pass repairs the existing application and integrates previously separate QA and Audit Me work. It includes the other agent's latest `main` build, `b67a8a4` (QA Review), verified against GitHub on the audit date. Changes are uploaded in [draft pull request #37](https://github.com/jabbeycodes/Complyra/pull/37); they have not been deployed to the live application or its database.
 
 ## What changed and why it matters
 
@@ -39,6 +39,7 @@ Final local results:
 - **56 browser tests passed**, with the three audit-page tests rerun successfully after the final score-label change.
 - **48 live database assertions passed.**
 - **Hosted API checks passed for all nine roles**, including the complete delegation path and concurrent medication updates.
+- **GitHub checks could not start:** GitHub reports failed account payments or a spending-limit restriction. The local results below and above are complete; remote CI has not verified the branch. Resolve the account restriction and rerun the workflow before merging.
 - **Production build passed.** Phone and desktop audit screenshots were visually inspected.
 - A clean local database installation, all migrations, fictional seed, database tests, and hosted API checks were rerun together. No production database was used.
 
