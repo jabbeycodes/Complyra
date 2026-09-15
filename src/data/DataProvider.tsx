@@ -33,6 +33,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   async function refresh(nextSession?: SessionUser | null) {
     const request = ++requestId.current;
+    try {
     const active = nextSession === undefined ? await api.getSession() : nextSession;
     if (request !== requestId.current) return;
     setSession(active);
@@ -44,7 +45,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setWorkspace(null);
       return;
     }
-    try {
       const view = await api.loadWorkspace(active);
       if (request !== requestId.current) return;
       setWorkspace(view);

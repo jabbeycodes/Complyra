@@ -138,6 +138,7 @@ const baseData: CommandCenterData = {
   individuals: [
     {
       id: "i1",
+      siteId: "s1",
       name: "Alex Doe",
       site: "Maple House",
       dateOfBirth: "1990-01-01",
@@ -220,7 +221,7 @@ describe("CommandCenterView", () => {
     assert.ok(!html.includes("Add corrective action"), "no add form");
     assert.ok(!html.includes(">Resolve<"), "no resolve button");
     assert.ok(
-      html.includes("correctiveActions.manage"),
+      html.includes("An authorized manager can assign and resolve them."),
       "permission requirement explained",
     );
     assert.ok(html.includes("Re-train night shift"), "actions still visible");
@@ -261,7 +262,7 @@ describe("CommandCenterView", () => {
       "honest empty score state",
     );
     assert.ok(
-      html.includes("Nothing overdue or due today"),
+      html.includes("No overdue or same-day items found"),
       "honest empty attention state",
     );
     assert.ok(

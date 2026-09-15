@@ -242,9 +242,6 @@ import {
   type ComplianceScore,
   type ScoreSnapshot,
 } from "./complianceScore";
-import { buildCarePlanPdf } from "../pdf/carePlanPdf";
-import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
-import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
 import {
   canCompleteMonthly,
   canConfigureMonthlyDue,
@@ -1714,7 +1711,7 @@ function mapRequirement(store: MemoryStore, row: RequirementRecord): Requirement
     owner: ownerName(store, row.ownerUserId),
     role: roleLabel(membership?.role ?? "dsp", owner?.jobTitle),
     due: row.dueOn,
-    status: row.status,
+    status: row.status === "Compliant" || row.status === "Pending review" ? row.status : computeRequirementStatus(row.dueOn, row.category),
     source: sourceLabel(store, row.documentVersionId),
     page: row.sourcePage,
     frequency: row.frequency,
@@ -2707,6 +2704,7 @@ export class LocalApi implements ComplyraApi {
     const individual = accessibleIndividual(this.store, session, input.individualId);
     if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
     assertCalendarDate(input.dueOn, "Use a valid due date.");
+    if (!Number.isInteger(input.sourcePage) || input.sourcePage < 1) throw new Error("Source page must be a positive whole number.");
     assertRequirementOwner(this.store, session, input.ownerUserId);
     const version = this.store.db.versions.find((v) => {
       const document = this.store.db.documents.find((d) => d.id === v.documentId);
@@ -2875,6 +2873,7 @@ export class LocalApi implements ComplyraApi {
     }
     const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     const title = input.title || `${individual.fullName} · PCSP 2026`;
     let document = this.store.db.documents.find(
       (d) => d.individualId === individual.id && d.title === title,
@@ -2951,8 +2950,14 @@ export class LocalApi implements ComplyraApi {
   }
 
   async getDocumentFile(versionId: string) {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.view");
     const version = this.store.db.versions.find((v) => v.id === versionId);
-    if (!version?.storagePath) return null;
+    if (!version) return null;
+    const document = this.store.db.documents.find((row) => row.id === version.documentId);
+    if (!document) return null;
+    accessibleIndividual(this.store, session, document.individualId);
+    if (!version.storagePath) return null;
     return readFile(version.storagePath);
   }
 
@@ -2961,6 +2966,7 @@ export class LocalApi implements ComplyraApi {
     assertPrivileged(session);
     const individual = this.store.db.individuals.find((p) => p.id === individualId);
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     this.store.db.assignments.push({
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -3086,6 +3092,7 @@ export class LocalApi implements ComplyraApi {
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     person.profile = normalizeProfile(person, profile);
     if (profile.legalName.trim()) person.fullName = profile.legalName.trim();
     await persistMeta(this.store);
@@ -3098,6 +3105,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     const item = this.store.db.obligations.find((row) => row.id === obligationId);
     if (!item) throw new Error("Item not found.");
+    accessibleIndividual(this.store, session, item.individualId);
     const turningOnDelegation = item.kind === "delegation" && patch.enabled === true;
     const turningOffDelegation = item.kind === "delegation" && patch.enabled === false;
     if (turningOffDelegation) {
@@ -3132,6 +3140,7 @@ export class LocalApi implements ComplyraApi {
     if (!title.trim()) throw new Error("Name the protocol.");
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     const item: ObligationItem = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -3163,6 +3172,7 @@ export class LocalApi implements ComplyraApi {
     }
     const item = this.store.db.obligations.find((row) => row.id === obligationId);
     if (!item) throw new Error("Item not found.");
+    accessibleIndividual(this.store, session, item.individualId);
     item.kind = "shift_task";
     item.mode = "required";
     item.enabled = true;
@@ -3239,6 +3249,7 @@ export class LocalApi implements ComplyraApi {
     if (!item || item.kind !== "delegation" || !item.enabled) {
       throw new Error("Turn the delegation on before the RN signs.");
     }
+    accessibleIndividual(this.store, session, item.individualId);
     if (item.rnSignedAt) throw new Error("Delegating RN already signed.");
     if (!signatureName.trim() || !signatureMark) {
       throw new Error("Type your legal name and add a signature mark.");
@@ -3280,6 +3291,7 @@ export class LocalApi implements ComplyraApi {
     }
     const renewal = this.store.db.clinicalRenewals.find((row) => row.id === input.renewalId);
     if (!renewal) throw new Error("Renewal not found.");
+    accessibleIndividual(this.store, session, renewal.individualId);
     const title =
       input.documentTitle.trim() ||
       input.file?.name ||
@@ -3376,6 +3388,7 @@ export class LocalApi implements ComplyraApi {
         (row) => row.id === checklist.individualId,
       );
       if (!person) return null;
+      accessibleIndividual(this.store, session, person.id);
       const site = this.store.db.sites.find((row) => row.id === person.siteId);
       // Collect actual initials per line from the sign-off records.
       const lineInitials: Record<string, string> = {};
@@ -3386,7 +3399,8 @@ export class LocalApi implements ComplyraApi {
           lineInitials[line.id] = signoff.initials.trim();
         }
       }
-      const pdf = buildTrainingChecklistPdf({
+      const { buildTrainingChecklistPdf, trainingFileName } = await import("../pdf/trainingChecklistPdf");
+    const pdf = buildTrainingChecklistPdf({
         agencyName: session.agencyName,
         individualName: person.fullName,
         siteName: site?.name ?? "",
@@ -3403,6 +3417,9 @@ export class LocalApi implements ComplyraApi {
       const version = this.store.db.versions.find((row) => row.id === input.id);
       if (!version) return null;
       const document = this.store.db.documents.find((row) => row.id === version.documentId);
+      assertCan(session, "documents.view");
+      if (!document) return null;
+      accessibleIndividual(this.store, session, document.individualId);
       const stored = version.storagePath ? await readFile(version.storagePath) : null;
       if (stored) {
         return {
@@ -3413,7 +3430,8 @@ export class LocalApi implements ComplyraApi {
       const person = document
         ? this.store.db.individuals.find((row) => row.id === document.individualId)
         : null;
-      const pdf = buildCarePlanPdf({
+      const { buildCarePlanPdf } = await import("../pdf/carePlanPdf");
+    const pdf = buildCarePlanPdf({
         agencyName: session.agencyName,
         individualName: person?.fullName ?? "Individual",
         title: document?.title ?? "Care plan",
@@ -3430,6 +3448,8 @@ export class LocalApi implements ComplyraApi {
     }
     const file = this.store.db.chartFiles.find((row) => row.id === input.id);
     if (!file) return null;
+    accessibleIndividual(this.store, session, file.individualId);
+    if (!canSeeRenewals(session.roleKey)) throw new Error("You cannot open clinical evidence.");
     const blob = await readFile(file.storagePath);
     if (!blob) return null;
     return { blob, name: file.name };
@@ -3447,13 +3467,15 @@ export class LocalApi implements ComplyraApi {
     }
     const med = this.store.db.medications.find((row) => row.id === input.medicationId);
     if (!med) throw new Error("Medication not found.");
-    if (input.remainingPills < 0) {
-      throw new Error("Remaining pills cannot be negative.");
+    accessibleIndividual(this.store, session, med.individualId);
+    if (!Number.isFinite(input.remainingPills) || input.remainingPills < 0) {
+      throw new Error("Enter a finite, nonnegative remaining pill count.");
     }
-    if (med.kind === "scheduled" && input.pillsPerDay <= 0) {
+    if (med.kind === "scheduled" && (!Number.isFinite(input.pillsPerDay) || input.pillsPerDay <= 0)) {
       throw new Error("Set pills per day for a scheduled medication.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     med.remainingPills = input.remainingPills;
     med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
     med.lastDeliveryOn = countedOn;
@@ -3486,7 +3508,9 @@ export class LocalApi implements ComplyraApi {
     if (!med || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
     }
-    if (pills <= 0) throw new Error("Enter how many pills were given.");
+    accessibleIndividual(this.store, session, med.individualId);
+    if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
+    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
     med.remainingPills = Math.max(0, med.remainingPills - pills);
     log(
       this.store,
@@ -4150,7 +4174,8 @@ export class LocalApi implements ComplyraApi {
     }
     const fullName = input.fullName.trim();
     if (!fullName) throw new Error("Enter the individual’s legal name.");
-    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    assertCalendarDate(input.dateOfBirth, "Enter a valid date of birth.");
+    if (input.dateOfBirth > todayIso()) throw new Error("Date of birth cannot be in the future.");
     const site = this.store.db.sites.find(
       (row) => row.id === input.siteId && row.agencyId === session.agencyId,
     );
@@ -4920,6 +4945,7 @@ export class LocalApi implements ComplyraApi {
     if (!item || item.kind !== "delegation" || item.agencyId !== session.agencyId) {
       throw new Error("Delegation not found.");
     }
+    accessibleIndividual(store, session, item.individualId);
     if (!item.delegationForm) item.delegationForm = blankDelegationForm();
     return item;
   }
@@ -4951,6 +4977,7 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === input.individualId && row.agencyId === session.agencyId,
     );
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     if (!canAccessSite(session, person.siteId)) {
       throw new Error("Choose a person at a site you can manage.");
     }
@@ -5140,6 +5167,7 @@ export class LocalApi implements ComplyraApi {
     const item = this.delegationItem(this.store, session, input.obligationId);
     const person = this.store.db.individuals.find((row) => row.id === item.individualId);
     const site = this.store.db.sites.find((row) => row.id === person?.siteId);
+    const { buildDelegationPdf, delegationFileName } = await import("../pdf/delegationPdf");
     const pdf = buildDelegationPdf({
       agencyName: session.agencyName,
       individualName: person?.fullName ?? "Individual",
@@ -5345,7 +5373,7 @@ export class LocalApi implements ComplyraApi {
 
   private findCorrectiveAction(session: SessionUser, id: string) {
     const action = this.correctiveActionsOf().find(
-      (row) => row.id === id && row.agencyId === session.agencyId,
+      (row) => row.id === id && row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
     );
     if (!action) throw new Error("Corrective action not found.");
     return action;
@@ -5366,7 +5394,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     const now = new Date();
     let rows = this.correctiveActionsOf().filter(
-      (row) => row.agencyId === session.agencyId,
+      (row) => row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
     );
     if (input?.assignedToUserId) {
       rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
@@ -5649,7 +5677,7 @@ export class LocalApi implements ComplyraApi {
     const site = this.store.db.sites.find(
       (s) => s.id === input.siteId && s.agencyId === session.agencyId,
     );
-    if (!site) throw new Error("Home not found.");
+    if (!site || !canAccessSite(session, input.siteId)) throw new Error("Home not found.");
     const hmMembership = this.store.db.memberships.find(
       (m) =>
         m.agencyId === session.agencyId &&
@@ -5980,6 +6008,7 @@ export class LocalApi implements ComplyraApi {
     if (!med || med.agencyId !== session.agencyId) {
       throw new Error("Medication not found.");
     }
+    accessibleIndividual(this.store, session, med.individualId);
     return { session, med };
   }
 
@@ -6031,6 +6060,7 @@ export class LocalApi implements ComplyraApi {
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
     }
+    accessibleIndividual(this.store, session, person.id);
     const rows = this.p6rows();
     const today = todayIso();
     return this.store.db.medications
@@ -6093,7 +6123,8 @@ export class LocalApi implements ComplyraApi {
     if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
       throw new Error("Enter a non-zero correction.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const next = Math.max(
       0,
       Math.round((med.remainingPills + input.quantityDelta) * 100) / 100,
@@ -6217,7 +6248,7 @@ export class LocalApi implements ComplyraApi {
     const site = this.store.db.sites.find(
       (row) => row.id === siteId && row.agencyId === session.agencyId,
     );
-    if (!site) throw new Error("Home not found.");
+    if (!site || !canAccessSite(assertSession(this.store), siteId)) throw new Error("Home not found.");
     return site;
   }
 
@@ -6226,6 +6257,7 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === tripId && row.agencyId === session.agencyId,
     );
     if (!trip) throw new Error("Mileage trip not found.");
+    this.siteOrThrow(session, trip.siteId);
     return trip;
   }
 
@@ -6365,9 +6397,12 @@ export class LocalApi implements ComplyraApi {
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
-  /** Local/demo path has no QA audits yet; the hosted path reads qa_audits. */
-  async listQaAuditHistory(_siteId: string): Promise<QaAuditSummary[]> {
-    return [];
+  async listQaAuditHistory(siteId: string): Promise<QaAuditSummary[]> {
+    return (await this.listQaAudits({ siteId })).map((audit) => ({
+      id: audit.id, year: audit.year, quarter: audit.quarter,
+      status: audit.status, auditorName: audit.auditorName ?? "",
+      signedAt: audit.signedAt, createdAt: audit.createdAt, scoreJson: audit.score,
+    }));
   }
 
   /** The log is one unbroken chain: a new trip's start must continue the latest end. */
@@ -8091,6 +8126,7 @@ export class LocalApi implements ComplyraApi {
       (p) => p.id === individualId && p.agencyId === session.agencyId,
     );
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     if (individual.siteId !== activation.siteId) {
       throw new Error(
         "That individual does not belong to the activation's site.",
@@ -8467,15 +8503,7 @@ export class LocalApi implements ComplyraApi {
   // ================= QA audits (local) =================
 
   private qaSiteScope(session: SessionUser): string[] | null {
-    if (
-      session.role === "administrator" ||
-      session.role === "compliance_admin" ||
-      session.platformAdmin
-    ) {
-      return null;
-    }
-    if (session.siteId) return [session.siteId];
-    return null;
+    return isAgencyWideViewer(session) ? null : session.siteId ? [session.siteId] : [];
   }
 
   private assertQaSite(session: SessionUser, siteId: string): void {
@@ -8984,6 +9012,7 @@ export class LocalApi implements ComplyraApi {
       (p) => p.id === input.individualId && p.agencyId === session.agencyId,
     );
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     const site = input.siteId
       ? db.sites.find(
           (s) => s.id === input.siteId && s.agencyId === session.agencyId,

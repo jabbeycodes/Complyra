@@ -1,4 +1,8 @@
 import { defineConfig } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
+process.env.WALKTHROUGH_DIR ??= resolve("playwright-report/screenshots");
+mkdirSync(process.env.WALKTHROUGH_DIR, { recursive: true });
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,

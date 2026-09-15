@@ -100,7 +100,7 @@ export default function NotificationsPanel({
     : notifications;
 
   return (
-    <div className="notif-panel" role="dialog" aria-label="Notifications">
+    <div className="notif-panel" role="region" aria-label="Notifications">
       <div className="notif-panel-head">
         <h2>Notifications</h2>
         <div className="notif-panel-actions">

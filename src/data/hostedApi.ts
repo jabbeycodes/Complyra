@@ -268,9 +268,6 @@ import {
   weeklyChecklistPdfName,
   weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
-import { buildCarePlanPdf } from "../pdf/carePlanPdf";
-import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
-import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -1021,7 +1018,7 @@ export class HostedApi implements ComplyraApi {
           owner: owner?.fullName ?? "Unassigned",
           role: roleLabel(asRole((ownerMembership?.role as string) ?? "dsp"), owner?.jobTitle),
           due: row.dueOn,
-          status: row.status,
+          status: row.status === "Compliant" || row.status === "Pending review" ? row.status : computeRequirementStatus(row.dueOn, row.category),
           source:
             document && version
               ? `${document.title} · ${version.versionLabel}`
@@ -1103,6 +1100,7 @@ export class HostedApi implements ComplyraApi {
     this.requirePermission(session, "documents.upload");
     if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
     assertCalendarDate(input.dueOn, "Use a valid due date.");
+    if (!Number.isInteger(input.sourcePage) || input.sourcePage < 1) throw new Error("Source page must be a positive whole number.");
     const { data: individual, error: personError } = await this.client
       .from("individuals")
       .select("id, site_id, full_name")
@@ -1987,7 +1985,8 @@ export class HostedApi implements ComplyraApi {
       }
       const person = await this.individualRecord(checklist.individualId);
       if (!person || person.agencyId !== session.agencyId) return null;
-      const pdf = buildTrainingChecklistPdf({
+      const { buildTrainingChecklistPdf, trainingFileName } = await import("../pdf/trainingChecklistPdf");
+    const pdf = buildTrainingChecklistPdf({
         agencyName: session.agencyName,
         individualName: person.fullName,
         siteName: await this.siteName(person.siteId),
@@ -2023,7 +2022,8 @@ export class HostedApi implements ComplyraApi {
       const person = document
         ? await this.individualRecord(document.individual_id as string)
         : null;
-      const pdf = buildCarePlanPdf({
+      const { buildCarePlanPdf } = await import("../pdf/carePlanPdf");
+    const pdf = buildCarePlanPdf({
         agencyName: session.agencyName,
         individualName: person?.fullName ?? "Individual",
         title: (document?.title as string) ?? "Care plan",
@@ -2071,40 +2071,20 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Medication not found.");
     const med = mapMedication(row!);
     if (med.agencyId !== session.agencyId) throw new Error("Medication not found.");
-    if (input.remainingPills < 0) {
-      throw new Error("Remaining pills cannot be negative.");
+    if (!Number.isFinite(input.remainingPills) || input.remainingPills < 0) {
+      throw new Error("Enter a finite, nonnegative remaining pill count.");
     }
-    if (med.kind === "scheduled" && input.pillsPerDay <= 0) {
+    if (med.kind === "scheduled" && (!Number.isFinite(input.pillsPerDay) || input.pillsPerDay <= 0)) {
       throw new Error("Set pills per day for a scheduled medication.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const nextPillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
-    const { error: updateError } = await this.client
-      .from("medications")
-      .update({
-        remaining_pills: input.remainingPills,
-        pills_per_day: nextPillsPerDay,
-        last_delivery_on: countedOn,
-        last_countdown_on: countedOn,
-      })
-      .eq("id", med.id);
-    throwIf(updateError, "Could not record the delivery.");
-    const { error: deliveryError } = await this.client.from("medication_deliveries").insert({
-      agency_id: session.agencyId,
-      medication_id: med.id,
-      counted_on: countedOn,
-      remaining_pills: input.remainingPills,
-      pills_per_day: nextPillsPerDay,
-      recorded_by: session.userId,
+    const { error: saveError } = await this.client.rpc("record_medication_delivery", {
+      p_medication_id: med.id, p_remaining: input.remainingPills,
+      p_daily: nextPillsPerDay, p_counted_on: countedOn,
     });
-    throwIf(deliveryError, "Delivery saved, but the count record could not be written.");
-    await this.audit(
-      session,
-      "medication.delivery",
-      `${session.fullName} counted ${med.name} at ${input.remainingPills} pills`,
-      "medication",
-      med.id,
-    );
+    throwIf(saveError, "Could not record the medication count.");
   }
 
   async logPrnDose(medicationId: string, pills = 1) {
@@ -2122,31 +2102,12 @@ export class HostedApi implements ComplyraApi {
     if (med.agencyId !== session.agencyId || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
     }
-    if (pills <= 0) throw new Error("Enter how many pills were given.");
-    const nextCount = Math.max(0, med.remainingPills - pills);
-    const { error: updateError } = await this.client
-      .from("medications")
-      .update({ remaining_pills: nextCount })
-      .eq("id", med.id);
-    throwIf(updateError, "Could not log the PRN dose.");
-    const { error: logError } = await this.client.from("prn_dose_logs").insert({
-      agency_id: session.agencyId,
-      medication_id: med.id,
-      logged_on: todayIso(),
-      logged_at: new Date().toISOString(),
-      pills_used: pills,
-      remaining_after: nextCount,
-      logged_by: session.fullName,
-      logged_by_user_id: session.userId,
+    if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
+    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    const { error: saveError } = await this.client.rpc("record_prn_dose", {
+      p_medication_id: med.id, p_pills: pills,
     });
-    throwIf(logError, "Dose counted down, but the PRN log could not be written.");
-    await this.audit(
-      session,
-      "medication.prn",
-      `${session.fullName} gave ${pills} ${med.name}`,
-      "medication",
-      med.id,
-    );
+    throwIf(saveError, "Could not record the PRN dose.");
   }
 
   // ---- Training ----
@@ -2909,7 +2870,8 @@ export class HostedApi implements ComplyraApi {
     }
     const fullName = input.fullName.trim();
     if (!fullName) throw new Error("Enter the individual’s legal name.");
-    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    assertCalendarDate(input.dateOfBirth, "Enter a valid date of birth.");
+    if (input.dateOfBirth > todayIso()) throw new Error("Date of birth cannot be in the future.");
     const site = await this.siteRecord(input.siteId);
     if (!site || site.agencyId !== session.agencyId) throw new Error("Choose a program site.");
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
@@ -4605,6 +4567,7 @@ export class HostedApi implements ComplyraApi {
     const person = await this.individualRecord(item.individualId);
     if (!person || person.agencyId !== session.agencyId) throw new Error("Delegation not found.");
     const logoDataUrl = await this.hostedLogoDataUrl(session.agencyId);
+    const { buildDelegationPdf, delegationFileName } = await import("../pdf/delegationPdf");
     const pdf = buildDelegationPdf({
       agencyName: session.agencyName,
       individualName: person.fullName,
@@ -5146,7 +5109,7 @@ export class HostedApi implements ComplyraApi {
         .eq("agency_id", agencyId)
         .eq("site_id", siteId)
         .gte("trip_date", `${months[0]}-01`)
-        .lte("trip_date", `${months[months.length - 1]}-31`),
+        .lt("trip_date", new Date(Date.UTC(year, quarter * 3, 1)).toISOString().slice(0, 10)),
       this.client
         .from("acknowledgment_packets")
         .select("id, individual_id, starts_on")
@@ -6993,7 +6956,8 @@ export class HostedApi implements ComplyraApi {
     if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
       throw new Error("Enter a non-zero correction.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const next =
       Math.max(0, Math.round((med.remainingPills + input.quantityDelta) * 100) / 100);
     const { error: updateError } = await this.client

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 async function signIn(
   page: Page,
@@ -18,7 +18,7 @@ async function signIn(
 
 async function signOut(page: Page) {
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByLabel("Provider code")).toBeVisible();
 }
 
@@ -111,9 +111,15 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
   const rnDelegation = rnChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",
   });
-  await rnDelegation.getByRole("button", { name: "Sign as delegating RN" }).click();
-  await drawSignature(page);
-  await rnDelegation.getByRole("button", { name: "Save RN signature" }).click();
+  await rnDelegation.getByRole("button", { name: "Adopt signature", exact: true }).click();
+  const adoption = page.getByRole("dialog", { name: "Adopt your electronic signature" });
+  await adoption.getByRole("tab", { name: "Type", exact: true }).nth(0).click();
+  await adoption.getByRole("tab", { name: "Type", exact: true }).nth(1).click();
+  await adoption.getByRole("checkbox").check();
+  await adoption.getByRole("button", { name: "Adopt signature", exact: true }).click();
+  await rnDelegation.getByRole("button", { name: "Sign as Cameron Price", exact: true }).click();
+  await page.getByLabel("Account password").fill("Evergreen!demo1");
+  await page.getByRole("button", { name: "Confirm and sign", exact: true }).click();
   await expect(rnDelegation).toContainText("Delegating RN signed");
   await rnDelegation.scrollIntoViewIfNeeded();
   await page.screenshot({

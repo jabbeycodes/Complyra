@@ -23,7 +23,7 @@ export const SCORE_BAND_META: Record<
   compliant: {
     label: "Compliant",
     icon: "✓",
-    description: "Score 90 or above — no systemic risk.",
+    description: "Score 90 or above across the records evaluated. Review remaining gaps separately.",
   },
   "at-risk": {
     label: "At risk",

@@ -67,11 +67,19 @@ const NOTIFICATION_TYPES = [
   "delegation.unacknowledged",
   "isp.renewal_soon",
   "incident.followup",
+  "delegation.review_ready",
+  "delegation.published",
+  "delegation.ack_overdue",
+  "qa.dispute_raised",
+  "qa.dispute_resolved",
+  "qa.schedule_due",
+  "qa.schedule_overdue",
+
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {
   return (
-    deepLink.startsWith("/") &&
+    deepLink.startsWith("/") && !deepLink.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(deepLink) &&
     !deepLink.includes("://") &&
     !deepLink.includes(" ")
   );

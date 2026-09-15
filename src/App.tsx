@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -90,11 +90,11 @@ import {
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
 import DelegationsPage from "./features/delegations/DelegationsPage";
-import QaAuditsPage from "./features/qa/QaAuditsPage";
+const QaAuditsPage = lazy(() => import("./features/qa/QaAuditsPage"));
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
-import CommandCenter from "./components/CommandCenter";
+const CommandCenter = lazy(() => import("./components/CommandCenter"));
 import StaffCertificatesModal from "./features/certificates/StaffCertificatesModal";
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage";
@@ -273,10 +273,11 @@ export default function App() {
   }, [session, page]);
   useEffect(() => {
     const applyHash = () => {
-      const fromHash = decodeURIComponent(
-        window.location.hash.replace(/^#/, ""),
-      ).trim();
-      if (fromHash) setPage(fromHash);
+      try {
+        const fromHash = decodeURIComponent(window.location.hash.replace(/^#/, "")).trim();
+        const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash;
+        if (next) setPage(next);
+      } catch { /* Ignore malformed external links. */ }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -425,12 +426,14 @@ export default function App() {
       r.due <= auditTo,
   );
   function navigate(next: string, nextStatus = "All statuses") {
+    if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
     if (next !== "Site detail") setDetailSiteId(null);
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
     setMobileOpen(false);
+    window.history.replaceState(null, "", `#${encodeURIComponent(next)}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function openPersonChart(name: string) {
@@ -607,6 +610,7 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
+        ["Audit Me", ClipboardCheck],
         // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
         // system-verified items, auditor scoring, and photo disputes.
         ["QA audits", BadgeCheck],
@@ -826,6 +830,7 @@ export default function App() {
           </div>
         </header>
         <main>
+          <Suspense fallback={<p role="status" className="loading-state">Loading workspace page…</p>}>
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
@@ -1838,6 +1843,7 @@ export default function App() {
               {page === "Help" && <HelpPage />}
             </>
           )}
+          </Suspense>
         </main>
         <div className="demo-strip">
           <span className="demo-dot" /> INTERACTIVE PREVIEW{" "}
@@ -2001,14 +2007,19 @@ export default function App() {
               )}
               <button
                 className="button primary full"
-                onClick={() =>
+                onClick={() => {
+                  if (!evidence.trim()) {
+                    setFormError("A completion record is required.");
+                    return;
+                  }
+                  setFormError("");
                   setConfirm({
                     title: "Mark this requirement complete?",
                     body: `“${selected.title}” will be recorded as complete with the evidence entered above.`,
                     action: "Save completion",
                     run: finishRequirement,
-                  })
-                }
+                  });
+                }}
               >
                 <CheckCheck size={17} /> Save completion evidence
               </button>

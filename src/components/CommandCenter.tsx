@@ -18,7 +18,7 @@
  * data as props so UI/accessibility tests can render every section without
  * a live API.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useData } from "../data/DataProvider";
 import { hasPermission } from "../data/permissions";
 import {
@@ -63,6 +63,7 @@ import type {
   ExpiringCertificate,
   HmWeeklyChecklist,
   StaffClearanceRow,
+  MedInventoryView,
 } from "../data/types";
 import type { WorkspaceSite, WorkspaceView } from "../data/localApi";
 import "./CommandCenter.css";
@@ -78,6 +79,9 @@ export interface CommandCenterData {
   sites: WorkspaceSite[];
   requirements: WorkspaceView["requirements"];
   individuals: WorkspaceView["individuals"];
+  unavailable?: string[];
+  medications?: MedInventoryView[];
+  planStacks?: WorkspaceView["planStacks"];
 }
 
 export interface AddActionInput {
@@ -101,6 +105,7 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
 
   const bySite = new Map<string, ScoreFacts>();
   const get = (siteId: string | null, siteName: string): ScoreFacts => {
+    siteId ??= data.sites.find((site) => site.name === siteName)?.id ?? null;
     const key = siteId ?? `name:${siteName}`;
     let facts = bySite.get(key);
     if (!facts) {
@@ -119,9 +124,10 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
   };
 
   for (const req of data.requirements) {
+    if (req.status === "Pending review") continue;
     const facts = get(null, req.site);
     facts.requirements.push(
-      req.status === "Overdue" ? "overdue" : req.status === "Due soon" ? "due" : "ok",
+      req.status === "Overdue" || req.status === "Expired" ? "overdue" : req.status === "Due soon" ? "due" : "ok",
     );
   }
 
@@ -150,6 +156,11 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
           ? "late"
           : "due",
     );
+  }
+
+  for (const med of data.medications ?? []) {
+    const person = data.individuals.find((row) => row.id === med.individualId);
+    if (person) get(person.siteId, person.site).medications.push(med.status);
   }
 
   return [...bySite.values()];
@@ -193,6 +204,7 @@ export function CommandCenterView({
   const [formDue, setFormDue] = useState("");
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  const [showAllDeadlines, setShowAllDeadlines] = useState(false);
 
   const staffSite = useMemo(() => {
     const map = new Map<string, { siteId: string | null; siteName: string }>();
@@ -252,9 +264,14 @@ export function CommandCenterView({
             | "incomplete",
           dueOn: null,
         })),
-      medications: [],
+      medications: (data.medications ?? []).filter((med) => med.status !== "ok").map((med) => {
+        const person = data.individuals.find((row) => row.id === med.individualId);
+        return { id: med.medicationId, medName: med.medicationName,
+          siteId: person?.siteId ?? "", siteName: person?.site ?? "Unknown site",
+          daysRemaining: med.daysRemaining, status: med.status as "low" | "critical" | "out" };
+      }),
       requirements: data.requirements
-        .filter((req) => req.status === "Overdue" || req.status === "Due soon")
+        .filter((req) => req.status === "Overdue" || req.status === "Expired")
         .map((req) => ({
           id: req.id,
           title: req.title,
@@ -270,7 +287,7 @@ export function CommandCenterView({
         overdue: deriveCorrectiveActionStatus(action, new Date()) === "overdue",
       })),
     }),
-    [certs, checklists, clearance, actions, data.requirements, siteNameById],
+    [certs, checklists, clearance, actions, data, siteNameById],
   );
 
   const risks = useMemo(() => collectRisks(riskContext), [riskContext]);
@@ -287,7 +304,9 @@ export function CommandCenterView({
         expiresOn: cert.expiresOn,
       })),
       trainings: [],
-      planRenewals: [],
+      planRenewals: (data.planStacks ?? []).flatMap((stack) => stack.renewals.map((renewal) => ({
+        id: renewal.id, individualName: stack.individualName, planTitle: renewal.title, dueOn: renewal.nextDueOn,
+      }))),
       checklists: checklists
         .filter((list) => list.status !== "submitted" && list.dueAt)
         .map((list) => ({
@@ -297,7 +316,13 @@ export function CommandCenterView({
           dueOn: (list.dueAt as string).slice(0, 10),
           submitted: false,
         })),
-      medications: [],
+      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null).map((med) => {
+        const end = new Date();
+        end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));
+        return { id: med.medicationId, medName: med.medicationName,
+          siteName: data.individuals.find((row) => row.id === med.individualId)?.site ?? "Unknown site",
+          runsOutOn: end.toISOString().slice(0, 10) };
+      }),
       correctiveActions: actions.map((action) => ({
         id: action.id,
         title: action.title,
@@ -307,7 +332,7 @@ export function CommandCenterView({
       })),
       providerRecertification: null,
     }),
-    [certs, checklists, actions, siteNameById],
+    [certs, checklists, actions, siteNameById, data],
   );
 
   const timeline = useMemo(() => buildTimeline(timelineFacts), [timelineFacts]);
@@ -341,7 +366,7 @@ export function CommandCenterView({
   /* ---------------- missing requirements ---------------- */
 
   const missing = useMemo(() => {
-    const certKinds = [...new Set(certs.map((cert) => cert.certName))];
+    // A certificate held by one person does not establish a requirement for every role.
     return findMissing({
       now: new Date(),
       staff: data.staff.map((person) => ({
@@ -349,7 +374,7 @@ export function CommandCenterView({
         name: person.name,
         siteName: person.site,
       })),
-      requiredCertificateKinds: certKinds,
+      requiredCertificateKinds: [],
       certificates: certs.map((cert) => ({
         userId: cert.userId,
         staffName: cert.staffName,
@@ -428,6 +453,9 @@ export function CommandCenterView({
   return (
     <div className="cc-wrap">
       <header className="cc-header">
+        {Boolean(data.unavailable?.length) && <p role="alert" className="inline-error">
+          Some records could not be evaluated: {data.unavailable?.join(", ")}. Scores reflect only the available records.
+        </p>}
         <div>
           <h1 className="cc-title">Audit readiness</h1>
           <p className="cc-subtitle">
@@ -462,7 +490,7 @@ export function CommandCenterView({
           <span className="cc-count">{attention.length}</span>
         </h2>
         {attention.length === 0 ? (
-          <p className="cc-empty">Nothing overdue or due today. The day is clear.</p>
+          <p className="cc-empty">No overdue or same-day items found in the connected records.</p>
         ) : (
           <ul className="cc-list">
             {attention.slice(0, 6).map((item) => {
@@ -474,7 +502,7 @@ export function CommandCenterView({
                     {sev.icon}
                   </span>
                   <div className="cc-item-body">
-                    <span className="cc-item-title">{item.title}</span>
+                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
                     <span className="cc-item-detail">
                       {item.detail} · {meta.label}
                       {item.personName ? ` · ${item.personName}` : ""}
@@ -504,7 +532,7 @@ export function CommandCenterView({
                     {urgencyMeta.icon}
                   </span>
                   <div className="cc-item-body">
-                    <span className="cc-item-title">{item.title}</span>
+                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
                     <span className="cc-item-detail">
                       {item.detail} · {kindMeta.label} ·{" "}
                       <strong className={`cc-urgency-text cc-urgency-${item.urgency}`}>
@@ -567,10 +595,10 @@ export function CommandCenterView({
                     {sev.icon}
                   </span>
                   <div className="cc-item-body">
-                    <span className="cc-item-title">
+                    <a className="cc-item-title" href={`#${encodeURIComponent(risk.deepLink)}`}>
                       {risk.title}
                       <span className={`cc-sev-label ${sev.className}`}>{risk.severity}</span>
-                    </span>
+                    </a>
                     <span className="cc-item-detail">
                       {risk.detail}
                       {risk.personName ? ` · ${risk.personName}` : ""}
@@ -633,8 +661,7 @@ export function CommandCenterView({
           </form>
         ) : (
           <p className="cc-section-note">
-            You can view corrective actions; managing them needs the correctiveActions.manage
-            permission.
+            You can view corrective actions. An authorized manager can assign and resolve them.
           </p>
         )}
         {actions.length === 0 ? (
@@ -727,6 +754,7 @@ export function CommandCenterView({
           Missing requirements
           <span className="cc-count">{missing.length}</span>
         </h2>
+        <p className="cc-muted">This list covers connected checklist gaps. Required certificates and training must be assigned by role before missing records can be assessed.</p>
         {missing.length === 0 ? (
           <p className="cc-empty">No gaps found in connected data.</p>
         ) : (
@@ -767,10 +795,10 @@ export function CommandCenterView({
       </section>
 
       {/* Workflow library */}
-      <section className="cc-section" aria-labelledby="cc-workflows">
-        <h2 id="cc-workflows" className="cc-section-title">Workflow library</h2>
+      <details className="cc-section" aria-labelledby="cc-workflows">
+        <summary id="cc-workflows" className="cc-details-summary">Workflow library</summary>
         <p className="cc-section-note">
-          Ready-made wording for the notices, reminders, and escalations Complyrer sends.
+          Reference templates for notices and reminders. Delivery depends on the agency’s configured automation services.
         </p>
         <div className="cc-grid">
           {WORKFLOW_TEMPLATES.map((template) => (
@@ -783,7 +811,7 @@ export function CommandCenterView({
             </article>
           ))}
         </div>
-      </section>
+      </details>
 
       {/* Score trend */}
       <section className="cc-section" aria-labelledby="cc-trend">
@@ -838,14 +866,14 @@ export function CommandCenterView({
           <p className="cc-empty">No dated deadlines on record.</p>
         ) : (
           <ul className="cc-list">
-            {timeline.map((item) => {
+            {(showAllDeadlines ? timeline : timeline.slice(0, 8)).map((item) => {
               const kindMeta = TIMELINE_KIND_META[item.kind];
               const urgencyMeta = TIMELINE_URGENCY_META[item.urgency];
               return (
                 <li key={item.id} className="cc-item">
                   <span className="cc-item-date">{item.dueOn}</span>
                   <div className="cc-item-body">
-                    <span className="cc-item-title">{item.title}</span>
+                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
                     <span className="cc-item-detail">
                       {item.detail} · {kindMeta.label} ·{" "}
                       {item.daysRemaining < 0
@@ -864,6 +892,9 @@ export function CommandCenterView({
             })}
           </ul>
         )}
+        {timeline.length > 8 && <button type="button" className="cc-button" aria-expanded={showAllDeadlines} onClick={() => setShowAllDeadlines((value) => !value)}>
+          {showAllDeadlines ? "Show fewer deadlines" : `Show all ${timeline.length} deadlines`}
+        </button>}
       </section>
     </div>
   );
@@ -875,22 +906,30 @@ export default function CommandCenter() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<CommandCenterData | null>(null);
+  const loadSequence = useRef(0);
 
   const canManage = Boolean(
     session && hasPermission(session, "correctiveActions.manage"),
   );
 
   async function reload() {
+    const request = ++loadSequence.current;
     setLoading(true);
     setError("");
     try {
-      const [actions, certs, clearance, checklists, snapshots] = await Promise.all([
+      const unavailable: string[] = [];
+      const optional = async <T,>(label: string, request: Promise<T>, fallback: T): Promise<T> => {
+        try { return await request; } catch { unavailable.push(label); return fallback; }
+      };
+      const [actions, certs, clearance, checklists, snapshots, medicationGroups] = await Promise.all([
         api.listCorrectiveActions(),
-        api.certificatesExpiringSoon(120),
-        api.listStaffNeedingClearance().catch(() => [] as StaffClearanceRow[]),
-        api.listWeeklyChecklists().catch(() => [] as HmWeeklyChecklist[]),
-        api.listComplianceSnapshots(null, 30).catch(() => [] as ScoreSnapshot[]),
+        optional("Certificates", api.certificatesExpiringSoon(36500), []),
+        optional("Staff training", api.listStaffNeedingClearance(), [] as StaffClearanceRow[]),
+        optional("Weekly checklists", api.listWeeklyChecklists(), [] as HmWeeklyChecklist[]),
+        optional("Score history", api.listComplianceSnapshots(null, 30), [] as ScoreSnapshot[]),
+        optional("Medication supply", Promise.all((workspace?.individuals ?? []).map((person) => api.getMedInventory(person.id))), [] as MedInventoryView[][]),
       ]);
+      if (request !== loadSequence.current) return;
       setData({
         actions: sortCorrectiveActions(actions, new Date()),
         certs,
@@ -901,22 +940,26 @@ export default function CommandCenter() {
         sites: workspace?.sites ?? [],
         requirements: workspace?.requirements ?? [],
         individuals: workspace?.individuals ?? [],
+        unavailable,
+        medications: medicationGroups.flat(),
+        planStacks: workspace?.planStacks ?? [],
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the command center.");
+      if (request === loadSequence.current) setError(err instanceof Error ? err.message : "Could not load the command center.");
     } finally {
-      setLoading(false);
+      if (request === loadSequence.current) setLoading(false);
     }
   }
 
   useEffect(() => {
-    reload();
+    void reload();
+    return () => { loadSequence.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [api, session?.userId, session?.agencyId, workspace]);
 
   // Record today's agency snapshot once data is loaded (managers only).
   useEffect(() => {
-    if (!data || !canManage || data.snapshots.length > 0) return;
+    if (!data || !canManage || data.unavailable?.length || data.snapshots.some((row) => row.computedAt.slice(0, 10) === todayIso())) return;
     let cancelled = false;
     (async () => {
       try {

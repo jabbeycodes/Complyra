@@ -12,12 +12,11 @@ import { DEMO_PASSWORD } from "../src/data/types.ts";
 
 const url =
   process.env.SUPABASE_URL ??
-  process.env.VITE_SUPABASE_URL ??
-  "https://ynjthbdfuzkqrbvjuvwd.supabase.co";
+  process.env.VITE_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!serviceKey) {
-  console.error("Set SUPABASE_SERVICE_ROLE_KEY before seeding.");
+if (!serviceKey || !url) {
+  console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before seeding.");
   process.exit(1);
 }
 

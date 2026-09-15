@@ -44,7 +44,7 @@ export default function QaAuditsPage() {
   const [creating, setCreating] = useState(false);
   const [newSiteId, setNewSiteId] = useState("");
   const [newYear, setNewYear] = useState(String(new Date().getUTCFullYear()));
-  const [newQuarter, setNewQuarter] = useState("1");
+  const [newQuarter, setNewQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
   const [siteFilter, setSiteFilter] = useState("");
   // Schedule editing state
   const [editingSite, setEditingSite] = useState("");

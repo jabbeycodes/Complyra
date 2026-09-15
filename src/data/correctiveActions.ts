@@ -124,7 +124,7 @@ export function validateCorrectiveActionInput(input: {
   if (input.dueOn != null && input.dueOn !== "") {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueOn)) {
       errors.push("The due date must be a calendar date (YYYY-MM-DD).");
-    } else if (Number.isNaN(Date.parse(`${input.dueOn}T00:00:00`))) {
+    } else if (Number.isNaN(Date.parse(`${input.dueOn}T00:00:00Z`)) || new Date(`${input.dueOn}T00:00:00Z`).toISOString().slice(0, 10) !== input.dueOn) {
       errors.push("The due date is not a real calendar date.");
     }
   }

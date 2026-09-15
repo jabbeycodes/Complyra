@@ -749,7 +749,7 @@ test("createDelegation refuses a person outside the nurse's site", async () => {
         taskTitle: "Cross-site leak",
         purpose: "Should not be allowed",
       }),
-    /site you can manage/,
+    /site you can manage|assigned access/,
   );
 });
 

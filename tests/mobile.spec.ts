@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -181,7 +181,7 @@ test.describe("390 phone", () => {
     expect(menuBox!.height).toBeGreaterThanOrEqual(44);
     expect(menuBox!.x).toBeGreaterThanOrEqual(16);
 
-    const bell = page.getByRole("button", { name: "View notifications" });
+    const bell = page.getByRole("button", { name: /^Notifications,/ });
     const bellBox = await bell.boundingBox();
     expect(bellBox).toBeTruthy();
     expect(bellBox!.width).toBeGreaterThanOrEqual(44);

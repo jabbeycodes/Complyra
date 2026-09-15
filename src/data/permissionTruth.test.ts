@@ -43,7 +43,7 @@ const LATEST_SEED_MIGRATION_PATH = join(
   repoRoot,
   "supabase",
   "migrations",
-  "20260914070000_audit_readiness.sql",
+  "20260915024000_integrated_permissions.sql",
 );
 
 // Files whose permission guards were consolidated onto the canonical module.

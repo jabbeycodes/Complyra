@@ -656,7 +656,6 @@ function RequiredList({
                 </p>
               )}
               {view.item.kind === "delegation" &&
-                view.item.delegationForm &&
                 (waitingOnRn || view.item.rnSignedAt) && (
                   <SignatureField
                     documentType="delegation_form"
@@ -664,12 +663,17 @@ function RequiredList({
                     fieldName="rn_signature"
                     label="Delegating RN signature"
                     getDocumentPayload={() =>
-                      delegationFormPayload({
+                      view.item.delegationForm ? delegationFormPayload({
                         obligationId: view.item.id,
                         individualName,
                         taskTitle: view.item.title ?? "",
-                        form: view.item.delegationForm!,
-                      })
+                        form: view.item.delegationForm,
+                      }) : {
+                        obligationId: view.item.id, individualName,
+                        taskTitle: view.item.title, detail: view.item.detail,
+                        sourcePage: view.item.sourcePage,
+                        documentVersionId: view.item.documentVersionId,
+                      }
                     }
                     canAct={waitingOnRn && nurseFirst}
                     cantActReason={

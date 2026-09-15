@@ -453,7 +453,7 @@ export function scoreQaAudit(items: QaAuditItemState[]): QaScore {
  * until they resolve the dispute).
  */
 export function qaUndecidedItems(items: QaAuditItemState[]): string[] {
-  return items.filter((item) => !item.locked && item.result === null).map((item) => item.key);
+  return items.filter((item) => !item.locked && (item.result === null || item.status === "disputed")).map((item) => item.key);
 }
 
 /* ------------------------------------------------------------------ */

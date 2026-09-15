@@ -36,7 +36,11 @@ export type NotificationType =
   | "delegation.ack_overdue"
   | "delegation.unacknowledged"
   | "isp.renewal_soon"
-  | "incident.followup";
+  | "incident.followup"
+  | "qa.dispute_raised"
+  | "qa.dispute_resolved"
+  | "qa.schedule_due"
+  | "qa.schedule_overdue";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -59,6 +63,10 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "delegation.unacknowledged",
   "isp.renewal_soon",
   "incident.followup",
+  "qa.dispute_raised",
+  "qa.dispute_resolved",
+  "qa.schedule_due",
+  "qa.schedule_overdue",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -139,6 +147,11 @@ export function notificationPage(link: string): string | null {
   if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
   if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
   if (/^\/recognition(?:\/|$)/.test(path)) return "Recognition";
+  if (/^\/plans(?:\/|$)/.test(path)) return "Individuals";
+  if (/^\/requirements(?:\/|$)/.test(path)) return "Requirements";
+  if (/^\/corrective-actions(?:\/|$)/.test(path)) return "Audit Me";
+  if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
+  if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA audits";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;
@@ -197,6 +210,10 @@ export const NOTIFICATION_META: Record<
   "delegation.unacknowledged": { status: "pending", label: "Delegation unacknowledged" },
   "isp.renewal_soon": { status: "expiring", label: "Plan renewal approaching" },
   "incident.followup": { status: "late", label: "Incident follow-up" },
+  "qa.dispute_raised": { status: "pending", label: "QA finding disputed" },
+  "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
+  "qa.schedule_due": { status: "expiring", label: "QA audit due" },
+  "qa.schedule_overdue": { status: "late", label: "QA audit overdue" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
