@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 async function signIn(
   page: Page,
@@ -9,7 +9,7 @@ async function signIn(
   await page.goto("/");
   await page.getByLabel("Provider code").fill(agencyCode);
   await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
@@ -49,6 +49,7 @@ test("priorities open their source, require evidence, and persist completion", a
   await dialog
     .getByRole("button", { name: /Save completion evidence/ })
     .click();
+  await page.getByRole("dialog", { name: "Mark this requirement complete?" }).getByRole("button", { name: "Save completion", exact: true }).click();
   await expect(dialog).toContainText("Completion evidence recorded");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await expect(
@@ -77,6 +78,7 @@ test("plan approval keeps earlier versions in the document history", async ({
   await page
     .getByRole("button", { name: "Approve & activate requirement" })
     .click();
+  await page.getByRole("dialog", { name: "Approve this requirement?" }).getByRole("button", { name: "Approve & activate", exact: true }).click();
   await expect(page.getByRole("status")).toContainText(
     "Earlier plan versions are retained",
   );
@@ -98,10 +100,12 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
     .getByRole("button", { name: "Add requirement", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Program site").selectOption({ label: "Maple House" });
+  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Jodie Williams" });
   await dialog
     .getByLabel("Requirement", { exact: true })
     .fill("Verify sample wheelchair maintenance log");
-  await dialog.getByLabel("Responsible person").selectOption("Alex Morgan");
+  await dialog.getByLabel("Responsible person").selectOption({ label: "Alex Morgan" });
   await dialog
     .getByLabel("Source document & version")
     .fill("Jodie Williams · PCSP 2026 · v2");
@@ -117,6 +121,7 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   await page
     .getByRole("button", { name: "Approve & activate requirement" })
     .click();
+  await page.getByRole("dialog", { name: "Approve this requirement?" }).getByRole("button", { name: "Approve & activate", exact: true }).click();
   await page
     .getByRole("button", { name: "Audit center", exact: true })
     .click();
@@ -144,13 +149,15 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   ).toHaveCount(0);
 });
 
-test("sample plan upload creates an indexed draft without storing document bytes", async ({
+test("sample plan upload retains its PDF separately and creates an indexed draft", async ({
   page,
 }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Documents", exact: true }).click();
   await page.getByRole("button", { name: "Add document", exact: true }).click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Program site").selectOption({ label: "Maple House" });
+  await dialog.getByLabel("Individual", { exact: true }).selectOption({ label: "Jodie Williams" });
   await dialog
     .getByLabel("Choose sample PDF")
     .setInputFiles({
@@ -188,7 +195,7 @@ test("search and copilot answers lead to the correct sample records", async ({
     .click();
   await expect(page.getByRole("dialog")).toContainText("Taylor Reed");
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: /YOUR COMPLIANCE PARTNER/ }).click();
+  await page.getByRole("button", { name: "Records Ask Complyrer", exact: true }).click();
   await page
     .getByRole("button", { name: "Which delegations are expiring?" })
     .click();
@@ -275,10 +282,10 @@ test("an administrator adds a member who must change the temporary password", as
   await expect(dialog).toContainText("jordan.blake");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("jordan.blake");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -313,10 +320,10 @@ test("an administrator can open role templates and invite HR without care record
   await expect(dialog).toContainText("riley.hart");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("riley.hart");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -353,7 +360,7 @@ test("an agency can set itself up with a state agency code", async ({
   await expect(page.getByText("MAPLEWOOD-MO", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Continue to sign in" }).click();
   await expect(page.getByLabel("Provider code")).toHaveValue("MAPLEWOOD-MO");
-  await page.getByLabel("Password").fill("TempPass!1");
+  await page.getByLabel("Password", { exact: true }).fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Choose your own password" }),
@@ -365,19 +372,19 @@ test("an agency can set itself up with a state agency code", async ({
   await expect(
     page.getByRole("heading", { name: "Waiting for Complyrer review" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.getByLabel("Provider code").fill("COMPLYRER-MO");
   await page.getByLabel("Username").fill("platform.owner");
-  await page.getByLabel("Password").fill("Evergreen!demo1");
+  await page.getByLabel("Password", { exact: true }).fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("button", { name: "Platform", exact: true }).click();
   await expect(page.getByText("MAPLEWOOD-MO")).toBeVisible();
   await page.getByRole("button", { name: "Approve" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("MAPLEWOOD-MO");
   await page.getByLabel("Username").fill("pat.okonkwo");
-  await page.getByLabel("Password").fill("Pat!own2");
+  await page.getByLabel("Password", { exact: true }).fill("Pat!own2");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
@@ -409,16 +416,12 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await expect(page.locator(".site-grid")).toBeVisible();
 
   await page.getByRole("button", { name: "Your profile" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await signIn(page, "alex.morgan");
-  await expect(
-    page.getByRole("button", { name: /Maple House compliance/ }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Oakwood House compliance/ }),
-  ).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: /Your work/ })).toBeVisible();
-  await expect(page.locator(".personal-queue-row").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveCount(0);
+  await page.goto('/#Overview');
+  await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.locator(".location-card")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();

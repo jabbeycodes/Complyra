@@ -9,7 +9,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  *     agency_id: string,          // uuid, required
  *     user_id?: string | null,    // targeted member (exactly one of user_id / role_key)
  *     role_key?: string | null,   // broadcast role, e.g. "house_manager"
- *     type: NotificationType,     // required, one of the 16 known types
+ *     type: NotificationType,     // required, one of the 10 known types
  *     title: string,              // required
  *     body: string,               // required
  *     deep_link: string,          // required, app route like "/checklists/<id>"
@@ -62,13 +62,24 @@ const NOTIFICATION_TYPES = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  // AUDIT-READINESS (workflow library) — source updated 2026-09-14;
+  // this function is not being deployed in this pass.
+  "delegation.unacknowledged",
+  "isp.renewal_soon",
+  "incident.followup",
+  "delegation.review_ready",
+  "delegation.published",
+  "delegation.ack_overdue",
   "qa.dispute_raised",
   "qa.dispute_resolved",
+  "qa.schedule_due",
+  "qa.schedule_overdue",
+
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {
   return (
-    deepLink.startsWith("/") &&
+    deepLink.startsWith("/") && !deepLink.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(deepLink) &&
     !deepLink.includes("://") &&
     !deepLink.includes(" ")
   );

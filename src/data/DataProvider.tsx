@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createApi, isSupabaseConfigured, type ComplyraApi, type WorkspaceView } from "./index";
 import type { LoginInput, SessionUser } from "./types";
@@ -29,9 +29,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const requestId = useRef(0);
 
   async function refresh(nextSession?: SessionUser | null) {
-    const active = nextSession === undefined ? session : nextSession;
+    const request = ++requestId.current;
+    try {
+    const active = nextSession === undefined ? await api.getSession() : nextSession;
+    if (request !== requestId.current) return;
+    setSession(active);
     if (!active || active.mustChangePassword) {
       setWorkspace(null);
       return;
@@ -40,11 +45,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setWorkspace(null);
       return;
     }
-    try {
       const view = await api.loadWorkspace(active);
+      if (request !== requestId.current) return;
       setWorkspace(view);
       setError("");
     } catch (err) {
+      if (request !== requestId.current) return;
       setWorkspace(null);
       setError(asErrorMessage(err, "Could not load the workspace."));
       throw err;
@@ -53,20 +59,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const request = ++requestId.current;
     (async () => {
       try {
         const existing = await api.getSession();
-        if (cancelled) return;
+        if (cancelled || request !== requestId.current) return;
         setSession(existing);
         if (
           existing &&
           !existing.mustChangePassword &&
           (existing.platformAdmin || existing.agencyStatus === "active")
         ) {
-          setWorkspace(await api.loadWorkspace(existing));
+          const view = await api.loadWorkspace(existing);
+          if (!cancelled && request === requestId.current) setWorkspace(view);
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && request === requestId.current) {
           setError(asErrorMessage(err, "Could not load the workspace."));
         }
       } finally {
@@ -75,6 +83,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       cancelled = true;
+      requestId.current++;
     };
   }, [api]);
 
@@ -88,8 +97,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
         error,
         usingHostedBackend,
         signIn: async (input) => {
+          const request = ++requestId.current;
           setError("");
+          setWorkspace(null);
           const next = await api.signIn(input);
+          if (request !== requestId.current) return;
           setSession(next);
           await refresh(next);
         },
@@ -118,6 +130,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
           }
         },
         signOut: async () => {
+          requestId.current++;
+          setWorkspace(null);
           await api.signOut();
           setSession(null);
           setWorkspace(null);

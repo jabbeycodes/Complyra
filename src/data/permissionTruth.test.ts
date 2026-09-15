@@ -35,6 +35,17 @@ const MIGRATION_PATH = join(
   "20260914040000_permission_source_of_truth.sql",
 );
 
+// Newer migrations may refresh the role_permission_matrix seed with regenerated
+// maps (e.g. 20260914070000_audit_readiness.sql adds correctiveActions.manage).
+// The exact-match checks below always target the LATEST seed refresh, while the
+// original migration is still verified for role-key coverage (frozen history).
+const LATEST_SEED_MIGRATION_PATH = join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260915024000_integrated_permissions.sql",
+);
+
 // Files whose permission guards were consolidated onto the canonical module.
 const CONSOLIDATED_SOURCES = [
   "src/data/permissions.ts",
@@ -106,24 +117,25 @@ test("truth: migration seed contains every role key and every permission key", (
       `migration seeds role_key ${roleKey}`,
     );
   }
+  // Every permission key must appear as a JSON key inside the LATEST seeded map.
+  const latest = readFileSync(LATEST_SEED_MIGRATION_PATH, "utf8");
   for (const permKey of PERMISSION_KEYS) {
-    // Each permission key must appear as a JSON key inside a seeded map.
     assert.ok(
-      sql.includes(`"${permKey}":`),
-      `migration seed contains permission ${permKey}`,
+      latest.includes(`"${permKey}":`),
+      `latest seed contains permission ${permKey}`,
     );
   }
 });
 
 test("truth: migration seed JSON matches the canonical template maps exactly", () => {
-  const sql = readFileSync(MIGRATION_PATH, "utf8");
+  const sql = readFileSync(LATEST_SEED_MIGRATION_PATH, "utf8");
   for (const roleKey of ROLE_KEYS) {
     const canonical = JSON.stringify(ROLE_TEMPLATE_BY_KEY[roleKey].permissions);
     // The seed rows were generated from the canonical module, so the exact
-    // serialized map must appear verbatim in the migration text.
+    // serialized map must appear verbatim in the latest seed migration text.
     assert.ok(
       sql.includes(canonical),
-      `migration row for ${roleKey} matches ROLE_TEMPLATE_BY_KEY exactly`,
+      `latest seed row for ${roleKey} matches ROLE_TEMPLATE_BY_KEY exactly`,
     );
   }
 });

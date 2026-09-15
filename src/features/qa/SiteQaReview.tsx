@@ -8,7 +8,6 @@ import {
   type QaAudit,
 } from "../../data/qaAudit";
 import QaAuditDetail from "./QaAuditDetail";
-import type { QaApi } from "./qaApiShim";
 
 /**
  * Per-site QA Review flow for the site detail "QA Review" tab.
@@ -23,9 +22,6 @@ export default function SiteQaReview({
   siteName: string;
 }) {
   const { api, session } = useData();
-  // qaApiShim: QA method declarations the data workstream is porting onto
-  // ComplyraApi. Remove the cast once they land natively.
-  const qaApi = api as QaApi;
   const [audits, setAudits] = useState<QaAudit[] | null>(null);
   const [openAudit, setOpenAudit] = useState<QaAudit | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +45,7 @@ export default function SiteQaReview({
     try {
       // Site-scoped list (drafts + in progress + finalized) so auditors can
       // resume their work from the site page.
-      setAudits(await qaApi.listQaAudits({ siteId }));
+      setAudits(await api.listQaAudits({ siteId }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -83,7 +79,7 @@ export default function SiteQaReview({
     setCreating(true);
     try {
       const now = new Date();
-      const audit = await qaApi.createQaAudit(
+      const audit = await api.createQaAudit(
         siteId,
         now.getUTCFullYear(),
         (Math.min(4, Math.floor(now.getUTCMonth() / 3) + 1) as 1 | 2 | 3 | 4),

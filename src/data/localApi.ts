@@ -1,3 +1,4 @@
+import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
@@ -52,7 +53,8 @@ import {
   type PermissionMap,
 } from "./permissions";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { canReadIndividual, assertCalendarDate } from "./access";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
@@ -177,7 +179,6 @@ import {
   qaUndecidedItems,
   raiseQaDisputeState,
   rankQaSites,
-  recheckQaItemForScoring,
   resolveQaDisputeState,
   scoreQaAudit,
   scoreQaItemState,
@@ -229,9 +230,19 @@ import {
   validateCertificateDates,
   validateCertificateFile,
 } from "./certificates";
-import { buildCarePlanPdf } from "../pdf/carePlanPdf";
-import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
-import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
+import {
+  deriveCorrectiveActionStatus,
+  sortCorrectiveActions,
+  validateCorrectiveActionInput,
+  type AddCorrectiveActionInput,
+  type CorrectiveAction,
+  type UpdateCorrectiveActionInput,
+} from "./correctiveActions";
+import {
+  sortSnapshotsOldestFirst,
+  type ComplianceScore,
+  type ScoreSnapshot,
+} from "./complianceScore";
 import {
   canCompleteMonthly,
   canConfigureMonthlyDue,
@@ -327,6 +338,8 @@ const META_KEY = "complyra-v2-meta";
 const FILE_PREFIX = "complyra-v2-file:";
 
 export interface ComplyraApi {
+  listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]>;
+  markNotificationsRead(ids: string[]): Promise<void>;
   getSession(): Promise<SessionUser | null>;
   signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
@@ -595,6 +608,35 @@ export interface ComplyraApi {
   deleteCertificate(id: string): Promise<void>;
   certificatesExpiringSoon(days: number): Promise<ExpiringCertificate[]>;
   certificateFileUrl(id: string): Promise<string>;
+  // ===== AUDIT-READINESS API (corrective actions) =====
+  /** List the agency's corrective actions (any agency member may read). */
+  listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]>;
+  /** Create a corrective action (correctiveActions.manage). */
+  addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction>;
+  /** Update title/owner/due date/status (correctiveActions.manage). */
+  updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction>;
+  /** Resolve an action: stamps resolved_at (correctiveActions.manage). */
+  resolveCorrectiveAction(id: string): Promise<CorrectiveAction>;
+  // ===== AUDIT-READINESS API (compliance score snapshots) =====
+  /**
+   * Record today's compliance score snapshot (agency-wide when siteId is
+   * null). One snapshot per day per scope — re-saving replaces today's.
+   */
+  saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot>;
+  /** Newest-first snapshots for the trend chart. */
+  listComplianceSnapshots(
+    siteId?: string | null,
+    limit?: number,
+  ): Promise<ScoreSnapshot[]>;
   // ===== LIFEPATH-P5 API (HM weekly checklist) =====
   /**
    * DPM-only: assign this week's checklist to an HM for a home.
@@ -1313,6 +1355,9 @@ async function hydrate() {
       browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
       browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
       browserStore.db.siteReviews = browserStore.db.siteReviews ?? [];
+      // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
+      browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
+      browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
       seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
@@ -1339,6 +1384,7 @@ function currentSession(store: MemoryStore): SessionUser | null {
     (m) => m.userId === store.sessionUserId,
   );
   if (!profile || !membership) return null;
+  if (membership.expiresOn && membership.expiresOn < todayIso()) return null;
   const agency = store.db.agencies.find((row) => row.id === membership.agencyId);
   if (!agency) return null;
   return {
@@ -1411,15 +1457,28 @@ function assertPlatformOperator(session: SessionUser) {
  * Returns null for "all sites".
  */
 function delegationSiteScope(session: SessionUser): string[] | null {
-  if (
-    session.role === "administrator" ||
-    session.role === "compliance_admin" ||
-    session.platformAdmin
-  ) {
-    return null;
+  if (isAgencyWideViewer(session)) return null;
+  return session.siteId ? [session.siteId] : [];
+}
+
+function accessibleIndividual(store: MemoryStore, session: SessionUser, id: string) {
+  const person = store.db.individuals.find((row) => row.id === id);
+  if (!person || !canReadIndividual(session, person, store.db.assignments)) {
+    throw new Error("Individual not found or outside your assigned access.");
   }
-  if (session.siteId) return [session.siteId];
-  return null;
+  return person;
+}
+
+function accessibleRequirement(store: MemoryStore, session: SessionUser, id: string) {
+  const row = store.db.requirements.find((item) => item.id === id && item.agencyId === session.agencyId);
+  if (!row || !canAccessSite(session, row.siteId)) throw new Error("Requirement not found or outside your assigned access.");
+  if (row.individualId) accessibleIndividual(store, session, row.individualId);
+  return row;
+}
+
+function assertRequirementOwner(store: MemoryStore, session: SessionUser, userId: string) {
+  if (!store.db.memberships.some((m) => m.agencyId === session.agencyId && m.userId === userId &&
+    (!m.expiresOn || m.expiresOn >= todayIso()))) throw new Error("Choose an active staff member in this agency.");
 }
 
 /** Throw unless the session user may touch delegation data at this site. */
@@ -1653,7 +1712,7 @@ function mapRequirement(store: MemoryStore, row: RequirementRecord): Requirement
     owner: ownerName(store, row.ownerUserId),
     role: roleLabel(membership?.role ?? "dsp", owner?.jobTitle),
     due: row.dueOn,
-    status: row.status,
+    status: row.status === "Compliant" || row.status === "Pending review" ? row.status : computeRequirementStatus(row.dueOn, row.category),
     source: sourceLabel(store, row.documentVersionId),
     page: row.sourcePage,
     frequency: row.frequency,
@@ -2105,23 +2164,29 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensureSiteReviews(store.db);
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
-  const canReadAudit =
-    hasPermission(session, "audit.read") || canViewPeople;
-  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId);
+  const canReadAudit = hasPermission(session, "audit.read") && isAgencyWideViewer(session);
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
   const individuals = canViewPeople
-    ? store.db.individuals.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments))
     : [];
-  const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId);
+  const personIds = new Set(individuals.map((row) => row.id));
+  const siteIds = new Set(sites.map((row) => row.id));
+  const memberships = store.db.memberships.filter((row) => row.agencyId === session.agencyId &&
+    (isAgencyWideViewer(session) || row.userId === session.userId || (row.siteId && siteIds.has(row.siteId))));
   const allRequirements = store.db.requirements.filter(
-    (row) => row.agencyId === session.agencyId,
+    (row) => row.agencyId === session.agencyId && canViewPeople &&
+      (row.individualId ? personIds.has(row.individualId) : siteIds.has(row.siteId)),
   );
-  const scorecard = metrics(allRequirements.map((row) => mapRequirement(store, row)));
+  const scorecard = metrics((session.roleKey === "hr"
+    ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)
+    : allRequirements).map((row) => mapRequirement(store, row)));
   const requirements = canViewPeople ? allRequirements : [];
   const versions = canViewPeople
-    ? store.db.versions.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.versions.filter((row) => row.agencyId === session.agencyId && hasPermission(session, "documents.view") &&
+        store.db.documents.some((doc) => doc.id === row.documentId && personIds.has(doc.individualId)))
     : [];
   const packets = canViewPeople
-    ? store.db.packets.filter((row) => row.agencyId === session.agencyId)
+    ? store.db.packets.filter((row) => row.agencyId === session.agencyId && personIds.has(row.individualId))
     : [];
   const audit = canReadAudit
     ? store.db.audit.filter((row) => row.agencyId === session.agencyId)
@@ -2212,20 +2277,20 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     roles: rolesFor(store, session.agencyId),
     scorecard,
     monthly: {
-      equipment: store.db.adaptiveEquipment.filter((row) => row.agencyId === session.agencyId),
+      equipment: store.db.adaptiveEquipment.filter((row) => row.agencyId === session.agencyId && personIds.has(row.individualId)),
       equipmentLogs: store.db.equipmentMonthLogs.filter((log) =>
         store.db.adaptiveEquipment.some(
-          (item) => item.id === log.equipmentId && item.agencyId === session.agencyId,
+          (item) => item.id === log.equipmentId && item.agencyId === session.agencyId && personIds.has(item.individualId),
         ),
       ),
-      drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId),
-      safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId),
+      drills: store.db.emergencyDrills.filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId)),
+      safetyReports: store.db.homeSafetyReports.filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId)),
     },
     monthlyDue: normalizeMonthlyDue(
       store.db.agencies.find((row) => row.id === session.agencyId)?.monthlyDue,
     ),
     siteReviews: (store.db.siteReviews ?? [])
-      .filter((row) => row.agencyId === session.agencyId)
+      .filter((row) => row.agencyId === session.agencyId && siteIds.has(row.siteId))
       .map((row) => normalizeSiteReview(applyWellWaterDefault(row, siteFactsFrom(
         sites.find((site) => site.id === row.siteId) ?? {
           id: row.siteId,
@@ -2241,6 +2306,32 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
 
 export class LocalApi implements ComplyraApi {
   constructor(private store: MemoryStore = browserStore) {}
+
+  async listNotifications() {
+    const session = assertSession(this.store);
+    return (this.store.db.notifications ?? []).filter((row) => row.agencyId === session.agencyId &&
+      (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
+      .map((row) => ({
+        id: row.id, agency_id: row.agencyId, user_id: row.userId, role_key: row.roleKey,
+        type: row.type as import("../features/notifications/notify").NotificationType,
+        title: row.title, body: row.body, deep_link: row.deepLink, entity_type: row.entityType,
+        entity_id: row.entityId, dedupe_key: row.dedupeKey, created_at: row.createdAt,
+        read_at: row.userId ? row.readAt : this.store.db.notificationReads?.[`${session.userId}:${row.id}`] ?? null,
+      })).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100);
+  }
+
+  async markNotificationsRead(ids: string[]) {
+    const session = assertSession(this.store);
+    const visible = new Set((await this.listNotifications()).map((row) => row.id));
+    const now = new Date().toISOString();
+    this.store.db.notificationReads ??= {};
+    for (const row of this.store.db.notifications ?? []) {
+      if (!ids.includes(row.id) || !visible.has(row.id)) continue;
+      if (row.userId === session.userId) row.readAt ??= now;
+      else this.store.db.notificationReads[`${session.userId}:${row.id}`] ??= now;
+    }
+    await persistMeta(this.store);
+  }
 
   async getSession() {
     await hydrate();
@@ -2271,7 +2362,7 @@ export class LocalApi implements ComplyraApi {
     const membership = this.store.db.memberships.find(
       (row) => row.userId === profile.id && row.agencyId === agency.id,
     );
-    if (!membership) {
+    if (!membership || (membership.expiresOn && membership.expiresOn < todayIso())) {
       throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
     this.store.sessionUserId = credential.userId;
@@ -2595,6 +2686,11 @@ export class LocalApi implements ComplyraApi {
 
   async loadWorkspace(session: SessionUser) {
     await hydrate();
+    const active = assertSession(this.store);
+    if (active.userId !== session.userId || active.agencyId !== session.agencyId) {
+      throw new Error("Sign in to this workspace to continue.");
+    }
+    session = active;
     seedDemoLogoPath(this.store);
     const view = toWorkspace(this.store, session);
     view.branding = {
@@ -2606,11 +2702,14 @@ export class LocalApi implements ComplyraApi {
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = assertSession(this.store);
     assertCan(session, "documents.upload");
-    const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
-    if (!individual) throw new Error("Individual not found.");
+    const individual = accessibleIndividual(this.store, session, input.individualId);
+    if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
+    assertCalendarDate(input.dueOn, "Use a valid due date.");
+    if (!Number.isInteger(input.sourcePage) || input.sourcePage < 1) throw new Error("Source page must be a positive whole number.");
+    assertRequirementOwner(this.store, session, input.ownerUserId);
     const version = this.store.db.versions.find((v) => {
       const document = this.store.db.documents.find((d) => d.id === v.documentId);
-      return `${document?.title} · ${v.versionLabel}` === input.source;
+      return document?.individualId === individual.id && v.agencyId === session.agencyId && `${document?.title} · ${v.versionLabel}` === input.source;
     });
     this.store.db.requirements.unshift({
       id: `REQ-${crypto.randomUUID().slice(0, 8)}`,
@@ -2618,7 +2717,7 @@ export class LocalApi implements ComplyraApi {
       documentVersionId: version?.id ?? null,
       individualId: individual.id,
       siteId: individual.siteId,
-      title: input.title,
+      title: input.title.trim(),
       category: input.category,
       ownerUserId: input.ownerUserId,
       dueOn: input.dueOn,
@@ -2640,7 +2739,7 @@ export class LocalApi implements ComplyraApi {
   async approveRequirement(id: string) {
     const session = assertSession(this.store);
     assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item || item.status !== "Pending review") {
       throw new Error("Only draft requirements can be approved.");
     }
@@ -2677,14 +2776,13 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     assertCan(session, "requirements.complete");
     if (!evidence.trim()) throw new Error("A completion record is required.");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item) throw new Error("Requirement not found.");
     if (item.status === "Pending review") {
       throw new Error("Approve this requirement before recording completion.");
     }
     if (
       session.role === "dsp" &&
-      item.ownerUserId &&
       item.ownerUserId !== session.userId
     ) {
       throw new Error("You can only complete requirements assigned to you.");
@@ -2704,12 +2802,7 @@ export class LocalApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    const session = assertSession(this.store);
-    assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
-    if (!item) throw new Error("Requirement not found.");
-    item.ownerUserId = ownerUserId;
-    await persistMeta(this.store);
+    await this.updateRequirement(id, { ownerUserId });
   }
 
   async updateRequirement(
@@ -2723,8 +2816,12 @@ export class LocalApi implements ComplyraApi {
   ) {
     const session = assertSession(this.store);
     assertCan(session, "requirements.approve");
-    const item = this.store.db.requirements.find((r) => r.id === id);
+    const item = accessibleRequirement(this.store, session, id);
     if (!item) throw new Error("Requirement not found.");
+    // Validate the entire edit before changing the stored record.
+    if (patch.title !== undefined && !patch.title.trim()) throw new Error("Enter a title for the requirement.");
+    if (patch.dueOn !== undefined) assertCalendarDate(patch.dueOn, "Use a valid due date.");
+    if (patch.ownerUserId !== undefined) assertRequirementOwner(this.store, session, patch.ownerUserId);
     const changes: string[] = [];
     if (patch.title !== undefined) {
       const title = patch.title.trim();
@@ -2777,6 +2874,7 @@ export class LocalApi implements ComplyraApi {
     }
     const individual = this.store.db.individuals.find((p) => p.id === input.individualId);
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     const title = input.title || `${individual.fullName} · PCSP 2026`;
     let document = this.store.db.documents.find(
       (d) => d.individualId === individual.id && d.title === title,
@@ -2853,8 +2951,14 @@ export class LocalApi implements ComplyraApi {
   }
 
   async getDocumentFile(versionId: string) {
+    const session = assertSession(this.store);
+    assertCan(session, "documents.view");
     const version = this.store.db.versions.find((v) => v.id === versionId);
-    if (!version?.storagePath) return null;
+    if (!version) return null;
+    const document = this.store.db.documents.find((row) => row.id === version.documentId);
+    if (!document) return null;
+    accessibleIndividual(this.store, session, document.individualId);
+    if (!version.storagePath) return null;
     return readFile(version.storagePath);
   }
 
@@ -2863,6 +2967,7 @@ export class LocalApi implements ComplyraApi {
     assertPrivileged(session);
     const individual = this.store.db.individuals.find((p) => p.id === individualId);
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     this.store.db.assignments.push({
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -2988,6 +3093,7 @@ export class LocalApi implements ComplyraApi {
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     person.profile = normalizeProfile(person, profile);
     if (profile.legalName.trim()) person.fullName = profile.legalName.trim();
     await persistMeta(this.store);
@@ -3000,6 +3106,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     const item = this.store.db.obligations.find((row) => row.id === obligationId);
     if (!item) throw new Error("Item not found.");
+    accessibleIndividual(this.store, session, item.individualId);
     const turningOnDelegation = item.kind === "delegation" && patch.enabled === true;
     const turningOffDelegation = item.kind === "delegation" && patch.enabled === false;
     if (turningOffDelegation) {
@@ -3034,6 +3141,7 @@ export class LocalApi implements ComplyraApi {
     if (!title.trim()) throw new Error("Name the protocol.");
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     const item: ObligationItem = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -3065,6 +3173,7 @@ export class LocalApi implements ComplyraApi {
     }
     const item = this.store.db.obligations.find((row) => row.id === obligationId);
     if (!item) throw new Error("Item not found.");
+    accessibleIndividual(this.store, session, item.individualId);
     item.kind = "shift_task";
     item.mode = "required";
     item.enabled = true;
@@ -3141,6 +3250,7 @@ export class LocalApi implements ComplyraApi {
     if (!item || item.kind !== "delegation" || !item.enabled) {
       throw new Error("Turn the delegation on before the RN signs.");
     }
+    accessibleIndividual(this.store, session, item.individualId);
     if (item.rnSignedAt) throw new Error("Delegating RN already signed.");
     if (!signatureName.trim() || !signatureMark) {
       throw new Error("Type your legal name and add a signature mark.");
@@ -3182,6 +3292,7 @@ export class LocalApi implements ComplyraApi {
     }
     const renewal = this.store.db.clinicalRenewals.find((row) => row.id === input.renewalId);
     if (!renewal) throw new Error("Renewal not found.");
+    accessibleIndividual(this.store, session, renewal.individualId);
     const title =
       input.documentTitle.trim() ||
       input.file?.name ||
@@ -3278,6 +3389,7 @@ export class LocalApi implements ComplyraApi {
         (row) => row.id === checklist.individualId,
       );
       if (!person) return null;
+      accessibleIndividual(this.store, session, person.id);
       const site = this.store.db.sites.find((row) => row.id === person.siteId);
       // Collect actual initials per line from the sign-off records.
       const lineInitials: Record<string, string> = {};
@@ -3288,7 +3400,8 @@ export class LocalApi implements ComplyraApi {
           lineInitials[line.id] = signoff.initials.trim();
         }
       }
-      const pdf = buildTrainingChecklistPdf({
+      const { buildTrainingChecklistPdf, trainingFileName } = await import("../pdf/trainingChecklistPdf");
+    const pdf = buildTrainingChecklistPdf({
         agencyName: session.agencyName,
         individualName: person.fullName,
         siteName: site?.name ?? "",
@@ -3305,6 +3418,9 @@ export class LocalApi implements ComplyraApi {
       const version = this.store.db.versions.find((row) => row.id === input.id);
       if (!version) return null;
       const document = this.store.db.documents.find((row) => row.id === version.documentId);
+      assertCan(session, "documents.view");
+      if (!document) return null;
+      accessibleIndividual(this.store, session, document.individualId);
       const stored = version.storagePath ? await readFile(version.storagePath) : null;
       if (stored) {
         return {
@@ -3315,7 +3431,8 @@ export class LocalApi implements ComplyraApi {
       const person = document
         ? this.store.db.individuals.find((row) => row.id === document.individualId)
         : null;
-      const pdf = buildCarePlanPdf({
+      const { buildCarePlanPdf } = await import("../pdf/carePlanPdf");
+    const pdf = buildCarePlanPdf({
         agencyName: session.agencyName,
         individualName: person?.fullName ?? "Individual",
         title: document?.title ?? "Care plan",
@@ -3332,6 +3449,8 @@ export class LocalApi implements ComplyraApi {
     }
     const file = this.store.db.chartFiles.find((row) => row.id === input.id);
     if (!file) return null;
+    accessibleIndividual(this.store, session, file.individualId);
+    if (!canSeeRenewals(session.roleKey)) throw new Error("You cannot open clinical evidence.");
     const blob = await readFile(file.storagePath);
     if (!blob) return null;
     return { blob, name: file.name };
@@ -3349,13 +3468,15 @@ export class LocalApi implements ComplyraApi {
     }
     const med = this.store.db.medications.find((row) => row.id === input.medicationId);
     if (!med) throw new Error("Medication not found.");
-    if (input.remainingPills < 0) {
-      throw new Error("Remaining pills cannot be negative.");
+    accessibleIndividual(this.store, session, med.individualId);
+    if (!Number.isFinite(input.remainingPills) || input.remainingPills < 0) {
+      throw new Error("Enter a finite, nonnegative remaining pill count.");
     }
-    if (med.kind === "scheduled" && input.pillsPerDay <= 0) {
+    if (med.kind === "scheduled" && (!Number.isFinite(input.pillsPerDay) || input.pillsPerDay <= 0)) {
       throw new Error("Set pills per day for a scheduled medication.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     med.remainingPills = input.remainingPills;
     med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
     med.lastDeliveryOn = countedOn;
@@ -3388,7 +3509,9 @@ export class LocalApi implements ComplyraApi {
     if (!med || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
     }
-    if (pills <= 0) throw new Error("Enter how many pills were given.");
+    accessibleIndividual(this.store, session, med.individualId);
+    if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
+    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
     med.remainingPills = Math.max(0, med.remainingPills - pills);
     log(
       this.store,
@@ -4052,7 +4175,8 @@ export class LocalApi implements ComplyraApi {
     }
     const fullName = input.fullName.trim();
     if (!fullName) throw new Error("Enter the individual’s legal name.");
-    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    assertCalendarDate(input.dateOfBirth, "Enter a valid date of birth.");
+    if (input.dateOfBirth > todayIso()) throw new Error("Date of birth cannot be in the future.");
     const site = this.store.db.sites.find(
       (row) => row.id === input.siteId && row.agencyId === session.agencyId,
     );
@@ -4822,6 +4946,7 @@ export class LocalApi implements ComplyraApi {
     if (!item || item.kind !== "delegation" || item.agencyId !== session.agencyId) {
       throw new Error("Delegation not found.");
     }
+    accessibleIndividual(store, session, item.individualId);
     if (!item.delegationForm) item.delegationForm = blankDelegationForm();
     return item;
   }
@@ -4853,6 +4978,7 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === input.individualId && row.agencyId === session.agencyId,
     );
     if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
     if (!canAccessSite(session, person.siteId)) {
       throw new Error("Choose a person at a site you can manage.");
     }
@@ -5042,6 +5168,7 @@ export class LocalApi implements ComplyraApi {
     const item = this.delegationItem(this.store, session, input.obligationId);
     const person = this.store.db.individuals.find((row) => row.id === item.individualId);
     const site = this.store.db.sites.find((row) => row.id === person?.siteId);
+    const { buildDelegationPdf, delegationFileName } = await import("../pdf/delegationPdf");
     const pdf = buildDelegationPdf({
       agencyName: session.agencyName,
       individualName: person?.fullName ?? "Individual",
@@ -5234,6 +5361,195 @@ export class LocalApi implements ComplyraApi {
     if (!blob || blob.size === 0) throw new Error("The certificate file is missing.");
     return URL.createObjectURL(blob);
   }
+
+  // ===== AUDIT-READINESS IMPL (corrective actions) =====
+  // AUDIT-READINESS: corrective-action workflow (LocalApi, in-memory).
+  private correctiveActionsOf() {
+    return (this.store.db.correctiveActions ??= []);
+  }
+
+  private assertCorrectiveActionWrite(session: SessionUser) {
+    assertCan(session, "correctiveActions.manage");
+  }
+
+  private findCorrectiveAction(session: SessionUser, id: string) {
+    const action = this.correctiveActionsOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
+    );
+    if (!action) throw new Error("Corrective action not found.");
+    return action;
+  }
+
+  private assigneeName(session: SessionUser, userId: string | null): string | null {
+    if (!userId) return null;
+    const profile = this.store.db.profiles.find(
+      (row) => row.id === userId && row.homeAgencyId === session.agencyId,
+    );
+    return profile?.fullName ?? null;
+  }
+
+  async listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]> {
+    const session = assertSession(this.store);
+    const now = new Date();
+    let rows = this.correctiveActionsOf().filter(
+      (row) => row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
+    );
+    if (input?.assignedToUserId) {
+      rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
+    }
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveCorrectiveActionStatus(row, now) === input.status,
+      );
+    }
+    return sortCorrectiveActions(rows, now);
+  }
+
+  async addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const errors = validateCorrectiveActionInput(input);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const assigneeId = input.assignedToUserId ?? null;
+    if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+    const now = new Date().toISOString();
+    const action: CorrectiveAction = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      assignedToUserId: assigneeId,
+      assignedToName: this.assigneeName(session, assigneeId),
+      dueOn: input.dueOn?.trim() || null,
+      storedStatus: "open",
+      linkedRiskId: input.linkedRiskId ?? null,
+      linkedRiskSource: input.linkedRiskSource ?? null,
+      createdByUserId: session.userId,
+      createdAt: now,
+      resolvedAt: null,
+    };
+    this.correctiveActionsOf().unshift(action);
+    log(
+      this.store,
+      session,
+      "corrective_action.added",
+      `Corrective action "${action.title}" created${action.assignedToName ? `, assigned to ${action.assignedToName}` : ""}`,
+      "corrective_action",
+      action.id,
+    );
+    await persistMeta(this.store);
+    return action;
+  }
+
+  async updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const action = this.findCorrectiveAction(session, id);
+    if (input.title !== undefined) {
+      const errors = validateCorrectiveActionInput({
+        title: input.title,
+        dueOn: input.dueOn ?? action.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      action.title = input.title.trim();
+    }
+    if (input.dueOn !== undefined) {
+      const errors = validateCorrectiveActionInput({
+        title: action.title,
+        dueOn: input.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      action.dueOn = input.dueOn?.trim() || null;
+    }
+    if (input.description !== undefined) action.description = input.description?.trim() ?? "";
+    if (input.assignedToUserId !== undefined) {
+      if (input.assignedToUserId) this.requireAgencyProfile(session, input.assignedToUserId);
+      action.assignedToUserId = input.assignedToUserId;
+      action.assignedToName = this.assigneeName(session, input.assignedToUserId);
+    }
+    if (input.storedStatus !== undefined) action.storedStatus = input.storedStatus;
+    if (input.linkedRiskId !== undefined) action.linkedRiskId = input.linkedRiskId;
+    if (input.linkedRiskSource !== undefined)
+      action.linkedRiskSource = input.linkedRiskSource;
+    if (action.storedStatus === "resolved" && !action.resolvedAt) {
+      action.resolvedAt = new Date().toISOString();
+    } else if (action.storedStatus !== "resolved") {
+      action.resolvedAt = null;
+    }
+    log(
+      this.store,
+      session,
+      "corrective_action.updated",
+      `Corrective action "${action.title}" updated`,
+      "corrective_action",
+      action.id,
+    );
+    await persistMeta(this.store);
+    return action;
+  }
+
+  async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
+    return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+
+  // ===== AUDIT-READINESS IMPL (score snapshots) =====
+  private complianceSnapshotsOf() {
+    return (this.store.db.complianceSnapshots ??= []);
+  }
+
+  async saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const siteId = input.siteId ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = this.complianceSnapshotsOf();
+    // One snapshot per day per scope — replace today's if it exists.
+    const existing = rows.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.siteId === siteId &&
+        row.computedAt.slice(0, 10) === today,
+    );
+    const snapshot: ScoreSnapshot = {
+      id: existing?.id ?? crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId,
+      score: input.result.score,
+      band: input.result.band,
+      breakdown: input.result.breakdown,
+      factCount: input.result.factCount,
+      computedAt: new Date().toISOString(),
+    };
+    if (existing) {
+      rows.splice(rows.indexOf(existing), 1, snapshot);
+    } else {
+      rows.unshift(snapshot);
+    }
+    await persistMeta(this.store);
+    return snapshot;
+  }
+
+  async listComplianceSnapshots(
+    siteId?: string | null,
+    limit = 30,
+  ): Promise<ScoreSnapshot[]> {
+    const session = assertSession(this.store);
+    const scope = siteId ?? null;
+    return sortSnapshotsOldestFirst(
+      this.complianceSnapshotsOf().filter(
+        (row) => row.agencyId === session.agencyId && row.siteId === scope,
+      ),
+    ).slice(-Math.max(limit, 1));
+  }
   // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====
 
   /**
@@ -5362,7 +5678,7 @@ export class LocalApi implements ComplyraApi {
     const site = this.store.db.sites.find(
       (s) => s.id === input.siteId && s.agencyId === session.agencyId,
     );
-    if (!site) throw new Error("Home not found.");
+    if (!site || !canAccessSite(session, input.siteId)) throw new Error("Home not found.");
     const hmMembership = this.store.db.memberships.find(
       (m) =>
         m.agencyId === session.agencyId &&
@@ -5693,6 +6009,7 @@ export class LocalApi implements ComplyraApi {
     if (!med || med.agencyId !== session.agencyId) {
       throw new Error("Medication not found.");
     }
+    accessibleIndividual(this.store, session, med.individualId);
     return { session, med };
   }
 
@@ -5744,6 +6061,7 @@ export class LocalApi implements ComplyraApi {
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
     }
+    accessibleIndividual(this.store, session, person.id);
     const rows = this.p6rows();
     const today = todayIso();
     return this.store.db.medications
@@ -5806,7 +6124,8 @@ export class LocalApi implements ComplyraApi {
     if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
       throw new Error("Enter a non-zero correction.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const next = Math.max(
       0,
       Math.round((med.remainingPills + input.quantityDelta) * 100) / 100,
@@ -5930,7 +6249,7 @@ export class LocalApi implements ComplyraApi {
     const site = this.store.db.sites.find(
       (row) => row.id === siteId && row.agencyId === session.agencyId,
     );
-    if (!site) throw new Error("Home not found.");
+    if (!site || !canAccessSite(assertSession(this.store), siteId)) throw new Error("Home not found.");
     return site;
   }
 
@@ -5939,6 +6258,7 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id === tripId && row.agencyId === session.agencyId,
     );
     if (!trip) throw new Error("Mileage trip not found.");
+    this.siteOrThrow(session, trip.siteId);
     return trip;
   }
 
@@ -6078,9 +6398,12 @@ export class LocalApi implements ComplyraApi {
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
-  /** Local/demo path has no QA audits yet; the hosted path reads qa_audits. */
-  async listQaAuditHistory(_siteId: string): Promise<QaAuditSummary[]> {
-    return [];
+  async listQaAuditHistory(siteId: string): Promise<QaAuditSummary[]> {
+    return (await this.listQaAudits({ siteId })).map((audit) => ({
+      id: audit.id, year: audit.year, quarter: audit.quarter,
+      status: audit.status, auditorName: audit.auditorName ?? "",
+      signedAt: audit.signedAt, createdAt: audit.createdAt, scoreJson: audit.score,
+    }));
   }
 
   /** The log is one unbroken chain: a new trip's start must continue the latest end. */
@@ -7654,6 +7977,7 @@ export class LocalApi implements ComplyraApi {
     );
     if (!assignment) throw new Error("Delegation assignment not found.");
     assertDelegationSite(session, assignment.siteId);
+    accessibleIndividual(this.store, session, assignment.individualId);
     const material = db.delegationTrainingMaterials.find(
       (m) => m.assignmentId === assignment.id,
     );
@@ -7695,6 +8019,7 @@ export class LocalApi implements ComplyraApi {
       active: true,
     };
     this.store.db.delegationTemplates.push(template);
+    await persistMeta(this.store);
     return template;
   }
 
@@ -7716,6 +8041,7 @@ export class LocalApi implements ComplyraApi {
     if (patch.name !== undefined) template.name = patch.name;
     if (patch.category !== undefined) template.category = patch.category;
     if (patch.active !== undefined) template.active = patch.active;
+    await persistMeta(this.store);
     return template;
   }
 
@@ -7751,6 +8077,7 @@ export class LocalApi implements ComplyraApi {
       activatedBy: session.userId,
     };
     db.siteDelegationActivations.push(activation);
+    await persistMeta(this.store);
     return activation;
   }
 
@@ -7766,6 +8093,7 @@ export class LocalApi implements ComplyraApi {
     if (!activation) throw new Error("Delegation activation not found.");
     assertDelegationSite(session, activation.siteId);
     activation.status = "deactivated";
+    await persistMeta(this.store);
     return activation;
   }
 
@@ -7804,6 +8132,7 @@ export class LocalApi implements ComplyraApi {
       (p) => p.id === individualId && p.agencyId === session.agencyId,
     );
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     if (individual.siteId !== activation.siteId) {
       throw new Error(
         "That individual does not belong to the activation's site.",
@@ -7856,6 +8185,7 @@ export class LocalApi implements ComplyraApi {
         }),
       );
     }
+    await persistMeta(this.store);
     return assignment;
   }
 
@@ -7871,6 +8201,7 @@ export class LocalApi implements ComplyraApi {
     if (!assignment) throw new Error("Delegation assignment not found.");
     assertDelegationSite(session, assignment.siteId);
     assignment.status = "ended";
+    await persistMeta(this.store);
     return assignment;
   }
 
@@ -7885,7 +8216,8 @@ export class LocalApi implements ComplyraApi {
       if (a.agencyId !== session.agencyId) return false;
       if (filter?.siteId && a.siteId !== filter.siteId) return false;
       if (scope !== null && !scope.includes(a.siteId)) return false;
-      return true;
+      const person = this.store.db.individuals.find(p => p.id === a.individualId);
+      return !!person && canReadIndividual(session, person, this.store.db.assignments);
     });
   }
 
@@ -7914,6 +8246,7 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Only a draft or in-review material can be edited.");
     }
     material.draftContent = { ...draft, generatedMark: DIGITAL_RECORD_MARK };
+    await persistMeta(this.store);
     return material;
   }
 
@@ -7928,6 +8261,7 @@ export class LocalApi implements ComplyraApi {
     }
     material.status = "in_review";
     material.submittedAt = new Date().toISOString();
+    await persistMeta(this.store);
     return material;
   }
 
@@ -7975,6 +8309,7 @@ export class LocalApi implements ComplyraApi {
       "delegation_assignment",
       assignment.id,
     );
+    await persistMeta(this.store);
     return material;
   }
 
@@ -8009,6 +8344,7 @@ export class LocalApi implements ComplyraApi {
       db.delegationAcknowledgments.push(row);
     }
     if (!row.openedAt) row.openedAt = new Date().toISOString();
+    await persistMeta(this.store);
     return row;
   }
 
@@ -8061,6 +8397,7 @@ export class LocalApi implements ComplyraApi {
       "delegation_acknowledgment",
       row.id,
     );
+    await persistMeta(this.store);
     return row;
   }
 
@@ -8084,6 +8421,7 @@ export class LocalApi implements ComplyraApi {
     if (!mayView) {
       throw new Error("You do not have permission to do that.");
     }
+    accessibleIndividual(this.store, session, assignment.individualId);
     const material = db.delegationTrainingMaterials.find(
       (m) => m.assignmentId === assignment.id,
     );
@@ -8174,24 +8512,18 @@ export class LocalApi implements ComplyraApi {
         }
       }
     }
+    await persistMeta(this.store);
     return inserted;
   }
 
   // ================= QA audits (local) =================
 
   private qaSiteScope(session: SessionUser): string[] | null {
-    if (
-      session.role === "administrator" ||
-      session.role === "compliance_admin" ||
-      session.platformAdmin
-    ) {
-      return null;
-    }
-    if (session.siteId) return [session.siteId];
-    return null;
+    return isAgencyWideViewer(session) ? null : session.siteId ? [session.siteId] : [];
   }
 
   private assertQaSite(session: SessionUser, siteId: string): void {
+    this.siteOrThrow(session, siteId);
     const scope = this.qaSiteScope(session);
     if (scope !== null && !scope.includes(siteId)) {
       throw new Error("You do not have permission to do that.");
@@ -8330,6 +8662,7 @@ export class LocalApi implements ComplyraApi {
         agencyId: session.agencyId,
       });
     }
+    await persistMeta(this.store);
     return audit;
   }
 
@@ -8405,12 +8738,7 @@ export class LocalApi implements ComplyraApi {
       throw new Error("That audit is finalized — it can no longer be scored.");
     }
     const item = this.qaItemOrThrow(session, auditId, itemKey);
-    if (result === "no") {
-      // Blocking rule: when Complyrer's own records prove the item is
-      // present, a fail can never be recorded — QaBlockedError propagates.
-      const ctx = this.qaAutoContext(session, audit.siteId, audit.year, audit.quarter);
-      recheckQaItemForScoring(item, ctx);
-    }
+    if (result === "no") recheckQaItemForScoring(item, this.qaAutoContext(session, audit.siteId, audit.year, audit.quarter));
     const updated = scoreQaItemState(
       item,
       result,
@@ -8420,6 +8748,7 @@ export class LocalApi implements ComplyraApi {
     );
     Object.assign(this.qaItemOrThrow(session, auditId, itemKey), updated);
     audit.updatedAt = new Date().toISOString();
+    await persistMeta(this.store);
     return { ...updated };
   }
 
@@ -8447,7 +8776,7 @@ export class LocalApi implements ComplyraApi {
     }
     const now = new Date().toISOString();
     audit.status = "finalized";
-    audit.auditorSignatureName = signature.name.trim();
+    audit.auditorSignatureName = session.fullName;
     audit.auditorSignatureMark = signature.mark.trim();
     audit.signedAt = now;
     audit.score = scoreQaAudit(items);
@@ -8461,6 +8790,7 @@ export class LocalApi implements ComplyraApi {
       schedule.nextDue = nextQaDueDate(schedule.nextDue);
       schedule.updatedAt = now;
     }
+    await persistMeta(this.store);
     return audit;
   }
 
@@ -8483,19 +8813,18 @@ export class LocalApi implements ComplyraApi {
     Object.assign(this.qaItemOrThrow(session, auditId, itemKey), updated);
     audit.updatedAt = new Date().toISOString();
     // Notify auditors at the agency that a dispute needs review.
-    const disputeSiteName = siteName(this.store, audit.siteId);
-    const raiserName = updated.disputeRaisedByName ?? "Staff";
     this.queueDelegationNotification({
       agencyId: session.agencyId,
       roleKey: "auditor",
       type: "qa.dispute_raised",
-      title: `QA dispute raised — ${disputeSiteName}`,
-      body: `${raiserName} disputed "${this.qaItemLabel(updated.itemId)}"${updated.disputeNote ? `: ${updated.disputeNote}` : ""}.`,
+      title: "QA finding disputed",
+      body: `${updated.individualName ? `${updated.individualName} — ` : ""}${this.qaItemLabel(updated.itemId)} was disputed with photo evidence.`,
       deepLink: `/qa-audits/${auditId}`,
       entityType: "qa_audit",
       entityId: auditId,
-      dedupeKey: `qa.dispute_raised:${auditId}:${itemKey}`,
+      dedupeKey: `qa-dispute-${auditId}-${itemKey}-${updated.disputeRaisedAt}`,
     });
+    await persistMeta(this.store);
     return { ...updated };
   }
 
@@ -8528,20 +8857,14 @@ export class LocalApi implements ComplyraApi {
       audit.score = scoreQaAudit(items);
     }
     audit.updatedAt = new Date().toISOString();
-    // Notify the raiser that the auditor ruled on their dispute.
-    const resolveSiteName = siteName(this.store, audit.siteId);
-    const verdict = approved ? "upheld" : "overturned";
-    this.queueDelegationNotification({
-      agencyId: session.agencyId,
-      userId: updated.disputeRaisedBy ?? null,
-      type: "qa.dispute_resolved",
-      title: `QA dispute resolved — ${resolveSiteName}`,
-      body: `Your dispute on "${this.qaItemLabel(updated.itemId)}" was ${verdict} by ${session.fullName || "the auditor"}: ${reason}.`,
-      deepLink: `/qa-audits/${auditId}`,
-      entityType: "qa_audit",
-      entityId: auditId,
-      dedupeKey: `qa.dispute_resolved:${auditId}:${itemKey}`,
+    if (updated.disputeRaisedBy) this.queueDelegationNotification({
+      agencyId: session.agencyId, userId: updated.disputeRaisedBy,
+      type: "qa.dispute_resolved", title: "QA dispute resolved",
+      body: `${this.qaItemLabel(updated.itemId)}: ${approved ? "dispute accepted" : "dispute rejected"}. ${reason}`,
+      deepLink: `/qa-audits/${auditId}`, entityType: "qa_audit", entityId: auditId,
+      dedupeKey: `qa.dispute_resolved:${auditId}:${itemKey}:${audit.updatedAt}`,
     });
+    await persistMeta(this.store);
     return { ...updated };
   }
 
@@ -8584,6 +8907,7 @@ export class LocalApi implements ComplyraApi {
       existing.assignedAuditorName = input.assignedAuditorName ?? null;
       existing.active = true;
       existing.updatedAt = now;
+      await persistMeta(this.store);
       return existing;
     }
     const schedule: StoredQaAuditSchedule = {
@@ -8598,6 +8922,7 @@ export class LocalApi implements ComplyraApi {
       updatedAt: now,
     };
     db.qaSchedules.push(schedule);
+    await persistMeta(this.store);
     return schedule;
   }
 
@@ -8637,6 +8962,7 @@ export class LocalApi implements ComplyraApi {
       });
       if (ok) queued += 1;
     }
+    await persistMeta(this.store);
     return queued;
   }
 
@@ -8698,6 +9024,13 @@ export class LocalApi implements ComplyraApi {
       .sort((a, b) => b.year - a.year || b.quarter - a.quarter);
   }
 
+  private assertExtractionAccess(session: SessionUser, extractionId: string): void {
+    const extraction = this.store.db.documentExtractions.find(e => e.id === extractionId && e.agencyId === session.agencyId);
+    const upload = extraction && this.store.db.documentUploads.find(u => u.id === extraction.uploadId && u.agencyId === session.agencyId);
+    if (!upload) throw new Error("Upload not found.");
+    accessibleIndividual(this.store, session, upload.individualId);
+  }
+
   // ================= PCSP document-extraction pipeline (local demo) =================
 
   async registerDocumentUpload(input: {
@@ -8720,6 +9053,7 @@ export class LocalApi implements ComplyraApi {
       (p) => p.id === input.individualId && p.agencyId === session.agencyId,
     );
     if (!individual) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, individual.id);
     const site = input.siteId
       ? db.sites.find(
           (s) => s.id === input.siteId && s.agencyId === session.agencyId,
@@ -8728,6 +9062,7 @@ export class LocalApi implements ComplyraApi {
           (s) => s.id === individual.siteId && s.agencyId === session.agencyId,
         );
     if (!site) throw new Error("Site not found.");
+    if (site.id !== individual.siteId) throw new Error("The individual does not belong to this site.");
     if (!input.originalFilename.trim()) throw new Error("A filename is required.");
     const now = new Date().toISOString();
     const upload: DocumentUpload = {
@@ -8738,7 +9073,7 @@ export class LocalApi implements ComplyraApi {
       documentType: input.documentType,
       originalFilename: input.originalFilename.trim(),
       mimeType: input.mimeType ?? "application/pdf",
-      storagePath: `${session.agencyId}/${input.siteId}/${input.originalFilename.trim()}`,
+      storagePath: `${session.agencyId}/${site.id}/${crypto.randomUUID()}/${input.originalFilename.trim()}`,
       uploadedBy: session.userId,
       uploadedAt: now,
       status: "uploaded",
@@ -8754,6 +9089,7 @@ export class LocalApi implements ComplyraApi {
         filename: upload.originalFilename,
       },
     });
+    await persistMeta(this.store);
     return upload;
   }
 
@@ -8767,6 +9103,8 @@ export class LocalApi implements ComplyraApi {
     const isReviewer = hasPermission(session, "documents.review");
     return db.documentUploads.filter((u) => {
       if (u.agencyId !== session.agencyId) return false;
+      const person = db.individuals.find(p => p.id === u.individualId);
+      if (!person || !canReadIndividual(session, person, db.assignments)) return false;
       if (filter?.individualId && u.individualId !== filter.individualId) return false;
       if (filter?.status && u.status !== filter.status) return false;
       if (isReviewer) return true;
@@ -8792,6 +9130,7 @@ export class LocalApi implements ComplyraApi {
       (u) => u.id === uploadId && u.agencyId === session.agencyId,
     );
     if (!upload) throw new Error("Upload not found.");
+    accessibleIndividual(this.store, session, upload.individualId);
     const extraction = db.documentExtractions.find(
       (e) => e.uploadId === uploadId,
     );
@@ -8814,6 +9153,7 @@ export class LocalApi implements ComplyraApi {
       (u) => u.id === uploadId && u.agencyId === session.agencyId,
     );
     if (!upload) throw new Error("Upload not found.");
+    accessibleIndividual(this.store, session, upload.individualId);
     const existing = db.documentExtractions.find((e) => e.uploadId === uploadId);
     if (existing) {
       const items = db.documentTrackableItems.filter(
@@ -8881,6 +9221,7 @@ export class LocalApi implements ComplyraApi {
         dedupeKey: `document.extraction_ready:${upload.id}:${userId}`,
       });
     }
+    await persistMeta(this.store);
     return { extraction, items };
   }
 
@@ -8913,9 +9254,11 @@ export class LocalApi implements ComplyraApi {
       (i) => i.id === itemId && i.agencyId === session.agencyId,
     );
     if (!item) throw new Error("Trackable item not found.");
+    this.assertExtractionAccess(session, item.extractionId);
     if (item.status !== "proposed" && item.status !== "edited") {
       throw new Error("Only proposed or edited items can be edited.");
     }
+    if (patch.dueDate) assertCalendarDate(patch.dueDate, "Use a valid due date.");
     if (!patch.title.trim()) throw new Error("A title is required.");
     item.title = patch.title.trim();
     item.detail = patch.detail ?? {};
@@ -8932,6 +9275,7 @@ export class LocalApi implements ComplyraApi {
       action: "item_edited",
       detail: { item_id: itemId, title: item.title },
     });
+    await persistMeta(this.store);
     return item;
   }
 
@@ -8944,6 +9288,7 @@ export class LocalApi implements ComplyraApi {
       (u) => u.id === uploadId && u.agencyId === session.agencyId,
     );
     if (!upload) throw new Error("Upload not found.");
+    accessibleIndividual(this.store, session, upload.individualId);
     if (upload.status !== "extracted" && upload.status !== "in_review") {
       throw new Error("Only extracted or in-review uploads can be approved.");
     }
@@ -8994,6 +9339,7 @@ export class LocalApi implements ComplyraApi {
         dedupeKey: `document.extraction_approved:${upload.id}:${userId}`,
       });
     }
+    await persistMeta(this.store);
   }
 
   async activateTrackableItem(itemId: string): Promise<TrackableItem> {
@@ -9006,6 +9352,7 @@ export class LocalApi implements ComplyraApi {
       (i) => i.id === itemId && i.agencyId === session.agencyId,
     );
     if (!item) throw new Error("Trackable item not found.");
+    this.assertExtractionAccess(session, item.extractionId);
     if (!canTransitionTrackableItem(item.status, "activated")) {
       throw new Error("Only approved items can be activated.");
     }
@@ -9176,6 +9523,7 @@ export class LocalApi implements ComplyraApi {
         });
       }
     }
+    await persistMeta(this.store);
     return item;
   }
 
@@ -9188,6 +9536,7 @@ export class LocalApi implements ComplyraApi {
       (u) => u.id === uploadId && u.agencyId === session.agencyId,
     );
     if (!upload) throw new Error("Upload not found.");
+    accessibleIndividual(this.store, session, upload.individualId);
     if (!canTransitionUpload(upload.status, "rejected")) {
       throw new Error("This upload can no longer be rejected.");
     }
@@ -9199,6 +9548,7 @@ export class LocalApi implements ComplyraApi {
       action: "upload_rejected",
       detail: { reason: reason ?? "" },
     });
+    await persistMeta(this.store);
   }
 
   async getAgencyAiSettings(): Promise<LocalAgencyAiSettings> {
@@ -9250,6 +9600,7 @@ export class LocalApi implements ComplyraApi {
       action: "ai_settings_changed",
       detail: { enabled: input.enabled, model: row.model },
     });
+    await persistMeta(this.store);
     return row;
   }
 
@@ -9278,6 +9629,7 @@ export class LocalApi implements ComplyraApi {
     }
     row.serviceAccountVerifiedAt = new Date().toISOString();
     row.vertexProjectId = "demo-project";
+    await persistMeta(this.store);
     return { ok: true, projectId: "demo-project" };
   }
 
@@ -9297,6 +9649,8 @@ export class LocalApi implements ComplyraApi {
       (e) => e.id === input.extractionId && e.agencyId === session.agencyId,
     );
     if (!extraction) throw new Error("Extraction not found.");
+    this.assertExtractionAccess(session, extraction.id);
+    if (input.dueDate) assertCalendarDate(input.dueDate, "Use a valid due date.");
     if (!input.title.trim()) throw new Error("A title is required.");
     const item: TrackableItem = {
       id: crypto.randomUUID(),
@@ -9318,6 +9672,7 @@ export class LocalApi implements ComplyraApi {
       action: "item_added",
       detail: { item_id: item.id, title: item.title },
     });
+    await persistMeta(this.store);
     return item;
   }
 
@@ -9330,6 +9685,7 @@ export class LocalApi implements ComplyraApi {
       (i) => i.id === itemId && i.agencyId === session.agencyId,
     );
     if (!item) throw new Error("Trackable item not found.");
+    this.assertExtractionAccess(session, item.extractionId);
     if (item.status !== "proposed" && item.status !== "edited") {
       throw new Error("Only proposed or edited items can be removed.");
     }
@@ -9344,6 +9700,7 @@ export class LocalApi implements ComplyraApi {
       action: "item_removed",
       detail: { item_id: itemId },
     });
+    await persistMeta(this.store);
     return item;
   }
 }

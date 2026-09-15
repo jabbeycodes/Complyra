@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -41,6 +41,10 @@ import {
   ServerCog,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
+import NotificationBell from "./features/notifications/NotificationBell";
+import NotificationsPanel from "./features/notifications/NotificationsPanel";
+import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
+import { notificationPage } from "./features/notifications/notify";
 import {
   Avatar,
   Badge,
@@ -86,10 +90,11 @@ import {
 import StaffCompliancePage from "./features/training/StaffCompliancePage";
 // LIFEPATH-P3-IMPORT (delegation forms)
 import DelegationsPage from "./features/delegations/DelegationsPage";
-import QaAuditsPage from "./features/qa/QaAuditsPage";
+const QaAuditsPage = lazy(() => import("./features/qa/QaAuditsPage"));
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
+const CommandCenter = lazy(() => import("./components/CommandCenter"));
 import StaffCertificatesModal from "./features/certificates/StaffCertificatesModal";
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage";
@@ -152,6 +157,7 @@ export default function App() {
     usingHostedBackend,
   } = useData();
   const [page, setPage] = useState("Overview");
+  const notifications = useWorkspaceNotifications();
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -212,15 +218,16 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
-  // Demo mode: auto-start the guided tour on first demo sign-in per browser.
+  // Only the explicit demo action starts a tour; ordinary sign-in stays direct.
   useEffect(() => {
     if (!demoMode) return;
     try {
-      if (!window.localStorage.getItem(DEMO_TOUR_SEEN_KEY)) {
+      if (window.sessionStorage.getItem("complyrer-start-tour")) {
+        window.sessionStorage.removeItem("complyrer-start-tour");
         setTourOpen(true);
       }
     } catch {
-      setTourOpen(true);
+      /* The tour remains available from the demo banner. */
     }
   }, [demoMode]);
   function closeTour() {
@@ -266,10 +273,11 @@ export default function App() {
   }, [session, page]);
   useEffect(() => {
     const applyHash = () => {
-      const fromHash = decodeURIComponent(
-        window.location.hash.replace(/^#/, ""),
-      ).trim();
-      if (fromHash) setPage(fromHash);
+      try {
+        const fromHash = decodeURIComponent(window.location.hash.replace(/^#/, "")).trim();
+        const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash;
+        if (next) setPage(next);
+      } catch { /* Ignore malformed external links. */ }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -323,7 +331,7 @@ export default function App() {
             </div>
             <h1>Could not open the workspace</h1>
             <p role="alert">{error}</p>
-            <button className="button primary full" type="button" onClick={() => void refresh()}>
+            <button className="button primary full" type="button" onClick={() => void refresh().catch(() => {})}>
               <RotateCcw size={16} /> Try again
             </button>
             <div className="login-demo">
@@ -376,20 +384,6 @@ export default function App() {
   const visibleRequirements = data.requirements.filter((r) =>
     visibleSiteNames.has(r.site),
   );
-  // QA-AUDIT (2026-09-14): HMs may view other houses' compliance scores, so the
-  // Dashboard gets the agency-wide site list plus the agency-wide requirement
-  // and people counts its score cards and status mix compute from. Care
-  // records everywhere else stay locked to the HM's own house via
-  // `sites`/`individuals`/`visibleRequirements` — the Dashboard only uses
-  // `individuals` for per-site counts, never names.
-  const dashboardSites =
-    session.roleKey === "house_manager" ? workspace.sites : sites;
-  const dashboardScoreItems =
-    session.roleKey === "house_manager"
-      ? workspace.requirements
-      : visibleRequirements;
-  const dashboardPeople =
-    session.roleKey === "house_manager" ? workspace.individuals : individuals;
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -432,12 +426,14 @@ export default function App() {
       r.due <= auditTo,
   );
   function navigate(next: string, nextStatus = "All statuses") {
+    if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
     if (next !== "Site detail") setDetailSiteId(null);
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
     setMobileOpen(false);
+    window.history.replaceState(null, "", `#${encodeURIComponent(next)}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function openPersonChart(name: string) {
@@ -614,7 +610,8 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
-        // QA-REVIEW-NAV (2026-09-14): quarterly site QA reviews with
+        ["Audit Me", ClipboardCheck],
+        // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
         // system-verified items, auditor scoring, and photo disputes.
         ["QA Review", BadgeCheck],
         ["Acknowledgments", PenLine],
@@ -825,27 +822,24 @@ export default function App() {
               )}
             </div>
             <span className="topbar-divider" />
-            <button
-              className="notification-button icon-button"
-              aria-label="View notifications"
-              onClick={() => setModal("notifications")}
-            >
-              <Bell size={19} />
-              {alertItems.length > 0 && <i />}
-            </button>
+            <NotificationBell unread={notifications.unread} onOpen={() => {
+              setModal("notifications");
+              void notifications.refresh();
+            }} />
             <Avatar name={session.fullName} color="peach" small />
           </div>
         </header>
         <main>
+          <Suspense fallback={<p role="status" className="loading-state">Loading workspace page…</p>}>
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
-              allItems={dashboardScoreItems}
+              allItems={visibleRequirements}
               scorecard={workspace.scorecard}
               activity={data.activity}
-              sites={dashboardSites}
+              sites={sites}
               siteReviews={workspace.siteReviews}
-              individuals={dashboardPeople}
+              individuals={individuals}
               site={site}
               personalItems={personalItems}
               onSite={setSite}
@@ -1601,6 +1595,7 @@ export default function App() {
                   </section>
                 </>
               )}
+              {page === "Audit Me" && <CommandCenter />}
               {page === "Acknowledgments" && (
                 <>
                   <PageHeading
@@ -1738,7 +1733,7 @@ export default function App() {
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {page === "AI settings" && <AiSettingsPage />}
-              {/* QA-REVIEW-PAGE (2026-09-14) */}
+              {/* QA-AUDIT-PAGE (2026-09-14) */}
               {page === "QA Review" && <QaAuditsPage />}
               {page === "Settings" && (
                 <>
@@ -1848,6 +1843,7 @@ export default function App() {
               {page === "Help" && <HelpPage />}
             </>
           )}
+          </Suspense>
         </main>
         <div className="demo-strip">
           <span className="demo-dot" /> INTERACTIVE PREVIEW{" "}
@@ -2011,14 +2007,19 @@ export default function App() {
               )}
               <button
                 className="button primary full"
-                onClick={() =>
+                onClick={() => {
+                  if (!evidence.trim()) {
+                    setFormError("A completion record is required.");
+                    return;
+                  }
+                  setFormError("");
                   setConfirm({
                     title: "Mark this requirement complete?",
                     body: `“${selected.title}” will be recorded as complete with the evidence entered above.`,
                     action: "Save completion",
                     run: finishRequirement,
-                  })
-                }
+                  });
+                }}
               >
                 <CheckCheck size={17} /> Save completion evidence
               </button>
@@ -2368,13 +2369,22 @@ export default function App() {
       )}
       {modal === "notifications" && (
         <Modal title="Your notifications" onClose={() => setModal(null)}>
-          <p className="form-help">
-            Sample activity and open priorities. Email reminders are not
-            connected.
-          </p>
-          {alertItems.length === 0 ? (
-            <Empty title="No notifications" />
-          ) : (
+          <NotificationsPanel {...notifications}
+            onMarkRead={(id) => void notifications.markRead(id)}
+            onMarkAllRead={() => void notifications.markAllAsRead()}
+            onRetry={() => void notifications.refresh()}
+            onClose={() => setModal(null)}
+            onNavigate={(link) => {
+              const target = notificationPage(link);
+              if (!target || !pageVisible(session, target)) {
+                notify("This notification's destination is unavailable for your current access.");
+                return;
+              }
+              setModal(null);
+              navigate(target);
+            }} />
+          {alertItems.length > 0 && <h3>Open priorities</h3>}
+          {alertItems.length > 0 && (
             alertItems.map((r) => (
               <button
                 key={r.id}

@@ -53,7 +53,7 @@ export function can(session: SessionUser, key: PermissionKey) {
 export function pageVisible(session: SessionUser, page: string) {
   // QA-AUDIT (2026-09-14): DSPs get no Overview dashboard.
   if (page === "Overview") return session.roleKey !== "dsp";
-  if (page === "Settings" || page === "Sites & programs") {
+  if (page === "Settings" || page === "Sites & programs" || page === "Help") {
     return true;
   }
   // Site detail is a drill-down, not a nav destination: always "visible" as a
@@ -78,7 +78,7 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   if (page === "Documents") return can(session, "documents.view");
   if (page === "Review queue") return can(session, "requirements.approve");
-  if (page === "Audit center") return can(session, "audit.read");
+  if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {
     return (
       can(session, "acknowledgments.manage") ||
@@ -121,6 +121,7 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Supply forecast") return can(session, "individuals.view");
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
+  if (page === "Mileage") return can(session, "mileage.manage");
   // PCSP-DOCUMENTS-PAGEVIS (AI document ingestion). `documents.review` is
   // owned by the backend workstream — referenced by string until merged.
   if (page === "Document upload") return can(session, "documents.upload");
@@ -137,7 +138,7 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "qa.schedule") ||
       can(session, "audit.read")
     );
-  return can(session, "individuals.view");
+  return ["PCSP acknowledgments", "Nursing delegations", "Equipment checks", "Behavior plan training", "Emergency drills", "Required forms"].includes(page) && can(session, "individuals.view");
 }
 
 /**
@@ -157,6 +158,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Documents",
   "Review queue",
   "Audit center",
+  "Audit Me",
   "Acknowledgments",
   "Activity log",
   "AI settings",

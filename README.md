@@ -46,11 +46,11 @@ Password for all sample accounts: `Evergreen!demo1`
 ### Hosted Supabase
 
 1. Create a Supabase project.
-2. Apply `supabase/migrations/20260911120000_complyra_foundation.sql`.
+2. Apply **all migrations in filename order** from `supabase/migrations` using the Supabase CLI. Applying only the foundation leaves most current features unavailable.
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 4. Create users in Auth and matching `memberships` rows. Do not load real PHI until Auth, RLS, private storage, and audit logging have been verified.
 
-The migration enables deny-by-default RLS, append-only `audit_events`, and a private `agency-documents` bucket. File paths are `{agency_id}/{individual_id}/{version_id}/source.pdf`.
+The migrations enable deny-by-default RLS, append-only `audit_events`, and a private `agency-documents` bucket. File paths are `{agency_id}/{individual_id}/{version_id}/source.pdf`.
 
 ## What this version does
 
@@ -69,7 +69,9 @@ Evergreen Care remains a fictional seed tenant.
 
 **Do not enter real individual, patient, or employee data** until a hosted project with Auth, RLS, private storage, and audit logging is verified. No HIPAA or regulatory compliance claim is made.
 
-Still production work: AI extraction with human approval, email/SMS escalations, smart forms, delegations as a full module, physician-order workflows, HR, and auditor invitations.
+The code includes human-reviewed document extraction, training, delegation forms, clinical renewals, HR certificates, medication inventory, mileage, quarterly QA audits, and Audit Me. Live AI providers, email delivery, scheduled jobs, private storage, backups, and operational monitoring still need deployment-specific verification. Audit scores describe connected records; they do not certify regulatory compliance.
+
+See [the platform audit report](docs/platform-audit.md) for verified workflows, repairs, and remaining limitations.
 
 See [the production design](docs/production-design.md) for implementation boundaries.
 
@@ -84,3 +86,17 @@ See [the production design](docs/production-design.md) for implementation bounda
 - `tests/workflows.spec.ts`: end-to-end browser checks.
 
 To restore the original fictional dataset in local mode, use **Settings → Reset sample workspace**.
+
+## Verify the hosted data path locally
+
+Requires Docker and the Supabase CLI. These commands use fictional data in a disposable local database. `db reset --local` clears that local database; never point the fixture scripts at production.
+
+```sh
+supabase start
+supabase db reset --local
+npm run test:db
+npm run seed:local
+npm run test:hosted
+```
+
+`npm test` discovers every test file under `src` and `supabase/functions`. Browser tests use a fixed date for fictional records and run on separate local ports. The hosted check exercises the real API and database, creates synthetic fixtures, and tests all nine standard roles plus concurrent medication updates.

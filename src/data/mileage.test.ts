@@ -223,7 +223,7 @@ async function dspClient() {
     password: DEMO_PASSWORD,
   });
   const site = store.db.sites.find(
-    (s) => s.agencyId === session.agencyId && s.name === "Maple House",
+    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Maple House"),
   )!;
   const people = store.db.individuals.filter(
     (p) => p.agencyId === session.agencyId && p.siteId === site.id,
@@ -241,7 +241,7 @@ async function clientAs(username: string) {
     password: DEMO_PASSWORD,
   });
   const site = store.db.sites.find(
-    (s) => s.agencyId === session.agencyId && s.name === "Maple House",
+    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Maple House"),
   )!;
   const people = store.db.individuals.filter(
     (p) => p.agencyId === session.agencyId && p.siteId === site.id,

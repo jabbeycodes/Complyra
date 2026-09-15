@@ -32,7 +32,7 @@ export default function DemoBanner({
   }
 
   return (
-    <div className="demo-banner" role="status">
+    <div className="demo-banner" role="note" aria-label="Demo workspace">
       <span className="demo-banner-text">
         <FlaskConical size={16} aria-hidden="true" />
         <span>

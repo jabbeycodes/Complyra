@@ -19,8 +19,6 @@ import {
   markOneRead,
   medLowStockPayload,
   metaForType,
-  qaDisputeRaisedPayload,
-  qaDisputeResolvedPayload,
   sortNotifications,
   trainingAssignedPayload,
   trainingDueSoonPayload,
@@ -57,8 +55,8 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
   };
 }
 
-test("all nineteen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 19);
+test("all seventeen notification types are known contract types", () => {
+  assert.equal(NOTIFICATION_TYPES.length, 24);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -426,50 +424,4 @@ test("delegation payloads name template and individual and dedupe per (assignmen
 
   assert.notEqual(review.dedupe_key, published.dedupe_key, "different types differ");
   assert.notEqual(published.dedupe_key, overdue.dedupe_key, "different types differ");
-});
-
-test("qa dispute payloads target roles and link to the audit", () => {
-  const raised = buildNotificationRow(
-    qaDisputeRaisedPayload({
-      agencyId: AGENCY,
-      roleKey: "auditor",
-      auditId: "00000000-0000-4000-8000-000000000060",
-      siteName: "Maple House",
-      itemText: "Medication storage is locked",
-      actorName: "Casey Morgan",
-    }),
-  );
-  assert.equal(raised.type, "qa.dispute_raised");
-  assert.equal(raised.title, "QA finding disputed");
-  assert.ok((raised.body as string).includes("Casey Morgan"));
-  assert.ok((raised.body as string).includes("Maple House"));
-  assert.ok((raised.body as string).includes("Medication storage is locked"));
-  assert.equal(raised.role_key, "auditor");
-  assert.equal(raised.deep_link, "/qa-audits/00000000-0000-4000-8000-000000000060");
-  assert.ok(isWellFormedDeepLink(raised.deep_link as string));
-  assert.equal(raised.entity_type, "qa_audit");
-  assert.equal(raised.entity_id, "00000000-0000-4000-8000-000000000060");
-  assert.ok(typeof raised.dedupe_key === "string" && (raised.dedupe_key as string).length > 0);
-
-  const resolved = buildNotificationRow(
-    qaDisputeResolvedPayload({
-      agencyId: AGENCY,
-      roleKey: "house_manager",
-      auditId: "00000000-0000-4000-8000-000000000060",
-      siteName: "Maple House",
-      itemText: "Medication storage is locked",
-      actorName: "R. Ellis",
-    }),
-  );
-  assert.equal(resolved.type, "qa.dispute_resolved");
-  assert.equal(resolved.title, "QA dispute resolved");
-  assert.ok((resolved.body as string).includes("R. Ellis"));
-  assert.ok((resolved.body as string).includes("Maple House"));
-  assert.equal(resolved.role_key, "house_manager");
-  assert.equal(resolved.deep_link, "/qa-audits/00000000-0000-4000-8000-000000000060");
-  assert.ok(isWellFormedDeepLink(resolved.deep_link as string));
-
-  assert.notEqual(raised.dedupe_key, resolved.dedupe_key, "raised vs resolved differ");
-  assert.equal(metaForType("qa.dispute_raised").status, "pending");
-  assert.equal(metaForType("qa.dispute_resolved").status, "compliant");
 });

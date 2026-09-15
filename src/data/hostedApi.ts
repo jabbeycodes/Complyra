@@ -1,3 +1,4 @@
+import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import type { Activity, Plan, Requirement } from "../domain";
@@ -77,6 +78,7 @@ import {
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
+import { assertCalendarDate } from "./access";
 import {
   assertAdoptableSignature,
   dataUrlToBlob,
@@ -176,6 +178,23 @@ import {
   validateCertificateDates,
   validateCertificateFile,
 } from "./certificates";
+// AUDIT-READINESS: corrective-action row mapping + validation.
+import {
+  buildCorrectiveActionRow,
+  correctiveActionFromRow,
+  deriveCorrectiveActionStatus,
+  sortCorrectiveActions,
+  validateCorrectiveActionInput,
+  type AddCorrectiveActionInput,
+  type CorrectiveAction,
+  type UpdateCorrectiveActionInput,
+} from "./correctiveActions";
+// AUDIT-READINESS: score snapshot rows for the trend chart.
+import {
+  buildScoreSnapshotRow,
+  type ComplianceScore,
+  type ScoreSnapshot,
+} from "./complianceScore";
 import {
   DEFAULT_MONTHLY_DUE,
   blankSafetyLines,
@@ -205,12 +224,10 @@ import {
 } from "./qaAuditApi";
 import {
   nextQaDueDate,
-  QA_ITEM_MAP,
   qaQuarterMonths,
   qaUndecidedItems,
   raiseQaDisputeState,
   rankQaSites,
-  recheckQaItemForScoring,
   resolveQaDisputeState,
   scoreQaAudit,
   scoreQaItemState,
@@ -252,9 +269,6 @@ import {
   weeklyChecklistPdfName,
   weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
-import { buildCarePlanPdf } from "../pdf/carePlanPdf";
-import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
-import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -391,6 +405,36 @@ export function edgeErrorFromBody(
 
 export class HostedApi implements ComplyraApi {
   constructor(private readonly client: SupabaseClient) {}
+
+  async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    const session = await this.requireSession();
+    const { data, error } = await this.client.from("notifications")
+      .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
+      .order("created_at", { ascending: false }).limit(100);
+    throwIf(error, "Could not load notifications.");
+    return (data ?? []).map((row) => ({ ...row,
+      read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
+    })) as import("../features/notifications/notify").NotificationRow[];
+  }
+
+  async markNotificationsRead(ids: string[]) {
+    const session = await this.requireSession();
+    const visible = (await this.listNotifications()).filter((row) => ids.includes(row.id) && !row.read_at);
+    const direct = visible.filter((row) => row.user_id === session.userId);
+    const broadcasts = visible.filter((row) => !row.user_id);
+    const now = new Date().toISOString();
+    if (direct.length) {
+      const { error } = await this.client.from("notifications").update({ read_at: now })
+        .eq("agency_id", session.agencyId).eq("user_id", session.userId).in("id", direct.map((row) => row.id));
+      throwIf(error, "Could not mark notifications read.");
+    }
+    if (broadcasts.length) {
+      const { error } = await this.client.from("notification_reads").upsert(broadcasts.map((row) => ({
+        notification_id: row.id, user_id: session.userId, read_at: now,
+      })), { onConflict: "notification_id,user_id", ignoreDuplicates: true });
+      throwIf(error, "Could not mark notifications read.");
+    }
+  }
 
   async getSession() {
     const { data } = await this.client.auth.getUser();
@@ -732,6 +776,7 @@ export class HostedApi implements ComplyraApi {
       packetsRes,
       rowsRes,
       auditRes,
+      scoreRes,
       rolesRes,
       indProfilesRes,
       obligationsRes,
@@ -912,17 +957,7 @@ export class HostedApi implements ComplyraApi {
           .split(" ")
           .map((part) => part[0])
           .join(""),
-        serviceType: "ISL",
-        staffed24h: false,
-        overnightSleepStaff: false,
-        wellWater: false,
-        lastWaterTestOn: "",
-        sitePhone: "",
-        contactName: "",
-        contactPhone: "",
-        city: "",
-        county: "",
-        zip: "",
+        ...normalizeSiteFacts(factsBySite.get(site.id)),
       })),
       individuals: individuals.map((person, i) => {
         const site = siteById[person.siteId];
@@ -984,7 +1019,7 @@ export class HostedApi implements ComplyraApi {
           owner: owner?.fullName ?? "Unassigned",
           role: roleLabel(asRole((ownerMembership?.role as string) ?? "dsp"), owner?.jobTitle),
           due: row.dueOn,
-          status: row.status,
+          status: row.status === "Compliant" || row.status === "Pending review" ? row.status : computeRequirementStatus(row.dueOn, row.category),
           source:
             document && version
               ? `${document.title} · ${version.versionLabel}`
@@ -1064,6 +1099,9 @@ export class HostedApi implements ComplyraApi {
   async createRequirementDraft(input: Parameters<ComplyraApi["createRequirementDraft"]>[0]) {
     const session = await this.requireSession();
     this.requirePermission(session, "documents.upload");
+    if (!input.title.trim()) throw new Error("Enter a title for the requirement.");
+    assertCalendarDate(input.dueOn, "Use a valid due date.");
+    if (!Number.isInteger(input.sourcePage) || input.sourcePage < 1) throw new Error("Source page must be a positive whole number.");
     const { data: individual, error: personError } = await this.client
       .from("individuals")
       .select("id, site_id, full_name")
@@ -1076,7 +1114,7 @@ export class HostedApi implements ComplyraApi {
       document_version_id: versionId,
       individual_id: individual!.id,
       site_id: individual!.site_id,
-      title: input.title,
+      title: input.title.trim(),
       category: input.category,
       owner_user_id: input.ownerUserId,
       due_on: input.dueOn,
@@ -1170,7 +1208,6 @@ export class HostedApi implements ComplyraApi {
     }
     if (
       session.role === "dsp" &&
-      item!.owner_user_id &&
       item!.owner_user_id !== session.userId
     ) {
       throw new Error("You can only complete requirements assigned to you.");
@@ -1195,13 +1232,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async reassignRequirement(id: string, ownerUserId: string) {
-    const session = await this.requireSession();
-    this.requirePermission(session, "requirements.approve");
-    const { error } = await this.client
-      .from("requirement_definitions")
-      .update({ owner_user_id: ownerUserId })
-      .eq("id", id);
-    throwIf(error, "Could not reassign that requirement.");
+    await this.updateRequirement(id, { ownerUserId });
   }
 
   async updateRequirement(
@@ -1232,9 +1263,7 @@ export class HostedApi implements ComplyraApi {
       }
     }
     if (patch.dueOn !== undefined) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.dueOn)) {
-        throw new Error("Use a valid due date.");
-      }
+      assertCalendarDate(patch.dueOn, "Use a valid due date.");
       if (patch.dueOn !== item!.due_on) {
         update.due_on = patch.dueOn;
         changes.push(`due ${item!.due_on} → ${patch.dueOn}`);
@@ -1957,7 +1986,8 @@ export class HostedApi implements ComplyraApi {
       }
       const person = await this.individualRecord(checklist.individualId);
       if (!person || person.agencyId !== session.agencyId) return null;
-      const pdf = buildTrainingChecklistPdf({
+      const { buildTrainingChecklistPdf, trainingFileName } = await import("../pdf/trainingChecklistPdf");
+    const pdf = buildTrainingChecklistPdf({
         agencyName: session.agencyName,
         individualName: person.fullName,
         siteName: await this.siteName(person.siteId),
@@ -1993,7 +2023,8 @@ export class HostedApi implements ComplyraApi {
       const person = document
         ? await this.individualRecord(document.individual_id as string)
         : null;
-      const pdf = buildCarePlanPdf({
+      const { buildCarePlanPdf } = await import("../pdf/carePlanPdf");
+    const pdf = buildCarePlanPdf({
         agencyName: session.agencyName,
         individualName: person?.fullName ?? "Individual",
         title: (document?.title as string) ?? "Care plan",
@@ -2041,40 +2072,20 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Medication not found.");
     const med = mapMedication(row!);
     if (med.agencyId !== session.agencyId) throw new Error("Medication not found.");
-    if (input.remainingPills < 0) {
-      throw new Error("Remaining pills cannot be negative.");
+    if (!Number.isFinite(input.remainingPills) || input.remainingPills < 0) {
+      throw new Error("Enter a finite, nonnegative remaining pill count.");
     }
-    if (med.kind === "scheduled" && input.pillsPerDay <= 0) {
+    if (med.kind === "scheduled" && (!Number.isFinite(input.pillsPerDay) || input.pillsPerDay <= 0)) {
       throw new Error("Set pills per day for a scheduled medication.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const nextPillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
-    const { error: updateError } = await this.client
-      .from("medications")
-      .update({
-        remaining_pills: input.remainingPills,
-        pills_per_day: nextPillsPerDay,
-        last_delivery_on: countedOn,
-        last_countdown_on: countedOn,
-      })
-      .eq("id", med.id);
-    throwIf(updateError, "Could not record the delivery.");
-    const { error: deliveryError } = await this.client.from("medication_deliveries").insert({
-      agency_id: session.agencyId,
-      medication_id: med.id,
-      counted_on: countedOn,
-      remaining_pills: input.remainingPills,
-      pills_per_day: nextPillsPerDay,
-      recorded_by: session.userId,
+    const { error: saveError } = await this.client.rpc("record_medication_delivery", {
+      p_medication_id: med.id, p_remaining: input.remainingPills,
+      p_daily: nextPillsPerDay, p_counted_on: countedOn,
     });
-    throwIf(deliveryError, "Delivery saved, but the count record could not be written.");
-    await this.audit(
-      session,
-      "medication.delivery",
-      `${session.fullName} counted ${med.name} at ${input.remainingPills} pills`,
-      "medication",
-      med.id,
-    );
+    throwIf(saveError, "Could not record the medication count.");
   }
 
   async logPrnDose(medicationId: string, pills = 1) {
@@ -2092,31 +2103,12 @@ export class HostedApi implements ComplyraApi {
     if (med.agencyId !== session.agencyId || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
     }
-    if (pills <= 0) throw new Error("Enter how many pills were given.");
-    const nextCount = Math.max(0, med.remainingPills - pills);
-    const { error: updateError } = await this.client
-      .from("medications")
-      .update({ remaining_pills: nextCount })
-      .eq("id", med.id);
-    throwIf(updateError, "Could not log the PRN dose.");
-    const { error: logError } = await this.client.from("prn_dose_logs").insert({
-      agency_id: session.agencyId,
-      medication_id: med.id,
-      logged_on: todayIso(),
-      logged_at: new Date().toISOString(),
-      pills_used: pills,
-      remaining_after: nextCount,
-      logged_by: session.fullName,
-      logged_by_user_id: session.userId,
+    if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
+    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    const { error: saveError } = await this.client.rpc("record_prn_dose", {
+      p_medication_id: med.id, p_pills: pills,
     });
-    throwIf(logError, "Dose counted down, but the PRN log could not be written.");
-    await this.audit(
-      session,
-      "medication.prn",
-      `${session.fullName} gave ${pills} ${med.name}`,
-      "medication",
-      med.id,
-    );
+    throwIf(saveError, "Could not record the PRN dose.");
   }
 
   // ---- Training ----
@@ -2879,7 +2871,8 @@ export class HostedApi implements ComplyraApi {
     }
     const fullName = input.fullName.trim();
     if (!fullName) throw new Error("Enter the individual’s legal name.");
-    if (!input.dateOfBirth) throw new Error("Enter a date of birth.");
+    assertCalendarDate(input.dateOfBirth, "Enter a valid date of birth.");
+    if (input.dateOfBirth > todayIso()) throw new Error("Date of birth cannot be in the future.");
     const site = await this.siteRecord(input.siteId);
     if (!site || site.agencyId !== session.agencyId) throw new Error("Choose a program site.");
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
@@ -4575,6 +4568,7 @@ export class HostedApi implements ComplyraApi {
     const person = await this.individualRecord(item.individualId);
     if (!person || person.agencyId !== session.agencyId) throw new Error("Delegation not found.");
     const logoDataUrl = await this.hostedLogoDataUrl(session.agencyId);
+    const { buildDelegationPdf, delegationFileName } = await import("../pdf/delegationPdf");
     const pdf = buildDelegationPdf({
       agencyName: session.agencyName,
       individualName: person.fullName,
@@ -5116,7 +5110,7 @@ export class HostedApi implements ComplyraApi {
         .eq("agency_id", agencyId)
         .eq("site_id", siteId)
         .gte("trip_date", `${months[0]}-01`)
-        .lte("trip_date", `${months[months.length - 1]}-31`),
+        .lt("trip_date", new Date(Date.UTC(year, quarter * 3, 1)).toISOString().slice(0, 10)),
       this.client
         .from("acknowledgment_packets")
         .select("id, individual_id, starts_on")
@@ -5235,27 +5229,6 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Could not load that QA audit item.");
     if (!data) throw new Error("QA audit item not found.");
     return data as Record<string, unknown>;
-  }
-
-  /** Site display name for QA notification titles. */
-  private async qaSiteName(session: SessionUser, siteId: string): Promise<string> {
-    const { data } = await this.client
-      .from("sites")
-      .select("name")
-      .eq("id", siteId)
-      .eq("agency_id", session.agencyId)
-      .maybeSingle();
-    const name = (data as Record<string, unknown> | null)?.name;
-    return typeof name === "string" && name.length > 0 ? name : "Unknown site";
-  }
-
-  /** Best-effort notify-event call: never fails the enclosing QA operation. */
-  private async qaNotifyQuietly(body: Record<string, unknown>): Promise<void> {
-    try {
-      await invokeEdgeFunction(this.client, "notify-event", body);
-    } catch (err) {
-      console.warn("QA notification failed:", err);
-    }
   }
 
   async createQaAudit(siteId: string, year: number, quarter: number): Promise<QaAudit> {
@@ -5386,13 +5359,8 @@ export class HostedApi implements ComplyraApi {
       throw new Error("That audit is finalized — it can no longer be scored.");
     }
     const row = await this.qaItemRowOrThrow(audit, itemKey);
-    if (result === "no") {
-      // Blocking rule: when Complyrer's own records prove the item is
-      // present, a fail can never be recorded — QaBlockedError propagates.
-      const ctx = await this.qaAutoContext(session, audit.siteId, audit.year, audit.quarter);
-      recheckQaItemForScoring(mapQaAuditItemRow(row), ctx);
-    }
     // Client-side precheck gives the clear error; RLS + state machine enforce it.
+    if (result === "no") recheckQaItemForScoring(mapQaAuditItemRow(row), await this.qaAutoContext(session, audit.siteId, audit.year, audit.quarter));
     const updated = scoreQaItemState(
       mapQaAuditItemRow(row),
       result,
@@ -5486,23 +5454,6 @@ export class HostedApi implements ComplyraApi {
       p_photos: photos,
     });
     throwIf(error, "Could not raise that dispute.");
-    // Notify auditors at the agency that a dispute needs review. Best
-    // effort: a notification failure never fails the dispute itself.
-    const disputeSiteName = await this.qaSiteName(session, audit.siteId);
-    const itemId = String(row.item_id);
-    const itemLabel = QA_ITEM_MAP[itemId]?.text ?? itemId;
-    const raiserName = session.fullName || "Staff";
-    await this.qaNotifyQuietly({
-      agency_id: session.agencyId,
-      role_key: "auditor",
-      type: "qa.dispute_raised",
-      title: `QA dispute raised — ${disputeSiteName}`,
-      body: `${raiserName} disputed "${itemLabel}"${note ? `: ${note}` : ""}.`,
-      deep_link: `/qa-audits/${auditId}`,
-      entity_type: "qa_audit",
-      entity_id: auditId,
-      dedupe_key: `qa.dispute_raised:${auditId}:${itemKey}`,
-    });
     return mapQaAuditItemRow(data as Record<string, unknown>);
   }
 
@@ -5533,22 +5484,6 @@ export class HostedApi implements ComplyraApi {
     if (audit.status === "finalized") {
       await this.qaRefreshFinalizedScore(audit);
     }
-    // Notify the raiser that the auditor ruled on their dispute. Best
-    // effort: a notification failure never fails the resolution itself.
-    const resolveSiteName = await this.qaSiteName(session, audit.siteId);
-    const resolveItemId = String(row.item_id);
-    const resolveItemLabel = QA_ITEM_MAP[resolveItemId]?.text ?? resolveItemId;
-    await this.qaNotifyQuietly({
-      agency_id: session.agencyId,
-      user_id: resolved.disputeRaisedBy ?? null,
-      type: "qa.dispute_resolved",
-      title: `QA dispute resolved — ${resolveSiteName}`,
-      body: `Your dispute on "${resolveItemLabel}" was ${approved ? "upheld" : "overturned"} by ${session.fullName || "the auditor"}: ${reason}.`,
-      deep_link: `/qa-audits/${auditId}`,
-      entity_type: "qa_audit",
-      entity_id: auditId,
-      dedupe_key: `qa.dispute_resolved:${auditId}:${itemKey}`,
-    });
     return resolved;
   }
 
@@ -6055,6 +5990,234 @@ export class HostedApi implements ComplyraApi {
       .createSignedUrl(cert.filePath, 300);
     throwIf(error, "Could not open the certificate file.");
     return data!.signedUrl;
+  }
+  // ===== AUDIT-READINESS HOSTED (corrective actions) =====
+  // AUDIT-READINESS: corrective-action workflow (HostedApi, Supabase).
+  // Table: public.corrective_actions (migration 20260914070000_audit_readiness.sql).
+
+  private requireCorrectiveActionWrite(session: SessionUser) {
+    this.requirePermission(session, "correctiveActions.manage");
+  }
+
+  private mapCorrectiveActionRow(row: Record<string, unknown>): CorrectiveAction {
+    const action = correctiveActionFromRow(row);
+    const profile = row.profiles as { full_name?: string } | null;
+    if (profile?.full_name) action.assignedToName = profile.full_name;
+    return action;
+  }
+
+  private async fetchCorrectiveActionRow(session: SessionUser, id: string) {
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the corrective action.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Corrective action not found.");
+    }
+    return data as Record<string, unknown>;
+  }
+
+  async listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]> {
+    const session = await this.requireSession();
+    const now = new Date();
+    let query = this.client
+      .from("corrective_actions")
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .eq("agency_id", session.agencyId);
+    if (input?.assignedToUserId) {
+      query = query.eq("assigned_to_user_id", input.assignedToUserId);
+    }
+    const { data, error } = await query;
+    throwIf(error, "Could not load corrective actions.");
+    let rows = (data ?? []).map((row) =>
+      this.mapCorrectiveActionRow(row as Record<string, unknown>),
+    );
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveCorrectiveActionStatus(row, now) === input.status,
+      );
+    }
+    return sortCorrectiveActions(rows, now);
+  }
+
+  async addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const errors = validateCorrectiveActionInput(input);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .insert(
+        buildCorrectiveActionRow({
+          agencyId: session.agencyId,
+          createdByUserId: session.userId,
+          data: input,
+        }),
+      )
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not save the corrective action.");
+    const action = this.mapCorrectiveActionRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "corrective_action.added",
+      `Corrective action "${action.title}" created${action.assignedToName ? `, assigned to ${action.assignedToName}` : ""}`,
+      "corrective_action",
+      action.id,
+    );
+    return action;
+  }
+
+  async updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const current = this.mapCorrectiveActionRow(await this.fetchCorrectiveActionRow(session, id));
+    const title = input.title?.trim() ?? current.title;
+    const dueOn = input.dueOn !== undefined ? input.dueOn?.trim() || null : current.dueOn;
+    const errors = validateCorrectiveActionInput({ title, dueOn });
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (input.assignedToUserId !== undefined && input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const patch: Record<string, unknown> = {};
+    if (input.title !== undefined) patch.title = title;
+    if (input.description !== undefined)
+      patch.description = input.description?.trim() ?? "";
+    if (input.assignedToUserId !== undefined)
+      patch.assigned_to_user_id = input.assignedToUserId;
+    if (input.dueOn !== undefined) patch.due_on = dueOn;
+    if (input.storedStatus !== undefined) patch.status = input.storedStatus;
+    if (input.linkedRiskId !== undefined) patch.linked_risk_id = input.linkedRiskId;
+    if (input.linkedRiskSource !== undefined)
+      patch.linked_risk_source = input.linkedRiskSource;
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .update(patch)
+      .eq("id", id)
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not update the corrective action.");
+    const updated = this.mapCorrectiveActionRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "corrective_action.updated",
+      `Corrective action "${updated.title}" updated`,
+      "corrective_action",
+      updated.id,
+    );
+    return updated;
+  }
+
+  async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
+    return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+  // ===== AUDIT-READINESS HOSTED (score snapshots) =====
+  // Table: public.compliance_score_snapshots
+  // (migration 20260914070000_audit_readiness.sql).
+
+  private mapScoreSnapshot(row: Record<string, unknown>): ScoreSnapshot {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: (row.site_id as string | null) ?? null,
+      score: row.score as number,
+      band: row.band as ScoreSnapshot["band"],
+      breakdown: (row.breakdown as ScoreSnapshot["breakdown"]) ?? {},
+      factCount: (row.fact_count as number) ?? 0,
+      computedAt: row.computed_at as string,
+    };
+  }
+
+  async saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const siteId = input.siteId ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    // One snapshot per day per scope — replace today's if it exists.
+    let existingQuery = this.client
+      .from("compliance_score_snapshots")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .gte("computed_at", `${today}T00:00:00`)
+      .lt("computed_at", `${today}T23:59:59.999`);
+    existingQuery = siteId
+      ? existingQuery.eq("site_id", siteId)
+      : existingQuery.is("site_id", null);
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    throwIf(existingError, "Could not check today's snapshot.");
+    const row = buildScoreSnapshotRow({
+      agencyId: session.agencyId,
+      siteId,
+      result: input.result,
+    });
+    let saved: Record<string, unknown>;
+    if (existing) {
+      const { data, error } = await this.client
+        .from("compliance_score_snapshots")
+        .update(row)
+        .eq("id", (existing as Record<string, unknown>).id)
+        .select("*")
+        .single();
+      throwIf(error, "Could not update today's snapshot.");
+      saved = data as Record<string, unknown>;
+    } else {
+      const { data, error } = await this.client
+        .from("compliance_score_snapshots")
+        .insert(row)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the snapshot.");
+      saved = data as Record<string, unknown>;
+    }
+    return this.mapScoreSnapshot(saved);
+  }
+
+  async listComplianceSnapshots(
+    siteId?: string | null,
+    limit = 30,
+  ): Promise<ScoreSnapshot[]> {
+    const session = await this.requireSession();
+    const scope = siteId ?? null;
+    let query = this.client
+      .from("compliance_score_snapshots")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("computed_at", { ascending: true })
+      .limit(Math.max(limit, 1));
+    query = scope ? query.eq("site_id", scope) : query.is("site_id", null);
+    const { data, error } = await query;
+    throwIf(error, "Could not load score snapshots.");
+    return (data ?? []).map((row) =>
+      this.mapScoreSnapshot(row as Record<string, unknown>),
+    );
   }
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
 
@@ -6795,7 +6958,8 @@ export class HostedApi implements ComplyraApi {
     if (!Number.isFinite(input.quantityDelta) || input.quantityDelta === 0) {
       throw new Error("Enter a non-zero correction.");
     }
-    const countedOn = (input.countedOn ?? todayIso()).slice(0, 10);
+    const countedOn = input.countedOn ?? todayIso();
+    assertCalendarDate(countedOn, "Use a valid count date.");
     const next =
       Math.max(0, Math.round((med.remainingPills + input.quantityDelta) * 100) / 100);
     const { error: updateError } = await this.client

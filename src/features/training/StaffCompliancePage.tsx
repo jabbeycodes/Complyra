@@ -12,6 +12,8 @@ import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
+import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
+import { hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -413,6 +415,7 @@ function ProfilePanel({
   onClose: () => void;
 }) {
   const { api, session } = useData();
+  const [showCertificates, setShowCertificates] = useState(false);
   const sessionAgencyName = session?.agencyName ?? "Agency";
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
     section,
@@ -817,13 +820,12 @@ function ProfilePanel({
         })}
       </ul>
 
-      {/* LIFEPATH-P4 extension point: certificate tracking UI plugs in here. */}
-      <section aria-label="Certificates (coming soon)">
+      {session && (hasPermission(session, "certificates.manage") || hasPermission(session, "hr.view_staff")) && <section aria-label="Certificates">
         <h3>Certificates</h3>
-        <p className="muted">
-          Certificate tracking (CPR, CPI, PBS, L1MA and others) arrives with the next build phase.
-        </p>
-      </section>
+        <button type="button" className="button" onClick={() => setShowCertificates(true)}>View certificates</button>
+        {showCertificates && <StaffCertificatesModal userId={profile.userId}
+          staffName={staffNames[profile.userId] ?? "Staff member"} onClose={() => setShowCertificates(false)} />}
+      </section>}
     </section>
   );
 }
@@ -1241,4 +1243,3 @@ function RequestCorrectionModal({
     </Modal>
   );
 }
-

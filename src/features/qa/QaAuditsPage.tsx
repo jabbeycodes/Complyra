@@ -12,7 +12,6 @@ import {
   type QaRankedSite,
 } from "../../data/qaAudit";
 import QaAuditDetail from "./QaAuditDetail";
-import type { QaApi } from "./qaApiShim";
 
 function currentQuarter(today = new Date()): { year: number; quarter: 1 | 2 | 3 | 4 } {
   const year = today.getUTCFullYear();
@@ -35,9 +34,6 @@ function TrendIcon({ trend }: { trend: number | null }) {
 
 export default function QaAuditsPage() {
   const { api, session, workspace, refresh } = useData();
-  // qaApiShim: QA method declarations the data workstream is porting onto
-  // ComplyraApi. Remove the cast once they land natively.
-  const qaApi = api as QaApi;
   const [tab, setTab] = useState<"audits" | "schedules" | "ranking">("audits");
   const [audits, setAudits] = useState<QaAudit[]>([]);
   const [schedules, setSchedules] = useState<QaAuditSchedule[]>([]);
@@ -48,7 +44,7 @@ export default function QaAuditsPage() {
   const [creating, setCreating] = useState(false);
   const [newSiteId, setNewSiteId] = useState("");
   const [newYear, setNewYear] = useState(String(new Date().getUTCFullYear()));
-  const [newQuarter, setNewQuarter] = useState("1");
+  const [newQuarter, setNewQuarter] = useState(String(currentQuarter().quarter));
   const [siteFilter, setSiteFilter] = useState("");
   // Schedule editing state
   const [editingSite, setEditingSite] = useState("");
@@ -68,9 +64,9 @@ export default function QaAuditsPage() {
     setError("");
     try {
       const [a, s, r] = await Promise.all([
-        qaApi.listQaAudits(siteFilter ? { siteId: siteFilter } : undefined),
-        qaApi.listQaSchedules(),
-        qaApi.getQaSiteRanking(),
+        api.listQaAudits(siteFilter ? { siteId: siteFilter } : undefined),
+        api.listQaSchedules(),
+        api.getQaSiteRanking(),
       ]);
       setAudits(a);
       setSchedules(s);
@@ -86,7 +82,7 @@ export default function QaAuditsPage() {
     void load();
     // QA-REVIEW: queue due/overdue reminders once per day on page entry.
     if (can(session!, "qa.schedule")) {
-      qaApi.sweepQaScheduleReminders().catch(() => {});
+      api.sweepQaScheduleReminders().catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteFilter]);
@@ -102,7 +98,7 @@ export default function QaAuditsPage() {
     setError("");
     setCreating(true);
     try {
-      const audit = await qaApi.createQaAudit(newSiteId, Number(newYear), Number(newQuarter) as 1 | 2 | 3 | 4);
+      const audit = await api.createQaAudit(newSiteId, Number(newYear), Number(newQuarter) as 1 | 2 | 3 | 4);
       await refresh();
       setOpenAudit(audit);
       await load();
@@ -116,7 +112,7 @@ export default function QaAuditsPage() {
   async function saveSchedule(siteId: string) {
     setError("");
     try {
-      await qaApi.upsertQaSchedule({
+      await api.upsertQaSchedule({
         siteId,
         nextDue: editDue,
         assignedAuditorId: editAuditor || null,
@@ -132,7 +128,7 @@ export default function QaAuditsPage() {
   async function sweepReminders() {
     setError("");
     try {
-      const n = await qaApi.sweepQaScheduleReminders();
+      const n = await api.sweepQaScheduleReminders();
       await load();
       setError(n === 0 ? "" : `${n} reminder${n === 1 ? "" : "s"} queued.`);
     } catch (err) {

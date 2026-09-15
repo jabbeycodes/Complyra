@@ -25,7 +25,7 @@ import {
   type QaPhotoInput,
 } from "../../data/qaAudit";
 import { buildQaAuditPdf, qaFileName } from "../../pdf/qaAuditPdf";
-import { asQaBlockedError, type QaApi } from "./qaApiShim";
+import { asQaBlockedError } from "./qaApiShim";
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -383,9 +383,6 @@ export default function QaAuditDetail({
   onChanged: (audit: QaAudit) => void;
 }) {
   const { api, session } = useData();
-  // qaApiShim: QA method declarations the data workstream is porting onto
-  // ComplyraApi. Remove the cast once they land natively.
-  const qaApi = api as QaApi;
   const [items, setItems] = useState<QaAuditItemState[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -412,7 +409,7 @@ export default function QaAuditDetail({
     setLoading(true);
     setError("");
     try {
-      setItems(await qaApi.getQaAuditItems(audit.id));
+      setItems(await api.getQaAuditItems(audit.id));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -459,7 +456,7 @@ export default function QaAuditDetail({
     setError("");
     setBusy(true);
     try {
-      await qaApi.scoreQaItem(audit.id, key, result, itemComment);
+      await api.scoreQaItem(audit.id, key, result, itemComment);
       await load();
     } catch (err) {
       const blockedErr = asQaBlockedError(err);
@@ -521,7 +518,7 @@ export default function QaAuditDetail({
 
       <div className="qa-score-summary">
         <div>
-          <span className="qa-score-label">Overall</span>
+          <span className="qa-score-label">{audit.status === "finalized" ? "Final score" : "Score so far"}</span>
           <strong>{score.pct === null ? "—" : `${score.pct}%`}</strong>
         </div>
         <div>
@@ -547,6 +544,10 @@ export default function QaAuditDetail({
           <strong>{undecided.length}</strong>
         </div>
       </div>
+
+      {!loading && audit.status !== "finalized" && (
+        <p className="muted">In progress: this score covers assessed items only. {undecided.length} item{undecided.length === 1 ? "" : "s"} still need a decision or dispute resolution.</p>
+      )}
 
       {loading ? (
         <Empty title="Loading audit…" text="Fetching the checklist items." />
@@ -592,10 +593,10 @@ export default function QaAuditDetail({
                         void handleScore(key, result, itemComment)
                       }
                       onDispute={(key, disputeNote, photos) =>
-                        void run(() => qaApi.raiseQaDispute(audit.id, key, disputeNote, photos))
+                        void run(() => api.raiseQaDispute(audit.id, key, disputeNote, photos))
                       }
                       onResolve={(key, approved, resolveReason) =>
-                        void run(() => qaApi.resolveQaDispute(audit.id, key, approved, resolveReason))
+                        void run(() => api.resolveQaDispute(audit.id, key, approved, resolveReason))
                       }
                     />
                   ))}
@@ -641,7 +642,7 @@ export default function QaAuditDetail({
                 disabled={busy || !sigName.trim() || !sigMark.trim()}
                 onClick={() =>
                   void run(() =>
-                    qaApi.finalizeQaAudit(audit.id, {
+                    api.finalizeQaAudit(audit.id, {
                       name: sigName.trim(),
                       mark: sigMark.trim(),
                     }),

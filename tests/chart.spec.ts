@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 async function signIn(
   page: Page,
@@ -8,7 +8,7 @@ async function signIn(
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
@@ -48,7 +48,7 @@ test("Jodie opens as a full chart with widgets, download, and med count", async 
     .click();
   expect((await download).suggestedFilename()).toMatch(/complyrer-care-plan-jodie-williams/);
 
-  const keppra = chart.locator(".med-card").filter({ hasText: "Levetiracetam" });
+  const keppra = chart.locator(".med-card").filter({ has: page.getByLabel("Pills remaining") }).filter({ hasText: "Levetiracetam" });
   await keppra.getByLabel("Pills remaining").fill("40");
   await keppra.getByLabel("Pills per day").fill("2");
   await keppra.getByRole("button", { name: "Record delivery count" }).click();
@@ -74,8 +74,8 @@ test("DSP sees meds and their training row, not annuals", async ({ page }) => {
   await expect(chart).toContainText("Alex Morgan");
   await expect(chart.getByRole("heading", { name: "In-home training checklist" }).first()).toBeVisible();
   const training = chart.locator(".training-card").first();
-  await expect(training.getByRole("button", { name: "Sign as staff" })).toBeDisabled();
+  await expect(training).toContainText("Check off every training item before you sign.");
   await training.getByRole("checkbox").first().check();
   await expect(training).toContainText("1/");
-  await expect(training.getByRole("button", { name: "Sign as staff" })).toBeDisabled();
+  await expect(training).toContainText("Check off every training item before you sign.");
 });

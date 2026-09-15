@@ -312,9 +312,7 @@ test("nurse, DPM/admin, and HM see physical, vision, and dental dates", async ()
       username,
       password: DEMO_PASSWORD,
     });
-    const stack = (await client.loadWorkspace(user)).planStacks.find((item) =>
-      item.individualName.includes("Jodie"),
-    )!;
+    const stack = (await client.loadWorkspace(user)).planStacks[0];
     const kinds = stack.renewals.map((row) => row.kind);
     assert.equal(kinds.includes("annual_physical"), true);
     assert.equal(kinds.includes("vision"), true);

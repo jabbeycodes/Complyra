@@ -101,7 +101,7 @@ test("QA audit: scoring, locked enforcement, and finalize gate", async () => {
     mark: "AA",
   });
   assert.equal(finalized.status, "finalized");
-  assert.equal(finalized.auditorSignatureName, "Auditor Ann");
+  assert.equal(finalized.auditorSignatureName, admin.fullName);
   assert.ok(finalized.signedAt);
   assert.equal(finalized.score?.pct, 100);
   assert.deepEqual(finalized.score?.criticalFails, []);

@@ -34,8 +34,13 @@ export type NotificationType =
   | "delegation.review_ready"
   | "delegation.published"
   | "delegation.ack_overdue"
+  | "delegation.unacknowledged"
+  | "isp.renewal_soon"
+  | "incident.followup"
   | "qa.dispute_raised"
-  | "qa.dispute_resolved";
+  | "qa.dispute_resolved"
+  | "qa.schedule_due"
+  | "qa.schedule_overdue";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -55,8 +60,13 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "delegation.review_ready",
   "delegation.published",
   "delegation.ack_overdue",
+  "delegation.unacknowledged",
+  "isp.renewal_soon",
+  "incident.followup",
   "qa.dispute_raised",
   "qa.dispute_resolved",
+  "qa.schedule_due",
+  "qa.schedule_overdue",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -126,7 +136,25 @@ export function dedupeKeyFor(
 export function isWellFormedDeepLink(deepLink: string): boolean {
   if (typeof deepLink !== "string") return false;
   if (!deepLink.startsWith("/")) return false;
-  return !deepLink.includes("://") && !deepLink.includes(" ");
+  return !deepLink.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(deepLink) && !deepLink.includes("://");
+}
+
+export function notificationPage(link: string): string | null {
+  if (!isWellFormedDeepLink(link)) return null;
+  const path = link.split(/[?#]/)[0];
+  if (/^\/training(?:\/|$)/.test(path)) return "Training";
+  if (/^\/certificates(?:\/|$)/.test(path)) return "Certificates";
+  if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
+  if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
+  if (/^\/recognition(?:\/|$)/.test(path)) return "Recognition";
+  if (/^\/plans(?:\/|$)/.test(path)) return "Individuals";
+  if (/^\/requirements(?:\/|$)/.test(path)) return "Requirements";
+  if (/^\/corrective-actions(?:\/|$)/.test(path)) return "Audit Me";
+  if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
+  if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
+  if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
+  if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
+  return null;
 }
 
 /** DB row as the client reads it. */
@@ -179,11 +207,16 @@ export const NOTIFICATION_META: Record<
   "review.changed": { status: "pending", label: "Review updated" },
   "recognition.hm_winner": { status: "compliant", label: "House Manager of the Week" },
   "recognition.dsp_winner": { status: "compliant", label: "DSP of the Week" },
+  "delegation.unacknowledged": { status: "pending", label: "Delegation unacknowledged" },
+  "isp.renewal_soon": { status: "expiring", label: "Plan renewal approaching" },
+  "incident.followup": { status: "late", label: "Incident follow-up" },
+  "qa.dispute_raised": { status: "pending", label: "QA finding disputed" },
+  "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
+  "qa.schedule_due": { status: "expiring", label: "QA audit due" },
+  "qa.schedule_overdue": { status: "late", label: "QA audit overdue" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
-  "qa.dispute_raised": { status: "pending", label: "QA finding disputed" },
-  "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
 };
 
 export function metaForType(type: NotificationType) {
@@ -406,56 +439,6 @@ export function checklistSubmittedPayload(input: {
     entityType: "checklist",
     entityId: input.checklistId,
     dedupeKey: dedupeKeyFor("checklist.submitted", input.checklistId),
-  };
-}
-
-/**
- * An HM/DPM disputed a scored QA item with photo evidence. Notifies the
- * agency's auditors so the dispute gets a ruling.
- */
-export function qaDisputeRaisedPayload(input: {
-  agencyId: string;
-  roleKey: string;
-  auditId: string;
-  siteName: string;
-  itemText: string;
-  actorName: string;
-}): NotificationPayload {
-  return {
-    agencyId: input.agencyId,
-    roleKey: input.roleKey,
-    type: "qa.dispute_raised",
-    title: "QA finding disputed",
-    body: `${input.actorName} disputed a QA finding at ${input.siteName}: ${input.itemText}. Review the photo evidence and rule on the dispute.`,
-    deepLink: `/qa-audits/${input.auditId}`,
-    entityType: "qa_audit",
-    entityId: input.auditId,
-    dedupeKey: dedupeKeyFor("qa.dispute_raised", input.auditId, input.itemText),
-  };
-}
-
-/**
- * The auditor ruled on a disputed QA item. Notifies the disputing side
- * (HM/DPM) with the outcome visible on the QA Review page.
- */
-export function qaDisputeResolvedPayload(input: {
-  agencyId: string;
-  roleKey: string;
-  auditId: string;
-  siteName: string;
-  itemText: string;
-  actorName: string;
-}): NotificationPayload {
-  return {
-    agencyId: input.agencyId,
-    roleKey: input.roleKey,
-    type: "qa.dispute_resolved",
-    title: "QA dispute resolved",
-    body: `${input.actorName} ruled on the disputed QA finding at ${input.siteName}: ${input.itemText}. See the QA Review page for the ruling and reason.`,
-    deepLink: `/qa-audits/${input.auditId}`,
-    entityType: "qa_audit",
-    entityId: input.auditId,
-    dedupeKey: dedupeKeyFor("qa.dispute_resolved", input.auditId, input.itemText),
   };
 }
 
@@ -703,5 +686,91 @@ export function delegationAckOverduePayload(input: {
     entityType: "delegation_assignment",
     entityId: input.assignmentId,
     dedupeKey: dedupeKeyFor("delegation.ack_overdue", input.assignmentId, input.userId),
+  };
+}
+
+export function delegationUnacknowledgedPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  acknowledgmentId: string;
+  delegationTitle: string;
+  staffName?: string;
+  individualName?: string;
+}): NotificationPayload {
+  const who = input.staffName ? `${input.staffName}, ` : "";
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "delegation.unacknowledged",
+    title: "Delegation needs your signature",
+    body: input.individualName
+      ? `${who}the delegation "${input.delegationTitle}" for ${input.individualName} is still unsigned. Review and sign it to stay compliant.`
+      : `${who}the delegation "${input.delegationTitle}" is still unsigned. Review and sign it to stay compliant.`,
+    deepLink: "/delegations",
+    entityType: "delegation_acknowledgment",
+    entityId: input.acknowledgmentId,
+    dedupeKey: dedupeKeyFor("delegation.unacknowledged", input.acknowledgmentId),
+  };
+}
+
+/**
+ * A plan/ISP renewal is approaching. Targeted at the DPM/program manager
+ * who owns renewals. Dedupe is per plan + due date so each renewal cycle
+ * notifies once.
+ */
+export function ispRenewalSoonPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  planId: string;
+  planTitle: string;
+  individualName: string;
+  dueOn: string;
+  daysRemaining: number;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "isp.renewal_soon",
+    title: "Plan renewal approaching",
+    body:
+      `Action required: ${input.planTitle} for ${input.individualName} ` +
+      `renews in ${input.daysRemaining} day${input.daysRemaining === 1 ? "" : "s"} ` +
+      `(${input.dueOn}). Start the renewal now to avoid a lapse in the plan.`,
+    deepLink: "/delegations",
+    entityType: "plan_renewal",
+    entityId: input.planId,
+    dedupeKey: dedupeKeyFor("isp.renewal_soon", input.planId, input.dueOn),
+  };
+}
+
+/**
+ * An incident needs follow-up: reported but no follow-up record, or the
+ * next-business-day filing window is closing. Targeted at managers.
+ */
+export function incidentFollowupPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  incidentId: string;
+  summary: string;
+  occurredOn: string;
+  followupDueOn: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey,
+    type: "incident.followup",
+    title: "Incident follow-up due",
+    body:
+      `Action required: follow up on the incident from ${input.occurredOn} ` +
+      `(${input.summary}) by ${input.followupDueOn}. ` +
+      `File the follow-up electronically to meet the next-business-day requirement.`,
+    deepLink: "/audit",
+    entityType: "incident",
+    entityId: input.incidentId,
+    dedupeKey: dedupeKeyFor("incident.followup", input.incidentId),
   };
 }
