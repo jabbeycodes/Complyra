@@ -109,3 +109,22 @@ test("phone drawer shows Programs groups, not WORKSPACE", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Mileage" })).toBeVisible();
   await page.screenshot({ path: shotPath("mileage_after_390.png"), fullPage: false });
 });
+
+test("house manager starts with Admin collapsed", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByLabel("Provider code").fill("EVERGREEN-MO");
+  await page.getByLabel("Username").fill("james.wilson");
+  await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
+  await page
+    .getByRole("dialog", { name: "Interactive demo tour" })
+    .waitFor({ state: "visible", timeout: 3_000 })
+    .catch(() => undefined);
+  await page.keyboard.press("Escape");
+  const admin = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Admin" });
+  if ((await admin.count()) > 0) {
+    await expect(admin).toHaveAttribute("aria-expanded", "false");
+  }
+});
