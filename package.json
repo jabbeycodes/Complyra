@@ -11,6 +11,7 @@
     "test:e2e": "playwright test",
     "seed:evergreen": "tsx scripts/seed-evergreen.ts",
     "seed:repair-operator": "tsx scripts/repair-platform-owner.ts",
+    "seed:repair-roster": "tsx scripts/repair-demo-roster.ts",
     "supabase:link": "bash scripts/link-and-push.sh",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:ios": "npx cap open ios",

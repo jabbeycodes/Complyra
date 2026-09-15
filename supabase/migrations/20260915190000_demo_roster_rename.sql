@@ -1,6 +1,11 @@
 -- Evergreen demo roster rename (#58). Historical migrations still look up
 -- Maple House for one-time nurse membership repairs; this updates live rows
 -- so hosted demo matches Cedar / Willow and the new Individuals.
+--
+-- Rename-only. Preview and production share one hosted project, so this file
+-- does not apply until `supabase db push`. It also does not delete leftover
+-- Individuals (QA Person, Jordan, Ethan, Olivia, Ava, …). The follow-up
+-- 20260915200000_demo_roster_repair.sql is the idempotent hosted wipe.
 
 update public.sites
 set name = 'Cedar House',

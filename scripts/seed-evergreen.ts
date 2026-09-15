@@ -288,12 +288,24 @@ async function main() {
     })),
   );
 
+  // Upsert cannot delete leftover Intake rows (QA Person, Jordan, Ethan, …)
+  // or extra houses. Preview uses this hosted project, so wipe after seed.
+  const { data: roster, error: rosterError } = await admin.rpc(
+    "repair_evergreen_demo_roster",
+  );
+  if (rosterError) {
+    throw new Error(
+      `repair_evergreen_demo_roster: ${rosterError.message}. Run npx supabase db push first.`,
+    );
+  }
+
   console.log(
     `Seeded Evergreen Care (${AGENCY_ID}). Demo login: agency EVERGREEN-MO / sarah.mitchell / ${DEMO_PASSWORD}`,
   );
   console.log(
     `Operator login: agency COMPLYRER-MO / platform.owner / ${DEMO_PASSWORD}`,
   );
+  console.log("Demo roster repair:", JSON.stringify(roster));
 }
 
 main().catch((error) => {
