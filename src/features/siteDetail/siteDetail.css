@@ -22,10 +22,9 @@
 }
 
 .site-hero-dash {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.3fr) minmax(180px, 0.7fr);
-  gap: 20px 28px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .site-hero .status-mix {
@@ -39,10 +38,10 @@
 }
 
 .site-hero-kpis {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
-  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  align-items: flex-end;
 }
 
 .site-hero-score,
@@ -50,11 +49,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
+  min-width: 72px;
 }
 
 .site-hero-score {
-  grid-column: 1 / -1;
+  min-width: 120px;
+  flex: 1 1 140px;
 }
 
 .site-hero-score strong,
@@ -277,8 +277,9 @@
 }
 
 @media (max-width: 900px) {
-  .site-hero-dash {
-    grid-template-columns: 1fr;
+  .site-hero .status-mix-chart {
+    width: 128px;
+    max-width: 128px;
   }
 }
 

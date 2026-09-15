@@ -610,9 +610,12 @@ export default function MileagePage() {
           </label>
         )}
         {tab !== "yearly" && (
-          <span className="mileage-toolbar-stat">
-            {summary.tripCount} trip{summary.tripCount === 1 ? "" : "s"} · {summary.totalMiles} mi
-          </span>
+          <>
+            <span className="mileage-toolbar-stat">
+              {summary.tripCount} trip{summary.tripCount === 1 ? "" : "s"} · {summary.totalMiles} mi
+            </span>
+            {sheetActions(tab)}
+          </>
         )}
       </div>
 

@@ -38,23 +38,25 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
   await expect(page.locator("body")).not.toContainText("Week 1: days 1–7");
   await expect(page.locator("body")).not.toContainText("Continues from last trip");
 
-  await expect(page.getByRole("button", { name: "Print monthly" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Monthly PDF" })).toBeVisible();
+  const monthlyBar = page.locator(".mileage-toolbar");
+  await expect(monthlyBar.getByRole("button", { name: "Print monthly" })).toBeVisible();
+  await expect(monthlyBar.getByRole("button", { name: "Monthly PDF" })).toBeVisible();
   await page.screenshot({ path: shotPath("mileage_admin_monthly.png"), fullPage: false });
 
   const monthly = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Monthly PDF" }).click();
+  await monthlyBar.getByRole("button", { name: "Monthly PDF" }).click();
   const monthlyFile = await monthly;
   expect(monthlyFile.suggestedFilename()).toMatch(/mileage-log.*\.pdf$/);
 
   await page.getByRole("tab", { name: "Weekly sheet" }).click();
   await expect(page.getByRole("heading", { name: /Weekly sheet/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Print weekly" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Weekly PDF" })).toBeVisible();
+  const weeklyBar = page.locator(".mileage-toolbar");
+  await expect(weeklyBar.getByRole("button", { name: "Print weekly" })).toBeVisible();
+  await expect(weeklyBar.getByRole("button", { name: "Weekly PDF" })).toBeVisible();
   await page.screenshot({ path: shotPath("mileage_admin_weekly.png"), fullPage: false });
 
   const weekly = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Weekly PDF" }).click();
+  await weeklyBar.getByRole("button", { name: "Weekly PDF" }).click();
   const weeklyFile = await weekly;
   expect(weeklyFile.suggestedFilename()).toMatch(/mileage-weekly.*\.pdf$/);
 });
@@ -98,6 +100,7 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
     )
     .toBe(true);
   await expect(page.locator(".site-hero")).toBeVisible();
+  await page.locator(".site-hero-people").scrollIntoViewIfNeeded();
   await expect(page.locator(".site-hero-person img").first()).toBeVisible();
   const tablist = page.locator(".site-detail-tabs");
   await expect(tablist).toBeVisible();
