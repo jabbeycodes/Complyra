@@ -1,3 +1,4 @@
+import type { Appointment } from "./appointments";
 import type { DelegationForm, IndividualRecord } from "./types";
 
 export type ObligationKind =
@@ -42,6 +43,8 @@ export interface IndividualProfile {
   behaviorSupports: string;
   dailyActivities: string;
   visitHours: string;
+  /** Optional program enrollment / admit date. Intake defaults this to today. */
+  enrolledOn: string;
 }
 
 export interface ObligationItem {
@@ -140,6 +143,7 @@ export interface PlanStackView {
   myTraining: import("./chart").TrainingRowView | null;
   mySubmissionAt: string | null;
   canSubmit: boolean;
+  appointments: Appointment[];
 }
 
 export interface ClinicalRenewalView extends ClinicalRenewal {
@@ -172,6 +176,7 @@ const SURVEY_PROFILE_DEFAULTS = {
   behaviorSupports: "",
   dailyActivities: "",
   visitHours: "",
+  enrolledOn: "",
 };
 
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
@@ -208,6 +213,7 @@ export function normalizeProfile(
     behaviorSupports: profile?.behaviorSupports ?? "",
     dailyActivities: profile?.dailyActivities ?? "",
     visitHours: profile?.visitHours ?? "",
+    enrolledOn: profile?.enrolledOn ?? "",
   };
 }
 

@@ -1,3 +1,4 @@
+import type { Appointment } from "./appointments";
 import type { DelegationForm, IndividualRecord } from "./types";
 import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import type {
@@ -213,6 +214,32 @@ export function mapChartFile(row: Row): ChartFile {
   };
 }
 
+function clock(value: unknown): string {
+  const raw = str(value);
+  const match = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return raw.slice(0, 5);
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+export function mapAppointment(row: Row): Appointment {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    startsOn: isoDate(row.starts_on) ?? "",
+    startTime: clock(row.start_time),
+    endTime: clock(row.end_time),
+    timezone: str(row.timezone) || "America/Chicago",
+    consultant: str(row.consultant),
+    specialty: str(row.specialty),
+    reason: str(row.reason),
+    visitAddress: str(row.visit_address),
+    createdBy: str(row.created_by),
+    createdAt: isoDateTime(row.created_at) ?? "",
+    updatedAt: isoDateTime(row.updated_at) ?? "",
+  };
+}
+
 export function mapMedication(row: Row): Medication {
   return {
     id: str(row.id),
@@ -368,5 +395,6 @@ export function profileFromRow(
     behaviorSupports: typeof stored.behaviorSupports === "string" ? stored.behaviorSupports : "",
     dailyActivities: typeof stored.dailyActivities === "string" ? stored.dailyActivities : "",
     visitHours: typeof stored.visitHours === "string" ? stored.visitHours : "",
+    enrolledOn: typeof stored.enrolledOn === "string" ? stored.enrolledOn : "",
   };
 }

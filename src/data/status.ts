@@ -2,6 +2,7 @@ import type { Status } from "../domain";
 import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
+  canCreateIndividual,
   hasPermission,
   isRoleKey,
   type PermissionKey,
@@ -62,6 +63,7 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Site detail") {
     return true;
   }
+  if (page === "Intake") return canCreateIndividual(session.roleKey);
   if (
     page === "Individuals" ||
     page === "Requirements" ||
@@ -152,6 +154,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Platform",
   "Individuals",
   "Sites & programs",
+  "Intake",
   "Staff",
   "Roles & access",
   "Requirements",

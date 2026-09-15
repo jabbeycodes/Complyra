@@ -59,6 +59,29 @@ test("canManageAiSettings is platformAdmin only", () => {
   );
 });
 
+test("pageVisible Intake follows canCreateIndividual", () => {
+  assert.equal(
+    pageVisible(session({ roleKey: "administrator" }), "Intake"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "nurse", role: "nurse" }), "Intake"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "house_manager", role: "manager" }), "Intake"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "dsp", role: "dsp" }), "Intake"),
+    false,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "auditor", role: "auditor" }), "Intake"),
+    false,
+  );
+});
+
 test("pageVisible AI settings is platformAdmin only", () => {
   assert.equal(
     pageVisible(session({ role: "administrator", platformAdmin: false }), "AI settings"),

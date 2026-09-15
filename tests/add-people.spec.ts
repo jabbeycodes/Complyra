@@ -35,7 +35,7 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await personDialog.getByLabel("Goes by").fill("Nora");
   await personDialog.getByLabel("Date of birth").fill("1991-04-12");
   await personDialog.getByLabel("Program site").selectOption({ label: "Poplar House" });
-  await personDialog.getByRole("button", { name: "Add person", exact: true }).click();
+  await personDialog.getByRole("button", { name: "Add Individual", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Nora Fields" })).toBeVisible();
   await expect(page.locator(".individual-chart")).toContainText("Nora");
 
@@ -52,13 +52,14 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
     buffer: Buffer.from("%PDF-1.4 fictional-data-for-test"),
   });
   await uploadDialog
-    .getByRole("button", { name: "Add person and send plan for review" })
+    .getByRole("button", { name: "Add Individual and send plan for review" })
     .click();
   await expect(page.getByRole("status")).toContainText("Review queue");
 });
 
-test("DSP does not see add-site or add-person actions", async ({ page }) => {
+test("DSP does not see add-site, add-person, or Intake", async ({ page }) => {
   await signIn(page, "alex.morgan");
+  await expect(page.getByRole("button", { name: "Intake", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await expect(page.getByRole("button", { name: "Add an individual" })).toHaveCount(0);
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();

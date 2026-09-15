@@ -6662,3 +6662,20 @@ button.qa-row:hover {
   font-weight: 600;
   color: #8a3d2b;
 }
+
+.intake-panel {
+  max-width: 640px;
+}
+.health-widget {
+  grid-column: 1 / -1;
+}
+.appointment-form {
+  display: grid;
+  gap: 10px;
+}
+.appointment-form strong {
+  color: #2f4630;
+}
+.appointment-card p {
+  margin: 0;
+}
