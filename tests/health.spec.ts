@@ -81,7 +81,7 @@ test("uploading a consultation form completes the appointment", async ({ page })
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4 test"),
   });
-  await chart.getByLabel("Comments").fill("Brought seizure log.");
+  await chart.getByPlaceholder("Optional notes from the visit").fill("Brought seizure log.");
   await chart.getByRole("button", { name: "Upload and complete" }).click();
   await expect(chart).toContainText("Completed by Sarah Mitchell");
   await expect(chart).toContainText("Brought seizure log.");

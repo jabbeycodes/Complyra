@@ -182,18 +182,20 @@ function CompleteForm({
       <p className="stack-help">
         Uploading the consultation form marks this appointment completed.
       </p>
-      <label>
+      <label htmlFor="consultation-form-file">
         Consultation form
         <input
+          id="consultation-form-file"
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
           required
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
       </label>
-      <label>
+      <label htmlFor="consultation-comments">
         Comments
         <textarea
+          id="consultation-comments"
           value={comments}
           onChange={(e) => setComments(e.target.value)}
           placeholder="Optional notes from the visit"
