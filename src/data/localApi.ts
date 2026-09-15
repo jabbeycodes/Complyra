@@ -528,6 +528,7 @@ export interface ComplyraApi {
     file?: File;
     pageCount?: number;
     effectiveOn?: string;
+    enrolledOn?: string;
   }): Promise<{ id: string; name: string }>;
   // ===== LIFEPATH-P2 API (training engine) =====
   /** All training topics (checklist verbatim + A1–A6 supplemental sets). */
@@ -4171,6 +4172,7 @@ export class LocalApi implements ComplyraApi {
     file?: File;
     pageCount?: number;
     effectiveOn?: string;
+    enrolledOn?: string;
   }) {
     const session = assertSession(this.store);
     if (!canCreateIndividual(session.roleKey)) {
@@ -4194,8 +4196,10 @@ export class LocalApi implements ComplyraApi {
           row.fullName.toLowerCase() === fullName.toLowerCase(),
       )
     ) {
-      throw new Error("Someone with that name is already on the roster.");
+      throw new Error("An Individual with that name is already on the roster.");
     }
+    const enrolledOn = input.enrolledOn?.trim() || todayIso();
+    assertCalendarDate(enrolledOn, "Enter a valid enrollment date.");
     const person = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -4212,6 +4216,7 @@ export class LocalApi implements ComplyraApi {
         }),
         goesBy: input.goesBy?.trim() || fullName.split(" ")[0] || fullName,
         dmhId: input.dmhId?.trim() || "",
+        enrolledOn,
       },
     };
     this.store.db.individuals.push(person);

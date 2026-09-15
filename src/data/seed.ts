@@ -402,6 +402,7 @@ export function createEvergreenSeed(): LocalDatabase {
     behaviorSupports: "None",
     dailyActivities: "Day habilitation, weekdays",
     visitHours: "Weekdays after 4:00 p.m.; weekends by appointment",
+    enrolledOn: "2026-01-15",
     guardians: [
       {
         name: "Jonathan Williams",
@@ -691,6 +692,7 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       behaviorSupports: "",
       dailyActivities: "",
       visitHours: "",
+      enrolledOn: "",
       ...person.profile,
       ...extra,
     };
