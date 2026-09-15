@@ -756,7 +756,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <div className="main-shell">
+      <div className="main-shell page-shell">
         {demoMode && (
           <DemoBanner
             onRestartTour={() => setTourOpen(true)}

@@ -22,7 +22,7 @@ async function canvasMetrics(page: Page) {
   return page.evaluate(() => {
     const main = document.querySelector("main");
     const topbar = document.querySelector(".topbar");
-    const shell = document.querySelector(".main-shell");
+    const shell = document.querySelector(".page-shell") || document.querySelector(".main-shell");
     if (!main || !topbar || !shell) throw new Error("missing main, topbar, or shell");
     const mainStyle = getComputedStyle(main);
     const topbarStyle = getComputedStyle(topbar);

@@ -175,7 +175,7 @@
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin-inline: 0;
-  padding: 0 var(--panel-inline) 16px;
+  padding: 0 0 16px;
   max-width: 100%;
 }
 
@@ -221,7 +221,8 @@
     display: none !important;
   }
 
-  .main-shell {
+  .main-shell,
+  .page-shell {
     margin-left: 0 !important;
     padding-inline: 0.4in !important;
     background: #fff !important;

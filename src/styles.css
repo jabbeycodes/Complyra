@@ -450,7 +450,10 @@ button:hover:not(:disabled) {
   margin-left: var(--sidebar);
   min-height: 100vh;
   background: #e8dcc8;
-  /* One gutter for banner, topbar, and page so chrome is not flush. */
+}
+/* Cut 1 (#68): this wrapper IS the content inset. Topbar, main, and
+   feature pages share it — do not add a second full-bleed page pad. */
+.page-shell {
   padding-inline: var(--page-inline-start) var(--page-inline-end);
 }
 .topbar {
@@ -461,6 +464,7 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   padding: 0;
+  padding-inline: 0;
   gap: 20px;
 }
 .breadcrumb {
@@ -603,7 +607,8 @@ kbd {
 main {
   max-width: 1640px;
   margin: auto;
-  padding: 31px 0 25px;
+  padding: 31px 0 max(25px, env(safe-area-inset-bottom, 0px));
+  padding-inline: 0;
   min-height: calc(100vh - 108px);
 }
 .eyebrow {
@@ -4751,6 +4756,8 @@ th {
   padding: 14px 16px;
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .obligation-card header {
   display: flex;
@@ -4817,15 +4824,19 @@ th {
 }
 .renewal-upload {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   align-items: end;
+  min-width: 0;
+  max-width: 100%;
 }
 .renewal-upload label {
   display: grid;
   gap: 4px;
   font-size: 13px;
   color: #4a4036;
+  min-width: 0;
+  max-width: 100%;
 }
 .renewal-upload select,
 .renewal-upload input[type="text"],
@@ -4982,18 +4993,36 @@ th {
 }
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Stack before two columns squeeze native file inputs past .page-shell.
+     480px min → 1280 content (~948px) is one column; wider desktops keep two. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
   gap: 14px;
   min-width: 0;
+  max-width: 100%;
 }
 .chart-widget {
   background: #faf6ef;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px 18px;
+  padding: 16px var(--panel-inline);
   display: grid;
   gap: 10px;
   color: #241e18;
+  min-width: 0;
+  max-width: 100%;
+}
+/* Native file inputs ignore grid shrinking unless the track and control
+   both have a 0 min-width. Stack upload fields on the chart so the
+   renewals column cannot paint past the shell. */
+.individual-chart .renewal-upload {
+  grid-template-columns: minmax(0, 1fr);
+}
+.individual-chart .renewal-upload input,
+.individual-chart .renewal-upload select,
+.individual-chart .renewal-upload input[type="file"],
+.individual-chart .plan-stack input[type="file"] {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 .individual-chart .page-heading,
@@ -5295,12 +5324,14 @@ th {
 html,
 body,
 .app-shell,
-.main-shell {
+.main-shell,
+.page-shell {
   overflow-x: hidden;
   max-width: 100%;
 }
 .app-shell,
 .main-shell,
+.page-shell,
 main,
 .panel,
 .table-scroll {
@@ -6667,4 +6698,30 @@ button.qa-row:hover {
 
 .intake-panel {
   max-width: 640px;
+  padding: 21px var(--panel-inline) 24px;
+}
+
+/* Feature pages inherit .page-shell. No second outer gutter (8–16px one-offs). */
+.mileage-page,
+.appointments-page,
+.individual-chart,
+.setup-form {
+  margin-inline: 0;
+  padding-inline: 0;
+}
+
+.health-widget {
+  grid-column: 1 / -1;
+  padding: 16px var(--panel-inline);
+}
+.health-tabs {
+  margin: 4px 0 12px;
+  padding-inline: 0;
+}
+
+.appointments-filters {
+  padding: 16px var(--panel-inline) 18px;
+}
+.appointments-page .appointments-calendar {
+  padding-inline: 0;
 }
