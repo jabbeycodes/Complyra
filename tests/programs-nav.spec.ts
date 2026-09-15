@@ -46,16 +46,14 @@ test("sidebar groups expand Programs Care Compliance; Admin stays collapsed for 
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
-  const programs = page.locator(".sidebar").getByRole("button", { name: "Programs" });
+  const programs = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Programs" });
   await expect(programs).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".sidebar .nav-label").first()).toHaveText("Programs");
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
-  await expect(page.locator(".sidebar").getByRole("button", { name: "Care" })).toHaveAttribute(
-    "aria-expanded",
-    "true",
-  );
-  await expect(page.locator(".sidebar").getByRole("button", { name: "Compliance" })).toBeVisible();
-  const admin = page.locator(".sidebar").getByRole("button", { name: "Admin" });
+  const care = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Care" });
+  await expect(care).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Compliance" })).toBeVisible();
+  const admin = page.locator(".sidebar .nav-group-toggle").filter({ hasText: "Admin" });
   if ((await admin.count()) > 0) {
     await expect(admin).toHaveAttribute("aria-expanded", "false");
   }
@@ -63,13 +61,10 @@ test("sidebar groups expand Programs Care Compliance; Admin stays collapsed for 
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
 
-  await page.locator(".sidebar").getByRole("button", { name: "Care" }).click();
-  await expect(page.locator(".sidebar").getByRole("button", { name: "Care" })).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-  await page.locator(".sidebar").getByRole("button", { name: "Care" }).click();
-  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage" })).toBeVisible();
+  await care.click();
+  await expect(care).toHaveAttribute("aria-expanded", "false");
+  await care.click();
+  await expect(page.locator(".sidebar").getByRole("button", { name: "Mileage", exact: true })).toBeVisible();
 
   await openNav(page, "Sites & programs");
   await expect(page.getByRole("heading", { name: "Sites & programs" })).toBeVisible();
@@ -100,7 +95,7 @@ test("phone drawer shows Programs groups, not WORKSPACE", async ({ page }) => {
     "Programs",
   );
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
-  await expect(page.locator(".sidebar.mobile-open").getByRole("button", { name: "Care" })).toBeVisible();
+  await expect(page.locator(".sidebar.mobile-open .nav-group-toggle").filter({ hasText: "Care" })).toBeVisible();
   await expect(
     page.locator(".sidebar.mobile-open").getByRole("button", { name: "Overview" }),
   ).toBeInViewport();
