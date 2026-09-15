@@ -6668,3 +6668,36 @@ button.qa-row:hover {
 .intake-panel {
   max-width: 640px;
 }
+
+.health-widget {
+  grid-column: 1 / -1;
+}
+.appointment-form {
+  display: grid;
+  gap: 10px;
+}
+.appointment-form strong {
+  color: #2f4630;
+}
+.appointment-card p,
+.allergy-card p {
+  margin: 0;
+}
+.health-stamp {
+  color: #6b6156;
+  font-size: 13px;
+}
+.allergy-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.allergy-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e9e6e1;
+  border-radius: 8px;
+  padding: 10px;
+}
+.appointment-removed {
+  opacity: 0.78;
+}

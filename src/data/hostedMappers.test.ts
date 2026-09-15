@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   mapAdaptiveEquipment,
+  mapAppointment,
   mapChartFile,
   mapClinicalRenewal,
   mapEmergencyDrill,
@@ -276,4 +277,36 @@ test("profileFromRow fills person fallbacks when no profile row exists", () => {
   assert.equal(profile?.language, "Spanish");
   assert.equal(profile?.goesBy, "Jordan");
   assert.equal(profile?.enrolledOn, "");
+  assert.deepEqual(profile?.allergies, []);
+});
+
+test("mapAppointment reads date, clock, visit address, and who/when stamps", () => {
+  const row = mapAppointment({
+    id: "appt-1",
+    agency_id: "ag-1",
+    individual_id: "p-1",
+    starts_on: "2026-09-22",
+    start_time: "09:30:00",
+    end_time: "10:15:00",
+    timezone: "America/Chicago",
+    consultant: "Dr. Priya Shah",
+    specialty: "Neurology",
+    reason: "Follow-up",
+    visit_address: "3201 Pompey Drive",
+    created_by: "u-1",
+    created_by_name: "Cameron Price",
+    created_at: "2026-09-10T14:00:00Z",
+    updated_by: "",
+    updated_by_name: "",
+    updated_at: "2026-09-10T14:00:00Z",
+    deleted_by: "",
+    deleted_by_name: "",
+    deleted_at: null,
+  });
+  assert.equal(row.startTime, "09:30");
+  assert.equal(row.endTime, "10:15");
+  assert.equal(row.consultant, "Dr. Priya Shah");
+  assert.equal(row.visitAddress, "3201 Pompey Drive");
+  assert.equal(row.createdByName, "Cameron Price");
+  assert.equal(row.deletedAt, null);
 });

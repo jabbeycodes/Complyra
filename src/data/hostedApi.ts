@@ -81,6 +81,17 @@ import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import {
+  appointmentChangeDetail,
+  canEditAllergies,
+  canManageAppointments,
+  canSeeAppointments,
+  isAppointmentRemoved,
+  validateAppointmentDraft,
+  visibleAppointments,
+  type Appointment,
+  type AppointmentDraft,
+} from "./appointments";
+import {
   assertAdoptableSignature,
   dataUrlToBlob,
   EdgeFunctionError,
@@ -112,6 +123,7 @@ import {
 } from "./permissions";
 import { isValidRating } from "../recognition/scoring";
 import {
+  allergiesChangeDetail,
   applyRenewalUpload,
   canEditCover,
   canEditExtraction,
@@ -122,11 +134,14 @@ import {
   defaultRenewals,
   emptyProfile,
   isObligationActive,
+  nextAllergiesStamp,
+  normalizeAllergies,
   normalizeProfile,
   renewalStatus,
   requiredForSigning,
   sortObligations,
   staffCanSignDelegation,
+  type Allergy,
   type ClinicalEvidenceKind,
   type ClinicalRenewal,
   type IndividualProfile,
@@ -286,6 +301,7 @@ import {
 } from "../pdf/siteReviewPdf";
 import {
   mapAdaptiveEquipment,
+  mapAppointment,
   mapChartFile,
   mapClinicalRenewal,
   mapEmergencyDrill,
@@ -728,6 +744,7 @@ export class HostedApi implements ComplyraApi {
       reviewsRes,
       brandingRes,
       assignmentsRes,
+      appointmentsRes,
     ] = await Promise.all([
       this.client.from("sites").select("*").eq("agency_id", agencyId),
       this.client.from("programs").select("*").eq("agency_id", agencyId),
@@ -763,6 +780,7 @@ export class HostedApi implements ComplyraApi {
       this.client.from("site_reviews").select("*").eq("agency_id", agencyId),
       this.client.from("agency_branding").select("*").eq("agency_id", agencyId).maybeSingle(),
       this.client.from("staff_assignments").select("*").eq("agency_id", agencyId),
+      this.client.from("appointments").select("*").eq("agency_id", agencyId),
     ]);
 
     for (const result of [
@@ -798,6 +816,8 @@ export class HostedApi implements ComplyraApi {
     ]) {
       throwIf(result.error, "Could not load the agency workspace.");
     }
+    // Appointments ship with Health H1; ignore until the migration is applied.
+    const appointmentRows = appointmentsRes.error ? [] : (appointmentsRes.data ?? []);
 
     const canViewPeople = hasPermission(session, "individuals.view");
     const canReadAudit = hasPermission(session, "audit.read") || canViewPeople;
@@ -908,6 +928,7 @@ export class HostedApi implements ComplyraApi {
             })),
             renewals: (renewalsRes.data ?? []).map(mapClinicalRenewal),
             medications: (medsRes.data ?? []).map(mapMedication),
+            appointments: appointmentRows.map(mapAppointment),
             checklists: (checklistsRes.data ?? []).map(mapTrainingChecklist),
             versionLabelById,
           }),
@@ -2942,6 +2963,185 @@ export class HostedApi implements ComplyraApi {
     return { id: record.id, name: fullName };
   }
 
+  async createAppointment(input: AppointmentDraft & { individualId: string }) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const person = await this.individualRecord(input.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const draft = validateAppointmentDraft(input);
+    const { data, error } = await this.client
+      .from("appointments")
+      .insert(this.appointmentRow(session.agencyId, person.id, session, draft))
+      .select("id")
+      .single();
+    throwIf(error, "Could not save that appointment.");
+    await this.audit(
+      session,
+      "appointment.created",
+      `${draft.consultant} for ${person.fullName}`,
+      "appointment",
+      data!.id as string,
+    );
+    return { id: data!.id as string };
+  }
+
+  async updateAppointment(appointmentId: string, patch: AppointmentDraft) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    const person = await this.individualRecord(existing.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const draft = validateAppointmentDraft(patch);
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        starts_on: draft.startsOn,
+        start_time: `${draft.startTime}:00`,
+        end_time: `${draft.endTime}:00`,
+        timezone: draft.timezone,
+        consultant: draft.consultant,
+        specialty: draft.specialty ?? "",
+        reason: draft.reason ?? "",
+        visit_address: draft.visitAddress ?? "",
+        updated_by: session.userId,
+        updated_by_name: session.fullName,
+      })
+      .eq("id", appointmentId)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not update that appointment.");
+    await this.audit(
+      session,
+      "appointment.updated",
+      appointmentChangeDetail(existing, draft),
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  async deleteAppointment(appointmentId: string) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        deleted_by: session.userId,
+        deleted_by_name: session.fullName,
+        deleted_at: new Date().toISOString(),
+      })
+      .eq("id", appointmentId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null);
+    throwIf(error, "Could not remove that appointment.");
+    await this.audit(
+      session,
+      "appointment.deleted",
+      `${existing.consultant} appointment removed`,
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  async updateIndividualAllergies(individualId: string, allergies: Allergy[]) {
+    const session = await this.requireSession();
+    if (!canEditAllergies(session.roleKey)) {
+      throw new Error("You cannot edit allergies.");
+    }
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const current = await this.individualProfile(person);
+    const nextAllergies = normalizeAllergies(allergies);
+    const now = new Date().toISOString();
+    const next = {
+      ...current,
+      allergies: nextAllergies,
+      allergiesStamp: nextAllergiesStamp(current.allergiesStamp, session, now),
+    };
+    const { error } = await this.client.from("individual_profiles").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: person.id,
+        profile: next,
+      },
+      { onConflict: "individual_id" },
+    );
+    throwIf(error, "Could not save allergies.");
+    await this.audit(
+      session,
+      "allergies.updated",
+      allergiesChangeDetail(current.allergies, nextAllergies),
+      "individual",
+      person.id,
+    );
+  }
+
+  async recordConsultationPacketGenerated(appointmentId: string) {
+    const session = await this.requireSession();
+    if (!canSeeAppointments(session.roleKey)) {
+      throw new Error("You cannot view Health records.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing) && !canManageAppointments(session.roleKey)) {
+      throw new Error("Appointment not found.");
+    }
+    const person = await this.individualRecord(existing.individualId);
+    await this.audit(
+      session,
+      "consultation_packet.generated",
+      `${existing.consultant} packet for ${person?.fullName ?? "Individual"}`,
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  private appointmentRow(
+    agencyId: string,
+    individualId: string,
+    actor: { userId: string; fullName: string },
+    draft: AppointmentDraft,
+  ) {
+    return {
+      agency_id: agencyId,
+      individual_id: individualId,
+      starts_on: draft.startsOn,
+      start_time: `${draft.startTime}:00`,
+      end_time: `${draft.endTime}:00`,
+      timezone: draft.timezone,
+      consultant: draft.consultant,
+      specialty: draft.specialty ?? "",
+      reason: draft.reason ?? "",
+      visit_address: draft.visitAddress ?? "",
+      created_by: actor.userId,
+      created_by_name: actor.fullName,
+    };
+  }
+
+  private async appointmentRecord(agencyId: string, appointmentId: string) {
+    const { data, error } = await this.client
+      .from("appointments")
+      .select("*")
+      .eq("agency_id", agencyId)
+      .eq("id", appointmentId)
+      .maybeSingle();
+    throwIf(error, "Could not load that appointment.");
+    if (!data) throw new Error("Appointment not found.");
+    return mapAppointment(data);
+  }
+
   // ---- Hosted plan-stack helpers ----
 
   private requirePdfFile(file: File, message: string) {
@@ -3122,6 +3322,7 @@ export class HostedApi implements ComplyraApi {
       submissions: { individualId: string; userId: string; submittedAt: string | null }[];
       renewals: ClinicalRenewal[];
       medications: Medication[];
+      appointments: Appointment[];
       checklists: TrainingChecklist[];
       versionLabelById: Map<string, string | null>;
     },
@@ -3192,6 +3393,10 @@ export class HostedApi implements ComplyraApi {
         myRequired.every((row) => row?.signedAt) &&
         !submission &&
         (!myChecklist || (allLinesInitialed(myChecklist) && Boolean(myChecklist.staffSignedAt))),
+      appointments: visibleAppointments(
+        input.appointments.filter((row) => row.individualId === person.id),
+        canManageAppointments(session.roleKey),
+      ),
     };
   }
 

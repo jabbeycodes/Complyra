@@ -271,6 +271,42 @@ async function main() {
       status: row.status,
     })),
   );
+  await upsertOnConflict(
+    "individual_profiles",
+    seed.individuals
+      .filter((row) => row.profile)
+      .map((row) => ({
+        agency_id: row.agencyId,
+        individual_id: row.id,
+        profile: row.profile,
+      })),
+    "individual_id",
+  );
+  await upsert(
+    "appointments",
+    seed.appointments.map((row) => ({
+      id: row.id,
+      agency_id: row.agencyId,
+      individual_id: row.individualId,
+      starts_on: row.startsOn,
+      start_time: `${row.startTime}:00`,
+      end_time: `${row.endTime}:00`,
+      timezone: row.timezone,
+      consultant: row.consultant,
+      specialty: row.specialty,
+      reason: row.reason,
+      visit_address: row.visitAddress,
+      created_by: uid(row.createdBy),
+      created_by_name: row.createdByName,
+      created_at: row.createdAt,
+      updated_by: row.updatedBy ? uid(row.updatedBy) : null,
+      updated_by_name: row.updatedByName,
+      updated_at: row.updatedAt,
+      deleted_by: row.deletedBy ? uid(row.deletedBy) : null,
+      deleted_by_name: row.deletedByName,
+      deleted_at: row.deletedAt,
+    })),
+  );
   await upsert(
     "acknowledgment_rows",
     seed.rows.map((row) => ({

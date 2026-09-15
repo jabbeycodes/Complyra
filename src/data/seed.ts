@@ -24,6 +24,7 @@ import type {
   StaffCertificate,
   MedDoseException,
 } from "./types";
+import type { Appointment } from "./appointments";
 import type {
   ClinicalRenewal,
   IndividualProfile,
@@ -102,6 +103,7 @@ export interface LocalDatabase {
   obligationSignatures: ObligationSignature[];
   packetSubmissions: PacketSubmission[];
   clinicalRenewals: ClinicalRenewal[];
+  appointments: Appointment[];
   chartFiles: ChartFile[];
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
@@ -403,6 +405,21 @@ export function createEvergreenSeed(): LocalDatabase {
     dailyActivities: "Day habilitation, weekdays",
     visitHours: "Weekdays after 4:00 p.m.; weekends by appointment",
     enrolledOn: "2026-01-15",
+    allergies: [
+      {
+        allergen: "Tree nuts",
+        reaction: "Noted on diet order",
+        status: "active",
+      },
+    ],
+    allergiesStamp: {
+      createdBy: profileByName["Cameron Price"].id,
+      createdByName: "Cameron Price",
+      createdAt: "2026-01-15T15:00:00.000Z",
+      updatedBy: "",
+      updatedByName: "",
+      updatedAt: "",
+    },
     guardians: [
       {
         name: "Jonathan Williams",
@@ -558,6 +575,30 @@ export function createEvergreenSeed(): LocalDatabase {
       // dental, and physician-order cards don't show identical dates.
       defaultRenewals(AGENCY_ID, person.id, renewalSeedToday(person.fullName)),
     ),
+    appointments: [
+      {
+        id: padId(940),
+        agencyId: AGENCY_ID,
+        individualId: jodie.id,
+        startsOn: "2026-09-22",
+        startTime: "09:30",
+        endTime: "10:15",
+        timezone: "America/Chicago",
+        consultant: "Dr. Priya Shah",
+        specialty: "Neurology",
+        reason: "Seizure follow-up and medication review",
+        visitAddress: jodieProfile.address,
+        createdBy: profileByName["Cameron Price"].id,
+        createdByName: "Cameron Price",
+        createdAt: "2026-09-10T14:00:00.000Z",
+        updatedBy: "",
+        updatedByName: "",
+        updatedAt: "2026-09-10T14:00:00.000Z",
+        deletedBy: "",
+        deletedByName: "",
+        deletedAt: null,
+      },
+    ],
     chartFiles: [],
     medications: defaultJodieMedications(AGENCY_ID, jodie.id),
     medicationDeliveries: [],
@@ -693,6 +734,8 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       dailyActivities: "",
       visitHours: "",
       enrolledOn: "",
+      allergies: [],
+      allergiesStamp: null,
       ...person.profile,
       ...extra,
     };

@@ -32,6 +32,18 @@ import {
 import { portraitSrc } from "./personPortrait";
 import { metrics } from "../domain";
 import {
+  appointmentChangeDetail,
+  blankAppointmentStamps,
+  canEditAllergies,
+  canManageAppointments,
+  canSeeAppointments,
+  isAppointmentRemoved,
+  validateAppointmentDraft,
+  visibleAppointments,
+  type Appointment,
+  type AppointmentDraft,
+} from "./appointments";
+import {
   computeRequirementStatus,
   isPrivileged,
   requirementStatusFromDb,
@@ -136,6 +148,7 @@ import {
 import {
   applyRenewalUpload,
   blankRnFields,
+  allergiesChangeDetail,
   canEditCover,
   canEditExtraction,
   canSeeRenewals,
@@ -144,6 +157,8 @@ import {
   canUploadRenewal,
   defaultRenewals,
   emptyProfile,
+  nextAllergiesStamp,
+  normalizeAllergies,
   normalizeProfile,
   isObligationActive,
   proposeFromPcsp,
@@ -151,6 +166,7 @@ import {
   renewalStatus,
   sortObligations,
   staffCanSignDelegation,
+  type Allergy,
   type ClinicalEvidenceKind,
   type IndividualProfile,
   type ObligationItem,
@@ -530,6 +546,16 @@ export interface ComplyraApi {
     effectiveOn?: string;
     enrolledOn?: string;
   }): Promise<{ id: string; name: string }>;
+  createAppointment(
+    input: AppointmentDraft & { individualId: string },
+  ): Promise<{ id: string }>;
+  updateAppointment(
+    appointmentId: string,
+    patch: AppointmentDraft,
+  ): Promise<void>;
+  deleteAppointment(appointmentId: string): Promise<void>;
+  updateIndividualAllergies(individualId: string, allergies: Allergy[]): Promise<void>;
+  recordConsultationPacketGenerated(appointmentId: string): Promise<void>;
   // ===== LIFEPATH-P2 API (training engine) =====
   /** All training topics (checklist verbatim + A1–A6 supplemental sets). */
   listTrainingTopics(scope?: "agency" | "site"): Promise<TrainingTopic[]>;
@@ -1798,6 +1824,7 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.emergencyDrills = store.db.emergencyDrills ?? [];
   store.db.homeSafetyReports = store.db.homeSafetyReports ?? [];
   store.db.siteReviews = store.db.siteReviews ?? [];
+  store.db.appointments = store.db.appointments ?? [];
 }
 
 function ensureClinicalRenewals(store: MemoryStore) {
@@ -2019,6 +2046,10 @@ function mapPlanStack(
         if (!checklist) return true;
         return allLinesInitialed(checklist) && Boolean(checklist.staffSignedAt);
       })(),
+    appointments: visibleAppointments(
+      (store.db.appointments ?? []).filter((row) => row.individualId === person.id),
+      canManageAppointments(session.roleKey),
+    ),
   };
 }
 
@@ -4250,6 +4281,140 @@ export class LocalApi implements ComplyraApi {
       });
     }
     return { id: person.id, name: fullName };
+  }
+
+  async createAppointment(input: AppointmentDraft & { individualId: string }) {
+    const session = assertSession(this.store);
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const person = accessibleIndividual(this.store, session, input.individualId);
+    const draft = validateAppointmentDraft(input);
+    ensurePlanCollections(this.store);
+    const now = new Date().toISOString();
+    const row: Appointment = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId: person.id,
+      ...draft,
+      specialty: draft.specialty ?? "",
+      reason: draft.reason ?? "",
+      visitAddress: draft.visitAddress ?? "",
+      ...blankAppointmentStamps(session, now),
+    };
+    this.store.db.appointments.push(row);
+    log(
+      this.store,
+      session,
+      "appointment.created",
+      `${draft.consultant} for ${person.fullName}`,
+      "appointment",
+      row.id,
+    );
+    await persistMeta(this.store);
+    return { id: row.id };
+  }
+
+  async updateAppointment(appointmentId: string, patch: AppointmentDraft) {
+    const session = assertSession(this.store);
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    ensurePlanCollections(this.store);
+    const row = this.store.db.appointments.find(
+      (item) => item.id === appointmentId && item.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("Appointment not found.");
+    if (isAppointmentRemoved(row)) throw new Error("That appointment was already removed.");
+    accessibleIndividual(this.store, session, row.individualId);
+    const draft = validateAppointmentDraft(patch);
+    const detail = appointmentChangeDetail(row, draft);
+    const now = new Date().toISOString();
+    Object.assign(row, draft, {
+      updatedBy: session.userId,
+      updatedByName: session.fullName,
+      updatedAt: now,
+    });
+    log(this.store, session, "appointment.updated", detail, "appointment", row.id);
+    await persistMeta(this.store);
+  }
+
+  async deleteAppointment(appointmentId: string) {
+    const session = assertSession(this.store);
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    ensurePlanCollections(this.store);
+    const row = this.store.db.appointments.find(
+      (item) => item.id === appointmentId && item.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("Appointment not found.");
+    if (isAppointmentRemoved(row)) throw new Error("That appointment was already removed.");
+    accessibleIndividual(this.store, session, row.individualId);
+    const now = new Date().toISOString();
+    row.deletedBy = session.userId;
+    row.deletedByName = session.fullName;
+    row.deletedAt = now;
+    log(
+      this.store,
+      session,
+      "appointment.deleted",
+      `${row.consultant} appointment removed`,
+      "appointment",
+      appointmentId,
+    );
+    await persistMeta(this.store);
+  }
+
+  async updateIndividualAllergies(individualId: string, allergies: Allergy[]) {
+    const session = assertSession(this.store);
+    if (!canEditAllergies(session.roleKey)) {
+      throw new Error("You cannot edit allergies.");
+    }
+    const person = accessibleIndividual(this.store, session, individualId);
+    const current = normalizeProfile(person, person.profile);
+    const nextAllergies = normalizeAllergies(allergies);
+    const now = new Date().toISOString();
+    person.profile = {
+      ...current,
+      allergies: nextAllergies,
+      allergiesStamp: nextAllergiesStamp(current.allergiesStamp, session, now),
+    };
+    log(
+      this.store,
+      session,
+      "allergies.updated",
+      allergiesChangeDetail(current.allergies, nextAllergies),
+      "individual",
+      person.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async recordConsultationPacketGenerated(appointmentId: string) {
+    const session = assertSession(this.store);
+    if (!canSeeAppointments(session.roleKey)) {
+      throw new Error("You cannot view Health records.");
+    }
+    ensurePlanCollections(this.store);
+    const row = this.store.db.appointments.find(
+      (item) => item.id === appointmentId && item.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("Appointment not found.");
+    if (isAppointmentRemoved(row) && !canManageAppointments(session.roleKey)) {
+      throw new Error("Appointment not found.");
+    }
+    accessibleIndividual(this.store, session, row.individualId);
+    const person = this.store.db.individuals.find((item) => item.id === row.individualId);
+    log(
+      this.store,
+      session,
+      "consultation_packet.generated",
+      `${row.consultant} packet for ${person?.fullName ?? "Individual"}`,
+      "appointment",
+      row.id,
+    );
+    await persistMeta(this.store);
   }
 
   async resetWorkspace() {

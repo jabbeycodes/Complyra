@@ -13,6 +13,8 @@ import { DEMO_PASSWORD } from "./types";
 import {
   applyRenewalUpload,
   canSeeRenewals,
+  formatAllergiesLabel,
+  normalizeAllergies,
   requiredForSigning,
   staffCanSignDelegation,
   type ObligationItem,
@@ -401,4 +403,18 @@ test("delegating RN must sign before staff, even if DPM turned the form on", asy
     .required.find((view) => view.item.kind === "delegation")!;
   assert.ok(signed.mySignature?.signedAt);
   assert.ok(signed.item.rnSignedAt);
+});
+
+test("allergies normalize and format for the consultation packet", () => {
+  assert.deepEqual(
+    normalizeAllergies([
+      { allergen: "  Tree nuts ", reaction: " hives ", status: "active" },
+      { allergen: " ", reaction: "x", status: "resolved" },
+    ]),
+    [{ allergen: "Tree nuts", reaction: "hives", status: "active" }],
+  );
+  assert.equal(
+    formatAllergiesLabel([{ allergen: "Tree nuts", reaction: "Noted on diet order", status: "active" }]),
+    "Tree nuts (active) — Noted on diet order",
+  );
 });
