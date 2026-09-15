@@ -177,6 +177,23 @@ import {
   validateCertificateDates,
   validateCertificateFile,
 } from "./certificates";
+// AUDIT-READINESS: corrective-action row mapping + validation.
+import {
+  buildCorrectiveActionRow,
+  correctiveActionFromRow,
+  deriveCorrectiveActionStatus,
+  sortCorrectiveActions,
+  validateCorrectiveActionInput,
+  type AddCorrectiveActionInput,
+  type CorrectiveAction,
+  type UpdateCorrectiveActionInput,
+} from "./correctiveActions";
+// AUDIT-READINESS: score snapshot rows for the trend chart.
+import {
+  buildScoreSnapshotRow,
+  type ComplianceScore,
+  type ScoreSnapshot,
+} from "./complianceScore";
 import {
   DEFAULT_MONTHLY_DUE,
   blankSafetyLines,
@@ -6008,6 +6025,234 @@ export class HostedApi implements ComplyraApi {
       .createSignedUrl(cert.filePath, 300);
     throwIf(error, "Could not open the certificate file.");
     return data!.signedUrl;
+  }
+  // ===== AUDIT-READINESS HOSTED (corrective actions) =====
+  // AUDIT-READINESS: corrective-action workflow (HostedApi, Supabase).
+  // Table: public.corrective_actions (migration 20260914070000_audit_readiness.sql).
+
+  private requireCorrectiveActionWrite(session: SessionUser) {
+    this.requirePermission(session, "correctiveActions.manage");
+  }
+
+  private mapCorrectiveActionRow(row: Record<string, unknown>): CorrectiveAction {
+    const action = correctiveActionFromRow(row);
+    const profile = row.profiles as { full_name?: string } | null;
+    if (profile?.full_name) action.assignedToName = profile.full_name;
+    return action;
+  }
+
+  private async fetchCorrectiveActionRow(session: SessionUser, id: string) {
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the corrective action.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Corrective action not found.");
+    }
+    return data as Record<string, unknown>;
+  }
+
+  async listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]> {
+    const session = await this.requireSession();
+    const now = new Date();
+    let query = this.client
+      .from("corrective_actions")
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .eq("agency_id", session.agencyId);
+    if (input?.assignedToUserId) {
+      query = query.eq("assigned_to_user_id", input.assignedToUserId);
+    }
+    const { data, error } = await query;
+    throwIf(error, "Could not load corrective actions.");
+    let rows = (data ?? []).map((row) =>
+      this.mapCorrectiveActionRow(row as Record<string, unknown>),
+    );
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveCorrectiveActionStatus(row, now) === input.status,
+      );
+    }
+    return sortCorrectiveActions(rows, now);
+  }
+
+  async addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const errors = validateCorrectiveActionInput(input);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .insert(
+        buildCorrectiveActionRow({
+          agencyId: session.agencyId,
+          createdByUserId: session.userId,
+          data: input,
+        }),
+      )
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not save the corrective action.");
+    const action = this.mapCorrectiveActionRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "corrective_action.added",
+      `Corrective action "${action.title}" created${action.assignedToName ? `, assigned to ${action.assignedToName}` : ""}`,
+      "corrective_action",
+      action.id,
+    );
+    return action;
+  }
+
+  async updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const current = this.mapCorrectiveActionRow(await this.fetchCorrectiveActionRow(session, id));
+    const title = input.title?.trim() ?? current.title;
+    const dueOn = input.dueOn !== undefined ? input.dueOn?.trim() || null : current.dueOn;
+    const errors = validateCorrectiveActionInput({ title, dueOn });
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (input.assignedToUserId !== undefined && input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const patch: Record<string, unknown> = {};
+    if (input.title !== undefined) patch.title = title;
+    if (input.description !== undefined)
+      patch.description = input.description?.trim() ?? "";
+    if (input.assignedToUserId !== undefined)
+      patch.assigned_to_user_id = input.assignedToUserId;
+    if (input.dueOn !== undefined) patch.due_on = dueOn;
+    if (input.storedStatus !== undefined) patch.status = input.storedStatus;
+    if (input.linkedRiskId !== undefined) patch.linked_risk_id = input.linkedRiskId;
+    if (input.linkedRiskSource !== undefined)
+      patch.linked_risk_source = input.linkedRiskSource;
+    const { data, error } = await this.client
+      .from("corrective_actions")
+      .update(patch)
+      .eq("id", id)
+      .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not update the corrective action.");
+    const updated = this.mapCorrectiveActionRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "corrective_action.updated",
+      `Corrective action "${updated.title}" updated`,
+      "corrective_action",
+      updated.id,
+    );
+    return updated;
+  }
+
+  async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
+    return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+  // ===== AUDIT-READINESS HOSTED (score snapshots) =====
+  // Table: public.compliance_score_snapshots
+  // (migration 20260914070000_audit_readiness.sql).
+
+  private mapScoreSnapshot(row: Record<string, unknown>): ScoreSnapshot {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: (row.site_id as string | null) ?? null,
+      score: row.score as number,
+      band: row.band as ScoreSnapshot["band"],
+      breakdown: (row.breakdown as ScoreSnapshot["breakdown"]) ?? {},
+      factCount: (row.fact_count as number) ?? 0,
+      computedAt: row.computed_at as string,
+    };
+  }
+
+  async saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot> {
+    const session = await this.requireSession();
+    this.requireCorrectiveActionWrite(session);
+    const siteId = input.siteId ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    // One snapshot per day per scope — replace today's if it exists.
+    let existingQuery = this.client
+      .from("compliance_score_snapshots")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .gte("computed_at", `${today}T00:00:00`)
+      .lt("computed_at", `${today}T23:59:59.999`);
+    existingQuery = siteId
+      ? existingQuery.eq("site_id", siteId)
+      : existingQuery.is("site_id", null);
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    throwIf(existingError, "Could not check today's snapshot.");
+    const row = buildScoreSnapshotRow({
+      agencyId: session.agencyId,
+      siteId,
+      result: input.result,
+    });
+    let saved: Record<string, unknown>;
+    if (existing) {
+      const { data, error } = await this.client
+        .from("compliance_score_snapshots")
+        .update(row)
+        .eq("id", (existing as Record<string, unknown>).id)
+        .select("*")
+        .single();
+      throwIf(error, "Could not update today's snapshot.");
+      saved = data as Record<string, unknown>;
+    } else {
+      const { data, error } = await this.client
+        .from("compliance_score_snapshots")
+        .insert(row)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the snapshot.");
+      saved = data as Record<string, unknown>;
+    }
+    return this.mapScoreSnapshot(saved);
+  }
+
+  async listComplianceSnapshots(
+    siteId?: string | null,
+    limit = 30,
+  ): Promise<ScoreSnapshot[]> {
+    const session = await this.requireSession();
+    const scope = siteId ?? null;
+    let query = this.client
+      .from("compliance_score_snapshots")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("computed_at", { ascending: true })
+      .limit(Math.max(limit, 1));
+    query = scope ? query.eq("site_id", scope) : query.is("site_id", null);
+    const { data, error } = await query;
+    throwIf(error, "Could not load score snapshots.");
+    return (data ?? []).map((row) =>
+      this.mapScoreSnapshot(row as Record<string, unknown>),
+    );
   }
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
 

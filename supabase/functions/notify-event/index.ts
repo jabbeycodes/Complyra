@@ -62,6 +62,11 @@ const NOTIFICATION_TYPES = [
   "review.changed",
   "recognition.hm_winner",
   "recognition.dsp_winner",
+  // AUDIT-READINESS (workflow library) — source updated 2026-09-14;
+  // this function is not being deployed in this pass.
+  "delegation.unacknowledged",
+  "isp.renewal_soon",
+  "incident.followup",
 ];
 
 function isWellFormedDeepLink(deepLink: string): boolean {

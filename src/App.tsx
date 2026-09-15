@@ -94,6 +94,7 @@ import QaAuditsPage from "./features/qa/QaAuditsPage";
 // LIFEPATH-P4-IMPORT (certificates)
 import { Award } from "lucide-react";
 import CertificateManager from "./features/certificates/CertificateManager";
+import CommandCenter from "./components/CommandCenter";
 import StaffCertificatesModal from "./features/certificates/StaffCertificatesModal";
 // LIFEPATH-P5-IMPORT (HM weekly checklist)
 import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage";
@@ -1589,6 +1590,7 @@ export default function App() {
                   </section>
                 </>
               )}
+              {page === "Audit Me" && <CommandCenter />}
               {page === "Acknowledgments" && (
                 <>
                   <PageHeading

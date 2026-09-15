@@ -229,6 +229,19 @@ import {
   validateCertificateDates,
   validateCertificateFile,
 } from "./certificates";
+import {
+  deriveCorrectiveActionStatus,
+  sortCorrectiveActions,
+  validateCorrectiveActionInput,
+  type AddCorrectiveActionInput,
+  type CorrectiveAction,
+  type UpdateCorrectiveActionInput,
+} from "./correctiveActions";
+import {
+  sortSnapshotsOldestFirst,
+  type ComplianceScore,
+  type ScoreSnapshot,
+} from "./complianceScore";
 import { buildCarePlanPdf } from "../pdf/carePlanPdf";
 import { buildTrainingChecklistPdf, trainingFileName } from "../pdf/trainingChecklistPdf";
 import { buildDelegationPdf, delegationFileName } from "../pdf/delegationPdf";
@@ -597,6 +610,35 @@ export interface ComplyraApi {
   deleteCertificate(id: string): Promise<void>;
   certificatesExpiringSoon(days: number): Promise<ExpiringCertificate[]>;
   certificateFileUrl(id: string): Promise<string>;
+  // ===== AUDIT-READINESS API (corrective actions) =====
+  /** List the agency's corrective actions (any agency member may read). */
+  listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]>;
+  /** Create a corrective action (correctiveActions.manage). */
+  addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction>;
+  /** Update title/owner/due date/status (correctiveActions.manage). */
+  updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction>;
+  /** Resolve an action: stamps resolved_at (correctiveActions.manage). */
+  resolveCorrectiveAction(id: string): Promise<CorrectiveAction>;
+  // ===== AUDIT-READINESS API (compliance score snapshots) =====
+  /**
+   * Record today's compliance score snapshot (agency-wide when siteId is
+   * null). One snapshot per day per scope — re-saving replaces today's.
+   */
+  saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot>;
+  /** Newest-first snapshots for the trend chart. */
+  listComplianceSnapshots(
+    siteId?: string | null,
+    limit?: number,
+  ): Promise<ScoreSnapshot[]>;
   // ===== LIFEPATH-P5 API (HM weekly checklist) =====
   /**
    * DPM-only: assign this week's checklist to an HM for a home.
@@ -1315,6 +1357,9 @@ async function hydrate() {
       browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
       browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
       browserStore.db.siteReviews = browserStore.db.siteReviews ?? [];
+      // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
+      browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
+      browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
       seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
@@ -5286,6 +5331,195 @@ export class LocalApi implements ComplyraApi {
     const blob = await readStoredFile(this.store, cert.filePath);
     if (!blob || blob.size === 0) throw new Error("The certificate file is missing.");
     return URL.createObjectURL(blob);
+  }
+
+  // ===== AUDIT-READINESS IMPL (corrective actions) =====
+  // AUDIT-READINESS: corrective-action workflow (LocalApi, in-memory).
+  private correctiveActionsOf() {
+    return (this.store.db.correctiveActions ??= []);
+  }
+
+  private assertCorrectiveActionWrite(session: SessionUser) {
+    assertCan(session, "correctiveActions.manage");
+  }
+
+  private findCorrectiveAction(session: SessionUser, id: string) {
+    const action = this.correctiveActionsOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!action) throw new Error("Corrective action not found.");
+    return action;
+  }
+
+  private assigneeName(session: SessionUser, userId: string | null): string | null {
+    if (!userId) return null;
+    const profile = this.store.db.profiles.find(
+      (row) => row.id === userId && row.homeAgencyId === session.agencyId,
+    );
+    return profile?.fullName ?? null;
+  }
+
+  async listCorrectiveActions(input?: {
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<CorrectiveAction[]> {
+    const session = assertSession(this.store);
+    const now = new Date();
+    let rows = this.correctiveActionsOf().filter(
+      (row) => row.agencyId === session.agencyId,
+    );
+    if (input?.assignedToUserId) {
+      rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
+    }
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveCorrectiveActionStatus(row, now) === input.status,
+      );
+    }
+    return sortCorrectiveActions(rows, now);
+  }
+
+  async addCorrectiveAction(input: AddCorrectiveActionInput): Promise<CorrectiveAction> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const errors = validateCorrectiveActionInput(input);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const assigneeId = input.assignedToUserId ?? null;
+    if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+    const now = new Date().toISOString();
+    const action: CorrectiveAction = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      assignedToUserId: assigneeId,
+      assignedToName: this.assigneeName(session, assigneeId),
+      dueOn: input.dueOn?.trim() || null,
+      storedStatus: "open",
+      linkedRiskId: input.linkedRiskId ?? null,
+      linkedRiskSource: input.linkedRiskSource ?? null,
+      createdByUserId: session.userId,
+      createdAt: now,
+      resolvedAt: null,
+    };
+    this.correctiveActionsOf().unshift(action);
+    log(
+      this.store,
+      session,
+      "corrective_action.added",
+      `Corrective action "${action.title}" created${action.assignedToName ? `, assigned to ${action.assignedToName}` : ""}`,
+      "corrective_action",
+      action.id,
+    );
+    await persistMeta(this.store);
+    return action;
+  }
+
+  async updateCorrectiveAction(
+    id: string,
+    input: UpdateCorrectiveActionInput,
+  ): Promise<CorrectiveAction> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const action = this.findCorrectiveAction(session, id);
+    if (input.title !== undefined) {
+      const errors = validateCorrectiveActionInput({
+        title: input.title,
+        dueOn: input.dueOn ?? action.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      action.title = input.title.trim();
+    }
+    if (input.dueOn !== undefined) {
+      const errors = validateCorrectiveActionInput({
+        title: action.title,
+        dueOn: input.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      action.dueOn = input.dueOn?.trim() || null;
+    }
+    if (input.description !== undefined) action.description = input.description?.trim() ?? "";
+    if (input.assignedToUserId !== undefined) {
+      if (input.assignedToUserId) this.requireAgencyProfile(session, input.assignedToUserId);
+      action.assignedToUserId = input.assignedToUserId;
+      action.assignedToName = this.assigneeName(session, input.assignedToUserId);
+    }
+    if (input.storedStatus !== undefined) action.storedStatus = input.storedStatus;
+    if (input.linkedRiskId !== undefined) action.linkedRiskId = input.linkedRiskId;
+    if (input.linkedRiskSource !== undefined)
+      action.linkedRiskSource = input.linkedRiskSource;
+    if (action.storedStatus === "resolved" && !action.resolvedAt) {
+      action.resolvedAt = new Date().toISOString();
+    } else if (action.storedStatus !== "resolved") {
+      action.resolvedAt = null;
+    }
+    log(
+      this.store,
+      session,
+      "corrective_action.updated",
+      `Corrective action "${action.title}" updated`,
+      "corrective_action",
+      action.id,
+    );
+    await persistMeta(this.store);
+    return action;
+  }
+
+  async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
+    return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+
+  // ===== AUDIT-READINESS IMPL (score snapshots) =====
+  private complianceSnapshotsOf() {
+    return (this.store.db.complianceSnapshots ??= []);
+  }
+
+  async saveComplianceSnapshot(input: {
+    siteId?: string | null;
+    result: ComplianceScore;
+  }): Promise<ScoreSnapshot> {
+    const session = assertSession(this.store);
+    this.assertCorrectiveActionWrite(session);
+    const siteId = input.siteId ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = this.complianceSnapshotsOf();
+    // One snapshot per day per scope — replace today's if it exists.
+    const existing = rows.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.siteId === siteId &&
+        row.computedAt.slice(0, 10) === today,
+    );
+    const snapshot: ScoreSnapshot = {
+      id: existing?.id ?? crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId,
+      score: input.result.score,
+      band: input.result.band,
+      breakdown: input.result.breakdown,
+      factCount: input.result.factCount,
+      computedAt: new Date().toISOString(),
+    };
+    if (existing) {
+      rows.splice(rows.indexOf(existing), 1, snapshot);
+    } else {
+      rows.unshift(snapshot);
+    }
+    await persistMeta(this.store);
+    return snapshot;
+  }
+
+  async listComplianceSnapshots(
+    siteId?: string | null,
+    limit = 30,
+  ): Promise<ScoreSnapshot[]> {
+    const session = assertSession(this.store);
+    const scope = siteId ?? null;
+    return sortSnapshotsOldestFirst(
+      this.complianceSnapshotsOf().filter(
+        (row) => row.agencyId === session.agencyId && row.siteId === scope,
+      ),
+    ).slice(-Math.max(limit, 1));
   }
   // ===== LIFEPATH-P5 IMPL (HM weekly checklist) =====
 
