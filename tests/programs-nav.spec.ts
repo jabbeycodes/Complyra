@@ -48,7 +48,7 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
 
   const programsLabel = page.locator(".sidebar .nav-label").first();
   await expect(programsLabel).toHaveText("PROGRAMS");
-  await expect(page.locator(".sidebar .nav-label")).not.toContainText("WORKSPACE");
+  await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
   await page.screenshot({ path: shotPath("programs_sidebar_1280.png"), fullPage: false });
@@ -78,9 +78,7 @@ test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   await expect(page.locator(".sidebar.mobile-open .nav-label").first()).toHaveText(
     "PROGRAMS",
   );
-  await expect(page.locator(".sidebar.mobile-open .nav-label")).not.toContainText(
-    "WORKSPACE",
-  );
+  await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
   await page.screenshot({ path: shotPath("programs_drawer_390.png"), fullPage: false });
   await closeMobileNav(page);
   await page.screenshot({ path: shotPath("overview_programs_390.png"), fullPage: false });
