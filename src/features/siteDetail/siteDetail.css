@@ -30,11 +30,16 @@
 .site-hero .status-mix {
   padding: 0;
   gap: 20px;
+  max-width: 520px;
 }
 
 .site-hero .status-mix-chart {
   width: 148px;
   max-width: 148px;
+}
+
+.site-hero .status-mix-legend {
+  flex: 0 1 240px;
 }
 
 .site-hero-kpis {
@@ -81,7 +86,7 @@
   display: flex;
   gap: 14px;
   overflow-x: auto;
-  padding: 4px 2px 6px;
+  padding: 4px 0 6px;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -139,8 +144,9 @@
 .site-detail-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 18px;
+  gap: 2px 14px;
   overflow: visible;
+  max-width: 100%;
   margin-bottom: 16px;
 }
 
@@ -185,8 +191,9 @@
 
 .fact-list {
   margin: 12px 0 0;
+  padding: 0 var(--panel-inline) 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px 24px;
 }
 
@@ -217,7 +224,7 @@
 .record-list {
   list-style: none;
   margin: 12px 0 0;
-  padding: 0;
+  padding: 0 var(--panel-inline) 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -279,6 +286,12 @@
   align-items: center;
 }
 
+@media (max-width: 1320px) {
+  .site-tab-icon {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .site-hero .status-mix-chart {
     width: 128px;
@@ -290,20 +303,23 @@
   .site-detail-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: thin;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 4px;
-    mask-image: linear-gradient(to right, #000 86%, transparent);
+    scroll-padding-inline: 8px;
+    mask-image: linear-gradient(to right, #000 82%, transparent);
   }
 
   .site-detail-tabs > button {
-    padding-left: 6px;
-    padding-right: 6px;
+    padding-left: 4px;
+    padding-right: 4px;
     font-size: 13px;
   }
 
-  .site-tab-icon {
-    display: none;
+  .site-detail-tabs::after {
+    content: "";
+    flex: 0 0 16px;
   }
 }
 

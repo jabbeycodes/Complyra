@@ -1,11 +1,23 @@
 /* LIFEPATH-P7 (mileage tracking) styles. */
 
+.mileage-page .tabs {
+  max-width: 100%;
+}
+
 .mileage-heading-actions,
 .mileage-sheet-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Headings, forms, and sheets share --panel-inline so nothing sits on the card edge. */
+.mileage-page .panel > h2,
+.mileage-page .panel > p,
+.mileage-page .panel > ul,
+.mileage-page .panel > .empty {
+  padding-inline: var(--panel-inline);
 }
 
 .mileage-sheet-head {
@@ -15,10 +27,12 @@
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 12px;
+  padding: 21px var(--panel-inline) 0;
 }
 
 .mileage-sheet-head h2 {
   margin: 0;
+  padding: 0;
 }
 
 .mileage-toolbar {
@@ -48,9 +62,10 @@
 
 .mileage-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   margin-top: 12px;
+  padding: 0 var(--panel-inline) 20px;
 }
 
 .mileage-form label {
@@ -155,11 +170,12 @@
   gap: 4px;
 }
 
-.table-scroll {
+.mileage-page .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  margin-inline: calc(-1 * var(--panel-inline));
-  padding-inline: var(--panel-inline);
+  margin-inline: 0;
+  padding: 0 var(--panel-inline) 16px;
+  max-width: 100%;
 }
 
 /* Admin backfill: out-of-sequence trip checkbox + row badge. */
@@ -246,12 +262,39 @@
     min-height: 44px;
   }
 
-  .mileage-table th,
-  .mileage-table td {
-    padding: 6px 7px;
+  .mileage-form {
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
-  .table-scroll {
-    mask-image: linear-gradient(to right, #000 88%, transparent);
+  .mileage-toolbar {
+    align-items: stretch;
+  }
+
+  .mileage-toolbar label {
+    flex: 1 1 148px;
+    min-width: 0;
+  }
+
+  .mileage-toolbar select,
+  .mileage-toolbar input[type="month"],
+  .mileage-toolbar input[type="number"] {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .mileage-toolbar .mileage-sheet-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mileage-table th,
+  .mileage-table td {
+    padding: 6px 8px;
+  }
+
+  .mileage-page .table-scroll {
+    mask-image: linear-gradient(to right, #000 86%, transparent);
   }
 }

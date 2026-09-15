@@ -26,6 +26,32 @@ function shotPath(name: string) {
   return `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}/${name}`;
 }
 
+async function assertNoPageHorizontalScroll(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const doc = document.documentElement;
+    return { scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth, scrollX: window.scrollX };
+  });
+  expect(overflow.scrollX).toBe(0);
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+}
+
+async function assertPanelContentInset(page: Page, panelSelector: string, innerSelector: string) {
+  const gap = await page.evaluate(
+    ({ panelSelector: panel, innerSelector: inner }) => {
+      const card = document.querySelector(panel);
+      const node = document.querySelector(inner);
+      if (!card || !node) return null;
+      const a = card.getBoundingClientRect();
+      const b = node.getBoundingClientRect();
+      return { fromStart: b.left - a.left, fromEnd: a.right - b.right };
+    },
+    { panelSelector, innerSelector },
+  );
+  expect(gap, `${panelSelector} ${innerSelector}`).toBeTruthy();
+  expect(gap!.fromStart, `${innerSelector} start inset`).toBeGreaterThanOrEqual(20);
+  expect(gap!.fromEnd, `${innerSelector} end inset`).toBeGreaterThanOrEqual(16);
+}
+
 test("demo admin can print and download weekly and monthly mileage sheets", async ({
   page,
 }) => {
@@ -41,6 +67,12 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
   const monthlyBar = page.locator(".mileage-toolbar");
   await expect(monthlyBar.getByRole("button", { name: "Print monthly" })).toBeVisible();
   await expect(monthlyBar.getByRole("button", { name: "Monthly PDF" })).toBeVisible();
+  await assertPanelContentInset(
+    page,
+    '[aria-label="Log a trip"]',
+    '[aria-label="Log a trip"] input[type="date"]',
+  );
+  await assertNoPageHorizontalScroll(page);
   await page.screenshot({ path: shotPath("mileage_admin_monthly.png"), fullPage: false });
 
   const monthly = page.waitForEvent("download");
@@ -59,6 +91,20 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
   await weeklyBar.getByRole("button", { name: "Weekly PDF" }).click();
   const weeklyFile = await weekly;
   expect(weeklyFile.suggestedFilename()).toMatch(/mileage-weekly.*\.pdf$/);
+  await assertPanelContentInset(
+    page,
+    '[aria-label="Weekly mileage sheet"]',
+    '[aria-label="Weekly mileage sheet"] h2',
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertNoPageHorizontalScroll(page);
+  await expect(weeklyBar.getByRole("button", { name: "Print weekly" })).toBeVisible();
+  await page.screenshot({ path: shotPath("mileage_admin_weekly_390.png"), fullPage: false });
+  await page.getByRole("tab", { name: "Monthly log" }).click();
+  await expect(page.getByRole("button", { name: "Print monthly" }).first()).toBeVisible();
+  await assertNoPageHorizontalScroll(page);
+  await page.screenshot({ path: shotPath("mileage_admin_monthly_390.png"), fullPage: false });
 });
 
 test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
@@ -107,6 +153,7 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   const box = await tablist.boundingBox();
   expect(box?.width).toBeLessThanOrEqual(390);
   await expect(tabs.last()).toHaveText(/Staff/);
+  await assertNoPageHorizontalScroll(page);
   await page.screenshot({ path: shotPath("site_hero_390.png"), fullPage: false });
   await tablist.scrollIntoViewIfNeeded();
   await page.screenshot({ path: shotPath("site_tabs_390.png"), fullPage: false });
