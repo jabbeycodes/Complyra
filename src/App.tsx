@@ -94,6 +94,9 @@ import ChecklistAssigner from "./features/hmChecklist/ChecklistAssigner";
 // LIFEPATH-P6-IMPORT (med inventory)
 import { Pill as MedInventoryNavIcon } from "lucide-react";
 import MedInventoryPage from "./features/medInventory/MedInventoryPage";
+// ISP-DATA-IMPORT (ISP data feature, stream C)
+import { NotebookPen as IspDataNavIcon } from "lucide-react";
+import OverdueCommand from "./features/ispData/OverdueCommand";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
@@ -586,6 +589,8 @@ export default function App() {
         ["Documents", FolderOpen],
         ["Review queue", ClipboardCheck],
         ["Audit center", ShieldCheck],
+        // ISP-DATA-NAV (ISP data command center)
+        ["ISP data", IspDataNavIcon],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
       ],
@@ -1703,6 +1708,8 @@ export default function App() {
               {page === "Checklist assignments" && <ChecklistAssigner />}
               {/* LIFEPATH-P6-PAGE (med supply forecast) */}
               {page === "Supply forecast" && <MedInventoryPage />}
+              {/* ISP-DATA-PAGE (overdue-notes command center) */}
+              {page === "ISP data" && <OverdueCommand />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {page === "Settings" && (
