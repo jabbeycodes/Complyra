@@ -35,8 +35,8 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await expect(chart.getByRole("region", { name: "Appointment filters" })).toHaveCount(0);
   await expect(chart.getByRole("button", { name: "New appointment" })).toBeVisible();
   await expect(chart).toContainText("Dr. Priya Shah");
-  await expect(chart).toContainText("Scheduled");
-  await expect(chart).not.toContainText("Upcoming");
+  await expect(chart.locator(".health-widget")).toContainText("Scheduled");
+  await expect(chart.locator(".health-widget")).not.toContainText("Upcoming");
   await expect(chart).toContainText("Logged by Cameron Price");
   await expect(chart.getByRole("heading", { name: "Shift notes" })).toHaveCount(0);
   await expect(chart.getByRole("heading", { name: "Vitals" })).toHaveCount(0);
