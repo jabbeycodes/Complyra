@@ -17,14 +17,15 @@
   --green: #4d6b42;
   --red: #b56a4e;
   --sidebar: 236px;
-  /* Canvas inset: content and topbar share one token so they stay aligned. */
-  --page-inline: 56px;
-  --page-inline-md: 36px;
-  --page-inline-sm: 22px;
+  /* Canvas inset: content and topbar share one token so they stay aligned.
+     Middle band: enough air that chrome is not flush, not a giant empty rail. */
+  --page-inline: 48px;
+  --page-inline-md: 32px;
+  --page-inline-sm: 20px;
   --page-inline-start: max(var(--page-inline), env(safe-area-inset-left, 0px));
   --page-inline-end: max(var(--page-inline), env(safe-area-inset-right, 0px));
   /* Inner panel chrome (headings, table edge cells, Cancel / Open form). */
-  --panel-inline: 32px;
+  --panel-inline: 28px;
 }
 * {
   box-sizing: border-box;
@@ -261,6 +262,7 @@ button:hover:not(:disabled) {
   font-weight: 600;
   color: #4a4036;
   padding: 0 14px 10px;
+  text-transform: uppercase;
 }
 .nav-item {
   display: flex;
@@ -1577,7 +1579,7 @@ td > svg {
   flex-direction: column;
 }
 .activity-link {
-  padding: 11px 20px;
+  padding: 11px var(--panel-inline);
   border-top: 1px solid #f1f0ee;
   margin-top: auto;
   font-size: 11px;
