@@ -40,7 +40,7 @@ test("well-water annual is current for 365 days and ignored when the home is on 
   );
 });
 
-test("Maple seed review is in place; Oakwood is still open", async () => {
+test("Cedar seed review is in place; Willow is still open", async () => {
   const client = api();
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,

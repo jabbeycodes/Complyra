@@ -125,7 +125,7 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
 test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   page,
 }) => {
-  async function openMaple() {
+  async function openCedar() {
     await openNav(page, "Sites & programs");
     await page
       .locator(".location-card")
@@ -137,7 +137,7 @@ test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
-  await openMaple();
+  await openCedar();
   await expect(page.locator(".site-hero")).toBeVisible();
   await expect(page.locator(".site-hero-stat").filter({ hasText: "Individuals" })).toContainText(
     "2",

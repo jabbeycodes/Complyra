@@ -11,7 +11,7 @@ async function signIn(page: Page, username = "sarah.mitchell") {
   });
 }
 
-test("DPM sees an open site review and can download Maple working copies", async ({
+test("DPM sees an open site review and can download Cedar working copies", async ({
   page,
 }) => {
   await signIn(page);

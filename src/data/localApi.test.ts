@@ -278,7 +278,7 @@ test("a house manager can upload but cannot approve", async () => {
   const draft = (await api.loadWorkspace(hm)).requirements.find(
     (r) => r.title === "House-created plan item",
   );
-  assert.equal(draft, undefined, "An Oakwood manager must not receive a Maple draft.");
+  assert.equal(draft, undefined, "A Willow manager must not receive a Cedar draft.");
   await assert.rejects(() => api.approveRequirement("outside-site-draft"), /permission/);
 });
 
@@ -820,7 +820,7 @@ test("HR-ROLES: HR can add staff and assign operational roles, but cannot escala
   await api.assignMemberRole(target.id, "dsp");
 });
 
-test("demo nurse cameron.price can sign in and is a Maple member", async () => {
+test("demo nurse cameron.price can sign in and is a Cedar member", async () => {
   const api = new LocalApi(store());
   const nurse = await api.signIn({
     agencyCode: DEMO_AGENCY_CODE,

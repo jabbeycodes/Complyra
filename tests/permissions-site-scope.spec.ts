@@ -69,7 +69,7 @@ test("admin new-delegation dropdown is site-scoped across two homes", async ({
   expect(oakwoodLabels.join(" ")).not.toContain("Morgan Pruitt");
 });
 
-test("Oakwood HM does not see Maple people in a new-delegation dropdown", async ({
+test("Willow HM does not see Cedar people in a new-delegation dropdown", async ({
   page,
 }) => {
   await signedIn(page, "james.wilson");
@@ -90,7 +90,7 @@ test("Oakwood HM does not see Maple people in a new-delegation dropdown", async 
   expect(labels.join(" ")).not.toContain("Morgan Pruitt");
 });
 
-test("demo nurse cameron.price signs in and only sees Maple people", async ({
+test("demo nurse cameron.price signs in and only sees Cedar people", async ({
   page,
 }) => {
   await signedIn(page, "cameron.price");

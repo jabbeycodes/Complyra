@@ -81,7 +81,7 @@ test("personal queue lists work owned by or assigned to the signed-in user", asy
   assert.ok(queue.some((item) => item.title.includes("PCSP") || item.kind === "acknowledgment"));
   assert.ok(queue.some((item) => item.kind === "training" || item.kind === "requirement"));
   assert.equal(
-    queue.every((item) => !item.detail.includes("Oakwood") || item.kind !== "requirement"),
+    queue.every((item) => !item.detail.includes("Willow") || item.kind !== "requirement"),
     true,
   );
 

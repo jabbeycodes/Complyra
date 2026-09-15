@@ -345,12 +345,12 @@ test("manager feedback is site-scoped: DPM sees only their sites' pairs", async 
   membership.siteId = oakwoodSite;
   await api.signIn(login(nurseUsername));
   let feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 1, "DPM at Oakwood sees the pair");
+  assert.equal(feedback.dspRatings.length, 1, "DPM at Willow sees the pair");
 
   // Same DPM moved to Maple: the Oakwood pair is hidden.
   membership.siteId = mapleSite;
   feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 0, "DPM at Maple sees nothing");
+  assert.equal(feedback.dspRatings.length, 0, "DPM at Cedar sees nothing");
 
   // Administrators still see the whole agency.
   await api.signIn(login(DEMO_ADMIN_USERNAME));

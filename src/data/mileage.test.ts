@@ -846,7 +846,7 @@ test("summarizeAgencyYearlyMileage groups by site and rolls up an agency grand t
 
   assert.equal(result.sites[2].rows.length, 0); // empty group still listed
 
-  // Agency grand total = Maple 50 + Oakwood 12.
+  // Agency grand total = Cedar 50 + Willow 12.
   assert.equal(result.grandTotal.months[0], 32);
   assert.equal(result.grandTotal.months[1], 30);
   assert.equal(result.grandTotal.yearlyTotal, 62);
