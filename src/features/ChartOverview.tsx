@@ -347,7 +347,7 @@ export default function ChartOverview({
       </div>
 
       {/* 2. PCSP / trackables summary */}
-      <h3 className="overview-subhead">PCSP summary</h3>
+      <h3 className="overview-subhead">PCSP / trackables summary</h3>
       {summary.tasks.length === 0 ? (
         <p className="overview-muted">No PCSP tasks on this chart yet.</p>
       ) : (

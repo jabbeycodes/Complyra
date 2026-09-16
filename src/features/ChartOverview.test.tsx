@@ -127,7 +127,7 @@ describe("ChartOverview", () => {
       "110245",
       "Cedar House",
       "1984-03-12",
-      "PCSP summary",
+      "PCSP / trackables summary",
       "Diagnoses",
       "Intellectual disability",
       "Medications",

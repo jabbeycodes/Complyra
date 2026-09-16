@@ -191,8 +191,6 @@ export default function IndividualChart({
         title={person.name}
         description={`${person.site}${
           profile.dmhId ? ` · DMH ${profile.dmhId}` : ""
-        }${person.dateOfBirth ? ` · DOB ${formatDate(person.dateOfBirth)}` : ""} · ${
-          profile.legalName
         }`}
       >
         <button className="button" onClick={onBack}>
