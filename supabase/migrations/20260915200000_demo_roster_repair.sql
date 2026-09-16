@@ -306,7 +306,7 @@ do $$
 begin
   if exists (
     select 1 from public.agencies
-    where id = '00000000-0000-4000-8000-000000000001' and code = 'EVERGREEN-MO'
+    where id = '00000000-0000-4000-8000-000000000001'
   ) then
     perform public.repair_evergreen_demo_roster();
   else
