@@ -108,6 +108,7 @@ import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
 import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
 import SitesList from "./features/sites/SitesList";
+import InactivityGuard from "./security/InactivityGuard";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -628,6 +629,7 @@ export default function App() {
     },
   ] as const;
   return (
+    <InactivityGuard onSignOut={() => void signOut()}>
     <div className="app-shell">
       {mobileOpen && (
         <button
@@ -2433,6 +2435,7 @@ export default function App() {
         </Modal>
       )}
     </div>
+    </InactivityGuard>
   );
 }
 function CreateForm({
