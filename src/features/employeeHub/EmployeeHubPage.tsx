@@ -12,7 +12,6 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowLeftRight,
   CalendarCheck,
   CalendarDays,
@@ -26,6 +25,7 @@ import {
   FileText,
   FolderOpen,
   Lock,
+  MonitorSmartphone,
   Pencil,
   Plus,
   Send,
@@ -100,6 +100,16 @@ import {
   StaffingConfigForm,
   StaffingPatternRow,
 } from "./StaffingBoard";
+import { WhosHereNow } from "./WhosHereNow";
+import { PunchExceptions } from "./PunchExceptions";
+import { MissedPunchReview } from "./MissedPunchReview";
+import { PunchRulesConfig } from "./PunchRulesConfig";
+import { KioskAdmin } from "./KioskAdmin";
+import { scheduledVsActual } from "./punchInsights";
+import {
+  adaptRemotePunchStore,
+  isRemotePunchAvailable,
+} from "./kioskContracts";
 import "./employeeHub.css";
 
 export interface HubStaffEntry {
@@ -329,6 +339,8 @@ interface TabDef {
   icon: typeof Clock;
   /** Permission that gates the tab; undefined = everyone with hub.access. */
   perm?: PermissionKey;
+  /** Any-of permissions that also open the tab (union with perm). */
+  permAny?: PermissionKey[];
   badge?: number;
 }
 
@@ -348,6 +360,7 @@ const MANAGER_TABS: TabDef[] = [
   { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards" },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
   { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll" },
+  { id: "kiosk", label: "Kiosk", icon: MonitorSmartphone, permAny: ["hub.manage_staffing", "hub.manage_pay_settings"] },
 ];
 
 /* --------------------------------- shell ---------------------------------- */
@@ -368,7 +381,13 @@ export function EmployeeHubShell({
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
   const tabs = useMemo(
-    () => [...EMPLOYEE_TABS, ...MANAGER_TABS.filter((t) => !t.perm || can(t.perm))],
+    () => [
+      ...EMPLOYEE_TABS,
+      ...MANAGER_TABS.filter(
+        (t) =>
+          !t.perm || can(t.perm) || (t.permAny?.some((p) => can(p)) ?? false),
+      ),
+    ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session],
   );
@@ -531,6 +550,9 @@ export function EmployeeHubShell({
         )}
         {tab === "payroll" && can("hub.approve_payroll") && (
           <PayrollTab session={session} store={store} staffList={staffList} />
+        )}
+        {tab === "kiosk" && (can("hub.manage_staffing") || can("hub.manage_pay_settings")) && (
+          <KioskAdmin session={session} store={store} sites={sites} staffList={staffList} />
         )}
       </div>
     </div>
@@ -1153,21 +1175,53 @@ function StaffingTab({
 
 /* ------------------------------- Time Clock -------------------------------- */
 
-function TimeClockTab({
+export function TimeClockTab({
   session,
   store,
   onChanged,
+  initialGrant,
 }: {
   session: SessionUser;
   store: HrStore;
   onChanged: () => void;
+  /** Test/SSR seed for the remote-punch grant check. */
+  initialGrant?: "allowed" | "denied";
 }) {
   const [punches, setPunches] = useState<HrPunch[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * Remote-punch grant state for this staff member. "unknown" while the
+   * grant is being checked; "allowed" when they hold a hub.remote_punch
+   * grant (or the store predates the grant surface — legacy behavior keeps
+   * punching available); "denied" replaces the punch buttons with the
+   * kiosk message.
+   */
+  const [grant, setGrant] = useState<"unknown" | "allowed" | "denied">(
+    () => initialGrant ?? (isRemotePunchAvailable(store) ? "unknown" : "allowed"),
+  );
 
   const stamp = dayStamp(new Date());
+
+  useEffect(() => {
+    let cancelled = false;
+    if (initialGrant || !isRemotePunchAvailable(store)) {
+      if (!initialGrant) setGrant("allowed");
+      return;
+    }
+    adaptRemotePunchStore(store)
+      .hasRemotePunch(session.userId)
+      .then((ok) => {
+        if (!cancelled) setGrant(ok ? "allowed" : "denied");
+      })
+      .catch(() => {
+        if (!cancelled) setGrant("allowed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [store, session.userId, initialGrant]);
 
   const load = () => {
     setLoading(true);
@@ -1214,14 +1268,26 @@ function TimeClockTab({
         Today: {fmtDate(stamp)}
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
-      <button
-        className={`hub-clock-btn${clockedIn ? " clock-out" : ""}`}
-        disabled={busy || loading}
-        onClick={() => act(clockedIn ? "out" : "in")}
-      >
-        <Clock size={28} aria-hidden="true" />
-        {busy ? "Saving…" : clockedIn ? "Clock Out" : "Clock In"}
-      </button>
+      {grant === "denied" ? (
+        <div className="hub-inline-form" role="note">
+          <p className="hub-sub" style={{ margin: 0 }}>
+            Clock in on the house kiosk laptop
+          </p>
+          <p className="hub-sub">
+            Remote punching from a personal device isn't enabled for your
+            account. Use the kiosk at your work site instead.
+          </p>
+        </div>
+      ) : (
+        <button
+          className={`hub-clock-btn${clockedIn ? " clock-out" : ""}`}
+          disabled={busy || loading || grant === "unknown"}
+          onClick={() => act(clockedIn ? "out" : "in")}
+        >
+          <Clock size={28} aria-hidden="true" />
+          {busy ? "Saving…" : clockedIn ? "Clock Out" : "Clock In"}
+        </button>
+      )}
       <h3 style={{ margin: "20px 0 8px" }}>Today's punches</h3>
       {loading ? (
         <p>Loading…</p>
@@ -1418,7 +1484,11 @@ function MyTimecardTab({
                               className="hub-btn"
                               onClick={() => {
                                 setCorrectingId(punch.id);
-                                setCorrKind(punch.kind);
+                                // Corrections target in/out punches only: the row
+                                // is a segment's clock-in, so it is always "in"
+                                // unless a break/transfer punch shares the
+                                // timestamp (defensive "out" branch).
+                                setCorrKind(punch.kind === "out" ? "out" : "in");
                                 setCorrAt(toLocalInputValue(punch.punchedAt));
                               }}
                             >
@@ -2528,6 +2598,7 @@ function SwapApprovalList({
 /* -------------------------------- Attendance ------------------------------ */
 
 function AttendanceTab({
+  session,
   store,
   staffList,
   sites,
@@ -2540,7 +2611,6 @@ function AttendanceTab({
   const [date, setDate] = useState(dayStamp(new Date()));
   const [siteFilter, setSiteFilter] = useState("");
   const [punchesByStaff, setPunchesByStaff] = useState<Record<string, HrPunch[]>>({});
-  const [dayShifts, setDayShifts] = useState<HrShift[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -2553,24 +2623,20 @@ function AttendanceTab({
     let cancelled = false;
     setLoading(true);
     setError("");
-    Promise.all([
-      Promise.all(
-        visibleStaff.map((s) =>
-          store
-            .listPunches(s.userId, `${date}T00:00:00`, `${date}T23:59:59`)
-            .catch(() => [] as HrPunch[]),
-        ),
+    Promise.all(
+      visibleStaff.map((s) =>
+        store
+          .listPunches(s.userId, `${date}T00:00:00`, `${date}T23:59:59`)
+          .catch(() => [] as HrPunch[]),
       ),
-      store.listShifts(`${date}T00:00:00`, `${date}T23:59:59`).catch(() => [] as HrShift[]),
-    ])
-      .then(([lists, shifts]) => {
+    )
+      .then((lists) => {
         if (cancelled) return;
         const map: Record<string, HrPunch[]> = {};
         visibleStaff.forEach((s, i) => {
           map[s.userId] = lists[i];
         });
         setPunchesByStaff(map);
-        setDayShifts(shifts);
         setLoading(false);
       })
       .catch((err) => {
@@ -2583,88 +2649,61 @@ function AttendanceTab({
     };
   }, [store, date, visibleStaff]);
 
-  const exceptions = useMemo(
-    () =>
-      detectExceptions({
-        punches: Object.values(punchesByStaff).flat(),
-        shifts: dayShifts,
-        timecardApprovals: [],
-        payPeriods: [],
-        nowIso: new Date().toISOString(),
-      }),
-    [punchesByStaff, dayShifts],
-  );
-
   return (
-    <section className="hub-card" aria-label="Attendance">
-      <h2>Attendance</h2>
-      <p className="hub-sub">Who clocked in today, and what needs a second look.</p>
-      {error && <div className="hub-error" role="alert">{error}</div>}
-      <div className="hub-form" style={{ marginBottom: 16 }}>
-        <label>
-          Date
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label>
-          Site
-          <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
-            <option value="">All sites</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {exceptions.length > 0 && (
-        <div className="hub-inline-form" style={{ marginBottom: 16 }}>
-          <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <AlertTriangle size={18} /> Exceptions ({exceptions.length})
-          </h3>
-          <ul className="hub-list">
-            {exceptions.map((ex, i) => (
-              <li className="hub-list-item" key={i}>
-                <div className="hub-item-main">
-                  <span className="hub-item-title">{staffName(staffList, ex.staffId)}</span>
-                  <span className="hub-item-sub">
-                    {ex.detail} · {fmtDateTime(ex.at)}
-                  </span>
-                </div>
-                <span className={statusClass("overdue")}>{ex.kind.replace(/_/g, " ")}</span>
-              </li>
-            ))}
-          </ul>
+    <>
+      <WhosHereNow session={session} store={store} staffList={staffList} sites={sites} />
+      <PunchExceptions session={session} store={store} staffList={staffList} sites={sites} />
+      <MissedPunchReview session={session} store={store} staffList={staffList} />
+      <section className="hub-card" aria-label="Attendance">
+        <h2>Attendance</h2>
+        <p className="hub-sub">Who clocked in on the selected day.</p>
+        {error && <div className="hub-error" role="alert">{error}</div>}
+        <div className="hub-form" style={{ marginBottom: 16 }}>
+          <label>
+            Date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label>
+            Site
+            <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
-      )}
-      {loading ? (
-        <p>Loading attendance…</p>
-      ) : (
-        <ul className="hub-list">
-          {visibleStaff.map((s) => {
-            const punches = punchesByStaff[s.userId] ?? [];
-            const last = punches[punches.length - 1];
-            return (
-              <li className="hub-list-item" key={s.userId}>
-                <div className="hub-item-main">
-                  <span className="hub-item-title">{s.fullName}</span>
-                  <span className="hub-item-sub">
-                    {punches.length === 0
-                      ? "No punches"
-                      : punches
-                          .map((p) => `${p.kind === "in" ? "In" : "Out"} ${fmtTime(p.punchedAt)}`)
-                          .join(" · ")}
-                  </span>
-                </div>
-                {last && (
-                  <span className={statusClass(last.kind === "in" ? "submitted" : "complete")}>
-                    {last.kind === "in" ? "Clocked in" : "Clocked out"}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+        {loading ? (
+          <p>Loading attendance…</p>
+        ) : (
+          <ul className="hub-list">
+            {visibleStaff.map((s) => {
+              const punches = punchesByStaff[s.userId] ?? [];
+              const last = punches[punches.length - 1];
+              return (
+                <li className="hub-list-item" key={s.userId}>
+                  <div className="hub-item-main">
+                    <span className="hub-item-title">{s.fullName}</span>
+                    <span className="hub-item-sub">
+                      {punches.length === 0
+                        ? "No punches"
+                        : punches
+                            .map((p) => `${p.kind === "in" ? "In" : "Out"} ${fmtTime(p.punchedAt)}`)
+                            .join(" · ")}
+                    </span>
+                  </div>
+                  {last && (
+                    <span className={statusClass(last.kind === "in" ? "submitted" : "complete")}>
+                      {last.kind === "in" ? "Clocked in" : "Clocked out"}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -2684,6 +2723,7 @@ function TimecardsTab({
   const [periodId, setPeriodId] = useState("");
   const [staffId, setStaffId] = useState("");
   const [punches, setPunches] = useState<HrPunch[]>([]);
+  const [shifts, setShifts] = useState<HrShift[]>([]);
   const [approval, setApproval] = useState<HrTimecardApproval | null>(null);
   const [corrections, setCorrections] = useState<HrPunchCorrection[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2717,12 +2757,14 @@ function TimecardsTab({
     setError("");
     Promise.all([
       store.listPunches(staffId, `${period.startsOn}T00:00:00`, `${period.endsOn}T23:59:59`),
+      store.listShifts(`${period.startsOn}T00:00:00`, `${period.endsOn}T23:59:59`),
       store.getTimecardApproval(period.id, staffId),
       store.listPunchCorrections({ staffId }),
     ])
-      .then(([p, a, c]) => {
+      .then(([p, sh, a, c]) => {
         if (cancelled) return;
         setPunches(p);
+        setShifts(sh);
         setApproval(a);
         setCorrections(c);
         setLoading(false);
@@ -2742,6 +2784,19 @@ function TimecardsTab({
     [punches, overtimeRules],
   );
   const pendingCorrections = corrections.filter((c) => c.status === "pending");
+
+  // Scheduled vs actual hours per day, with variance flags at ±15 minutes.
+  const variance = useMemo(
+    () =>
+      scheduledVsActual({
+        staffId,
+        punches,
+        shifts: period
+          ? shifts.filter((s) => s.staffId === staffId)
+          : [],
+      }),
+    [period, staffId, punches, shifts],
+  );
 
   const decideCorrection = async (id: string, approve: boolean) => {
     setBusy(true);
@@ -2815,6 +2870,54 @@ function TimecardsTab({
               <span className={statusClass("pending")}>Not submitted</span>
             )}
           </div>
+          {variance.length > 0 && (
+            <>
+              <h3>Scheduled vs actual</h3>
+              <p className="hub-sub">
+                Scheduled hours from published shifts next to clocked hours.
+                Days off by 15 minutes or more are flagged.
+              </p>
+              <div className="hub-table-scroll" style={{ marginBottom: 16 }}>
+                <table className="hub-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Scheduled</th>
+                      <th>Actual</th>
+                      <th>Variance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variance.map((r) => {
+                      const flagged = Math.abs(r.varianceMinutes) >= 15;
+                      return (
+                        <tr key={r.date}>
+                          <td>
+                            {fmtDate(r.date)}
+                            {r.shiftLabels.length > 0 && (
+                              <span className="hub-item-sub"> · {r.shiftLabels.join(", ")}</span>
+                            )}
+                          </td>
+                          <td>{fmtHours(r.scheduledMinutes)}</td>
+                          <td>{fmtHours(r.actualMinutes)}</td>
+                          <td>
+                            <span className={flagged ? (r.varianceMinutes > 0 ? "hub-variance-over" : "hub-variance-under") : ""}>
+                              {r.varianceMinutes === 0 ? "—" : `${r.varianceMinutes > 0 ? "+" : "−"}${fmtHours(Math.abs(r.varianceMinutes))}`}
+                            </span>{" "}
+                            {flagged && (
+                              <span className={`hub-status ${r.varianceMinutes > 0 ? "due_soon" : "overdue"}`}>
+                                {r.varianceMinutes > 0 ? "Over" : "Under"}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           {pendingCorrections.length > 0 && (
             <>
               <h3>Pending punch corrections ({pendingCorrections.length})</h3>
@@ -3246,6 +3349,7 @@ function PayrollTab({
         </ul>
       )}
       {canManagePaySettings && <PaySettingsSection store={store} />}
+      {canManagePaySettings && <PunchRulesConfig store={store} />}
     </section>
   );
 }

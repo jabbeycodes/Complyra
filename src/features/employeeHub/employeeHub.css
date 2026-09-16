@@ -242,6 +242,11 @@
   color: #4a4036;
 }
 
+.hub-status.info {
+  background: #d9e4d6;
+  color: #33502f;
+}
+
 .hub-status.approved,
 .hub-status.published {
   background: #dce8d2;
@@ -803,4 +808,60 @@
   .hub-band-row label {
     min-width: 0;
   }
+}
+
+/* ----------------- kiosk time clock (worker 4) ------------------------ */
+
+.hub-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hub-chip {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #b59a74);
+  background: #f6f1e6;
+  color: var(--muted, #4a4036);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.hub-chip.selected {
+  background: var(--purple, #3f5c3b);
+  border-color: var(--purple, #3f5c3b);
+  color: #fbf7ec;
+}
+
+.hub-token-box {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #fff;
+  border: 1px dashed var(--red, #b56a4e);
+  border-radius: 10px;
+  padding: 14px 16px;
+  word-break: break-all;
+  font-size: 15px;
+  color: var(--text, #241e18);
+}
+
+.hub-elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hub-variance-over {
+  color: #8a3d1f;
+  font-weight: 700;
+}
+
+.hub-variance-under {
+  color: #7a5a1e;
+  font-weight: 700;
 }

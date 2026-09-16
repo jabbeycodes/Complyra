@@ -56,7 +56,7 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 27);
+  assert.equal(NOTIFICATION_TYPES.length, 29);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
