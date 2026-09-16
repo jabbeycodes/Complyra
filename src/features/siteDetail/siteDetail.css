@@ -530,3 +530,60 @@
     mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }
+
+/* Checklists accordion: Drills nests here (no standalone Drills tab). */
+.checklist-section {
+  padding: 0;
+}
+
+.checklist-section-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 14px var(--panel-inline);
+  cursor: pointer;
+  list-style: none;
+  border-radius: 8px;
+}
+
+.checklist-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.checklist-section-summary::after {
+  content: "";
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #8b5e3c;
+  border-bottom: 2px solid #8b5e3c;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.checklist-section:not([open]) .checklist-section-summary::after {
+  transform: rotate(-45deg) translateY(2px);
+}
+
+.checklist-section-summary h2 {
+  padding: 0;
+  font-size: 19px;
+}
+
+.checklist-section-summary:focus-visible {
+  outline: 2px solid #8b5e3c;
+  outline-offset: -2px;
+}
+
+.checklist-section-body {
+  padding: 2px var(--panel-inline) 20px;
+}
+
+/* Monthly home checks keeps its own panel chrome inside the accordion body. */
+.checklist-section-body > .site-monthly.panel {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}

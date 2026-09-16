@@ -54,7 +54,6 @@ const EXPECTED_ORDER: SiteDetailTabId[] = [
   "training",
   "medications",
   "mileage",
-  "drills",
   "documents",
   "staff",
 ];
