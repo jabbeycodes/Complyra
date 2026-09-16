@@ -6,7 +6,6 @@ import {
   CarFront,
   ClipboardCheck,
   FileText,
-  Flame,
   GraduationCap,
   MapPin,
   Phone,
@@ -86,10 +85,33 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   training: GraduationCap,
   medications: Pill,
   mileage: CarFront,
-  drills: Flame,
   documents: FileText,
   staff: Users,
 };
+
+/**
+ * Collapsible Checklists section (native details/summary accordion).
+ * Drills nests here instead of living as its own tab — Emergency drills
+ * stays default-expanded so deep links into Checklists land on it.
+ */
+function ChecklistSection({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="panel checklist-section" open={defaultOpen}>
+      <summary className="checklist-section-summary">
+        <h2>{title}</h2>
+      </summary>
+      <div className="checklist-section-body">{children}</div>
+    </details>
+  );
+}
 
 interface TrainingRow {
   userId: string;
@@ -614,8 +636,40 @@ export default function SiteDetailPage({
 
         {activeTab === "checklists" && !loading.checklists && (
           <>
-            <div className="panel">
-              <h2>HM weekly checklists</h2>
+            {/* Former Drills tab: nested here per craft (no standalone Drills tab).
+                Default-expanded so deep links into Checklists land on drills. */}
+            <ChecklistSection title="Emergency drills" defaultOpen>
+              {siteDrills.length === 0 && (
+                <Empty
+                  mark="none"
+                  title="No drills"
+                  text="No emergency drills recorded for this home yet."
+                />
+              )}
+              {siteDrills.length > 0 && (
+                <ul className="record-list">
+                  {siteDrills.map((d) => {
+                    const dateLabel = d.date?.trim()
+                      ? formatDate(d.date)
+                      : "Not logged";
+                    return (
+                      <li key={d.id} className="record-row">
+                        <div>
+                          <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
+                          <span className="muted">
+                            {" "}
+                            · {dateLabel}
+                            {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
+                            {d.leaderName ? ` · led by ${d.leaderName}` : ""}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </ChecklistSection>
+            <ChecklistSection title="HM weekly checklists" defaultOpen>
               {!checklists?.length && (
                 <Empty
                   mark="none"
@@ -686,9 +740,8 @@ export default function SiteDetailPage({
                     </button>
                   </div>
                 )}
-            </div>
-            <div className="panel">
-              <h2>Weekly service logs</h2>
+            </ChecklistSection>
+            <ChecklistSection title="Weekly service logs">
               <p className="muted section-note">
                 Service logs are a separate record from the weekly checklist.
               </p>
@@ -730,8 +783,10 @@ export default function SiteDetailPage({
                   ))}
                 </ul>
               )}
-            </div>
-            <SiteMonthlyChecks siteId={siteId} />
+            </ChecklistSection>
+            <ChecklistSection title="Monthly home checks">
+              <SiteMonthlyChecks siteId={siteId} />
+            </ChecklistSection>
           </>
         )}
 
@@ -943,41 +998,6 @@ export default function SiteDetailPage({
                   Open mileage log
                 </button>
               </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "drills" && (
-          <div className="panel">
-            <h2>Emergency drills</h2>
-            {siteDrills.length === 0 && (
-              <Empty
-                mark="none"
-                title="No drills"
-                text="No emergency drills recorded for this home yet."
-              />
-            )}
-            {siteDrills.length > 0 && (
-              <ul className="record-list">
-                {siteDrills.map((d) => {
-                  const dateLabel = d.date?.trim()
-                    ? formatDate(d.date)
-                    : "Not logged";
-                  return (
-                  <li key={d.id} className="record-row">
-                    <div>
-                      <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
-                      <span className="muted">
-                        {" "}
-                        · {dateLabel}
-                        {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
-                        {d.leaderName ? ` · led by ${d.leaderName}` : ""}
-                      </span>
-                    </div>
-                  </li>
-                  );
-                })}
-              </ul>
             )}
           </div>
         )}

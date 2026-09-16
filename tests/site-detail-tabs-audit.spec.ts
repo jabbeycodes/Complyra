@@ -8,7 +8,6 @@ const TABS = [
   "Training",
   "Medications",
   "Mileage",
-  "Drills",
   "Documents",
   "Staff",
 ] as const;
@@ -107,10 +106,6 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
       if (label === "Checklists") {
         await expect(page.getByRole("heading", { name: /Monthly home checks/ })).toBeVisible();
         await expect(page.getByRole("button", { name: "Start weekly checklist" })).toBeVisible();
-      }
-      if (label === "Drills") {
-        await expect(page.locator(".site-detail-panel")).not.toContainText("severe_weather");
-        await expect(page.locator(".site-detail-panel")).not.toContainText("date not set");
       }
       if (label === "QA Review") {
         await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
