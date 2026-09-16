@@ -93,6 +93,25 @@ test("pageVisible Intake follows canCreateIndividual", () => {
   );
 });
 
+test("pageVisible Appointments follows Health access, not HR", () => {
+  assert.equal(
+    pageVisible(session({ roleKey: "administrator", role: "administrator" }), "Appointments"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "nurse", role: "nurse" }), "Appointments"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "dsp", role: "dsp" }), "Appointments"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "hr", role: "hr" }), "Appointments"),
+    false,
+  );
+});
+
 test("pageVisible AI settings is platformAdmin only", () => {
   assert.equal(
     pageVisible(session({ role: "administrator", platformAdmin: false }), "AI settings"),

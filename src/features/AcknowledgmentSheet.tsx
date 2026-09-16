@@ -15,6 +15,7 @@ import {
   packetFileName,
   sortAcknowledgmentRows,
 } from "../pdf/acknowledgmentPdf";
+import { agencyStateCode, siteLocationFrom } from "../data/siteAddress";
 import SignaturePad from "./SignaturePad";
 import ComplyrerRecordMark from "../components/ComplyrerRecordMark";
 
@@ -217,10 +218,15 @@ export default function AcknowledgmentSheet({
         <button
           className="button primary"
           onClick={() => {
+            const liveSite = workspace?.sites.find((row) => row.id === detail.site.id);
             const pdf = buildAcknowledgmentPdf(
               session?.agencyName ?? "Agency",
               detail,
               workspace?.branding.logoUrl,
+              siteLocationFrom(
+                liveSite ?? detail.site,
+                agencyStateCode(null, session?.agencyCode),
+              ),
             );
             pdf.save(packetFileName(detail));
           }}

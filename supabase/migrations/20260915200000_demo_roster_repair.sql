@@ -301,4 +301,16 @@ revoke all on function public.repair_evergreen_demo_roster() from anon, authenti
 grant execute on function public.repair_evergreen_demo_roster() to service_role;
 
 -- Apply now so db push repairs the shared hosted preview, not just schema.
-select public.repair_evergreen_demo_roster();
+-- Guarded: fresh databases (CI) have no Evergreen demo agency yet, so skip there.
+do $$
+begin
+  if exists (
+    select 1 from public.agencies
+    where id = '00000000-0000-4000-8000-000000000001' and code = 'EVERGREEN-MO'
+  ) then
+    perform public.repair_evergreen_demo_roster();
+  else
+    raise notice 'Skipping Evergreen demo roster repair: demo agency not present.';
+  end if;
+end
+$$;

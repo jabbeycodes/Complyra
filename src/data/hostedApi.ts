@@ -82,6 +82,19 @@ import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import { assertSiteHasCapacity } from "./siteCapacity";
 import {
+  appointmentChangeDetail,
+  assertConsultationUpload,
+  canCompleteAppointments,
+  canEditAllergies,
+  canManageAppointments,
+  canSeeAppointments,
+  isAppointmentRemoved,
+  validateAppointmentDraft,
+  visibleAppointments,
+  type Appointment,
+  type AppointmentDraft,
+} from "./appointments";
+import {
   assertAdoptableSignature,
   dataUrlToBlob,
   EdgeFunctionError,
@@ -113,6 +126,7 @@ import {
 } from "./permissions";
 import { isValidRating } from "../recognition/scoring";
 import {
+  allergiesChangeDetail,
   applyRenewalUpload,
   canEditCover,
   canEditExtraction,
@@ -123,11 +137,14 @@ import {
   defaultRenewals,
   emptyProfile,
   isObligationActive,
+  nextAllergiesStamp,
+  normalizeAllergies,
   normalizeProfile,
   renewalStatus,
   requiredForSigning,
   sortObligations,
   staffCanSignDelegation,
+  type Allergy,
   type ClinicalEvidenceKind,
   type ClinicalRenewal,
   type IndividualProfile,
@@ -250,6 +267,7 @@ import {
   normalizeSiteReview,
   type SiteFacts,
 } from "./siteReview";
+import { agencyStateCode, siteLocationFrom, type SiteAddressParts } from "./siteAddress";
 import {
   blobToDataUrl,
   canManageAgencyLogo,
@@ -287,6 +305,7 @@ import {
 } from "../pdf/siteReviewPdf";
 import {
   mapAdaptiveEquipment,
+  mapAppointment,
   mapChartFile,
   mapClinicalRenewal,
   mapEmergencyDrill,
@@ -729,6 +748,7 @@ export class HostedApi implements ComplyraApi {
       reviewsRes,
       brandingRes,
       assignmentsRes,
+      appointmentsRes,
     ] = await Promise.all([
       this.client.from("sites").select("*").eq("agency_id", agencyId),
       this.client.from("programs").select("*").eq("agency_id", agencyId),
@@ -764,6 +784,7 @@ export class HostedApi implements ComplyraApi {
       this.client.from("site_reviews").select("*").eq("agency_id", agencyId),
       this.client.from("agency_branding").select("*").eq("agency_id", agencyId).maybeSingle(),
       this.client.from("staff_assignments").select("*").eq("agency_id", agencyId),
+      this.client.from("appointments").select("*").eq("agency_id", agencyId),
     ]);
 
     for (const result of [
@@ -799,6 +820,8 @@ export class HostedApi implements ComplyraApi {
     ]) {
       throwIf(result.error, "Could not load the agency workspace.");
     }
+    // Appointments ship with Health H1; ignore until the migration is applied.
+    const appointmentRows = appointmentsRes.error ? [] : (appointmentsRes.data ?? []);
 
     const canViewPeople = hasPermission(session, "individuals.view");
     const canReadAudit = hasPermission(session, "audit.read") || canViewPeople;
@@ -909,6 +932,7 @@ export class HostedApi implements ComplyraApi {
             })),
             renewals: (renewalsRes.data ?? []).map(mapClinicalRenewal),
             medications: (medsRes.data ?? []).map(mapMedication),
+            appointments: appointmentRows.map(mapAppointment),
             checklists: (checklistsRes.data ?? []).map(mapTrainingChecklist),
             versionLabelById,
           }),
@@ -1970,7 +1994,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   async getChartFile(input: {
-    type: "renewal" | "discontinue" | "training" | "version";
+    type: "renewal" | "discontinue" | "training" | "version" | "consultation";
     id: string;
   }): Promise<{ blob: Blob; name: string } | null> {
     const session = await this.requireSession();
@@ -1996,6 +2020,7 @@ export class HostedApi implements ComplyraApi {
         siteName: await this.siteName(person.siteId),
         checklist,
         logoDataUrl,
+        siteLocation: await this.siteLocationParts(person.siteId),
       });
       return { blob: pdf.output("blob"), name: trainingFileName(checklist.staffName, person.fullName) };
     }
@@ -2048,6 +2073,9 @@ export class HostedApi implements ComplyraApi {
     throwIf(fileError, "Chart file not found.");
     if (!fileRow) return null;
     const file = mapChartFile(fileRow);
+    if (input.type === "consultation" && !canSeeAppointments(session.roleKey)) {
+      throw new Error("You cannot view Health records.");
+    }
     const { data: blob, error: downloadError } = await this.client.storage
       .from(CHART_BUCKET)
       .download(file.storagePath);
@@ -2531,6 +2559,7 @@ export class HostedApi implements ComplyraApi {
         monthKey: input.monthKey,
         drills,
         logoDataUrl,
+        siteLocation: await this.siteLocationParts(site.id),
       });
       return { blob: pdf.output("blob"), name: drillsFileName(site.name, input.monthKey) };
     }
@@ -2550,6 +2579,7 @@ export class HostedApi implements ComplyraApi {
       monthKey: input.monthKey,
       report,
       logoDataUrl,
+      siteLocation: await this.siteLocationParts(site.id),
     });
     return { blob: pdf.output("blob"), name: safetyFileName(site.name, input.monthKey) };
   }
@@ -2645,6 +2675,7 @@ export class HostedApi implements ComplyraApi {
       review: normalizeSiteReview(applyWellWaterDefault(mapSiteReview(reviewRow), facts)),
       monthlySafetyOnFile: monthlySafetyOnFile(safety),
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      stateCode: await this.agencyState(session.agencyId),
     });
     return { blob: pdf.output("blob"), name: siteReviewFileName(site.name) };
   }
@@ -2690,6 +2721,7 @@ export class HostedApi implements ComplyraApi {
       facts,
       rows,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      stateCode: await this.agencyState(session.agencyId),
     });
     return { blob: pdf.output("blob"), name: preSurveyFileName(site.name) };
   }
@@ -3000,6 +3032,228 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+  async createAppointment(input: AppointmentDraft & { individualId: string }) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const person = await this.individualRecord(input.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const draft = validateAppointmentDraft(input);
+    const { data, error } = await this.client
+      .from("appointments")
+      .insert(this.appointmentRow(session.agencyId, person.id, session, draft))
+      .select("id")
+      .single();
+    throwIf(error, "Could not save that appointment.");
+    await this.audit(
+      session,
+      "appointment.created",
+      `${draft.consultant} for ${person.fullName}`,
+      "appointment",
+      data!.id as string,
+    );
+    return { id: data!.id as string };
+  }
+
+  async updateAppointment(appointmentId: string, patch: AppointmentDraft) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    const person = await this.individualRecord(existing.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const draft = validateAppointmentDraft(patch);
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        starts_on: draft.startsOn,
+        start_time: `${draft.startTime}:00`,
+        end_time: `${draft.endTime}:00`,
+        timezone: draft.timezone,
+        consultant: draft.consultant,
+        specialty: draft.specialty ?? "",
+        reason: draft.reason ?? "",
+        visit_address: draft.visitAddress ?? "",
+        updated_by: session.userId,
+        updated_by_name: session.fullName,
+      })
+      .eq("id", appointmentId)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not update that appointment.");
+    await this.audit(
+      session,
+      "appointment.updated",
+      appointmentChangeDetail(existing, draft),
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  async deleteAppointment(appointmentId: string) {
+    const session = await this.requireSession();
+    if (!canManageAppointments(session.roleKey)) {
+      throw new Error("You cannot create or edit appointments.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        deleted_by: session.userId,
+        deleted_by_name: session.fullName,
+        deleted_at: new Date().toISOString(),
+      })
+      .eq("id", appointmentId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null);
+    throwIf(error, "Could not remove that appointment.");
+    await this.audit(
+      session,
+      "appointment.deleted",
+      `${existing.consultant} appointment removed`,
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  async completeAppointment(input: {
+    appointmentId: string;
+    file: File;
+    comments?: string;
+  }) {
+    const session = await this.requireSession();
+    if (!canCompleteAppointments(session.roleKey)) {
+      throw new Error("You cannot complete this appointment.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, input.appointmentId);
+    if (isAppointmentRemoved(existing)) throw new Error("That appointment was already removed.");
+    if (existing.completedAt) throw new Error("That appointment is already completed.");
+    const person = await this.individualRecord(existing.individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    assertConsultationUpload(input.file);
+    const fileId = await this.saveChartFile(session, person.id, "other", input.file);
+    const now = new Date().toISOString();
+    const { error } = await this.client
+      .from("appointments")
+      .update({
+        consultation_file_id: fileId,
+        visit_comments: input.comments?.trim() ?? "",
+        completed_by: session.userId,
+        completed_by_name: session.fullName,
+        completed_at: now,
+        updated_by: session.userId,
+        updated_by_name: session.fullName,
+      })
+      .eq("id", input.appointmentId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .is("completed_at", null);
+    throwIf(error, "Could not complete that appointment.");
+    await this.audit(
+      session,
+      "appointment.completed",
+      `${existing.consultant} visit completed for ${person.fullName} · ${input.file.name}`,
+      "appointment",
+      input.appointmentId,
+    );
+  }
+
+  async updateIndividualAllergies(individualId: string, allergies: Allergy[]) {
+    const session = await this.requireSession();
+    if (!canEditAllergies(session.roleKey)) {
+      throw new Error("You cannot edit allergies.");
+    }
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const current = await this.individualProfile(person);
+    const nextAllergies = normalizeAllergies(allergies);
+    const now = new Date().toISOString();
+    const next = {
+      ...current,
+      allergies: nextAllergies,
+      allergiesStamp: nextAllergiesStamp(current.allergiesStamp, session, now),
+    };
+    const { error } = await this.client.from("individual_profiles").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: person.id,
+        profile: next,
+      },
+      { onConflict: "individual_id" },
+    );
+    throwIf(error, "Could not save allergies.");
+    await this.audit(
+      session,
+      "allergies.updated",
+      allergiesChangeDetail(current.allergies, nextAllergies),
+      "individual",
+      person.id,
+    );
+  }
+  async recordConsultationPacketGenerated(appointmentId: string) {
+    const session = await this.requireSession();
+    if (!canSeeAppointments(session.roleKey)) {
+      throw new Error("You cannot view Health records.");
+    }
+    const existing = await this.appointmentRecord(session.agencyId, appointmentId);
+    if (isAppointmentRemoved(existing) && !canManageAppointments(session.roleKey)) {
+      throw new Error("Appointment not found.");
+    }
+    const person = await this.individualRecord(existing.individualId);
+    await this.audit(
+      session,
+      "consultation_packet.generated",
+      `${existing.consultant} packet for ${person?.fullName ?? "Individual"}`,
+      "appointment",
+      appointmentId,
+    );
+  }
+
+  private appointmentRow(
+    agencyId: string,
+    individualId: string,
+    actor: { userId: string; fullName: string },
+    draft: AppointmentDraft,
+  ) {
+    return {
+      agency_id: agencyId,
+      individual_id: individualId,
+      starts_on: draft.startsOn,
+      start_time: `${draft.startTime}:00`,
+      end_time: `${draft.endTime}:00`,
+      timezone: draft.timezone,
+      consultant: draft.consultant,
+      specialty: draft.specialty ?? "",
+      reason: draft.reason ?? "",
+      visit_address: draft.visitAddress ?? "",
+      created_by: actor.userId,
+      created_by_name: actor.fullName,
+    };
+  }
+
+  private async appointmentRecord(agencyId: string, appointmentId: string) {
+    const { data, error } = await this.client
+      .from("appointments")
+      .select("*")
+      .eq("agency_id", agencyId)
+      .eq("id", appointmentId)
+      .maybeSingle();
+    throwIf(error, "Could not load that appointment.");
+    if (!data) throw new Error("Appointment not found.");
+    return mapAppointment(data);
+  }
+
   // ---- Hosted plan-stack helpers ----
 
   private requirePdfFile(file: File, message: string) {
@@ -3011,14 +3265,15 @@ export class HostedApi implements ComplyraApi {
   private async saveChartFile(
     session: SessionUser,
     individualId: string,
-    kind: "renewal" | "discontinue",
+    kind: "renewal" | "discontinue" | "other",
     file: File,
   ): Promise<string> {
     const fileId = crypto.randomUUID();
     const storagePath = `${session.agencyId}/${individualId}/chart/${fileId}/${file.name}`;
+    const mime = file.type || (kind === "other" ? "application/octet-stream" : "application/pdf");
     const { error: uploadError } = await this.client.storage
       .from(CHART_BUCKET)
-      .upload(storagePath, file, { contentType: "application/pdf", upsert: false });
+      .upload(storagePath, file, { contentType: mime, upsert: false });
     throwIf(uploadError, "Could not store the file.");
     const { error: insertError } = await this.client.from("chart_files").insert({
       id: fileId,
@@ -3026,7 +3281,7 @@ export class HostedApi implements ComplyraApi {
       individual_id: individualId,
       kind,
       name: file.name,
-      mime: "application/pdf",
+      mime,
       storage_path: storagePath,
     });
     throwIf(insertError, "File stored, but the chart record could not be saved.");
@@ -3180,6 +3435,7 @@ export class HostedApi implements ComplyraApi {
       submissions: { individualId: string; userId: string; submittedAt: string | null }[];
       renewals: ClinicalRenewal[];
       medications: Medication[];
+      appointments: Appointment[];
       checklists: TrainingChecklist[];
       versionLabelById: Map<string, string | null>;
     },
@@ -3250,6 +3506,10 @@ export class HostedApi implements ComplyraApi {
         myRequired.every((row) => row?.signedAt) &&
         !submission &&
         (!myChecklist || (allLinesInitialed(myChecklist) && Boolean(myChecklist.staffSignedAt))),
+      appointments: visibleAppointments(
+        input.appointments.filter((row) => row.individualId === person.id),
+        canManageAppointments(session.roleKey),
+      ),
     };
   }
 
@@ -3267,6 +3527,25 @@ export class HostedApi implements ComplyraApi {
     if (!row) return null;
     const site = mapSite(row);
     return { id: site.id, agencyId: site.agencyId, name: site.name, address: site.address };
+  }
+
+  private async agencyState(agencyId: string): Promise<string> {
+    const { data } = await this.client
+      .from("agencies")
+      .select("state_code")
+      .eq("id", agencyId)
+      .maybeSingle();
+    return agencyStateCode({ stateCode: data?.state_code as string | undefined });
+  }
+
+  private async siteLocationParts(siteId: string): Promise<SiteAddressParts> {
+    const site = await this.siteRecord(siteId);
+    const facts = site ? await this.siteFacts(site.id) : normalizeSiteFacts();
+    const stateCode = site ? await this.agencyState(site.agencyId) : "";
+    return siteLocationFrom(
+      { name: site?.name ?? "Home", address: site?.address, city: facts.city, zip: facts.zip },
+      stateCode,
+    );
   }
 
   private async siteFacts(siteId: string): Promise<SiteFacts> {
@@ -6781,6 +7060,7 @@ export class HostedApi implements ComplyraApi {
       checklist: row,
       hmName,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: site ? await this.siteLocationParts(site.id) : { name: "Home" },
     });
     return {
       blob: doc.output("blob"),
@@ -6802,6 +7082,7 @@ export class HostedApi implements ComplyraApi {
       checklist: row,
       hmName,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: site ? await this.siteLocationParts(site.id) : { name: "Home" },
     });
     return {
       blob: doc.output("blob"),

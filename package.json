@@ -18,7 +18,8 @@
     "mobile:android": "npx cap open android",
     "seed:local": "tsx scripts/seed-local.ts",
     "test:db": "supabase test db",
-    "test:hosted": "node --import tsx --import ./src/testSupport/cssStub.mts scripts/verify-local-hosted.ts"
+    "test:hosted": "node --import tsx --import ./src/testSupport/cssStub.mts scripts/verify-local-hosted.ts",
+    "seed:repair-site-addresses": "tsx scripts/repair-site-addresses.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

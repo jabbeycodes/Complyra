@@ -40,6 +40,49 @@ function trip(overrides: Partial<MileageTripView> = {}): MileageTripView {
   };
 }
 
+test("mileage month PDF prints the live site address under the home name", async () => {
+  const doc = buildMileageMonthPdf({
+    agencyName: "Evergreen Care",
+    siteName: "Cedar House",
+    monthKey: "2026-09",
+    people: PEOPLE,
+    trips: [trip()],
+    totalMiles: 40,
+    milesByIndividualId: { p1: 20, p2: 20 },
+    siteLocation: {
+      name: "Cedar House",
+      address: "418 Cedar Court",
+      city: "Columbia",
+      stateCode: "MO",
+      zip: "65202",
+    },
+  });
+  const text = doc.output();
+  assert.match(text, /Cedar House/);
+  assert.match(text, /418 Cedar Court, Columbia, MO 65202/);
+  assert.doesNotMatch(text, /undefined/);
+});
+
+test("mileage PDF does not stutter when the home name is the street and there is no city", async () => {
+  const doc = buildMileageMonthPdf({
+    agencyName: "Evergreen Care",
+    siteName: "3201 Pompey Drive",
+    monthKey: "2026-09",
+    people: PEOPLE,
+    trips: [],
+    totalMiles: 0,
+    milesByIndividualId: {},
+    siteLocation: {
+      name: "3201 Pompey Drive",
+      address: "3201 Pompey Drive",
+    },
+  });
+  const text = doc.output();
+  const streetHits = text.split("3201 Pompey Drive").length - 1;
+  assert.ok(streetHits >= 1, "prints the home once");
+  assert.doesNotMatch(text, /Address/);
+});
+
 test("mileage month PDF produces a non-empty downloadable blob", async () => {
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",

@@ -58,9 +58,13 @@ test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", as
 
   const chart = await openEllis(page);
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
+  // H1 Health tabs live on the same chart as the plan-stack tabs.
+  await expect(chart.locator(".health-tabs").getByRole("tab")).toHaveCount(2);
+  await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
+  await expect(chart.getByRole("tab", { name: "Appointments" })).toBeVisible();
+  await expect(chart.locator(".stack-tabs").getByRole("tab")).toHaveCount(2);
   await expect(chart.getByRole("tab", { name: "Must acknowledge" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Checked in plan" })).toBeVisible();
-  await expect(chart.getByRole("tab")).toHaveCount(2);
 
   const vision = chart.locator(".renewal-card").filter({ hasText: "Vision exam" });
   const dental = chart.locator(".renewal-card").filter({ hasText: "Dental exam" });

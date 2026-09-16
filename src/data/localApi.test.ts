@@ -502,6 +502,152 @@ test("reassign onto a full demo house is blocked; empty house accepts the transf
   );
 });
 
+test("nurse can create an appointment; DSP cannot", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(adminLogin());
+  const ellis = (await api.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
+  )!;
+  await api.signOut();
+  const nurse = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const created = await api.createAppointment({
+    individualId: ellis.id,
+    startsOn: "2026-09-24",
+    startTime: "13:00",
+    endTime: "13:45",
+    timezone: "America/Chicago",
+    consultant: "Dr. Elena Ruiz",
+    specialty: "Primary care",
+    reason: "Well visit",
+    visitAddress: "3201 Pompey Drive",
+  });
+  const afterNurse = await api.loadWorkspace(nurse);
+  const stack = afterNurse.planStacks.find((row) => row.individualId === ellis.id);
+  const row = stack?.appointments.find((item) => item.id === created.id);
+  assert.ok(row);
+  assert.equal(row?.createdByName, nurse.fullName);
+  assert.equal(row?.createdBy, nurse.userId);
+  await api.updateAppointment(created.id, {
+    startsOn: "2026-09-24",
+    startTime: "13:00",
+    endTime: "14:00",
+    timezone: "America/Chicago",
+    consultant: "Dr. Elena Ruiz",
+    specialty: "Primary care",
+    reason: "Annual physical",
+    visitAddress: "3201 Pompey Drive",
+  });
+  const afterEdit = (await api.loadWorkspace(nurse)).planStacks.find(
+    (item) => item.individualId === ellis.id,
+  );
+  const edited = afterEdit?.appointments.find((item) => item.id === created.id);
+  assert.equal(edited?.createdBy, nurse.userId);
+  assert.equal(edited?.updatedBy, nurse.userId);
+  assert.equal(edited?.reason, "Annual physical");
+  await api.signOut();
+  const dsp = await api.signIn(dspLogin());
+  const dspStack = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  );
+  assert.ok(dspStack?.appointments.some((row) => row.consultant === "Dr. Priya Shah"));
+  assert.ok(dspStack?.profile.allergies.some((row) => row.allergen === "Tree nuts"));
+  await assert.rejects(
+    () =>
+      api.createAppointment({
+        individualId: ellis.id,
+        startsOn: "2026-09-25",
+        startTime: "09:00",
+        endTime: "09:30",
+        timezone: "America/Chicago",
+        consultant: "Should Fail",
+      }),
+    /cannot create or edit appointments/,
+  );
+  await assert.rejects(
+    () =>
+      api.updateIndividualAllergies(ellis.id, [
+        { allergen: "Penicillin", reaction: "", status: "active" },
+      ]),
+    /cannot edit allergies/,
+  );
+});
+
+test("removing an appointment is a soft-delete RN can still see", async () => {
+  const api = new LocalApi(store());
+  const nurse = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const ellis = (await api.loadWorkspace(nurse)).individuals.find((p) =>
+    p.name.includes("Ellis"),
+  )!;
+  const seedAppt = (await api.loadWorkspace(nurse)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  )!.appointments.find((row) => row.consultant === "Dr. Priya Shah")!;
+  await api.deleteAppointment(seedAppt.id);
+  const afterNurse = (await api.loadWorkspace(nurse)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  );
+  const removed = afterNurse?.appointments.find((row) => row.id === seedAppt.id);
+  assert.ok(removed?.deletedAt);
+  assert.equal(removed?.deletedByName, nurse.fullName);
+  assert.equal(removed?.createdByName, "Cameron Price");
+  await api.signOut();
+  const dsp = await api.signIn(dspLogin());
+  const dspStack = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  );
+  assert.equal(
+    dspStack?.appointments.some((row) => row.id === seedAppt.id),
+    false,
+  );
+});
+
+test("assigned DSP can upload a consultation form and complete the visit", async () => {
+  const api = new LocalApi(store());
+  const dsp = await api.signIn(dspLogin());
+  const ellis = (await api.loadWorkspace(dsp)).individuals.find((p) =>
+    p.name.includes("Ellis"),
+  )!;
+  const seedAppt = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  )!.appointments.find((row) => row.consultant === "Dr. Priya Shah")!;
+  const file = new File(["%PDF-1.4 consultation"], "shah-visit.pdf", {
+    type: "application/pdf",
+  });
+  await api.completeAppointment({
+    appointmentId: seedAppt.id,
+    file,
+    comments: "Brought seizure log.",
+  });
+  const after = (await api.loadWorkspace(dsp)).planStacks.find(
+    (row) => row.individualId === ellis.id,
+  )!.appointments.find((row) => row.id === seedAppt.id)!;
+  assert.equal(after.completedBy, dsp.userId);
+  assert.equal(after.completedByName, dsp.fullName);
+  assert.ok(after.completedAt);
+  assert.equal(after.visitComments, "Brought seizure log.");
+  assert.ok(after.consultationFileId);
+  const stored = await api.getChartFile({
+    type: "consultation",
+    id: after.consultationFileId!,
+  });
+  assert.equal(stored?.name, "shah-visit.pdf");
+  await assert.rejects(
+    () =>
+      api.completeAppointment({
+        appointmentId: seedAppt.id,
+        file,
+      }),
+    /already completed/,
+  );
+});
+
 test("the platform owner can approve a pending agency", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

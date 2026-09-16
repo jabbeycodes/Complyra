@@ -40,6 +40,19 @@ test("demo has four individuals, two per site, across two sites", () => {
   }
 });
 
+test("seed locality is Columbia + zip for whatever the demo houses are named", () => {
+  const data = seed();
+  for (const site of data.sites) {
+    assert.equal(site.city, "Columbia", `${site.name} city`);
+    assert.ok(site.zip, `${site.name} zip`);
+    assert.doesNotMatch(site.zip ?? "", /undefined/i);
+  }
+  const first = data.sites[0];
+  const second = data.sites[1];
+  assert.equal(first?.zip, "65202");
+  assert.equal(second?.zip, "65203");
+});
+
 test("clinical renewal dates vary across individuals", () => {
   const data = seed();
   const dueDates = data.clinicalRenewals.map((r) => r.nextDueOn);

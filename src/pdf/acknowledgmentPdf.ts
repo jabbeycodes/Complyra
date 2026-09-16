@@ -1,5 +1,6 @@
 import type { PacketDetail } from "../data/types";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
 
 function formatLongDate(iso: string | null) {
   if (!iso) return "—";
@@ -33,6 +34,7 @@ export function buildAcknowledgmentPdf(
   agencyName: string,
   detail: PacketDetail,
   logoDataUrl?: string | null,
+  siteLocation?: SiteAddressParts,
 ) {
   const { doc, margin, y: startY } = startBrandedDoc(
     "Support Plan Staff Acknowledgment",
@@ -43,6 +45,14 @@ export function buildAcknowledgmentPdf(
   let y = startY;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
+  const loc = siteLocationFields(
+    siteLocation ?? {
+      name: detail.site.name,
+      address: detail.site.address,
+      city: detail.site.city,
+      zip: detail.site.zip,
+    },
+  );
   const header = [
     ["Agency", agencyName],
     ["Individual", detail.individual.fullName],
@@ -50,7 +60,8 @@ export function buildAcknowledgmentPdf(
     ["What they are acknowledging", detail.packet.whatAcknowledging],
     ["Start date", formatLongDate(detail.packet.startsOn)],
     ["End date", formatLongDate(detail.packet.endsOn)],
-    ["Program site", detail.site.name],
+    ["Program site", loc.name],
+    ...(loc.address ? [["Address", loc.address]] : []),
     ["Document version", detail.version.versionLabel],
   ];
   for (const [label, value] of header) {

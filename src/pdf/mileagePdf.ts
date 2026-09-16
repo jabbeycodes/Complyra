@@ -10,6 +10,7 @@ import { monthLabel } from "../data/mileage";
 import { stampRecordMark } from "./brandHeader";
 import type { MileageTripView } from "../data/types";
 import type { MileageYearlySummary } from "../data/mileage";
+import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
 
 export interface MileagePdfPerson {
   id: string;
@@ -25,6 +26,8 @@ export interface MileageMonthPdfInput {
   totalMiles: number;
   /** individualId -> accumulated mile share for the month */
   milesByIndividualId: Record<string, number>;
+  /** Live site canonical address. Pulled on generate, not from the Individual. */
+  siteLocation?: SiteAddressParts;
 }
 
 function slug(value: string) {
@@ -50,7 +53,41 @@ const EVERGREEN: RGB = [47, 70, 48];
 const HEADER_FILL: RGB = [240, 240, 240];
 const GROUP_FILL: RGB = [233, 229, 221];
 
-function drawBrand(doc: jsPDF, agencyName: string, monthKey: string, siteName: string) {
+function drawHomeHeader(
+  doc: jsPDF,
+  titleY: number,
+  siteName: string,
+  location: SiteAddressParts | undefined,
+  periodLabel: string,
+) {
+  const { name, address } = siteLocationFields({
+    name: location?.name || siteName,
+    address: location?.address,
+    city: location?.city,
+    zip: location?.zip,
+    stateCode: location?.stateCode,
+  });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(...INK);
+  doc.text(`Home: ${name}`, MARGIN, titleY + 18);
+  doc.text(periodLabel, PAGE_W - MARGIN, titleY + 18, { align: "right" });
+  let next = titleY + 34;
+  if (address) {
+    const wrapped = doc.splitTextToSize(address, CONTENT_W) as string[];
+    doc.text(wrapped, MARGIN, titleY + 32);
+    next = titleY + 32 + wrapped.length * 12 + 8;
+  }
+  return next;
+}
+
+function drawBrand(
+  doc: jsPDF,
+  agencyName: string,
+  monthKey: string,
+  siteName: string,
+  location?: SiteAddressParts,
+) {
   let y = 48;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
@@ -62,10 +99,7 @@ function drawBrand(doc: jsPDF, agencyName: string, monthKey: string, siteName: s
   y += 34;
   doc.setFontSize(16);
   doc.text("Mileage Log", MARGIN, y);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(`Home: ${siteName}    Month: ${monthLabel(monthKey)}`, MARGIN, y + 18);
-  return y + 34;
+  return drawHomeHeader(doc, y, siteName, location, `Month: ${monthLabel(monthKey)}`);
 }
 
 interface Column {
@@ -110,7 +144,7 @@ function fmtDate(iso: string) {
 
 export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
   const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
-  let y = drawBrand(doc, input.agencyName, input.monthKey, input.siteName);
+  let y = drawBrand(doc, input.agencyName, input.monthKey, input.siteName, input.siteLocation);
 
   const columns = buildColumns(input.people);
   const lineH = 11;
@@ -227,6 +261,7 @@ export interface MileageWeekPdfInput {
   monthKey: string;
   people: MileagePdfPerson[];
   rows: Array<{ individualId: string; weeks: number[]; monthlyTotal: number }>;
+  siteLocation?: SiteAddressParts;
 }
 
 export function mileageWeekFileName(siteName: string, monthKey: string) {
@@ -249,10 +284,13 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
   y += 34;
   doc.setFontSize(16);
   doc.text("Weekly Mileage Sheet", MARGIN, y);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(`Home: ${input.siteName}    Month: ${monthLabel(input.monthKey)}`, MARGIN, y + 18);
-  y += 34;
+  y = drawHomeHeader(
+    doc,
+    y,
+    input.siteName,
+    input.siteLocation,
+    `Month: ${monthLabel(input.monthKey)}`,
+  );
 
   const nameW = 180;
   const totalW = 80;
@@ -361,6 +399,7 @@ export interface MileageYearPdfInput {
    * must be ordered site-by-site so the groups stay together.
    */
   siteNameByIndividualId?: Record<string, string>;
+  siteLocation?: SiteAddressParts;
 }
 
 export function mileageYearFileName(siteName: string, year: number) {
@@ -388,10 +427,13 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
   y += 34;
   doc.setFontSize(16);
   doc.text("Yearly Mileage Tracking", MARGIN, y);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(`Home: ${input.siteName}    Year: ${input.year}`, MARGIN, y + 18);
-  y += 34;
+  y = drawHomeHeader(
+    doc,
+    y,
+    input.siteName,
+    input.siteLocation,
+    `Year: ${input.year}`,
+  );
 
   const nameW = 130;
   const totalW = 56;

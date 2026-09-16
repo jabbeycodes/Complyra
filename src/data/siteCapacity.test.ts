@@ -6,6 +6,7 @@ import {
   assertSiteHasCapacity,
   countIndividualsAtSite,
   siteAtCapacityMessage,
+  siteCapacityLabel,
   siteIndividualCap,
 } from "./siteCapacity";
 
@@ -65,4 +66,9 @@ test("countIndividualsAtSite uses site id, not leftover names", () => {
     ),
     2,
   );
+});
+
+test("Sites list capacity copy is n of max Individuals", () => {
+  assert.equal(siteCapacityLabel(2, 2), "2 of 2 Individuals");
+  assert.equal(siteCapacityLabel(1, 3), "1 of 3 Individuals");
 });

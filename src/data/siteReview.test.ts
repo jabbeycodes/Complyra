@@ -48,11 +48,11 @@ test("Cedar seed review is in place; Willow is still open", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const cedar = workspace.sites.find((row) => row.name === "Cedar House")!;
   const oakwood = workspace.sites.find((row) => row.name === "Willow House")!;
-  const mapleReview = workspace.siteReviews.find((row) => row.siteId === maple.id);
+  const cedarReview = workspace.siteReviews.find((row) => row.siteId === cedar.id);
   const oakwoodReview = workspace.siteReviews.find((row) => row.siteId === oakwood.id);
-  assert.equal(isSiteReviewInPlace(mapleReview, maple, todayIso()), true);
+  assert.equal(isSiteReviewInPlace(cedarReview, cedar, todayIso()), true);
   assert.equal(isSiteReviewInPlace(oakwoodReview, oakwood, todayIso()), false);
   assert.ok((oakwoodReview ? siteReviewGaps(oakwoodReview, oakwood, todayIso()) : []).length > 3);
 });
@@ -116,6 +116,13 @@ test("DPM can save a site review and a DSP cannot", async () => {
   assert.match(file.name, /pre-survey-willow-house/);
   const reviewFile = await client.downloadSiteReviewPdf(oakwood.id);
   assert.match(reviewFile.name, /site-review-willow-house/);
+  const reviewText = Buffer.from(await reviewFile.blob.arrayBuffer()).toString("latin1");
+  assert.match(reviewText, /Willow House/);
+  assert.match(reviewText, /920 Willow Lane/);
+  assert.match(reviewText, /Columbia/);
+  assert.match(reviewText, /MO/);
+  assert.match(reviewText, /65203/);
+  assert.doesNotMatch(reviewText, /undefined/);
 
   const dspClient = api();
   await dspClient.signIn({
@@ -126,12 +133,12 @@ test("DPM can save a site review and a DSP cannot", async () => {
   const dspWorkspace = await dspClient.loadWorkspace(
     (await dspClient.getSession())!,
   );
-  const maple = dspWorkspace.sites.find((row) => row.name === "Cedar House")!;
-  const mapleReview = dspWorkspace.siteReviews.find((row) => row.siteId === maple.id)!;
+  const cedar = dspWorkspace.sites.find((row) => row.name === "Cedar House")!;
+  const cedarReview = dspWorkspace.siteReviews.find((row) => row.siteId === cedar.id)!;
   await assert.rejects(
     () =>
       dspClient.saveSiteReview({
-        id: mapleReview.id,
+        id: cedarReview.id,
         reviewerName: "Alex",
         supportCoordinator: "",
         reviewedOn: "2026-09-01",
@@ -139,10 +146,31 @@ test("DPM can save a site review and a DSP cannot", async () => {
         heightenedScrutiny: false,
         meetsIndividualNeeds: true,
         part2Verified: true,
-        lines: mapleReview.lines,
+        lines: cedarReview.lines,
       }),
     /administrator/,
   );
+});
+
+test("changing site facts updates the next print without editing Individuals", async () => {
+  const client = api();
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const workspace = await client.loadWorkspace(admin);
+  const cedar = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const ellis = workspace.individuals.find((row) => row.name === "Ellis Hart")!;
+  const coverAddress = ellis.profile?.address ?? "";
+  await client.saveSiteFacts(cedar.id, { zip: "99999" });
+  const reviewFile = await client.downloadSiteReviewPdf(cedar.id);
+  const reviewText = Buffer.from(await reviewFile.blob.arrayBuffer()).toString("latin1");
+  assert.match(reviewText, /99999/);
+  assert.doesNotMatch(reviewText, /undefined/);
+  const after = await client.loadWorkspace(admin);
+  const ellisAfter = after.individuals.find((row) => row.name === "Ellis Hart")!;
+  assert.equal(ellisAfter.profile?.address, coverAddress);
 });
 
 test("new sites start with an open DPM site review", async () => {

@@ -6,6 +6,7 @@ import {
   sites as demoSites,
   staff as demoStaff,
 } from "../domain";
+import { demoSiteLocality, isPrimaryDemoHouse } from "./evergreenSiteAddress";
 import type {
   AcknowledgmentPacket,
   AcknowledgmentRow,
@@ -24,6 +25,7 @@ import type {
   StaffCertificate,
   MedDoseException,
 } from "./types";
+import type { Appointment } from "./appointments";
 import type {
   ClinicalRenewal,
   IndividualProfile,
@@ -102,6 +104,7 @@ export interface LocalDatabase {
   obligationSignatures: ObligationSignature[];
   packetSubmissions: PacketSubmission[];
   clinicalRenewals: ClinicalRenewal[];
+  appointments: Appointment[];
   chartFiles: ChartFile[];
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
@@ -226,7 +229,7 @@ export function createEvergreenSeed(): LocalDatabase {
     { id: SUPPORTED_ID, agencyId: AGENCY_ID, name: "Supported living" },
   ];
   const sites: SiteRecord[] = demoSites.map((site, i) => {
-    const cedar = site.name === "Cedar House";
+    const locality = demoSiteLocality(site.name);
     return {
       id: padId(11 + i),
       agencyId: AGENCY_ID,
@@ -239,12 +242,12 @@ export function createEvergreenSeed(): LocalDatabase {
       overnightSleepStaff: false,
       wellWater: false,
       lastWaterTestOn: "",
-      sitePhone: cedar ? "573-555-0144" : "573-555-0188",
-      contactName: cedar ? "Sarah Mitchell" : "James Wilson",
-      contactPhone: cedar ? "573-555-0144" : "573-555-0188",
-      city: cedar ? "Columbia" : "Columbia",
-      county: "Boone",
-      zip: cedar ? "65202" : "65203",
+      sitePhone: locality.sitePhone,
+      contactName: locality.contactName,
+      contactPhone: locality.contactPhone,
+      city: locality.city,
+      county: locality.county,
+      zip: locality.zip,
     };
   });
   const siteByName = Object.fromEntries(sites.map((s) => [s.name, s]));
@@ -403,6 +406,21 @@ export function createEvergreenSeed(): LocalDatabase {
     dailyActivities: "Day habilitation, weekdays",
     visitHours: "Weekdays after 4:00 p.m.; weekends by appointment",
     enrolledOn: "2026-01-15",
+    allergies: [
+      {
+        allergen: "Tree nuts",
+        reaction: "Noted on diet order",
+        status: "active",
+      },
+    ],
+    allergiesStamp: {
+      createdBy: profileByName["Cameron Price"].id,
+      createdByName: "Cameron Price",
+      createdAt: "2026-01-15T15:00:00.000Z",
+      updatedBy: "",
+      updatedByName: "",
+      updatedAt: "",
+    },
     guardians: [
       {
         name: "Dana Hart",
@@ -558,6 +576,66 @@ export function createEvergreenSeed(): LocalDatabase {
       // dental, and physician-order cards don't show identical dates.
       defaultRenewals(AGENCY_ID, person.id, renewalSeedToday(person.fullName)),
     ),
+    appointments: [
+      {
+        // Same seed id as hosted Ellis Hart after the Cedar/Willow repair.
+        // Playwright clock is 2026-09-12, so 2026-09-22 stays in the 30-day window.
+        id: padId(940),
+        agencyId: AGENCY_ID,
+        individualId: ellis.id,
+        startsOn: "2026-09-22",
+        startTime: "09:30",
+        endTime: "10:15",
+        timezone: "America/Chicago",
+        consultant: "Dr. Priya Shah",
+        specialty: "Neurology",
+        reason: "Seizure follow-up and medication review",
+        visitAddress: ellisProfile.address,
+        createdBy: profileByName["Cameron Price"].id,
+        createdByName: "Cameron Price",
+        createdAt: "2026-09-10T14:00:00.000Z",
+        updatedBy: "",
+        updatedByName: "",
+        updatedAt: "2026-09-10T14:00:00.000Z",
+        deletedBy: "",
+        deletedByName: "",
+        deletedAt: null,
+        completedBy: "",
+        completedByName: "",
+        completedAt: null,
+        visitComments: "",
+        consultationFileId: null,
+      },
+      {
+        // Hosted …941 is the live Scheduled click-path after UX completed …940.
+        // Local e2e still drives packet/upload from the Sep 22 row above.
+        id: padId(941),
+        agencyId: AGENCY_ID,
+        individualId: ellis.id,
+        startsOn: "2026-09-29",
+        startTime: "09:30",
+        endTime: "10:15",
+        timezone: "America/Chicago",
+        consultant: "Dr. Priya Shah",
+        specialty: "Neurology",
+        reason: "Seizure follow-up and medication review",
+        visitAddress: ellisProfile.address,
+        createdBy: profileByName["Cameron Price"].id,
+        createdByName: "Cameron Price",
+        createdAt: "2026-09-15T19:00:00.000Z",
+        updatedBy: "",
+        updatedByName: "",
+        updatedAt: "2026-09-15T19:00:00.000Z",
+        deletedBy: "",
+        deletedByName: "",
+        deletedAt: null,
+        completedBy: "",
+        completedByName: "",
+        completedAt: null,
+        visitComments: "",
+        consultationFileId: null,
+      },
+    ],
     chartFiles: [],
     medications: defaultEllisMedications(AGENCY_ID, ellis.id),
     medicationDeliveries: [],
@@ -693,6 +771,8 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       dailyActivities: "",
       visitHours: "",
       enrolledOn: "",
+      allergies: [],
+      allergiesStamp: null,
       ...person.profile,
       ...extra,
     };
@@ -755,7 +835,7 @@ function buildSiteReviewSeed(sites: SiteRecord[]): SiteReview[] {
       siteId: site.id,
       updatedAt: "2026-07-15T16:00:00.000Z",
     });
-    if (site.name !== "Cedar House") return blank;
+    if (!isPrimaryDemoHouse(site.name)) return blank;
     const complete = applyWellWaterDefault(
       {
         ...blank,
@@ -882,8 +962,8 @@ function buildMonthlySeed(
               : "",
         temp: line.key.includes("faucet") ? "116 F" : "",
         extra: line.key === "fire_extinguisher" ? "2027-03 / full" : "",
-        checkedBy: site.name === "Cedar House" ? "Alex Morgan" : "James Wilson",
-        signature: site.name === "Cedar House" ? "Alex Morgan" : "James Wilson",
+        checkedBy: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
+        signature: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
       })),
     });
   }

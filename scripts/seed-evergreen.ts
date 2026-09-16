@@ -3,10 +3,14 @@
  * Requires SUPABASE_SERVICE_ROLE_KEY. Never put that key in VITE_* or the browser.
  *
  * A second real agency can be inserted later with a different agency_code.
- * This script only creates Evergreen.
+ * This script only creates Evergreen. If hosted houses were renamed to
+ * Cedar/Willow, names and streets stay; city/zip are patched onto site_facts.
  */
 import { createClient } from "@supabase/supabase-js";
 import { AGENCY_ID, createEvergreenSeed } from "../src/data/seed.ts";
+import { isHostedRosterRename } from "../src/data/evergreenSiteAddress.ts";
+import { siteFactsFrom } from "../src/data/siteReview.ts";
+import { repairEvergreenSiteLocality } from "./repair-site-addresses.ts";
 import { requirementStatusToDb } from "../src/data/status.ts";
 import { DEMO_PASSWORD } from "../src/data/types.ts";
 
@@ -169,16 +173,40 @@ async function main() {
       name: row.name,
     })),
   );
+  const { data: liveSites, error: liveSitesError } = await admin
+    .from("sites")
+    .select("id,name,address")
+    .eq("agency_id", AGENCY_ID);
+  if (liveSitesError) throw new Error(`sites read: ${liveSitesError.message}`);
+  const liveById = new Map(
+    (liveSites ?? []).map((row) => [row.id as string, row]),
+  );
+  // Keep a hosted Cedar/Willow rename. seed:evergreen must not restore Maple
+  // names just to write city/zip — locality is patched after this upsert.
   await upsert(
     "sites",
-    seed.sites.map((row) => ({
-      id: row.id,
-      agency_id: row.agencyId,
-      program_id: row.programId,
-      name: row.name,
-      address: row.address,
-    })),
+    seed.sites.map((row) => {
+      const live = liveById.get(row.id);
+      const keepRename = live && isHostedRosterRename(String(live.name));
+      return {
+        id: row.id,
+        agency_id: row.agencyId,
+        program_id: row.programId,
+        name: keepRename ? String(live.name) : row.name,
+        address: keepRename ? String(live.address) : row.address,
+      };
+    }),
   );
+  await upsertOnConflict(
+    "site_facts",
+    seed.sites.map((row) => ({
+      site_id: row.id,
+      agency_id: row.agencyId,
+      facts: siteFactsFrom(row),
+    })),
+    "site_id",
+  );
+  await repairEvergreenSiteLocality(admin);
   await upsertOnConflict(
     "memberships",
     seed.memberships.map((row) => ({
@@ -269,6 +297,47 @@ async function main() {
       starts_on: row.startsOn,
       ends_on: row.endsOn,
       status: row.status,
+    })),
+  );
+  await upsertOnConflict(
+    "individual_profiles",
+    seed.individuals
+      .filter((row) => row.profile)
+      .map((row) => ({
+        agency_id: row.agencyId,
+        individual_id: row.id,
+        profile: row.profile,
+      })),
+    "individual_id",
+  );
+  await upsert(
+    "appointments",
+    seed.appointments.map((row) => ({
+      id: row.id,
+      agency_id: row.agencyId,
+      individual_id: row.individualId,
+      starts_on: row.startsOn,
+      start_time: `${row.startTime}:00`,
+      end_time: `${row.endTime}:00`,
+      timezone: row.timezone,
+      consultant: row.consultant,
+      specialty: row.specialty,
+      reason: row.reason,
+      visit_address: row.visitAddress,
+      created_by: uid(row.createdBy),
+      created_by_name: row.createdByName,
+      created_at: row.createdAt,
+      updated_by: row.updatedBy ? uid(row.updatedBy) : null,
+      updated_by_name: row.updatedByName,
+      updated_at: row.updatedAt,
+      deleted_by: row.deletedBy ? uid(row.deletedBy) : null,
+      deleted_by_name: row.deletedByName,
+      deleted_at: row.deletedAt,
+      completed_by: row.completedBy ? uid(row.completedBy) : null,
+      completed_by_name: row.completedByName,
+      completed_at: row.completedAt,
+      visit_comments: row.visitComments,
+      consultation_file_id: row.consultationFileId,
     })),
   );
   await upsert(

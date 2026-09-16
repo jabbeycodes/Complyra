@@ -1,0 +1,136 @@
+.sites-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.site-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.site-grid .location-card {
+  position: relative;
+  cursor: pointer;
+  min-height: 44px;
+  padding: 16px var(--panel-inline) 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.site-grid .location-card:focus-visible {
+  outline: 2px solid #3f5c3b;
+  outline-offset: 3px;
+}
+
+.location-card-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  padding-right: 4.5rem;
+}
+
+.site-grid .location-card h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  color: #2f4630;
+  overflow-wrap: anywhere;
+}
+
+.site-grid .location-address {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #6b6156;
+  overflow-wrap: anywhere;
+}
+
+.location-capacity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #4a4036;
+}
+
+.capacity-full {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #e4d5b8;
+  color: #4a4036;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.location-faces {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.location-faces-more {
+  font-size: 12px;
+  color: #6b6156;
+}
+
+.location-glance {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.location-open-hint {
+  position: absolute;
+  top: 16px;
+  right: var(--panel-inline);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  color: #5d8354;
+}
+
+.site-grid .location-card .heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+  grid-template-columns: none;
+}
+
+.site-grid .location-card .heading-actions .button {
+  min-height: 44px;
+  width: auto;
+}
+
+.site-grid .location-card .heading-actions .button.full {
+  grid-column: auto;
+}
+
+@media (min-width: 960px) {
+  .site-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 959px) {
+  .site-grid {
+    grid-template-columns: 1fr;
+  }
+}

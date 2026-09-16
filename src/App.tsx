@@ -73,6 +73,7 @@ import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
+import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
@@ -106,6 +107,7 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
 import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
+import SitesList from "./features/sites/SitesList";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
@@ -114,8 +116,6 @@ import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
-import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
-import { todayIso } from "./data/chart";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -130,20 +130,6 @@ function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-/** "2 program sites · 4 individuals · 1 program" with correct pluralization. */
-function siteSummary(
-  siteCount: number,
-  individualCount: number,
-  sites: { program?: string }[],
-): string {
-  const programCount = new Set(sites.map((row) => row.program)).size;
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  return [
-    plural(siteCount, "program site"),
-    plural(individualCount, "individual"),
-    plural(programCount, "program"),
-  ].join(" · ");
 }
 export default function App() {
   const {
@@ -598,6 +584,7 @@ export default function App() {
         ["Overview", LayoutDashboard],
         ["Platform", ShieldCheck],
         ["Individuals", Users],
+        ["Appointments", CalendarDays],
         ["Sites & programs", Building2],
         ["Intake", UserPlus],
         ["Staff", Users],
@@ -756,7 +743,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <div className="main-shell">
+      <div className="main-shell page-shell">
         {demoMode && (
           <DemoBanner
             onRestartTour={() => setTourOpen(true)}
@@ -1052,6 +1039,9 @@ export default function App() {
                   </section>
                 </>
               )}
+              {page === "Appointments" && (
+                <AppointmentsPage onOpenPerson={openPersonChart} />
+              )}
               {page === "Individual chart" && person && (
                 <IndividualChart
                   individualId={
@@ -1065,143 +1055,28 @@ export default function App() {
                   siteId={detailSiteId}
                   onBack={() => navigate("Sites & programs")}
                   onOpenIndividual={(name) => openPersonChart(name)}
+                  onOpenPage={(next) => navigate(next)}
                 />
               )}
               {page === "Sites & programs" && (
                 <>
-                  <PageHeading title="Sites & programs" />
-                  <div className="list-controls">
-                    <span>
-                      {siteSummary(sites.length, individuals.length, sites)}
-                    </span>
-                    <select
-                      aria-label="Select site"
-                      value={site}
-                      onChange={(e) => setSite(e.target.value)}
-                    >
-                      <option>All sites</option>
-                      {sites.map((s) => (
-                        <option key={s.name}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="site-grid">
-                    {canAddSite && (
-                      <button
-                        type="button"
-                        className="panel add-site-tile"
-                        aria-label="Add a site"
-                        onClick={() => setModal("add-site")}
-                      >
-                        <span className="add-site-plus" aria-hidden="true">
-                          <Plus size={22} strokeWidth={3} />
-                        </span>
-                        <strong>Add a site</strong>
-                        <span>Open a new program home as you grow</span>
-                      </button>
-                    )}
-                    {sites
-                      .filter((s) => site === "All sites" || s.name === site)
-                      .map((s) => {
-                        const sm = metrics(
-                          data.requirements.filter((r) => r.site === s.name),
-                        );
-                        const review = workspace.siteReviews.find(
-                          (row) => row.siteId === s.id,
-                        );
-                        const reviewInPlace = isSiteReviewInPlace(
-                          review,
-                          normalizeSiteFacts(s),
-                          todayIso(),
-                        );
-                        return (
-                          <section className="panel location-card" key={s.name}>
-                            <div className="location-top">
-                              <span className={`house-icon ${s.color}`}>
-                                <Building2 size={20} />
-                              </span>
-                              <div className="location-title">
-                                <h2>{s.name}</h2>
-                                <p>
-                                  {s.address}
-                                  <span className="program-tag">{s.program}</span>
-                                </p>
-                              </div>
-                              <Badge
-                                status={
-                                  sm.overdue ? "Needs attention" : "On track"
-                                }
-                              />
-                            </div>
-                            <div className="location-stat">
-                              <strong>
-                                {sm.score}
-                                <small>%</small>
-                              </strong>
-                              <span>ready</span>
-                              <div className="progress-track">
-                                <span style={{ width: `${sm.score}%` }} />
-                              </div>
-                              <em>
-                                {sm.overdue} overdue
-                              </em>
-                            </div>
-                            <div className="location-manager">
-                              <Avatar name={s.manager} small color={s.color} />
-                              <span>{s.manager}</span>
-                              <span className="muted">
-                                {individuals.filter((person) => person.site === s.name).length}{" "}
-                                individuals
-                                {" · "}
-                                {reviewInPlace
-                                  ? "Site review in place"
-                                  : "Site review open"}
-                              </span>
-                            </div>
-                            <div className="heading-actions">
-                              <button
-                                className="button primary"
-                                onClick={() => openSiteDetail(s.id)}
-                              >
-                                Open site <ArrowRight size={16} />
-                              </button>
-                              {canAddPerson && (
-                                <button
-                                  className="button"
-                                  onClick={() => {
-                                    setAddPersonSiteId(s.id);
-                                    setModal("add-person");
-                                  }}
-                                >
-                                  <UserPlus size={16} /> Add an individual
-                                </button>
-                              )}
-                              <button
-                                className="button"
-                                onClick={() => setSite(s.name)}
-                              >
-                                Site review pack
-                              </button>
-                              <button
-                                className="button"
-                                onClick={() => setSite(s.name)}
-                              >
-                                This month’s checks
-                              </button>
-                              <button
-                                className="button full"
-                                onClick={() => {
-                                  setSite(s.name);
-                                  navigate("Requirements");
-                                }}
-                              >
-                                View site requirements <ArrowRight size={16} />
-                              </button>
-                            </div>
-                          </section>
-                        );
-                      })}
-                  </div>
+                  <SitesList
+                    session={session}
+                    sites={sites}
+                    individuals={individuals}
+                    requirements={data.requirements}
+                    siteReviews={workspace.siteReviews}
+                    siteFilter={site}
+                    onSiteFilter={setSite}
+                    onOpenSite={openSiteDetail}
+                    onAddSite={() => setModal("add-site")}
+                    onAddPerson={(siteId) => {
+                      setAddPersonSiteId(siteId);
+                      setModal("add-person");
+                    }}
+                    canAddSite={canAddSite}
+                    canAddPerson={canAddPerson}
+                  />
                   {site !== "All sites" &&
                     sites
                       .filter((row) => row.name === site)

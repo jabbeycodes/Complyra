@@ -30,6 +30,7 @@ import type { MileageYearlySummary, MileageAgencyYearlySummary } from "../../dat
 import type { MileageTrip, MileageTripView } from "../../data/types";
 import { individualsAtSite } from "../../data/dashboard";
 import { todayIso } from "../../data/chart";
+import { agencyStateCode, siteLocationFrom } from "../../data/siteAddress";
 import "./mileage.css";
 
 interface FormState {
@@ -104,6 +105,10 @@ export default function MileagePage() {
   const sites = workspace?.sites ?? [];
   const activeSiteId = siteId || sites[0]?.id || "";
   const activeSite = sites.find((site) => site.id === activeSiteId);
+  const siteLocation = siteLocationFrom(
+    activeSite,
+    agencyStateCode(null, session?.agencyCode),
+  );
   const showYearly = canViewYearlySummary(session);
   /** Admin backfill: administrators, compliance admins, and house managers
    * may log a forgotten trip out of sequence. Regular staff never see it. */
@@ -416,12 +421,17 @@ export default function MileagePage() {
       }
       if (!yearly) return;
       const scopedPeople = peopleBySiteId.get(yearlyScope) ?? [];
+      const yearlySite = sites.find((site) => site.id === yearlyScope);
       const doc = buildMileageYearPdf({
         agencyName: session?.agencyName ?? "Agency",
         siteName: yearlySiteName,
         year,
         people: scopedPeople.map((person) => ({ id: person.id, name: person.name })),
         summary: yearly,
+        siteLocation: siteLocationFrom(
+          yearlySite,
+          agencyStateCode(null, session?.agencyCode),
+        ),
       });
       const blob = doc.output("blob") as Blob;
       downloadBlob(mileageYearFileName(yearlySiteName || "home", year), blob);
@@ -444,6 +454,7 @@ export default function MileagePage() {
         monthKey: month,
         people: people.map((person) => ({ id: person.id, name: person.name })),
         rows: weekly.rows,
+        siteLocation,
       });
       const blob = doc.output("blob") as Blob;
       downloadBlob(mileageWeekFileName(activeSite?.name ?? "home", month), blob);
@@ -481,6 +492,7 @@ export default function MileagePage() {
         trips,
         totalMiles: summary.totalMiles,
         milesByIndividualId,
+        siteLocation,
       });
       const blob = doc.output("blob") as Blob;
       downloadBlob(mileageMonthFileName(activeSite?.name ?? "home", month), blob);

@@ -32,8 +32,7 @@ export function siteAtCapacityMessage(currentCount: number, cap: number) {
 
 /**
  * Block Intake / add / reassign onto a site that is already at cap.
- * `currentCount` is everyone currently on that site, excluding the person
- * being moved when this is a reassign of someone already there.
+ * Display on the Sites list uses the same numbers; enforcement stays with #57.
  */
 export function assertSiteHasCapacity(input: {
   siteName: string;
@@ -45,4 +44,8 @@ export function assertSiteHasCapacity(input: {
   const next = input.currentCount + (input.adding ?? 1);
   if (next <= cap) return;
   throw new Error(siteAtCapacityMessage(input.currentCount, cap));
+}
+
+export function siteCapacityLabel(currentCount: number, cap: number) {
+  return `${currentCount} of ${cap} Individuals`;
 }
