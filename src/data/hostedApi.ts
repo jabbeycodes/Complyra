@@ -80,6 +80,7 @@ import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
+import { assertSiteHasCapacity } from "./siteCapacity";
 import {
   appointmentChangeDetail,
   assertConsultationUpload,
@@ -2913,6 +2914,17 @@ export class HostedApi implements ComplyraApi {
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
       throw new Error("House managers can add individuals to their own site.");
     }
+    const { count: rosterCount, error: rosterCountError } = await this.client
+      .from("individuals")
+      .select("id", { count: "exact", head: true })
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", site.id);
+    throwIf(rosterCountError, "Could not check this site’s Individual limit.");
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount: rosterCount ?? 0,
+    });
     const { data: roster } = await this.client
       .from("individuals")
       .select("id, full_name")
@@ -2972,6 +2984,52 @@ export class HostedApi implements ComplyraApi {
       });
     }
     return { id: record.id, name: fullName };
+  }
+
+  async reassignIndividualToSite(individualId: string, siteId: string) {
+    const session = await this.requireSession();
+    if (!canCreateIndividual(session.roleKey)) {
+      throw new Error("Only a DPM, nurse, or house manager can move an Individual.");
+    }
+    const { data: personRow, error: personError } = await this.client
+      .from("individuals")
+      .select("*")
+      .eq("id", individualId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(personError, "Individual not found.");
+    if (!personRow) throw new Error("Individual not found or outside your assigned access.");
+    const person = mapIndividual(personRow);
+    const site = await this.siteRecord(siteId);
+    if (!site || site.agencyId !== session.agencyId) throw new Error("Choose a program site.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can move individuals to their own site.");
+    }
+    if (person.siteId === site.id) return;
+    const { count: rosterCount, error: rosterCountError } = await this.client
+      .from("individuals")
+      .select("id", { count: "exact", head: true })
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", site.id)
+      .neq("id", person.id);
+    throwIf(rosterCountError, "Could not check this site’s Individual limit.");
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount: rosterCount ?? 0,
+    });
+    const { error: moveError } = await this.client
+      .from("individuals")
+      .update({ site_id: site.id })
+      .eq("id", person.id);
+    throwIf(moveError, "Could not move this Individual.");
+    await this.audit(
+      session,
+      "individual.reassigned",
+      `${person.fullName} moved to ${site.name}`,
+      "individual",
+      person.id,
+    );
   }
 
   async createAppointment(input: AppointmentDraft & { individualId: string }) {
@@ -3143,7 +3201,6 @@ export class HostedApi implements ComplyraApi {
       person.id,
     );
   }
-
   async recordConsultationPacketGenerated(appointmentId: string) {
     const session = await this.requireSession();
     if (!canSeeAppointments(session.roleKey)) {

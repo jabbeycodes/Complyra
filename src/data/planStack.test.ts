@@ -62,7 +62,7 @@ test("assigned staff see required docs as a list with the PCSP first", async () 
   });
   const workspace = await client.loadWorkspace(dsp);
   const stack = workspace.planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   );
   assert.ok(stack);
   assert.equal(stack.required[0].item.kind, "pcsp");
@@ -87,7 +87,7 @@ test("staff sign each required document then submit the packet", async () => {
   });
   const workspace = await client.loadWorkspace(dsp);
   const stack = workspace.planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   await assert.rejects(() => client.submitPlanPacket(stack.individualId), /Sign every/);
   for (const view of stack.required.filter((item) => item.item.enabled)) {
@@ -122,11 +122,11 @@ test("a new assigned staff member must sign the current unexpired PCSP", async (
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
-  const outsider = workspace.staff.find((s) => s.site !== jodie.site)!;
-  await client.assignStaff(jodie.id, outsider.id);
+  const ellis = workspace.individuals.find((p) => p.name.includes("Ellis"))!;
+  const outsider = workspace.staff.find((s) => s.site !== ellis.site)!;
+  await client.assignStaff(ellis.id, outsider.id);
   const stack = (await client.loadWorkspace(admin)).planStacks.find(
-    (item) => item.individualId === jodie.id,
+    (item) => item.individualId === ellis.id,
   )!;
   const pcsp = stack.required.find((view) => view.item.kind === "pcsp")!;
   assert.equal(pcsp.assignedCount >= 2, true);
@@ -140,14 +140,14 @@ test("adding a protocol does not clear existing PCSP signatures", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
+  const ellis = workspace.individuals.find((p) => p.name.includes("Ellis"))!;
   const before = workspace.planStacks
-    .find((item) => item.individualId === jodie.id)!
+    .find((item) => item.individualId === ellis.id)!
     .required.find((view) => view.item.kind === "pcsp")!;
   const signedBefore = before.signedCount;
-  await client.addProtocol(jodie.id, "Aspiration protocol");
+  await client.addProtocol(ellis.id, "Aspiration protocol");
   const after = (await client.loadWorkspace(admin)).planStacks.find(
-    (item) => item.individualId === jodie.id,
+    (item) => item.individualId === ellis.id,
   )!;
   assert.equal(
     after.required.find((view) => view.item.kind === "pcsp")?.signedCount,
@@ -166,11 +166,11 @@ test("DPM can edit cover fields and a DSP cannot", async () => {
     username: DEMO_ADMIN_USERNAME,
     password: DEMO_PASSWORD,
   });
-  const jodie = (await client.loadWorkspace(admin)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const ellis = (await client.loadWorkspace(admin)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
-  await client.updateIndividualProfile(jodie.id, {
-    ...jodie.profile!,
+  await client.updateIndividualProfile(ellis.id, {
+    ...ellis.profile!,
     goesBy: "Jo",
     dmhId: "999",
   });
@@ -180,13 +180,13 @@ test("DPM can edit cover fields and a DSP cannot", async () => {
     username: DEMO_DSP_USERNAME,
     password: DEMO_PASSWORD,
   });
-  const dspJodie = (await dspClient.loadWorkspace(dsp)).individuals.find((p) =>
-    p.name.includes("Jodie"),
+  const dspEllis = (await dspClient.loadWorkspace(dsp)).individuals.find((p) =>
+    p.name.includes("Ellis"),
   )!;
   await assert.rejects(
     () =>
-      dspClient.updateIndividualProfile(dspJodie.id, {
-        ...dspJodie.profile!,
+      dspClient.updateIndividualProfile(dspEllis.id, {
+        ...dspEllis.profile!,
         goesBy: "Nope",
       }),
     /cover-page/,
@@ -283,7 +283,7 @@ test("DSP does not see clinical renewal dates", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(dsp)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   assert.equal(stack.renewals.length, 0);
   const nurseClient = api();
@@ -293,7 +293,7 @@ test("DSP does not see clinical renewal dates", async () => {
     password: DEMO_PASSWORD,
   });
   const renewal = (await nurseClient.loadWorkspace(nurse)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!.renewals[0];
   await assert.rejects(
     () =>
@@ -330,7 +330,7 @@ test("uploading a consult resets only that renewal date", async () => {
     password: DEMO_PASSWORD,
   });
   const stack = (await client.loadWorkspace(nurse)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+    item.individualName.includes("Ellis"),
   )!;
   const vision = stack.renewals.find((row) => row.kind === "vision")!;
   const dentalBefore = stack.renewals.find((row) => row.kind === "dental")!.nextDueOn;
@@ -357,10 +357,10 @@ test("delegating RN must sign before staff, even if DPM turned the form on", asy
     username: DEMO_ADMIN_USERNAME,
     password: DEMO_PASSWORD,
   });
-  const jodie = (await client.loadWorkspace(admin)).planStacks.find((item) =>
-    item.individualName.includes("Jodie"),
+  const ellis = (await client.loadWorkspace(admin)).planStacks.find((item) =>
+    item.individualName.includes("Ellis"),
   )!;
-  const delegation = jodie.required.find((view) => view.item.kind === "delegation")!;
+  const delegation = ellis.required.find((view) => view.item.kind === "delegation")!;
   await client.updateObligation(delegation.item.id, { enabled: true });
   await assert.rejects(
     () => client.signDelegationRn(delegation.item.id, admin.fullName, mark),
@@ -374,7 +374,7 @@ test("delegating RN must sign before staff, even if DPM turned the form on", asy
     password: DEMO_PASSWORD,
   });
   const dspStack = (await client.loadWorkspace(dsp)).planStacks.find(
-    (item) => item.individualId === jodie.individualId,
+    (item) => item.individualId === ellis.individualId,
   )!;
   const dspRow = dspStack.required.find((view) => view.item.kind === "delegation")!.mySignature!;
   await client.markObligationOpened(dspRow.id);
@@ -399,7 +399,7 @@ test("delegating RN must sign before staff, even if DPM turned the form on", asy
   });
   await client.signObligation(dspRow.id, dsp.fullName, mark);
   const signed = (await client.loadWorkspace(dsp)).planStacks
-    .find((item) => item.individualId === jodie.individualId)!
+    .find((item) => item.individualId === ellis.individualId)!
     .required.find((view) => view.item.kind === "delegation")!;
   assert.ok(signed.mySignature?.signedAt);
   assert.ok(signed.item.rnSignedAt);

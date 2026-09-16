@@ -33,11 +33,11 @@ function userIdFor(s: MemoryStore, fullName: string): string {
 }
 
 function mapleSiteId(s: MemoryStore): string {
-  return s.db.sites.find((row) => row.name === "Maple House")!.id;
+  return s.db.sites.find((row) => row.name === "Cedar House")!.id;
 }
 
-/** Fresh store, admin signed in, one template activated at Maple House and
- *  assigned to Jodie Williams (Maple). Material is still a draft. */
+/** Fresh store, admin signed in, one template activated at Cedar House and
+ *  assigned to Ellis Hart (Maple). Material is still a draft. */
 async function setupAssignedFlow() {
   const s = store();
   const api = new LocalApi(s);
@@ -48,7 +48,7 @@ async function setupAssignedFlow() {
     mapleSiteId(s),
   );
   const individual = s.db.individuals.find(
-    (p) => p.fullName === "Jodie Williams",
+    (p) => p.fullName === "Ellis Hart",
   )!;
   const assignment = await api.assignDelegationToIndividual(
     activation.id,
@@ -125,7 +125,7 @@ test("DSP cannot activate, assign, or approve", async () => {
     api.activateDelegationTemplate(templates[0].id, mapleSiteId(s)),
   );
   const individual = s.db.individuals.find(
-    (p) => p.fullName === "Jodie Williams",
+    (p) => p.fullName === "Ellis Hart",
   )!;
   await assert.rejects(() =>
     api.assignDelegationToIndividual(activation.id, individual.id),
@@ -144,7 +144,7 @@ test("assignment instantiates a draft and notifies reviewers, not all staff", as
     (m) => m.assignmentId === assignment.id,
   )!;
   assert.equal(material.status, "draft");
-  assert.equal(material.draftContent.individualName, "Jodie Williams");
+  assert.equal(material.draftContent.individualName, "Ellis Hart");
   assert.equal(material.draftContent.templateName, assignment.templateName);
   assert.equal(material.draftContent.generatedMark, DIGITAL_RECORD_MARK);
   assert.equal(material.draftContent.individualNotes, "");

@@ -172,6 +172,17 @@ test("summarizeMonthlyMileage totals miles and per-individual shares", () => {
   );
 });
 
+test("monthly columns stay on the current site roster, not stale trip riders", () => {
+  const summary = summarizeMonthlyMileage(
+    [trip({ riderIds: ["former-resident", "ellis"] })],
+    ["ellis"],
+  );
+  assert.deepEqual(
+    summary.individualTotals.map((row) => row.individualId),
+    ["ellis"],
+  );
+});
+
 test("compareMileageTrips orders by date then creation", () => {
   const a = trip({ id: "a", tripDate: "2026-09-10", createdAt: "2026-09-10T09:00:00Z" });
   const b = trip({ id: "b", tripDate: "2026-09-10", createdAt: "2026-09-10T10:00:00Z" });
@@ -223,12 +234,12 @@ async function dspClient() {
     password: DEMO_PASSWORD,
   });
   const site = store.db.sites.find(
-    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Maple House"),
+    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Cedar House"),
   )!;
   const people = store.db.individuals.filter(
     (p) => p.agencyId === session.agencyId && p.siteId === site.id,
   );
-  assert.ok(people.length >= 2, "seed needs two individuals at Maple House");
+  assert.ok(people.length >= 2, "seed needs two individuals at Cedar House");
   return { client, store, session, site, people };
 }
 
@@ -241,12 +252,12 @@ async function clientAs(username: string) {
     password: DEMO_PASSWORD,
   });
   const site = store.db.sites.find(
-    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Maple House"),
+    (s) => s.agencyId === session.agencyId && (session.siteId ? s.id === session.siteId : s.name === "Cedar House"),
   )!;
   const people = store.db.individuals.filter(
     (p) => p.agencyId === session.agencyId && p.siteId === site.id,
   );
-  assert.ok(people.length >= 2, "seed needs two individuals at Maple House");
+  assert.ok(people.length >= 2, "seed needs two individuals at Cedar House");
   return { client, store, session, site, people };
 }
 
@@ -808,8 +819,8 @@ test("summarizeAgencyYearlyMileage groups by site and rolls up an agency grand t
   const result = summarizeAgencyYearlyMileage(
     tripsBySite,
     [
-      { siteId: "site-a", siteName: "Maple House", individualIds: ["a1", "a2", "a3"] },
-      { siteId: "site-b", siteName: "Oakwood House", individualIds: ["b1"] },
+      { siteId: "site-a", siteName: "Cedar House", individualIds: ["a1", "a2", "a3"] },
+      { siteId: "site-b", siteName: "Willow House", individualIds: ["b1"] },
       { siteId: "site-c", siteName: "Empty House", individualIds: [] },
     ],
     2026,
@@ -818,7 +829,7 @@ test("summarizeAgencyYearlyMileage groups by site and rolls up an agency grand t
   assert.equal(result.sites.length, 3);
 
   const maple = result.sites[0];
-  assert.equal(maple.siteName, "Maple House");
+  assert.equal(maple.siteName, "Cedar House");
   const mapleById = Object.fromEntries(maple.rows.map((r) => [r.individualId, r]));
   assert.equal(mapleById["a1"].months[0], 10); // half of 20
   assert.equal(mapleById["a1"].months[1], 30);
@@ -835,7 +846,7 @@ test("summarizeAgencyYearlyMileage groups by site and rolls up an agency grand t
 
   assert.equal(result.sites[2].rows.length, 0); // empty group still listed
 
-  // Agency grand total = Maple 50 + Oakwood 12.
+  // Agency grand total = Cedar 50 + Willow 12.
   assert.equal(result.grandTotal.months[0], 32);
   assert.equal(result.grandTotal.months[1], 30);
   assert.equal(result.grandTotal.yearlyTotal, 62);
@@ -848,7 +859,7 @@ test("summarizeAgencyYearlyMileage ignores trips for sites not in the input list
   ]);
   const result = summarizeAgencyYearlyMileage(
     tripsBySite,
-    [{ siteId: "site-a", siteName: "Maple House", individualIds: ["a1"] }],
+    [{ siteId: "site-a", siteName: "Cedar House", individualIds: ["a1"] }],
     2026,
   );
   assert.equal(result.sites.length, 1);

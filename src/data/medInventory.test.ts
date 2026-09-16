@@ -295,7 +295,7 @@ function viewWithStatus(status: MedInventoryView["status"], individualId = "i"):
 }
 
 test("supply summary counts by status and flags the home", () => {
-  const summary = summarizeMedSupply("s1", "Maple House", [
+  const summary = summarizeMedSupply("s1", "Cedar House", [
     viewWithStatus("ok"),
     viewWithStatus("low"),
     viewWithStatus("critical"),
@@ -311,11 +311,11 @@ test("supply summary counts by status and flags the home", () => {
     summary.alerts.map((a) => a.status),
     ["out", "critical", "low"],
   );
-  assert.match(summary.summary, /Maple House/);
+  assert.match(summary.summary, /Cedar House/);
 });
 
 test("all-clear summary reads clean", () => {
-  const summary = summarizeMedSupply("s1", "Maple House", [viewWithStatus("ok")]);
+  const summary = summarizeMedSupply("s1", "Cedar House", [viewWithStatus("ok")]);
   assert.equal(summary.allClear, true);
   assert.match(summary.summary, /all 1 medication stocked/);
 });
@@ -326,19 +326,19 @@ async function hmClient() {
   const store = new MemoryStore(structuredClone(createEvergreenSeed()));
   const hm = store.db.profiles.find((p) => p.username === DEMO_HM_USERNAME)!;
   store.db.memberships.find((m) => m.userId === hm.id)!.siteId =
-    store.db.individuals.find((p) => p.fullName.includes("Jodie"))!.siteId;
+    store.db.individuals.find((p) => p.fullName.includes("Ellis"))!.siteId;
   const client = new LocalApi(store);
   const session = await client.signIn(hmLogin());
   const workspace = await client.loadWorkspace(session);
-  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
+  const ellis = workspace.individuals.find((p) => p.name.includes("Ellis"))!;
   const siteId = store.db.sites.find((s) => s.agencyId === session.agencyId)!.id;
-  return { client, store, session, jodie, siteId };
+  return { client, store, session, ellis, siteId };
 }
 
 test("delivery-day count drives the projection; new delivery refreshes it", async () => {
-  const { client, jodie } = await hmClient();
+  const { client, ellis } = await hmClient();
   const today = todayIso();
-  const before = await client.getMedInventory(jodie.id);
+  const before = await client.getMedInventory(ellis.id);
   const keppra = before.find((v) => v.medicationName === "Levetiracetam")!;
   assert.ok(keppra);
 
@@ -348,7 +348,7 @@ test("delivery-day count drives the projection; new delivery refreshes it", asyn
     pillsPerDay: 2,
     countedOn: today,
   });
-  const after = await client.getMedInventory(jodie.id);
+  const after = await client.getMedInventory(ellis.id);
   const view = after.find((v) => v.medicationId === keppra.medicationId)!;
   assert.equal(view.currentCount, 60);
   assert.equal(view.daysRemaining, 30);
@@ -358,9 +358,9 @@ test("delivery-day count drives the projection; new delivery refreshes it", asyn
 });
 
 test("adjustMedInventory corrects the count and requires a reason", async () => {
-  const { client, jodie } = await hmClient();
+  const { client, ellis } = await hmClient();
   const today = todayIso();
-  const [keppra] = await client.getMedInventory(jodie.id).then((rows) =>
+  const [keppra] = await client.getMedInventory(ellis.id).then((rows) =>
     rows.filter((v) => v.medicationName === "Levetiracetam"),
   );
   await client.recordMedDelivery({
@@ -382,7 +382,7 @@ test("adjustMedInventory corrects the count and requires a reason", async () => 
     quantityDelta: -5,
     reason: "recount found 5 fewer",
   });
-  const view = (await client.getMedInventory(jodie.id)).find(
+  const view = (await client.getMedInventory(ellis.id)).find(
     (v) => v.medicationId === keppra.medicationId,
   )!;
   assert.equal(view.currentCount, 55);
@@ -390,9 +390,9 @@ test("adjustMedInventory corrects the count and requires a reason", async () => 
 });
 
 test("threshold, acknowledge, and supply status work end to end", async () => {
-  const { client, jodie, siteId } = await hmClient();
+  const { client, ellis, siteId } = await hmClient();
   const today = todayIso();
-  const keppra = (await client.getMedInventory(jodie.id)).find(
+  const keppra = (await client.getMedInventory(ellis.id)).find(
     (v) => v.medicationName === "Levetiracetam",
   )!;
   await client.recordMedDelivery({
@@ -406,7 +406,7 @@ test("threshold, acknowledge, and supply status work end to end", async () => {
     /1–90/,
   );
   await client.setReorderThreshold({ medicationId: keppra.medicationId, lowThresholdDays: 30 });
-  let view = (await client.getMedInventory(jodie.id)).find(
+  let view = (await client.getMedInventory(ellis.id)).find(
     (v) => v.medicationId === keppra.medicationId,
   )!;
   assert.equal(view.lowThresholdDays, 30);
@@ -414,7 +414,7 @@ test("threshold, acknowledge, and supply status work end to end", async () => {
   assert.equal(view.alertActive, true);
 
   await client.acknowledgeReorderAlert(keppra.medicationId);
-  view = (await client.getMedInventory(jodie.id)).find(
+  view = (await client.getMedInventory(ellis.id)).find(
     (v) => v.medicationId === keppra.medicationId,
   )!;
   assert.equal(view.alertActive, false);
@@ -432,8 +432,8 @@ test("DSP can view inventory but cannot adjust it", async () => {
   const client = new LocalApi(store);
   const session = await client.signIn(dspLogin());
   const workspace = await client.loadWorkspace(session);
-  const jodie = workspace.individuals.find((p) => p.name.includes("Jodie"))!;
-  const views = await client.getMedInventory(jodie.id);
+  const ellis = workspace.individuals.find((p) => p.name.includes("Ellis"))!;
+  const views = await client.getMedInventory(ellis.id);
   assert.ok(views.length > 0);
   await assert.rejects(
     client.adjustMedInventory({

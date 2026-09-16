@@ -66,10 +66,10 @@ test("people with equipment get a current-month log; a new month starts blank", 
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const jodie = workspace.individuals.find((row) => row.name === "Jodie Williams");
-  assert.ok(jodie);
+  const ellis = workspace.individuals.find((row) => row.name === "Ellis Hart");
+  assert.ok(ellis);
   const current = workspace.monthly.equipment.filter(
-    (row) => row.individualId === jodie.id && row.active,
+    (row) => row.individualId === ellis.id && row.active,
   );
   assert.ok(current.length >= 2);
   const thisMonth = monthKeyFrom(todayIso());
@@ -82,7 +82,7 @@ test("people with equipment get a current-month log; a new month starts blank", 
     true,
   );
 
-  const sylvester = workspace.individuals.find((row) => row.name === "Sylvester Jones");
+  const sylvester = workspace.individuals.find((row) => row.name === "Reese Lang");
   assert.ok(sylvester);
   assert.equal(
     workspace.monthly.equipment.some(
@@ -100,18 +100,18 @@ test("checking equipment, drills, and safety unlocks that month’s downloads", 
     password: DEMO_PASSWORD,
   });
   let workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
-  const jodie = workspace.individuals.find((row) => row.name === "Jodie Williams")!;
+  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const ellis = workspace.individuals.find((row) => row.name === "Ellis Hart")!;
   const augustEquipment = await client.downloadMonthlyCheck({
     kind: "equipment",
-    id: jodie.id,
+    id: ellis.id,
     monthKey: "2026-08",
   });
-  assert.match(augustEquipment.name, /adaptive-equipment-jodie-williams-2026-08/);
+  assert.match(augustEquipment.name, /adaptive-equipment-ellis-hart-2026-08/);
 
   const thisMonth = monthKeyFrom(todayIso());
   const items = workspace.monthly.equipment.filter(
-    (row) => row.individualId === jodie.id && row.active,
+    (row) => row.individualId === ellis.id && row.active,
   );
   for (const item of items) {
     await client.checkEquipmentLog({
@@ -134,7 +134,7 @@ test("checking equipment, drills, and safety unlocks that month’s downloads", 
       time: "10:15",
       evacTime: "2:10",
       leaderName: "Alex Morgan",
-      participants: "Alex Morgan, Taylor Reed, Jodie Williams",
+      participants: "Alex Morgan, Taylor Reed, Ellis Hart",
       awakeOrSleep: "awake",
     });
   }
@@ -159,7 +159,7 @@ test("checking equipment, drills, and safety unlocks that month’s downloads", 
 
   const equipmentPdf = await client.downloadMonthlyCheck({
     kind: "equipment",
-    id: jodie.id,
+    id: ellis.id,
     monthKey: thisMonth,
   });
   const drillPdf = await client.downloadMonthlyCheck({
@@ -172,9 +172,9 @@ test("checking equipment, drills, and safety unlocks that month’s downloads", 
     id: maple.id,
     monthKey: thisMonth,
   });
-  assert.match(equipmentPdf.name, new RegExp(`adaptive-equipment-jodie-williams-${thisMonth}`));
-  assert.match(drillPdf.name, new RegExp(`emergency-drills-maple-house-${thisMonth}`));
-  assert.match(safetyPdf.name, new RegExp(`home-safety-maple-house-${thisMonth}`));
+  assert.match(equipmentPdf.name, new RegExp(`adaptive-equipment-ellis-hart-${thisMonth}`));
+  assert.match(drillPdf.name, new RegExp(`emergency-drills-cedar-house-${thisMonth}`));
+  assert.match(safetyPdf.name, new RegExp(`home-safety-cedar-house-${thisMonth}`));
   assert.equal(equipmentPdf.blob.type, "application/pdf");
 });
 
@@ -260,7 +260,7 @@ test("a second drill type cannot share a date with a fire drill", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
   const thisMonth = monthKeyFrom(todayIso());
   const drills = workspace.monthly.drills.filter(
     (row) => row.siteId === maple.id && row.monthKey === thisMonth,
@@ -295,7 +295,7 @@ test("a fire drill cannot share a date with another drill type", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
   const thisMonth = monthKeyFrom(todayIso());
   const drills = workspace.monthly.drills.filter(
     (row) => row.siteId === maple.id && row.monthKey === thisMonth,
@@ -324,7 +324,7 @@ test("the same drills on different dates are allowed", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
   const thisMonth = monthKeyFrom(todayIso());
   const drills = workspace.monthly.drills.filter(
     (row) => row.siteId === maple.id && row.monthKey === thisMonth,
@@ -354,7 +354,7 @@ test("re-saving a drill on its own date is allowed", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
+  const maple = workspace.sites.find((row) => row.name === "Cedar House")!;
   const thisMonth = monthKeyFrom(todayIso());
   const fire = workspace.monthly.drills.find(
     (row) => row.siteId === maple.id && row.monthKey === thisMonth && row.drillType === "fire",

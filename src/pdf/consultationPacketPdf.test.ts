@@ -40,7 +40,7 @@ test("consultation packet names the Individual and leaves missing fields blank o
       id: "i1",
       agencyId: "a1",
       siteId: "s1",
-      fullName: "Jodie Williams",
+      fullName: "Ellis Hart",
       dateOfBirth: "1984-03-12",
     }),
     dmhId: "110245",
@@ -54,9 +54,9 @@ test("consultation packet names the Individual and leaves missing fields blank o
   };
   const doc = buildConsultationPacketPdf({
     agencyName: "Evergreen Care",
-    individualName: "Jodie Williams",
+    individualName: "Ellis Hart",
     dateOfBirth: "1984-03-12",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     programName: "Residential services",
     profile,
     appointment,
@@ -69,7 +69,7 @@ test("consultation packet names the Individual and leaves missing fields blank o
   const text = doc.output() as string;
   assert.ok(text.includes("Consultation"), "title");
   assert.ok(text.includes("Evergreen Care"), "agency");
-  assert.ok(text.includes("Jodie Williams"), "individual");
+  assert.ok(text.includes("Ellis Hart"), "individual");
   assert.ok(text.includes("110245"), "DMH id");
   assert.ok(text.includes("Dr. Priya Shah"), "consultant");
   assert.ok(text.includes("Levetiracetam"), "med name");
@@ -88,8 +88,8 @@ test("consultation packet names the Individual and leaves missing fields blank o
 
 test("consultation packet filename uses the Individual and date", () => {
   assert.equal(
-    consultationPacketFileName("Jodie Williams", "2026-09-22"),
-    "complyrer-consultation-jodie-williams-2026-09-22.pdf",
+    consultationPacketFileName("Ellis Hart", "2026-09-22"),
+    "complyrer-consultation-ellis-hart-2026-09-22.pdf",
   );
 });
 
@@ -98,14 +98,14 @@ test("consultation packet labels allergies as not on file when the list is empty
     id: "i1",
     agencyId: "a1",
     siteId: "s1",
-    fullName: "Jodie Williams",
+    fullName: "Ellis Hart",
     dateOfBirth: "1984-03-12",
   });
   const doc = buildConsultationPacketPdf({
     agencyName: "Evergreen Care",
-    individualName: "Jodie Williams",
+    individualName: "Ellis Hart",
     dateOfBirth: "1984-03-12",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     programName: "Residential services",
     profile,
     appointment,

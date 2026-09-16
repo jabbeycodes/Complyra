@@ -125,23 +125,29 @@ test("demo admin can print and download weekly and monthly mileage sheets", asyn
 test("program site hero and tabs at 1280 and 390 keep Staff last", async ({
   page,
 }) => {
-  async function openMaple() {
+  async function openCedar() {
     await openNav(page, "Sites & programs");
     await page
       .locator(".location-card")
-      .filter({ hasText: "Maple House" })
+      .filter({ hasText: "Cedar House" })
       .getByRole("button", { name: /Open site/ })
       .click();
-    await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
   }
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
-  await openMaple();
+  await openCedar();
   await expect(page.locator(".site-hero")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Maple House" })).toBeVisible();
+  await expect(page.locator(".site-hero-stat").filter({ hasText: "Individuals" })).toContainText(
+    "2",
+  );
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Ellis");
+  await expect(page.getByLabel("Individuals in this house")).toContainText("Morgan");
+  await expect(page.getByLabel("Individuals in this house")).not.toContainText("Jodie");
+  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
   await expect(page.locator(".site-hero-address-text")).toContainText(
-    "3201 Pompey Drive, Columbia, MO 65202",
+    "418 Cedar Court, Columbia, MO 65202",
   );
   await expect(page.locator(".site-hero")).not.toContainText("undefined");
   await expect(page.locator(".site-hero .status-mix")).toBeVisible();

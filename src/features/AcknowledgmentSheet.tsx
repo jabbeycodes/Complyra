@@ -190,7 +190,7 @@ export default function AcknowledgmentSheet({
             <input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Covering Maple House this week"
+              placeholder="e.g. Covering Cedar House this week"
             />
           </label>
           <button

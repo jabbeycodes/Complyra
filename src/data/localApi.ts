@@ -70,6 +70,7 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
+import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
   AcknowledgmentPacket,
   AddCertificateInput,
@@ -549,6 +550,11 @@ export interface ComplyraApi {
     effectiveOn?: string;
     enrolledOn?: string;
   }): Promise<{ id: string; name: string }>;
+  /**
+   * Move an Individual onto another program site. Same cap as Intake —
+   * a full house cannot take the transfer.
+   */
+  reassignIndividualToSite(individualId: string, siteId: string): Promise<void>;
   createAppointment(
     input: AppointmentDraft & { individualId: string },
   ): Promise<{ id: string }>;
@@ -4241,6 +4247,11 @@ export class LocalApi implements ComplyraApi {
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
       throw new Error("House managers can add individuals to their own site.");
     }
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount: countIndividualsAtSite(this.store.db.individuals, site.id),
+    });
     if (
       this.store.db.individuals.some(
         (row) =>
@@ -4302,6 +4313,41 @@ export class LocalApi implements ComplyraApi {
       });
     }
     return { id: person.id, name: fullName };
+  }
+
+  async reassignIndividualToSite(individualId: string, siteId: string) {
+    const session = assertSession(this.store);
+    if (!canCreateIndividual(session.roleKey)) {
+      throw new Error("Only a DPM, nurse, or house manager can move an Individual.");
+    }
+    const person = accessibleIndividual(this.store, session, individualId);
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Choose a program site.");
+    if (session.roleKey === "house_manager" && session.siteId && session.siteId !== site.id) {
+      throw new Error("House managers can move individuals to their own site.");
+    }
+    if (person.siteId === site.id) return;
+    const currentCount = countIndividualsAtSite(
+      this.store.db.individuals.filter((row) => row.id !== person.id),
+      site.id,
+    );
+    assertSiteHasCapacity({
+      siteName: site.name,
+      agencyCode: session.agencyCode,
+      currentCount,
+    });
+    person.siteId = site.id;
+    log(
+      this.store,
+      session,
+      "individual.reassigned",
+      `${person.fullName} moved to ${site.name}`,
+      "individual",
+      person.id,
+    );
+    await persistMeta(this.store);
   }
 
   async createAppointment(input: AppointmentDraft & { individualId: string }) {
@@ -4455,7 +4501,6 @@ export class LocalApi implements ComplyraApi {
     );
     await persistMeta(this.store);
   }
-
   async recordConsultationPacketGenerated(appointmentId: string) {
     const session = assertSession(this.store);
     if (!canSeeAppointments(session.roleKey)) {

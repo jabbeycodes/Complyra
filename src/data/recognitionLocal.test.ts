@@ -23,9 +23,9 @@ function login(username: string) {
   };
 }
 
-const dspUsername = DEMO_DSP_USERNAME; // Alex Morgan, DSP at Maple House
-const hmUsername = emailFor("James Wilson").split("@")[0]; // James Wilson, HM at Oakwood House
-const oakwoodDspUsername = emailFor("Jordan Lee").split("@")[0]; // Jordan Lee, DSP at Oakwood House
+const dspUsername = DEMO_DSP_USERNAME; // Alex Morgan, DSP at Cedar House
+const hmUsername = emailFor("James Wilson").split("@")[0]; // James Wilson, HM at Willow House
+const oakwoodDspUsername = emailFor("Jordan Lee").split("@")[0]; // Jordan Lee, DSP at Willow House
 
 function userId(store: MemoryStore, username: string): string {
   const profile = store.db.profiles.find(
@@ -133,7 +133,7 @@ test("HM reviews assigned DSP: history and notification mirror the rating path",
 test("cross-site rating is rejected: only assigned pairs may rate/review", async () => {
   const s = store();
   const api = new LocalApi(s);
-  await api.signIn(login(dspUsername)); // Alex Morgan, Maple House DSP
+  await api.signIn(login(dspUsername)); // Alex Morgan, Cedar House DSP
   const oakwoodHmId = userId(s, hmUsername); // James Wilson, Oakwood HM
 
   await assert.rejects(
@@ -294,7 +294,7 @@ test("listRecognitionPartners returns only assigned counterparts", async () => {
 test("staff_assignments pair people across sites for ratings and partners", async () => {
   const s = store();
   const api = new LocalApi(s);
-  const dspId = userId(s, dspUsername); // Alex Morgan, Maple House DSP
+  const dspId = userId(s, dspUsername); // Alex Morgan, Cedar House DSP
   const hmId = userId(s, hmUsername); // James Wilson, Oakwood HM
   // Alex has no membership at Oakwood; link them with an active assignment.
   const oakwoodSite = s.db.memberships.find(
@@ -345,12 +345,12 @@ test("manager feedback is site-scoped: DPM sees only their sites' pairs", async 
   membership.siteId = oakwoodSite;
   await api.signIn(login(nurseUsername));
   let feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 1, "DPM at Oakwood sees the pair");
+  assert.equal(feedback.dspRatings.length, 1, "DPM at Willow sees the pair");
 
   // Same DPM moved to Maple: the Oakwood pair is hidden.
   membership.siteId = mapleSite;
   feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 0, "DPM at Maple sees nothing");
+  assert.equal(feedback.dspRatings.length, 0, "DPM at Cedar sees nothing");
 
   // Administrators still see the whole agency.
   await api.signIn(login(DEMO_ADMIN_USERNAME));

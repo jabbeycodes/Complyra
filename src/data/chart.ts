@@ -263,7 +263,7 @@ export function mergeTrainingLines(existing: TrainingLine[], nextTitles: Trainin
   return nextTitles.map((line) => byTitle.get(line.title) ?? line);
 }
 
-export function defaultJodieMedications(agencyId: string, individualId: string): Medication[] {
+export function defaultEllisMedications(agencyId: string, individualId: string): Medication[] {
   return [
     {
       id: `${individualId}-med-keppra`,

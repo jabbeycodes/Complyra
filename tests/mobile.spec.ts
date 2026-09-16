@@ -143,16 +143,16 @@ test.describe("390 phone", () => {
     }
 
     await openPage(page, "Individuals");
-    await page.getByRole("button", { name: /Jodie Williams/ }).click();
+    await page.getByRole("button", { name: /Ellis Hart/ }).click();
     await expect(
-      page.getByRole("heading", { name: "Jodie Williams", exact: true }),
+      page.getByRole("heading", { name: "Ellis Hart", exact: true }),
     ).toBeVisible();
     await assertNoHorizontalOverflow(page);
 
     await openPage(page, "Sites & programs");
     await page
       .locator(".location-card")
-      .filter({ hasText: "Maple House" })
+      .filter({ hasText: "Cedar House" })
       .getByRole("button", { name: "Site review pack" })
       .click();
     await expect(

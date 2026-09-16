@@ -43,23 +43,23 @@ function trip(overrides: Partial<MileageTripView> = {}): MileageTripView {
 test("mileage month PDF prints the live site address under the home name", async () => {
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: PEOPLE,
     trips: [trip()],
     totalMiles: 40,
     milesByIndividualId: { p1: 20, p2: 20 },
     siteLocation: {
-      name: "Maple House",
-      address: "3201 Pompey Drive",
+      name: "Cedar House",
+      address: "418 Cedar Court",
       city: "Columbia",
       stateCode: "MO",
       zip: "65202",
     },
   });
   const text = doc.output();
-  assert.match(text, /Maple House/);
-  assert.match(text, /3201 Pompey Drive, Columbia, MO 65202/);
+  assert.match(text, /Cedar House/);
+  assert.match(text, /418 Cedar Court, Columbia, MO 65202/);
   assert.doesNotMatch(text, /undefined/);
 });
 
@@ -86,7 +86,7 @@ test("mileage PDF does not stutter when the home name is the street and there is
 test("mileage month PDF produces a non-empty downloadable blob", async () => {
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: PEOPLE,
     trips: [
@@ -120,7 +120,7 @@ test("mileage month PDF produces a non-empty downloadable blob", async () => {
 test("mileage month PDF works with no trips and no people", async () => {
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: [],
     trips: [],
@@ -142,7 +142,7 @@ test("mileage month PDF spans multiple pages for many trips", () => {
   );
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: PEOPLE,
     trips,
@@ -159,7 +159,7 @@ test("mileage month PDF spans multiple pages for many trips", () => {
 test("mileage weekly PDF is a printable Week 1–4 sheet", async () => {
   const doc = buildMileageWeekPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: PEOPLE,
     rows: [
@@ -179,22 +179,22 @@ test("mileage weekly PDF is a printable Week 1–4 sheet", async () => {
     "record mark",
   );
   assert.equal(
-    mileageWeekFileName("Maple House", "2026-09"),
-    "complyrer-mileage-weekly-maple-house-2026-09.pdf",
+    mileageWeekFileName("Cedar House", "2026-09"),
+    "complyrer-mileage-weekly-cedar-house-2026-09.pdf",
   );
 });
 
 test("mileage month file name is a safe download name", () => {
   assert.equal(
-    mileageMonthFileName("Maple House", "2026-09"),
-    "complyrer-mileage-log-maple-house-2026-09.pdf",
+    mileageMonthFileName("Cedar House", "2026-09"),
+    "complyrer-mileage-log-cedar-house-2026-09.pdf",
   );
 });
 
 test("mileage month PDF sign-off uses role labels, never pre-printed individual names", () => {
   const doc = buildMileageMonthPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     monthKey: "2026-09",
     people: PEOPLE,
     trips: [trip()],
@@ -228,7 +228,7 @@ test("mileage month PDF sign-off uses role labels, never pre-printed individual 
 test("mileage yearly PDF renders Jan–Dec columns, yearly totals, and the grand total", async () => {
   const doc = buildMileageYearPdf({
     agencyName: "Evergreen Care",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     year: 2026,
     people: PEOPLE,
     summary: {
@@ -251,7 +251,7 @@ test("mileage yearly PDF renders Jan–Dec columns, yearly totals, and the grand
     "every generated document must carry the Complyrer record mark",
   );
   assert.ok(
-    mileageYearFileName("Maple House", 2026).endsWith("-2026.pdf"),
+    mileageYearFileName("Cedar House", 2026).endsWith("-2026.pdf"),
     "yearly filename carries the year",
   );
 });
@@ -276,15 +276,15 @@ test("mileage yearly PDF agency-wide mode draws one site group header per site",
       grandTotal: { months: [35, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], yearlyTotal: 50 },
     },
     siteNameByIndividualId: {
-      p1: "Maple House",
-      p2: "Maple House",
-      p3: "Oakwood House",
+      p1: "Cedar House",
+      p2: "Cedar House",
+      p3: "Willow House",
     },
   });
   const text = doc.output() as string;
   assert.ok(text.includes("All sites"), "agency-wide header names the scope");
-  assert.ok(text.includes("Maple House"), "first site group header");
-  assert.ok(text.includes("Oakwood House"), "second site group header");
+  assert.ok(text.includes("Cedar House"), "first site group header");
+  assert.ok(text.includes("Willow House"), "second site group header");
   assert.ok(text.includes("Grand Total"), "grand total row");
   assert.ok(
     text.includes("Digital record generated by Complyrer"),

@@ -22,7 +22,7 @@ export function requirementMatchesQuery(item: Requirement, query: string) {
 
 /**
  * Filter, drop duplicate ids, then surface open work before completed copies
- * of the same title. Limit is applied after ranking so "Jodie" is not five
+ * of the same title. Limit is applied after ranking so "Ellis" is not five
  * identical Compliant PCSP rows.
  */
 export function searchRequirements(

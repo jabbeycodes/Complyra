@@ -153,9 +153,9 @@ test("30-day range and month cells are calendar-stable", () => {
 test("caseload filters AND name, range, scheduled status, site, and program", () => {
   const scheduled = {
     ...sample,
-    individualName: "Jodie Williams",
+    individualName: "Ellis Hart",
     siteId: "maple",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     programName: "Residential services",
   };
   const completed = {
@@ -166,9 +166,9 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
     completedAt: "2026-09-15T18:00:00.000Z",
     completedBy: "u-dsp",
     completedByName: "Alex Morgan",
-    individualName: "Jodie Williams",
+    individualName: "Ellis Hart",
     siteId: "maple",
-    siteName: "Maple House",
+    siteName: "Cedar House",
     programName: "Residential services",
   };
   const otherSite = {
@@ -184,7 +184,7 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
   assert.equal(appointmentStatus(scheduled), "scheduled");
   assert.equal(appointmentStatus(completed), "completed");
   const named = filterCaseloadAppointments([scheduled, completed, otherSite], {
-    name: "jodie",
+    name: "ellis",
     from: "2026-09-12",
     to: "2026-10-11",
     status: "all",
@@ -193,14 +193,14 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
     named.map((row) => row.id),
     ["appt-done", "appt-1"],
   );
-  const mapleScheduled = filterCaseloadAppointments([scheduled, completed, otherSite], {
+  const cedarScheduled = filterCaseloadAppointments([scheduled, completed, otherSite], {
     status: "scheduled",
     siteId: "maple",
     programName: "Residential services",
     individualId: "i1",
   });
   assert.deepEqual(
-    mapleScheduled.map((row) => row.id),
+    cedarScheduled.map((row) => row.id),
     ["appt-1"],
   );
   const programAndStaff = filterCaseloadAppointments([scheduled, completed, otherSite], {
@@ -225,7 +225,7 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
   const window = { from: "2026-09-12", to: "2026-10-11" };
   assert.equal(hasActiveCaseloadFilters({ status: "all", from: window.from, to: window.to }, window), false);
   assert.equal(hasActiveCaseloadFilters({ status: "scheduled", from: window.from, to: window.to }, window), true);
-  assert.equal(hasActiveCaseloadFilters({ name: "jodie", from: window.from, to: window.to }, window), true);
+  assert.equal(hasActiveCaseloadFilters({ name: "ellis", from: window.from, to: window.to }, window), true);
   assert.deepEqual(
     uniqueProgramNames([
       { program: "Supported living" },
@@ -236,7 +236,7 @@ test("caseload filters AND name, range, scheduled status, site, and program", ()
   );
   const fromWorkspace = caseloadAppointmentsFromWorkspace(
     [{ individualId: "i1", appointments: [sample] }],
-    [{ id: "i1", name: "Jodie Williams", siteId: "maple", site: "Maple House" }],
+    [{ id: "i1", name: "Ellis Hart", siteId: "maple", site: "Cedar House" }],
     [{ id: "maple", program: "Residential services" }],
   );
   assert.equal(fromWorkspace[0]?.programName, "Residential services");

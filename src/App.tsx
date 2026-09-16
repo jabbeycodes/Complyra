@@ -2203,7 +2203,7 @@ export default function App() {
             {[
               "What should we fix before an audit?",
               "Which delegations are expiring?",
-              "Who needs to acknowledge Jodie’s PCSP?",
+              "Who needs to acknowledge Ellis’s PCSP?",
             ].map((q) => (
               <button key={q} onClick={() => askCopilot(q)}>
                 {q}
@@ -2642,7 +2642,7 @@ function CreateForm({
             <input
               name="source"
               required
-              placeholder="e.g. Jodie Williams · PCSP 2026 · v2"
+              placeholder="e.g. Ellis Hart · PCSP 2026 · v2"
             />
           </label>
         )}

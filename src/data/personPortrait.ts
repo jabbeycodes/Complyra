@@ -1,6 +1,6 @@
 /**
  * Deterministic illustrated portraits for people who do not yet have an
- * uploaded photo. Used by the program-site hero so Maple House is not
+ * uploaded photo. Used by the program-site hero so Cedar House is not
  * initials-only. A stored photoUrl always wins.
  */
 function hashName(name: string): number {

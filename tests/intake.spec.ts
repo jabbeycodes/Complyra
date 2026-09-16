@@ -15,6 +15,14 @@ test("admin Intake adds an Individual and opens the chart", async ({ page }, tes
   const shot = (name: string) =>
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
   await signIn(page);
+  await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
+  await page.getByRole("button", { name: "Add a site" }).click();
+  const siteDialog = page.getByRole("dialog", { name: "Add a program site" });
+  await siteDialog.getByLabel("Site name").fill("Poplar House");
+  await siteDialog.getByLabel("Address").fill("12 Poplar Lane");
+  await siteDialog.getByRole("button", { name: "Create site" }).click();
+  await expect(page.getByRole("heading", { name: "Poplar House", exact: true })).toBeVisible();
+
   await page.getByRole("button", { name: "Intake", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Intake" })).toBeVisible();
   await expect(
@@ -25,14 +33,27 @@ test("admin Intake adds an Individual and opens the chart", async ({ page }, tes
   await page.getByLabel("Legal name").fill("Casey Nguyen");
   await page.getByLabel("Goes by").fill("Casey");
   await page.getByLabel("Date of birth").fill("1993-06-04");
-  await page.getByLabel("Program site").selectOption({ label: "Maple House" });
+  await page.getByLabel("Program site").selectOption({ label: "Poplar House" });
   await expect(page.getByLabel("Enrollment date (optional)")).toHaveValue(
     "2026-09-12",
   );
+  await expect(page.getByText("0 of 2 Individuals")).toBeVisible();
   await page.getByRole("button", { name: "Add Individual", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Casey Nguyen" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Individual added to Maple House.");
+  await expect(page.getByRole("status")).toContainText("Individual added to Poplar House.");
   await expect(page.locator(".individual-chart")).toBeVisible();
+});
+
+test("Intake blocks a demo house that is already at 2 Individuals", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Intake", exact: true }).click();
+  await page.getByRole("tab", { name: /Add by hand/ }).click();
+  await page.getByLabel("Program site").selectOption({ label: "Cedar House" });
+  await expect(page.getByText("2 of 2 Individuals")).toBeVisible();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "This site already has 2 Individuals (max 2)." }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add Individual", exact: true })).toBeDisabled();
 });
 
 test("DSP does not see Intake", async ({ page }) => {

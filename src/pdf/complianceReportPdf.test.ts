@@ -31,8 +31,8 @@ test("compliance report PDF includes scores, site mix, status sections, and regi
   assert.ok(text.includes("2026-09-14"), "as-of date");
   assert.ok(text.includes("Executive Summary"), "summary");
   assert.ok(text.includes("Breakdown by site"), "site breakdown");
-  assert.ok(text.includes("Maple House"), "maple in site table");
-  assert.ok(text.includes("Oakwood House"), "oakwood in site table");
+  assert.ok(text.includes("Cedar House"), "maple in site table");
+  assert.ok(text.includes("Willow House"), "oakwood in site table");
   assert.ok(text.includes("Compliant summary"), "compliant section");
   assert.ok(text.includes("Requirements register"), "full register");
   assert.ok(text.includes("Pending review"), "review count");

@@ -23,7 +23,7 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
   await signIn(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
   await expect(chart.locator(".health-tabs").getByRole("tab")).toHaveCount(2);
@@ -53,7 +53,7 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   const download = page.waitForEvent("download");
   await sep22.getByRole("button", { name: "Generate consultation packet" }).click();
   expect((await download).suggestedFilename()).toMatch(
-    /complyrer-consultation-jodie-williams-2026-09-22/,
+    /complyrer-consultation-ellis-hart-2026-09-22/,
   );
 });
 
@@ -62,7 +62,7 @@ test("DSP can view Health and generate a packet but cannot create appointments",
 }) => {
   await signIn(page, "alex.morgan");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
@@ -96,20 +96,20 @@ test("Appointments calendar lists caseload days and opens that day's visits", as
   await expect(page.getByRole("heading", { name: "September 2026" })).toBeVisible();
   await page.getByRole("gridcell", { name: /September 22, 2026/ }).click();
   await expect(page.getByRole("heading", { name: "September 22, 2026" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Jodie Williams" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ellis Hart" })).toBeVisible();
   await expect(page.locator(".appointments-page")).toContainText("Dr. Priya Shah");
   await expect(page.locator(".appointments-page")).toContainText("Scheduled");
   await expect(page.getByRole("button", { name: "Generate consultation packet" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New appointment" })).toHaveCount(0);
 
-  const mapleOption = await filters
+  const cedarOption = await filters
     .getByLabel("Filter by site")
-    .locator("option", { hasText: "Maple House" })
+    .locator("option", { hasText: "Cedar House" })
     .getAttribute("value");
   await filters.getByRole("button", { name: "Scheduled", exact: true }).click();
   await filters.getByLabel("Filter by program").selectOption("Residential services");
-  await filters.getByLabel("Filter by individual").fill("Jodie Williams");
-  await filters.getByLabel("Filter by site").selectOption(mapleOption ?? "");
+  await filters.getByLabel("Filter by individual").fill("Ellis Hart");
+  await filters.getByLabel("Filter by site").selectOption(cedarOption ?? "");
   await expect(page.locator(".appointments-page")).toContainText("Dr. Priya Shah");
   await expect(filters.getByRole("button", { name: "Clear filters" })).toBeVisible();
   await page.screenshot({ path: shot("appointments_calendar.png"), fullPage: true });
@@ -123,7 +123,7 @@ test("Appointments calendar lists caseload days and opens that day's visits", as
 test("uploading a consultation form completes the appointment", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await page.getByRole("button", { name: /Jodie Williams/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
   await chart.getByRole("tab", { name: "Appointments" }).click();
   const sep22 = appointmentCard(chart, "September 22, 2026");

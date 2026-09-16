@@ -30,7 +30,7 @@ test('Audit Me persists corrective actions and opens their risk sources', async 
 test('Quarterly QA creates, scores, reloads and exports a site audit', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: 'QA Review', exact: true }).click();
-  await page.locator('.qa-new-audit').getByRole('combobox').first().selectOption({ label: 'Maple House' });
+  await page.locator('.qa-new-audit').getByRole('combobox').first().selectOption({ label: 'Cedar House' });
   await page.getByRole('button', { name: 'Start review', exact: true }).click();
   await page.getByRole('button', { name: /Home environment/ }).click();
   const item = page.locator('.qa-item:not(.qa-item--locked)').first();
@@ -41,7 +41,7 @@ test('Quarterly QA creates, scores, reloads and exports a site audit', async ({ 
   await page.getByRole('button', { name: 'Download report', exact: true }).click();
   expect((await download).suggestedFilename()).toMatch(/\.pdf$/);
   await page.reload();
-  await expect(page.locator('.qa-list')).toContainText('Maple House');
+  await expect(page.locator('.qa-list')).toContainText('Cedar House');
 });
 
 test('Audit pages stay usable on a phone and invalid routes recover', async ({ page }) => {

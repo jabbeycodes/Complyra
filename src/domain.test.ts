@@ -59,7 +59,7 @@ test("audit exports retain source and evidence and neutralize spreadsheet formul
     '=HYPERLINK("https://example.com")',
   );
   const csv = exportCsv(next.filter((r) => r.id === "REQ-121"));
-  assert.ok(csv.includes("Jodie Williams · PCSP 2026 · v2"));
+  assert.ok(csv.includes("Ellis Hart · PCSP 2026 · v2"));
   assert.ok(csv.includes("'=HYPERLINK"));
   assert.equal(csvCell('Hello, "world"'), '"Hello, ""world"""');
   assert.equal(csv.split("\r\n").length, 2);

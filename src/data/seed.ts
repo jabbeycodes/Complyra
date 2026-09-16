@@ -35,7 +35,7 @@ import type {
 } from "./planStack";
 import { defaultRenewals } from "./planStack";
 import {
-  defaultJodieMedications,
+  defaultEllisMedications,
   mergeTrainingLines,
   trainingLinesFromObligations,
   type ChartFile,
@@ -385,14 +385,14 @@ export function createEvergreenSeed(): LocalDatabase {
     };
   });
 
-  const jodie = individualByName["Jodie Williams"];
-  const jodieProfile: IndividualProfile = {
-    legalName: "Jodie Williams",
-    goesBy: "Jodie",
+  const ellis = individualByName["Ellis Hart"];
+  const ellisProfile: IndividualProfile = {
+    legalName: "Ellis Hart",
+    goesBy: "Ellis",
     dmhId: "110245",
     diagnosis: "Unspecified intellectual disability",
     waiver: "Comprehensive Residential",
-    address: "3201 Pompey Drive",
+    address: "418 Cedar Court",
     phone: "573-555-0144",
     language: "English",
     implementationStart: "2026-01-15",
@@ -423,33 +423,33 @@ export function createEvergreenSeed(): LocalDatabase {
     },
     guardians: [
       {
-        name: "Jonathan Williams",
-        relationship: "Brother",
+        name: "Dana Hart",
+        relationship: "Sibling",
         phone: "573-555-0199",
         email: "guardian@example.com",
         preferredContact: "Phone",
       },
     ],
   };
-  const jodieRecord = individuals.find((p) => p.id === jodie.id);
-  if (jodieRecord) jodieRecord.profile = jodieProfile;
+  const ellisRecord = individuals.find((p) => p.id === ellis.id);
+  if (ellisRecord) ellisRecord.profile = ellisProfile;
   attachSurveyProfiles(individuals);
-  const jodieV2 = versions.find((v) => {
+  const ellisV2 = versions.find((v) => {
     const doc = documents.find((d) => d.id === v.documentId);
-    return doc?.title === "Jodie Williams · PCSP 2026" && v.versionLabel === "v2";
+    return doc?.title === "Ellis Hart · PCSP 2026" && v.versionLabel === "v2";
   })!;
   const packet: AcknowledgmentPacket = {
     id: padId(801),
     agencyId: AGENCY_ID,
-    individualId: jodie.id,
-    documentVersionId: jodieV2.id,
+    individualId: ellis.id,
+    documentVersionId: ellisV2.id,
     whatAcknowledging: "PCSP 2026 · v2",
-    startsOn: jodieV2.effectiveOn,
-    endsOn: jodieV2.expiresOn,
+    startsOn: ellisV2.effectiveOn,
+    endsOn: ellisV2.expiresOn,
     status: "open",
   };
-  const jodieStaff = assignments.filter((a) => a.individualId === jodie.id);
-  const rows: AcknowledgmentRow[] = jodieStaff.map((assignment, i) => {
+  const ellisStaff = assignments.filter((a) => a.individualId === ellis.id);
+  const rows: AcknowledgmentRow[] = ellisStaff.map((assignment, i) => {
     const profile = profiles.find((p) => p.id === assignment.userId)!;
     const signed = profile.fullName === "Sarah Mitchell";
     return {
@@ -467,12 +467,12 @@ export function createEvergreenSeed(): LocalDatabase {
     };
   });
 
-  const { obligations: jodieObligations, obligationSignatures: jodieObligationSignatures } =
-    buildJodieStack(
+  const { obligations: ellisObligations, obligationSignatures: ellisObligationSignatures } =
+    buildEllisStack(
       AGENCY_ID,
-      jodie.id,
-      jodieV2.id,
-      jodieStaff.map((assignment) => {
+      ellis.id,
+      ellisV2.id,
+      ellisStaff.map((assignment) => {
         const profile = profiles.find((p) => p.id === assignment.userId)!;
         return {
           userId: profile.id,
@@ -568,8 +568,8 @@ export function createEvergreenSeed(): LocalDatabase {
     packets: [packet],
     rows,
     audit,
-    obligations: jodieObligations,
-    obligationSignatures: jodieObligationSignatures,
+    obligations: ellisObligations,
+    obligationSignatures: ellisObligationSignatures,
     packetSubmissions: [],
     clinicalRenewals: individuals.flatMap((person) =>
       // Vary the reference date per person so annual physical, vision,
@@ -582,7 +582,7 @@ export function createEvergreenSeed(): LocalDatabase {
         // Playwright clock is 2026-09-12, so 2026-09-22 stays in the 30-day window.
         id: padId(940),
         agencyId: AGENCY_ID,
-        individualId: jodie.id,
+        individualId: ellis.id,
         startsOn: "2026-09-22",
         startTime: "09:30",
         endTime: "10:15",
@@ -590,7 +590,7 @@ export function createEvergreenSeed(): LocalDatabase {
         consultant: "Dr. Priya Shah",
         specialty: "Neurology",
         reason: "Seizure follow-up and medication review",
-        visitAddress: jodieProfile.address,
+        visitAddress: ellisProfile.address,
         createdBy: profileByName["Cameron Price"].id,
         createdByName: "Cameron Price",
         createdAt: "2026-09-10T14:00:00.000Z",
@@ -611,7 +611,7 @@ export function createEvergreenSeed(): LocalDatabase {
         // Local e2e still drives packet/upload from the Sep 22 row above.
         id: padId(941),
         agencyId: AGENCY_ID,
-        individualId: jodie.id,
+        individualId: ellis.id,
         startsOn: "2026-09-29",
         startTime: "09:30",
         endTime: "10:15",
@@ -619,7 +619,7 @@ export function createEvergreenSeed(): LocalDatabase {
         consultant: "Dr. Priya Shah",
         specialty: "Neurology",
         reason: "Seizure follow-up and medication review",
-        visitAddress: jodieProfile.address,
+        visitAddress: ellisProfile.address,
         createdBy: profileByName["Cameron Price"].id,
         createdByName: "Cameron Price",
         createdAt: "2026-09-15T19:00:00.000Z",
@@ -637,15 +637,15 @@ export function createEvergreenSeed(): LocalDatabase {
       },
     ],
     chartFiles: [],
-    medications: defaultJodieMedications(AGENCY_ID, jodie.id),
+    medications: defaultEllisMedications(AGENCY_ID, ellis.id),
     medicationDeliveries: [],
     medDoseExceptions: [],
     trainingChecklists: buildTrainingChecklists(
       AGENCY_ID,
-      jodie.id,
-      jodieV2.id,
-      jodieObligations,
-      jodieStaff.map((assignment) => {
+      ellis.id,
+      ellisV2.id,
+      ellisObligations,
+      ellisStaff.map((assignment) => {
         const profile = profiles.find((p) => p.id === assignment.userId)!;
         return { userId: profile.id, staffName: profile.fullName };
       }),
@@ -698,13 +698,13 @@ export function createEvergreenSeed(): LocalDatabase {
 
 function attachSurveyProfiles(people: IndividualRecord[]) {
   const extras: Record<string, Partial<IndividualProfile>> = {
-    "Brandon Miller": {
-      legalName: "Brandon Miller",
-      goesBy: "Brandon",
+    "Morgan Pruitt": {
+      legalName: "Morgan Pruitt",
+      goesBy: "Morgan",
       dmhId: "110312",
       diagnosis: "Mild intellectual disability",
       waiver: "Comprehensive Residential",
-      address: "3201 Pompey Drive",
+      address: "418 Cedar Court",
       sex: "M",
       medicaidStatus: "yes",
       specializedDiet: "None",
@@ -714,13 +714,13 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       visitHours: "Evenings after 5:00 p.m.",
       serviceCoordinator: "Jason Briscoe",
     },
-    "Sylvester Jones": {
-      legalName: "Sylvester Jones",
-      goesBy: "Sylvester",
+    "Reese Lang": {
+      legalName: "Reese Lang",
+      goesBy: "Reese",
       dmhId: "110418",
       diagnosis: "Unspecified intellectual disability",
       waiver: "Comprehensive Residential",
-      address: "1840 Oakwood Lane",
+      address: "920 Willow Lane",
       sex: "M",
       medicaidStatus: "ida",
       specializedDiet: "Texture-modified diet. No thin liquids.",
@@ -730,13 +730,13 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       visitHours: "Weekends 10:00 a.m. to 2:00 p.m.",
       serviceCoordinator: "Jason Briscoe",
     },
-    "Maya Johnson": {
-      legalName: "Maya Johnson",
-      goesBy: "Maya",
+    "Harper Soto": {
+      legalName: "Harper Soto",
+      goesBy: "Harper",
       dmhId: "110509",
       diagnosis: "Moderate intellectual disability",
       waiver: "Comprehensive Residential",
-      address: "1840 Oakwood Lane",
+      address: "920 Willow Lane",
       sex: "F",
       medicaidStatus: "yes",
       specializedDiet: "None",
@@ -782,11 +782,11 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
 /** Per-person reference date so seeded clinical renewals vary realistically. */
 function renewalSeedToday(fullName: string): string {
   switch (fullName) {
-    case "Brandon Miller":
+    case "Morgan Pruitt":
       return "2026-08-20";
-    case "Sylvester Jones":
+    case "Reese Lang":
       return "2026-09-25";
-    case "Maya Johnson":
+    case "Harper Soto":
       return "2026-07-30";
     default:
       return "2026-09-12";
@@ -885,7 +885,7 @@ function buildMonthlySeed(
     {
       id: padId(1301),
       agencyId: AGENCY_ID,
-      individualId: byName["Jodie Williams"].id,
+      individualId: byName["Ellis Hart"].id,
       name: "Wheelchair",
       source: "pcsp",
       active: true,
@@ -893,7 +893,7 @@ function buildMonthlySeed(
     {
       id: padId(1302),
       agencyId: AGENCY_ID,
-      individualId: byName["Jodie Williams"].id,
+      individualId: byName["Ellis Hart"].id,
       name: "Shower chair",
       source: "pcsp",
       active: true,
@@ -901,7 +901,7 @@ function buildMonthlySeed(
     {
       id: padId(1303),
       agencyId: AGENCY_ID,
-      individualId: byName["Brandon Miller"].id,
+      individualId: byName["Morgan Pruitt"].id,
       name: "Gait belt",
       source: "manual",
       active: true,
@@ -909,7 +909,7 @@ function buildMonthlySeed(
     {
       id: padId(1304),
       agencyId: AGENCY_ID,
-      individualId: byName["Maya Johnson"].id,
+      individualId: byName["Harper Soto"].id,
       name: "Shower chair",
       source: "pcsp",
       active: true,
@@ -920,7 +920,7 @@ function buildMonthlySeed(
     equipmentId: item.id,
     monthKey: "2026-08",
     checkedOn: "2026-08-04",
-    initials: item.individualId === byName["Maya Johnson"].id ? "JW" : "AM",
+    initials: item.individualId === byName["Harper Soto"].id ? "JW" : "AM",
     checkedByUserId: null,
     comments: "",
   }));
@@ -938,11 +938,11 @@ function buildMonthlySeed(
         date: "2026-08-05",
         time: "14:20",
         evacTime: "2:05",
-        leaderName: isPrimaryDemoHouse(site.name) ? "Alex Morgan" : "James Wilson",
+        leaderName: site.name === "Cedar House" ? "Alex Morgan" : "James Wilson",
         participants:
-          isPrimaryDemoHouse(site.name)
-            ? "Alex Morgan, Taylor Reed, Jodie Williams, Brandon Miller"
-            : "James Wilson, Jordan Lee, Sylvester Jones, Maya Johnson",
+          site.name === "Cedar House"
+            ? "Alex Morgan, Taylor Reed, Ellis Hart, Morgan Pruitt"
+            : "James Wilson, Jordan Lee, Reese Lang, Harper Soto",
         awakeOrSleep: drillType === "fire" ? "awake" : "",
       });
     }
@@ -993,9 +993,9 @@ function buildTrainingChecklists(
   }));
 }
 
-function buildJodieStack(
+function buildEllisStack(
   agencyId: string,
-  jodieId: string,
+  personId: string,
   versionId: string,
   staff: { userId: string; staffName: string; signedPcsp: boolean }[],
 ): {
@@ -1006,10 +1006,10 @@ function buildJodieStack(
     {
       id: padId(1101),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "pcsp",
       mode: "required",
-      title: "PCSP for Jodie Williams",
+      title: "PCSP for Ellis Hart",
       detail:
         "I have read and understood the PCSP that started on 1/15/2026. I had the opportunity to ask questions.",
       sourcePage: 1,
@@ -1032,7 +1032,7 @@ function buildJodieStack(
     {
       id: padId(1102),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "protocol",
       mode: "required",
       title: "Seizure protocol",
@@ -1057,11 +1057,11 @@ function buildJodieStack(
     {
       id: padId(1103),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "protocol",
       mode: "required",
       title: "Behavioral support strategies",
-      detail: "Use the positive support plan when Jodie is upset or wants space.",
+      detail: "Use the positive support plan when Ellis is upset or wants space.",
       sourcePage: 7,
       documentVersionId: versionId,
       enabled: true,
@@ -1082,7 +1082,7 @@ function buildJodieStack(
     {
       id: padId(1104),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "delegation",
       mode: "required",
       title: "RN delegation of specified nursing task",
@@ -1107,7 +1107,7 @@ function buildJodieStack(
     {
       id: padId(1105),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "shift_task",
       mode: "required",
       title: "Daily body / skin checks",
@@ -1132,7 +1132,7 @@ function buildJodieStack(
     {
       id: padId(1106),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "inventory",
       mode: "checked",
       title: "HRST support needs",
@@ -1157,7 +1157,7 @@ function buildJodieStack(
     {
       id: padId(1108),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "inventory",
       mode: "checked",
       title: "Adaptive equipment",
@@ -1182,7 +1182,7 @@ function buildJodieStack(
     {
       id: padId(1107),
       agencyId,
-      individualId: jodieId,
+      individualId: personId,
       kind: "inventory",
       mode: "checked",
       title: "Physician orders / equipment renewals",

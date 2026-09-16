@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { seedRequirements } from "../domain";
 import { requirementMatchesQuery, searchRequirements } from "./search";
 
-test("Jodie search does not return five identical current-PCSP rows", () => {
-  const hits = searchRequirements(seedRequirements, "Jodie");
+test("Ellis search does not return five identical current-PCSP rows", () => {
+  const hits = searchRequirements(seedRequirements, "Ellis");
   assert.ok(hits.length > 0);
   const ids = hits.map((r) => r.id);
   assert.equal(new Set(ids).size, ids.length);
@@ -35,15 +35,15 @@ test("empty query matches nothing so the empty-state copy stays gated", () => {
 test("visually identical clones collapse to one search row", () => {
   // Seed titles changed on main ("Acknowledge current PCSP" no longer exists),
   // so build the clone deterministically instead of depending on seed data.
-  const base = seedRequirements.find((r) => r.person.includes("Jodie"))!;
-  assert.ok(base, "seed has a Jodie requirement");
+  const base = seedRequirements.find((r) => r.person.includes("Ellis"))!;
+  assert.ok(base, "seed has a Ellis requirement");
   const clone = { ...base, id: "CLONE-LOOKALIKE-1" };
-  const hits = searchRequirements([base, clone], "Jodie");
+  const hits = searchRequirements([base, clone], "Ellis");
   assert.equal(hits.length, 1);
 });
 
 test("open work ranks above compliant copies of the same person", () => {
-  const hits = searchRequirements(seedRequirements, "Jodie");
+  const hits = searchRequirements(seedRequirements, "Ellis");
   const firstOpen = hits.findIndex((r) => r.status !== "Compliant");
   const firstCompliant = hits.findIndex((r) => r.status === "Compliant");
   if (firstOpen >= 0 && firstCompliant >= 0) {

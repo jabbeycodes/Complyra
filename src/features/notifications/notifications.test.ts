@@ -343,13 +343,13 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: USER,
       assignmentId: ASSIGNMENT,
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
     }),
   );
   assert.equal(review.type, "delegation.review_ready");
   assert.equal(review.title, "Delegation ready for review");
   assert.ok((review.body as string).includes("G-Tube Feedings"));
-  assert.ok((review.body as string).includes("Jodie"));
+  assert.ok((review.body as string).includes("Ellis"));
   assert.equal(review.deep_link, "/delegations/templates");
   assert.ok(isWellFormedDeepLink(review.deep_link as string));
   assert.equal(review.entity_type, "delegation_assignment");
@@ -361,13 +361,13 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: USER,
       assignmentId: ASSIGNMENT,
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
     }),
   );
   assert.equal(published.type, "delegation.published");
   assert.equal(published.title, "New delegation training to review");
   assert.ok((published.body as string).includes("G-Tube Feedings"));
-  assert.ok((published.body as string).includes("Jodie"));
+  assert.ok((published.body as string).includes("Ellis"));
   assert.ok((published.body as string).toLowerCase().includes("sign"));
   assert.equal(published.deep_link, "/delegations/templates");
   assert.ok(isWellFormedDeepLink(published.deep_link as string));
@@ -378,7 +378,7 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: USER,
       assignmentId: ASSIGNMENT,
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
       daysOverdue: 4,
     }),
   );
@@ -395,7 +395,7 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: USER,
       assignmentId: ASSIGNMENT,
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
     }),
   );
   assert.equal(review.dedupe_key, sameAgain.dedupe_key, "same event dedupes");
@@ -406,7 +406,7 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: "00000000-0000-4000-8000-000000000003",
       assignmentId: ASSIGNMENT,
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
     }),
   );
   assert.notEqual(review.dedupe_key, otherUser.dedupe_key, "different user differs");
@@ -417,7 +417,7 @@ test("delegation payloads name template and individual and dedupe per (assignmen
       userId: USER,
       assignmentId: "00000000-0000-4000-8000-000000000051",
       templateName: "G-Tube Feedings",
-      individualName: "Jodie",
+      individualName: "Ellis",
     }),
   );
   assert.notEqual(review.dedupe_key, otherAssignment.dedupe_key, "different assignment differs");

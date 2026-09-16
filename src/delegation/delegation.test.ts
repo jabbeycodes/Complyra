@@ -46,13 +46,13 @@ test("instantiateDraft copies generic sections and stamps the person", () => {
     "individualId" | "individualName" | "siteId" | "siteName"
   > = {
     individualId: "p1",
-    individualName: "Jodie",
+    individualName: "Ellis",
     siteId: "s1",
-    siteName: "Maple House",
+    siteName: "Cedar House",
   };
   const draft = instantiateDraft(template, assignment);
   assert.equal(draft.templateName, template.name);
-  assert.equal(draft.individualName, "Jodie");
+  assert.equal(draft.individualName, "Ellis");
   assert.equal(draft.individualNotes, "");
   assert.deepEqual(draft.steps, template.sections.steps);
   assert.equal(draft.generatedMark, DIGITAL_RECORD_MARK);
@@ -75,7 +75,7 @@ test("ordinary staff never see draft content", () => {
     status: "draft",
     draftContent: instantiateDraft(
       { ...DELEGATION_TEMPLATES[1], id: "t2", agencyId: null },
-      { individualId: "p1", individualName: "Jodie", siteId: "s1", siteName: "Maple House" },
+      { individualId: "p1", individualName: "Ellis", siteId: "s1", siteName: "Cedar House" },
     ),
     publishedContent: null,
     submittedAt: null,

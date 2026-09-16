@@ -102,11 +102,11 @@ test("profile modal does not grow a horizontal scrollbar", async ({ page }) => {
   expect(overflow.scroll).toBeLessThanOrEqual(overflow.client + 1);
 });
 
-test("searching Jodie does not list five identical current PCSP rows", async ({
+test("searching Ellis does not list five identical current PCSP rows", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("Jodie");
+  await page.getByLabel("Search all requirements").fill("Ellis");
   const results = page.locator(".search-results > button");
   await expect(results.first()).toBeVisible();
   const count = await results.count();

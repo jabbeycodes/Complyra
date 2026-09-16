@@ -40,7 +40,7 @@ test("well-water annual is current for 365 days and ignored when the home is on 
   );
 });
 
-test("Maple seed review is in place; Oakwood is still open", async () => {
+test("Cedar seed review is in place; Willow is still open", async () => {
   const client = api();
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -48,11 +48,11 @@ test("Maple seed review is in place; Oakwood is still open", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
-  const oakwood = workspace.sites.find((row) => row.name === "Oakwood House")!;
-  const mapleReview = workspace.siteReviews.find((row) => row.siteId === maple.id);
+  const cedar = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const oakwood = workspace.sites.find((row) => row.name === "Willow House")!;
+  const cedarReview = workspace.siteReviews.find((row) => row.siteId === cedar.id);
   const oakwoodReview = workspace.siteReviews.find((row) => row.siteId === oakwood.id);
-  assert.equal(isSiteReviewInPlace(mapleReview, maple, todayIso()), true);
+  assert.equal(isSiteReviewInPlace(cedarReview, cedar, todayIso()), true);
   assert.equal(isSiteReviewInPlace(oakwoodReview, oakwood, todayIso()), false);
   assert.ok((oakwoodReview ? siteReviewGaps(oakwoodReview, oakwood, todayIso()) : []).length > 3);
 });
@@ -65,23 +65,23 @@ test("pre-survey rows pull equipment and chart facts", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(session);
-  const jodie = workspace.individuals.find((row) => row.name === "Jodie Williams")!;
+  const ellis = workspace.individuals.find((row) => row.name === "Ellis Hart")!;
   const row = buildPreSurveyRow({
-    person: { fullName: jodie.name, dateOfBirth: jodie.dateOfBirth },
-    profile: jodie.profile ?? emptyProfile({
-      id: jodie.id,
+    person: { fullName: ellis.name, dateOfBirth: ellis.dateOfBirth },
+    profile: ellis.profile ?? emptyProfile({
+      id: ellis.id,
       agencyId: session.agencyId,
       siteId: workspace.sites[0].id,
-      fullName: jodie.name,
-      dateOfBirth: jodie.dateOfBirth,
+      fullName: ellis.name,
+      dateOfBirth: ellis.dateOfBirth,
     }),
     today: "2026-09-12",
-    equipment: workspace.monthly.equipment.filter((item) => item.individualId === jodie.id),
+    equipment: workspace.monthly.equipment.filter((item) => item.individualId === ellis.id),
   });
   assert.match(row.equipment, /Wheelchair/);
   assert.equal(row.sex, "F");
   assert.equal(row.medicaid, "Yes");
-  assert.ok(Number(ageOn(jodie.dateOfBirth, "2026-09-12")) > 20);
+  assert.ok(Number(ageOn(ellis.dateOfBirth, "2026-09-12")) > 20);
 });
 
 test("DPM can save a site review and a DSP cannot", async () => {
@@ -92,7 +92,7 @@ test("DPM can save a site review and a DSP cannot", async () => {
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const oakwood = workspace.sites.find((row) => row.name === "Oakwood House")!;
+  const oakwood = workspace.sites.find((row) => row.name === "Willow House")!;
   const review = workspace.siteReviews.find((row) => row.siteId === oakwood.id)!;
   await client.saveSiteFacts(oakwood.id, { city: "Columbia", county: "Boone" });
   await client.saveSiteReview({
@@ -113,12 +113,12 @@ test("DPM can save a site review and a DSP cannot", async () => {
   const saved = after.siteReviews.find((row) => row.siteId === oakwood.id)!;
   assert.equal(isSiteReviewInPlace(saved, oakwood, todayIso()), true);
   const file = await client.downloadPreSurveyPdf(oakwood.id);
-  assert.match(file.name, /pre-survey-oakwood-house/);
+  assert.match(file.name, /pre-survey-willow-house/);
   const reviewFile = await client.downloadSiteReviewPdf(oakwood.id);
-  assert.match(reviewFile.name, /site-review-oakwood-house/);
+  assert.match(reviewFile.name, /site-review-willow-house/);
   const reviewText = Buffer.from(await reviewFile.blob.arrayBuffer()).toString("latin1");
-  assert.match(reviewText, /Oakwood House/);
-  assert.match(reviewText, /1840 Oakwood Lane/);
+  assert.match(reviewText, /Willow House/);
+  assert.match(reviewText, /920 Willow Lane/);
   assert.match(reviewText, /Columbia/);
   assert.match(reviewText, /MO/);
   assert.match(reviewText, /65203/);
@@ -133,12 +133,12 @@ test("DPM can save a site review and a DSP cannot", async () => {
   const dspWorkspace = await dspClient.loadWorkspace(
     (await dspClient.getSession())!,
   );
-  const maple = dspWorkspace.sites.find((row) => row.name === "Maple House")!;
-  const mapleReview = dspWorkspace.siteReviews.find((row) => row.siteId === maple.id)!;
+  const cedar = dspWorkspace.sites.find((row) => row.name === "Cedar House")!;
+  const cedarReview = dspWorkspace.siteReviews.find((row) => row.siteId === cedar.id)!;
   await assert.rejects(
     () =>
       dspClient.saveSiteReview({
-        id: mapleReview.id,
+        id: cedarReview.id,
         reviewerName: "Alex",
         supportCoordinator: "",
         reviewedOn: "2026-09-01",
@@ -146,7 +146,7 @@ test("DPM can save a site review and a DSP cannot", async () => {
         heightenedScrutiny: false,
         meetsIndividualNeeds: true,
         part2Verified: true,
-        lines: mapleReview.lines,
+        lines: cedarReview.lines,
       }),
     /administrator/,
   );
@@ -160,17 +160,17 @@ test("changing site facts updates the next print without editing Individuals", a
     password: DEMO_PASSWORD,
   });
   const workspace = await client.loadWorkspace(admin);
-  const maple = workspace.sites.find((row) => row.name === "Maple House")!;
-  const jodie = workspace.individuals.find((row) => row.name === "Jodie Williams")!;
-  const coverAddress = jodie.profile?.address ?? "";
-  await client.saveSiteFacts(maple.id, { zip: "99999" });
-  const reviewFile = await client.downloadSiteReviewPdf(maple.id);
+  const cedar = workspace.sites.find((row) => row.name === "Cedar House")!;
+  const ellis = workspace.individuals.find((row) => row.name === "Ellis Hart")!;
+  const coverAddress = ellis.profile?.address ?? "";
+  await client.saveSiteFacts(cedar.id, { zip: "99999" });
+  const reviewFile = await client.downloadSiteReviewPdf(cedar.id);
   const reviewText = Buffer.from(await reviewFile.blob.arrayBuffer()).toString("latin1");
   assert.match(reviewText, /99999/);
   assert.doesNotMatch(reviewText, /undefined/);
   const after = await client.loadWorkspace(admin);
-  const jodieAfter = after.individuals.find((row) => row.name === "Jodie Williams")!;
-  assert.equal(jodieAfter.profile?.address, coverAddress);
+  const ellisAfter = after.individuals.find((row) => row.name === "Ellis Hart")!;
+  assert.equal(ellisAfter.profile?.address, coverAddress);
 });
 
 test("new sites start with an open DPM site review", async () => {
@@ -181,8 +181,8 @@ test("new sites start with an open DPM site review", async () => {
     password: DEMO_PASSWORD,
   });
   const created = await client.createSite({
-    name: "Willow House",
-    address: "9 Willow Court",
+    name: "Hemlock House",
+    address: "9 Hemlock Court",
     programName: "Residential services",
   });
   const workspace = await client.loadWorkspace(session);
@@ -212,12 +212,12 @@ test("Your work lists an open site review for DPM and house manager, not DSP", a
   assert.ok(
     adminQueue.some(
       (item) =>
-        item.kind === "site_review" && item.detail.includes("Oakwood"),
+        item.kind === "site_review" && item.detail.includes("Willow"),
     ),
   );
   assert.equal(
     adminQueue.some(
-      (item) => item.kind === "site_review" && item.detail.includes("Maple"),
+      (item) => item.kind === "site_review" && item.detail.includes("Cedar"),
     ),
     false,
   );
@@ -235,7 +235,7 @@ test("Your work lists an open site review for DPM and house manager, not DSP", a
     packets: hmWorkspace.packets,
     planStacks: hmWorkspace.planStacks,
     canApprove: false,
-    sites: hmWorkspace.sites.filter((row) => row.name === "Oakwood House"),
+    sites: hmWorkspace.sites.filter((row) => row.name === "Willow House"),
     siteReviews: hmWorkspace.siteReviews,
   });
   assert.ok(hmQueue.some((item) => item.kind === "site_review"));

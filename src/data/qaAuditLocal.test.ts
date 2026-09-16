@@ -37,7 +37,7 @@ const PHOTO = {
 test("QA audit: admin creates a 94-item audit for a 2-individual site", async () => {
   const api = new LocalApi(store());
   const session = await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const maple = await siteId(api, session, "Maple House");
+  const maple = await siteId(api, session, "Cedar House");
   const audit = await api.createQaAudit(maple, 2026, 3);
   assert.equal(audit.status, "in_progress");
   const items = await api.getQaAuditItems(audit.id);
@@ -61,14 +61,14 @@ test("QA audit: admin creates a 94-item audit for a 2-individual site", async ()
 test("QA audit: DSP cannot create or score audits", async () => {
   const api = new LocalApi(store());
   const dsp = await api.signIn(login(DEMO_DSP_USERNAME));
-  const maple = await siteId(api, dsp, "Maple House");
+  const maple = await siteId(api, dsp, "Cedar House");
   await assert.rejects(() => api.createQaAudit(maple, 2026, 3), /permission/);
 });
 
 test("QA audit: scoring, locked enforcement, and finalize gate", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const maple = await siteId(api, admin, "Maple House");
+  const maple = await siteId(api, admin, "Cedar House");
   const audit = await api.createQaAudit(maple, 2026, 3);
   const items = await api.getQaAuditItems(audit.id);
 
@@ -118,7 +118,7 @@ test("QA audit: HM disputes with photo, auditor resolves and flips the score", a
   const adminLogin = login(DEMO_ADMIN_USERNAME);
   const hmLogin = login(DEMO_HM_USERNAME);
   let session = await api.signIn(adminLogin);
-  const oakwood = await siteId(api, session, "Oakwood House");
+  const oakwood = await siteId(api, session, "Willow House");
   const audit = await api.createQaAudit(oakwood, 2026, 3);
   const items = await api.getQaAuditItems(audit.id);
   const target = items.find((i) => !i.locked)!;
@@ -168,8 +168,8 @@ test("QA audit: HM disputes with photo, auditor resolves and flips the score", a
 test("QA audit: schedules, reminders, ranking, and history", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const maple = await siteId(api, admin, "Maple House");
-  const oakwood = await siteId(api, admin, "Oakwood House");
+  const maple = await siteId(api, admin, "Cedar House");
+  const oakwood = await siteId(api, admin, "Willow House");
 
   const schedule = await api.upsertQaSchedule({
     siteId: maple,
@@ -212,7 +212,7 @@ test("QA audit: schedules, reminders, ranking, and history", async () => {
 test("QA audit: scoring 'no' is blocked when the system can prove presence", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
-  const oakwood = await siteId(api, admin, "Oakwood House");
+  const oakwood = await siteId(api, admin, "Willow House");
   const audit = await api.createQaAudit(oakwood, 2026, 3);
   const items = await api.getQaAuditItems(audit.id);
   const mileage = items.find((i) => i.itemId === "vehicle.mileage-log" && !i.locked);

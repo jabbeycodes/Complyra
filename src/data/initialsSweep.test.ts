@@ -132,7 +132,7 @@ test("delegationRowInitialsPayload binds the row key to the whole-form snapshot"
   const rowKey = delegationRosterRowKey("Mary Jane");
   const payload = delegationRowInitialsPayload({
     obligationId: "d1",
-    individualName: "Sylvester Drummer",
+    individualName: "Andre Drummer",
     taskTitle: "PRN Inhaler",
     form,
     rowKey,
@@ -150,7 +150,7 @@ test("delegationRowInitialsPayload binds the row key to the whole-form snapshot"
   // Deterministic: same input -> same hash; the row key participates in it.
   const again = delegationRowInitialsPayload({
     obligationId: "d1",
-    individualName: "Sylvester Drummer",
+    individualName: "Andre Drummer",
     taskTitle: "PRN Inhaler",
     form,
     rowKey,
@@ -161,7 +161,7 @@ test("delegationRowInitialsPayload binds the row key to the whole-form snapshot"
   );
   const otherRow = delegationRowInitialsPayload({
     obligationId: "d1",
-    individualName: "Sylvester Drummer",
+    individualName: "Andre Drummer",
     taskTitle: "PRN Inhaler",
     form,
     rowKey: delegationRosterRowKey("John Doe"),
