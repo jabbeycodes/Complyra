@@ -17,7 +17,7 @@ import {
 import { Avatar, Badge, Empty, formatDate } from "../../components";
 import StatusMixDonut from "../../components/StatusMixDonut";
 import { useData } from "../../data/DataProvider";
-import { can } from "../../data/status";
+import { can, pageVisible } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
@@ -25,7 +25,14 @@ import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
 import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
+import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
+import {
+  documentStatusLabel,
+  formatDrillTypeLabel,
+  sortOpenRequirements,
+  trainingProgressLine,
+} from "./siteDetailCopy";
 import type { QaAuditSummary } from "../../data/localApi";
 import type {
   HmWeeklyChecklist,
@@ -39,12 +46,15 @@ import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { DocumentUpload } from "../../data/documents";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
 import SiteQaReview from "../qa/SiteQaReview";
+import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
 
 interface SiteDetailPageProps {
   siteId: string;
   onBack: () => void;
   onOpenIndividual: (name: string) => void;
+  /** Open the matching full page so site tabs stay a summary, not a gutted copy. */
+  onOpenPage?: (page: string) => void;
 }
 
 /** Defensive read of the finalized score snapshot (shape owned by the audit workflow). */
@@ -94,6 +104,7 @@ export default function SiteDetailPage({
   siteId,
   onBack,
   onOpenIndividual,
+  onOpenPage,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
@@ -314,7 +325,7 @@ export default function SiteDetailPage({
   if (!site) {
     return (
       <div className="site-detail">
-        <button type="button" className="button" onClick={onBack}>
+        <button type="button" className="text-button site-back" onClick={onBack}>
           <ArrowLeft size={16} /> Back to sites
         </button>
         <p>That site is not in this workspace.</p>
@@ -324,7 +335,7 @@ export default function SiteDetailPage({
 
   return (
     <div className="site-detail">
-      <button type="button" className="button" onClick={onBack}>
+      <button type="button" className="text-button site-back" onClick={onBack}>
         <ArrowLeft size={16} /> Back to sites
       </button>
 
@@ -375,8 +386,8 @@ export default function SiteDetailPage({
               <span>Open</span>
             </div>
             <div className="site-hero-stat">
-              <strong>{latestQaPct ?? "—"}</strong>
-              <span>{latestQa ? auditPeriodLabel(latestQa) : "QA"}</span>
+              <strong>{latestQaPct ?? "None"}</strong>
+              <span>{latestQa ? auditPeriodLabel(latestQa) : "QA review"}</span>
             </div>
           </div>
         </div>
@@ -399,6 +410,7 @@ export default function SiteDetailPage({
         </div>
       </header>
 
+      <div className="site-detail-tabstrip">
       <div
         className="tabs site-detail-tabs"
         role="tablist"
@@ -424,6 +436,7 @@ export default function SiteDetailPage({
           );
         })}
       </div>
+      </div>
 
       <section
         id={`sited-panel-${activeTab}`}
@@ -444,18 +457,54 @@ export default function SiteDetailPage({
 
         {activeTab === "overview" && !loading.overview && (
           <>
-            <div className="stat-grid">
-              {/* QA-REVIEW-BADGE (2026-09-14): overnight module — keep the
-                  section breakdown here. Headcount lives in the site hero. */}
-              <div className="panel stat-card qa-review-badge">
-                <strong>{latestQaPct ?? "—"}</strong>
-                <span>
-                  QA Review score
-                  {latestQa ? ` (${auditPeriodLabel(latestQa)})` : ""}
-                </span>
-                <span className="qa-badge-caption">
-                  Projects this home's compliance score
-                </span>
+            {openRequirements.length > 0 && (
+              <div className="panel">
+                <h2>Needs attention</h2>
+                <ul className="record-list">
+                  {sortOpenRequirements(openRequirements)
+                    .slice(0, 8)
+                    .map((item) => (
+                      <li key={item.id} className="record-row">
+                        <div>
+                          <strong>{item.title}</strong>
+                          <span className="muted">
+                            {" "}
+                            · {item.person}
+                            {item.due ? ` · due ${formatDate(item.due)}` : ""}
+                          </span>
+                        </div>
+                        <Badge status={item.status} />
+                      </li>
+                    ))}
+                </ul>
+                {openRequirements.length > 8 && (
+                  <p className="muted site-detail-note">
+                    {openRequirements.length - 8} more open item
+                    {openRequirements.length - 8 === 1 ? "" : "s"}.
+                  </p>
+                )}
+                {onOpenPage && pageVisible(session, "Requirements") && (
+                  <div className="site-panel-actions">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => onOpenPage("Requirements")}
+                    >
+                      Open requirements
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {latestQaPct != null && (
+              <div className="panel qa-review-badge">
+                <h2>QA Review score</h2>
+                <div className="site-kpi-grid">
+                  <div>
+                    <strong>{latestQaPct}%</strong>
+                    <span>{latestQa ? auditPeriodLabel(latestQa) : "Latest review"}</span>
+                  </div>
+                </div>
                 {latestQaScore && (
                   <ul className="qa-badge-sections">
                     {QA_SECTIONS.map((s) => {
@@ -471,13 +520,13 @@ export default function SiteDetailPage({
                   </ul>
                 )}
                 {latestQaScore && latestQaScore.criticalFails.length > 0 && (
-                  <span className="qa-badge-critical">
-                    ⚠ {latestQaScore.criticalFails.length} critical item
+                  <p className="qa-badge-critical site-detail-note">
+                    {latestQaScore.criticalFails.length} critical item
                     {latestQaScore.criticalFails.length === 1 ? "" : "s"} failed
-                  </span>
+                  </p>
                 )}
               </div>
-            </div>
+            )}
             <div className="panel">
               <h2>Site facts</h2>
               <dl className="fact-list">
@@ -530,7 +579,11 @@ export default function SiteDetailPage({
         {activeTab === "individuals" && (
           <div className="card-grid">
             {siteIndividuals.length === 0 && (
-              <Empty title="No individuals" text="No one is placed at this home yet." />
+              <Empty
+                mark="none"
+                title="No individuals"
+                text="No one is placed at this home yet."
+              />
             )}
             {siteIndividuals.map((p) => (
               <button
@@ -544,13 +597,19 @@ export default function SiteDetailPage({
                   <ArrowUpRight size={18} />
                 </div>
                 <h2>{p.name}</h2>
+                <p className="site-person-open">Open chart</p>
               </button>
             ))}
           </div>
         )}
 
         {activeTab === "audits" && !loading.audits && (
-          <SiteQaReview siteId={siteId} siteName={site.name} />
+          <div className="panel">
+            <h2>QA Review</h2>
+            <div className="site-qa-body">
+              <SiteQaReview siteId={siteId} siteName={site.name} />
+            </div>
+          </div>
         )}
 
         {activeTab === "checklists" && !loading.checklists && (
@@ -558,7 +617,30 @@ export default function SiteDetailPage({
             <div className="panel">
               <h2>HM weekly checklists</h2>
               {!checklists?.length && (
-                <Empty title="No checklists" text="No weekly checklists filed for this home yet." />
+                <Empty
+                  mark="none"
+                  title="No checklists"
+                  text="No weekly checklists filed for this home yet."
+                  actions={
+                    onOpenPage &&
+                    (pageVisible(session, "Weekly checklist") ||
+                      pageVisible(session, "Checklist assignments")) ? (
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() =>
+                          onOpenPage(
+                            pageVisible(session, "Weekly checklist")
+                              ? "Weekly checklist"
+                              : "Checklist assignments",
+                          )
+                        }
+                      >
+                        Start weekly checklist
+                      </button>
+                    ) : undefined
+                  }
+                />
               )}
               {!!checklists?.length && (
                 <ul className="record-list">
@@ -584,6 +666,26 @@ export default function SiteDetailPage({
                   ))}
                 </ul>
               )}
+              {onOpenPage &&
+                !!checklists?.length &&
+                (pageVisible(session, "Weekly checklist") ||
+                  pageVisible(session, "Checklist assignments")) && (
+                  <div className="site-panel-actions">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() =>
+                        onOpenPage(
+                          pageVisible(session, "Weekly checklist")
+                            ? "Weekly checklist"
+                            : "Checklist assignments",
+                        )
+                      }
+                    >
+                      Open weekly checklist
+                    </button>
+                  </div>
+                )}
             </div>
             <div className="panel">
               <h2>Weekly service logs</h2>
@@ -591,7 +693,22 @@ export default function SiteDetailPage({
                 Service logs are a separate record from the weekly checklist.
               </p>
               {serviceLogs.length === 0 && (
-                <Empty title="No service logs" text="No service log entries filed for this home yet." />
+                <Empty
+                  mark="none"
+                  title="No service logs"
+                  text="No service log entries filed for this home yet."
+                  actions={
+                    onOpenPage && pageVisible(session, "Weekly checklist") ? (
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={() => onOpenPage("Weekly checklist")}
+                      >
+                        File a service log
+                      </button>
+                    ) : undefined
+                  }
+                />
               )}
               {serviceLogs.length > 0 && (
                 <ul className="record-list">
@@ -614,6 +731,7 @@ export default function SiteDetailPage({
                 </ul>
               )}
             </div>
+            <SiteMonthlyChecks siteId={siteId} />
           </>
         )}
 
@@ -622,7 +740,11 @@ export default function SiteDetailPage({
             <div className="panel">
               <h2>Active delegations at this home</h2>
               {!delegations?.length && (
-                <Empty title="No delegations" text="No delegation templates are activated for this home." />
+                <Empty
+                  mark="none"
+                  title="No delegations"
+                  text="No delegation templates are activated for this home."
+                />
               )}
               {!!delegations?.length && (
                 <ul className="record-list">
@@ -644,7 +766,7 @@ export default function SiteDetailPage({
             <div className="panel">
               <h2>Staff training &amp; certificates</h2>
               {!trainingRows?.length && (
-                <Empty title="No staff" text="No staff are assigned to this home." />
+                <Empty mark="none" title="No staff" text="No staff are assigned to this home." />
               )}
               {!!trainingRows?.length && (
                 <ul className="record-list">
@@ -656,16 +778,20 @@ export default function SiteDetailPage({
                         {row.failed ? (
                           <p className="muted">Training record unavailable.</p>
                         ) : (
-                          <p className="muted">
-                            {row.profile
-                              ? `${row.profile.counts.complete}/${row.profile.counts.required} training items complete`
-                              : "No training checklist started"}
-                            {row.profile && !row.profile.clearedForInRatio
-                              ? " · not cleared for in-ratio"
-                              : ""}
-                            {row.expiringCerts.length > 0 &&
-                              ` · ${row.expiringCerts.length} certificate${row.expiringCerts.length === 1 ? "" : "s"} expiring soon`}
-                          </p>
+                          <>
+                            <p className="muted">
+                              {trainingProgressLine(row.profile, false)}
+                              {row.profile && !row.profile.clearedForInRatio
+                                ? " · not cleared for in-ratio"
+                                : ""}
+                            </p>
+                            {row.expiringCerts.length > 0 && (
+                              <p className="muted">
+                                {row.expiringCerts.length} certificate
+                                {row.expiringCerts.length === 1 ? "" : "s"} expiring within 60 days
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                       {row.profile && (
@@ -677,6 +803,20 @@ export default function SiteDetailPage({
                   ))}
                 </ul>
               )}
+              {onOpenPage &&
+                (pageVisible(session, "Training") || pageVisible(session, "Delegations")) && (
+                  <div className="site-panel-actions">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() =>
+                        onOpenPage(pageVisible(session, "Training") ? "Training" : "Delegations")
+                      }
+                    >
+                      Open training
+                    </button>
+                  </div>
+                )}
             </div>
           </>
         )}
@@ -685,32 +825,77 @@ export default function SiteDetailPage({
           <div className="panel">
             <h2>Medication supply</h2>
             {!medStatus && (
-              <Empty title="No data" text="Medication supply status is not available for this home." />
+              <Empty
+                mark="none"
+                title="No data"
+                text="Medication supply status is not available for this home."
+              />
             )}
             {medStatus && (
               <>
-                <div className="stat-grid">
-                  <div className="panel stat-card">
+                <div className="site-kpi-grid">
+                  <div>
                     <strong>{medStatus.totalMeds}</strong>
                     <span>Medications</span>
                   </div>
-                  <div className="panel stat-card">
+                  <div>
                     <strong>{medStatus.okCount}</strong>
                     <span>Stock OK</span>
                   </div>
-                  <div className="panel stat-card">
+                  <div>
                     <strong>{medStatus.lowCount}</strong>
                     <span>Running low</span>
                   </div>
-                  <div className="panel stat-card">
+                  <div>
                     <strong>{medStatus.criticalCount + medStatus.outCount}</strong>
                     <span>Critical / out</span>
                   </div>
                 </div>
-                <p className="muted">
+                <p className="muted site-detail-note">
                   Checked {formatDate(medStatus.checkedOn)}
                   {medStatus.allClear ? " · everything stocked" : " · needs attention"}
+                  {medStatus.summary ? ` · ${medStatus.summary}` : ""}
                 </p>
+                {!medStatus.allClear && medStatus.alerts.length > 0 && (
+                  <ul className="record-list">
+                    {medStatus.alerts.map((alert) => {
+                      const person =
+                        siteIndividuals.find((row) => row.id === alert.individualId)?.name ??
+                        "Individual";
+                      return (
+                        <li key={alert.id} className="record-row">
+                          <div>
+                            <strong>
+                              {person} · {alert.medicationName}
+                            </strong>
+                            <span className="muted">
+                              {" "}
+                              · {alert.strength} · {inventoryCountdownLabel(alert)}
+                            </span>
+                          </div>
+                          <Badge
+                            status={
+                              alert.status === "out" || alert.status === "critical"
+                                ? "Needs attention"
+                                : "Due soon"
+                            }
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {onOpenPage && pageVisible(session, "Supply forecast") && (
+                  <div className="site-panel-actions">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => onOpenPage("Supply forecast")}
+                    >
+                      Open supply forecast
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -731,8 +916,9 @@ export default function SiteDetailPage({
             {loading.mileage && <p className="muted">Loading…</p>}
             {!loading.mileage && (!trips || trips.length === 0) && (
               <Empty
+                mark="none"
                 title="No trips"
-                text={`No mileage trips logged for ${monthLabel(month)}.`}
+                text={`No mileage trips logged for ${monthLabel(month)}. Open the full mileage log to print or add trips.`}
               />
             )}
             {!!trips?.length && (
@@ -751,30 +937,46 @@ export default function SiteDetailPage({
                 ))}
               </ul>
             )}
+            {onOpenPage && pageVisible(session, "Mileage") && (
+              <div className="site-panel-actions">
+                <button type="button" className="button" onClick={() => onOpenPage("Mileage")}>
+                  Open mileage log
+                </button>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === "drills" && (
           <div className="panel">
-            <h2>Fire drill log</h2>
+            <h2>Emergency drills</h2>
             {siteDrills.length === 0 && (
-              <Empty title="No drills" text="No emergency drills recorded for this home yet." />
+              <Empty
+                mark="none"
+                title="No drills"
+                text="No emergency drills recorded for this home yet."
+              />
             )}
             {siteDrills.length > 0 && (
               <ul className="record-list">
-                {siteDrills.map((d) => (
+                {siteDrills.map((d) => {
+                  const dateLabel = d.date?.trim()
+                    ? formatDate(d.date)
+                    : "Not logged";
+                  return (
                   <li key={d.id} className="record-row">
                     <div>
-                      <strong>{d.drillType} drill</strong>
+                      <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
                       <span className="muted">
                         {" "}
-                        · {d.date ? formatDate(d.date) : "date not set"}
+                        · {dateLabel}
                         {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
                         {d.leaderName ? ` · led by ${d.leaderName}` : ""}
                       </span>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -784,7 +986,22 @@ export default function SiteDetailPage({
           <div className="panel">
             <h2>Site documents</h2>
             {!documents?.length && (
-              <Empty title="No documents" text="No documents filed for this home yet." />
+              <Empty
+                mark="none"
+                title="No documents"
+                text="No documents filed for this home yet."
+                actions={
+                  onOpenPage && pageVisible(session, "Documents") ? (
+                    <button
+                      type="button"
+                      className="button primary"
+                      onClick={() => onOpenPage("Documents")}
+                    >
+                      Upload a document
+                    </button>
+                  ) : undefined
+                }
+              />
             )}
             {!!documents?.length && (
               <ul className="record-list">
@@ -797,10 +1014,17 @@ export default function SiteDetailPage({
                         · {d.documentType} · uploaded {formatDate(d.uploadedAt)}
                       </span>
                     </div>
-                    <Badge status={d.status} />
+                    <Badge status={documentStatusLabel(d.status)} />
                   </li>
                 ))}
               </ul>
+            )}
+            {onOpenPage && !!documents?.length && pageVisible(session, "Documents") && (
+              <div className="site-panel-actions">
+                <button type="button" className="button" onClick={() => onOpenPage("Documents")}>
+                  Open documents
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -809,34 +1033,29 @@ export default function SiteDetailPage({
           <div className="panel">
             <h2>Staff at this home</h2>
             {siteStaff.length === 0 && (
-              <Empty title="No staff" text="No staff are assigned to this home yet." />
+              <Empty
+                mark="none"
+                title="No staff"
+                text="No staff are assigned to this home yet."
+              />
             )}
             {siteStaff.length > 0 && (
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Team member</th>
-                      <th>Role</th>
-                      <th>Username</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {siteStaff.map((s) => (
-                      <tr key={s.id}>
-                        <td>
-                          <span className="person-cell">
-                            <Avatar name={s.name} small />
-                            <strong>{s.name}</strong>
-                          </span>
-                        </td>
-                        <td>{s.role}</td>
-                        <td>{s.username || s.email}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="record-list">
+                {siteStaff.map((s) => (
+                  <li key={s.id} className="record-row">
+                    <div>
+                      <span className="person-cell">
+                        <Avatar name={s.name} small />
+                        <strong>{s.name}</strong>
+                      </span>
+                      <p className="muted">
+                        {s.role}
+                        {s.username || s.email ? ` · ${s.username || s.email}` : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}
