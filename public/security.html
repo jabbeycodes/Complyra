@@ -49,6 +49,17 @@
       
       <p>ComplyRer is built for care-agency operations: tenant isolation, role-aware access, private document storage, and an audit trail of privileged actions. This page describes controls that exist in the hosted product and the limits of those controls. It is not a certification package, a HIPAA declaration, or a penetration-test report.</p>
 
+      <h2>HIPAA readiness</h2>
+      <p>ComplyRer is built with HIPAA-aligned security practices and supports your HIPAA readiness. These technical safeguards are implemented in the hosted product today:</p>
+      <ul>
+        <li><strong>Access control.</strong> Unique user credentials; role-based permissions scoped to assigned homes and people; deny-by-default row-level security, so an agency only ever sees its own records.</li>
+        <li><strong>Audit controls.</strong> Access to individual records is written to a PHI access log — actor, action, IP address, device — automatically at the database level. Corrections append to history; they never silently rewrite it.</li>
+        <li><strong>Re-authentication.</strong> Sensitive actions such as signing require password re-entry, verified server-side, with a short grace window for a signing session.</li>
+        <li><strong>Transmission security.</strong> Served over HTTPS. Uploaded documents are hashed and kept in private, agency-scoped storage — never in a public folder.</li>
+        <li><strong>Human review.</strong> Extracted plan details stay drafts until an authorized reviewer activates them. Signatures and delegations are named actions, not a generic checkbox.</li>
+      </ul>
+      <p><strong>What remains before real PHI goes in:</strong> signed Business Associate Agreements with our subprocessors (Supabase, Vercel, Resend), plus each agency's own risk assessment, policies, and workforce training. This section is a readiness statement — not a claim of HIPAA compliance, and not a certification. No vendor can truthfully claim to be "HIPAA certified": HHS does not certify products.</p>
+
       <h2>What we will not claim</h2>
       <ul>
         <li>We are <strong>not</strong> HIPAA-certified and we do not state that the product is “HIPAA compliant” until a Business Associate Agreement, the safeguards below, and the agency’s procedures are in place.</li>
