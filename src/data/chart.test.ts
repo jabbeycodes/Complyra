@@ -12,12 +12,20 @@ import {
 import { DEMO_PASSWORD } from "./types";
 import {
   applyDailyMedDrop,
+  canEditDiagnoses,
+  canEditIndividualContacts,
+  canSeeChartOverview,
   countdownLabel,
   medIsLow,
+  pcspTaskSummary,
   toMedicationView,
   trainingLinesFromObligations,
 } from "./chart";
-import { applyRenewalUpload, defaultRenewals } from "./planStack";
+import {
+  applyRenewalUpload,
+  defaultRenewals,
+  type ObligationView,
+} from "./planStack";
 
 function api() {
   return new LocalApi(new MemoryStore(structuredClone(createEvergreenSeed())));
@@ -311,4 +319,90 @@ test("training lines come from required obligations", () => {
   ]);
   assert.ok(lines.some((line) => line.title.includes("PCSP")));
   assert.ok(lines.some((line) => line.title.includes("Emergency contacts")));
+});
+
+test("issue #81: Overview visibility and edit gates", () => {
+  for (const role of [
+    "administrator",
+    "compliance_admin",
+    "house_manager",
+    "program_manager",
+    "nurse",
+    "dsp",
+    "auditor",
+  ]) {
+    assert.equal(canSeeChartOverview(role), true, role);
+  }
+  assert.equal(canSeeChartOverview("hr"), false);
+
+  for (const role of ["administrator", "house_manager", "program_manager"]) {
+    assert.equal(canEditIndividualContacts(role), true, role);
+  }
+  for (const role of ["nurse", "dsp", "auditor", "compliance_admin", "hr"]) {
+    assert.equal(canEditIndividualContacts(role), false, role);
+  }
+
+  for (const role of ["administrator", "program_manager", "nurse"]) {
+    assert.equal(canEditDiagnoses(role), true, role);
+  }
+  for (const role of ["house_manager", "dsp", "auditor", "compliance_admin", "hr"]) {
+    assert.equal(canEditDiagnoses(role), false, role);
+  }
+});
+
+function pcspView(id: string, title: string, mode: "required" | "checked"): ObligationView {
+  return {
+    item: {
+      id,
+      agencyId: "a",
+      individualId: "i",
+      kind: "pcsp",
+      mode,
+      title,
+      detail: "",
+      sourcePage: 1,
+      documentVersionId: "v",
+      enabled: true,
+      frequency: "Daily",
+      shiftPeriods: [],
+      expiresOn: null,
+      createdFrom: "extraction",
+      inventoryState: "present",
+      proposed: false,
+      delegatingRnUserId: null,
+      rnSignedAt: null,
+      rnSignatureName: null,
+      rnSignatureMark: null,
+      discontinuedAt: null,
+      discontinueFileId: null,
+      discontinueTitle: null,
+    },
+    mySignature: null,
+    signedCount: 0,
+    assignedCount: 0,
+  };
+}
+
+test("issue #81: PCSP summary counts active vs completed and ignores other kinds", () => {
+  const delegation = pcspView("d1", "Delegation", "required");
+  delegation.item.kind = "delegation";
+  const summary = pcspTaskSummary([
+    pcspView("1", "Morning routine", "required"),
+    pcspView("2", "Evening meds", "checked"),
+    delegation,
+  ]);
+  assert.equal(summary.active, 1);
+  assert.equal(summary.completed, 1);
+  assert.equal(summary.tasks.length, 2);
+  assert.equal(summary.tasks[0].title, "Morning routine");
+  assert.equal(summary.tasks[0].completed, false);
+  assert.equal(summary.tasks[1].title, "Evening meds");
+  assert.equal(summary.tasks[1].completed, true);
+});
+
+test("issue #81: PCSP summary is empty when there are no PCSP tasks", () => {
+  const summary = pcspTaskSummary([]);
+  assert.equal(summary.active, 0);
+  assert.equal(summary.completed, 0);
+  assert.deepEqual(summary.tasks, []);
 });

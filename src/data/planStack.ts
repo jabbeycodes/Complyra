@@ -18,6 +18,25 @@ export interface GuardianContact {
   phone: string;
   email: string;
   preferredContact: string;
+  /** Issue #81: Overview contact form fields (Name → Role → Phone → Email → Address → Notes). */
+  address?: string;
+  notes?: string;
+}
+
+/**
+ * Issue #81: provider contacts listed on the Individual chart Overview.
+ * Manager-added/editable; never invented — an empty list renders
+ * "No providers yet". `role` carries the provider kind
+ * (PCP, neurologist, psychiatrist, dentist, pharmacy, hospital, specialist).
+ */
+export interface ProviderContact {
+  id: string;
+  name: string;
+  role: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
 }
 
 export type SexCode = "" | "M" | "F" | "X";
@@ -53,6 +72,8 @@ export interface IndividualProfile {
   implementationEnd: string;
   serviceCoordinator: string;
   guardians: GuardianContact[];
+  /** Issue #81: manager-maintained provider contacts on the Overview. */
+  providerContacts: ProviderContact[];
   sex: SexCode;
   medicaidStatus: MedicaidStatus;
   specializedDiet: string;
@@ -215,6 +236,7 @@ export function emptyProfile(person: IndividualRecord): IndividualProfile {
     implementationEnd: "",
     serviceCoordinator: "",
     guardians: [],
+    providerContacts: [],
     ...SURVEY_PROFILE_DEFAULTS,
   };
 }
@@ -227,7 +249,8 @@ export function normalizeProfile(
   return {
     ...base,
     ...profile,
-    guardians: profile?.guardians ?? base.guardians,
+    guardians: normalizeGuardianContacts(profile?.guardians),
+    providerContacts: normalizeProviderContacts(profile?.providerContacts),
     sex: profile?.sex ?? base.sex,
     medicaidStatus: profile?.medicaidStatus ?? base.medicaidStatus,
     specializedDiet: profile?.specializedDiet ?? "",
@@ -253,6 +276,48 @@ export function normalizeAllergies(value: unknown): Allergy[] {
         allergen,
         reaction: typeof row.reaction === "string" ? row.reaction.trim() : "",
         status: row.status === "resolved" ? "resolved" : "active",
+      },
+    ];
+  });
+}
+
+export function normalizeGuardianContacts(value: unknown): GuardianContact[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<GuardianContact>;
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    if (!name) return [];
+    return [
+      {
+        name,
+        relationship: typeof row.relationship === "string" ? row.relationship.trim() : "",
+        phone: typeof row.phone === "string" ? row.phone.trim() : "",
+        email: typeof row.email === "string" ? row.email.trim() : "",
+        preferredContact: typeof row.preferredContact === "string" ? row.preferredContact.trim() : "",
+        address: typeof row.address === "string" ? row.address.trim() : "",
+        notes: typeof row.notes === "string" ? row.notes.trim() : "",
+      },
+    ];
+  });
+}
+
+export function normalizeProviderContacts(value: unknown): ProviderContact[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<ProviderContact>;
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    if (!name) return [];
+    return [
+      {
+        id: typeof row.id === "string" && row.id.trim() ? row.id : `provider-${index}`,
+        name,
+        role: typeof row.role === "string" ? row.role.trim() : "",
+        phone: typeof row.phone === "string" ? row.phone.trim() : "",
+        email: typeof row.email === "string" ? row.email.trim() : "",
+        address: typeof row.address === "string" ? row.address.trim() : "",
+        notes: typeof row.notes === "string" ? row.notes.trim() : "",
       },
     ];
   });

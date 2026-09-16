@@ -430,6 +430,17 @@ export function createEvergreenSeed(): LocalDatabase {
         preferredContact: "Phone",
       },
     ],
+    providerContacts: [
+      {
+        id: "provider-seed-pcp",
+        name: "Dr. Maya Chen",
+        role: "PCP",
+        phone: "573-555-0142",
+        email: "care@example.com",
+        address: "1200 Medical Plaza Dr, Columbia, MO 65201",
+        notes: "Annual physical due in October.",
+      },
+    ],
   };
   const ellisRecord = individuals.find((p) => p.id === ellis.id);
   if (ellisRecord) ellisRecord.profile = ellisProfile;
@@ -763,6 +774,7 @@ function attachSurveyProfiles(people: IndividualRecord[]) {
       implementationEnd: "",
       serviceCoordinator: "",
       guardians: [],
+      providerContacts: [],
       sex: "",
       medicaidStatus: "",
       specializedDiet: "",
