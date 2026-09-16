@@ -1,3 +1,4 @@
+import type { Appointment } from "./appointments";
 import type { DelegationForm, IndividualRecord } from "./types";
 
 export type ObligationKind =
@@ -21,6 +22,23 @@ export interface GuardianContact {
 
 export type SexCode = "" | "M" | "F" | "X";
 export type MedicaidStatus = "" | "yes" | "no" | "ida" | "cd_only";
+export type AllergyStatus = "active" | "resolved";
+
+export interface Allergy {
+  allergen: string;
+  reaction: string;
+  status: AllergyStatus;
+}
+
+/** Who/when for the allergies list as a whole (one Health write). */
+export interface AllergiesStamp {
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedBy: string;
+  updatedByName: string;
+  updatedAt: string;
+}
 
 export interface IndividualProfile {
   legalName: string;
@@ -44,6 +62,9 @@ export interface IndividualProfile {
   visitHours: string;
   /** Optional program enrollment / admit date. Intake defaults this to today. */
   enrolledOn: string;
+  /** Structured allergy list for the consultation packet (Health H1). */
+  allergies: Allergy[];
+  allergiesStamp: AllergiesStamp | null;
 }
 
 export interface ObligationItem {
@@ -142,6 +163,7 @@ export interface PlanStackView {
   myTraining: import("./chart").TrainingRowView | null;
   mySubmissionAt: string | null;
   canSubmit: boolean;
+  appointments: Appointment[];
 }
 
 export interface ClinicalRenewalView extends ClinicalRenewal {
@@ -175,6 +197,8 @@ const SURVEY_PROFILE_DEFAULTS = {
   dailyActivities: "",
   visitHours: "",
   enrolledOn: "",
+  allergies: [] as Allergy[],
+  allergiesStamp: null as AllergiesStamp | null,
 };
 
 export function emptyProfile(person: IndividualRecord): IndividualProfile {
@@ -212,6 +236,83 @@ export function normalizeProfile(
     dailyActivities: profile?.dailyActivities ?? "",
     visitHours: profile?.visitHours ?? "",
     enrolledOn: profile?.enrolledOn ?? "",
+    allergies: normalizeAllergies(profile?.allergies),
+    allergiesStamp: normalizeAllergiesStamp(profile?.allergiesStamp),
+  };
+}
+
+export function normalizeAllergies(value: unknown): Allergy[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<Allergy>;
+    const allergen = typeof row.allergen === "string" ? row.allergen.trim() : "";
+    if (!allergen) return [];
+    return [
+      {
+        allergen,
+        reaction: typeof row.reaction === "string" ? row.reaction.trim() : "",
+        status: row.status === "resolved" ? "resolved" : "active",
+      },
+    ];
+  });
+}
+
+export function normalizeAllergiesStamp(value: unknown): AllergiesStamp | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<AllergiesStamp>;
+  const createdByName = typeof row.createdByName === "string" ? row.createdByName.trim() : "";
+  const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
+  if (!createdByName || !createdAt) return null;
+  return {
+    createdBy: typeof row.createdBy === "string" ? row.createdBy : "",
+    createdByName,
+    createdAt,
+    updatedBy: typeof row.updatedBy === "string" ? row.updatedBy : "",
+    updatedByName: typeof row.updatedByName === "string" ? row.updatedByName : "",
+    updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
+  };
+}
+
+export function formatAllergiesLabel(allergies: Allergy[]) {
+  const rows = normalizeAllergies(allergies);
+  if (rows.length === 0) return "";
+  return rows
+    .map((row) => {
+      const reaction = row.reaction ? ` — ${row.reaction}` : "";
+      return `${row.allergen} (${row.status})${reaction}`;
+    })
+    .join("; ");
+}
+
+export function allergiesChangeDetail(before: Allergy[], after: Allergy[]) {
+  const from = formatAllergiesLabel(before) || "(none)";
+  const to = formatAllergiesLabel(after) || "(none)";
+  if (from === to) return "Allergies unchanged";
+  return `Allergies: ${from} → ${to}`;
+}
+
+export function nextAllergiesStamp(
+  existing: AllergiesStamp | null,
+  actor: { userId: string; fullName: string },
+  at: string,
+): AllergiesStamp {
+  const name = actor.fullName.trim() || "Unknown";
+  if (!existing) {
+    return {
+      createdBy: actor.userId,
+      createdByName: name,
+      createdAt: at,
+      updatedBy: "",
+      updatedByName: "",
+      updatedAt: "",
+    };
+  }
+  return {
+    ...existing,
+    updatedBy: actor.userId,
+    updatedByName: name,
+    updatedAt: at,
   };
 }
 

@@ -17,6 +17,11 @@ import {
   canSignTrainingAsHm,
   countdownLabel,
 } from "../data/chart";
+import {
+  canCompleteAppointments,
+  canManageAppointments,
+  canSeeAppointments,
+} from "../data/appointments";
 import { openPrintable } from "../data/openFile";
 import {
   canSeeRenewals,
@@ -28,6 +33,8 @@ import {
 } from "../data/planStack";
 import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
+import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
+import HealthCard from "./HealthCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
 // LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
@@ -57,11 +64,17 @@ export default function IndividualChart({
 
   if (!session || !stack || !person) return null;
 
-  const widgets = canSeeChartWidgets(session.roleKey);
-  const showAnnuals = canSeeRenewals(session.roleKey);
-  const showMeds = canSeeMeds(session.roleKey);
-  const profile = stack.profile;
-  const delegations = stack.required.filter((view) => view.item.kind === "delegation");
+  const chartSession = session;
+  const chartStack = stack;
+  const chartPerson = person;
+  const widgets = canSeeChartWidgets(chartSession.roleKey);
+  const showAnnuals = canSeeRenewals(chartSession.roleKey);
+  const showMeds = canSeeMeds(chartSession.roleKey);
+  const showHealth = canSeeAppointments(chartSession.roleKey);
+  const manageAppointments = canManageAppointments(chartSession.roleKey);
+  const completeAppointments = canCompleteAppointments(chartSession.roleKey);
+  const profile = chartStack.profile;
+  const delegations = chartStack.required.filter((view) => view.item.kind === "delegation");
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -74,7 +87,7 @@ export default function IndividualChart({
   }
 
   async function openFile(
-    type: "renewal" | "discontinue" | "training" | "version",
+    type: "renewal" | "discontinue" | "training" | "version" | "consultation",
     id: string,
     mode: "download" | "print",
   ) {
@@ -83,6 +96,28 @@ export default function IndividualChart({
       if (!file) throw new Error("That file is not stored yet.");
       await openPrintable(file.name, file.blob, mode);
     });
+  }
+
+  async function generatePacket(
+    appointment: (typeof chartStack.appointments)[number],
+    mode: "download" | "print",
+  ) {
+    if (!workspace) return;
+    setError("");
+    try {
+      await generateConsultationPacket({
+        recordGenerated: (id) => api.recordConsultationPacketGenerated(id),
+        session: chartSession,
+        workspace,
+        person: chartPerson,
+        profile,
+        appointment,
+        medications: chartStack.medications,
+        mode,
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   return (
@@ -243,6 +278,41 @@ export default function IndividualChart({
               </article>
             ))}
           </section>
+        )}
+
+        {showHealth && (
+          <HealthCard
+            individualName={person.name}
+            defaultVisitAddress={profile.address}
+            appointments={stack.appointments}
+            profile={profile}
+            canManage={manageAppointments}
+            canComplete={completeAppointments}
+            onCreate={(draft) =>
+              run(() =>
+                api.createAppointment({
+                  individualId,
+                  ...draft,
+                }).then(() => undefined),
+              )
+            }
+            onUpdate={(id, draft) => run(() => api.updateAppointment(id, draft))}
+            onDelete={(id) => run(() => api.deleteAppointment(id))}
+            onGenerate={generatePacket}
+            onComplete={(appointment, file, comments) =>
+              run(() =>
+                api.completeAppointment({
+                  appointmentId: appointment.id,
+                  file,
+                  comments,
+                }),
+              )
+            }
+            onOpenConsultation={(fileId) => openFile("consultation", fileId, "download")}
+            onSaveAllergies={(allergies) =>
+              run(() => api.updateIndividualAllergies(individualId, allergies))
+            }
+          />
         )}
 
         {showMeds && (

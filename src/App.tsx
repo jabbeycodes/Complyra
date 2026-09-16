@@ -73,6 +73,7 @@ import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
+import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
@@ -583,6 +584,7 @@ export default function App() {
         ["Overview", LayoutDashboard],
         ["Platform", ShieldCheck],
         ["Individuals", Users],
+        ["Appointments", CalendarDays],
         ["Sites & programs", Building2],
         ["Intake", UserPlus],
         ["Staff", Users],
@@ -1036,6 +1038,9 @@ export default function App() {
                     />
                   </section>
                 </>
+              )}
+              {page === "Appointments" && (
+                <AppointmentsPage onOpenPerson={openPersonChart} />
               )}
               {page === "Individual chart" && person && (
                 <IndividualChart
