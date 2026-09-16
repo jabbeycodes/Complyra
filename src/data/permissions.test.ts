@@ -12,7 +12,7 @@ import {
 
 test("template roles map to the right capability class", () => {
   assert.equal(capabilityForRoleKey("house_manager"), "manager");
-  assert.equal(capabilityForRoleKey("degreed_professional_manager"), "manager");
+  assert.equal(capabilityForRoleKey("program_manager"), "manager");
   assert.equal(capabilityForRoleKey("dsp"), "dsp");
   assert.equal(capabilityForRoleKey("program_manager"), "manager");
   assert.equal(capabilityForRoleKey("nurse"), "nurse");
@@ -31,17 +31,17 @@ test("HR stays out of care records and auditors stay read-only", () => {
   assert.equal(ROLE_TEMPLATE_BY_KEY.house_manager.permissions["requirements.approve"], false);
   assert.equal(ROLE_TEMPLATE_BY_KEY.house_manager.permissions["acknowledgments.sign_own"], true);
   assert.equal(
-    ROLE_TEMPLATE_BY_KEY.degreed_professional_manager.permissions["members.reset_password"],
+    ROLE_TEMPLATE_BY_KEY.program_manager.permissions["members.reset_password"],
     true,
   );
   assert.equal(ROLE_TEMPLATE_BY_KEY.administrator.permissions["sites.create"], true);
   assert.equal(
-    ROLE_TEMPLATE_BY_KEY.degreed_professional_manager.permissions["sites.create"],
+    ROLE_TEMPLATE_BY_KEY.program_manager.permissions["sites.create"],
     true,
   );
   assert.equal(ROLE_TEMPLATE_BY_KEY.dsp.permissions["sites.create"], false);
   assert.equal(ROLE_TEMPLATE_BY_KEY.house_manager.permissions["sites.create"], false);
-  assert.equal(ROLE_TEMPLATE_BY_KEY.program_manager.permissions["sites.create"], false);
+  // (merged 2026-09-16: program_manager keeps the wider DPM sites.create grant)
   assert.equal(
     hasPermission({ role: "hr" }, "individuals.view"),
     false,
@@ -116,7 +116,7 @@ import {
 } from "./permissions";
 
 test("WS4: registry covers every permission key with description + derived defaults", () => {
-  assert.equal(ROLE_KEYS.length, 9);
+  assert.equal(ROLE_KEYS.length, 8); // 8 roles after the 2026-09-16 DPM merge
   for (const key of PERMISSION_KEYS) {
     const entry = PERMISSION_REGISTRY[key];
     assert.ok(entry, `registry entry for ${key}`);
@@ -146,7 +146,7 @@ test("WS4: registry covers every permission key with description + derived defau
 
 test("WS4: GRANT_RULES data matches canGrantRole behavior", () => {
   assert.deepEqual([...PRIVILEGED_ROLE_KEYS], ["administrator", "compliance_admin"]);
-  assert.equal(OPERATIONAL_ROLE_KEYS.length, 7);
+  assert.equal(OPERATIONAL_ROLE_KEYS.length, 6); // 8 roles after the 2026-09-16 DPM merge
   assert.ok(!OPERATIONAL_ROLE_KEYS.includes("administrator"));
   assert.ok(!OPERATIONAL_ROLE_KEYS.includes("compliance_admin"));
   for (const target of ROLE_KEYS) {
@@ -201,7 +201,6 @@ test("WS4: grantableRoleTemplates mirrors the inline filters it replaces", () =>
   const hrRoles = grantableRoleTemplates("hr").map((row) => row.key);
   assert.deepEqual(hrRoles, [
     "house_manager",
-    "degreed_professional_manager",
     "program_manager",
     "dsp",
     "nurse",
@@ -209,7 +208,7 @@ test("WS4: grantableRoleTemplates mirrors the inline filters it replaces", () =>
     "auditor",
   ]);
   const adminRoles = grantableRoleTemplates("administrator").map((row) => row.key);
-  assert.equal(adminRoles.length, 9);
+  assert.equal(adminRoles.length, 8); // 8 roles after the 2026-09-16 DPM merge
 });
 
 test("WS4: template locks — administrator keeps assign_roles + roles.manage", () => {
@@ -259,11 +258,11 @@ test("WS4: assertNoDrift catches undeclared permission strings", () => {
 test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field staff off", () => {
   assert.ok(PERMISSION_KEYS.includes("correctiveActions.manage"));
   assert.equal(PERMISSION_LABELS["correctiveActions.manage"], "Manage corrective actions");
-  // Granted: administrator, compliance_admin, degreed_professional_manager, program_manager.
+  // Granted: administrator, compliance_admin, program_manager, program_manager.
   assert.equal(defaultPermissions("administrator")["correctiveActions.manage"], true);
   assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], true);
   assert.equal(
-    defaultPermissions("degreed_professional_manager")["correctiveActions.manage"],
+    defaultPermissions("program_manager")["correctiveActions.manage"],
     true,
   );
   assert.equal(defaultPermissions("program_manager")["correctiveActions.manage"], true);

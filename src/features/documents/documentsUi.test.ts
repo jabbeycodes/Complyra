@@ -168,7 +168,7 @@ function extractionFixture(overrides: Partial<PcspExtraction> = {}): PcspExtract
       trainingRequirements: [{ title: "Seizure response refresher", confidence: 0.55 }],
       physicianOrders: [],
       signatures: [
-        { role: "DPM", name: "Pat Manager", signed: true, signedAt: "2026-09-02", confidence: 0.9 },
+        { role: "PM", name: "Pat Manager", signed: true, signedAt: "2026-09-02", confidence: 0.9 },
         { role: "RN", signed: false, confidence: 0.4 },
         { role: "Guardian", signed: false },
       ],

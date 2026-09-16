@@ -257,7 +257,7 @@ test("staff cannot sign another staff member's acknowledgment", async () => {
   assert.ok(alexRow.signedAt);
 });
 
-test("HM/DPM sees per-staff acknowledgment status with overdue flags", async () => {
+test("HM/PM sees per-staff acknowledgment status with overdue flags", async () => {
   const { s, api, assignment } = await setupPublishedFlow();
   // Backdate publication past the 7-day due window.
   s.db.delegationTrainingMaterials.find(

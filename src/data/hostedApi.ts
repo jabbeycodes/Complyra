@@ -1600,7 +1600,7 @@ export class HostedApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = await this.requireSession();
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a DPM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
     }
     const { data: person, error: personError } = await this.client
       .from("individuals")
@@ -1648,10 +1648,10 @@ export class HostedApi implements ComplyraApi {
     const canApprove = hasPermission(session, "requirements.approve");
     if (turningOnDelegation) {
       if (!canToggleDelegation(session.roleKey, session.role, canApprove)) {
-        throw new Error("Only a DPM or nurse can turn a delegation on.");
+        throw new Error("Only a PM or nurse can turn a delegation on.");
       }
     } else if (!canEditExtraction(session.roleKey, canApprove)) {
-      throw new Error("Only a DPM can edit extracted items.");
+      throw new Error("Only a PM can edit extracted items.");
     }
     const update = obligationPatch(patch);
     if (turningOnDelegation) {
@@ -1692,7 +1692,7 @@ export class HostedApi implements ComplyraApi {
   async addProtocol(individualId: string, title: string, detail = "") {
     const session = await this.requireSession();
     if (!canEditExtraction(session.roleKey, hasPermission(session, "requirements.approve"))) {
-      throw new Error("Only a DPM can add a protocol.");
+      throw new Error("Only a PM can add a protocol.");
     }
     if (!title.trim()) throw new Error("Name the protocol.");
     const person = await this.individualRecord(individualId);
@@ -1732,7 +1732,7 @@ export class HostedApi implements ComplyraApi {
   async promoteToShiftTask(obligationId: string, shiftPeriods: string[]) {
     const session = await this.requireSession();
     if (!canEditExtraction(session.roleKey, hasPermission(session, "requirements.approve"))) {
-      throw new Error("Only a DPM can add a daily shift requirement.");
+      throw new Error("Only a PM can add a daily shift requirement.");
     }
     const { data: row, error } = await this.client
       .from("obligations")
@@ -1913,7 +1913,7 @@ export class HostedApi implements ComplyraApi {
   }) {
     const session = await this.requireSession();
     if (!canUploadRenewal(session.roleKey)) {
-      throw new Error("RN, DPM, or House Manager can upload renewal evidence.");
+      throw new Error("RN, PM, or House Manager can upload renewal evidence.");
     }
     const { data: row, error } = await this.client
       .from("clinical_renewals")
@@ -1968,7 +1968,7 @@ export class HostedApi implements ComplyraApi {
     if (
       !canToggleDelegation(session.roleKey, session.role, hasPermission(session, "requirements.approve"))
     ) {
-      throw new Error("Only a DPM or nurse can discontinue a delegation.");
+      throw new Error("Only a PM or nurse can discontinue a delegation.");
     }
     if (!input.file) throw new Error("Upload the discontinuation order first.");
     this.requirePdfFile(input.file, "Upload the discontinuation order as a PDF.");
@@ -2093,7 +2093,7 @@ export class HostedApi implements ComplyraApi {
   }) {
     const session = await this.requireSession();
     if (!canRecordDelivery(session.roleKey)) {
-      throw new Error("House manager, RN, or DPM records a medication delivery.");
+      throw new Error("House manager, RN, or PM records a medication delivery.");
     }
     const { data: row, error } = await this.client
       .from("medications")
@@ -2255,7 +2255,7 @@ export class HostedApi implements ComplyraApi {
   async updateMonthlyDueSettings(input: { equipmentDay: number; drillDay: number; safetyDay: number }) {
     const session = await this.requireSession();
     if (!canConfigureMonthlyDue(session.roleKey)) {
-      throw new Error("Only a DPM or administrator can set monthly due dates.");
+      throw new Error("Only a PM or administrator can set monthly due dates.");
     }
     const due = normalizeMonthlyDue(input);
     const { error } = await this.client.from("agency_monthly_due").upsert(
@@ -2280,7 +2280,7 @@ export class HostedApi implements ComplyraApi {
   async addAdaptiveEquipment(individualId: string, name: string) {
     const session = await this.requireSession();
     if (!canManageEquipment(session.roleKey)) {
-      throw new Error("Only a DPM or house manager can add adaptive equipment.");
+      throw new Error("Only a PM or house manager can add adaptive equipment.");
     }
     const person = await this.individualRecord(individualId);
     if (!person || person.agencyId !== session.agencyId) throw new Error("Individual not found.");
@@ -2335,7 +2335,7 @@ export class HostedApi implements ComplyraApi {
   async removeAdaptiveEquipment(equipmentId: string) {
     const session = await this.requireSession();
     if (!canManageEquipment(session.roleKey)) {
-      throw new Error("Only a DPM or house manager can remove adaptive equipment.");
+      throw new Error("Only a PM or house manager can remove adaptive equipment.");
     }
     const { data: row, error } = await this.client
       .from("adaptive_equipment")
@@ -2472,7 +2472,7 @@ export class HostedApi implements ComplyraApi {
   async recordHomeSafety(input: { id: string; lines: SafetyLine[] }) {
     const session = await this.requireSession();
     if (!canCompleteMonthly(session.roleKey)) {
-      throw new Error("Only a DPM, nurse, or house manager can record safety checks.");
+      throw new Error("Only a PM, nurse, or house manager can record safety checks.");
     }
     const { data: report, error } = await this.client
       .from("home_safety_reports")
@@ -2588,7 +2588,7 @@ export class HostedApi implements ComplyraApi {
   async saveSiteFacts(siteId: string, facts: Partial<SiteFacts>) {
     const session = await this.requireSession();
     if (!canEditSiteReview(session.roleKey)) {
-      throw new Error("Only a DPM, house manager, or administrator can update site-review facts.");
+      throw new Error("Only a PM, house manager, or administrator can update site-review facts.");
     }
     const site = await this.siteRecord(siteId);
     if (!site || site.agencyId !== session.agencyId) throw new Error("Site not found.");
@@ -2608,7 +2608,7 @@ export class HostedApi implements ComplyraApi {
   async saveSiteReview(input: Parameters<ComplyraApi["saveSiteReview"]>[0]) {
     const session = await this.requireSession();
     if (!canEditSiteReview(session.roleKey)) {
-      throw new Error("Only a DPM, house manager, or administrator can mark site-review checks.");
+      throw new Error("Only a PM, house manager, or administrator can mark site-review checks.");
     }
     const { data: reviewRow, error } = await this.client
       .from("site_reviews")
@@ -2729,7 +2729,7 @@ export class HostedApi implements ComplyraApi {
   async uploadAgencyLogo(file: File) {
     const session = await this.requireSession();
     if (!canManageAgencyLogo(session.roleKey)) {
-      throw new Error("Only a DPM or administrator can change the agency logo.");
+      throw new Error("Only a PM or administrator can change the agency logo.");
     }
     validateLogoFile(file);
     const extension = file.type === "image/jpeg" ? "jpg" : "png";
@@ -2755,7 +2755,7 @@ export class HostedApi implements ComplyraApi {
   async removeAgencyLogo() {
     const session = await this.requireSession();
     if (!canManageAgencyLogo(session.roleKey)) {
-      throw new Error("Only a DPM or administrator can change the agency logo.");
+      throw new Error("Only a PM or administrator can change the agency logo.");
     }
     const { data: branding } = await this.client
       .from("agency_branding")
@@ -2903,7 +2903,7 @@ export class HostedApi implements ComplyraApi {
   }): Promise<{ id: string; name: string }> {
     const session = await this.requireSession();
     if (!canCreateIndividual(session.roleKey)) {
-      throw new Error("Only a DPM, nurse, or house manager can add an individual.");
+      throw new Error("Only a PM, nurse, or house manager can add an individual.");
     }
     const fullName = input.fullName.trim();
     if (!fullName) throw new Error("Enter the individual’s legal name.");
@@ -2989,7 +2989,7 @@ export class HostedApi implements ComplyraApi {
   async reassignIndividualToSite(individualId: string, siteId: string) {
     const session = await this.requireSession();
     if (!canCreateIndividual(session.roleKey)) {
-      throw new Error("Only a DPM, nurse, or house manager can move an Individual.");
+      throw new Error("Only a PM, nurse, or house manager can move an Individual.");
     }
     const { data: personRow, error: personError } = await this.client
       .from("individuals")
@@ -3307,7 +3307,7 @@ export class HostedApi implements ComplyraApi {
       "administrator",
       "compliance_admin",
       "house_manager",
-      "degreed_professional_manager",
+      "program_manager",
       "nurse",
       "program_manager",
     ].includes(roleKey);
@@ -3320,7 +3320,7 @@ export class HostedApi implements ComplyraApi {
    * checklists for assigned staff. All writes use upserts/inserts guarded by
    * unique constraints, so repeat loads add nothing.
    *
-   * Failures are swallowed: a DPM/nurse can often SELECT every home but fail
+   * Failures are swallowed: a PM/nurse can often SELECT every home but fail
    * WITH CHECK on a bulk upsert. That must not strand sign-in on
    * "Loading workspace…".
    */
@@ -4480,7 +4480,7 @@ export class HostedApi implements ComplyraApi {
       // out of the re-initial the stamp path demands.
       if (!canEditTrainingLine(session.roleKey) && session.userId !== mapped.userId) {
         throw new Error(
-          "Only the assigned staff member, an administrator, compliance admin, house manager, or DPM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, compliance admin, house manager, or PM can edit a completed training line.",
         );
       }
       // Void-and-redo: the edit voids the previous initialing — the line must
@@ -4594,7 +4594,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!canRequestTrainingCorrection(session.roleKey)) {
       throw new Error(
-        "Only an administrator, compliance admin, or DPM can request a training correction.",
+        "Only an administrator, compliance admin, or PM can request a training correction.",
       );
     }
     const reason = input.reason.trim();
@@ -4750,7 +4750,7 @@ export class HostedApi implements ComplyraApi {
         hasPermission(session, "requirements.approve"),
       )
     ) {
-      throw new Error("Only a DPM or nurse can manage a delegation form.");
+      throw new Error("Only a PM or nurse can manage a delegation form.");
     }
   }
 
@@ -5407,7 +5407,7 @@ export class HostedApi implements ComplyraApi {
 
   // ================= QA audits (hosted) =================
 
-  /** HMs are scoped to their own site; admins/auditors/DPMs see the agency. */
+  /** HMs are scoped to their own site; admins/auditors/PMs see the agency. */
   private qaSiteFilter<T>(
     session: SessionUser,
     query: T,
@@ -6566,7 +6566,7 @@ export class HostedApi implements ComplyraApi {
 
   private checklistCanAssign(session: SessionUser): boolean {
     return (
-      session.roleKey === "degreed_professional_manager" ||
+      session.roleKey === "program_manager" ||
       session.role === "administrator" ||
       session.role === "compliance_admin" ||
       session.platformAdmin
@@ -6650,7 +6650,7 @@ export class HostedApi implements ComplyraApi {
       .not(
         "role_key",
         "in",
-        "(administrator,compliance_admin,degreed_professional_manager,program_manager)",
+        "(administrator,compliance_admin,program_manager)",
       );
     throwIf(memberError, "Could not load site staff.");
     const active = (memberships ?? []).filter(
@@ -6718,7 +6718,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!this.checklistCanAssign(session)) {
       throw new Error(
-        "Only a DPM or agency administrator can assign weekly checklists.",
+        "Only a PM or agency administrator can assign weekly checklists.",
       );
     }
     const weekOf = weekOfSundayIso(input.weekOf);
@@ -7296,7 +7296,7 @@ export class HostedApi implements ComplyraApi {
   }) {
     const { session, med } = await this.p6medicationOrThrow(input.medicationId);
     if (!canRecordDelivery(session.roleKey)) {
-      throw new Error("House manager, RN, or DPM adjusts medication inventory.");
+      throw new Error("House manager, RN, or PM adjusts medication inventory.");
     }
     const reason = input.reason.trim();
     if (!reason) throw new Error("Give a reason for the count correction.");
@@ -7342,7 +7342,7 @@ export class HostedApi implements ComplyraApi {
   }) {
     const { session, med } = await this.p6medicationOrThrow(input.medicationId);
     if (!canRecordDelivery(session.roleKey)) {
-      throw new Error("House manager, RN, or DPM sets the reorder threshold.");
+      throw new Error("House manager, RN, or PM sets the reorder threshold.");
     }
     const days = Math.floor(input.lowThresholdDays);
     if (!Number.isFinite(days) || days < 1 || days > 90) {
@@ -7371,7 +7371,7 @@ export class HostedApi implements ComplyraApi {
   async acknowledgeReorderAlert(medicationId: string) {
     const { session, med } = await this.p6medicationOrThrow(medicationId);
     if (!canRecordDelivery(session.roleKey)) {
-      throw new Error("House manager, RN, or DPM acknowledges a reorder alert.");
+      throw new Error("House manager, RN, or PM acknowledges a reorder alert.");
     }
     const { error } = await this.client.from("med_inventory").upsert(
       {
@@ -8606,7 +8606,7 @@ export class HostedApi implements ComplyraApi {
     let ratingRows = (ratings ?? []) as Record<string, unknown>[];
     let reviewRows = (reviews ?? []) as Record<string, unknown>[];
     // "Appropriate managers": administrators see the whole agency; other
-    // recognition.manage holders (DPM, program manager) see only pairs they
+    // recognition.manage holders (PM) see only pairs they
     // share an active site with. Mirrors private.recognition_manager_view.
     const scope = await this.recognitionManagerScope(session);
     if (scope) {

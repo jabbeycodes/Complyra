@@ -198,7 +198,7 @@ test("DSP cannot discontinue a delegation", async () => {
         title: "Nope",
         file: orderFile(),
       }),
-    /DPM or nurse/,
+    /PM or nurse/,
   );
 });
 

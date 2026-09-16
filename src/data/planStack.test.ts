@@ -159,7 +159,7 @@ test("adding a protocol does not clear existing PCSP signatures", async () => {
   );
 });
 
-test("DPM can edit cover fields and a DSP cannot", async () => {
+test("PM can edit cover fields and a DSP cannot", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -227,9 +227,9 @@ test("requiredForSigning skips off, expired, and inventory items", () => {
   );
 });
 
-test("RN, DPM, and HM see renewals; DSP does not", () => {
+test("RN, PM, and HM see renewals; DSP does not", () => {
   assert.equal(canSeeRenewals("nurse"), true);
-  assert.equal(canSeeRenewals("degreed_professional_manager"), true);
+  assert.equal(canSeeRenewals("program_manager"), true);
   assert.equal(canSeeRenewals("house_manager"), true);
   assert.equal(canSeeRenewals("dsp"), false);
 });
@@ -306,7 +306,7 @@ test("DSP does not see clinical renewal dates", async () => {
   );
 });
 
-test("nurse, DPM/admin, and HM see physical, vision, and dental dates", async () => {
+test("nurse, PM/admin, and HM see physical, vision, and dental dates", async () => {
   for (const username of [DEMO_NURSE_USERNAME, DEMO_ADMIN_USERNAME, DEMO_HM_USERNAME]) {
     const client = api();
     const user = await client.signIn({
@@ -347,7 +347,7 @@ test("uploading a consult resets only that renewal date", async () => {
   assert.equal(after.renewals.find((row) => row.kind === "dental")?.nextDueOn, dentalBefore);
 });
 
-test("delegating RN must sign before staff, even if DPM turned the form on", async () => {
+test("delegating RN must sign before staff, even if PM turned the form on", async () => {
   const store = new MemoryStore(structuredClone(createEvergreenSeed()));
   const client = new LocalApi(store);
   const mark = "data:image/png;base64,aaa";

@@ -78,7 +78,7 @@ Registered by this module from approved PCSP extractions
 (`PcspExtraction`, see `src/features/documents/documents.ts`).
 
 Only **approved** extractions contribute — nothing is actionable before a
-DPM/RN approves the extraction.
+PM/RN approves the extraction.
 
 | Kind | Severity | Rule |
 | ---- | -------- | ---- |

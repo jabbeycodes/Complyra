@@ -25,7 +25,6 @@ import {
 export const AGENCY_WIDE_ROLE_KEYS = [
   "administrator",
   "compliance_admin",
-  "degreed_professional_manager",
   "program_manager",
   "auditor",
   "hr",
@@ -169,7 +168,7 @@ export function personalQueue(input: {
         id: `site-review-${site.id}`,
         kind: "site_review",
         title: "Confirm site-review checks are in place",
-        detail: `${site.name} · DPM environmental pack`,
+        detail: `${site.name} · PM environmental pack`,
         tone: "overdue",
         siteName: site.name,
       });

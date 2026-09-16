@@ -1,5 +1,5 @@
 /**
- * DocumentUploadCard — admin/DPM uploads a PCSP (or annual physician order).
+ * DocumentUploadCard — admin/PM uploads a PCSP (or annual physician order).
  *
  * Flow: pick individual + document type + file (PDF/DOCX) -> the browser
  * extracts plain text client-side (PHI minimization: only TEXT is sent for

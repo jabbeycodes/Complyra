@@ -321,7 +321,7 @@ test("staff_assignments pair people across sites for ratings and partners", asyn
   assert.equal(saved.rating, 5);
 });
 
-test("manager feedback is site-scoped: DPM sees only their sites' pairs", async () => {
+test("manager feedback is site-scoped: PM sees only their sites' pairs", async () => {
   const s = store();
   const api = new LocalApi(s);
   // Jordan (Oakwood DSP) rates James (Oakwood HM).
@@ -339,18 +339,18 @@ test("manager feedback is site-scoped: DPM sees only their sites' pairs", async 
   )!.siteId!;
   assert.notEqual(oakwoodSite, mapleSite, "seed has two sites");
 
-  // Promote the nurse to DPM at Oakwood: sees the Oakwood pair.
+  // Promote the nurse to PM at Oakwood: sees the Oakwood pair.
   const membership = s.db.memberships.find((m) => m.userId === nurseId)!;
-  membership.roleKey = "degreed_professional_manager";
+  membership.roleKey = "program_manager";
   membership.siteId = oakwoodSite;
   await api.signIn(login(nurseUsername));
   let feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 1, "DPM at Willow sees the pair");
+  assert.equal(feedback.dspRatings.length, 1, "PM at Willow sees the pair");
 
-  // Same DPM moved to Maple: the Oakwood pair is hidden.
+  // Same PM moved to Maple: the Oakwood pair is hidden.
   membership.siteId = mapleSite;
   feedback = await api.listRecognitionFeedback();
-  assert.equal(feedback.dspRatings.length, 0, "DPM at Cedar sees nothing");
+  assert.equal(feedback.dspRatings.length, 0, "PM at Cedar sees nothing");
 
   // Administrators still see the whole agency.
   await api.signIn(login(DEMO_ADMIN_USERNAME));

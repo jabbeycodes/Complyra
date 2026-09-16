@@ -24,7 +24,7 @@ export default function AddSiteForm({
   );
   const managers =
     workspace?.staff.filter((member) =>
-      ["house_manager", "administrator", "degreed_professional_manager"].includes(
+      ["house_manager", "administrator", "program_manager"].includes(
         member.roleKey,
       ),
     ) ?? [];

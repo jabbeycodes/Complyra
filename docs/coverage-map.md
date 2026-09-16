@@ -135,7 +135,7 @@ New order: chk-6-10, chk-6-05, chk-6-04, chk-6-06, chk-6-07, chk-6-03, chk-6-01,
 | Id | Original | Complyrer wording |
 |---|---|---|
 | `gt-01` | Be certified in Medication Administration (Level I or higher as required by Missouri DMH regulations). | Hold medication-administration certification at Level I or higher, as Missouri DMH regulations require. |
-| `gt-02` | Receive hands-on G-tube training from a licensed nurse or DPM before administering any medication via G-tube. | Get hands-on G-tube training from a licensed nurse or DPM before giving any medication through a G-tube. |
+| `gt-02` | Receive hands-on G-tube training from a licensed nurse or PM before administering any medication via G-tube. | Get hands-on G-tube training from a licensed nurse or PM before giving any medication through a G-tube. |
 | `gt-03` | Complete annual refresher training and competency assessments. | Finish the annual refresher and pass the yearly competency checks. |
 | `gt-04` | Review [Individual]'s Individual Support Plan (ISP) and Medication Administration Record (MAR) to understand his/her specific medical needs. | Read [Individual]'s support plan (ISP) and medication administration record (MAR) to learn their specific medical needs. |
 | `gt-05` | Competency validation: correct identification of [Individual] and his/her medications. | Competency check — correctly identify [Individual] and their medications. |
@@ -146,7 +146,7 @@ New order: chk-6-10, chk-6-05, chk-6-04, chk-6-06, chk-6-07, chk-6-03, chk-6-01,
 | `gt-10` | Competency validation: accurate documentation in the MAR and Therap. | Competency check — accurate charting in the MAR and Therap. |
 | `gt-11` | Competency validation: correct response to common G-tube issues (leakage, blockage, dislodgement). | Competency check — correct response to common G-tube problems: leaking, blockage, dislodgement. |
 | `gt-12` | Emergency preparedness: recognize signs of complications (e.g., leakage, redness, swelling, clogged tube, or pain). | Emergency readiness — spot warning signs of complications: leaking, redness, swelling, a clogged tube, or pain. |
-| `gt-13` | Emergency preparedness: stop the procedure immediately and contact on-call nurse/HM/DPM if issues arise. | Emergency readiness — stop the procedure at once and call the on-call nurse, house manager, or DPM if anything goes wrong. |
+| `gt-13` | Emergency preparedness: stop the procedure immediately and contact on-call nurse/HM/PM if issues arise. | Emergency readiness — stop the procedure at once and call the on-call nurse, house manager, or PM if anything goes wrong. |
 | `gt-14` | Emergency preparedness: call 911 if the G-tube becomes dislodged or [Individual] shows signs of respiratory distress, vomiting, or altered consciousness. | Emergency readiness — call 911 if the G-tube comes out or [Individual] shows trouble breathing, vomiting, or a change in alertness. |
 | `gt-15` | Emergency preparedness: maintain emergency supplies (syringes, extension sets, gloves, sterile water) in a designated, clearly labeled area. | Emergency readiness — keep emergency supplies (syringes, extension sets, gloves, sterile water) in a marked, dedicated spot. |
 | `gt-16` | Infection control: always wash hands before and after medication administration. | Infection control — wash hands before and after every medication pass. |
@@ -155,7 +155,7 @@ New order: chk-6-10, chk-6-05, chk-6-04, chk-6-06, chk-6-07, chk-6-03, chk-6-01,
 | `gt-19` | Infection control: disinfect surfaces before and after each procedure. | Infection control — clean and disinfect work surfaces before and after each procedure. |
 | `gt-20` | Documentation & communication: document each administration in the MAR immediately after giving medication. | Documentation & communication — chart each administration in the MAR right after giving the medication. |
 | `gt-21` | Documentation & communication: if medication is refused, spilled, or delayed, include a detailed explanation in the comments. | Documentation & communication — if a medication is refused, spilled, or late, write a detailed note in the comments. |
-| `gt-22` | Documentation & communication: notify the House Manager and DPM immediately of any changes in the G-tube site or unusual reactions. | Documentation & communication — tell the house manager and DPM right away about any change at the G-tube site or any unusual reaction. |
+| `gt-22` | Documentation & communication: notify the House Manager and PM immediately of any changes in the G-tube site or unusual reactions. | Documentation & communication — tell the house manager and PM right away about any change at the G-tube site or any unusual reaction. |
 | `gt-23` | Documentation & communication: include G-tube care and medication notes in shift handovers to ensure continuity of care. | Documentation & communication — include G-tube care and medication notes in shift handover so care stays continuous. |
 
 ### House staff expectations (Lawton)

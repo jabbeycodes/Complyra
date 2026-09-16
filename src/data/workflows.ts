@@ -144,7 +144,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     name: "Delegation unacknowledged",
     description: "A delegation or training material is still waiting on a signature.",
     trigger: "A delegation acknowledgment has no staff signature past its expected window.",
-    action: "Notify the staffer to review and sign; escalate to the DPM after 7 days.",
+    action: "Notify the staffer to review and sign; escalate to the PM after 7 days.",
     audience: "assignee",
     notificationType: "delegation.unacknowledged",
     message: (v) => ({
@@ -160,9 +160,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     name: "Plan renewal approaching",
     description: "A plan/ISP renewal date is coming up — start early to avoid a lapse.",
     trigger: "A plan renewal is due within 30 days.",
-    action: "Notify the DPM/program manager to start the renewal.",
+    action: "Notify the program manager to start the renewal.",
     audience: "role",
-    roleKey: "degreed_professional_manager",
+    roleKey: "program_manager",
     notificationType: "isp.renewal_soon",
     message: (v) => ({
       title: "Plan renewal approaching",
@@ -205,7 +205,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     trigger: "An incident has no follow-up record and the next-business-day filing window is closing.",
     action: "Notify managers to file the follow-up electronically.",
     audience: "role",
-    roleKey: "degreed_professional_manager",
+    roleKey: "program_manager",
     notificationType: "incident.followup",
     message: (v) => ({
       title: "Incident follow-up due",
@@ -528,7 +528,7 @@ export function workflowNotificationPayload(
       case "incident.followup":
         return incidentFollowupPayload({
           ...base,
-          roleKey: template.roleKey ?? "degreed_professional_manager",
+          roleKey: template.roleKey ?? "program_manager",
           incidentId: hit.entityId,
           summary: hit.vars.incidentSummary ?? "see incident log",
           occurredOn: hit.vars.occurredOn ?? "",

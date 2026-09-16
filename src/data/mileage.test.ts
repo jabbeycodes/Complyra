@@ -199,7 +199,6 @@ test("LIFEPATH-P7: mileage.manage defaults — on for service roles, off for aud
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
     "program_manager",
     "dsp",
     "nurse",
@@ -539,7 +538,7 @@ test("updateMileageTrip validates the start against the previous trip's end", as
 });
 
 test("getMileageYearlySummary rolls up per-individual months and the grand total", async () => {
-  // Yearly summary is administrator/DPM-only server-side: sign in as the admin.
+  // Yearly summary is administrator/PM-only server-side: sign in as the admin.
   const { client, site, people } = await clientAs(DEMO_ADMIN_USERNAME);
   const [first, second] = people;
   await client.addMileageTrip({
@@ -584,12 +583,12 @@ test("getMileageYearlySummary rejects DSP and house-manager sessions server-side
   const dsp = await dspClient();
   await assert.rejects(
     () => dsp.client.getMileageYearlySummary(dsp.site.id, 2026, dsp.people.map((p) => p.id)),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
   const hm = await clientAs(DEMO_HM_USERNAME);
   await assert.rejects(
     () => hm.client.getMileageYearlySummary(hm.site.id, 2026, hm.people.map((p) => p.id)),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
 });
 
@@ -603,7 +602,7 @@ test("canBackfillMileage allows administrator, compliance_admin, house_manager, 
 });
 
 test("canBackfillMileage blocks DSP, nurse, HR, and auditor staff", () => {
-  for (const roleKey of ["dsp", "nurse", "hr", "auditor", "degreed_professional_manager", "program_manager"]) {
+  for (const roleKey of ["dsp", "nurse", "hr", "auditor", "program_manager"]) {
     assert.equal(canBackfillMileage({ roleKey, platformAdmin: false }), false, roleKey);
   }
   assert.equal(canBackfillMileage(null), false);
@@ -619,35 +618,36 @@ test("assertCanBackfillMileage throws for staff but not for house managers", () 
   );
 });
 
-// ---------- Role gates: monthly sheet for HM/DSP, yearly for administrator/DPM ----------
+// ---------- Role gates: monthly sheet for HM/DSP, yearly for administrator/PM ----------
 
-test("canViewMileageYearlySummary allows administrator, DPM, and platform admins only", () => {
+test("canViewMileageYearlySummary allows administrator, PM, and platform admins only", () => {
   assert.equal(canViewMileageYearlySummary({ roleKey: "administrator", platformAdmin: false }), true);
-  assert.equal(canViewMileageYearlySummary({ roleKey: "degreed_professional_manager", platformAdmin: false }), true);
+  assert.equal(canViewMileageYearlySummary({ roleKey: "program_manager", platformAdmin: false }), true);
   assert.equal(canViewMileageYearlySummary({ roleKey: "dsp", platformAdmin: true }), true);
 });
 
 test("canViewMileageYearlySummary blocks HM, DSP, compliance_admin, and everyone else", () => {
-  for (const roleKey of ["house_manager", "dsp", "compliance_admin", "program_manager", "nurse", "hr", "auditor"]) {
+  // (merged 2026-09-16: program_manager now carries the DPM pack, so it is allowed)
+  for (const roleKey of ["house_manager", "dsp", "compliance_admin", "nurse", "hr", "auditor"]) {
     assert.equal(canViewMileageYearlySummary({ roleKey, platformAdmin: false }), false, roleKey);
   }
   assert.equal(canViewMileageYearlySummary(null), false);
 });
 
-test("assertCanViewMileageYearlySummary throws for HM/DSP but not for administrator or DPM", () => {
+test("assertCanViewMileageYearlySummary throws for HM/DSP but not for administrator or PM", () => {
   assert.doesNotThrow(() =>
     assertCanViewMileageYearlySummary({ roleKey: "administrator", platformAdmin: false }),
   );
   assert.doesNotThrow(() =>
-    assertCanViewMileageYearlySummary({ roleKey: "degreed_professional_manager", platformAdmin: false }),
+    assertCanViewMileageYearlySummary({ roleKey: "program_manager", platformAdmin: false }),
   );
   assert.throws(
     () => assertCanViewMileageYearlySummary({ roleKey: "house_manager", platformAdmin: false }),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
   assert.throws(
     () => assertCanViewMileageYearlySummary({ roleKey: "dsp", platformAdmin: false }),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
 });
 
@@ -657,8 +657,8 @@ test("canDownloadMileageMonthly allows house managers, administrators, and platf
   assert.equal(canDownloadMileageMonthly({ roleKey: "dsp", platformAdmin: true }), true);
 });
 
-test("canDownloadMileageMonthly blocks DSP, DPM, and everyone else", () => {
-  for (const roleKey of ["dsp", "degreed_professional_manager", "compliance_admin", "nurse", "hr", "auditor", "program_manager"]) {
+test("canDownloadMileageMonthly blocks DSP, PM, and everyone else", () => {
+  for (const roleKey of ["dsp", "program_manager", "compliance_admin", "nurse", "hr", "auditor", "program_manager"]) {
     assert.equal(canDownloadMileageMonthly({ roleKey, platformAdmin: false }), false, roleKey);
   }
   assert.equal(canDownloadMileageMonthly(null), false);
@@ -922,7 +922,7 @@ test("getMileageYearlySummaryAllSites rejects DSP and house-manager sessions ser
       dsp.client.getMileageYearlySummaryAllSites(2026, [
         { siteId: dsp.site.id, siteName: dsp.site.name, individualIds: [] },
       ]),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
   const hm = await clientAs(DEMO_HM_USERNAME);
   await assert.rejects(
@@ -930,7 +930,7 @@ test("getMileageYearlySummaryAllSites rejects DSP and house-manager sessions ser
       hm.client.getMileageYearlySummaryAllSites(2026, [
         { siteId: hm.site.id, siteName: hm.site.name, individualIds: [] },
       ]),
-    /Only administrators and degreed professional managers/,
+    /Only administrators and program managers/,
   );
 });
 

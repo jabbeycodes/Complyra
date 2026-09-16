@@ -395,7 +395,7 @@ test("correction requires a reason and is denied to the HM", async () => {
   await api.signIn(login(DEMO_HM_USERNAME));
   await assert.rejects(
     api.requestTrainingCorrection({ countersignatureId, reason: "typo" }),
-    /Only an administrator, compliance admin, or DPM/,
+    /Only an administrator, compliance admin, or PM/,
   );
   await api.signIn(login(DEMO_ADMIN_USERNAME));
   await assert.rejects(

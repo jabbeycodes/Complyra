@@ -811,7 +811,7 @@ function ProfilePanel({
               {locked && !canCorrect && (canInitialOwn || isHm) && (
                 <small className="muted">
                   Locked sheets can only be corrected by an administrator, compliance
-                  admin, or DPM — ask one of them to unlock this sheet so lines can be
+                  admin, or PM — ask one of them to unlock this sheet so lines can be
                   edited and re-signed.
                 </small>
               )}

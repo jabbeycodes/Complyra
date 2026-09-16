@@ -84,7 +84,7 @@ test("pre-survey rows pull equipment and chart facts", async () => {
   assert.ok(Number(ageOn(ellis.dateOfBirth, "2026-09-12")) > 20);
 });
 
-test("DPM can save a site review and a DSP cannot", async () => {
+test("PM can save a site review and a DSP cannot", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -173,7 +173,7 @@ test("changing site facts updates the next print without editing Individuals", a
   assert.equal(ellisAfter.profile?.address, coverAddress);
 });
 
-test("new sites start with an open DPM site review", async () => {
+test("new sites start with an open PM site review", async () => {
   const client = api();
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -192,7 +192,7 @@ test("new sites start with an open DPM site review", async () => {
   assert.equal(isSiteReviewInPlace(review, site, todayIso()), false);
 });
 
-test("Your work lists an open site review for DPM and house manager, not DSP", async () => {
+test("Your work lists an open site review for PM and house manager, not DSP", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,

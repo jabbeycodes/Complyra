@@ -46,7 +46,7 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "checklists",
     label: "Checklists",
     // Mirrors the existing gates: "Weekly checklist" (HM/agency admin) plus
-    // "Checklist assignments" (DPM/agency admin).
+    // "Checklist assignments" (PM/agency admin).
     visible: (s) =>
       !!s &&
       (pageVisible(s, "Weekly checklist") ||

@@ -54,7 +54,7 @@ export function buildSiteReviewPdf(input: {
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);
   doc.text(
-    "Working copy for the DPM. This is not the official Division form. Monthly smoke, CO, water temperature, extinguisher, and first-aid checks stay on the home safety report.",
+    "Working copy for the PM. This is not the official Division form. Monthly smoke, CO, water temperature, extinguisher, and first-aid checks stay on the home safety report.",
     margin,
     y,
     { maxWidth: 514 },

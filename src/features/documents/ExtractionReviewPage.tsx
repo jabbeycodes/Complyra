@@ -1,5 +1,5 @@
 /**
- * ExtractionReviewPage — DPM/RN reviews an AI extraction side-by-side.
+ * ExtractionReviewPage — PM/RN reviews an AI extraction side-by-side.
  *
  * Left: the extracted structured data (individual, plan dates, outcomes and
  * goals, protocols, dietary, behavioral supports, training requirements,

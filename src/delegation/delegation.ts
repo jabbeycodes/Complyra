@@ -3,16 +3,16 @@
  *
  * Workflow:
  *  1. Common templates are available across the agency.
- *  2. A DPM activates a template for a program site ("In preparation").
- *  3. A DPM or RN assigns it to an individual → an editable training draft
+ *  2. A PM activates a template for a program site ("In preparation").
+ *  3. A PM or RN assigns it to an individual → an editable training draft
  *     is instantiated for that person.
- *  4. A DPM or RN reviews, edits, and approves the draft → published.
+ *  4. A PM or RN reviews, edits, and approves the draft → published.
  *  5. Published material becomes visible to assigned site staff, who review
  *     and electronically sign it.
- *  6. HM/DPM views show signed, outstanding, and overdue staff.
+ *  6. HM/PM views show signed, outstanding, and overdue staff.
  *
  * All template content is Complyrer-original generic starting material. It is
- * NOT a medical directive and must be individualized by the DPM/RN for the
+ * NOT a medical directive and must be individualized by the PM/RN for the
  * person before approval. Every generated or signed document carries the
  * digital-record mark.
  */
@@ -43,7 +43,7 @@ export interface DelegationTemplate {
   name: string;
   category: DelegationTemplateCategory;
   sections: TemplateSections;
-  /** Why the DPM/RN must individualize this before approval. */
+  /** Why the PM/RN must individualize this before approval. */
   individualizationNote: string;
   active: boolean;
 }
@@ -93,7 +93,7 @@ export interface TrainingMaterialContent {
   steps: string[];
   safetyWarnings: string[];
   documentation: string[];
-  /** DPM/RN person-specific additions, edited during review. */
+  /** PM/RN person-specific additions, edited during review. */
   individualNotes: string;
   individualizationNote: string;
   generatedMark: string;
@@ -123,7 +123,7 @@ export interface DelegationAcknowledgment {
   signatureMark: string | null;
 }
 
-/** Per-staff acknowledgment rollup for one assignment (HM/DPM view). */
+/** Per-staff acknowledgment rollup for one assignment (HM/PM view). */
 export interface DelegationAckStatusRow {
   staffId: string;
   staffName: string;
@@ -152,7 +152,7 @@ export function delegationLifecycleLabel(assignment: {
 /**
  * Pure helper: instantiate an editable training draft for one person from a
  * template. The draft starts as a copy of the generic sections with empty
- * individual notes for the DPM/RN to complete.
+ * individual notes for the PM/RN to complete.
  */
 export function instantiateDraft(
   template: DelegationTemplate,
@@ -212,7 +212,7 @@ export function isAcknowledgmentOverdue(
 
 /**
  * The common template library. Generic Complyrer-original starting material —
- * every entry requires individualization by the DPM/RN before approval.
+ * every entry requires individualization by the PM/RN before approval.
  */
 export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[] = [
   {
@@ -239,7 +239,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must fill in this person's normal pattern, what counts as a missed day for them, and their current physician orders before approval.",
+      "The PM or RN must fill in this person's normal pattern, what counts as a missed day for them, and their current physician orders before approval.",
     active: true,
   },
   {
@@ -267,7 +267,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must add this person's seizure type(s), emergency thresholds, rescue medication orders (if any), and who to call before approval.",
+      "The PM or RN must add this person's seizure type(s), emergency thresholds, rescue medication orders (if any), and who to call before approval.",
     active: true,
   },
   {
@@ -294,7 +294,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must attach this person's actual meal plan or diet guide, portion sizes, fluid goals, and any swallowing precautions before approval.",
+      "The PM or RN must attach this person's actual meal plan or diet guide, portion sizes, fluid goals, and any swallowing precautions before approval.",
     active: true,
   },
   {
@@ -320,7 +320,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must set this person's daily targets, what counts as a full portion for them, and the review schedule before approval.",
+      "The PM or RN must set this person's daily targets, what counts as a full portion for them, and the review schedule before approval.",
     active: true,
   },
   {
@@ -347,7 +347,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must specify this person's diet texture, liquid consistency, positioning, supervision level, and emergency steps before approval.",
+      "The PM or RN must specify this person's diet texture, liquid consistency, positioning, supervision level, and emergency steps before approval.",
     active: true,
   },
   {
@@ -374,7 +374,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must attach this person's current physician orders (formula, rate, schedule, flushes), positioning, and site-care steps before approval. Only delegated, trained staff may be assigned.",
+      "The PM or RN must attach this person's current physician orders (formula, rate, schedule, flushes), positioning, and site-care steps before approval. Only delegated, trained staff may be assigned.",
     active: true,
   },
   {
@@ -401,7 +401,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must enter this person's testing schedule, target range, low/high response steps, and current medication orders before approval.",
+      "The PM or RN must enter this person's testing schedule, target range, low/high response steps, and current medication orders before approval.",
     active: true,
   },
   {
@@ -428,7 +428,7 @@ export const DELEGATION_TEMPLATES: Omit<DelegationTemplate, "id" | "agencyId">[]
       ],
     },
     individualizationNote:
-      "The DPM or RN must describe this person's mobility level, aids, transfer method, supervision needs, and post-fall steps before approval.",
+      "The PM or RN must describe this person's mobility level, aids, transfer method, supervision needs, and post-fall steps before approval.",
     active: true,
   },
 ];

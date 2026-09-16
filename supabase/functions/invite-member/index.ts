@@ -114,7 +114,6 @@ Deno.serve(async (req) => {
     administrator: "administrator",
     compliance_admin: "compliance_admin",
     house_manager: "manager",
-    degreed_professional_manager: "manager",
     program_manager: "manager",
     dsp: "dsp",
     nurse: "nurse",

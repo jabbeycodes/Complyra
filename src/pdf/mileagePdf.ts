@@ -382,8 +382,8 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
  *
  * Rows = individuals, columns = January–December + Yearly Total, with a
  * Grand Total row — the format of the paper yearly summary sheet, stamped
- * with the Complyrer record mark. Only administrators, degreed professional
- * managers, and platform owners may view or download it.
+ * with the Complyrer record mark. Only administrators, program managers,
+ * and platform owners may view or download it.
  */
 
 export interface MileageYearPdfInput {

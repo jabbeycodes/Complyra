@@ -138,7 +138,7 @@ const GTUBE_TOPICS: TrainingTopic[] = [
   supplemental(
     "gt-02",
     5,
-    "Get hands-on G-tube training from a licensed nurse or DPM before giving any medication through a G-tube.",
+    "Get hands-on G-tube training from a licensed nurse or PM before giving any medication through a G-tube.",
     "G-tube competency template",
     { perIndividual: true, reusableTemplate: true },
   ),
@@ -215,7 +215,7 @@ const GTUBE_TOPICS: TrainingTopic[] = [
   supplemental(
     "gt-13",
     4,
-    "Emergency readiness — stop the procedure at once and call the on-call nurse, house manager, or DPM if anything goes wrong.",
+    "Emergency readiness — stop the procedure at once and call the on-call nurse, house manager, or PM if anything goes wrong.",
     "G-tube competency template",
     { perIndividual: true, reusableTemplate: true },
   ),
@@ -278,7 +278,7 @@ const GTUBE_TOPICS: TrainingTopic[] = [
   supplemental(
     "gt-22",
     5,
-    "Documentation & communication — tell the house manager and DPM right away about any change at the G-tube site or any unusual reaction.",
+    "Documentation & communication — tell the house manager and PM right away about any change at the G-tube site or any unusual reaction.",
     "G-tube competency template",
     { perIndividual: true, reusableTemplate: true },
   ),

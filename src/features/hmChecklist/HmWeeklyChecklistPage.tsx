@@ -178,8 +178,8 @@ export default function HmWeeklyChecklistPage() {
         <section className="panel">
           <h2>No open checklist for this week</h2>
           <p>
-            Your DPM assigns the weekly checklist each week. If one should be
-            here, ask your DPM to assign it.
+            Your PM assigns the weekly checklist each week. If one should be
+            here, ask your PM to assign it.
           </p>
         </section>
       )}

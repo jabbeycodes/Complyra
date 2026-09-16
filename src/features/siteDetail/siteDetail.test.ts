@@ -18,7 +18,6 @@ function sessionFor(
     administrator: "administrator",
     compliance_admin: "compliance_admin",
     house_manager: "manager",
-    degreed_professional_manager: "manager",
     program_manager: "manager",
     nurse: "nurse",
     hr: "hr",
@@ -95,7 +94,7 @@ describe("site detail tabs", () => {
 
   it("gates restricted tabs for a non-privileged role", () => {
     const dspTabs = getSiteDetailTabs(sessionFor("dsp")).map((t) => t.id);
-    // DSP has no audit.read, so no audits tab; checklists need HM/DPM scope.
+    // DSP has no audit.read, so no audits tab; checklists need HM/PM scope.
     assert.ok(!dspTabs.includes("audits"), "DSP does not see audits");
     assert.ok(!dspTabs.includes("checklists"), "DSP does not see checklists");
     // DSP does see documents (documents.view is in the template).

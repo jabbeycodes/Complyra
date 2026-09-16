@@ -40,7 +40,7 @@ async function drawSignature(page: Page) {
   await page.mouse.up();
 }
 
-test("RN/DPM/HM see clinical dates that reset on upload, and RN signs first", async ({
+test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", async ({
   page,
 }, testInfo) => {
   const shot = (name: string) =>

@@ -59,8 +59,8 @@ function emptyForm(): FormState {
 }
 
 /**
- * Yearly tracking is only available to administrators and degreed
- * professional managers (plus the platform owner) — Joshua's 2026-09-14 spec.
+ * Yearly tracking is only available to administrators and program
+ * managers (plus the platform owner) — Joshua's 2026-09-14 spec.
  */
 function canViewYearlySummary(
   session: { roleKey: string; platformAdmin: boolean } | null,

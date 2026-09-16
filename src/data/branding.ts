@@ -20,7 +20,7 @@ export function canManageAgencyLogo(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 

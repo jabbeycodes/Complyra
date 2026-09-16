@@ -152,7 +152,7 @@ test("submit rejects blank items, naming them", async () => {
   );
 });
 
-test("only DPM/admin can assign; item 21 cannot be answered by hand", async () => {
+test("only PM/admin can assign; item 21 cannot be answered by hand", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const ws = await api.loadWorkspace(admin);
@@ -172,7 +172,7 @@ test("only DPM/admin can assign; item 21 cannot be answered by hand", async () =
         hmUserId: hmStaff.id,
         weekOf: weekOfSundayIso(todayIso()),
       }),
-    /Only a DPM or agency administrator/,
+    /Only a PM or agency administrator/,
   );
 
   await api.signIn(login(hmStaff.username));
@@ -186,7 +186,7 @@ test("only DPM/admin can assign; item 21 cannot be answered by hand", async () =
       hmUserId: hmStaff.id,
       weekOf: weekOfSundayIso(todayIso()),
     }),
-    /Only a DPM or agency administrator/,
+    /Only a PM or agency administrator/,
   );
 });
 

@@ -23,7 +23,7 @@ export default function MonthlyDueSettings({
         <strong>Monthly check due dates</strong>
         <small>
           Equipment, emergency drills, and the home safety report are due by
-          this day each month. A DPM sets this when the agency is stood up.
+          this day each month. A PM sets this when the agency is stood up.
           Default is the 7th.
         </small>
       </span>

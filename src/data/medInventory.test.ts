@@ -441,10 +441,10 @@ test("DSP can view inventory but cannot adjust it", async () => {
       quantityDelta: 1,
       reason: "dsp correction",
     }),
-    /House manager, RN, or DPM/,
+    /House manager, RN, or PM/,
   );
   await assert.rejects(
     client.setReorderThreshold({ medicationId: views[0].medicationId, lowThresholdDays: 10 }),
-    /House manager, RN, or DPM/,
+    /House manager, RN, or PM/,
   );
 });

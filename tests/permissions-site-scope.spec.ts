@@ -163,24 +163,24 @@ test("a person added on a new site keeps that site on a requirement", async ({
   await expect(row).not.toContainText("Cedar House");
 });
 
-test("inviting qa.dpm then signing in is recognized", async ({ page }) => {
+test("inviting qa.pm then signing in is recognized", async ({ page }) => {
   await signedIn(page);
   await openNav(page);
   await page.getByRole("button", { name: "Staff", exact: true }).click();
   await page.getByRole("button", { name: "Add member" }).click();
   const dialog = page.getByRole("dialog", { name: "Add a member" });
-  await dialog.getByLabel("Full name").fill("QA Degreed Manager");
-  await dialog.getByLabel("Username").fill("qa.dpm");
+  await dialog.getByLabel("Full name").fill("QA Program Manager");
+  await dialog.getByLabel("Username").fill("qa.pm");
   await dialog.getByLabel("Temporary password").fill("TempPass!1");
-  await dialog.getByLabel("Role").selectOption("degreed_professional_manager");
+  await dialog.getByLabel("Role").selectOption("program_manager");
   await dialog.getByRole("button", { name: "Create member account" }).click();
-  await expect(dialog).toContainText("qa.dpm");
+  await expect(dialog).toContainText("qa.pm");
   await expect(dialog).toContainText("EVERGREEN-MO");
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Your profile" }).click();
   await page.getByRole("dialog", { name: "Your profile" }).getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
-  await page.getByLabel("Username").fill("qa.dpm");
+  await page.getByLabel("Username").fill("qa.pm");
   await page.locator('input[autocomplete="current-password"]').fill("TempPass!1");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
