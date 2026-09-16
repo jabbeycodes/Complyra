@@ -94,7 +94,9 @@
 }
 
 .appointments-cell {
-  min-height: 64px;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  min-width: 0;
   border: 1px solid #e9e6e1;
   border-radius: 10px;
   background: #fff;
@@ -148,7 +150,12 @@
 
 @media (max-width: 640px) {
   .appointments-cell {
-    min-height: 48px;
     padding: 6px;
+  }
+  .appointments-cell span {
+    font-size: 13px;
+  }
+  .appointments-cell em {
+    font-size: 11px;
   }
 }

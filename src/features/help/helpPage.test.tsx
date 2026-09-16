@@ -51,3 +51,19 @@ describe("HelpPage", () => {
     assert.ok(html.includes("help-toc"), "topic jump list");
   });
 });
+
+describe("HelpPage platform tour", () => {
+  it("shows the tour entry point in demo mode", () => {
+    const html = renderToStaticMarkup(
+      <HelpPage demoMode={true} onRestartTour={() => {}} />,
+    );
+    assert.ok(html.includes("Platform tour"), "tour section heading");
+    assert.ok(html.includes("Restart tour"), "tour restart button");
+  });
+
+  it("hides the tour entry point outside demo mode", () => {
+    const html = renderToStaticMarkup(<HelpPage />);
+    assert.ok(!html.includes("Platform tour"), "no tour section");
+    assert.ok(!html.includes("Restart tour"), "no tour button");
+  });
+});

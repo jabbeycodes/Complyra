@@ -1732,18 +1732,25 @@ export default function App() {
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
               )}
-              {page === "Help" && <HelpPage />}
+              {page === "Help" && (
+                <HelpPage
+                  demoMode={demoMode}
+                  onRestartTour={() => setTourOpen(true)}
+                />
+              )}
             </>
           )}
           </Suspense>
         </main>
-        <div className="demo-strip">
-          <span className="demo-dot" /> INTERACTIVE PREVIEW{" "}
-          <span>Fictional records. Real possibilities.</span>
-          <button onClick={() => navigate("Help")}>
-            About this workspace <ArrowUpRight size={12} />
-          </button>
-        </div>
+        {demoMode && (
+          <div className="demo-strip">
+            <span className="demo-dot" /> INTERACTIVE PREVIEW{" "}
+            <span>Fictional records. Real possibilities.</span>
+            <button onClick={() => navigate("Help")}>
+              About this workspace <ArrowUpRight size={12} />
+            </button>
+          </div>
+        )}
       </div>
       {toast && (
         <div role="status" className="toast">
