@@ -106,6 +106,9 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+// HR-EMPLOYEE-HUB (2026-09-16)
+import { Briefcase } from "lucide-react";
+import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
 import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
 import SitesList from "./features/sites/SitesList";
 import InactivityGuard from "./security/InactivityGuard";
@@ -626,6 +629,10 @@ export default function App() {
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
       ],
+    },
+    {
+      title: "EMPLOYEE HUB",
+      items: [["Employee Hub", Briefcase]],
     },
   ] as const;
   return (
@@ -1626,6 +1633,8 @@ export default function App() {
               {page === "Supply forecast" && <MedInventoryPage />}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
+              {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}
+              {page === "Employee Hub" && <EmployeeHubPage />}
               {page === "AI settings" && <AiSettingsPage />}
               {/* QA-AUDIT-PAGE (2026-09-14) */}
               {page === "QA Review" && <QaAuditsPage />}

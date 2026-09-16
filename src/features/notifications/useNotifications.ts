@@ -235,7 +235,7 @@ export interface QueueResult {
   errors: number;
 }
 
-async function emitOne(
+export async function emitOne(
   client: SupabaseClient,
   payload: NotificationPayload,
 ): Promise<"emitted" | "deduped" | "error"> {
@@ -324,4 +324,26 @@ export async function queueClientNotifications(
   }
 
   return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* HR event emitter (shift swaps and other hub events)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Fire-and-forget HR event emitter. Wraps emitOne so callers can raise a
+ * hub notification after a successful mutation without awaiting it.
+ *
+ * Never throws: failures are logged with console.warn only, so a
+ * notification hiccup can never break the underlying store mutation.
+ */
+export async function emitHrEvent(
+  client: SupabaseClient,
+  payload: NotificationPayload,
+): Promise<void> {
+  try {
+    await emitOne(client, payload);
+  } catch (err) {
+    console.warn("[notifications] emitHrEvent failed:", err);
+  }
 }

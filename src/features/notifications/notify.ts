@@ -40,7 +40,10 @@ export type NotificationType =
   | "qa.dispute_raised"
   | "qa.dispute_resolved"
   | "qa.schedule_due"
-  | "qa.schedule_overdue";
+  | "qa.schedule_overdue"
+  | "hr.swap_requested"
+  | "hr.swap_approved"
+  | "hr.swap_denied";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -67,6 +70,9 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "qa.dispute_resolved",
   "qa.schedule_due",
   "qa.schedule_overdue",
+  "hr.swap_requested",
+  "hr.swap_approved",
+  "hr.swap_denied",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -146,6 +152,7 @@ export function notificationPage(link: string): string | null {
   if (/^\/certificates(?:\/|$)/.test(path)) return "Certificates";
   if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
   if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
+  if (/^\/hub(?:\/|$)/.test(path)) return "Employee Hub";
   if (/^\/recognition(?:\/|$)/.test(path)) return "Recognition";
   if (/^\/plans(?:\/|$)/.test(path)) return "Individuals";
   if (/^\/requirements(?:\/|$)/.test(path)) return "Requirements";
@@ -214,6 +221,9 @@ export const NOTIFICATION_META: Record<
   "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
   "qa.schedule_due": { status: "expiring", label: "QA audit due" },
   "qa.schedule_overdue": { status: "late", label: "QA audit overdue" },
+  "hr.swap_requested": { status: "pending", label: "Shift swap requested" },
+  "hr.swap_approved": { status: "compliant", label: "Shift swap approved" },
+  "hr.swap_denied": { status: "expired", label: "Shift swap denied" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
@@ -772,5 +782,65 @@ export function incidentFollowupPayload(input: {
     entityType: "incident",
     entityId: input.incidentId,
     dedupeKey: dedupeKeyFor("incident.followup", input.incidentId),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* HR shift-swap payloads (request → manager decision)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A staff member posted a shift for swap. Notifies the scheduling managers
+ * (roleKey broadcast, e.g. "house_manager" / "program_manager") so they can
+ * review and approve it.
+ */
+export function swapRequestedPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  swapId: string;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "hr.swap_requested",
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_shift_swap",
+    entityId: input.swapId,
+    dedupeKey: dedupeKeyFor("hr.swap_requested", input.swapId),
+  };
+}
+
+/**
+ * A manager decided a shift swap (claim approval or a request decision).
+ * Notifies the requester with the outcome; a claim is also routed through
+ * this builder with approved=true.
+ */
+export function swapDecidedPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  swapId: string;
+  approved: boolean;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  const type: NotificationType = input.approved ? "hr.swap_approved" : "hr.swap_denied";
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type,
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_shift_swap",
+    entityId: input.swapId,
+    dedupeKey: dedupeKeyFor(type, input.swapId),
   };
 }

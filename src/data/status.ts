@@ -124,6 +124,9 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
   if (page === "Mileage") return can(session, "mileage.manage");
+  // HR-EMPLOYEE-HUB-PAGEVIS (2026-09-16): the Employee Hub is reachable by
+  // everyone with hub.access; each tab is permission-gated in-app.
+  if (page === "Employee Hub") return can(session, "hub.access");
   // PCSP-DOCUMENTS-PAGEVIS (AI document ingestion). `documents.review` is
   // owned by the backend workstream — referenced by string until merged.
   if (page === "Document upload") return can(session, "documents.upload");
@@ -176,6 +179,7 @@ export const CANONICAL_PAGE_ORDER = [
   "QA Review",
   "Recognition",
   "Settings",
+  "Employee Hub",
 ] as const;
 
 export function defaultLandingPage(session: SessionUser): string {
