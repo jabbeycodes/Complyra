@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import {
+  APPOINTMENT_TIMEZONES,
+  DEFAULT_APPOINTMENT_TIMEZONE,
   WEEKDAY_LABELS,
   canCompleteAppointments,
+  canManageAppointments,
   canSeeAppointments,
   caseloadAppointmentsFromWorkspace,
   filterCaseloadAppointments,
@@ -19,6 +22,7 @@ import {
   thirtyDayRange,
   uniqueProgramNames,
   type Appointment,
+  type AppointmentDraft,
   type AppointmentStatus,
   type CaseloadAppointment,
 } from "../../data/appointments";
@@ -48,6 +52,7 @@ export default function AppointmentsPage({
   const [createdBy, setCreatedBy] = useState("");
   const [month, setMonth] = useState(monthStart(today));
   const [selectedDay, setSelectedDay] = useState(today);
+  const [addingAppointment, setAddingAppointment] = useState(false);
 
   const caseload = useMemo(
     () =>
@@ -98,6 +103,7 @@ export default function AppointmentsPage({
   const dayRows = filtered.filter((row) => row.startsOn === selectedDay);
   const cells = monthCells(month);
   const canComplete = canCompleteAppointments(session.roleKey);
+  const canAdd = canManageAppointments(session.roleKey);
   const sites = workspace.sites;
   const programs = uniqueProgramNames(sites);
   const individuals = [...workspace.individuals].sort((a, b) => a.name.localeCompare(b.name));
@@ -301,12 +307,15 @@ export default function AppointmentsPage({
                 type="button"
                 role="gridcell"
                 className={`appointments-cell${selected ? " selected" : ""}${inWindow ? "" : " muted"}${isToday ? " today" : ""}`}
-                aria-label={`${formatAppointmentDate(cell.date)}${count ? `, ${count} appointment${count === 1 ? "" : "s"}` : ""}`}
+                aria-label={`${formatAppointmentDate(cell.date)}, ${count} appointment${count === 1 ? "" : "s"}`}
                 aria-pressed={selected}
-                onClick={() => setSelectedDay(cell.date!)}
+                onClick={() => {
+                  setSelectedDay(cell.date!);
+                  setAddingAppointment(false);
+                }}
               >
                 <span>{Number(cell.date.slice(8))}</span>
-                {count > 0 && <em>{count}</em>}
+                <em>{count}</em>
               </button>
             );
           })}
@@ -319,6 +328,30 @@ export default function AppointmentsPage({
 
       <section className="panel" aria-labelledby="appointments-day-heading">
         <h2 id="appointments-day-heading">{formatAppointmentDate(selectedDay)}</h2>
+        {canAdd && !addingAppointment && (
+          <div className="chart-actions">
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => setAddingAppointment(true)}
+            >
+              <Plus size={16} /> Add appointment
+            </button>
+          </div>
+        )}
+        {canAdd && addingAppointment && (
+          <AddAppointmentForm
+            individuals={individuals}
+            defaultDate={selectedDay}
+            onCancel={() => setAddingAppointment(false)}
+            onSave={async (individualId, draft) => {
+              await run(() =>
+                api.createAppointment({ individualId, ...draft }).then(() => undefined),
+              );
+              setAddingAppointment(false);
+            }}
+          />
+        )}
         {dayRows.length === 0 ? (
           <p>
             {filtersActive
@@ -397,5 +430,149 @@ function DayAppointmentCard({
         onOpenFile={onOpenFile}
       />
     </article>
+  );
+}
+
+function AddAppointmentForm({
+  individuals,
+  defaultDate,
+  onCancel,
+  onSave,
+}: {
+  individuals: { id: string; name: string }[];
+  defaultDate: string;
+  onCancel: () => void;
+  onSave: (individualId: string, draft: AppointmentDraft) => Promise<void>;
+}) {
+  const [individualId, setIndividualId] = useState("");
+  const [draft, setDraft] = useState<AppointmentDraft>({
+    startsOn: defaultDate,
+    startTime: "09:00",
+    endTime: "10:00",
+    timezone: DEFAULT_APPOINTMENT_TIMEZONE,
+    consultant: "",
+    specialty: "",
+    reason: "",
+    visitAddress: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const zones = APPOINTMENT_TIMEZONES.includes(
+    draft.timezone as (typeof APPOINTMENT_TIMEZONES)[number],
+  )
+    ? APPOINTMENT_TIMEZONES
+    : ([draft.timezone, ...APPOINTMENT_TIMEZONES] as string[]);
+
+  return (
+    <form
+      className="renewal-upload appointment-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!individualId) return;
+        setBusy(true);
+        try {
+          await onSave(individualId, draft);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <strong>New appointment</strong>
+      <label>
+        Individual
+        <select
+          value={individualId}
+          onChange={(e) => setIndividualId(e.target.value)}
+          required
+        >
+          <option value="">Choose an Individual</option>
+          {individuals.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Date
+        <input
+          type="date"
+          value={draft.startsOn}
+          onChange={(e) => setDraft({ ...draft, startsOn: e.target.value })}
+          required
+        />
+      </label>
+      <label>
+        Start
+        <input
+          type="time"
+          value={draft.startTime}
+          onChange={(e) => setDraft({ ...draft, startTime: e.target.value })}
+          required
+        />
+      </label>
+      <label>
+        End
+        <input
+          type="time"
+          value={draft.endTime}
+          onChange={(e) => setDraft({ ...draft, endTime: e.target.value })}
+          required
+        />
+      </label>
+      <label>
+        Timezone
+        <select
+          value={draft.timezone}
+          onChange={(e) => setDraft({ ...draft, timezone: e.target.value })}
+        >
+          {zones.map((zone) => (
+            <option key={zone} value={zone}>
+              {zone}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Consultant
+        <input
+          value={draft.consultant}
+          onChange={(e) => setDraft({ ...draft, consultant: e.target.value })}
+          placeholder="Name of the clinician"
+          required
+        />
+      </label>
+      <label>
+        Specialty
+        <input
+          value={draft.specialty}
+          onChange={(e) => setDraft({ ...draft, specialty: e.target.value })}
+          placeholder="Optional"
+        />
+      </label>
+      <label>
+        Reason
+        <input
+          value={draft.reason}
+          onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+          placeholder="Optional"
+        />
+      </label>
+      <label>
+        Address of visit
+        <input
+          value={draft.visitAddress}
+          onChange={(e) => setDraft({ ...draft, visitAddress: e.target.value })}
+          placeholder="Optional"
+        />
+      </label>
+      <div className="chart-actions">
+        <button className="button primary" type="submit" disabled={busy || !individualId}>
+          Save appointment
+        </button>
+        <button className="button" type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

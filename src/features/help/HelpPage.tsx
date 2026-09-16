@@ -106,10 +106,32 @@ const FAQS: { q: string; a: string }[] = [
   },
 ];
 
-export default function HelpPage() {
+export default function HelpPage({
+  demoMode,
+  onRestartTour,
+}: {
+  demoMode?: boolean;
+  onRestartTour?: () => void;
+}) {
   return (
     <div data-tour="help">
       <PageHeading title="Help" />
+      {demoMode && onRestartTour && (
+        <section className="panel" aria-label="Platform tour">
+          <h2>Platform tour</h2>
+          <ul className="help-list">
+            <li>
+              Take the guided walkthrough again any time — it highlights each
+              part of the platform in order.
+            </li>
+          </ul>
+          <div className="chart-actions">
+            <button className="button primary" type="button" onClick={onRestartTour}>
+              Restart tour
+            </button>
+          </div>
+        </section>
+      )}
       <nav className="help-toc panel" aria-label="Help topics">
         <h2>Guides</h2>
         <ul>
