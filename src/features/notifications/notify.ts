@@ -716,7 +716,7 @@ export function delegationUnacknowledgedPayload(input: {
 }
 
 /**
- * A plan/ISP renewal is approaching. Targeted at the DPM/program manager
+ * A plan/ISP renewal is approaching. Targeted at the program manager
  * who owns renewals. Dedupe is per plan + due date so each renewal cycle
  * notifies once.
  */

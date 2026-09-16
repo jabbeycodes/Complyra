@@ -622,7 +622,7 @@ function RequiredList({
             {waitingOnRn && (
               <p className="rn-gate">
                 The delegating RN must sign this form first. Staff cannot sign
-                yet, even if a DPM created or turned the form on.
+                yet, even if a PM created or turned the form on.
               </p>
             )}
             {view.item.rnSignedAt && (
@@ -808,7 +808,7 @@ function CheckedList({
     <div className="obligation-list">
       <p className="stack-help">
         These sections were found in the plan. They are not signature tasks
-        unless a DPM turns one into a daily shift requirement.
+        unless a PM turns one into a daily shift requirement.
       </p>
       {editExtract && (
         <label>

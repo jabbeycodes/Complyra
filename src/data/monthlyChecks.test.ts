@@ -215,7 +215,7 @@ test("a new month does not clear last month’s completed log", async () => {
   assert.equal(october?.checkedOn, null);
 });
 
-test("a DPM or admin can change monthly due days; a DSP cannot", async () => {
+test("a PM or admin can change monthly due days; a DSP cannot", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -248,7 +248,7 @@ test("a DPM or admin can change monthly due days; a DSP cannot", async () => {
         drillDay: 1,
         safetyDay: 1,
       }),
-    /DPM or administrator/,
+    /PM or administrator/,
   );
 });
 

@@ -74,14 +74,13 @@ export function canSeeAppointments(roleKey: string) {
 
 /**
  * Create / edit / soft-delete appointments and edit allergies.
- * DSP and auditor cannot. Matches the #45 H1 brief: RN + HM, plus Admin / DPM / PM.
+ * DSP and auditor cannot. Matches the #45 H1 brief: RN + HM, plus Admin / PM.
  */
 export function canManageAppointments(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
     "program_manager",
     "nurse",
   ].includes(roleKey);

@@ -101,7 +101,7 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
         <div>
           <h2 id="site-review-heading">Site review pack · {site.name}</h2>
           <p>
-            DPM confirms the environmental and HCBS checks are in place at
+            PM confirms the environmental and HCBS checks are in place at
             this home. Smoke, CO, water temperature, extinguisher, and first
             aid stay on the monthly safety report — this pack points at that
             evidence instead of asking staff to check them twice.

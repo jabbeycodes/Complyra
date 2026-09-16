@@ -341,7 +341,7 @@ export function requiredForSigning(items: ObligationItem[], today?: string) {
   );
 }
 
-/** Typical residential PCSP sections. DPM edits these after extraction. */
+/** Typical residential PCSP sections. PM edits these after extraction. */
 export function proposeFromPcsp(input: {
   agencyId: string;
   individualId: string;
@@ -386,7 +386,7 @@ export function proposeFromPcsp(input: {
       ["Seizure protocol", "Staff follow the individual's seizure protocol and give PRN medication when needed.", 5],
       ["Bowel movement protocol", "Staff follow the bowel protocol on file in the home.", 6],
       ["Behavioral support strategies", "Staff use the positive support strategy plan when the individual is upset.", 7],
-      ["PRN medication protocol", "House manager contacts RN/DPM before a mood PRN is given.", 7],
+      ["PRN medication protocol", "House manager contacts RN/PM before a mood PRN is given.", 7],
       ["Eating / food size", "Food is cut to the planned size. Staff feed or hand utensils as written.", 8],
     ] as [string, string, number][]
   ).map(([title, detail, page]) => ({
@@ -409,7 +409,7 @@ export function proposeFromPcsp(input: {
     mode: "required",
     title: "RN delegation of specified nursing task",
     detail:
-      "Detected from the plan. DPM or RN can turn this on for assigned staff to sign. Off until they do.",
+      "Detected from the plan. PM or RN can turn this on for assigned staff to sign. Off until they do.",
     sourcePage: null,
     frequency: "As delegated",
     enabled: false,
@@ -466,25 +466,25 @@ export function canEditCover(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 
 export function canEditExtraction(roleKey: string, canApprove: boolean) {
-  return canApprove || roleKey === "degreed_professional_manager";
+  return canApprove || roleKey === "program_manager";
 }
 
 export function canToggleDelegation(roleKey: string, role: string, canApprove: boolean) {
   return role === "nurse" || roleKey === "nurse" || canEditExtraction(roleKey, canApprove);
 }
 
-/** RN, DPM, HM, admin, and auditor see clinical due dates on the chart. */
+/** RN, PM, HM, admin, and auditor see clinical due dates on the chart. */
 export function canSeeRenewals(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
     "nurse",
     "auditor",
   ].includes(roleKey);

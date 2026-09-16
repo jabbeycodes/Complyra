@@ -71,7 +71,7 @@ await client.auth.signOut();
 
 const service = createClient(config.API_URL, config.SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 // Always revoke temporary memberships; a local database reset clears all fixtures.
-for (const roleKey of ['compliance_admin','degreed_professional_manager','program_manager','hr','auditor']) {
+for (const roleKey of ['compliance_admin','program_manager','hr','auditor']) {
   const username = `audit.${roleKey.replaceAll('_','')}.${suffix}`;
   const email = `${username}@example.invalid`;
   const { data: auth, error } = await service.auth.admin.createUser({ email, password: 'AuditVerify!123', email_confirm: true, user_metadata: { username, full_name: 'Fictional verification', home_agency_id: session.agencyId, must_change_password: false } });

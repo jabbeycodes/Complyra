@@ -43,7 +43,7 @@ const REAUTH_WINDOW_SECONDS = 300;
 const REAUTH_MAX_ATTEMPTS = 5;
 const REAUTH_LOCKOUT_SECONDS = 15 * 60;
 
-const HM_ROLE_KEYS = ["administrator", "house_manager", "degreed_professional_manager"];
+const HM_ROLE_KEYS = ["administrator", "house_manager", "program_manager"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

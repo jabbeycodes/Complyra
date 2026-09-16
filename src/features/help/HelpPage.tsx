@@ -38,7 +38,7 @@ const SECTIONS: {
     title: "Delegations",
     points: [
       "Delegations holds the agency-wide template library (nursing and care tasks, in Complyrer's own wording).",
-      "A degreed professional manager activates a template for a program site, drafts the training material, and a nurse or DPM reviews and approves it.",
+      "A program manager activates a template for a program site, drafts the training material, and a nurse or PM reviews and approves it.",
       "Approved delegations go to site staff, who review and sign acknowledgment. Signed vs. unsigned staff are tracked on the delegation.",
     ],
   },
@@ -49,7 +49,7 @@ const SECTIONS: {
       "House managers answer every item each week — no blanks — and add service-log entries for second-page notes.",
       "Submit by Monday at 4:00 p.m. Late submissions stay flagged as late on the record.",
       "The checklist auto-renews every Sunday: prior open weeks lock as overdue and a fresh blank checklist opens for the new week. Nothing carries over — each week starts clean.",
-      "DPMs and administrators assign checklists and watch every home's status on Checklist assignments.",
+      "PMs and administrators assign checklists and watch every home's status on Checklist assignments.",
     ],
   },
   {

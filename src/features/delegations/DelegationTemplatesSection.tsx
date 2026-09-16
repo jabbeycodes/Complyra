@@ -20,7 +20,7 @@ import SignaturePad from "../SignaturePad";
 
 /**
  * Delegation template library UI: common templates -> site activation
- * ("In preparation") -> assignment to an individual -> DPM/RN review of the
+ * ("In preparation") -> assignment to an individual -> PM/RN review of the
  * training draft -> publication -> staff review & electronic acknowledgment.
  *
  * The ComplyraApi methods below are being implemented by a sibling agent; the

@@ -58,7 +58,7 @@ test("monthly equipment, drills, and safety are due by the 7th and downloadable 
   );
 });
 
-test("DPM can change monthly due days in settings", async ({ page }) => {
+test("PM can change monthly due days in settings", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
@@ -74,7 +74,7 @@ test("DPM can change monthly due days in settings", async ({ page }) => {
   await expect(page.getByText(/checked by the 15th of each month/)).toBeVisible();
 });
 
-test("people without equipment do not get an equipment log unless DPM adds one", async ({
+test("people without equipment do not get an equipment log unless PM adds one", async ({
   page,
 }) => {
   await signIn(page);

@@ -53,7 +53,7 @@ test("Evergreen seed exposes a logo and branded PDFs accept it", async () => {
   assert.match(sheet.output("datauristring"), /application\/pdf/);
 });
 
-test("DPM can replace or remove the logo; a DSP cannot", async () => {
+test("PM can replace or remove the logo; a DSP cannot", async () => {
   const client = api();
   const admin = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,

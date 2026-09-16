@@ -75,7 +75,6 @@ export type RoleKey =
   | "administrator"
   | "compliance_admin"
   | "house_manager"
-  | "degreed_professional_manager"
   | "program_manager"
   | "dsp"
   | "nurse"
@@ -124,7 +123,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     defaultScope: "agency",
     capability: "compliance_admin",
     // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
-    // the compliance_admin defaults — the auditor role owns scoring, DPM/HM
+    // the compliance_admin defaults — the auditor role owns scoring, PM/HM
     // own disputes and schedules. Grantable explicitly via Roles & access.
     permissions: pack(ALL.filter((key) => key !== "hr.view_staff" && !key.startsWith("qa."))),
   },
@@ -132,7 +131,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: "house_manager",
     name: "House manager",
     shortCode: "HM",
-    description: "Runs one home, creates plans for DPM approval, and signs acknowledgments for that site.",
+    description: "Runs one home, creates plans for PM approval, and signs acknowledgments for that site.",
     defaultScope: "site",
     capability: "manager",
     permissions: pack([
@@ -156,10 +155,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     ]),
   },
   {
-    key: "degreed_professional_manager",
-    name: "Degreed professional manager",
-    shortCode: "DPM",
-    description: "Program-level QIDP/QIP oversight: upload, approve, sign, and reset staff passwords.",
+    key: "program_manager",
+    name: "Program Manager",
+    shortCode: "PM",
+    description:
+      "Program-level oversight across homes: creates and approves ISPs/PCSPs, uploads and signs plans, reviews delegation training, and resets staff passwords.",
     defaultScope: "program",
     capability: "manager",
     permissions: pack([
@@ -190,36 +190,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.assign",
       "delegation.training.review",
       "delegation.training.approve",
-      "delegation.acknowledge",
-    ]),
-  },
-  {
-    key: "program_manager",
-    name: "Program manager",
-    shortCode: "PM",
-    description: "Creates and approves ISPs/PCSPs across homes, and signs the plans they oversee.",
-    defaultScope: "program",
-    capability: "manager",
-    permissions: pack([
-      "individuals.view",
-      "documents.view",
-      "documents.upload",
-      // PCSP-EXTRACTION: review/approve AI-extracted items.
-      "documents.review",
-      "requirements.approve",
-      "requirements.complete",
-      "acknowledgments.manage",
-      "acknowledgments.sign_own",
-      "clinical.view",
-      "audit.read",
-      "audit.export",
-      "correctiveActions.manage",
-      "mileage.manage",
-      "recognition.view_winners",
-      "recognition.manage",
-      // DELEGATION: activate templates + sign own acknowledgments.
-      "delegation.templates.view",
-      "delegation.activate",
       "delegation.acknowledge",
     ]),
   },
@@ -345,7 +315,6 @@ export const GRANT_RULES: Record<RoleKey, readonly RoleKey[] | "any"> = {
   administrator: ["administrator"],
   compliance_admin: ["administrator", "compliance_admin"],
   house_manager: "any",
-  degreed_professional_manager: "any",
   program_manager: "any",
   dsp: "any",
   nurse: "any",
@@ -439,7 +408,6 @@ export const TEMPLATE_LOCKED_PERMISSIONS: Record<RoleKey, readonly PermissionKey
   administrator: ["members.assign_roles", "roles.manage"],
   compliance_admin: [],
   house_manager: [],
-  degreed_professional_manager: [],
   program_manager: [],
   dsp: [],
   nurse: [],
@@ -585,7 +553,6 @@ export function assertNoDrift(allKnownKeys: string[]): void {
 
 export const PLAN_SIGNER_ROLE_KEYS: RoleKey[] = [
   "house_manager",
-  "degreed_professional_manager",
   "program_manager",
 ];
 

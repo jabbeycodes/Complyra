@@ -1,11 +1,11 @@
 /**
  * PCSP document-extraction pipeline — shared types + pure validation.
  *
- * When an administrator or DPM uploads a PCSP (or annual physician order),
+ * When an administrator or PM uploads a PCSP (or annual physician order),
  * the `extract-pcsp` edge function calls Gemini with a strict response
  * schema, records the structured result in `document_extractions`, and
  * proposes one `document_trackable_items` row per deadline / training
- * requirement / protocol / order / missing signature. A DPM/RN then
+ * requirement / protocol / order / missing signature. A PM/RN then
  * reviews, edits, approves (nothing becomes tracked before approval), and
  * activates each item. Activating a `protocol_needs_delegation` item hands
  * off into the delegation system: a delegation template is ensured,

@@ -238,7 +238,7 @@ export const SITE_REVIEW_SECTIONS: { id: SiteReviewSectionId; title: string; hel
   {
     id: "interior",
     title: "Part I · Home interior",
-    help: "Support coordinator and provider walk the home before a new lease. DPM keeps the working copy current.",
+    help: "Support coordinator and provider walk the home before a new lease. PM keeps the working copy current.",
   },
   {
     id: "exterior",
@@ -261,7 +261,7 @@ export function canEditSiteReview(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
-    "degreed_professional_manager",
+    "program_manager",
     "house_manager",
   ].includes(roleKey);
 }

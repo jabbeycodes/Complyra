@@ -9,7 +9,7 @@
  *    prove stays auditor-scored (never an automatic fail).
  *  - The auditor scores the rest Yes / No / N/A, or skips an item (skipped =
  *    excluded from scoring, tracked as not-assessed).
- *  - DPMs and HMs may dispute an auditor-scored item with photo evidence + a
+ *  - PMs and HMs may dispute an auditor-scored item with photo evidence + a
  *    note. The auditor approves (score flips) or rejects (score stands, reason
  *    recorded). Locked system items cannot be disputed.
  *  - Scoring: Yes = pass, No = fail, N/A and skipped excluded. Section scores
@@ -80,7 +80,7 @@ export const QA_ITEMS: QaChecklistItemDef[] = [
   { id: "home.rights-limits-documented", sectionId: "home", text: "Any limits on individual rights are documented and approved", hint: "Locks, chimes, or other restrictions" },
   // ---- Health & safety (13) ----
   { id: "safety.evac-maps-posted", sectionId: "safety", text: "Evacuation maps are posted where everyone can see them" },
-  { id: "safety.emergency-numbers-posted", sectionId: "safety", text: "Emergency numbers are posted, including the home address", hint: "911, poison control, HM, DPM, guardian" },
+  { id: "safety.emergency-numbers-posted", sectionId: "safety", text: "Emergency numbers are posted, including the home address", hint: "911, poison control, HM, PM, guardian" },
   { id: "safety.water-temp-log", sectionId: "safety", text: "Hot-water temperature checks are done and the log is current" },
   { id: "safety.detectors-tested", sectionId: "safety", text: "Smoke and carbon-monoxide detectors are tested with fresh batteries" },
   { id: "safety.extinguisher-inspected", sectionId: "safety", text: "Fire extinguisher is inspected and in date" },
@@ -114,7 +114,7 @@ export const QA_ITEMS: QaChecklistItemDef[] = [
   { id: "record.lease", sectionId: "record", perIndividual: true, text: "Signed lease or residency agreement is on file" },
   { id: "record.inventory", sectionId: "record", perIndividual: true, text: "Personal belongings inventory is kept current" },
   // ---- Emergency book (11) ----
-  { id: "emergency.contacts", sectionId: "emergency", text: "Emergency contacts are current", hint: "House manager, DPM, guardian" },
+  { id: "emergency.contacts", sectionId: "emergency", text: "Emergency contacts are current", hint: "House manager, PM, guardian" },
   { id: "emergency.site-plans", sectionId: "emergency", text: "Site-specific emergency plans are on file", hint: "Including hazardous-material storage" },
   { id: "emergency.evac-map", sectionId: "emergency", text: "Evacuation map is in the book" },
   { id: "emergency.drills-on-schedule", sectionId: "emergency", text: "Emergency drills are completed on schedule", autoVerify: "drills_on_schedule" },
@@ -284,7 +284,7 @@ export interface QaAuditItemState {
   scoredBy: string | null;
   scoredByName: string | null;
   scoredAt: string | null;
-  /** Dispute raised by DPM/HM with photo evidence. */
+  /** Dispute raised by PM/HM with photo evidence. */
   disputeNote: string | null;
   disputePhotos: QaPhotoInput[];
   disputeRaisedBy: string | null;
@@ -710,7 +710,7 @@ export function skipQaItemState(
 }
 
 /**
- * DPM/HM raises a dispute on an auditor-scored item with photo evidence.
+ * PM/HM raises a dispute on an auditor-scored item with photo evidence.
  * Locked system items cannot be disputed — they are system facts.
  */
 export function raiseQaDisputeState(

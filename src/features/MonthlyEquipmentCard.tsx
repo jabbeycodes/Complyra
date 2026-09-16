@@ -72,7 +72,7 @@ export default function MonthlyEquipmentCard({
       <h2 id="equipment-log-heading">Adaptive equipment log</h2>
       <p className="stack-help">
         Anyone with equipment on file must be checked by the{" "}
-        {dayOrdinal(dueDay)} of each month. A DPM can change that day in
+        {dayOrdinal(dueDay)} of each month. A PM can change that day in
         Settings. A date with no comment means the item is in good order. The
         log resets on the 1st; finished months stay downloadable.
       </p>

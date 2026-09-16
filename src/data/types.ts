@@ -793,7 +793,7 @@ export interface HmWeeklyChecklist {
   lateFlaggedAt?: string | null;
   /** The HM this instance is assigned to. */
   assignedToUserId: string;
-  /** The DPM (or system rollover) that created the assignment. */
+  /** The PM (or system rollover) that created the assignment. */
   assignedByUserId: string | null;
   status: WeeklyChecklistStatus;
   submittedAt: string | null;

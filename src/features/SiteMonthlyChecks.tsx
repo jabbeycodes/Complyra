@@ -89,7 +89,7 @@ export default function SiteMonthlyChecks({
           <h2 id="site-monthly-heading">Monthly home checks · {site.name}</h2>
           <p>
             Emergency drills are due by the {dayOrdinal(drillDay)}. The home
-            safety report is due by the {dayOrdinal(safetyDay)}. A DPM sets
+            safety report is due by the {dayOrdinal(safetyDay)}. A PM sets
             those days in Settings. They reset when the month ends. Finished
             months stay downloadable.
           </p>

@@ -20,7 +20,7 @@ function tempPassword() {
 
 // P0-4 (2026-09-13): mirrors the client `canGrantRole` in
 // src/data/permissions.ts — callers may only reset passwords for roles they
-// could grant. Without this, a DPM could reset the administrator's password
+// could grant. Without this, a PM could reset the administrator's password
 // and take over the account.
 function canResetPasswordFor(callerRoleKey: string, targetRoleKey: string): boolean {
   if (targetRoleKey === "administrator") return callerRoleKey === "administrator";

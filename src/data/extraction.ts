@@ -8,7 +8,7 @@ import { proposeFromPcsp, type ObligationItem } from "./planStack";
  * document text to Gemini with a strict JSON responseSchema (v1), validates
  * the output, and proposes typed trackable items — deadlines, training
  * requirements, protocols needing delegation, physician orders, and missing
- * signatures. A DPM/RN then reviews, edits, approves (nothing becomes
+ * signatures. A PM/RN then reviews, edits, approves (nothing becomes
  * tracked before approval), and activates each item; protocol items hand
  * off into the delegation system.
  *
@@ -22,7 +22,7 @@ import { proposeFromPcsp, type ObligationItem } from "./planStack";
  * server-side (~120k chars) for PHI minimization.
  *
  * This module's LOCAL path stays a pure demo: extractPlanProposal() calls
- * proposeFromPcsp() — the same proposed stack a DPM would review — never a
+ * proposeFromPcsp() — the same proposed stack a PM would review — never a
  * real model. Live calls belong in the extract-pcsp edge function.
  */
 export const EXTRACTION_PROVIDER = {
@@ -40,6 +40,6 @@ export function extractPlanProposal(input: {
   effectiveOn: string;
 }): ObligationItem[] {
   // Live Gemini calls belong in the extract-pcsp edge function. Local/demo
-  // uses the same proposed stack a DPM would review after extraction.
+  // uses the same proposed stack a PM would review after extraction.
   return proposeFromPcsp(input);
 }

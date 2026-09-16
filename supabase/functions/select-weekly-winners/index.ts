@@ -31,7 +31,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  * changes nothing and reports already_decided.
  *
  * Authorization: the service_role key (external cron) OR a member holding
- * recognition.manage (administrator, compliance_admin, DPM, program_manager
+ * recognition.manage (administrator, compliance_admin, program managers
  * per the canonical templates; per-agency customized templates are honored).
  * JWT callers are scoped to the agencies where they hold the permission.
  *
@@ -177,7 +177,7 @@ Deno.serve(async (req) => {
   }
 
   // -- Authorization: service_role key OR a member holding ---------------
-  // -- recognition.manage (administrator, compliance_admin, DPM, program
+  // -- recognition.manage (administrator, compliance_admin, PM, program
   // -- manager per the canonical templates). JWT callers are scoped to the
   // -- agencies where they hold the permission.
   const authHeader = req.headers.get("Authorization") ?? "";

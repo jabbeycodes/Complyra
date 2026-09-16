@@ -101,7 +101,6 @@ export function canSeeChartWidgets(roleKey: string) {
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
     "program_manager",
     "nurse",
     "auditor",
@@ -116,7 +115,7 @@ export function canRecordDelivery(roleKey: string) {
   return [
     "administrator",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
     "nurse",
   ].includes(roleKey);
 }
@@ -129,14 +128,14 @@ export function canLogPrnDose(roleKey: string) {
  * Who may log a refused / held / wasted dose exception. Matches the
  * med_dose_exceptions RLS insert policy: DSPs record exceptions during the
  * med pass, alongside administrators, compliance admins, house managers,
- * DPMs, and nurses.
+ * PMs, and nurses.
  */
 export function canLogDoseException(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
     "nurse",
     "dsp",
   ].includes(roleKey);
@@ -152,7 +151,7 @@ export function canEditTrainingLine(roleKey: string) {
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 
@@ -161,10 +160,10 @@ export function canEditTrainingLine(roleKey: string) {
  * HM countersignature with a written reason). Matches the
  * training_countersignatures_delete RLS policy — house managers are
  * deliberately excluded; they ask an administrator, compliance admin, or
- * DPM instead.
+ * PM instead.
  */
 export function canRequestTrainingCorrection(roleKey: string) {
-  return ["administrator", "compliance_admin", "degreed_professional_manager"].includes(
+  return ["administrator", "compliance_admin", "program_manager"].includes(
     roleKey,
   );
 }
@@ -173,7 +172,7 @@ export function canSignTrainingAsHm(roleKey: string) {
   return [
     "administrator",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 

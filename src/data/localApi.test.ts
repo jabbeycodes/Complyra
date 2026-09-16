@@ -282,14 +282,14 @@ test("a house manager can upload but cannot approve", async () => {
   await assert.rejects(() => api.approveRequirement("outside-site-draft"), /permission/);
 });
 
-test("a DPM can reset another staff member’s password", async () => {
+test("a PM can reset another staff member’s password", async () => {
   const api = new LocalApi(store());
   await api.signIn(adminLogin());
   await api.inviteMember({
     fullName: "Dana Qidp",
     username: "dana.qidp",
     tempPassword: "TempPass!1",
-    roleKey: "degreed_professional_manager",
+    roleKey: "program_manager",
   });
   await api.signOut();
   await api.signIn({
@@ -312,7 +312,7 @@ test("a DPM can reset another staff member’s password", async () => {
   assert.equal(next.mustChangePassword, true);
 });
 
-test("a DPM/admin can add a site and a person by hand or from a PCSP", async () => {
+test("a PM/admin can add a site and a person by hand or from a PCSP", async () => {
   const api = new LocalApi(store());
   const session = await api.signIn(adminLogin());
   const site = await api.createSite({
@@ -1060,30 +1060,30 @@ test("a requirement draft inherits the individual's site, not the first agency s
   assert.notEqual(requirement.site, "Cedar House");
 });
 
-test("inviting qa.dpm creates a login that is recognized", async () => {
+test("inviting qa.pm creates a login that is recognized", async () => {
   const api = new LocalApi(store());
   await api.signIn(adminLogin());
   const invited = await api.inviteMember({
-    fullName: "QA Degreed Manager",
-    username: "qa.dpm",
+    fullName: "QA Program Manager",
+    username: "qa.pm",
     tempPassword: "TempPass!1",
-    roleKey: "degreed_professional_manager",
+    roleKey: "program_manager",
   });
-  assert.equal(invited.username, "qa.dpm");
+  assert.equal(invited.username, "qa.pm");
   await api.signOut();
   const session = await api.signIn({
     agencyCode: DEMO_AGENCY_CODE,
-    username: "qa.dpm",
+    username: "qa.pm",
     password: "TempPass!1",
   });
-  assert.equal(session.roleKey, "degreed_professional_manager");
+  assert.equal(session.roleKey, "program_manager");
   assert.equal(session.mustChangePassword, true);
   await api.changePassword("TempPass!1", "QaDpm!own2");
   const after = await api.getSession();
   assert.equal(after?.mustChangePassword, false);
   const workspace = await api.loadWorkspace(after!);
   assert.ok(workspace.sites.length > 0);
-  assert.ok(workspace.staff.some((row) => row.username === "qa.dpm"));
+  assert.ok(workspace.staff.some((row) => row.username === "qa.pm"));
 });
 
 test("sign-in names a missing membership separately from a bad password", async () => {

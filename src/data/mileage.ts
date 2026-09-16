@@ -209,18 +209,18 @@ export function assertCanBackfillMileage(session: {
 // ---------- Role gates (Joshua's 2026-09-14 spec) ----------
 // The normal monthly mileage sheet is for house managers and DSPs at their
 // sites; only house managers can download/print it. The yearly tracking
-// sheet is only available to administrators and degreed professional
-// managers. The platform owner keeps full access everywhere.
+// sheet is only available to administrators and program managers.
+// The platform owner keeps full access everywhere.
 
 /** Roles allowed to view and download the yearly mileage summary. */
 export const MILEAGE_YEARLY_ROLE_KEYS = [
   "administrator",
-  "degreed_professional_manager",
+  "program_manager",
 ] as const;
 
 /**
  * Whether this session may view the yearly mileage summary: administrators,
- * degreed professional managers, and platform admins only.
+ * program managers, and platform admins only.
  */
 export function canViewMileageYearlySummary(
   session: { roleKey: string; platformAdmin: boolean } | null,
@@ -239,7 +239,7 @@ export function assertCanViewMileageYearlySummary(session: {
 }): void {
   if (!canViewMileageYearlySummary(session)) {
     throw new Error(
-      "Only administrators and degreed professional managers " +
+      "Only administrators and program managers " +
         "can view the yearly mileage summary.",
     );
   }
@@ -482,7 +482,7 @@ export function summarizeYearlyMileage(
 // program site, grouped by site, with Jan–Dec columns, a Yearly Total per
 // individual, and one Grand Total row across the whole agency. Same equal-
 // share math as the per-site summary; the agency view is administrator /
-// degreed-professional-manager / platform-owner only.
+// program-manager / platform-owner only.
 
 export interface MileageAgencyYearSiteInput {
   siteId: string;

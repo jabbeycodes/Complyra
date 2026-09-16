@@ -56,12 +56,21 @@ const CONSOLIDATED_SOURCES = [
   "src/features/InviteMemberForm.tsx",
 ] as const;
 
-test("truth: all 9 role keys exist in ROLE_TEMPLATE_BY_KEY with full maps", () => {
+// Program Manager merge migration (2026-09-16): refreshes the canonical
+// program_manager row with the wider former-DPM permission pack and migrates
+// any lingering degreed_professional_manager memberships/agency roles.
+const MERGE_MIGRATION_PATH = join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260916060000_merge_dpm_program_manager.sql",
+);
+
+test("truth: all 8 role keys exist in ROLE_TEMPLATE_BY_KEY with full maps", () => {
   assert.deepEqual([...ROLE_KEYS].sort(), [
     "administrator",
     "auditor",
     "compliance_admin",
-    "degreed_professional_manager",
     "dsp",
     "house_manager",
     "hr",
@@ -128,14 +137,22 @@ test("truth: migration seed contains every role key and every permission key", (
 });
 
 test("truth: migration seed JSON matches the canonical template maps exactly", () => {
-  const sql = readFileSync(LATEST_SEED_MIGRATION_PATH, "utf8");
+  const seedSql = readFileSync(LATEST_SEED_MIGRATION_PATH, "utf8");
+  const mergeSql = readFileSync(MERGE_MIGRATION_PATH, "utf8");
+  assert.ok(
+    mergeSql.includes("degreed_professional_manager"),
+    "merge migration migrates the retired degreed_professional_manager key",
+  );
   for (const roleKey of ROLE_KEYS) {
     const canonical = JSON.stringify(ROLE_TEMPLATE_BY_KEY[roleKey].permissions);
     // The seed rows were generated from the canonical module, so the exact
-    // serialized map must appear verbatim in the latest seed migration text.
+    // serialized map must appear verbatim in migration text. Program
+    // Manager's latest refresh is the DPM-merge migration (2026-09-16);
+    // every other role still matches the 2026-09-15 seed refresh.
+    const sql = roleKey === "program_manager" ? mergeSql : seedSql;
     assert.ok(
       sql.includes(canonical),
-      `latest seed row for ${roleKey} matches ROLE_TEMPLATE_BY_KEY exactly`,
+      `latest migration row for ${roleKey} matches ROLE_TEMPLATE_BY_KEY exactly`,
     );
   }
 });

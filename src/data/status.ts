@@ -114,7 +114,7 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   if (page === "Checklist assignments") {
     return (
-      session.roleKey === "degreed_professional_manager" ||
+      session.roleKey === "program_manager" ||
       isAgencyAdmin(session.role) ||
       Boolean(session.platformAdmin)
     );
@@ -130,7 +130,7 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Extraction review")
     return can(session, "documents.review" as PermissionKey);
   if (page === "AI settings") return Boolean(session.platformAdmin);
-  // QA-AUDIT (2026-09-14): QA Review is reachable by auditors, DPMs, HMs, and
+  // QA-AUDIT (2026-09-14): QA Review is reachable by auditors, PMs, HMs, and
   // anyone with audit access; every scoring/finalize/dispute action is
   // permission-gated behind qa.audit / qa.dispute / qa.schedule.
   if (page === "QA Review")

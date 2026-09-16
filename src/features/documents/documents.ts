@@ -2,14 +2,14 @@
  * PCSP document-ingestion domain layer (frontend workstream).
  *
  * Covers the AI document pipeline:
- *  1. An admin/DPM uploads a PCSP (or annual physician order). The browser
+ *  1. An admin/PM uploads a PCSP (or annual physician order). The browser
  *     extracts plain text client-side (see extractText.ts) so only TEXT —
  *     never raw files — is sent for AI processing (PHI minimization). The
  *     raw bytes are stored in the `pcsp-documents` storage bucket for
  *     retention.
  *  2. The `extract-pcsp` edge function returns structured data plus proposed
  *     trackable items.
- *  3. A DPM/RN reviews side-by-side, edits items, then approves or rejects.
+ *  3. A PM/RN reviews side-by-side, edits items, then approves or rejects.
  *     NOTHING becomes tracked or visible to staff before approval — the UI
  *     gates every mutating action on the extraction status.
  *  4. Approved items are activated one by one, wiring into existing systems
@@ -25,8 +25,8 @@
  * verifyAiServiceAccount, addTrackableItem) are preserved as the adapter's method
  * names so the UI code below is unchanged.
  *
- * Permissions: `documents.upload` gates upload (admin/DPM); `documents.review`
- * gates review (admin/DPM/RN). `documents.review` is owned by the backend
+ * Permissions: `documents.upload` gates upload (admin/PM); `documents.review`
+ * gates review (admin/PM/RN). `documents.review` is owned by the backend
  * workstream — it is referenced by string here so this UI does not touch the
  * shared permissions.ts.
  */

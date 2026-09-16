@@ -54,7 +54,7 @@ export function canConfigureMonthlyDue(roleKey: string) {
   return [
     "administrator",
     "compliance_admin",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 
@@ -292,7 +292,7 @@ export function canManageEquipment(roleKey: string) {
     "administrator",
     "compliance_admin",
     "house_manager",
-    "degreed_professional_manager",
+    "program_manager",
   ].includes(roleKey);
 }
 
