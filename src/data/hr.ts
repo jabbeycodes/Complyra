@@ -358,30 +358,96 @@ export interface TimecardSummary {
 
 /**
  * Summarizes ONE work week's punches into regular/overtime minutes.
- * Unpaid breaks are deducted per distinct day worked (floored at 0 per day),
- * then overtime is the weekly net beyond OVERTIME_WEEKLY_HOURS (40h).
- * Callers pass a single week's punches; pay-period rollups sum the weekly
- * summaries produced here.
+ * Unpaid breaks are deducted per distinct day worked (floored at 0 per day).
+ *
+ * Without `overtimeRules` the legacy behavior applies: overtime is the weekly
+ * net beyond OVERTIME_WEEKLY_HOURS (40h). With rules, overtime is layered so
+ * the same minute is never counted twice:
+ *  - daily OT: minutes beyond dailyThresholdHours, summed per day;
+ *  - seventh-consecutive-day OT: for maximal runs of consecutive calendar
+ *    days with net > 0 minutes, the 7th, 14th, ... day contributes
+ *    max(0, net - seventhDayThresholdHours*60);
+ *  - weekly OT: remaining minutes beyond weeklyThresholdHours.
+ *
+ * Conventions (documented so callers don't guess):
+ *  - Overnight segments attribute to the CLOCK-IN day (night-shift rule),
+ *    so daily thresholds always see the whole shift on the day it started.
+ *  - The 7th-day detector only sees the punch set passed in: the store/UI
+ *    passes one week at a time, so a streak that crosses the week boundary
+ *    restarts here. Cross-week streaks are a documented limitation — the
+ *    API layer must pass a wider window if California-style 7th-day pay
+ *    needs to span pay periods.
  */
 export function summarizeTimecard(
   punches: HrPunch[],
-  options: { unpaidBreakMinutesPerDay: number },
+  options: {
+    unpaidBreakMinutesPerDay: number;
+    overtimeRules?: HrOvertimeRules;
+  },
 ): TimecardSummary {
   const byDay: Record<string, number> = {};
   for (const segment of pairPunches(punches)) {
     const day = dateKeyOf(segment.clockIn);
     byDay[day] = (byDay[day] ?? 0) + segment.minutes;
   }
-  let totalMinutes = 0;
-  for (const dayMinutes of Object.values(byDay)) {
-    totalMinutes += Math.max(0, dayMinutes - options.unpaidBreakMinutesPerDay);
+  const netByDay: Record<string, number> = {};
+  let totalNetMinutes = 0;
+  for (const [day, dayMinutes] of Object.entries(byDay)) {
+    const net = Math.max(0, dayMinutes - options.unpaidBreakMinutesPerDay);
+    netByDay[day] = net;
+    totalNetMinutes += net;
   }
-  const overtimeThreshold = OVERTIME_WEEKLY_HOURS * 60;
-  const overtimeMinutes = Math.max(0, totalMinutes - overtimeThreshold);
+  const rules = options.overtimeRules;
+
+  // Daily overtime: minutes beyond the daily threshold, summed per day.
+  let dailyOtMinutes = 0;
+  if (rules?.dailyThresholdHours != null && rules.dailyThresholdHours > 0) {
+    const threshold = rules.dailyThresholdHours * 60;
+    for (const net of Object.values(netByDay)) {
+      dailyOtMinutes += Math.max(0, net - threshold);
+    }
+  }
+
+  // Seventh-consecutive-day overtime: maximal runs of consecutive calendar
+  // days with net > 0; the 7th, 14th, ... day of each run contributes
+  // minutes beyond the 7th-day threshold.
+  let seventhDayOtMinutes = 0;
+  if (rules?.seventhConsecutiveDay) {
+    const seventhThreshold = rules.seventhDayThresholdHours * 60;
+    const runs: string[][] = [];
+    let run: string[] = [];
+    let prevDay: string | null = null;
+    for (const day of Object.keys(netByDay).sort()) {
+      const consecutive =
+        prevDay !== null &&
+        day === addDaysIso(`${prevDay}T00:00:00.000Z`, 1).slice(0, 10);
+      if (netByDay[day] > 0 && (run.length === 0 || consecutive)) {
+        run.push(day);
+      } else {
+        if (run.length > 0) runs.push(run);
+        run = netByDay[day] > 0 ? [day] : [];
+      }
+      prevDay = day;
+    }
+    if (run.length > 0) runs.push(run);
+    for (const runDays of runs) {
+      for (let i = 6; i < runDays.length; i += 7) {
+        seventhDayOtMinutes += Math.max(0, netByDay[runDays[i]] - seventhThreshold);
+      }
+    }
+  }
+
+  // Weekly overtime applies only to what's left after daily + 7th-day OT.
+  const weeklyThreshold = (rules?.weeklyThresholdHours ?? OVERTIME_WEEKLY_HOURS) * 60;
+  const weeklyOtMinutes = Math.max(
+    0,
+    totalNetMinutes - weeklyThreshold - dailyOtMinutes - seventhDayOtMinutes,
+  );
+  const overtimeMinutes = dailyOtMinutes + seventhDayOtMinutes + weeklyOtMinutes;
   return {
-    regularMinutes: totalMinutes - overtimeMinutes,
+    regularMinutes: totalNetMinutes - overtimeMinutes,
     overtimeMinutes,
-    totalMinutes,
+    totalMinutes: totalNetMinutes,
   };
 }
 
@@ -1057,3 +1123,382 @@ export function formatWindowLabel(window: StaffingWindow): string {
 }
 
 export const STAFFING_DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+/* ------------------------------------------------------------------ */
+/* HR-PHASE2 (2026-09-16): PTO accruals, overtime rules, shift swaps.  */
+/*                                                                      */
+/* Accruals: an HrAccrualPolicy grants hoursPerPeriod per pay period to  */
+/* staff whose tenure falls in a band; the hr_accrual_ledger records     */
+/* accruals/usage/adjustments as running-balance entries, so the         */
+/* current balance is always the latest entry — no recomputation from   */
+/* history is ever needed. Time-off requests for pto/sick debit the     */
+/* ledger on approval and post a restoring adjustment when an approval   */
+/* is later reversed.                                                   */
+/*                                                                      */
+/* Overtime rules are per-agency (one row). summarizeTimecard layers     */
+/* daily, 7th-day, and weekly OT without double-counting; see its docs.  */
+/*                                                                      */
+/* Shift swaps: a requester posts an offered shift, optionally aimed at  */
+/* one staffer (targetStaffId) or open; a claimer claims it, optionally  */
+/* counter-offering one of their own shifts. Approving reassigns the     */
+/* shifts through the store's shift-update path.                         */
+/* ------------------------------------------------------------------ */
+
+export type LeaveType = "vacation" | "pto" | "sick";
+
+export interface AccrualTenureBand {
+  minYears: number;
+  /** null = no upper bound. */
+  maxYears: number | null;
+  hoursPerPeriod: number;
+}
+
+export interface HrAccrualPolicy {
+  id: string;
+  agencyId: string;
+  leaveType: LeaveType;
+  tenureBands: AccrualTenureBand[];
+  carryoverCapHours: number;
+  carryoverBasis: "calendar_year" | "anniversary";
+  effectiveFrom: string;
+  /** null = open-ended. */
+  effectiveTo: string | null;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AccrualPolicyInput = Pick<
+  HrAccrualPolicy,
+  | "leaveType"
+  | "tenureBands"
+  | "carryoverCapHours"
+  | "carryoverBasis"
+  | "effectiveFrom"
+  | "effectiveTo"
+>;
+
+export interface HrAccrualLedgerEntry {
+  id: string;
+  agencyId: string;
+  staffId: string;
+  payPeriodId: string | null;
+  /** YYYY-MM-DD the entry belongs to. */
+  periodStart: string;
+  leaveType: LeaveType;
+  accrued: number;
+  used: number;
+  adjustment: number;
+  /** Running balance AFTER this entry: prev + accrued - used + adjustment. */
+  balance: number;
+  note: string | null;
+  createdAt: string;
+}
+
+export type LedgerEntryInput = Pick<HrAccrualLedgerEntry, "staffId" | "leaveType"> &
+  Partial<
+    Pick<
+      HrAccrualLedgerEntry,
+      "payPeriodId" | "periodStart" | "accrued" | "used" | "adjustment" | "note"
+    >
+  >;
+
+export interface HrOvertimeRules {
+  agencyId: string;
+  weeklyThresholdHours: number;
+  /** null = no daily overtime rule. */
+  dailyThresholdHours: number | null;
+  seventhConsecutiveDay: boolean;
+  seventhDayThresholdHours: number;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export type OvertimeRulesInput = Pick<
+  HrOvertimeRules,
+  | "weeklyThresholdHours"
+  | "dailyThresholdHours"
+  | "seventhConsecutiveDay"
+  | "seventhDayThresholdHours"
+>;
+
+/** Agency default when no overtime-rules row exists (FLSA weekly standard). */
+export const DEFAULT_OVERTIME_RULES: Omit<
+  HrOvertimeRules,
+  "agencyId" | "updatedBy" | "updatedAt"
+> = {
+  weeklyThresholdHours: 40,
+  dailyThresholdHours: null,
+  seventhConsecutiveDay: false,
+  seventhDayThresholdHours: 8,
+};
+
+export type ShiftSwapStatus = "pending" | "approved" | "denied" | "cancelled";
+
+export interface HrShiftSwap {
+  id: string;
+  agencyId: string;
+  requesterId: string;
+  offeredShiftId: string;
+  /** Counter-offered shift, or null for an open claim. */
+  requestedShiftId: string | null;
+  /** The claimer once claimed, or the direct target when created. */
+  targetStaffId: string | null;
+  status: ShiftSwapStatus;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ShiftSwapInput = Pick<HrShiftSwap, "offeredShiftId"> &
+  Partial<Pick<HrShiftSwap, "requestedShiftId" | "targetStaffId">>;
+
+/**
+ * Completed full years of service as of a YYYY-MM-DD date. Floors to whole
+ * years (anniversary not yet reached doesn't count); never negative.
+ * Unparseable dates yield 0 rather than NaN.
+ */
+export function yearsOfService(hireDate: string, asOf: string): number {
+  const hire = hireDate.slice(0, 10).split("-").map(Number);
+  const ref = asOf.slice(0, 10).split("-").map(Number);
+  if (
+    hire.length !== 3 ||
+    ref.length !== 3 ||
+    hire.some((n) => !Number.isFinite(n)) ||
+    ref.some((n) => !Number.isFinite(n))
+  ) {
+    return 0;
+  }
+  let years = ref[0] - hire[0];
+  if (ref[1] < hire[1] || (ref[1] === hire[1] && ref[2] < hire[2])) {
+    years -= 1;
+  }
+  return Math.max(0, years);
+}
+
+/**
+ * Validate an accrual-policy form. Returns error messages; empty = valid.
+ * Bands must be sorted by minYears, non-overlapping (a band's interval is
+ * [minYears, maxYears), null max = infinity), minYears >= 0,
+ * hoursPerPeriod >= 0.
+ */
+export function validateAccrualPolicy(input: AccrualPolicyInput): string[] {
+  const errors: string[] = [];
+  if (!["vacation", "pto", "sick"].includes(input.leaveType)) {
+    errors.push("Choose a leave type (vacation, pto, or sick).");
+  }
+  if (input.tenureBands.length === 0) {
+    errors.push("Add at least one tenure band.");
+  }
+  input.tenureBands.forEach((band, i) => {
+    const label = `Band ${i + 1}`;
+    if (!Number.isFinite(band.minYears) || band.minYears < 0) {
+      errors.push(`${label}: minimum years must be 0 or more.`);
+    }
+    if (!Number.isFinite(band.hoursPerPeriod) || band.hoursPerPeriod < 0) {
+      errors.push(`${label}: hours per period must be 0 or more.`);
+    }
+    if (
+      band.maxYears !== null &&
+      (!Number.isFinite(band.maxYears) || band.maxYears <= band.minYears)
+    ) {
+      errors.push(`${label}: maximum years must be above minimum years.`);
+    }
+  });
+  for (let i = 1; i < input.tenureBands.length; i++) {
+    if (input.tenureBands[i].minYears < input.tenureBands[i - 1].minYears) {
+      errors.push("Tenure bands must be sorted by minimum years.");
+      break;
+    }
+  }
+  for (let i = 1; i < input.tenureBands.length; i++) {
+    const prev = input.tenureBands[i - 1];
+    if (prev.maxYears === null || prev.maxYears > input.tenureBands[i].minYears) {
+      errors.push(`Band ${i} overlaps band ${i + 1}.`);
+    }
+  }
+  if (!Number.isFinite(input.carryoverCapHours) || input.carryoverCapHours < 0) {
+    errors.push("Carryover cap must be 0 hours or more.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom)) {
+    errors.push("Choose a valid effective-from date.");
+  }
+  if (
+    input.effectiveTo !== null &&
+    input.effectiveTo !== "" &&
+    input.effectiveTo < input.effectiveFrom
+  ) {
+    errors.push("The end date cannot be before the start date.");
+  }
+  return errors;
+}
+
+/**
+ * Hours-per-period for a staff member with the given completed years of
+ * service. First band whose [minYears, maxYears) contains the tenure wins;
+ * 0 when no band matches.
+ */
+export function accrualRateForTenure(
+  policy: Pick<HrAccrualPolicy, "tenureBands">,
+  years: number,
+): number {
+  for (const band of policy.tenureBands) {
+    if (years >= band.minYears && (band.maxYears === null || years < band.maxYears)) {
+      return band.hoursPerPeriod;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Hours accrued for one pay period under a policy. One rate per pay period:
+ * the rate for the staff member's tenure band, earned in full each period.
+ */
+export function accruedHoursForPeriod(
+  policy: Pick<HrAccrualPolicy, "tenureBands">,
+  years: number,
+): number {
+  return accrualRateForTenure(policy, years);
+}
+
+/**
+ * Split a year-end balance into carried and forfeited hours under a
+ * carryover cap. Negative balances carry nothing and forfeit nothing.
+ */
+export function applyCarryover(
+  balance: number,
+  capHours: number,
+): { carried: number; forfeited: number } {
+  const positive = Math.max(0, balance);
+  const carried = Math.min(positive, Math.max(0, capHours));
+  return { carried, forfeited: positive - carried };
+}
+
+/**
+ * Current leave balance = the balance of the latest ledger entry for that
+ * leave type (ordered by periodStart, then createdAt); 0 when no entries.
+ */
+export function currentLeaveBalance(
+  entries: HrAccrualLedgerEntry[],
+  leaveType: LeaveType,
+): number {
+  let latest: HrAccrualLedgerEntry | null = null;
+  for (const entry of entries) {
+    if (entry.leaveType !== leaveType) continue;
+    if (
+      latest === null ||
+      entry.periodStart > latest.periodStart ||
+      (entry.periodStart === latest.periodStart &&
+        entry.createdAt > latest.createdAt)
+    ) {
+      latest = entry;
+    }
+  }
+  return latest ? latest.balance : 0;
+}
+
+/**
+ * Hours a time-off request consumes: inclusive calendar days × hoursPerDay
+ * (default 8). Throws on an unparseable or inverted date range.
+ */
+export function timeOffRequestHours(
+  startsOn: string,
+  endsOn: string,
+  hoursPerDay = 8,
+): number {
+  const start = new Date(`${startsOn}T00:00:00`);
+  const end = new Date(`${endsOn}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Invalid time-off date range.");
+  }
+  const days = Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  if (days < 1) {
+    throw new Error("The end date cannot be before the start date.");
+  }
+  return days * hoursPerDay;
+}
+
+/**
+ * Check a time-off request against the leave balance. Blocks (ok: false)
+ * when the request exceeds the balance; warns when the request would leave
+ * fewer than 8 hours. Messages are user-facing.
+ */
+export function validateTimeOffBalance(
+  requestHours: number,
+  balance: number,
+  leaveType: LeaveType,
+): { ok: boolean; errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (requestHours - balance > 1e-9) {
+    errors.push(
+      `Not enough ${leaveType} balance: this request needs ${requestHours}h but only ${balance}h is available.`,
+    );
+  } else {
+    const remaining = Math.round((balance - requestHours) * 100) / 100;
+    if (remaining < 8) {
+      warnings.push(
+        `Only ${remaining}h of ${leaveType} will remain after this request.`,
+      );
+    }
+  }
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+/* ------------------------------ shift swaps ----------------------------- */
+
+function shiftsOverlap(a: HrShift, b: HrShift): boolean {
+  return (
+    parseTime(a.startsAt) < parseTime(b.endsAt) &&
+    parseTime(b.startsAt) < parseTime(a.endsAt)
+  );
+}
+
+export interface ValidateShiftSwapInput {
+  offeredShift: HrShift;
+  requesterId: string;
+  /** The requester's other shifts (the offered shift is skipped by id). */
+  requesterShifts: HrShift[];
+  claimerId: string;
+  claimerShifts: HrShift[];
+  /** The shift the claimer counter-offers, when this is a two-shift swap. */
+  claimedShift?: HrShift | null;
+  nowIso: string;
+}
+
+/**
+ * Guard a shift swap. Returns error messages; empty = the swap may proceed.
+ * Errors when the offered shift has already started, the claimer is the
+ * requester themselves, the offered shift overlaps any of the claimer's
+ * shifts, or the counter-offered shift overlaps any of the requester's other
+ * shifts. Messages are user-facing.
+ */
+export function validateShiftSwap(input: ValidateShiftSwapInput): string[] {
+  const errors: string[] = [];
+  if (parseTime(input.offeredShift.startsAt) <= parseTime(input.nowIso)) {
+    errors.push("This shift has already started and can no longer be swapped.");
+  }
+  if (input.claimerId === input.requesterId) {
+    errors.push("You can't claim your own shift-swap posting.");
+  }
+  for (const shift of input.claimerShifts) {
+    if (shift.id !== input.offeredShift.id && shiftsOverlap(input.offeredShift, shift)) {
+      errors.push("The offered shift overlaps a shift the other person is already working.");
+      break;
+    }
+  }
+  if (input.claimedShift) {
+    for (const shift of input.requesterShifts) {
+      if (shift.id === input.claimedShift.id || shift.id === input.offeredShift.id) {
+        continue;
+      }
+      if (shiftsOverlap(input.claimedShift, shift)) {
+        errors.push("The counter-offered shift overlaps a shift you're already working.");
+        break;
+      }
+    }
+  }
+  return errors;
+}

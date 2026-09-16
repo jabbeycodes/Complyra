@@ -3,15 +3,23 @@ import type { ComplyraApi, WorkspaceView } from "./localApi";
 import { LocalApi } from "./localApi";
 import { HostedApi } from "./hostedApi";
 
+/** import.meta.env is undefined outside a Vite bundle (e.g. node tests). */
+function viteEnv(): Record<string, string | undefined> {
+  const meta = import.meta as unknown as {
+    env?: Record<string, string | undefined>;
+  };
+  return meta.env ?? {};
+}
+
 export function isSupabaseConfigured() {
-  return Boolean(
-    import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY,
-  );
+  const env = viteEnv();
+  return Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_ANON_KEY);
 }
 
 export function createSupabaseBrowserClient(): SupabaseClient | null {
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const env = viteEnv();
+  const url = env.VITE_SUPABASE_URL;
+  const key = env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
   return createClient(url, key, {
     auth: {

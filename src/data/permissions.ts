@@ -75,6 +75,8 @@ export const PERMISSION_KEYS = [
   "hub.approve_payroll",
   "hub.manage_documents",
   "hub.manage_staffing",
+  // HR-PHASE2 (pto accrual / overtime rules go here)
+  "hub.manage_pay_settings",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -230,6 +232,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.manage_documents",
       // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
       "hub.manage_staffing",
+      // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
+      "hub.manage_pay_settings",
     ]),
   },
   {
@@ -308,6 +312,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.access",
       // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
       "hub.manage_staffing",
+      // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
+      "hub.manage_pay_settings",
     ]),
   },
   {
@@ -429,6 +435,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "hub.approve_payroll": "Lock pay periods and prepare payroll",
   "hub.manage_documents": "Manage HR documents",
   "hub.manage_staffing": "Configure recurring staffing patterns",
+  // HR-PHASE2
+  "hub.manage_pay_settings": "Configure accrual policies and overtime rules",
 };
 
 /**

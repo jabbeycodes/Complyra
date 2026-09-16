@@ -13,24 +13,39 @@ import {
   LATE_GRACE_MINUTES,
   MISSED_PUNCH_GRACE_MINUTES,
   OVERTIME_WEEKLY_HOURS,
+  DEFAULT_OVERTIME_RULES,
+  accruedHoursForPeriod,
+  accrualRateForTenure,
+  applyCarryover,
   buildPayrollCsvExport,
+  currentLeaveBalance,
   dailyTotals,
   detectExceptions,
   pairPunches,
   rollupCompliance,
   summarizeTimecard,
+  timeOffRequestHours,
+  validateAccrualPolicy,
   validateClockIn,
   validateClockOut,
+  validateShiftSwap,
+  validateTimeOffBalance,
   weeklyTotals,
+  yearsOfService,
 } from "./hr";
 import type {
+  AccrualPolicyInput,
   ComplianceEvidence,
+  HrAccrualLedgerEntry,
+  HrOvertimeRules,
   HrPayPeriod,
   HrPunch,
   HrReadinessRequirement,
   HrShift,
   HrTimecardApproval,
+  LeaveType,
   PayrollRow,
+  ValidateShiftSwapInput,
 } from "./hr";
 import {
   PERMISSION_KEYS,
@@ -1062,5 +1077,432 @@ test("staffing: hub.manage_staffing permission gating per role", () => {
       "hub.manage_staffing",
     ),
     true,
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* HR-PHASE2 (2026-09-16): accruals, overtime rules, shift swaps       */
+/* ------------------------------------------------------------------ */
+
+function accrualPolicyInput(overrides: Partial<AccrualPolicyInput> = {}): AccrualPolicyInput {
+  return {
+    leaveType: "pto",
+    tenureBands: [
+      { minYears: 0, maxYears: 2, hoursPerPeriod: 80 },
+      { minYears: 2, maxYears: 5, hoursPerPeriod: 120 },
+      { minYears: 5, maxYears: null, hoursPerPeriod: 160 },
+    ],
+    carryoverCapHours: 80,
+    carryoverBasis: "calendar_year",
+    effectiveFrom: "2026-01-01",
+    effectiveTo: null,
+    ...overrides,
+  };
+}
+
+function ledgerEntry(overrides: Partial<HrAccrualLedgerEntry> = {}): HrAccrualLedgerEntry {
+  return {
+    id: `ledger-test-${Math.floor(Math.random() * 1e9)}`,
+    agencyId: "agency-test",
+    staffId: "staff-test-1",
+    payPeriodId: null,
+    periodStart: "2026-09-01",
+    leaveType: "pto",
+    accrued: 0,
+    used: 0,
+    adjustment: 0,
+    balance: 0,
+    note: null,
+    createdAt: "2026-09-01T00:00:00",
+    ...overrides,
+  };
+}
+
+function overtimeRules(overrides: Partial<HrOvertimeRules> = {}): HrOvertimeRules {
+  return {
+    ...DEFAULT_OVERTIME_RULES,
+    agencyId: "agency-test",
+    updatedBy: null,
+    updatedAt: "2026-09-16T00:00:00",
+    ...overrides,
+  };
+}
+
+/** One in/out pair per date, all for staff-test-1. */
+function workDays(dates: string[], clockIn: string, clockOut: string): HrPunch[] {
+  const punches: HrPunch[] = [];
+  for (const date of dates) {
+    punches.push(punch({ kind: "in", punchedAt: `${date}T${clockIn}` }));
+    punches.push(punch({ kind: "out", punchedAt: `${date}T${clockOut}` }));
+  }
+  return punches;
+}
+
+// yearsOfService
+// ---------------------------------------------------------------------------
+
+test("PHASE2: yearsOfService floors to completed years, never negative", () => {
+  assert.equal(yearsOfService("2020-03-15", "2026-09-16"), 6);
+  // Day before the 6th anniversary doesn't count yet.
+  assert.equal(yearsOfService("2020-03-15", "2026-03-14"), 5);
+  assert.equal(yearsOfService("2026-03-15", "2026-09-16"), 0);
+  // Future hire date is not negative service.
+  assert.equal(yearsOfService("2027-01-01", "2026-09-16"), 0);
+});
+
+// Accrual bands
+// ---------------------------------------------------------------------------
+
+test("PHASE2: accrualRateForTenure picks the band by tenure, upper bound exclusive", () => {
+  const policy = accrualPolicyInput();
+  assert.equal(accrualRateForTenure(policy, 0), 80);
+  assert.equal(accrualRateForTenure(policy, 1), 80);
+  assert.equal(accrualRateForTenure(policy, 2), 120);
+  assert.equal(accrualRateForTenure(policy, 4), 120);
+  assert.equal(accrualRateForTenure(policy, 5), 160);
+  assert.equal(accrualRateForTenure(policy, 50), 160);
+});
+
+test("PHASE2: accrualRateForTenure returns 0 when no band matches", () => {
+  const policy = accrualPolicyInput({
+    tenureBands: [{ minYears: 1, maxYears: null, hoursPerPeriod: 100 }],
+  });
+  assert.equal(accrualRateForTenure(policy, 0), 0);
+  assert.equal(accrualRateForTenure(policy, 1), 100);
+});
+
+test("PHASE2: accruedHoursForPeriod equals the tenure rate", () => {
+  const policy = accrualPolicyInput();
+  assert.equal(accruedHoursForPeriod(policy, 3), 120);
+});
+
+test("PHASE2: validateAccrualPolicy accepts a clean policy", () => {
+  assert.deepEqual(validateAccrualPolicy(accrualPolicyInput()), []);
+});
+
+test("PHASE2: validateAccrualPolicy rejects overlapping and unsorted bands", () => {
+  const overlapping = accrualPolicyInput({
+    tenureBands: [
+      { minYears: 0, maxYears: 5, hoursPerPeriod: 80 },
+      { minYears: 2, maxYears: null, hoursPerPeriod: 120 },
+    ],
+  });
+  assert.ok(validateAccrualPolicy(overlapping).some((e) => /overlap/i.test(e)));
+  const unsorted = accrualPolicyInput({
+    tenureBands: [
+      { minYears: 2, maxYears: null, hoursPerPeriod: 120 },
+      { minYears: 0, maxYears: 2, hoursPerPeriod: 80 },
+    ],
+  });
+  assert.ok(validateAccrualPolicy(unsorted).some((e) => /sorted/i.test(e)));
+  // An open-ended band swallows everything after it.
+  const swallowed = accrualPolicyInput({
+    tenureBands: [
+      { minYears: 0, maxYears: null, hoursPerPeriod: 80 },
+      { minYears: 5, maxYears: null, hoursPerPeriod: 160 },
+    ],
+  });
+  assert.ok(validateAccrualPolicy(swallowed).some((e) => /overlap/i.test(e)));
+});
+
+test("PHASE2: validateAccrualPolicy rejects negative rates and bad dates", () => {
+  const negative = accrualPolicyInput({
+    tenureBands: [{ minYears: -1, maxYears: 2, hoursPerPeriod: -5 }],
+  });
+  const errors = validateAccrualPolicy(negative);
+  assert.ok(errors.some((e) => /minimum years/i.test(e)));
+  assert.ok(errors.some((e) => /hours per period/i.test(e)));
+  const inverted = accrualPolicyInput({
+    effectiveFrom: "2026-06-01",
+    effectiveTo: "2026-01-01",
+  });
+  assert.ok(validateAccrualPolicy(inverted).some((e) => /end date/i.test(e)));
+});
+
+// Carryover
+// ---------------------------------------------------------------------------
+
+test("PHASE2: applyCarryover caps and reports the forfeit", () => {
+  assert.deepEqual(applyCarryover(200, 80), { carried: 80, forfeited: 120 });
+  assert.deepEqual(applyCarryover(50, 80), { carried: 50, forfeited: 0 });
+  assert.deepEqual(applyCarryover(80, 80), { carried: 80, forfeited: 0 });
+  assert.deepEqual(applyCarryover(-10, 80), { carried: 0, forfeited: 0 });
+});
+
+// Ledger balance
+// ---------------------------------------------------------------------------
+
+test("PHASE2: currentLeaveBalance takes the latest entry by period then createdAt", () => {
+  const entries = [
+    ledgerEntry({ periodStart: "2026-09-01", balance: 40, createdAt: "2026-09-02T00:00:00" }),
+    ledgerEntry({ periodStart: "2026-08-01", balance: 99, createdAt: "2026-08-02T00:00:00" }),
+    ledgerEntry({
+      periodStart: "2026-09-01",
+      balance: 36,
+      createdAt: "2026-09-03T00:00:00",
+      note: "time-off t1",
+    }),
+  ];
+  assert.equal(currentLeaveBalance(entries, "pto"), 36);
+  assert.equal(currentLeaveBalance(entries, "sick"), 0);
+  assert.equal(currentLeaveBalance([], "pto"), 0);
+});
+
+// Time-off hours + balance validation
+// ---------------------------------------------------------------------------
+
+test("PHASE2: timeOffRequestHours counts inclusive calendar days", () => {
+  assert.equal(timeOffRequestHours("2026-09-14", "2026-09-16"), 24);
+  assert.equal(timeOffRequestHours("2026-09-14", "2026-09-14"), 8);
+  assert.equal(timeOffRequestHours("2026-09-14", "2026-09-15", 10), 20);
+});
+
+test("PHASE2: validateTimeOffBalance blocks overdrafts and warns on thin balances", () => {
+  const blocked = validateTimeOffBalance(24, 20, "pto" as LeaveType);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.errors.length, 1);
+  const thin = validateTimeOffBalance(16, 20, "pto" as LeaveType);
+  assert.equal(thin.ok, true);
+  assert.equal(thin.warnings.length, 1);
+  const healthy = validateTimeOffBalance(8, 40, "pto" as LeaveType);
+  assert.equal(healthy.ok, true);
+  assert.deepEqual(healthy.errors, []);
+  assert.deepEqual(healthy.warnings, []);
+  // Exactly the balance leaves 0 < 8, so it warns but passes.
+  const exact = validateTimeOffBalance(20, 20, "sick" as LeaveType);
+  assert.equal(exact.ok, true);
+  assert.equal(exact.warnings.length, 1);
+});
+
+// summarizeTimecard with overtime rules
+// ---------------------------------------------------------------------------
+
+test("PHASE2: legacy call shape keeps weekly-40 behavior without rules", () => {
+  const summary = summarizeTimecard(fiveNineHourDays(), {
+    unpaidBreakMinutesPerDay: 0,
+  });
+  assert.equal(summary.overtimeMinutes, 300);
+  assert.equal(summary.regularMinutes, 2400);
+});
+
+test("PHASE2: explicit 40h-week rules match the legacy default", () => {
+  const summary = summarizeTimecard(fiveNineHourDays(), {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules(),
+  });
+  assert.equal(summary.totalMinutes, 2700);
+  assert.equal(summary.regularMinutes, 2400);
+  assert.equal(summary.overtimeMinutes, 300);
+});
+
+test("PHASE2: daily overtime stacks per day before the weekly layer", () => {
+  // 5 x 10h days, daily threshold 8h: 5 x 2h daily OT = 10h; weekly 40h
+  // leaves nothing, so weekly OT is 0 — no double count.
+  const punches = workDays(["14", "15", "16", "17", "18"].map((d) => `2026-09-${d}`), "08:00:00", "18:00:00");
+  const summary = summarizeTimecard(punches, {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules({
+      weeklyThresholdHours: 40,
+      dailyThresholdHours: 8,
+    }),
+  });
+  assert.equal(summary.totalMinutes, 3000);
+  assert.equal(summary.overtimeMinutes, 600);
+  assert.equal(summary.regularMinutes, 2400);
+});
+
+test("PHASE2: custom weekly threshold replaces the 40h default", () => {
+  const punches = workDays(["14", "15", "16", "17", "18"].map((d) => `2026-09-${d}`), "08:00:00", "17:00:00");
+  const summary = summarizeTimecard(punches, {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules({ weeklyThresholdHours: 36 }),
+  });
+  assert.equal(summary.totalMinutes, 2700);
+  assert.equal(summary.overtimeMinutes, 540); // 45h - 36h
+  assert.equal(summary.regularMinutes, 2160);
+});
+
+test("PHASE2: seventh-consecutive-day rule pays the 7th day beyond its threshold", () => {
+  // 7 x 10h days: 7th-day OT = 10h - 8h = 2h; weekly OT = 70h - 40h - 2h = 28h.
+  const dates = ["14", "15", "16", "17", "18", "19", "20"].map((d) => `2026-09-${d}`);
+  const punches = workDays(dates, "08:00:00", "18:00:00");
+  const summary = summarizeTimecard(punches, {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules({
+      weeklyThresholdHours: 40,
+      dailyThresholdHours: null,
+      seventhConsecutiveDay: true,
+      seventhDayThresholdHours: 8,
+    }),
+  });
+  assert.equal(summary.totalMinutes, 4200);
+  assert.equal(summary.overtimeMinutes, 1800); // 2h seventh + 28h weekly
+  assert.equal(summary.regularMinutes, 2400);
+});
+
+test("PHASE2: six consecutive days earn no seventh-day overtime", () => {
+  const dates = ["14", "15", "16", "17", "18", "19"].map((d) => `2026-09-${d}`);
+  const punches = workDays(dates, "08:00:00", "18:00:00");
+  const summary = summarizeTimecard(punches, {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules({
+      weeklyThresholdHours: 40,
+      seventhConsecutiveDay: true,
+      seventhDayThresholdHours: 8,
+    }),
+  });
+  assert.equal(summary.overtimeMinutes, 1200); // 60h - 40h weekly only
+  assert.equal(summary.regularMinutes, 2400);
+});
+
+test("PHASE2: overnight shifts attribute to the clock-in day under daily rules", () => {
+  // 22:00 -> 06:00 next day is 10h on 2026-09-14 (night-shift rule); daily
+  // threshold 8h -> 2h OT lands on the start day, weekly 40h leaves 0.
+  const punches = [
+    punch({ kind: "in", punchedAt: "2026-09-14T22:00:00" }),
+    punch({ kind: "out", punchedAt: "2026-09-15T08:00:00" }),
+  ];
+  const summary = summarizeTimecard(punches, {
+    unpaidBreakMinutesPerDay: 0,
+    overtimeRules: overtimeRules({
+      weeklyThresholdHours: 40,
+      dailyThresholdHours: 8,
+    }),
+  });
+  assert.equal(summary.totalMinutes, 600);
+  assert.equal(summary.overtimeMinutes, 120);
+  assert.equal(summary.regularMinutes, 480);
+});
+
+// validateShiftSwap
+// ---------------------------------------------------------------------------
+
+const SWAP_NOW = "2026-09-10T12:00:00";
+
+function swapInput(overrides: Partial<ValidateShiftSwapInput> = {}) {
+  const offered = shift({
+    id: "shift-offered",
+    staffId: "staff-a",
+    startsAt: "2026-09-14T08:00:00",
+    endsAt: "2026-09-14T16:00:00",
+  });
+  return {
+    offeredShift: offered,
+    requesterId: "staff-a",
+    requesterShifts: [] as HrShift[],
+    claimerId: "staff-b",
+    claimerShifts: [] as HrShift[],
+    claimedShift: null as HrShift | null,
+    nowIso: SWAP_NOW,
+    ...overrides,
+  };
+}
+
+test("PHASE2: validateShiftSwap passes a clean open claim", () => {
+  assert.deepEqual(validateShiftSwap(swapInput()), []);
+});
+
+test("PHASE2: validateShiftSwap rejects an already-started offered shift", () => {
+  const errors = validateShiftSwap(
+    swapInput({
+      offeredShift: shift({
+        id: "shift-offered",
+        staffId: "staff-a",
+        startsAt: "2026-09-09T08:00:00",
+        endsAt: "2026-09-09T16:00:00",
+      }),
+    }),
+  );
+  assert.ok(errors.some((e) => /already started/i.test(e)));
+});
+
+test("PHASE2: validateShiftSwap rejects claiming your own posting", () => {
+  const errors = validateShiftSwap(swapInput({ claimerId: "staff-a" }));
+  assert.ok(errors.some((e) => /own/i.test(e)));
+});
+
+test("PHASE2: validateShiftSwap rejects when the offered shift overlaps the claimer's shift", () => {
+  const errors = validateShiftSwap(
+    swapInput({
+      claimerShifts: [
+        shift({
+          id: "shift-claimer",
+          staffId: "staff-b",
+          startsAt: "2026-09-14T12:00:00",
+          endsAt: "2026-09-14T20:00:00",
+        }),
+      ],
+    }),
+  );
+  assert.ok(errors.some((e) => /overlap/i.test(e)));
+});
+
+test("PHASE2: validateShiftSwap rejects when the counter-offer overlaps the requester's other shift", () => {
+  const errors = validateShiftSwap(
+    swapInput({
+      claimedShift: shift({
+        id: "shift-claimed",
+        staffId: "staff-b",
+        startsAt: "2026-09-15T08:00:00",
+        endsAt: "2026-09-15T16:00:00",
+      }),
+      requesterShifts: [
+        shift({
+          id: "shift-requester-other",
+          staffId: "staff-a",
+          startsAt: "2026-09-15T12:00:00",
+          endsAt: "2026-09-15T20:00:00",
+        }),
+      ],
+    }),
+  );
+  assert.ok(errors.some((e) => /overlap/i.test(e)));
+});
+
+test("PHASE2: validateShiftSwap ignores the offered shift itself in the requester's list", () => {
+  const offered = shift({
+    id: "shift-offered",
+    staffId: "staff-a",
+    startsAt: "2026-09-14T08:00:00",
+    endsAt: "2026-09-14T16:00:00",
+  });
+  const errors = validateShiftSwap(
+    swapInput({
+      offeredShift: offered,
+      requesterShifts: [offered],
+      claimedShift: shift({
+        id: "shift-claimed",
+        staffId: "staff-b",
+        startsAt: "2026-09-16T08:00:00",
+        endsAt: "2026-09-16T16:00:00",
+      }),
+    }),
+  );
+  assert.deepEqual(errors, []);
+});
+
+// hub.manage_pay_settings permission
+// ---------------------------------------------------------------------------
+
+test("PHASE2: hub.manage_pay_settings defaults for admin/PM/HR only", () => {
+  for (const role of ["administrator", "program_manager", "hr"]) {
+    assert.equal(defaultPermissions(role)["hub.manage_pay_settings"], true, role);
+  }
+  for (const role of [
+    "compliance_admin",
+    "house_manager",
+    "dsp",
+    "nurse",
+    "auditor",
+  ]) {
+    assert.equal(
+      defaultPermissions(role)["hub.manage_pay_settings"],
+      false,
+      role,
+    );
+  }
+  assert.equal(
+    PERMISSION_LABELS["hub.manage_pay_settings"],
+    "Configure accrual policies and overtime rules",
   );
 });

@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CalendarCheck,
   CalendarDays,
   CalendarRange,
@@ -36,9 +37,32 @@ import {
 } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { createSupabaseBrowserClient } from "../../data/index";
 import { hasPermission, type PermissionKey } from "../../data/permissions";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
+import { emitHrEvent } from "../notifications/useNotifications";
+import {
+  swapDecidedPayload,
+  swapRequestedPayload,
+} from "../notifications/notify";
+import {
+  currentLeaveBalance,
+  DEFAULT_OVERTIME_RULES,
+  timeOffRequestHours,
+  validateAccrualPolicy,
+  validateShiftSwap,
+  validateTimeOffBalance,
+  type AccrualPolicyInput,
+  type AccrualTenureBand,
+  type HrAccrualLedgerEntry,
+  type HrAccrualPolicy,
+  type HrOvertimeRules,
+  type HrShiftSwap,
+  type LeaveType,
+  type OvertimeRulesInput,
+  type ShiftSwapInput,
+} from "../../data/hr";
 import {
   DUE_SOON_DAYS,
   buildPayrollCsvExport,
@@ -184,6 +208,110 @@ function staffName(staffList: HubStaffEntry[], userId: string | null): string {
 function siteName(sites: HubSite[], siteId: string | null): string {
   if (!siteId) return "All sites";
   return sites.find((s) => s.id === siteId)?.name ?? "Unknown site";
+}
+
+/** One-line shift description for swap lists and notifications. */
+function describeShift(shift: HrShift | undefined): string {
+  if (!shift) return "Unknown shift";
+  return `${shift.title} · ${fmtDateTime(shift.startsAt)} – ${fmtTime(shift.endsAt)}`;
+}
+
+/* ------------------- accrual / overtime / swap UI helpers ------------------ */
+
+export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+  vacation: "Vacation",
+  pto: "PTO",
+  sick: "Sick",
+};
+
+/**
+ * Plain-English summary of the active overtime rules, e.g.
+ * "Overtime after 40 hours per week. Daily overtime after 10 hours in a day.
+ * Seventh consecutive day: overtime after 8 hours."
+ */
+export function describeOvertimeRules(
+  rules: Pick<
+    HrOvertimeRules,
+    | "weeklyThresholdHours"
+    | "dailyThresholdHours"
+    | "seventhConsecutiveDay"
+    | "seventhDayThresholdHours"
+  >,
+): string {
+  const parts: string[] = [
+    `Overtime after ${rules.weeklyThresholdHours} hours per week.`,
+  ];
+  if (rules.dailyThresholdHours != null) {
+    parts.push(
+      `Daily overtime after ${rules.dailyThresholdHours} hours in a day.`,
+    );
+  }
+  if (rules.seventhConsecutiveDay) {
+    parts.push(
+      `Seventh consecutive day: overtime after ${rules.seventhDayThresholdHours} hours.`,
+    );
+  }
+  return parts.join(" ");
+}
+
+/**
+ * Whether `userId` may claim this swap: pending, not their own posting, and
+ * open to everyone or targeted at them. (A claimed swap stays "pending"
+ * until a manager decides it.)
+ */
+export function swapClaimable(
+  swap: { status: string; requesterId: string; targetStaffId: string | null },
+  userId: string,
+): boolean {
+  if (swap.status !== "pending") return false;
+  if (swap.requesterId === userId) return false;
+  return swap.targetStaffId === null || swap.targetStaffId === userId;
+}
+
+/** "0–2 yrs → 3.08h/period" */
+export function formatTenureBand(band: AccrualTenureBand): string {
+  const range =
+    band.maxYears == null
+      ? `${band.minYears}+ yrs`
+      : `${band.minYears}–${band.maxYears} yrs`;
+  return `${range} → ${band.hoursPerPeriod}h/period`;
+}
+
+/** Browser client for client-side notification emits; null in tests/local. */
+function useNotifyClient() {
+  return useMemo(() => createSupabaseBrowserClient(), []);
+}
+
+/** Load the agency overtime rules. */
+function useOvertimeRules(store: HrStore): HrOvertimeRules | null {
+  const [rules, setRules] = useState<HrOvertimeRules | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    store
+      .getOvertimeRules()
+      .then((r) => {
+        if (!cancelled) setRules(r);
+      })
+      .catch(() => {
+        if (!cancelled) setRules(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [store]);
+  return rules;
+}
+
+/** summarizeTimecard options with the agency overtime rules when present.
+ * The spread bypasses the excess-property check so this compiles against
+ * both the current signature and the extended contract signature. */
+function timecardOptions(overtimeRules: HrOvertimeRules | null): {
+  unpaidBreakMinutesPerDay: number;
+} {
+  return {
+    unpaidBreakMinutesPerDay: 0,
+    ...(overtimeRules ? { overtimeRules } : {}),
+  };
 }
 
 function toLocalInputValue(iso: string): string {
@@ -358,7 +486,7 @@ export function EmployeeHubShell({
       </div>
 
       <div className="hub-panel">
-        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} />}
+        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
         {tab === "staffing" && (
           <StaffingTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
@@ -415,10 +543,12 @@ function MyScheduleTab({
   session,
   store,
   sites,
+  staffList,
 }: {
   session: SessionUser;
   store: HrStore;
   sites: HubSite[];
+  staffList: HubStaffEntry[];
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -541,6 +671,345 @@ function MyScheduleTab({
               onEdit={() => {}}
               onToggleActive={() => {}}
             />
+          ))}
+        </ul>
+      )}
+      <SwapBoard session={session} store={store} staffList={staffList} />
+    </section>
+  );
+}
+
+/* --------------------------- shift swap board ----------------------------- */
+
+/**
+ * Employee shift-swap board. Post one of my upcoming shifts for swap (open
+ * claim, targeted at one coworker, or a direct two-shift exchange), claim
+ * coworkers' open/targeted swaps, and cancel my own pending requests.
+ * Renders a "being set up" note until the phase-2 store surface exists.
+ */
+function SwapBoard({
+  session,
+  store,
+  staffList,
+}: {
+  session: SessionUser;
+  store: HrStore;
+  staffList: HubStaffEntry[];
+}) {
+  const notifyClient = useNotifyClient();
+  const [swaps, setSwaps] = useState<HrShiftSwap[]>([]);
+  const [shifts, setShifts] = useState<HrShift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [offeredId, setOfferedId] = useState("");
+  const [requestedId, setRequestedId] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [targetShifts, setTargetShifts] = useState<HrShift[]>([]);
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    const now = Date.now();
+    Promise.all([
+      store.listShiftSwaps(),
+      store
+        .listShifts(
+          new Date(now - 7 * 86_400_000).toISOString(),
+          new Date(now + 60 * 86_400_000).toISOString(),
+        )
+        .catch(() => [] as HrShift[]),
+    ])
+      .then(([sw, sh]) => {
+        setSwaps(sw);
+        setShifts(sh);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(errMessage(err, "Could not load shift swaps."));
+        setLoading(false);
+      });
+  };
+
+  useEffect(load, [store]);
+
+  // The exchange shift in a direct two-shift swap belongs to the target
+  // coworker (the store validates ownership), so load their upcoming
+  // published shifts when a target is chosen.
+  useEffect(() => {
+    if (targetId === "") {
+      setTargetShifts([]);
+      setRequestedId("");
+      return;
+    }
+    let cancelled = false;
+    const now = Date.now();
+    store
+      .listShifts(
+        new Date(now).toISOString(),
+        new Date(now + 60 * 86_400_000).toISOString(),
+      )
+      .then((all) => {
+        if (cancelled) return;
+        const nowIso = new Date(now).toISOString();
+        setTargetShifts(
+          all.filter(
+            (s) =>
+              s.staffId === targetId &&
+              s.status === "published" &&
+              s.startsAt > nowIso,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTargetShifts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [store, targetId]);
+
+  const shiftById = new Map(shifts.map((s) => [s.id, s]));
+  const nowIso = new Date().toISOString();
+  const myUpcoming = shifts.filter(
+    (s) => s.staffId === session.userId && s.status === "published" && s.startsAt > nowIso,
+  );
+  const openSwaps = swaps.filter(
+    (s) =>
+      s.status === "pending" &&
+      (s.targetStaffId === null || s.targetStaffId === session.userId),
+  );
+  const myRequests = swaps.filter((s) => s.requesterId === session.userId);
+
+  const notifyManagers = (swapId: string, offered: HrShift | undefined) => {
+    if (!notifyClient) return;
+    const title = "Shift swap requested";
+    const body = `${staffName(staffList, session.userId)} offered ${describeShift(offered)} for swap.`;
+    for (const roleKey of ["house_manager", "program_manager"]) {
+      void emitHrEvent(
+        notifyClient,
+        swapRequestedPayload({
+          agencyId: session.agencyId,
+          roleKey,
+          swapId,
+          title,
+          body,
+        }),
+      );
+    }
+  };
+
+  const postSwap = async () => {
+    const input: ShiftSwapInput = {
+      offeredShiftId: offeredId,
+      requestedShiftId: requestedId || null,
+      targetStaffId: targetId || null,
+    };
+    setBusy(true);
+    setError("");
+    try {
+      // The store validates the swap (past shifts, overlaps, self-target)
+      // and throws user-facing errors, shown inline below.
+      const created = await store.createShiftSwap(input);
+      notifyManagers(created.id, shiftById.get(created.offeredShiftId));
+      setOfferedId("");
+      setRequestedId("");
+      setTargetId("");
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not post the swap."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const claim = async (swap: HrShiftSwap) => {
+    // Client-side pre-check with the real validator (catches started shifts
+    // and self-claims early); the store re-validates authoritatively,
+    // including overlap windows, and throws user-facing errors.
+    const offered = shiftById.get(swap.offeredShiftId);
+    const problems = offered
+      ? validateShiftSwap({
+          offeredShift: offered,
+          requesterId: swap.requesterId,
+          requesterShifts: [],
+          claimerId: session.userId,
+          claimerShifts: [],
+          claimedShift: swap.requestedShiftId
+            ? (shiftById.get(swap.requestedShiftId) ?? null)
+            : null,
+          nowIso: new Date().toISOString(),
+        })
+      : ["Shift details are unavailable."];
+    if (problems.length > 0) {
+      setError(problems.join(" "));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await store.claimShiftSwap(swap.id, session.userId);
+      if (notifyClient) {
+        void emitHrEvent(
+          notifyClient,
+          swapDecidedPayload({
+            agencyId: session.agencyId,
+            userId: swap.requesterId,
+            swapId: updated.id,
+            approved: true,
+            title: "Your shift swap was claimed",
+            body: `${staffName(staffList, session.userId)} claimed your swap offer (${describeShift(shiftById.get(updated.offeredShiftId))}).`,
+          }),
+        );
+      }
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not claim the swap."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async (id: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await store.cancelShiftSwap(id);
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not cancel the swap."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section aria-label="Shift swaps">
+      <h3 style={{ margin: "20px 0 8px" }}>Shift swap board</h3>
+      <p className="hub-sub">
+        Offer one of your upcoming shifts for swap — leave it open for anyone,
+        target a coworker, or propose a direct two-shift exchange.
+      </p>
+      {error && <div className="hub-error" role="alert">{error}</div>}
+      <div className="hub-inline-form" style={{ marginBottom: 20 }}>
+        <h3>Post a shift for swap</h3>
+        <div className="hub-form">
+          <label>
+            My shift to offer
+            <select value={offeredId} onChange={(e) => setOfferedId(e.target.value)}>
+              <option value="">Pick a shift…</option>
+              {myUpcoming.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {describeShift(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Request in exchange (optional)
+            <select
+              value={requestedId}
+              onChange={(e) => setRequestedId(e.target.value)}
+              disabled={targetId === ""}
+            >
+              <option value="">Open claim — no specific shift</option>
+              {targetShifts
+                .filter((s) => s.id !== offeredId)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {describeShift(s)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            Target coworker (optional)
+            <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+              <option value="">Open to everyone</option>
+              {staffList
+                .filter((s) => s.userId !== session.userId)
+                .map((s) => (
+                  <option key={s.userId} value={s.userId}>
+                    {s.fullName}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <p className="hub-form-wide hub-sub">
+            {targetId === ""
+              ? "Choose a target coworker above to request a direct two-shift exchange."
+              : "Direct swap: the coworker above gives up the selected shift in exchange. Leave it blank for a one-sided claim."}
+          </p>
+        </div>
+        <div className="hub-form-actions">
+          <button className="hub-btn primary" disabled={busy || !offeredId} onClick={postSwap}>
+            <ArrowLeftRight size={16} /> Post swap
+          </button>
+        </div>
+      </div>
+      <h3>Open swaps</h3>
+      {loading ? (
+        <p>Loading swaps…</p>
+      ) : openSwaps.length === 0 ? (
+        <Empty title="No open swaps" text="Nothing posted for swap right now." mark="quiet" />
+      ) : (
+        <ul className="hub-list">
+          {openSwaps.map((s) => (
+            <li className="hub-list-item" key={s.id}>
+              <div className="hub-item-main">
+                <span className="hub-item-title">
+                  {staffName(staffList, s.requesterId)} offers {describeShift(shiftById.get(s.offeredShiftId))}
+                </span>
+                <span className="hub-item-sub">
+                  {s.requestedShiftId
+                    ? `Wants in exchange: ${describeShift(shiftById.get(s.requestedShiftId))}`
+                    : "Open claim — pick up this shift"}
+                  {s.targetStaffId ? ` · Targeted at you` : ""}
+                </span>
+              </div>
+              <div className="hub-row">
+                <span className={statusClass(s.status)}>{s.status}</span>
+                {swapClaimable(s, session.userId) && (
+                  <button className="hub-btn primary" disabled={busy} onClick={() => claim(s)}>
+                    <Check size={16} /> Claim
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 style={{ marginTop: 20 }}>My swap requests</h3>
+      {loading ? (
+        <p>Loading…</p>
+      ) : myRequests.length === 0 ? (
+        <p className="hub-sub">You haven't posted any swaps.</p>
+      ) : (
+        <ul className="hub-list">
+          {myRequests.map((s) => (
+            <li className="hub-list-item" key={s.id}>
+              <div className="hub-item-main">
+                <span className="hub-item-title">
+                  Offering {describeShift(shiftById.get(s.offeredShiftId))}
+                </span>
+                <span className="hub-item-sub">
+                  {s.requestedShiftId
+                    ? `For: ${describeShift(shiftById.get(s.requestedShiftId))}`
+                    : s.targetStaffId
+                      ? `Targeted at ${staffName(staffList, s.targetStaffId)}`
+                      : "Open claim"}
+                  {s.decisionNote ? ` · Manager: ${s.decisionNote}` : ""}
+                </span>
+              </div>
+              <div className="hub-row">
+                <span className={statusClass(s.status)}>{s.status}</span>
+                {s.status === "pending" && s.requesterId === session.userId && (
+                  <button className="hub-btn" disabled={busy} onClick={() => cancel(s.id)}>
+                    <X size={16} /> Cancel
+                  </button>
+                )}
+              </div>
+            </li>
           ))}
         </ul>
       )}
@@ -802,6 +1271,7 @@ function MyTimecardTab({
   const [corrKind, setCorrKind] = useState<"in" | "out">("in");
   const [corrAt, setCorrAt] = useState("");
   const [corrReason, setCorrReason] = useState("");
+  const overtimeRules = useOvertimeRules(store);
 
   useEffect(() => {
     store
@@ -846,7 +1316,10 @@ function MyTimecardTab({
     };
   }, [store, period, session.userId]);
 
-  const summary = useMemo(() => summarizeTimecard(punches, { unpaidBreakMinutesPerDay: 0 }), [punches]);
+  const summary = useMemo(
+    () => summarizeTimecard(punches, timecardOptions(overtimeRules)),
+    [punches, overtimeRules],
+  );
   const segments = useMemo(() => pairPunches(punches), [punches]);
 
   const submit = async () => {
@@ -1405,6 +1878,8 @@ function TimeOffTab({
   const [reason, setReason] = useState("");
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
+  const [policies, setPolicies] = useState<HrAccrualPolicy[]>([]);
+  const [ledger, setLedger] = useState<HrAccrualLedgerEntry[]>([]);
 
   const load = () => {
     setLoading(true);
@@ -1412,10 +1887,16 @@ function TimeOffTab({
     Promise.all([
       store.listTimeOffRequests({ staffId: session.userId }),
       canApprove ? store.listTimeOffRequests({}) : Promise.resolve([] as HrTimeOffRequest[]),
+      Promise.all([
+        store.listAccrualPolicies().catch(() => [] as HrAccrualPolicy[]),
+        store.listLedgerEntries(session.userId).catch(() => [] as HrAccrualLedgerEntry[]),
+      ]),
     ])
-      .then(([m, t]) => {
+      .then(([m, t, [pol, entries]]) => {
         setMine(m);
         setTeam(t);
+        setPolicies(pol);
+        setLedger(entries);
         setLoading(false);
       })
       .catch((err) => {
@@ -1468,11 +1949,39 @@ function TimeOffTab({
 
   const pending = team.filter((r) => r.status === "pending");
 
+  const activePolicies = policies.filter((p) => p.active);
+  const balances = new Map<LeaveType, number>(
+    activePolicies.map((p) => [p.leaveType, currentLeaveBalance(ledger, p.leaveType)]),
+  );
+  // Time-off kind → leave type for balance checks (unpaid/other have none).
+  const requestLeaveType: LeaveType | null =
+    kind === "pto" ? "pto" : kind === "sick" ? "sick" : null;
+  const datesValid = startsOn !== "" && endsOn !== "" && endsOn >= startsOn;
+  const requestedHours = requestLeaveType && datesValid ? timeOffRequestHours(startsOn, endsOn, 8) : 0;
+  const availableHours = requestLeaveType ? (balances.get(requestLeaveType) ?? 0) : null;
+  // Domain validation: blocks when the request exceeds the balance, warns
+  // when fewer than 8h would remain. The store re-validates on submit and
+  // throws — caught and shown inline by submitRequest.
+  const balanceCheck =
+    requestLeaveType && datesValid
+      ? validateTimeOffBalance(requestedHours, availableHours ?? 0, requestLeaveType)
+      : null;
+
   return (
     <section className="hub-card" aria-label="Time off">
       <h2>Time Off</h2>
       <p className="hub-sub">Request time off and track your requests.</p>
       {error && <div className="hub-error" role="alert">{error}</div>}
+      {activePolicies.length > 0 && (
+        <div className="hub-balance-cards" aria-label="Leave balances">
+          {activePolicies.map((p) => (
+            <div className="hub-balance-card" key={p.id}>
+              <span className="hub-balance-label">{LEAVE_TYPE_LABELS[p.leaveType]} available</span>
+              <span className="hub-balance-value">{balances.get(p.leaveType) ?? 0}h</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="hub-inline-form" style={{ marginBottom: 20 }}>
         <h3>New request</h3>
         <div className="hub-form">
@@ -1497,6 +2006,24 @@ function TimeOffTab({
             Reason
             <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
           </label>
+          {requestLeaveType && datesValid && balanceCheck && (
+            <div className="hub-form-wide">
+              <p className="hub-balance-line">
+                Requesting <strong>{requestedHours}h</strong> of {availableHours}h available{" "}
+                {LEAVE_TYPE_LABELS[requestLeaveType]} (8h per day).
+              </p>
+              {balanceCheck.errors.map((message) => (
+                <p className="hub-balance-line" key={message}>
+                  <span className="hub-balance-warn">{message}</span>
+                </p>
+              ))}
+              {balanceCheck.warnings.map((message) => (
+                <p className="hub-balance-line hub-sub" key={message}>
+                  {message}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
         <div className="hub-form-actions">
           <button className="hub-btn primary" disabled={busy} onClick={submitRequest}>
@@ -1703,8 +2230,6 @@ function TeamScheduleTab({
     }
   };
 
-  void session;
-
   return (
     <section className="hub-card" aria-label="Team schedule">
       <div className="hub-row">
@@ -1841,6 +2366,160 @@ function TeamScheduleTab({
             </div>
           );
         })
+      )}
+      <SwapApprovalList session={session} store={store} staffList={staffList} />
+    </section>
+  );
+}
+
+/* -------------------------- swap approvals (manager) ---------------------- */
+
+/**
+ * Manager view of pending shift swaps (gated on hub.manage_schedule by the
+ * tab itself). Approve or deny with an optional note; the requester is
+ * notified of the decision.
+ */
+function SwapApprovalList({
+  session,
+  store,
+  staffList,
+}: {
+  session: SessionUser;
+  store: HrStore;
+  staffList: HubStaffEntry[];
+}) {
+  const notifyClient = useNotifyClient();
+  const [swaps, setSwaps] = useState<HrShiftSwap[]>([]);
+  const [shifts, setShifts] = useState<HrShift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [decisionNote, setDecisionNote] = useState("");
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    const now = Date.now();
+    Promise.all([
+      store.listShiftSwaps(),
+      store
+        .listShifts(
+          new Date(now - 7 * 86_400_000).toISOString(),
+          new Date(now + 60 * 86_400_000).toISOString(),
+        )
+        .catch(() => [] as HrShift[]),
+    ])
+      .then(([sw, sh]) => {
+        setSwaps(sw);
+        setShifts(sh);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(errMessage(err, "Could not load shift swaps."));
+        setLoading(false);
+      });
+  };
+
+  useEffect(load, [store]);
+
+  const shiftById = new Map(shifts.map((s) => [s.id, s]));
+  const pending = swaps.filter((s) => s.status === "pending");
+
+  const decide = async (swap: HrShiftSwap, approve: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await store.decideShiftSwap(
+        swap.id,
+        approve,
+        session.userId,
+        decisionNote.trim() ? decisionNote.trim() : undefined,
+      );
+      if (notifyClient) {
+        void emitHrEvent(
+          notifyClient,
+          swapDecidedPayload({
+            agencyId: session.agencyId,
+            userId: swap.requesterId,
+            swapId: updated.id,
+            approved: updated.status === "approved",
+            title: approve ? "Your shift swap was approved" : "Your shift swap was denied",
+            body: approve
+              ? `Your swap offer (${describeShift(shiftById.get(updated.offeredShiftId))}) was approved.`
+              : `Your swap offer (${describeShift(shiftById.get(updated.offeredShiftId))}) was denied.${decisionNote.trim() ? ` Note: ${decisionNote.trim()}` : ""}`,
+          }),
+        );
+      }
+      setDecidingId(null);
+      setDecisionNote("");
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not decide the swap."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section aria-label="Shift swap approvals" style={{ marginTop: 24 }}>
+      <h3>Shift swap approvals</h3>
+      <p className="hub-sub">Pending swap requests — approve or deny with a note.</p>
+      {error && <div className="hub-error" role="alert">{error}</div>}
+      {loading ? (
+        <p>Loading swaps…</p>
+      ) : pending.length === 0 ? (
+        <Empty title="No pending swaps" text="All swap requests have been decided." mark="check" />
+      ) : (
+        <ul className="hub-list">
+          {pending.map((s) => (
+            <li className="hub-list-item" key={s.id}>
+              <div className="hub-item-main">
+                <span className="hub-item-title">
+                  {staffName(staffList, s.requesterId)} offers {describeShift(shiftById.get(s.offeredShiftId))}
+                </span>
+                <span className="hub-item-sub">
+                  {s.requestedShiftId
+                    ? `Wants in exchange: ${describeShift(shiftById.get(s.requestedShiftId))}`
+                    : "Open claim — no exchange requested"}
+                  {s.targetStaffId && s.status === "pending"
+                    ? ` · With ${staffName(staffList, s.targetStaffId)}`
+                    : s.status === "pending"
+                      ? " · Open to everyone"
+                      : ""}
+                </span>
+                {decidingId === s.id ? (
+                  <div className="hub-inline-form" style={{ marginTop: 8 }}>
+                    <label>
+                      Note (optional)
+                      <input
+                        value={decisionNote}
+                        onChange={(e) => setDecisionNote(e.target.value)}
+                        placeholder="Coverage confirmed"
+                      />
+                    </label>
+                    <div className="hub-form-actions">
+                      <button className="hub-btn primary" disabled={busy} onClick={() => decide(s, true)}>
+                        <Check size={16} /> Approve
+                      </button>
+                      <button className="hub-btn danger" disabled={busy} onClick={() => decide(s, false)}>
+                        <X size={16} /> Deny
+                      </button>
+                      <button className="hub-btn" onClick={() => setDecidingId(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <button className="hub-btn" onClick={() => setDecidingId(s.id)}>
+                      Decide
+                    </button>
+                  </div>
+                )}
+              </div>
+              <span className={statusClass(s.status)}>{s.status}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -2011,6 +2690,7 @@ function TimecardsTab({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const overtimeRules = useOvertimeRules(store);
 
   useEffect(() => {
     store
@@ -2057,7 +2737,10 @@ function TimecardsTab({
     };
   }, [store, period, staffId]);
 
-  const summary = useMemo(() => summarizeTimecard(punches, { unpaidBreakMinutesPerDay: 0 }), [punches]);
+  const summary = useMemo(
+    () => summarizeTimecard(punches, timecardOptions(overtimeRules)),
+    [punches, overtimeRules],
+  );
   const pendingCorrections = corrections.filter((c) => c.status === "pending");
 
   const decideCorrection = async (id: string, approve: boolean) => {
@@ -2379,6 +3062,7 @@ function TeamComplianceTab({
 /* --------------------------------- Payroll -------------------------------- */
 
 function PayrollTab({
+  session,
   store,
   staffList,
 }: {
@@ -2386,12 +3070,14 @@ function PayrollTab({
   store: HrStore;
   staffList: HubStaffEntry[];
 }) {
+  const canManagePaySettings = hasPermission(session, "hub.manage_pay_settings");
   const [periods, setPeriods] = useState<HrPayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [startsOn, setStartsOn] = useState(dayStamp(addDays(new Date(), -14)));
   const [endsOn, setEndsOn] = useState(dayStamp(addDays(new Date(), -1)));
+  const [overtimeRules, setOvertimeRules] = useState<HrOvertimeRules | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -2406,6 +3092,10 @@ function PayrollTab({
         setError(errMessage(err, "Could not load pay periods."));
         setLoading(false);
       });
+    store
+      .getOvertimeRules()
+      .then(setOvertimeRules)
+      .catch(() => setOvertimeRules(null));
   };
 
   useEffect(load, [store]);
@@ -2452,7 +3142,7 @@ function PayrollTab({
             store.listPunches(s.userId, `${period.startsOn}T00:00:00`, `${period.endsOn}T23:59:59`),
             store.getTimecardApproval(period.id, s.userId),
           ]);
-          const summary = summarizeTimecard(punches, { unpaidBreakMinutesPerDay: 0 });
+          const summary = summarizeTimecard(punches, timecardOptions(overtimeRules));
           let ptoHours = 0;
           let sickHours = 0;
           for (const r of timeOff) {
@@ -2550,6 +3240,446 @@ function PayrollTab({
                     <Download size={16} /> Export CSV
                   </button>
                 )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canManagePaySettings && <PaySettingsSection store={store} />}
+    </section>
+  );
+}
+
+/* ------------------------------ pay settings ------------------------------ */
+
+/**
+ * Pay-settings configuration (overtime rules + accrual policies), gated on
+ * hub.manage_pay_settings by the Payroll tab. Renders nothing without the
+ * phase-2 store surface.
+ */
+function PaySettingsSection({ store }: { store: HrStore }) {
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h3>Pay settings</h3>
+      <p className="hub-sub">
+        Overtime rules feed every timecard summary and payroll export; accrual
+        policies feed leave balances on the Time Off tab.
+      </p>
+      <div className="hub-pay-grid">
+        <OvertimeRulesCard store={store} />
+        <AccrualPoliciesCard store={store} />
+      </div>
+    </div>
+  );
+}
+
+function OvertimeRulesCard({ store }: { store: HrStore }) {
+  const [rules, setRules] = useState<HrOvertimeRules | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [weekly, setWeekly] = useState(String(DEFAULT_OVERTIME_RULES.weeklyThresholdHours));
+  const [daily, setDaily] = useState("");
+  const [seventh, setSeventh] = useState(DEFAULT_OVERTIME_RULES.seventhConsecutiveDay);
+  const [seventhHours, setSeventhHours] = useState(
+    String(DEFAULT_OVERTIME_RULES.seventhDayThresholdHours),
+  );
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    store
+      .getOvertimeRules()
+      .then((r) => {
+        setRules(r);
+        setWeekly(String(r.weeklyThresholdHours));
+        setDaily(r.dailyThresholdHours == null ? "" : String(r.dailyThresholdHours));
+        setSeventh(r.seventhConsecutiveDay);
+        setSeventhHours(String(r.seventhDayThresholdHours));
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(errMessage(err, "Could not load overtime rules."));
+        setLoading(false);
+      });
+  };
+
+  useEffect(load, [store]);
+
+  const save = async () => {
+    const weeklyHours = Number(weekly);
+    if (!Number.isFinite(weeklyHours) || weeklyHours <= 0) {
+      setError("Weekly overtime threshold must be a positive number of hours.");
+      return;
+    }
+    const dailyHours = daily.trim() === "" ? null : Number(daily);
+    if (dailyHours != null && (!Number.isFinite(dailyHours) || dailyHours <= 0)) {
+      setError("Daily overtime threshold must be a positive number, or blank to turn it off.");
+      return;
+    }
+    const seventhDayHours = Number(seventhHours);
+    if (seventh && (!Number.isFinite(seventhDayHours) || seventhDayHours <= 0)) {
+      setError("Seventh-day threshold must be a positive number of hours.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const input: OvertimeRulesInput = {
+        weeklyThresholdHours: weeklyHours,
+        dailyThresholdHours: dailyHours,
+        seventhConsecutiveDay: seventh,
+        seventhDayThresholdHours: seventhDayHours,
+      };
+      const saved = await store.saveOvertimeRules(input);
+      setRules(saved);
+    } catch (err) {
+      setError(errMessage(err, "Could not save overtime rules."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="hub-card hub-pay-card" aria-label="Overtime rules">
+      <h3>Overtime rules</h3>
+      {error && <div className="hub-error" role="alert">{error}</div>}
+      {loading ? (
+        <p>Loading pay settings…</p>
+      ) : (
+        <>
+          <div className="hub-summary-box" aria-live="polite">
+            <strong>Active rules:</strong> {rules ? describeOvertimeRules(rules) : "None configured."}
+            <br />
+            Double-time is not supported — overtime is calculated at the single configured rate.
+          </div>
+          <div className="hub-form" style={{ marginTop: 12 }}>
+            <label>
+              Weekly threshold (hours)
+              <input
+                type="number"
+                min="1"
+                step="0.5"
+                value={weekly}
+                onChange={(e) => setWeekly(e.target.value)}
+              />
+            </label>
+            <label>
+              Daily threshold (hours, blank = off)
+              <input
+                type="number"
+                min="1"
+                step="0.5"
+                value={daily}
+                onChange={(e) => setDaily(e.target.value)}
+                placeholder="Off"
+              />
+            </label>
+            <label>
+              Seventh-day threshold (hours)
+              <input
+                type="number"
+                min="1"
+                step="0.5"
+                value={seventhHours}
+                onChange={(e) => setSeventhHours(e.target.value)}
+                disabled={!seventh}
+              />
+            </label>
+            <label className="hub-check">
+              <input
+                type="checkbox"
+                checked={seventh}
+                onChange={(e) => setSeventh(e.target.checked)}
+              />
+              Seventh consecutive day overtime
+            </label>
+          </div>
+          <div className="hub-form-actions" style={{ marginTop: 12 }}>
+            <button className="hub-btn primary" disabled={busy} onClick={save}>
+              <Check size={16} /> Save overtime rules
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+const LEAVE_TYPES: LeaveType[] = ["vacation", "pto", "sick"];
+
+function AccrualPoliciesCard({ store }: { store: HrStore }) {
+  const [policies, setPolicies] = useState<HrAccrualPolicy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<HrAccrualPolicy | null>(null);
+  const [leaveType, setLeaveType] = useState<LeaveType>("pto");
+  const [bands, setBands] = useState<AccrualTenureBand[]>([
+    { minYears: 0, maxYears: null, hoursPerPeriod: 3.08 },
+  ]);
+  const [capHours, setCapHours] = useState("40");
+  const [basis, setBasis] = useState<"calendar_year" | "anniversary">("calendar_year");
+  const [effectiveFrom, setEffectiveFrom] = useState(dayStamp(new Date()));
+  const [effectiveTo, setEffectiveTo] = useState("");
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    store
+      .listAccrualPolicies()
+      .then((p) => {
+        setPolicies(p);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(errMessage(err, "Could not load accrual policies."));
+        setLoading(false);
+      });
+  };
+
+  useEffect(load, [store]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setLeaveType("pto");
+    setBands([{ minYears: 0, maxYears: null, hoursPerPeriod: 3.08 }]);
+    setCapHours("40");
+    setBasis("calendar_year");
+    setEffectiveFrom(dayStamp(new Date()));
+    setEffectiveTo("");
+    setFormError("");
+    setFormOpen(true);
+  };
+
+  const openEdit = (policy: HrAccrualPolicy) => {
+    setEditing(policy);
+    setLeaveType(policy.leaveType);
+    setBands(policy.tenureBands.map((b) => ({ ...b })));
+    setCapHours(String(policy.carryoverCapHours));
+    setBasis(policy.carryoverBasis);
+    setEffectiveFrom(policy.effectiveFrom);
+    setEffectiveTo(policy.effectiveTo ?? "");
+    setFormError("");
+    setFormOpen(true);
+  };
+
+  const updateBand = (index: number, patch: Partial<AccrualTenureBand>) => {
+    setBands((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
+  };
+
+  const save = async () => {
+    const input: AccrualPolicyInput = {
+      leaveType,
+      // Bands must be sorted by minYears (the domain validator requires it).
+      tenureBands: [...bands].sort((a, b) => a.minYears - b.minYears),
+      carryoverCapHours: Number(capHours),
+      carryoverBasis: basis,
+      effectiveFrom,
+      effectiveTo: effectiveTo === "" ? null : effectiveTo,
+    };
+    const problems = validateAccrualPolicy(input);
+    if (problems.length > 0) {
+      setFormError(problems.join(" "));
+      return;
+    }
+    setBusy(true);
+    setFormError("");
+    try {
+      if (editing) await store.updateAccrualPolicy(editing.id, input);
+      else await store.createAccrualPolicy(input);
+      setFormOpen(false);
+      setEditing(null);
+      load();
+    } catch (err) {
+      setFormError(errMessage(err, "Could not save the accrual policy."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async (policy: HrAccrualPolicy) => {
+    setBusy(true);
+    setError("");
+    try {
+      await store.setAccrualPolicyActive(policy.id, !policy.active);
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not update the policy."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="hub-card hub-pay-card" aria-label="Accrual policies">
+      <div className="hub-row">
+        <h3>Accrual policies</h3>
+        <button className="hub-btn primary" onClick={openCreate}>
+          <Plus size={16} /> Add policy
+        </button>
+      </div>
+      {error && <div className="hub-error" role="alert">{error}</div>}
+      {formError && !formOpen && <div className="hub-error" role="alert">{formError}</div>}
+      {formOpen && (
+        <div className="hub-inline-form" style={{ margin: "12px 0" }}>
+          <h3>{editing ? "Edit accrual policy" : "New accrual policy"}</h3>
+          {formError && <div className="hub-error" role="alert">{formError}</div>}
+          <div className="hub-form">
+            <label>
+              Leave type
+              <select value={leaveType} onChange={(e) => setLeaveType(e.target.value as LeaveType)}>
+                {LEAVE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {LEAVE_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Carryover basis
+              <select value={basis} onChange={(e) => setBasis(e.target.value as "calendar_year" | "anniversary")}>
+                <option value="calendar_year">Calendar year</option>
+                <option value="anniversary">Anniversary</option>
+              </select>
+            </label>
+            <label>
+              Carryover cap (hours)
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={capHours}
+                onChange={(e) => setCapHours(e.target.value)}
+                placeholder="40"
+              />
+            </label>
+            <label>
+              Effective from
+              <input
+                type="date"
+                value={effectiveFrom}
+                onChange={(e) => setEffectiveFrom(e.target.value)}
+              />
+            </label>
+            <label>
+              Effective to (blank = open-ended)
+              <input
+                type="date"
+                value={effectiveTo}
+                onChange={(e) => setEffectiveTo(e.target.value)}
+              />
+            </label>
+          </div>
+          <fieldset className="hub-fieldset">
+            <legend>Tenure bands</legend>
+            {bands.map((band, i) => (
+              <div className="hub-band-row" key={i}>
+                <label>
+                  Min years
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={band.minYears}
+                    onChange={(e) => updateBand(i, { minYears: Number(e.target.value) })}
+                  />
+                </label>
+                <label>
+                  Max years (blank = none)
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={band.maxYears == null ? "" : band.maxYears}
+                    onChange={(e) =>
+                      updateBand(i, {
+                        maxYears: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    placeholder="None"
+                  />
+                </label>
+                <label>
+                  Hours / period
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={band.hoursPerPeriod}
+                    onChange={(e) => updateBand(i, { hoursPerPeriod: Number(e.target.value) })}
+                  />
+                </label>
+                {bands.length > 1 && (
+                  <button
+                    className="hub-btn danger"
+                    aria-label={`Remove band ${i + 1}`}
+                    onClick={() => setBands((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="hub-form-actions" style={{ marginTop: 8 }}>
+              <button
+                className="hub-btn"
+                onClick={() => setBands((prev) => [...prev, { minYears: 0, maxYears: null, hoursPerPeriod: 0 }])}
+              >
+                <Plus size={16} /> Add band
+              </button>
+            </div>
+          </fieldset>
+          <div className="hub-form-actions">
+            <button className="hub-btn primary" disabled={busy} onClick={save}>
+              <Check size={16} /> Save policy
+            </button>
+            <button
+              className="hub-btn"
+              onClick={() => {
+                setFormOpen(false);
+                setEditing(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <p>Loading policies…</p>
+      ) : policies.length === 0 ? (
+        <Empty title="No accrual policies" text="Add the first policy above — leave balances appear once a policy is active." mark="quiet" />
+      ) : (
+        <ul className="hub-list">
+          {policies.map((p) => (
+            <li className={`hub-list-item${p.active ? "" : " hub-inactive"}`} key={p.id}>
+              <div className="hub-item-main">
+                <span className="hub-item-title">
+                  <span className="hub-leave-badge">{LEAVE_TYPE_LABELS[p.leaveType]}</span>
+                </span>
+                <span className="hub-item-sub">
+                  {p.tenureBands.map(formatTenureBand).join(" · ")}
+                </span>
+                <span className="hub-item-sub">
+                  Carryover: {p.carryoverCapHours}h ·{" "}
+                  {p.carryoverBasis === "calendar_year" ? "Calendar year" : "Anniversary"} ·{" "}
+                  Effective {fmtDate(p.effectiveFrom)}
+                  {p.effectiveTo ? ` – ${fmtDate(p.effectiveTo)}` : " – present"}
+                </span>
+              </div>
+              <div className="hub-row">
+                <span className={statusClass(p.active ? "approved" : "draft")}>
+                  {p.active ? "Active" : "Inactive"}
+                </span>
+                <button className="hub-btn" aria-label={`Edit ${LEAVE_TYPE_LABELS[p.leaveType]} policy`} disabled={busy} onClick={() => openEdit(p)}>
+                  <Pencil size={16} />
+                </button>
+                <button className="hub-btn" disabled={busy} onClick={() => toggleActive(p)}>
+                  {p.active ? "Deactivate" : "Activate"}
+                </button>
               </div>
             </li>
           ))}

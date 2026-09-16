@@ -670,3 +670,137 @@
     flex-wrap: wrap;
   }
 }
+
+/* ----------------- phase-2: balances, pay settings, swaps -------------- */
+
+.hub-balance-cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  margin-bottom: 20px;
+}
+
+.hub-balance-card {
+  background: #fff;
+  border: 1px solid var(--border, #b59a74);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.hub-balance-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #4a4036);
+}
+
+.hub-balance-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2f4630;
+}
+
+.hub-balance-line {
+  font-size: 0.95rem;
+  color: var(--text, #241e18);
+}
+
+.hub-balance-warn {
+  color: #8a3d1f;
+  font-weight: 700;
+}
+
+.hub-leave-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #dce8d2;
+  color: #2f4630;
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hub-pay-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+}
+
+.hub-pay-card > .hub-row > h3,
+.hub-pay-card > h3 {
+  margin: 0 0 8px;
+}
+
+.hub-summary-box {
+  background: #f6f1e6;
+  border: 1px solid var(--border, #b59a74);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.hub-band-row {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.hub-band-row label {
+  flex: 1;
+  min-width: 120px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.hub-band-row input {
+  border: 1px solid var(--border, #b59a74);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 16px;
+  background: #fff;
+  color: var(--text, #241e18);
+  min-height: 44px;
+  width: 100%;
+}
+
+.hub-band-row .hub-btn {
+  min-width: 44px;
+  justify-content: center;
+}
+
+.hub-status.claimed {
+  background: #e4ddcf;
+  color: #4a4036;
+}
+
+.hub-status.cancelled {
+  background: #f0d3c2;
+  color: #8a3d1f;
+}
+
+@media (max-width: 640px) {
+  .hub-balance-cards {
+    grid-template-columns: 1fr;
+  }
+  .hub-pay-grid {
+    grid-template-columns: 1fr;
+  }
+  .hub-band-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hub-band-row label {
+    min-width: 0;
+  }
+}

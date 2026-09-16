@@ -21,21 +21,37 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildPayrollCsvExport,
   computePatternWeeklyHours,
+  currentLeaveBalance,
+  timeOffRequestHours,
+  validateAccrualPolicy,
   validateClockIn,
   validateClockOut,
+  validateShiftSwap,
+  validateTimeOffBalance,
+  DEFAULT_OVERTIME_RULES,
 } from "./hr";
 import type {
+  AccrualPolicyInput,
   ComplianceEvidence,
+  HrAccrualLedgerEntry,
+  HrAccrualPolicy,
   HrDocument,
   HrDocumentAck,
+  HrOvertimeRules,
   HrPayPeriod,
   HrPunch,
   HrPunchCorrection,
   HrReadinessRequirement,
   HrShift,
+  HrShiftSwap,
   HrStaffingPattern,
   HrTimecardApproval,
   HrTimeOffRequest,
+  LedgerEntryInput,
+  LeaveType,
+  OvertimeRulesInput,
+  ShiftSwapInput,
+  ShiftSwapStatus,
 } from "./hr";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
 
@@ -118,6 +134,41 @@ export interface HrStore {
     patch: Partial<HrStaffingPatternInput>,
   ): Promise<HrStaffingPattern>;
   setStaffingPatternActive(id: string, active: boolean): Promise<void>;
+  /* PTO accrual policies (HR-PHASE2) */
+  listAccrualPolicies(): Promise<HrAccrualPolicy[]>;
+  createAccrualPolicy(input: AccrualPolicyInput): Promise<HrAccrualPolicy>;
+  updateAccrualPolicy(
+    id: string,
+    patch: Partial<AccrualPolicyInput>,
+  ): Promise<HrAccrualPolicy>;
+  setAccrualPolicyActive(id: string, active: boolean): Promise<HrAccrualPolicy>;
+  /* Leave ledger (HR-PHASE2) */
+  listLedgerEntries(
+    staffId: string,
+    opts?: { leaveType?: LeaveType },
+  ): Promise<HrAccrualLedgerEntry[]>;
+  postLedgerEntry(input: LedgerEntryInput): Promise<HrAccrualLedgerEntry>;
+  /* Overtime rules (HR-PHASE2) */
+  getOvertimeRules(): Promise<HrOvertimeRules>;
+  saveOvertimeRules(input: OvertimeRulesInput): Promise<HrOvertimeRules>;
+  /* Shift swaps (HR-PHASE2) */
+  listShiftSwaps(scope?: {
+    staffId?: string;
+    status?: ShiftSwapStatus;
+  }): Promise<HrShiftSwap[]>;
+  createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap>;
+  claimShiftSwap(
+    id: string,
+    claimerId: string,
+    counterOfferShiftId?: string,
+  ): Promise<HrShiftSwap>;
+  decideShiftSwap(
+    id: string,
+    approve: boolean,
+    decidedBy: string,
+    note?: string,
+  ): Promise<HrShiftSwap>;
+  cancelShiftSwap(id: string): Promise<HrShiftSwap>;
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -231,6 +282,79 @@ function mapAck(r: Record<string, unknown>): HrDocumentAck {
     staffId: String(r.staff_id),
     ackedAt: String(r.acked_at),
     signatureName: String(r.signature_name ?? ""),
+  };
+}
+
+/* Column names follow the hr_* snake_case convention; if the phase-2
+ * migration names a column differently, the Supabase calls below fail loudly
+ * and this mapping is the single place to reconcile. */
+
+function mapAccrualPolicy(r: Record<string, unknown>): HrAccrualPolicy {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    leaveType: r.leave_type as LeaveType,
+    tenureBands: (r.tenure_bands as HrAccrualPolicy["tenureBands"]) ?? [],
+    carryoverCapHours: Number(r.carryover_cap_hours ?? 0),
+    carryoverBasis: (r.carryover_basis as HrAccrualPolicy["carryoverBasis"]) ?? "calendar_year",
+    effectiveFrom: String(r.effective_from),
+    effectiveTo: r.effective_to == null ? null : String(r.effective_to),
+    active: Boolean(r.active),
+    createdBy: String(r.created_by ?? ""),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapLedgerEntry(r: Record<string, unknown>): HrAccrualLedgerEntry {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    payPeriodId: r.pay_period_id == null ? null : String(r.pay_period_id),
+    periodStart: String(r.period_start),
+    leaveType: r.leave_type as LeaveType,
+    accrued: Number(r.accrued ?? 0),
+    used: Number(r.used ?? 0),
+    adjustment: Number(r.adjustment ?? 0),
+    balance: Number(r.balance ?? 0),
+    note: r.note == null ? null : String(r.note),
+    createdAt: String(r.created_at),
+  };
+}
+
+function mapOvertimeRules(
+  r: Record<string, unknown>,
+  agencyId: string,
+): HrOvertimeRules {
+  return {
+    agencyId,
+    weeklyThresholdHours: Number(r.weekly_threshold_hours),
+    dailyThresholdHours:
+      r.daily_threshold_hours == null ? null : Number(r.daily_threshold_hours),
+    seventhConsecutiveDay: Boolean(r.seventh_consecutive_day),
+    seventhDayThresholdHours: Number(r.seventh_day_threshold_hours ?? 8),
+    updatedBy: r.updated_by == null ? null : String(r.updated_by),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapShiftSwap(r: Record<string, unknown>): HrShiftSwap {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    requesterId: String(r.requester_id),
+    offeredShiftId: String(r.offered_shift_id),
+    requestedShiftId:
+      r.requested_shift_id == null ? null : String(r.requested_shift_id),
+    targetStaffId:
+      r.target_staff_id == null ? null : String(r.target_staff_id),
+    status: r.status as ShiftSwapStatus,
+    decidedBy: r.decided_by == null ? null : String(r.decided_by),
+    decidedAt: r.decided_at == null ? null : String(r.decided_at),
+    decisionNote: r.decision_note == null ? null : String(r.decision_note),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
   };
 }
 
@@ -700,7 +824,31 @@ class SupabaseHrStore implements HrStore {
     return (data ?? []).map(mapTimeOff);
   }
 
+  /**
+   * Throws a user-facing error when a pto/sick request would exceed the
+   * staff member's current leave balance. Unpaid/other kinds skip the check;
+   * so does a leave type with no active accrual policy (nothing to check
+   * against).
+   */
+  private async assertTimeOffBalance(
+    kind: HrTimeOffRequest["kind"],
+    startsOn: string,
+    endsOn: string,
+    staffId: string,
+  ): Promise<void> {
+    if (kind !== "pto" && kind !== "sick") return;
+    const policies = await this.listAccrualPolicies();
+    const policy = policies.find((p) => p.leaveType === kind && p.active);
+    if (!policy) return;
+    const hours = timeOffRequestHours(startsOn, endsOn);
+    const ledger = await this.listLedgerEntries(staffId, { leaveType: kind });
+    const balance = currentLeaveBalance(ledger, kind);
+    const check = validateTimeOffBalance(hours, balance, kind);
+    if (!check.ok) throw new Error(check.errors.join(" "));
+  }
+
   async createTimeOffRequest(input: HrTimeOffRequestInput): Promise<HrTimeOffRequest> {
+    await this.assertTimeOffBalance(input.kind, input.startsOn, input.endsOn, this.userId);
     const { data, error } = await this.client
       .from("hr_time_off_requests")
       .insert({
@@ -724,6 +872,14 @@ class SupabaseHrStore implements HrStore {
     approve: boolean,
     note?: string,
   ): Promise<HrTimeOffRequest> {
+    const { data: existing, error: fetchError } = await this.client
+      .from("hr_time_off_requests")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(fetchError, "Time-off request not found");
+    const prev = mapTimeOff(existing as Record<string, unknown>);
     const { data, error } = await this.client
       .from("hr_time_off_requests")
       .update({
@@ -737,7 +893,29 @@ class SupabaseHrStore implements HrStore {
       .select()
       .single();
     throwIf(error, "Could not decide the time-off request");
-    return mapTimeOff(data as Record<string, unknown>);
+    const decided = mapTimeOff(data as Record<string, unknown>);
+    // Ledger integration: approving a pto/sick request debits the balance;
+    // reversing an approval posts a restoring adjustment. Guards on the
+    // previous status keep repeated decides from double-posting.
+    if (prev.kind === "pto" || prev.kind === "sick") {
+      const hours = timeOffRequestHours(prev.startsOn, prev.endsOn);
+      if (approve && prev.status !== "approved") {
+        await this.postLedgerEntry({
+          staffId: prev.staffId,
+          leaveType: prev.kind,
+          used: hours,
+          note: `time-off ${prev.id}`,
+        });
+      } else if (!approve && prev.status === "approved") {
+        await this.postLedgerEntry({
+          staffId: prev.staffId,
+          leaveType: prev.kind,
+          adjustment: hours,
+          note: `time-off restored ${prev.id}`,
+        });
+      }
+    }
+    return decided;
   }
 
   async listReadinessRequirements(): Promise<HrReadinessRequirement[]> {
@@ -1005,6 +1183,414 @@ class SupabaseHrStore implements HrStore {
       .eq("agency_id", this.agencyId);
     throwIf(error, "Could not update the staffing pattern");
   }
+
+  /* ------------------------- PTO accrual policies ------------------------- */
+
+  async listAccrualPolicies(): Promise<HrAccrualPolicy[]> {
+    const { data, error } = await this.client
+      .from("hr_accrual_policies")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .order("leave_type", { ascending: true })
+      .order("effective_from", { ascending: false });
+    throwIf(error, "Could not load accrual policies");
+    return (data ?? []).map(mapAccrualPolicy);
+  }
+
+  private accrualPolicyRow(input: AccrualPolicyInput): Record<string, unknown> {
+    return {
+      agency_id: this.agencyId,
+      leave_type: input.leaveType,
+      tenure_bands: input.tenureBands,
+      carryover_cap_hours: input.carryoverCapHours,
+      carryover_basis: input.carryoverBasis,
+      effective_from: input.effectiveFrom,
+      effective_to: input.effectiveTo,
+      active: true,
+      created_by: this.userId,
+    };
+  }
+
+  async createAccrualPolicy(input: AccrualPolicyInput): Promise<HrAccrualPolicy> {
+    const problems = validateAccrualPolicy(input);
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    const { data, error } = await this.client
+      .from("hr_accrual_policies")
+      .insert(this.accrualPolicyRow(input))
+      .select()
+      .single();
+    throwIf(error, "Could not create the accrual policy");
+    return mapAccrualPolicy(data as Record<string, unknown>);
+  }
+
+  async updateAccrualPolicy(
+    id: string,
+    patch: Partial<AccrualPolicyInput>,
+  ): Promise<HrAccrualPolicy> {
+    // Validate the merged policy, not just the patch.
+    const { data: existing, error: fetchError } = await this.client
+      .from("hr_accrual_policies")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(fetchError, "Accrual policy not found");
+    const merged = { ...mapAccrualPolicy(existing as Record<string, unknown>), ...patch };
+    const problems = validateAccrualPolicy(merged);
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    const row: Record<string, unknown> = { updated_at: nowIso() };
+    if (patch.leaveType !== undefined) row.leave_type = patch.leaveType;
+    if (patch.tenureBands !== undefined) row.tenure_bands = patch.tenureBands;
+    if (patch.carryoverCapHours !== undefined) row.carryover_cap_hours = patch.carryoverCapHours;
+    if (patch.carryoverBasis !== undefined) row.carryover_basis = patch.carryoverBasis;
+    if (patch.effectiveFrom !== undefined) row.effective_from = patch.effectiveFrom;
+    if (patch.effectiveTo !== undefined) row.effective_to = patch.effectiveTo;
+    const { data, error } = await this.client
+      .from("hr_accrual_policies")
+      .update(row)
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not update the accrual policy");
+    return mapAccrualPolicy(data as Record<string, unknown>);
+  }
+
+  async setAccrualPolicyActive(id: string, active: boolean): Promise<HrAccrualPolicy> {
+    const { data, error } = await this.client
+      .from("hr_accrual_policies")
+      .update({ active, updated_at: nowIso() })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not update the accrual policy");
+    return mapAccrualPolicy(data as Record<string, unknown>);
+  }
+
+  /* ------------------------------ Leave ledger --------------------------- */
+
+  async listLedgerEntries(
+    staffId: string,
+    opts: { leaveType?: LeaveType } = {},
+  ): Promise<HrAccrualLedgerEntry[]> {
+    let q = this.client
+      .from("hr_accrual_ledger")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .order("period_start", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (opts.leaveType) q = q.eq("leave_type", opts.leaveType);
+    const { data, error } = await q;
+    throwIf(error, "Could not load the leave ledger");
+    return (data ?? []).map(mapLedgerEntry);
+  }
+
+  async postLedgerEntry(input: LedgerEntryInput): Promise<HrAccrualLedgerEntry> {
+    const existing = await this.listLedgerEntries(input.staffId, {
+      leaveType: input.leaveType,
+    });
+    const balance =
+      currentLeaveBalance(existing, input.leaveType) +
+      (input.accrued ?? 0) -
+      (input.used ?? 0) +
+      (input.adjustment ?? 0);
+    const { data, error } = await this.client
+      .from("hr_accrual_ledger")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: input.staffId,
+        pay_period_id: input.payPeriodId ?? null,
+        period_start: input.periodStart ?? todayStamp(),
+        leave_type: input.leaveType,
+        accrued: input.accrued ?? 0,
+        used: input.used ?? 0,
+        adjustment: input.adjustment ?? 0,
+        balance,
+        note: input.note ?? null,
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not post the ledger entry");
+    return mapLedgerEntry(data as Record<string, unknown>);
+  }
+
+  /* ----------------------------- Overtime rules --------------------------- */
+
+  async getOvertimeRules(): Promise<HrOvertimeRules> {
+    const { data, error } = await this.client
+      .from("hr_overtime_rules")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load overtime rules");
+    if (!data) {
+      return {
+        ...DEFAULT_OVERTIME_RULES,
+        agencyId: this.agencyId,
+        updatedBy: null,
+        updatedAt: nowIso(),
+      };
+    }
+    return mapOvertimeRules(data as Record<string, unknown>, this.agencyId);
+  }
+
+  async saveOvertimeRules(input: OvertimeRulesInput): Promise<HrOvertimeRules> {
+    if (!(input.weeklyThresholdHours > 0)) {
+      throw new Error("Weekly overtime threshold must be above 0 hours.");
+    }
+    if (input.dailyThresholdHours !== null && !(input.dailyThresholdHours > 0)) {
+      throw new Error("Daily overtime threshold must be above 0 hours.");
+    }
+    if (!(input.seventhDayThresholdHours >= 0)) {
+      throw new Error("Seventh-day overtime threshold cannot be negative.");
+    }
+    const { data, error } = await this.client
+      .from("hr_overtime_rules")
+      .upsert(
+        {
+          agency_id: this.agencyId,
+          weekly_threshold_hours: input.weeklyThresholdHours,
+          daily_threshold_hours: input.dailyThresholdHours,
+          seventh_consecutive_day: input.seventhConsecutiveDay,
+          seventh_day_threshold_hours: input.seventhDayThresholdHours,
+          updated_by: this.userId,
+          updated_at: nowIso(),
+        },
+        { onConflict: "agency_id" },
+      )
+      .select()
+      .single();
+    throwIf(error, "Could not save overtime rules");
+    return mapOvertimeRules(data as Record<string, unknown>, this.agencyId);
+  }
+
+  /* ------------------------------- Shift swaps --------------------------- */
+
+  private async getSwap(id: string): Promise<HrShiftSwap> {
+    const { data, error } = await this.client
+      .from("hr_shift_swaps")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(error, "Shift swap not found");
+    return mapShiftSwap(data as Record<string, unknown>);
+  }
+
+  private async getShiftById(id: string): Promise<HrShift> {
+    const { data, error } = await this.client
+      .from("hr_shifts")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(error, "Shift not found");
+    return mapShift(data as Record<string, unknown>);
+  }
+
+  /** One staffer's shifts that could overlap [startsAt, endsAt). */
+  private async shiftsOverlappingWindow(
+    staffId: string,
+    startsAt: string,
+    endsAt: string,
+  ): Promise<HrShift[]> {
+    const { data, error } = await this.client
+      .from("hr_shifts")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .lt("starts_at", endsAt)
+      .gt("ends_at", startsAt);
+    throwIf(error, "Could not load shifts for swap validation");
+    return (data ?? []).map(mapShift);
+  }
+
+  async listShiftSwaps(
+    scope: { staffId?: string; status?: ShiftSwapStatus } = {},
+  ): Promise<HrShiftSwap[]> {
+    let q = this.client
+      .from("hr_shift_swaps")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .order("created_at", { ascending: false });
+    if (scope.staffId) {
+      q = q.or(`requester_id.eq.${scope.staffId},target_staff_id.eq.${scope.staffId}`);
+    }
+    if (scope.status) q = q.eq("status", scope.status);
+    const { data, error } = await q;
+    throwIf(error, "Could not load shift swaps");
+    return (data ?? []).map(mapShiftSwap);
+  }
+
+  async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    const offered = await this.getShiftById(input.offeredShiftId);
+    const targetId = input.targetStaffId ?? null;
+    if (targetId !== null && targetId === this.userId) {
+      throw new Error("You can't offer a shift swap to yourself.");
+    }
+    const claimerShifts = targetId
+      ? await this.shiftsOverlappingWindow(targetId, offered.startsAt, offered.endsAt)
+      : [];
+    let claimedShift: HrShift | null = null;
+    if (input.requestedShiftId) {
+      claimedShift = await this.getShiftById(input.requestedShiftId);
+    }
+    const requesterShifts = claimedShift
+      ? await this.shiftsOverlappingWindow(
+          this.userId,
+          claimedShift.startsAt,
+          claimedShift.endsAt,
+        )
+      : [];
+    const problems = validateShiftSwap({
+      offeredShift: offered,
+      requesterId: this.userId,
+      requesterShifts,
+      claimerId: targetId ?? "unclaimed",
+      claimerShifts,
+      claimedShift,
+      nowIso: nowIso(),
+    });
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    const { data, error } = await this.client
+      .from("hr_shift_swaps")
+      .insert({
+        agency_id: this.agencyId,
+        requester_id: this.userId,
+        offered_shift_id: input.offeredShiftId,
+        requested_shift_id: input.requestedShiftId ?? null,
+        target_staff_id: targetId,
+        status: "pending",
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not create the shift swap");
+    return mapShiftSwap(data as Record<string, unknown>);
+  }
+
+  async claimShiftSwap(
+    id: string,
+    claimerId: string,
+    counterOfferShiftId?: string,
+  ): Promise<HrShiftSwap> {
+    const swap = await this.getSwap(id);
+    if (swap.status !== "pending") {
+      throw new Error("This shift swap is no longer open.");
+    }
+    if (claimerId === swap.requesterId) {
+      throw new Error("You can't claim your own shift-swap posting.");
+    }
+    if (swap.targetStaffId !== null && swap.targetStaffId !== claimerId) {
+      throw new Error("This shift was offered to someone else.");
+    }
+    const offered = await this.getShiftById(swap.offeredShiftId);
+    const claimerShifts = await this.shiftsOverlappingWindow(
+      claimerId,
+      offered.startsAt,
+      offered.endsAt,
+    );
+    let claimedShift: HrShift | null = null;
+    if (counterOfferShiftId) {
+      claimedShift = await this.getShiftById(counterOfferShiftId);
+      if (claimedShift.staffId !== claimerId) {
+        throw new Error("The counter-offered shift isn't assigned to you.");
+      }
+    } else if (swap.requestedShiftId) {
+      claimedShift = await this.getShiftById(swap.requestedShiftId);
+    }
+    const requesterShifts = claimedShift
+      ? await this.shiftsOverlappingWindow(
+          swap.requesterId,
+          claimedShift.startsAt,
+          claimedShift.endsAt,
+        )
+      : [];
+    const problems = validateShiftSwap({
+      offeredShift: offered,
+      requesterId: swap.requesterId,
+      requesterShifts,
+      claimerId,
+      claimerShifts,
+      claimedShift,
+      nowIso: nowIso(),
+    });
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    const row: Record<string, unknown> = {
+      target_staff_id: claimerId,
+      updated_at: nowIso(),
+    };
+    if (counterOfferShiftId) row.requested_shift_id = counterOfferShiftId;
+    const { data, error } = await this.client
+      .from("hr_shift_swaps")
+      .update(row)
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not claim the shift swap");
+    return mapShiftSwap(data as Record<string, unknown>);
+  }
+
+  async decideShiftSwap(
+    id: string,
+    approve: boolean,
+    decidedBy: string,
+    note?: string,
+  ): Promise<HrShiftSwap> {
+    const swap = await this.getSwap(id);
+    if (swap.status !== "pending") {
+      throw new Error("This shift swap has already been decided.");
+    }
+    if (approve) {
+      // Reassign through the existing shift-update path.
+      if (swap.requestedShiftId) {
+        if (!swap.targetStaffId) {
+          throw new Error("This swap has no one to assign the shift to.");
+        }
+        await this.updateShift(swap.offeredShiftId, { staffId: swap.targetStaffId });
+        await this.updateShift(swap.requestedShiftId, { staffId: swap.requesterId });
+      } else {
+        if (!swap.targetStaffId) {
+          throw new Error("This swap has no one to assign the shift to.");
+        }
+        await this.updateShift(swap.offeredShiftId, { staffId: swap.targetStaffId });
+      }
+    }
+    const now = nowIso();
+    const { data, error } = await this.client
+      .from("hr_shift_swaps")
+      .update({
+        status: approve ? "approved" : "denied",
+        decided_by: decidedBy,
+        decided_at: now,
+        decision_note: note?.trim() ? note.trim() : null,
+        updated_at: now,
+      })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not decide the shift swap");
+    return mapShiftSwap(data as Record<string, unknown>);
+  }
+
+  async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    const swap = await this.getSwap(id);
+    if (swap.status !== "pending") {
+      throw new Error("Only a pending swap can be cancelled.");
+    }
+    const { data, error } = await this.client
+      .from("hr_shift_swaps")
+      .update({ status: "cancelled", updated_at: nowIso() })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not cancel the shift swap");
+    return mapShiftSwap(data as Record<string, unknown>);
+  }
 }
 
 /* ------------------------ localStorage implementation -------------------- */
@@ -1024,6 +1610,11 @@ interface LocalBucket {
   patterns: HrStaffingPattern[];
   /** True once the Evergreen demo seed has been written (so a user who clears all patterns doesn't get them back). */
   staffingSeeded?: boolean;
+  /* HR-PHASE2 */
+  policies: HrAccrualPolicy[];
+  ledger: HrAccrualLedgerEntry[];
+  overtimeRules: HrOvertimeRules | null;
+  swaps: HrShiftSwap[];
 }
 
 function emptyBucket(): LocalBucket {
@@ -1038,6 +1629,10 @@ function emptyBucket(): LocalBucket {
     timeOff: [],
     requirements: [],
     patterns: [],
+    policies: [],
+    ledger: [],
+    overtimeRules: null,
+    swaps: [],
   };
 }
 
@@ -1166,6 +1761,11 @@ class LocalHrStore implements HrStore {
         const bucket = root[this.agencyId]?.[this.userId] ?? emptyBucket();
         // Buckets written before staffing patterns existed have no patterns array.
         if (!Array.isArray(bucket.patterns)) bucket.patterns = [];
+        // Buckets written before HR-PHASE2 existed have no phase-2 arrays.
+        if (!Array.isArray(bucket.policies)) bucket.policies = [];
+        if (!Array.isArray(bucket.ledger)) bucket.ledger = [];
+        if (!Array.isArray(bucket.swaps)) bucket.swaps = [];
+        if (bucket.overtimeRules === undefined) bucket.overtimeRules = null;
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -1504,8 +2104,55 @@ class LocalHrStore implements HrStore {
       .sort((a, b) => (a.startsOn < b.startsOn ? 1 : -1));
   }
 
+  private assertTimeOffBalanceLocal(
+    b: LocalBucket,
+    kind: HrTimeOffRequest["kind"],
+    startsOn: string,
+    endsOn: string,
+    staffId: string,
+  ): void {
+    if (kind !== "pto" && kind !== "sick") return;
+    const policy = b.policies.find((p) => p.leaveType === kind && p.active);
+    if (!policy) return;
+    const hours = timeOffRequestHours(startsOn, endsOn);
+    const balance = currentLeaveBalance(b.ledger.filter((e) => e.staffId === staffId), kind);
+    const check = validateTimeOffBalance(hours, balance, kind);
+    if (!check.ok) throw new Error(check.errors.join(" "));
+  }
+
+  private postLedgerEntryLocal(
+    b: LocalBucket,
+    input: LedgerEntryInput,
+  ): HrAccrualLedgerEntry {
+    const balance =
+      currentLeaveBalance(
+        b.ledger.filter((e) => e.staffId === input.staffId),
+        input.leaveType,
+      ) +
+      (input.accrued ?? 0) -
+      (input.used ?? 0) +
+      (input.adjustment ?? 0);
+    const entry: HrAccrualLedgerEntry = {
+      id: newId(),
+      agencyId: this.agencyId,
+      staffId: input.staffId,
+      payPeriodId: input.payPeriodId ?? null,
+      periodStart: input.periodStart ?? todayStamp(),
+      leaveType: input.leaveType,
+      accrued: input.accrued ?? 0,
+      used: input.used ?? 0,
+      adjustment: input.adjustment ?? 0,
+      balance,
+      note: input.note ?? null,
+      createdAt: nowIso(),
+    };
+    b.ledger.push(entry);
+    return entry;
+  }
+
   async createTimeOffRequest(input: HrTimeOffRequestInput): Promise<HrTimeOffRequest> {
     return this.mutate((b) => {
+      this.assertTimeOffBalanceLocal(b, input.kind, input.startsOn, input.endsOn, this.userId);
       const req: HrTimeOffRequest = {
         ...input,
         id: newId(),
@@ -1530,10 +2177,32 @@ class LocalHrStore implements HrStore {
     return this.mutate((b) => {
       const req = b.timeOff.find((t) => t.id === id);
       if (!req) throw new Error("Time-off request not found.");
+      const prevStatus = req.status;
       req.status = approve ? "approved" : "denied";
       req.decidedBy = this.userId;
       req.decidedAt = nowIso();
       req.decisionNote = note?.trim() ? note.trim() : null;
+      // Ledger integration mirrors the Supabase implementation: approving a
+      // pto/sick request debits the balance; reversing an approval posts a
+      // restoring adjustment. Guards keep repeated decides idempotent.
+      if (req.kind === "pto" || req.kind === "sick") {
+        const hours = timeOffRequestHours(req.startsOn, req.endsOn);
+        if (approve && prevStatus !== "approved") {
+          this.postLedgerEntryLocal(b, {
+            staffId: req.staffId,
+            leaveType: req.kind,
+            used: hours,
+            note: `time-off ${req.id}`,
+          });
+        } else if (!approve && prevStatus === "approved") {
+          this.postLedgerEntryLocal(b, {
+            staffId: req.staffId,
+            leaveType: req.kind,
+            adjustment: hours,
+            note: `time-off restored ${req.id}`,
+          });
+        }
+      }
       return req;
     });
   }
@@ -1621,6 +2290,286 @@ class LocalHrStore implements HrStore {
       const pattern = b.patterns.find((p) => p.id === id);
       if (!pattern) throw new Error("Staffing pattern not found.");
       pattern.active = active;
+    });
+  }
+
+  /* ------------------------- PTO accrual policies ------------------------- */
+
+  async listAccrualPolicies(): Promise<HrAccrualPolicy[]> {
+    return this.load()
+      .policies.slice()
+      .sort(
+        (a, b) =>
+          a.leaveType.localeCompare(b.leaveType) ||
+          (b.effectiveFrom < a.effectiveFrom ? -1 : 1),
+      );
+  }
+
+  async createAccrualPolicy(input: AccrualPolicyInput): Promise<HrAccrualPolicy> {
+    const problems = validateAccrualPolicy(input);
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    return this.mutate((b) => {
+      const now = nowIso();
+      const policy: HrAccrualPolicy = {
+        ...input,
+        id: newId(),
+        agencyId: this.agencyId,
+        active: true,
+        createdBy: this.userId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      b.policies.push(policy);
+      return policy;
+    });
+  }
+
+  async updateAccrualPolicy(
+    id: string,
+    patch: Partial<AccrualPolicyInput>,
+  ): Promise<HrAccrualPolicy> {
+    return this.mutate((b) => {
+      const policy = b.policies.find((p) => p.id === id);
+      if (!policy) throw new Error("Accrual policy not found.");
+      const problems = validateAccrualPolicy({ ...policy, ...patch });
+      if (problems.length > 0) throw new Error(problems.join(" "));
+      Object.assign(policy, patch, { updatedAt: nowIso() });
+      return policy;
+    });
+  }
+
+  async setAccrualPolicyActive(id: string, active: boolean): Promise<HrAccrualPolicy> {
+    return this.mutate((b) => {
+      const policy = b.policies.find((p) => p.id === id);
+      if (!policy) throw new Error("Accrual policy not found.");
+      policy.active = active;
+      policy.updatedAt = nowIso();
+      return policy;
+    });
+  }
+
+  /* ------------------------------ Leave ledger --------------------------- */
+
+  async listLedgerEntries(
+    staffId: string,
+    opts: { leaveType?: LeaveType } = {},
+  ): Promise<HrAccrualLedgerEntry[]> {
+    return this.load()
+      .ledger.filter(
+        (e) =>
+          e.staffId === staffId &&
+          (!opts.leaveType || e.leaveType === opts.leaveType),
+      )
+      .sort(
+        (a, b) =>
+          a.periodStart < b.periodStart
+            ? -1
+            : a.periodStart > b.periodStart
+              ? 1
+              : a.createdAt < b.createdAt
+                ? -1
+                : 1,
+      );
+  }
+
+  async postLedgerEntry(input: LedgerEntryInput): Promise<HrAccrualLedgerEntry> {
+    return this.mutate((b) => this.postLedgerEntryLocal(b, input));
+  }
+
+  /* ----------------------------- Overtime rules --------------------------- */
+
+  async getOvertimeRules(): Promise<HrOvertimeRules> {
+    const stored = this.load().overtimeRules;
+    if (stored) return { ...stored };
+    return {
+      ...DEFAULT_OVERTIME_RULES,
+      agencyId: this.agencyId,
+      updatedBy: null,
+      updatedAt: nowIso(),
+    };
+  }
+
+  async saveOvertimeRules(input: OvertimeRulesInput): Promise<HrOvertimeRules> {
+    if (!(input.weeklyThresholdHours > 0)) {
+      throw new Error("Weekly overtime threshold must be above 0 hours.");
+    }
+    if (input.dailyThresholdHours !== null && !(input.dailyThresholdHours > 0)) {
+      throw new Error("Daily overtime threshold must be above 0 hours.");
+    }
+    if (!(input.seventhDayThresholdHours >= 0)) {
+      throw new Error("Seventh-day overtime threshold cannot be negative.");
+    }
+    return this.mutate((b) => {
+      const rules: HrOvertimeRules = {
+        ...input,
+        agencyId: this.agencyId,
+        updatedBy: this.userId,
+        updatedAt: nowIso(),
+      };
+      b.overtimeRules = rules;
+      return { ...rules };
+    });
+  }
+
+  /* ------------------------------- Shift swaps --------------------------- */
+
+  private getShiftLocal(b: LocalBucket, id: string): HrShift {
+    const shift = b.shifts.find((s) => s.id === id);
+    if (!shift) throw new Error("Shift not found.");
+    return shift;
+  }
+
+  private getSwapLocal(b: LocalBucket, id: string): HrShiftSwap {
+    const swap = b.swaps.find((s) => s.id === id);
+    if (!swap) throw new Error("Shift swap not found.");
+    return swap;
+  }
+
+  async listShiftSwaps(
+    scope: { staffId?: string; status?: ShiftSwapStatus } = {},
+  ): Promise<HrShiftSwap[]> {
+    return this.load()
+      .swaps.filter(
+        (s) =>
+          (!scope.staffId ||
+            s.requesterId === scope.staffId ||
+            s.targetStaffId === scope.staffId) &&
+          (!scope.status || s.status === scope.status),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    return this.mutate((b) => {
+      const offered = this.getShiftLocal(b, input.offeredShiftId);
+      const targetId = input.targetStaffId ?? null;
+      if (targetId !== null && targetId === this.userId) {
+        throw new Error("You can't offer a shift swap to yourself.");
+      }
+      let claimedShift: HrShift | null = null;
+      if (input.requestedShiftId) {
+        claimedShift = this.getShiftLocal(b, input.requestedShiftId);
+      }
+      const problems = validateShiftSwap({
+        offeredShift: offered,
+        requesterId: this.userId,
+        requesterShifts: b.shifts.filter((s) => s.staffId === this.userId),
+        claimerId: targetId ?? "unclaimed",
+        claimerShifts: targetId
+          ? b.shifts.filter((s) => s.staffId === targetId)
+          : [],
+        claimedShift,
+        nowIso: nowIso(),
+      });
+      if (problems.length > 0) throw new Error(problems.join(" "));
+      const now = nowIso();
+      const swap: HrShiftSwap = {
+        id: newId(),
+        agencyId: this.agencyId,
+        requesterId: this.userId,
+        offeredShiftId: input.offeredShiftId,
+        requestedShiftId: input.requestedShiftId ?? null,
+        targetStaffId: targetId,
+        status: "pending",
+        decidedBy: null,
+        decidedAt: null,
+        decisionNote: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      b.swaps.push(swap);
+      return swap;
+    });
+  }
+
+  async claimShiftSwap(
+    id: string,
+    claimerId: string,
+    counterOfferShiftId?: string,
+  ): Promise<HrShiftSwap> {
+    return this.mutate((b) => {
+      const swap = this.getSwapLocal(b, id);
+      if (swap.status !== "pending") {
+        throw new Error("This shift swap is no longer open.");
+      }
+      if (claimerId === swap.requesterId) {
+        throw new Error("You can't claim your own shift-swap posting.");
+      }
+      if (swap.targetStaffId !== null && swap.targetStaffId !== claimerId) {
+        throw new Error("This shift was offered to someone else.");
+      }
+      const offered = this.getShiftLocal(b, swap.offeredShiftId);
+      let claimedShift: HrShift | null = null;
+      if (counterOfferShiftId) {
+        claimedShift = this.getShiftLocal(b, counterOfferShiftId);
+        if (claimedShift.staffId !== claimerId) {
+          throw new Error("The counter-offered shift isn't assigned to you.");
+        }
+      } else if (swap.requestedShiftId) {
+        claimedShift = this.getShiftLocal(b, swap.requestedShiftId);
+      }
+      const problems = validateShiftSwap({
+        offeredShift: offered,
+        requesterId: swap.requesterId,
+        requesterShifts: b.shifts.filter((s) => s.staffId === swap.requesterId),
+        claimerId,
+        claimerShifts: b.shifts.filter((s) => s.staffId === claimerId),
+        claimedShift,
+        nowIso: nowIso(),
+      });
+      if (problems.length > 0) throw new Error(problems.join(" "));
+      swap.targetStaffId = claimerId;
+      if (counterOfferShiftId) swap.requestedShiftId = counterOfferShiftId;
+      swap.updatedAt = nowIso();
+      return swap;
+    });
+  }
+
+  async decideShiftSwap(
+    id: string,
+    approve: boolean,
+    decidedBy: string,
+    note?: string,
+  ): Promise<HrShiftSwap> {
+    return this.mutate((b) => {
+      const swap = this.getSwapLocal(b, id);
+      if (swap.status !== "pending") {
+        throw new Error("This shift swap has already been decided.");
+      }
+      if (approve) {
+        // Reassign through the existing shift-update path (in-place here to
+        // keep the whole decide atomic within one bucket mutation).
+        if (swap.requestedShiftId) {
+          if (!swap.targetStaffId) {
+            throw new Error("This swap has no one to assign the shift to.");
+          }
+          this.getShiftLocal(b, swap.offeredShiftId).staffId = swap.targetStaffId;
+          this.getShiftLocal(b, swap.requestedShiftId).staffId = swap.requesterId;
+        } else {
+          if (!swap.targetStaffId) {
+            throw new Error("This swap has no one to assign the shift to.");
+          }
+          this.getShiftLocal(b, swap.offeredShiftId).staffId = swap.targetStaffId;
+        }
+      }
+      swap.status = approve ? "approved" : "denied";
+      swap.decidedBy = decidedBy;
+      swap.decidedAt = nowIso();
+      swap.decisionNote = note?.trim() ? note.trim() : null;
+      swap.updatedAt = nowIso();
+      return swap;
+    });
+  }
+
+  async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    return this.mutate((b) => {
+      const swap = this.getSwapLocal(b, id);
+      if (swap.status !== "pending") {
+        throw new Error("Only a pending swap can be cancelled.");
+      }
+      swap.status = "cancelled";
+      swap.updatedAt = nowIso();
+      return swap;
     });
   }
 }

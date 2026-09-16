@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeHubShell, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
+import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
 import type { SessionUser } from "../../data/types";
 import type {
@@ -27,6 +27,11 @@ import type {
 } from "../../data/hr";
 import {
   computePatternWeeklyHours,
+  currentLeaveBalance,
+  timeOffRequestHours,
+  validateAccrualPolicy,
+  validateShiftSwap,
+  validateTimeOffBalance,
   validateStaffingPattern,
 } from "../../data/hr";
 import { StaffingBoard } from "./StaffingBoard";
@@ -77,6 +82,15 @@ const pmSession = makeSession({
   roleKey: "program_manager",
   jobTitle: "Program Manager",
   permissions: PM_PERMISSIONS,
+});
+
+const pmPaySession = makeSession({
+  userId: "user-pat",
+  fullName: "Pat Morgan",
+  role: "manager",
+  roleKey: "program_manager",
+  jobTitle: "Program Manager",
+  permissions: { ...PM_PERMISSIONS, "hub.manage_pay_settings": true },
 });
 
 const dspSession = makeSession({
@@ -146,6 +160,29 @@ function makeStubStore(): HrStore {
       requiredRoleKeys: [],
       active: true,
     },
+  ];
+  const accrualPolicies = [
+    {
+      id: "pol-1",
+      agencyId: "agency-1",
+      leaveType: "pto" as const,
+      tenureBands: [
+        { minYears: 0, maxYears: 2 as number | null, hoursPerPeriod: 3.08 },
+        { minYears: 2, maxYears: null as number | null, hoursPerPeriod: 4.62 },
+      ],
+      carryoverCapHours: 40,
+      carryoverBasis: "calendar_year" as const,
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null as string | null,
+      active: true,
+      createdBy: "user-pat",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+  const ledgerEntries = [
+    { id: "le-1", agencyId: "agency-1", staffId: "user-alex", payPeriodId: null as string | null, periodStart: "2026-08-01", leaveType: "pto" as const, accrued: 6.16, used: 0, adjustment: 0, balance: 6.16, note: null as string | null, createdAt: "2026-08-01T00:00:00.000Z" },
+    { id: "le-2", agencyId: "agency-1", staffId: "user-alex", payPeriodId: null as string | null, periodStart: "2026-09-01", leaveType: "pto" as const, accrued: 6.16, used: 8, adjustment: 0, balance: 4.32, note: null as string | null, createdAt: "2026-09-01T00:00:00.000Z" },
   ];
   const patterns: HrStaffingPattern[] = [
     {
@@ -268,6 +305,117 @@ function makeStubStore(): HrStore {
       return { ...p, ...patch };
     },
     setStaffingPatternActive: async () => {},
+    // Phase-2 surface (accrual, overtime rules, shift swaps).
+    getOvertimeRules: async () => ({
+      agencyId: "agency-1",
+      weeklyThresholdHours: 40,
+      dailyThresholdHours: null as number | null,
+      seventhConsecutiveDay: false,
+      seventhDayThresholdHours: 8,
+      updatedBy: null,
+      updatedAt: new Date().toISOString(),
+    }),
+    saveOvertimeRules: async (input) => ({
+      agencyId: "agency-1",
+      weeklyThresholdHours: input.weeklyThresholdHours,
+      dailyThresholdHours: input.dailyThresholdHours,
+      seventhConsecutiveDay: input.seventhConsecutiveDay,
+      seventhDayThresholdHours: input.seventhDayThresholdHours,
+      updatedBy: "user-pat",
+      updatedAt: new Date().toISOString(),
+    }),
+    listAccrualPolicies: async () => accrualPolicies,
+    createAccrualPolicy: async (input) => ({
+      ...input,
+      id: "pol-new",
+      agencyId: "agency-1",
+      active: true,
+      createdBy: "user-pat",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    updateAccrualPolicy: async (id, patch) => {
+      const p = accrualPolicies.find((x) => x.id === id);
+      if (!p) throw new Error("policy not found");
+      return { ...p, ...patch };
+    },
+    setAccrualPolicyActive: async (id, active) => {
+      const p = accrualPolicies.find((x) => x.id === id);
+      if (!p) throw new Error("policy not found");
+      return { ...p, active };
+    },
+    listLedgerEntries: async () => ledgerEntries,
+    postLedgerEntry: async (input) => ({
+      id: "le-new",
+      agencyId: "agency-1",
+      payPeriodId: input.payPeriodId ?? null,
+      periodStart: input.periodStart ?? "2026-09-01",
+      staffId: input.staffId,
+      leaveType: input.leaveType,
+      accrued: input.accrued ?? 0,
+      used: input.used ?? 0,
+      adjustment: input.adjustment ?? 0,
+      balance: (input.accrued ?? 0) - (input.used ?? 0) + (input.adjustment ?? 0),
+      note: input.note ?? null,
+      createdAt: new Date().toISOString(),
+    }),
+    listShiftSwaps: async () => [],
+    createShiftSwap: async (input) => ({
+      id: "swap-new",
+      agencyId: "agency-1",
+      requesterId: "user-alex",
+      offeredShiftId: input.offeredShiftId,
+      requestedShiftId: input.requestedShiftId ?? null,
+      targetStaffId: input.targetStaffId ?? null,
+      status: "pending" as const,
+      decidedBy: null,
+      decidedAt: null,
+      decisionNote: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    claimShiftSwap: async (id, claimerId) => ({
+      id,
+      agencyId: "agency-1",
+      requesterId: "user-pat",
+      offeredShiftId: "shift-1",
+      requestedShiftId: null,
+      targetStaffId: claimerId,
+      status: "pending" as const,
+      decidedBy: null,
+      decidedAt: null,
+      decisionNote: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    decideShiftSwap: async (id, approve, decidedBy, note) => ({
+      id,
+      agencyId: "agency-1",
+      requesterId: "user-alex",
+      offeredShiftId: "shift-1",
+      requestedShiftId: null,
+      targetStaffId: null,
+      status: (approve ? "approved" : "denied") as "approved" | "denied",
+      decidedBy,
+      decidedAt: new Date().toISOString(),
+      decisionNote: note?.trim() ? note.trim() : null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    cancelShiftSwap: async (id) => ({
+      id,
+      agencyId: "agency-1",
+      requesterId: "user-alex",
+      offeredShiftId: "shift-1",
+      requestedShiftId: null,
+      targetStaffId: null,
+      status: "cancelled" as const,
+      decidedBy: null,
+      decidedAt: null,
+      decisionNote: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
   };
   void notFound;
   return store;
@@ -276,6 +424,12 @@ function makeStubStore(): HrStore {
 function render(session: SessionUser, initialTab?: string): string {
   return renderToStaticMarkup(
     <EmployeeHubShell session={session} store={makeStubStore()} staffList={staffList} sites={sites} initialTab={initialTab} />,
+  );
+}
+
+function renderWith(session: SessionUser, store: HrStore, initialTab?: string): string {
+  return renderToStaticMarkup(
+    <EmployeeHubShell session={session} store={store} staffList={staffList} sites={sites} initialTab={initialTab} />,
   );
 }
 
@@ -479,5 +633,191 @@ describe("staffing pattern domain", () => {
       computePatternWeeklyHours([1], [{ start: "23:00", end: "07:00" }]),
       8,
     );
+  });
+});
+
+describe("phase-2 domain adapters", () => {
+  it("describes overtime rules in plain English", () => {
+    assert.equal(
+      describeOvertimeRules({
+        weeklyThresholdHours: 40,
+        dailyThresholdHours: null,
+        seventhConsecutiveDay: false,
+        seventhDayThresholdHours: 8,
+      }),
+      "Overtime after 40 hours per week.",
+    );
+    const full = describeOvertimeRules({
+      weeklyThresholdHours: 40,
+      dailyThresholdHours: 10,
+      seventhConsecutiveDay: true,
+      seventhDayThresholdHours: 8,
+    });
+    assert.ok(full.includes("Overtime after 40 hours per week."), "weekly");
+    assert.ok(full.includes("Daily overtime after 10 hours in a day."), "daily");
+    assert.ok(
+      full.includes("Seventh consecutive day: overtime after 8 hours."),
+      "seventh day",
+    );
+  });
+
+  it("computes the current leave balance from the latest ledger entry", () => {
+    const entries = [
+      { id: "le-1", agencyId: "agency-1", staffId: "user-alex", payPeriodId: null as string | null, periodStart: "2026-08-01", leaveType: "pto" as const, accrued: 6.16, used: 0, adjustment: 0, balance: 6.16, note: null as string | null, createdAt: "2026-08-01T00:00:00.000Z" },
+      { id: "le-2", agencyId: "agency-1", staffId: "user-alex", payPeriodId: null as string | null, periodStart: "2026-09-01", leaveType: "pto" as const, accrued: 6.16, used: 8, adjustment: 0, balance: 4.32, note: null as string | null, createdAt: "2026-09-01T00:00:00.000Z" },
+    ];
+    assert.equal(currentLeaveBalance(entries, "pto"), 4.32);
+    assert.equal(currentLeaveBalance(entries, "sick"), 0, "other leave type");
+    assert.equal(currentLeaveBalance([], "pto"), 0, "no entries");
+  });
+
+  it("computes requested hours as inclusive days x hours per day", () => {
+    assert.equal(timeOffRequestHours("2026-09-20", "2026-09-22"), 24);
+    assert.equal(timeOffRequestHours("2026-09-20", "2026-09-20"), 8);
+    assert.throws(
+      () => timeOffRequestHours("2026-09-20", "2026-09-19"),
+      /cannot be before/,
+      "inverted range throws",
+    );
+  });
+
+  it("validates accrual policies", () => {
+    assert.deepEqual(
+      validateAccrualPolicy({
+        leaveType: "pto",
+        tenureBands: [{ minYears: 0, maxYears: null, hoursPerPeriod: 3.08 }],
+        carryoverCapHours: 40,
+        carryoverBasis: "calendar_year",
+        effectiveFrom: "2026-01-01",
+        effectiveTo: null,
+      }),
+      [],
+    );
+    const problems = validateAccrualPolicy({
+      leaveType: "pto",
+      tenureBands: [],
+      carryoverCapHours: -1,
+      carryoverBasis: "calendar_year",
+      effectiveFrom: "",
+      effectiveTo: null,
+    });
+    assert.ok(problems.length >= 2, `expected errors, got: ${problems.join(" | ")}`);
+  });
+
+  it("validates time-off balances", () => {
+    const within = validateTimeOffBalance(8, 40, "pto");
+    assert.equal(within.ok, true, "within balance");
+    assert.equal(within.errors.length, 0);
+    const exceeds = validateTimeOffBalance(48, 40, "pto");
+    assert.equal(exceeds.ok, false, "exceeding balance is not ok");
+    assert.ok(exceeds.errors.length > 0, "has errors");
+    const low = validateTimeOffBalance(36, 40, "pto");
+    assert.equal(low.ok, true, "still ok under the balance");
+    assert.ok(low.warnings.length > 0, "warns about low remaining balance");
+  });
+
+  it("validates shift swaps", () => {
+    const shift = {
+      id: "shift-1",
+      agencyId: "agency-1",
+      staffId: "user-alex",
+      siteId: null as string | null,
+      title: "Day shift",
+      startsAt: "2026-09-20T09:00:00.000Z",
+      endsAt: "2026-09-20T17:00:00.000Z",
+      status: "published" as const,
+      notes: null as string | null,
+      createdBy: "user-pat",
+    };
+    const valid = validateShiftSwap({
+      offeredShift: shift,
+      requesterId: "user-alex",
+      requesterShifts: [],
+      claimerId: "user-pat",
+      claimerShifts: [],
+      claimedShift: null,
+      nowIso: "2026-09-19T12:00:00.000Z",
+    });
+    assert.deepEqual(valid, []);
+    const selfClaim = validateShiftSwap({
+      offeredShift: shift,
+      requesterId: "user-alex",
+      requesterShifts: [],
+      claimerId: "user-alex",
+      claimerShifts: [],
+      claimedShift: null,
+      nowIso: "2026-09-19T12:00:00.000Z",
+    });
+    assert.ok(selfClaim.length > 0, "requester cannot claim their own shift");
+    const pastShift = validateShiftSwap({
+      offeredShift: { ...shift, startsAt: "2026-09-18T09:00:00.000Z", endsAt: "2026-09-18T17:00:00.000Z" },
+      requesterId: "user-alex",
+      requesterShifts: [],
+      claimerId: "user-pat",
+      claimerShifts: [],
+      claimedShift: null,
+      nowIso: "2026-09-19T12:00:00.000Z",
+    });
+    assert.ok(pastShift.length > 0, "past shifts are not eligible");
+  });
+
+  it("guards swap claiming: never on own posting, only pending and open/targeted", () => {
+    const base = {
+      id: "sw-1",
+      agencyId: "agency-1",
+      requesterId: "user-pat",
+      offeredShiftId: "shift-1",
+      requestedShiftId: null,
+      targetStaffId: null as string | null,
+      status: "pending",
+      decidedBy: null as string | null,
+      decidedAt: null as string | null,
+      decisionNote: null as string | null,
+      createdAt: "2026-09-19T00:00:00.000Z",
+      updatedAt: "2026-09-19T00:00:00.000Z",
+    };
+    assert.equal(swapClaimable(base, "user-pat"), false, "own posting hidden");
+    assert.equal(swapClaimable(base, "user-alex"), true, "open swap claimable");
+    assert.equal(
+      swapClaimable({ ...base, targetStaffId: "user-sam" }, "user-alex"),
+      false,
+      "targeted at someone else",
+    );
+    assert.equal(
+      swapClaimable({ ...base, targetStaffId: "user-alex" }, "user-alex"),
+      true,
+      "targeted at me",
+    );
+    assert.equal(
+      swapClaimable({ ...base, status: "approved" }, "user-alex"),
+      false,
+      "no longer pending",
+    );
+  });
+});
+
+describe("phase-2 pay settings", () => {
+  it("shows overtime rules and accrual policy cards with hub.manage_pay_settings", () => {
+    const html = renderWith(pmPaySession, makeStubStore(), "payroll");
+    assert.ok(html.includes("Overtime rules"), "overtime rules card");
+    assert.ok(html.includes("Accrual policies"), "accrual policies card");
+    assert.ok(html.includes("Pay settings"), "pay settings section");
+  });
+
+  it("hides pay settings without hub.manage_pay_settings", () => {
+    const html = renderWith(pmSession, makeStubStore(), "payroll");
+    assert.ok(!html.includes("Overtime rules"), "no overtime rules card");
+    assert.ok(!html.includes("Accrual policies"), "no accrual policies card");
+  });
+
+  it("renders the swap board for the dsp", () => {
+    const html = renderWith(dspSession, makeStubStore(), "schedule");
+    assert.ok(html.includes("Post a shift for swap"), "swap form");
+    assert.ok(html.includes("Open swaps"), "open swaps list");
+  });
+
+  it("renders swap approvals on the team schedule for a manager", () => {
+    const html = renderWith(pmSession, makeStubStore(), "team-schedule");
+    assert.ok(html.includes("Shift swap approvals"), "approvals section");
   });
 });
