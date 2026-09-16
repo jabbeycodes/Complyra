@@ -66,6 +66,15 @@ export const PERMISSION_KEYS = [
   "delegation.training.review",
   "delegation.training.approve",
   "delegation.acknowledge",
+  // HR-EMPLOYEE-HUB (hub.* goes here)
+  "hub.access",
+  "hub.manage_schedule",
+  "hub.review_timecards",
+  "hub.approve_time_off",
+  "hub.view_team",
+  "hub.approve_payroll",
+  "hub.manage_documents",
+  "hub.manage_staffing",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -125,7 +134,17 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
     // the compliance_admin defaults — the auditor role owns scoring, PM/HM
     // own disputes and schedules. Grantable explicitly via Roles & access.
-    permissions: pack(ALL.filter((key) => key !== "hr.view_staff" && !key.startsWith("qa."))),
+    // HR-EMPLOYEE-HUB: hub.access only — scheduling, timecard review,
+    // time-off approval, team view, payroll lock, and HR documents stay with
+    // the operational managers (administrator / program_manager / house_manager).
+    permissions: pack(
+      ALL.filter(
+        (key) =>
+          key !== "hr.view_staff" &&
+          !key.startsWith("qa.") &&
+          (key === "hub.access" || !key.startsWith("hub.")),
+      ),
+    ),
   },
   {
     key: "house_manager",
@@ -152,6 +171,15 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // DELEGATION: view templates + sign own site's acknowledgments.
       "delegation.templates.view",
       "delegation.acknowledge",
+      // HR-EMPLOYEE-HUB: hub access plus the scheduling/timecard/time-off
+      // duties a house manager owns for their home.
+      "hub.access",
+      "hub.manage_schedule",
+      "hub.review_timecards",
+      "hub.approve_time_off",
+      "hub.view_team",
+      // HR-STAFFING (2026-09-16): recurring staffing patterns for their home.
+      "hub.manage_staffing",
     ]),
   },
   {
@@ -191,6 +219,17 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.training.review",
       "delegation.training.approve",
       "delegation.acknowledge",
+      // HR-EMPLOYEE-HUB: full hub management (scheduling, timecards, time-off,
+      // team view, payroll lock, HR documents).
+      "hub.access",
+      "hub.manage_schedule",
+      "hub.review_timecards",
+      "hub.approve_time_off",
+      "hub.view_team",
+      "hub.approve_payroll",
+      "hub.manage_documents",
+      // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
+      "hub.manage_staffing",
     ]),
   },
   {
@@ -212,6 +251,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       // DELEGATION: view templates + sign own acknowledgments.
       "delegation.templates.view",
       "delegation.acknowledge",
+      // HR-EMPLOYEE-HUB: every employee opens their own hub.
+      "hub.access",
     ]),
   },
   {
@@ -240,6 +281,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.training.review",
       "delegation.training.approve",
       "delegation.acknowledge",
+      // HR-EMPLOYEE-HUB: every employee opens their own hub.
+      "hub.access",
     ]),
   },
   {
@@ -261,6 +304,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "recognition.view_winners",
       // DELEGATION: view templates only.
       "delegation.templates.view",
+      // HR-EMPLOYEE-HUB: every employee opens their own hub.
+      "hub.access",
+      // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
+      "hub.manage_staffing",
     ]),
   },
   {
@@ -282,6 +329,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "recognition.view_winners",
       // DELEGATION: view templates only.
       "delegation.templates.view",
+      // HR-EMPLOYEE-HUB: every employee opens their own hub.
+      "hub.access",
     ]),
   },
 ];
@@ -371,6 +420,15 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "delegation.training.review": "Review delegation training drafts",
   "delegation.training.approve": "Approve delegation training materials",
   "delegation.acknowledge": "Sign delegation acknowledgments",
+  // HR-EMPLOYEE-HUB
+  "hub.access": "Open Employee Hub",
+  "hub.manage_schedule": "Create and publish staff schedules",
+  "hub.review_timecards": "Review and correct staff timecards",
+  "hub.approve_time_off": "Approve or deny time-off requests",
+  "hub.view_team": "View team schedules and attendance",
+  "hub.approve_payroll": "Lock pay periods and prepare payroll",
+  "hub.manage_documents": "Manage HR documents",
+  "hub.manage_staffing": "Configure recurring staffing patterns",
 };
 
 /**
