@@ -53,11 +53,29 @@ export interface HrPunch {
   agencyId: string;
   siteId: string | null;
   staffId: string;
-  kind: "in" | "out";
+  kind: "in" | "out" | "break_in" | "break_out" | "transfer";
   punchedAt: string;
   source: string;
   note: string | null;
   shiftId: string | null;
+  /* KIOSK (2026-09-16): optional — existing rows/queries omit them. */
+  /** Individual-service context (ISD) when the punch served someone. */
+  serviceType?: string | null;
+  individualId?: string | null;
+  /** DB check: web | mobile | kiosk_pin | qr | nfc. */
+  verificationMethod?: string | null;
+  /** Recorded while the device was offline; queued for manager review. */
+  offline?: boolean;
+  /** True when punched from a personal device under a hub.remote_punch grant. */
+  remote?: boolean;
+  roundedPunchedAt?: string | null;
+  /** jsonb attestation payload, e.g. {"meal_break_taken": true}. */
+  attestation?: unknown;
+  /** Groups the out->in pair that is a transfer between sites/individuals. */
+  transferGroup?: string | null;
+  /** True when the app auto-closed this punch after the auto-clockout buffer. */
+  autoClockout?: boolean | null;
+  exceptionFlags?: string[];
 }
 
 export interface HrPunchCorrection {
@@ -253,6 +271,9 @@ interface PairedPunch {
  * An "in" that arrives while the queue is non-empty is recorded as an
  * overlap AND kept as its own open segment — the anomaly stays visible in
  * both the segments list and the exception feed.
+ * Non-pairable kinds ("break_in", "break_out", "transfer") are timeline
+ * events, never segment boundaries: they neither open nor close segments,
+ * so a transfer logged between an "in" and an "out" never breaks pairing.
  */
 function analyzePunches(punches: HrPunch[]): {
   segments: PairedPunch[];
@@ -275,11 +296,12 @@ function analyzePunches(punches: HrPunch[]): {
       if (punch.kind === "in") {
         if (open.length > 0) overlaps.push(punch);
         open.push(punch);
-      } else {
+      } else if (punch.kind === "out") {
         const match = open.shift(); // FIFO: earliest open "in" closes first
         if (match) segments.push({ in: match, out: punch });
         // else: orphan "out" — ignored; validateClockOut prevents new ones.
       }
+      // break_in / break_out / transfer: timeline events, not pairable.
     }
     for (const remaining of open) segments.push({ in: remaining, out: null });
   }
@@ -472,7 +494,8 @@ function openInPunch(punches: HrPunch[], nowIso?: string): HrPunch | null {
   );
   for (const punch of sorted) {
     if (punch.kind === "in") stack.push(punch);
-    else if (stack.length > 0) stack.pop();
+    else if (punch.kind === "out" && stack.length > 0) stack.pop();
+    // break_in / break_out / transfer never open or close a session.
   }
   return stack.length > 0 ? stack[stack.length - 1] : null;
 }
@@ -1498,6 +1521,570 @@ export function validateShiftSwap(input: ValidateShiftSwapInput): string[] {
         errors.push("The counter-offered shift overlaps a shift you're already working.");
         break;
       }
+    }
+  }
+  return errors;
+}
+
+/* ------------------------------------------------------------------ */
+/* HR-KIOSK (2026-09-16): kiosk time clock.                            */
+/*                                                                      */
+/* Entities map 1:1 to the 20260916140000_hr_kiosk_timeclock migration. */
+/* Interface contracts mirror the DB columns minus secrets: kiosk       */
+/* tokens carry neither the raw token nor its hash; credentials carry   */
+/* no PIN hash (PINs are verified server-side through                   */
+/* public.verify_kiosk_pin only).                                       */
+/*                                                                      */
+/* Pairing note: "break_in", "break_out", and "transfer" punches are    */
+/* timeline events. analyzePunches (above) skips them entirely, so a    */
+/* transfer logged between an "in" and an "out" never breaks pairing.   */
+/* ------------------------------------------------------------------ */
+
+export interface HrKioskToken {
+  id: string;
+  agencyId: string;
+  siteId: string;
+  label: string | null;
+  active: boolean;
+  createdBy: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface HrClockCredential {
+  staffId: string;
+  agencyId: string;
+  employeeIdNumber: string;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  pinUpdatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface HrPunchRules {
+  agencyId: string;
+  /** 0 = rounding off. */
+  roundingMinutes: number;
+  roundingApplies: "payroll" | "display_and_payroll";
+  graceMinutes: number;
+  autoClockoutBufferMinutes: number;
+  autoApprovalScoreThreshold: number;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface HrMissedPunchReport {
+  id: string;
+  agencyId: string;
+  staffId: string;
+  siteId: string | null;
+  workDate: string;
+  claimedInAt: string | null;
+  claimedOutAt: string | null;
+  reason: string;
+  status: "pending" | "approved" | "denied";
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  createdAt: string;
+}
+
+/** Mirrors the jsonb returned by public.verify_kiosk_pin. */
+export interface KioskVerifyResult {
+  ok: boolean;
+  reason?: "bad_token" | "bad_pin" | "locked";
+  staffId?: string;
+  displayName?: string | null;
+  attemptsLeft?: number | null;
+  lockedUntil?: string | null;
+}
+
+/** Agency defaults when no hr_punch_rules row exists. */
+export const DEFAULT_PUNCH_RULES: Omit<
+  HrPunchRules,
+  "agencyId" | "updatedBy" | "updatedAt"
+> = {
+  roundingMinutes: 0,
+  roundingApplies: "payroll",
+  graceMinutes: 5,
+  autoClockoutBufferMinutes: 30,
+  autoApprovalScoreThreshold: 90,
+};
+
+/**
+ * Round a punch timestamp to the nearest rounding_minutes bucket.
+ * A rounding_minutes of 0 (or missing/invalid) means rounding is OFF: the
+ * input is returned unchanged. Ties round up (half-up on the minute grid).
+ * Returns an ISO instant; invalid input is returned unchanged rather than
+ * throwing, so a bad row can't break a timecard summary.
+ */
+export function applyPunchRounding(
+  punchedAt: string,
+  rules: Pick<HrPunchRules, "roundingMinutes">,
+): string {
+  const minutes = rules?.roundingMinutes ?? 0;
+  if (!Number.isFinite(minutes) || minutes <= 0) return punchedAt;
+  const ms = parseTime(punchedAt);
+  if (Number.isNaN(ms)) return punchedAt;
+  const roundedMs = Math.round(ms / (minutes * MS_PER_MINUTE)) * minutes * MS_PER_MINUTE;
+  return new Date(roundedMs).toISOString();
+}
+
+/**
+ * True when a punch falls within +/- graceMinutes of the scheduled instant.
+ * Boundary: exactly at the grace edge counts as within grace (grace is a
+ * tolerance, not a cliff). NaN inputs yield false.
+ */
+export function isWithinGrace(
+  punchedAt: string,
+  scheduledAt: string,
+  graceMinutes: number,
+): boolean {
+  if (!Number.isFinite(graceMinutes) || graceMinutes < 0) return false;
+  const delta = parseTime(punchedAt) - parseTime(scheduledAt);
+  return Number.isFinite(delta) && Math.abs(delta) <= graceMinutes * MS_PER_MINUTE;
+}
+
+/* ------------------------- kiosk exception detection ------------------------ */
+
+export type KioskExceptionFlag =
+  | "late"
+  | "early"
+  | "missed_punch"
+  | "offline"
+  | "overtime_trending"
+  | "auto_clockout";
+
+export interface KioskPunchException {
+  staffId: string;
+  /** The flagged punch; null for day-level flags (overtime_trending). */
+  punchId: string | null;
+  /** YYYY-MM-DD work date (clock-in date, or the shift's date for day rows). */
+  date: string;
+  flags: KioskExceptionFlag[];
+  detail: string;
+}
+
+/**
+ * Schedule vs actual minutes per staff-day, attributing each segment to the
+ * published shift findPublishedShiftForPunch matched to its clock-in (the
+ * same attribution detectPunchExceptions uses for late/early flags).
+ * Only CLOSED segments participate: open punches have no known duration,
+ * so they contribute no actual minutes and no variance signal.
+ * Unmatched shifts/segments are skipped.
+ */
+function staffDayScheduleVsActual(
+  punches: HrPunch[],
+  shifts: HrShift[],
+): Map<string, { scheduled: number; actual: number }> {
+  const byStaffDay = new Map<string, { scheduled: number; actual: number }>();
+  const cell = (key: string): { scheduled: number; actual: number } => {
+    let row = byStaffDay.get(key);
+    if (!row) {
+      row = { scheduled: 0, actual: 0 };
+      byStaffDay.set(key, row);
+    }
+    return row;
+  };
+  for (const segment of analyzePunches(punches).segments) {
+    // Open segments carry no actual minutes AND no variance signal: with the
+    // clock-out unknown, |actual - scheduled| would punish every missed
+    // punch twice (the missed_punch / auto_clockout flags already cover it).
+    if (segment.out === null) continue;
+    const shift = findPublishedShiftForPunch(segment.in, shifts);
+    if (shift !== null) {
+      const minutes = Math.max(
+        0,
+        Math.round(
+          (parseTime(shift.endsAt) - parseTime(shift.startsAt)) / MS_PER_MINUTE,
+        ),
+      );
+      cell(`${segment.in.staffId}|${dateKeyOf(shift.startsAt)}`).scheduled += minutes;
+    }
+    cell(`${segment.in.staffId}|${dateKeyOf(segment.in.punchedAt)}`).actual +=
+      minutesBetween(segment.in.punchedAt, segment.out.punchedAt);
+  }
+  return byStaffDay;
+}
+
+/**
+ * Kiosk-era exception scan. Rows are keyed per punch (punchId set) or per
+ * staff-day (punchId null); one punch can carry several flags — flags are
+ * independent signals, not exclusive states.
+ *
+ * Rules (all pure/deterministic on the inputs):
+ *  - offline: punch.offline is true (any kind) — recorded off-network,
+ *    queued for manager review.
+ *  - late: clock-in after shift start + rules.graceMinutes, anchored to the
+ *    published shift that findPublishedShiftForPunch attributes the punch
+ *    to. Draft/cancelled shifts never anchor (same rule as
+ *    detectExceptions).
+ *  - early: clock-out before shift end - rules.graceMinutes.
+ *  - missed_punch: open "in" whose published shift ended more than
+ *    MISSED_PUNCH_GRACE_MINUTES (15) ago — needs the published shift; an
+ *    open punch with no matching shift is left for manual review.
+ *  - auto_clockout: open "in" still open past shift end +
+ *    rules.autoClockoutBufferMinutes — the app would auto-close it there.
+ *    (A punch past the buffer also carries missed_punch: one is the
+ *    policy signal, the other the pending automation.)
+ *  - overtime_trending: day-level. Actual paired minutes for the staff-day
+ *    exceed the published scheduled minutes for that staff-day — the shift
+ *    is running into overtime territory. Open segments contribute 0.
+ *
+ * patterns is accepted for API parity with the kiosk workstream and is
+ * reserved for future pattern-vs-actual detection; it is not read here.
+ */
+export function detectPunchExceptions(
+  punches: HrPunch[],
+  shifts: HrShift[],
+  patterns: HrStaffingPattern[],
+  rules: HrPunchRules,
+  nowIso: string,
+): KioskPunchException[] {
+  void patterns; // reserved: expected-time windows come from patterns in v2
+  const graceMs = Math.max(0, rules.graceMinutes ?? 0) * MS_PER_MINUTE;
+  const now = parseTime(nowIso);
+  const rows = new Map<string, KioskPunchException>();
+
+  const flag = (
+    staffId: string,
+    punchId: string | null,
+    date: string,
+    kind: KioskExceptionFlag,
+    detail: string,
+  ): void => {
+    const key = punchId ?? `day:${staffId}:${date}`;
+    const existing = rows.get(key);
+    if (existing) {
+      if (!existing.flags.includes(kind)) existing.flags.push(kind);
+      return;
+    }
+    rows.set(key, { staffId, punchId, date, flags: [kind], detail });
+  };
+
+  // Per-punch flags (independent of pairing).
+  for (const punch of punches) {
+    const date = dateKeyOf(punch.punchedAt);
+    if (punch.offline === true) {
+      flag(
+        punch.staffId,
+        punch.id,
+        date,
+        "offline",
+        `Punch at ${fmtTime(punch.punchedAt)} was recorded offline — queued for manager review.`,
+      );
+    }
+  }
+
+  const { segments } = analyzePunches(punches);
+
+  for (const segment of segments) {
+    const staffId = segment.in.staffId;
+    const shift = findPublishedShiftForPunch(segment.in, shifts);
+    if (shift !== null) {
+      const startMs = parseTime(shift.startsAt);
+      const endMs = parseTime(shift.endsAt);
+      const inMs = parseTime(segment.in.punchedAt);
+      if (inMs > startMs + graceMs) {
+        const lateMin = Math.round((inMs - startMs) / MS_PER_MINUTE);
+        flag(
+          staffId,
+          segment.in.id,
+          dateKeyOf(segment.in.punchedAt),
+          "late",
+          `Clocked in ${lateMin} minute${lateMin === 1 ? "" : "s"} after the ${fmtTime(shift.startsAt)} shift start (grace ${rules.graceMinutes}).`,
+        );
+      }
+      if (segment.out !== null) {
+        const outMs = parseTime(segment.out.punchedAt);
+        if (outMs < endMs - graceMs) {
+          const earlyMin = Math.round((endMs - outMs) / MS_PER_MINUTE);
+          flag(
+            staffId,
+            segment.out.id,
+            dateKeyOf(segment.out.punchedAt),
+            "early",
+            `Clocked out ${earlyMin} minute${earlyMin === 1 ? "" : "s"} before the ${fmtTime(shift.endsAt)} shift end (grace ${rules.graceMinutes}).`,
+          );
+        }
+      } else {
+        if (now > endMs + MISSED_PUNCH_GRACE_MINUTES * MS_PER_MINUTE) {
+          flag(
+            staffId,
+            segment.in.id,
+            dateKeyOf(segment.in.punchedAt),
+            "missed_punch",
+            `Clocked in at ${fmtTime(segment.in.punchedAt)} for the shift ending ${fmtTime(shift.endsAt)} but never clocked out.`,
+          );
+        }
+        const bufferMs =
+          Math.max(0, rules.autoClockoutBufferMinutes ?? 0) * MS_PER_MINUTE;
+        if (now > endMs + bufferMs) {
+          flag(
+            staffId,
+            segment.in.id,
+            dateKeyOf(segment.in.punchedAt),
+            "auto_clockout",
+            `Still clocked in past the ${fmtTime(shift.endsAt)} shift end plus the ${rules.autoClockoutBufferMinutes}-minute auto clock-out buffer.`,
+          );
+        }
+      }
+    }
+  }
+
+  // Day-level: overtime trending — worked more than scheduled. Same
+  // attribution helper as scoreTimecard's variance so both agree.
+  for (const [key, row] of staffDayScheduleVsActual(punches, shifts)) {
+    if (row.actual > row.scheduled) {
+      const [overtimeStaffId, overtimeDate] = key.split("|");
+      flag(
+        overtimeStaffId,
+        null,
+        overtimeDate,
+        "overtime_trending",
+        `Worked ${row.actual} minutes on ${overtimeDate} against ${row.scheduled} scheduled — into overtime territory.`,
+      );
+    }
+  }
+
+  return [...rows.values()].sort((a, b) =>
+    a.date < b.date
+      ? -1
+      : a.date > b.date
+        ? 1
+        : (a.punchId ?? "") < (b.punchId ?? "")
+          ? -1
+          : 1,
+  );
+}
+
+/* ------------------------------ timecard score ----------------------------- */
+
+/** Penalty per kiosk exception flag; missed punches cost the most. */
+const KIOSK_FLAG_PENALTIES: Record<KioskExceptionFlag, number> = {
+  missed_punch: 15,
+  auto_clockout: 10,
+  late: 5,
+  early: 5,
+  overtime_trending: 8,
+  offline: 3,
+};
+
+const KIOSK_VARIANCE_CAP_PER_DAY = 15;
+
+/**
+ * 0–100 timecard score. Formula:
+ *   score = clamp(100 - flag penalties - variance penalty, 0, 100)
+ * where flag penalties are the KIOSK_FLAG_PENALTIES above (summed over every
+ * flag row from detectPunchExceptions — a punch with two flags pays twice),
+ * and the variance penalty is per staff-day: |actual - scheduled| minutes
+ * beyond rules.graceMinutes cost 1 point per full 10 minutes, capped at
+ * KIOSK_VARIANCE_CAP_PER_DAY (15) per staff-day.
+ *
+ * A score >= rules.autoApprovalScoreThreshold is eligible for auto-approval
+ * (the app decides; this function only scores). Without nowIso, "now" is
+ * the latest punch time — open-punch checks (missed/auto-clockout) only
+ * fire relative to data the caller actually passed in.
+ */
+export function scoreTimecard(
+  punches: HrPunch[],
+  shifts: HrShift[],
+  rules: HrPunchRules,
+  nowIso?: string,
+): number {
+  const effectiveNow =
+    nowIso ??
+    (punches.length === 0
+      ? "1970-01-01T00:00:00.000Z"
+      : punches.reduce((a, b) => (a.punchedAt > b.punchedAt ? a : b)).punchedAt);
+  let penalty = 0;
+
+  for (const row of detectPunchExceptions(punches, shifts, [], rules, effectiveNow)) {
+    for (const kind of row.flags) penalty += KIOSK_FLAG_PENALTIES[kind];
+  }
+
+  // Schedule variance per staff-day (published shifts only; paired minutes
+  // by clock-in date — the night-shift rule). Same attribution as the
+  // overtime_trending flag so the score and the exception feed agree.
+  for (const [, row] of staffDayScheduleVsActual(punches, shifts)) {
+    const overage = Math.max(
+      0,
+      Math.abs(row.actual - row.scheduled) - (rules.graceMinutes ?? 0),
+    );
+    penalty += Math.min(KIOSK_VARIANCE_CAP_PER_DAY, Math.floor(overage / 10));
+  }
+
+  return Math.max(0, Math.min(100, 100 - penalty));
+}
+
+/* --------------------------- scheduled vs actual --------------------------- */
+
+export interface ScheduledVsActualDay {
+  /** YYYY-MM-DD. */
+  date: string;
+  scheduledMinutes: number;
+  actualMinutes: number;
+  /** actual - scheduled (negative = under-scheduled hours worked). */
+  varianceMinutes: number;
+}
+
+/**
+ * Per-day scheduled vs worked minutes. Scheduled counts published shifts
+ * only (draft/cancelled shifts are not commitments); worked counts paired
+ * in/out minutes attributed to the clock-in date (night-shift rule). Open
+ * segments contribute 0. Dates are the union of shift-start dates and
+ * clock-in dates, sorted ascending.
+ */
+export function scheduledVsActual(
+  shifts: HrShift[],
+  punches: HrPunch[],
+): ScheduledVsActualDay[] {
+  const byDate = new Map<string, { scheduled: number; actual: number }>();
+  const cell = (date: string): { scheduled: number; actual: number } => {
+    let row = byDate.get(date);
+    if (!row) {
+      row = { scheduled: 0, actual: 0 };
+      byDate.set(date, row);
+    }
+    return row;
+  };
+
+  for (const shift of shifts) {
+    if (shift.status !== "published") continue;
+    cell(dateKeyOf(shift.startsAt)).scheduled += Math.max(
+      0,
+      Math.round((parseTime(shift.endsAt) - parseTime(shift.startsAt)) / MS_PER_MINUTE),
+    );
+  }
+  for (const segment of pairPunches(punches)) {
+    cell(dateKeyOf(segment.clockIn)).actual += segment.minutes;
+  }
+
+  return [...byDate.entries()]
+    .map(([date, row]) => ({
+      date,
+      scheduledMinutes: row.scheduled,
+      actualMinutes: row.actual,
+      varianceMinutes: row.actual - row.scheduled,
+    }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/* --------------------------- auto clock-out -------------------------------- */
+
+export interface AutoClockoutCandidate {
+  punch: HrPunch;
+  shift: HrShift;
+  /** The time the app would auto-clock the staff out (the shift end). */
+  clockOutAt: string;
+}
+
+/**
+ * Open "in" punches the app should auto-clock out: the punch's published
+ * shift ended more than rules.autoClockoutBufferMinutes ago. The caller
+ * passes only the still-open "in" punches (via openInPunch-style filtering).
+ * Punches with no matching published shift are skipped — the app leaves
+ * them for manual review rather than guessing the shift.
+ */
+export function findAutoClockoutCandidates(
+  openPunches: HrPunch[],
+  shifts: HrShift[],
+  rules: Pick<HrPunchRules, "autoClockoutBufferMinutes">,
+  nowIso: string,
+): AutoClockoutCandidate[] {
+  const now = parseTime(nowIso);
+  const bufferMs =
+    Math.max(0, rules.autoClockoutBufferMinutes ?? 0) * MS_PER_MINUTE;
+  const candidates: AutoClockoutCandidate[] = [];
+  for (const punch of openPunches) {
+    if (punch.kind !== "in") continue;
+    const shift = findPublishedShiftForPunch(punch, shifts);
+    if (shift === null) continue;
+    if (now > parseTime(shift.endsAt) + bufferMs) {
+      candidates.push({ punch, shift, clockOutAt: shift.endsAt });
+    }
+  }
+  candidates.sort((a, b) =>
+    a.punch.punchedAt < b.punch.punchedAt
+      ? -1
+      : a.punch.punchedAt > b.punch.punchedAt
+        ? 1
+        : 0,
+  );
+  return candidates;
+}
+
+/* ------------------------- missed-punch validation ------------------------- */
+
+export interface MissedPunchReportInput {
+  /** YYYY-MM-DD the missed punch belongs to. */
+  workDate: string;
+  claimedInAt: string | null;
+  claimedOutAt: string | null;
+  reason: string;
+  nowIso: string;
+}
+
+/**
+ * Validate a staff-submitted missed-punch report. Returns error messages;
+ * empty = the report may be filed. Rules:
+ *  - a clock-in time, a clock-out time, or both must be present;
+ *  - the reason must not be empty;
+ *  - claimed times must parse, must not be in the future, and must fall on
+ *    the work date (the clock-out may roll to the next day for night
+ *    shifts);
+ *  - when both are present, the clock-out must be after the clock-in.
+ * Messages are user-facing.
+ */
+export function validateMissedPunchReport(
+  input: MissedPunchReportInput,
+): string[] {
+  const errors: string[] = [];
+  if (input.claimedInAt === null && input.claimedOutAt === null) {
+    errors.push("Enter a clock-in time, a clock-out time, or both.");
+  }
+  if (input.reason.trim().length === 0) {
+    errors.push("Tell us what happened so the manager can review it.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.workDate)) {
+    errors.push("Choose a valid work date.");
+    return errors; // without a valid work date the day checks can't run
+  }
+  const now = parseTime(input.nowIso);
+  const nextDay = addDaysIso(`${input.workDate}T00:00:00`, 1).slice(0, 10);
+
+  const checkClaimed = (
+    label: string,
+    iso: string | null,
+    allowNextDay: boolean,
+  ): void => {
+    if (iso === null) return;
+    const ms = parseTime(iso);
+    if (Number.isNaN(ms)) {
+      errors.push(`${label} is not a valid time.`);
+      return;
+    }
+    if (ms > now) {
+      errors.push(`${label} is in the future — claim the time you actually worked.`);
+      return;
+    }
+    const day = dateKeyOf(iso);
+    const onWorkDate = day === input.workDate;
+    const onNextDay = allowNextDay && day === nextDay;
+    if (!onWorkDate && !onNextDay) {
+      errors.push(`${label} must fall on ${input.workDate}${allowNextDay ? " (or the following day for a night shift)" : ""}.`);
+    }
+  };
+
+  checkClaimed("The clock-in", input.claimedInAt, false);
+  checkClaimed("The clock-out", input.claimedOutAt, true);
+
+  if (input.claimedInAt !== null && input.claimedOutAt !== null) {
+    const inMs = parseTime(input.claimedInAt);
+    const outMs = parseTime(input.claimedOutAt);
+    if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs <= inMs) {
+      errors.push("The clock-out must be after the clock-in.");
     }
   }
   return errors;

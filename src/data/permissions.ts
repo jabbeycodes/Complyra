@@ -77,6 +77,8 @@ export const PERMISSION_KEYS = [
   "hub.manage_staffing",
   // HR-PHASE2 (pto accrual / overtime rules go here)
   "hub.manage_pay_settings",
+  // KIOSK (remote punch is individually granted per staff, never role-default)
+  "hub.remote_punch",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -437,6 +439,9 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "hub.manage_staffing": "Configure recurring staffing patterns",
   // HR-PHASE2
   "hub.manage_pay_settings": "Configure accrual policies and overtime rules",
+  // KIOSK — granted per staff member by admins (see hr_staff_permission_grants),
+  // never enabled by default in any role pack.
+  "hub.remote_punch": "Clock in/out from a personal device",
 };
 
 /**

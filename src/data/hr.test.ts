@@ -1506,3 +1506,500 @@ test("PHASE2: hub.manage_pay_settings defaults for admin/PM/HR only", () => {
     "Configure accrual policies and overtime rules",
   );
 });
+
+/* ------------------------------------------------------------------ */
+/* HR-KIOSK (2026-09-16): kiosk time clock                              */
+/* ------------------------------------------------------------------ */
+
+import {
+  DEFAULT_PUNCH_RULES,
+  applyPunchRounding,
+  detectPunchExceptions,
+  findAutoClockoutCandidates,
+  isWithinGrace,
+  scheduledVsActual,
+  scoreTimecard,
+  validateMissedPunchReport,
+} from "./hr";
+import type { HrPunchRules } from "./hr";
+
+function punchRules(overrides: Partial<HrPunchRules> = {}): HrPunchRules {
+  return {
+    ...DEFAULT_PUNCH_RULES,
+    agencyId: "agency-test",
+    updatedBy: null,
+    updatedAt: "2026-09-16T00:00:00",
+    ...overrides,
+  };
+}
+
+const KIOSK_NOW = "2026-09-16T12:00:00.000Z";
+
+// applyPunchRounding
+// ---------------------------------------------------------------------------
+
+test("KIOSK: rounding 0 minutes leaves the punch untouched", () => {
+  assert.equal(
+    applyPunchRounding("2026-09-16T08:07:00", punchRules({ roundingMinutes: 0 })),
+    "2026-09-16T08:07:00",
+  );
+});
+
+test("KIOSK: 15-minute rounding snaps to the nearest bucket", () => {
+  const rules = punchRules({ roundingMinutes: 15 });
+  assert.equal(applyPunchRounding("2026-09-16T08:07:00", rules), "2026-09-16T08:00:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:08:00", rules), "2026-09-16T08:15:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:00:00", rules), "2026-09-16T08:00:00.000Z");
+});
+
+test("KIOSK: rounding supports 5 and 10 minute buckets, ties round up", () => {
+  assert.equal(
+    applyPunchRounding("2026-09-16T08:02:30", punchRules({ roundingMinutes: 5 })),
+    "2026-09-16T08:05:00.000Z",
+  );
+  assert.equal(
+    applyPunchRounding("2026-09-16T08:06:00", punchRules({ roundingMinutes: 10 })),
+    "2026-09-16T08:10:00.000Z",
+  );
+});
+
+test("KIOSK: rounding passes invalid input through unchanged", () => {
+  assert.equal(applyPunchRounding("not-a-time", punchRules({ roundingMinutes: 15 })), "not-a-time");
+});
+
+// isWithinGrace
+// ---------------------------------------------------------------------------
+
+test("KIOSK: isWithinGrace tolerates both directions with an inclusive boundary", () => {
+  assert.equal(isWithinGrace("2026-09-16T08:05:00", "2026-09-16T08:00:00", 5), true);
+  assert.equal(isWithinGrace("2026-09-16T07:55:00", "2026-09-16T08:00:00", 5), true);
+  assert.equal(isWithinGrace("2026-09-16T08:06:00", "2026-09-16T08:00:00", 5), false);
+  assert.equal(isWithinGrace("2026-09-16T07:54:00", "2026-09-16T08:00:00", 5), false);
+  assert.equal(isWithinGrace("not-a-time", "2026-09-16T08:00:00", 5), false);
+});
+
+// detectPunchExceptions
+// ---------------------------------------------------------------------------
+
+function kioskFlags(punches: HrPunch[], shifts: HrShift[], rules?: Partial<HrPunchRules>) {
+  return detectPunchExceptions(punches, shifts, [], punchRules(rules), KIOSK_NOW);
+}
+
+test("KIOSK: late and early flags respect the agency grace", () => {
+  const flags = kioskFlags(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:10:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T15:50:00" }),
+    ],
+    [shift()],
+    { graceMinutes: 5 },
+  );
+  const kinds = flags.flatMap((f) => f.flags);
+  assert.ok(kinds.includes("late"), JSON.stringify(flags));
+  assert.ok(kinds.includes("early"), JSON.stringify(flags));
+});
+
+test("KIOSK: a punch on the grace boundary raises no late/early flag", () => {
+  const flags = kioskFlags(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:05:00" }), // exactly 5 min late
+      punch({ kind: "out", punchedAt: "2026-09-14T15:55:00" }), // exactly 5 min early
+    ],
+    [shift()],
+    { graceMinutes: 5 },
+  );
+  const kinds = flags.flatMap((f) => f.flags);
+  assert.ok(!kinds.includes("late"));
+  assert.ok(!kinds.includes("early"));
+});
+
+test("KIOSK: an offline punch is flagged", () => {
+  const flags = kioskFlags(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00", offline: true }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+    ],
+    [shift()],
+  );
+  assert.ok(flags.some((f) => f.flags.includes("offline")), JSON.stringify(flags));
+});
+
+test("KIOSK: a kiosk_pin punch carries no photo-related flags", () => {
+  const flags = kioskFlags(
+    [
+      punch({
+        kind: "in",
+        punchedAt: "2026-09-14T08:00:00",
+        verificationMethod: "kiosk_pin",
+      }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+    ],
+    [shift()],
+  );
+  assert.ok(
+    !flags.flatMap((f) => f.flags).includes("unverified_photo" as never),
+    JSON.stringify(flags),
+  );
+});
+
+test("KIOSK: remote punches keep their remote marker (reviewed in the exception view)", () => {
+  const p = punch({
+    kind: "in",
+    punchedAt: "2026-09-14T08:00:00",
+    verificationMethod: "mobile",
+    remote: true,
+  });
+  assert.equal(p.remote, true);
+});
+
+test("KIOSK: overtime_trending is a day-level flag when worked exceeds scheduled", () => {
+  const flags = kioskFlags(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T17:00:00" }), // 9h vs 8h scheduled
+    ],
+    [shift()],
+  );
+  const dayRow = flags.find((f) => f.punchId === null);
+  assert.ok(dayRow, JSON.stringify(flags));
+  assert.ok(dayRow.flags.includes("overtime_trending"));
+  assert.equal(dayRow.date, "2026-09-14");
+});
+
+test("KIOSK: no overtime_trending when the day matches the schedule exactly", () => {
+  const flags = kioskFlags(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+    ],
+    [shift()],
+  );
+  assert.ok(!flags.flatMap((f) => f.flags).includes("overtime_trending"));
+});
+
+test("KIOSK: an open punch past shift end plus buffer raises auto_clockout and missed_punch", () => {
+  const flags = kioskFlags(
+    [punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" })],
+    [shift()],
+    { autoClockoutBufferMinutes: 30 },
+  );
+  const kinds = flags.flatMap((f) => f.flags);
+  assert.ok(kinds.includes("missed_punch"), JSON.stringify(flags));
+  assert.ok(kinds.includes("auto_clockout"), JSON.stringify(flags));
+});
+
+test("KIOSK: an open punch inside the buffer is not yet an auto-clockout", () => {
+  // 2026-09-16 now; shift ends 16:00 today on 2026-09-16 (30-min buffer not passed at 16:20).
+  const todayShift = shift({ startsAt: "2026-09-16T08:00:00", endsAt: "2026-09-16T16:00:00" });
+  const flags = detectPunchExceptions(
+    [punch({ kind: "in", punchedAt: "2026-09-16T08:00:00" })],
+    [todayShift],
+    [],
+    punchRules({ autoClockoutBufferMinutes: 30 }),
+    "2026-09-16T16:20:00",
+  );
+  const kinds = flags.flatMap((f) => f.flags);
+  assert.ok(kinds.includes("missed_punch")); // 15-min missed grace has passed
+  assert.ok(!kinds.includes("auto_clockout")); // 30-min buffer has not
+});
+
+// scoreTimecard
+// ---------------------------------------------------------------------------
+
+test("KIOSK: a clean shift scores 100", () => {
+  const score = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  assert.equal(score, 100);
+});
+
+test("KIOSK: late and early each cost 5 points", () => {
+  const punches = [
+    punch({ kind: "in", punchedAt: "2026-09-14T08:10:00" }),
+    punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+  ];
+  const lateOnly = scoreTimecard(punches, [shift()], punchRules(), KIOSK_NOW);
+  assert.equal(lateOnly, 95);
+  const both = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:10:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T15:50:00" }),
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  // Late -5, early -5, plus a 1-point variance penalty: 460 worked vs 480
+  // scheduled is 20 minutes off, 15 beyond grace, floor(15/10) = 1.
+  assert.equal(both, 89);
+});
+
+test("KIOSK: a missed punch costs 15 plus the auto-clockout 10", () => {
+  const score = scoreTimecard(
+    [punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" })],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  assert.equal(score, 75);
+});
+
+test("KIOSK: score decreases as exceptions accumulate and never goes below 0", () => {
+  const clean = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  const messy = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:20:00", offline: true }),
+      // never clocked out -> missed_punch + auto_clockout
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  assert.ok(messy < clean);
+  const worst = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T10:00:00", offline: true }),
+      punch({ kind: "in", punchedAt: "2026-09-14T13:00:00", offline: true }),
+      // two overlapping open punches, far past shift end
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  assert.ok(worst >= 0 && worst <= 100);
+});
+
+test("KIOSK: large schedule variance costs 1 point per 10 minutes, capped at 15 per day", () => {
+  // Scheduled 8h, worked 8h+40min: 40 - 5 grace = 35 -> 3 points.
+  const score = scoreTimecard(
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T16:40:00" }),
+    ],
+    [shift()],
+    punchRules(),
+    KIOSK_NOW,
+  );
+  // overtime_trending (-8) + variance 35min -> 3 = 89.
+  assert.equal(score, 89);
+});
+
+test("KIOSK: the score default-anchors 'now' at the latest punch when omitted", () => {
+  const punches = [
+    punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+    punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+  ];
+  assert.equal(scoreTimecard(punches, [shift()], punchRules()), 100);
+});
+
+// scheduledVsActual
+// ---------------------------------------------------------------------------
+
+test("KIOSK: scheduledVsActual reports scheduled, actual, and variance per day", () => {
+  const days = scheduledVsActual(
+    [
+      shift({ startsAt: "2026-09-14T08:00:00", endsAt: "2026-09-14T16:00:00" }),
+      shift({ startsAt: "2026-09-15T08:00:00", endsAt: "2026-09-15T16:00:00", id: "shift-test-99" }),
+    ],
+    [
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-14T17:00:00" }),
+      punch({ kind: "in", punchedAt: "2026-09-15T08:00:00" }),
+      punch({ kind: "out", punchedAt: "2026-09-15T16:00:00" }),
+    ],
+  );
+  assert.deepEqual(days, [
+    { date: "2026-09-14", scheduledMinutes: 480, actualMinutes: 540, varianceMinutes: 60 },
+    { date: "2026-09-15", scheduledMinutes: 480, actualMinutes: 480, varianceMinutes: 0 },
+  ]);
+});
+
+test("KIOSK: scheduledVsActual ignores draft shifts and open segments", () => {
+  const days = scheduledVsActual(
+    [shift({ status: "scheduled" })], // draft — not a commitment
+    [punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" })], // open — 0 minutes
+  );
+  assert.deepEqual(days, [
+    { date: "2026-09-14", scheduledMinutes: 0, actualMinutes: 0, varianceMinutes: 0 },
+  ]);
+});
+
+// findAutoClockoutCandidates
+// ---------------------------------------------------------------------------
+
+test("KIOSK: open punches past shift end plus buffer are candidates", () => {
+  const candidates = findAutoClockoutCandidates(
+    [punch({ kind: "in", punchedAt: "2026-09-16T08:00:00" })],
+    [shift({ startsAt: "2026-09-16T08:00:00", endsAt: "2026-09-16T16:00:00", id: "shift-test-50" })],
+    punchRules({ autoClockoutBufferMinutes: 30 }),
+    "2026-09-16T16:45:00",
+  );
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].clockOutAt, "2026-09-16T16:00:00");
+  assert.equal(candidates[0].shift.id, "shift-test-50");
+});
+
+test("KIOSK: open punches inside the buffer, or with no shift, are not candidates", () => {
+  const early = findAutoClockoutCandidates(
+    [punch({ kind: "in", punchedAt: "2026-09-16T08:00:00" })],
+    [shift({ startsAt: "2026-09-16T08:00:00", endsAt: "2026-09-16T16:00:00" })],
+    punchRules({ autoClockoutBufferMinutes: 30 }),
+    "2026-09-16T16:20:00",
+  );
+  assert.deepEqual(early, []);
+  const noShift = findAutoClockoutCandidates(
+    [punch({ kind: "in", punchedAt: "2026-09-16T08:00:00" })],
+    [],
+    punchRules({ autoClockoutBufferMinutes: 30 }),
+    "2026-09-16T20:00:00",
+  );
+  assert.deepEqual(noShift, []);
+});
+
+test("KIOSK: non-in punches in the open list are skipped", () => {
+  const candidates = findAutoClockoutCandidates(
+    [
+      punch({ kind: "out", punchedAt: "2026-09-16T12:00:00" }),
+      punch({ kind: "transfer", punchedAt: "2026-09-16T13:00:00" }),
+    ],
+    [shift({ startsAt: "2026-09-16T08:00:00", endsAt: "2026-09-16T16:00:00" })],
+    punchRules(),
+    "2026-09-16T20:00:00",
+  );
+  assert.deepEqual(candidates, []);
+});
+
+// validateMissedPunchReport
+// ---------------------------------------------------------------------------
+
+function reportInput(overrides: Partial<Parameters<typeof validateMissedPunchReport>[0]> = {}) {
+  return {
+    workDate: "2026-09-14",
+    claimedInAt: "2026-09-14T08:00:00",
+    claimedOutAt: "2026-09-14T16:00:00",
+    reason: "Kiosk was offline when I arrived.",
+    nowIso: "2026-09-16T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("KIOSK: a sane report validates clean", () => {
+  assert.deepEqual(validateMissedPunchReport(reportInput()), []);
+});
+
+test("KIOSK: one claimed time is enough", () => {
+  assert.deepEqual(validateMissedPunchReport(reportInput({ claimedOutAt: null })), []);
+  assert.deepEqual(validateMissedPunchReport(reportInput({ claimedInAt: null })), []);
+});
+
+test("KIOSK: no claimed times, empty reason, inverted times are rejected", () => {
+  assert.ok(
+    validateMissedPunchReport(reportInput({ claimedInAt: null, claimedOutAt: null })).some(
+      (e) => /clock-in time/i.test(e),
+    ),
+  );
+  assert.ok(
+    validateMissedPunchReport(reportInput({ reason: "   " })).some((e) => /what happened/i.test(e)),
+  );
+  assert.ok(
+    validateMissedPunchReport(
+      reportInput({ claimedInAt: "2026-09-14T16:00:00", claimedOutAt: "2026-09-14T08:00:00" }),
+    ).some((e) => /after the clock-in/i.test(e)),
+  );
+});
+
+test("KIOSK: future claimed times are rejected", () => {
+  const errors = validateMissedPunchReport(
+    reportInput({ claimedInAt: "2026-09-17T08:00:00", claimedOutAt: "2026-09-17T16:00:00" }),
+  );
+  assert.ok(errors.some((e) => /in the future/i.test(e)));
+});
+
+test("KIOSK: claimed times must fall on the work date (night shift may roll over)", () => {
+  const wrongDay = validateMissedPunchReport(
+    reportInput({ claimedInAt: "2026-09-13T08:00:00" }),
+  );
+  assert.ok(wrongDay.some((e) => /2026-09-14/.test(e)));
+  // Night shift: out the next morning is fine.
+  const night = validateMissedPunchReport(
+    reportInput({
+      workDate: "2026-09-14",
+      claimedInAt: "2026-09-14T22:00:00",
+      claimedOutAt: "2026-09-15T06:00:00",
+    }),
+  );
+  assert.deepEqual(night, []);
+});
+
+// transfer / break pairing integrity
+// ---------------------------------------------------------------------------
+
+test("KIOSK: a transfer punch between in and out does not break pairing", () => {
+  const segments = pairPunches([
+    punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+    punch({ kind: "transfer", punchedAt: "2026-09-14T12:00:00", transferGroup: "xfer-1" }),
+    punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+  ]);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].minutes, 480);
+  assert.equal(segments[0].clockOut, "2026-09-14T16:00:00");
+});
+
+test("KIOSK: break_in/break_out punches are timeline events, not segment boundaries", () => {
+  const segments = pairPunches([
+    punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+    punch({ kind: "break_out", punchedAt: "2026-09-14T12:00:00" }),
+    punch({ kind: "break_in", punchedAt: "2026-09-14T12:30:00" }),
+    punch({ kind: "out", punchedAt: "2026-09-14T16:00:00" }),
+  ]);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].minutes, 480);
+});
+
+test("KIOSK: validateClockOut still sees through break/transfer punches", () => {
+  // Open in, then a break pair and a transfer: the in is still open.
+  assert.doesNotThrow(() =>
+    validateClockOut([
+      punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+      punch({ kind: "break_out", punchedAt: "2026-09-14T12:00:00" }),
+      punch({ kind: "transfer", punchedAt: "2026-09-14T13:00:00" }),
+    ]),
+  );
+  // And a double-in is still a double-in even with a transfer in between.
+  assert.throws(
+    () =>
+      validateClockIn(
+        [
+          punch({ kind: "in", punchedAt: "2026-09-14T08:00:00" }),
+          punch({ kind: "transfer", punchedAt: "2026-09-14T13:00:00" }),
+          punch({ kind: "in", punchedAt: "2026-09-14T14:00:00" }),
+        ],
+        "2026-09-14T15:00:00",
+      ),
+    /Already clocked in/,
+  );
+});
+
+test("KIOSK: DEFAULT_PUNCH_RULES carries the documented defaults", () => {
+  assert.deepEqual(DEFAULT_PUNCH_RULES, {
+    roundingMinutes: 0,
+    roundingApplies: "payroll",
+    graceMinutes: 5,
+    autoClockoutBufferMinutes: 30,
+    autoApprovalScoreThreshold: 90,
+  });
+});

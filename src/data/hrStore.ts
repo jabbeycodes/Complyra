@@ -18,6 +18,7 @@
  */
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 import {
   buildPayrollCsvExport,
   computePatternWeeklyHours,
@@ -35,24 +36,30 @@ import type {
   ComplianceEvidence,
   HrAccrualLedgerEntry,
   HrAccrualPolicy,
+  HrClockCredential,
   HrDocument,
   HrDocumentAck,
+  HrKioskToken,
+  HrMissedPunchReport,
   HrOvertimeRules,
   HrPayPeriod,
   HrPunch,
   HrPunchCorrection,
+  HrPunchRules,
   HrReadinessRequirement,
   HrShift,
   HrShiftSwap,
   HrStaffingPattern,
   HrTimecardApproval,
   HrTimeOffRequest,
+  KioskVerifyResult,
   LedgerEntryInput,
   LeaveType,
   OvertimeRulesInput,
   ShiftSwapInput,
   ShiftSwapStatus,
 } from "./hr";
+import { DEFAULT_PUNCH_RULES } from "./hr";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
 
 /* ------------------------------ input types ------------------------------ */
@@ -76,6 +83,178 @@ export type HrStaffingPatternInput = Omit<
   HrStaffingPattern,
   "id" | "agencyId" | "staffName" | "individualName" | "siteName"
 >;
+
+/* ------------------------- kiosk time clock (Worker 3) ---------------------- */
+/*
+ * RECONCILED 2026-09-16 with Worker 1's `20260916140000_hr_kiosk_timeclock`
+ * migration and hr.ts kiosk types (HrKioskToken, HrClockCredential,
+ * HrMissedPunchReport, HrPunchRules, KioskVerifyResult, DEFAULT_PUNCH_RULES).
+ * Entity types come from hr.ts; only store-owned inputs and helpers live here.
+ *
+ * Backend facts (from the migration — do not drift from these):
+ * - hr_kiosk_tokens(id, agency_id, site_id NOT NULL, token_hash UNIQUE sha256
+ *   hex, label NULLABLE, active bool, created_by, created_at, last_used_at,
+ *   revoked_at NULL). Raw tokens are generated client-side (32 random bytes
+ *   hex); ONLY the sha256 hex is stored — the raw token is shown once.
+ *   One active token per site (partial unique index).
+ * - hr_clock_credentials(staff_id PK, agency_id, employee_id_number,
+ *   pin_hash bcrypt, failed_attempts, locked_until NULL, pin_updated_at,
+ *   updated_by). PINs are hashed with bcryptjs client-side (cost 10);
+ *   plaintext never leaves the browser. RLS: hub.manage_pay_settings only.
+ * - hr_missed_punch_reports(id, agency_id, staff_id, site_id NULLABLE,
+ *   work_date date, claimed_in_at NULLABLE, claimed_out_at NULLABLE, reason,
+ *   status, reviewed_by, reviewed_at, review_note, created_at). DB check: at
+ *   least one of claimed_in_at / claimed_out_at is not null. On approval the
+ *   APP inserts the punch rows and writes correction-ledger entries into
+ *   hr_punch_corrections (see decideMissedPunchReport).
+ * - hr_punch_rules(agency_id PK, rounding_minutes ∈ {0,5,10,15},
+ *   rounding_applies ∈ {'payroll','display_and_payroll'}, grace_minutes,
+ *   auto_clockout_buffer_minutes, auto_approval_score_threshold,
+ *   updated_by, updated_at). RLS: read hub.access, write hub.manage_pay_settings.
+ * - hr_punches gains: service_type, individual_id, verification_method NOT
+ *   NULL DEFAULT 'web' CHECK (web|mobile|kiosk_pin|qr|nfc) — NO photo
+ *   method —, offline, remote, rounded_punched_at, attestation jsonb,
+ *   transfer_group, auto_clockout, exception_flags; kind widened to
+ *   in/out/break_in/break_out/transfer. There is no photo_data_url column:
+ *   photo capture was cut from the kiosk path entirely.
+ *
+ * RPC verify_kiosk_pin(p_token text, p_employee_id text, p_pin text) RETURNS
+ * jsonb {ok, reason?, staff_id?, display_name?, attempts_left?, locked_until?}
+ * — deliberately NO site fields (Worker 1's kiosk trust model: the kiosk
+ * device authenticates through the RPC only, never table reads; hashes never
+ * leave the DB). Lockout: 5 failed attempts lock the credential 15 minutes;
+ * success clears. Unknown employee id → {ok:false, reason:'bad_pin',
+ * attempts_left:null} (audited, no row to lock).
+ *
+ * resolveKioskToken calls the companion definer RPC
+ * public.resolve_kiosk_token(p_token text) (migration
+ * 20260916140001_hr_kiosk_token_resolve, granted to anon + authenticated
+ * like verify_kiosk_pin). The raw token is hashed INSIDE the function; the
+ * response carries only {ok, site_id, site_name, agency_id} — never hashes,
+ * never staff data. Only active, non-revoked tokens resolve; anything else
+ * returns {ok:false} and the store throws "Invalid kiosk token.". Because the
+ * RPC is granted to anon, a kiosk device can resolve/brand itself before any
+ * staff member clocks in, without any table reads.
+ *
+ * RLS / permission gates (Worker 1; the store does not gate, Worker 4's HR UI
+ * does): kiosk token admin writes need hub.manage_schedule (NOT
+ * hub.manage_staffing); PIN/credential admin needs hub.manage_pay_settings;
+ * missed-punch decisions need hub.review_timecards.
+ *
+ * Punch submission: kiosk devices are unauthenticated, so punches go through
+ * the SECURITY DEFINER RPC public.submit_kiosk_punch (migration
+ * 20260916140001_hr_kiosk_token_resolve) — NEVER a direct insert. The RPC
+ * hashes the token server-side, requires an active token, stamps
+ * verification_method='kiosk_pin' (no client method is accepted), and the
+ * stamp_punch_remote trigger derives remote=false. The store's
+ * submitKioskPunch(token, input) takes the raw token + punch fields and
+ * returns the punch row.
+ *
+ * Remote punching (personal device): staff clocking in/out from the hub
+ * Time Clock need an individual hub.remote_punch grant
+ * (hr_staff_permission_grants, Worker 1's migration). The store surfaces
+ * hasRemotePunch / grantRemotePunch / revokeRemotePunch /
+ * listRemotePunchGrants on both impls; local clockIn/clockOut REQUIRE the
+ * grant, and the Supabase impl pre-checks it for a friendly message (the
+ * hr_punches_insert_remote RLS policy is the real server-side gate).
+ */
+
+/**
+ * Punch fields for submitKioskPunch(token, input). The raw kiosk token (not
+ * the input) determines the site; verification_method is stamped
+ * server-side as 'kiosk_pin' — the input carries NO method and NO photo
+ * (photo capture was cut from the kiosk path entirely).
+ */
+export interface KioskPunchInput {
+  staffId: string;
+  kind: HrPunch["kind"];
+  /** ISO timestamp of the punch (may be backdated for offline sync). */
+  punchedAt: string;
+  serviceType?: string | null;
+  individualId?: string | null;
+  /** True when the punch was captured offline and synced later. */
+  offline: boolean;
+  /**
+   * Written to hr_punches.attestation (jsonb); surfaced on HrPunch.attestation.
+   */
+  attestation?: string | Record<string, unknown> | null;
+  note?: string | null;
+  shiftId?: string | null;
+}
+
+/**
+ * One active hub.remote_punch grant (Worker 1's hr_staff_permission_grants).
+ * employeeIdNumber comes from the staffer's clock credential when one exists
+ * (null otherwise) so HR lists can show the familiar ID number.
+ */
+export interface RemotePunchGrant {
+  staffId: string;
+  grantedBy: string | null;
+  grantedAt: string;
+  employeeIdNumber: string | null;
+}
+
+/**
+ * The exact argument object sent to the public.submit_kiosk_punch RPC.
+ * Exported for unit tests: the RPC contract (argument names, server-stamped
+ * verification_method='kiosk_pin') is pinned here, not in the impl.
+ */
+export function buildSubmitKioskPunchParams(
+  token: string,
+  input: KioskPunchInput,
+): Record<string, unknown> {
+  return {
+    p_token: token,
+    p_staff_id: input.staffId,
+    p_kind: input.kind,
+    p_punched_at: input.punchedAt,
+    p_service_type:
+      input.serviceType?.trim() ? input.serviceType.trim() : null,
+    p_individual_id: input.individualId ?? null,
+    p_attestation: input.attestation ?? null,
+    p_note: input.note?.trim() ? input.note.trim() : null,
+    p_shift_id: input.shiftId ?? null,
+    p_offline: input.offline,
+  };
+}
+
+export interface KioskSite {
+  siteId: string;
+  siteName: string;
+  agencyId: string;
+}
+
+export interface MissedPunchReportInput {
+  staffId: string;
+  siteId?: string | null;
+  /** YYYY-MM-DD work date. */
+  workDate: string;
+  claimedInAt?: string | null;
+  claimedOutAt?: string | null;
+  reason: string;
+}
+
+export interface KioskShiftSuggestion {
+  shiftLabel: string;
+  serviceType: string | null;
+  individualId: string | null;
+  individualName: string | null;
+}
+
+/**
+ * Test-only seed for the local impl: a known-good token + PIN credential.
+ * Never pass this in production — createHrStore's kioskTestSeed exists so
+ * tests get a working local PIN flow without touching the network.
+ */
+export interface KioskTestSeed {
+  rawToken: string;
+  siteId: string;
+  siteName: string;
+  staffId: string;
+  displayName: string;
+  employeeIdNumber: string;
+  pin: string;
+}
 
 export interface HrStore {
   /* Shifts */
@@ -169,6 +348,86 @@ export interface HrStore {
     note?: string,
   ): Promise<HrShiftSwap>;
   cancelShiftSwap(id: string): Promise<HrShiftSwap>;
+  /* Kiosk time clock (Worker 3) — entity types are Worker 1's hr.ts types */
+  verifyKioskPin(
+    rawToken: string,
+    employeeId: string,
+    pin: string,
+  ): Promise<KioskVerifyResult>;
+  resolveKioskToken(rawToken: string): Promise<KioskSite>;
+  /**
+   * Submit a punch from a kiosk device via the submit_kiosk_punch definer
+   * RPC — never a direct insert. The token is hashed server-side and must
+   * belong to an active token; verification_method is stamped 'kiosk_pin'
+   * and remote derives false. Throws "Invalid kiosk token." otherwise.
+   */
+  submitKioskPunch(token: string, input: KioskPunchInput): Promise<HrPunch>;
+  suggestKioskShift(
+    staffId: string,
+    siteId: string,
+  ): Promise<KioskShiftSuggestion | null>;
+  /* hub.remote_punch per-staff grants (personal-device punching) */
+  /** True when the staffer holds an active hub.remote_punch grant. */
+  hasRemotePunch(staffId: string): Promise<boolean>;
+  /**
+   * Grant hub.remote_punch to a staffer. grantedBy defaults to the current
+   * user. Idempotent: an existing active grant is returned as-is.
+   */
+  grantRemotePunch(
+    staffId: string,
+    grantedBy?: string,
+  ): Promise<RemotePunchGrant>;
+  /** Soft-revoke: sets revoked_at, never deletes the row. */
+  revokeRemotePunch(staffId: string): Promise<void>;
+  /** Active grants for this agency, newest first. */
+  listRemotePunchGrants(): Promise<RemotePunchGrant[]>;
+  /* Kiosk token admin (HR UI, writes gated on hub.manage_schedule) */
+  listKioskTokens(siteId?: string): Promise<HrKioskToken[]>;
+  generateKioskToken(
+    siteId: string,
+    label: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }>;
+  revokeKioskToken(id: string): Promise<void>;
+  rotateKioskToken(
+    id: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }>;
+  /* PIN/credential admin (HR UI, gated on hub.manage_pay_settings) */
+  issueClockCredential(
+    staffId: string,
+    employeeIdNumber: string,
+    pin: string,
+  ): Promise<HrClockCredential>;
+  resetClockPin(staffId: string, newPin: string): Promise<HrClockCredential>;
+  listClockCredentials(): Promise<HrClockCredential[]>;
+  unlockCredential(staffId: string): Promise<HrClockCredential>;
+  /* Open sessions, missed punches, punch rules */
+  listOpenPunches(siteId: string): Promise<HrPunch[]>;
+  listMissedPunchReports(scope?: {
+    staffId?: string;
+    siteId?: string;
+    status?: HrMissedPunchReport["status"];
+  }): Promise<HrMissedPunchReport[]>;
+  reportMissedPunch(
+    input: MissedPunchReportInput,
+  ): Promise<HrMissedPunchReport>;
+  decideMissedPunchReport(
+    id: string,
+    approve: boolean,
+    note?: string,
+  ): Promise<HrMissedPunchReport>;
+  getPunchRules(): Promise<HrPunchRules>;
+  savePunchRules(
+    patch: Partial<
+      Pick<
+        HrPunchRules,
+        | "roundingMinutes"
+        | "roundingApplies"
+        | "graceMinutes"
+        | "autoClockoutBufferMinutes"
+        | "autoApprovalScoreThreshold"
+      >
+    >,
+  ): Promise<HrPunchRules>;
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -219,6 +478,20 @@ function mapPunch(r: Record<string, unknown>): HrPunch {
     source: String(r.source ?? "hub"),
     note: r.note == null ? null : String(r.note),
     shiftId: r.shift_id == null ? null : String(r.shift_id),
+    /* Kiosk-era optional columns (Worker 1's hr.ts HrPunch). */
+    serviceType: r.service_type == null ? undefined : String(r.service_type),
+    individualId:
+      r.individual_id == null ? undefined : String(r.individual_id),
+    verificationMethod:
+      r.verification_method == null
+        ? undefined
+        : String(r.verification_method),
+    offline: r.offline == null ? undefined : Boolean(r.offline),
+    /* True when punched from a personal device under a hub.remote_punch
+     * grant (server-stamped: the trigger forces false for kiosk_pin). */
+    remote: r.remote == null ? undefined : Boolean(r.remote),
+    roundedPunchedAt:
+      r.rounded_punched_at == null ? undefined : String(r.rounded_punched_at),
   };
 }
 
@@ -425,6 +698,268 @@ function throwIf(error: { message: string } | null, what: string): void {
   if (error) throw new Error(`${what}: ${error.message}`);
 }
 
+/* ------------------------- kiosk helpers (Worker 3) ----------------------- */
+/* Entity mappers target Worker 1's hr.ts types, which mirror the
+ * 20260916140000_hr_kiosk_timeclock migration 1:1. */
+
+const MAX_PIN_ATTEMPTS = 5;
+const PIN_LOCKOUT_MINUTES = 15;
+/** Kiosk PINs are numeric, 4–8 digits. */
+const PIN_RE = /^\d{4,8}$/;
+
+function assertPinFormat(pin: string): void {
+  if (!PIN_RE.test(pin)) {
+    throw new Error("PIN must be 4–8 digits.");
+  }
+}
+
+/** sha256 hex digest of a raw kiosk token (what the server stores). */
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input),
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** 32 random bytes as hex — the raw kiosk token, shown to the admin once. */
+function randomTokenHex(bytes = 32): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function mapKioskToken(r: Record<string, unknown>): HrKioskToken {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    siteId: String(r.site_id),
+    label: r.label == null ? null : String(r.label),
+    active: Boolean(r.active),
+    createdBy: r.created_by == null ? null : String(r.created_by),
+    createdAt: String(r.created_at),
+    lastUsedAt: r.last_used_at == null ? null : String(r.last_used_at),
+    revokedAt: r.revoked_at == null ? null : String(r.revoked_at),
+  };
+}
+
+/** Safe credential mapper: callers must select WITHOUT pin_hash. */
+function mapCredential(r: Record<string, unknown>): HrClockCredential {
+  return {
+    staffId: String(r.staff_id),
+    agencyId: String(r.agency_id),
+    employeeIdNumber: String(r.employee_id_number ?? ""),
+    failedAttempts: Number(r.failed_attempts ?? 0),
+    lockedUntil: r.locked_until == null ? null : String(r.locked_until),
+    pinUpdatedAt:
+      r.pin_updated_at == null ? null : String(r.pin_updated_at),
+    updatedBy: r.updated_by == null ? null : String(r.updated_by),
+  };
+}
+
+const CREDENTIAL_SAFE_COLUMNS =
+  "staff_id, agency_id, employee_id_number, failed_attempts, locked_until, pin_updated_at, updated_by";
+
+function mapMissedReport(r: Record<string, unknown>): HrMissedPunchReport {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    siteId: r.site_id == null ? null : String(r.site_id),
+    workDate: String(r.work_date ?? ""),
+    claimedInAt: r.claimed_in_at == null ? null : String(r.claimed_in_at),
+    claimedOutAt:
+      r.claimed_out_at == null ? null : String(r.claimed_out_at),
+    reason: String(r.reason ?? ""),
+    status: r.status as HrMissedPunchReport["status"],
+    reviewedBy: r.reviewed_by == null ? null : String(r.reviewed_by),
+    reviewedAt: r.reviewed_at == null ? null : String(r.reviewed_at),
+    reviewNote: r.review_note == null ? null : String(r.review_note),
+    createdAt: String(r.created_at),
+  };
+}
+
+function mapPunchRules(
+  r: Record<string, unknown>,
+  agencyId: string,
+): HrPunchRules {
+  return {
+    agencyId,
+    roundingMinutes: Number(r.rounding_minutes ?? 0),
+    roundingApplies:
+      r.rounding_applies === "display_and_payroll"
+        ? "display_and_payroll"
+        : "payroll",
+    graceMinutes: Number(r.grace_minutes ?? 5),
+    autoClockoutBufferMinutes: Number(r.auto_clockout_buffer_minutes ?? 30),
+    autoApprovalScoreThreshold: Number(r.auto_approval_score_threshold ?? 90),
+    updatedBy: r.updated_by == null ? null : String(r.updated_by),
+    updatedAt: String(r.updated_at ?? nowIso()),
+  };
+}
+
+function defaultPunchRules(agencyId: string): HrPunchRules {
+  return {
+    agencyId,
+    ...DEFAULT_PUNCH_RULES,
+    updatedBy: null,
+    updatedAt: nowIso(),
+  };
+}
+
+const ROUNDING_MINUTES_ALLOWED = [0, 5, 10, 15] as const;
+
+function assertPunchRulesPatch(
+  patch: Partial<
+    Pick<
+      HrPunchRules,
+      | "roundingMinutes"
+      | "roundingApplies"
+      | "graceMinutes"
+      | "autoClockoutBufferMinutes"
+      | "autoApprovalScoreThreshold"
+    >
+  >,
+): void {
+  if (
+    patch.roundingMinutes !== undefined &&
+    !(ROUNDING_MINUTES_ALLOWED as readonly number[]).includes(
+      patch.roundingMinutes,
+    )
+  ) {
+    throw new Error("roundingMinutes must be one of 0, 5, 10, 15.");
+  }
+  if (
+    patch.roundingApplies !== undefined &&
+    patch.roundingApplies !== "payroll" &&
+    patch.roundingApplies !== "display_and_payroll"
+  ) {
+    throw new Error(
+      "roundingApplies must be 'payroll' or 'display_and_payroll'.",
+    );
+  }
+  if (
+    patch.graceMinutes !== undefined &&
+    (!Number.isFinite(patch.graceMinutes) || patch.graceMinutes < 0)
+  ) {
+    throw new Error("graceMinutes must be a non-negative number.");
+  }
+  if (
+    patch.autoClockoutBufferMinutes !== undefined &&
+    (!Number.isFinite(patch.autoClockoutBufferMinutes) ||
+      patch.autoClockoutBufferMinutes < 0)
+  ) {
+    throw new Error("autoClockoutBufferMinutes must be a non-negative number.");
+  }
+  if (
+    patch.autoApprovalScoreThreshold !== undefined &&
+    (!Number.isFinite(patch.autoApprovalScoreThreshold) ||
+      patch.autoApprovalScoreThreshold < 0 ||
+      patch.autoApprovalScoreThreshold > 100)
+  ) {
+    throw new Error("autoApprovalScoreThreshold must be between 0 and 100.");
+  }
+}
+
+type GuardPunch = Pick<HrPunch, "kind" | "punchedAt">;
+
+/**
+ * Kiosk-aware open session: "in" opens, "out" closes, break/transfer punches
+ * are neutral. (hr.ts's analyzePunches skips break/transfer entirely; the
+ * domain validators below are called with in/out punches only.)
+ */
+function kioskSessionOpen(punches: GuardPunch[]): boolean {
+  const sorted = [...punches].sort((a, b) =>
+    a.punchedAt < b.punchedAt ? -1 : a.punchedAt > b.punchedAt ? 1 : 0,
+  );
+  let open = false;
+  for (const p of sorted) {
+    if (p.kind === "in") open = true;
+    else if (p.kind === "out") open = false;
+  }
+  return open;
+}
+
+/** Latest break_in with no later break_out, or null. */
+function openBreakPunch(punches: GuardPunch[]): GuardPunch | null {
+  const sorted = [...punches].sort((a, b) =>
+    a.punchedAt < b.punchedAt ? -1 : a.punchedAt > b.punchedAt ? 1 : 0,
+  );
+  let open: GuardPunch | null = null;
+  for (const p of sorted) {
+    if (p.kind === "break_in") open = p;
+    else if (p.kind === "break_out") open = null;
+  }
+  return open;
+}
+
+/**
+ * Domain punch guards for kiosk submissions. Reuses hr.ts's validateClockIn /
+ * validateClockOut (narrowed to in/out punches) so the kiosk surfaces the same
+ * user-facing messages as the hub clock.
+ */
+function guardKioskPunch(
+  todays: GuardPunch[],
+  kind: HrPunch["kind"],
+  punchedAt: string,
+): void {
+  const session = todays.filter((p) => p.kind === "in" || p.kind === "out");
+  if (kind === "in") {
+    validateClockIn(session as HrPunch[], punchedAt);
+  } else if (kind === "out" || kind === "transfer" || kind === "break_in") {
+    validateClockOut(session as HrPunch[]);
+  } else {
+    if (!openBreakPunch(todays)) {
+      throw new Error("No open break to end.");
+    }
+  }
+}
+
+/** Raw verify_kiosk_pin RPC response (mirrors Worker 1's KioskVerifyResult). */
+interface VerifyKioskPinRow {
+  ok: boolean;
+  reason?: "bad_token" | "bad_pin" | "locked" | null;
+  staff_id?: string | null;
+  display_name?: string | null;
+  attempts_left?: number | null;
+  locked_until?: string | null;
+}
+
+function mapVerifyResult(row: VerifyKioskPinRow): KioskVerifyResult {
+  if (row.ok && row.staff_id != null) {
+    return {
+      ok: true,
+      staffId: String(row.staff_id),
+      displayName: row.display_name ?? null,
+    };
+  }
+  return {
+    ok: false,
+    reason: row.reason ?? "bad_pin",
+    attemptsLeft: row.attempts_left ?? null,
+    lockedUntil: row.locked_until ?? null,
+  };
+}
+
+function validateMissedPunchInput(input: MissedPunchReportInput): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.workDate)) {
+    throw new Error("workDate must be YYYY-MM-DD.");
+  }
+  if (input.claimedInAt == null && input.claimedOutAt == null) {
+    throw new Error(
+      "At least one of claimedInAt / claimedOutAt is required.",
+    );
+  }
+  for (const v of [input.claimedInAt, input.claimedOutAt]) {
+    if (v != null && Number.isNaN(new Date(v).getTime())) {
+      throw new Error("Invalid claimed punch time.");
+    }
+  }
+  if (!input.reason.trim()) throw new Error("A reason is required.");
+}
+
 class SupabaseHrStore implements HrStore {
   constructor(
     private client: SupabaseClient,
@@ -513,7 +1048,22 @@ class SupabaseHrStore implements HrStore {
     return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
   }
 
+  /**
+   * Friendly pre-check for hub.remote_punch before a hub clock in/out. The
+   * hr_punches_insert_remote RLS policy is the real server-side gate; this
+   * surfaces the plain-language reason before the insert fails.
+   */
+  private async requireRemotePunchGrant(action: "in" | "out"): Promise<void> {
+    if (await this.hasRemotePunch(this.userId)) return;
+    throw new Error(
+      action === "in"
+        ? "Clock in on the house kiosk laptop — remote clock-in isn't enabled for your account."
+        : "Clock out on the house kiosk laptop — remote clock-out isn't enabled for your account.",
+    );
+  }
+
   async clockIn(note?: string): Promise<HrPunch> {
+    await this.requireRemotePunchGrant("in");
     const { from, to } = this.dayRange();
     const todays = await this.listPunches(this.userId, from, to);
     // Domain punch guard throws a user-facing message when already clocked in.
@@ -537,6 +1087,7 @@ class SupabaseHrStore implements HrStore {
   }
 
   async clockOut(note?: string): Promise<HrPunch> {
+    await this.requireRemotePunchGrant("out");
     const { from, to } = this.dayRange();
     const todays = await this.listPunches(this.userId, from, to);
     // Domain punch guard throws a user-facing message when nothing is open.
@@ -1591,6 +2142,640 @@ class SupabaseHrStore implements HrStore {
     throwIf(error, "Could not cancel the shift swap");
     return mapShiftSwap(data as Record<string, unknown>);
   }
+
+  /* ------------------------- kiosk time clock (Worker 3) ------------------ */
+  /*
+   * RLS NOTES (Worker 1's migration 20260916140000_hr_kiosk_timeclock):
+   * - verify_kiosk_pin and resolve_kiosk_token are SECURITY DEFINER and
+   *   granted to anon + authenticated; they are the ONLY data paths an
+   *   unauthenticated kiosk device has (anon has no table policies).
+   * - Token-hash/site lookups run inside resolve_kiosk_token; the store never
+   *   sends or receives token hashes or raw tokens except the one-time raw
+   *   token returned by generateKioskToken/rotateKioskToken.
+   * - submitKioskPunch calls the SECURITY DEFINER RPC submit_kiosk_punch
+   *   (migration 20260916140001_hr_kiosk_token_resolve) — never a direct
+   *   insert. The RPC hashes the token server-side, requires an active
+   *   token, stamps verification_method='kiosk_pin' (any client method is
+   *   ignored), and the stamp_punch_remote trigger derives remote=false.
+   *   The punch id returned by the RPC is read back for the caller.
+   * - Known integration gaps (Worker 1/coordinator to resolve; the store
+   *   attempts the documented writes and lets RLS enforce):
+   *   1. decideMissedPunchReport (approve): the migration says the app
+   *      inserts the punch rows AND writes hr_punch_corrections ledger
+   *      entries, but hr_punches_insert AND hr_punch_corrections_insert both
+   *      require staff_id = auth.uid() — a manager approving someone else's
+   *      report is blocked by RLS. Needs a definer RPC or policy exception.
+   *   2. reportMissedPunch: hr_missed_punch_reports_insert requires
+   *      staff_id = auth.uid(); a manager cannot file for another staffer.
+   */
+
+  async verifyKioskPin(
+    rawToken: string,
+    employeeId: string,
+    pin: string,
+  ): Promise<KioskVerifyResult> {
+    // The raw token is hashed INSIDE the definer RPC; token hashes never
+    // leave the database. The RPC deliberately returns no site fields.
+    const { data, error } = await this.client.rpc("verify_kiosk_pin", {
+      p_token: rawToken,
+      p_employee_id: employeeId.trim(),
+      p_pin: pin,
+    });
+    throwIf(error, "Could not verify kiosk PIN");
+    return mapVerifyResult((data ?? {}) as VerifyKioskPinRow);
+  }
+
+  async resolveKioskToken(rawToken: string): Promise<KioskSite> {
+    // Companion definer RPC (20260916140001_hr_kiosk_token_resolve): the raw
+    // token is hashed inside the function and the response carries only
+    // site/agency fields — never hashes, never staff data.
+    const { data, error } = await this.client.rpc("resolve_kiosk_token", {
+      p_token: rawToken,
+    });
+    throwIf(error, "Could not resolve kiosk token");
+    const row = (data ?? {}) as {
+      ok?: boolean;
+      site_id?: string | null;
+      site_name?: string | null;
+      agency_id?: string | null;
+    };
+    if (!row.ok || row.site_id == null) {
+      throw new Error("Invalid kiosk token.");
+    }
+    return {
+      siteId: String(row.site_id),
+      siteName: String(row.site_name ?? ""),
+      agencyId: String(row.agency_id ?? this.agencyId),
+    };
+  }
+
+  private kioskDayRange(punchedAt: string): { from: string; to: string } {
+    const d = new Date(punchedAt);
+    if (Number.isNaN(d.getTime())) throw new Error("Invalid punch time.");
+    const stamp = todayStamp(d);
+    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+  }
+
+  async submitKioskPunch(
+    token: string,
+    input: KioskPunchInput,
+  ): Promise<HrPunch> {
+    // The RPC is the ONLY punch-writing path for kiosk devices (anon has no
+    // table policies). verification_method is stamped 'kiosk_pin'
+    // server-side; no client method is accepted or sent.
+    const { from, to } = this.kioskDayRange(input.punchedAt);
+    const todays = await this.listPunches(input.staffId, from, to);
+    guardKioskPunch(todays, input.kind, input.punchedAt);
+    const { data, error } = await this.client.rpc(
+      "submit_kiosk_punch",
+      buildSubmitKioskPunchParams(token, input),
+    );
+    throwIf(error, "Could not submit kiosk punch");
+    const punchId = String(data);
+    // The definer RPC returns only the new punch id; read the row back so
+    // the caller gets the full HrPunch (verificationMethod, remote, ...).
+    // A sessionless kiosk device may be RLS-blocked from the read — then
+    // synthesize the row from what the RPC guarantees.
+    const { data: row, error: fetchError } = await this.client
+      .from("hr_punches")
+      .select("*")
+      .eq("id", punchId)
+      .maybeSingle();
+    if (fetchError) {
+      throw new Error(`Could not read the submitted punch: ${fetchError.message}`);
+    }
+    if (row) return mapPunch(row as Record<string, unknown>);
+    return {
+      id: punchId,
+      agencyId: this.agencyId,
+      siteId: null,
+      staffId: input.staffId,
+      kind: input.kind,
+      punchedAt: input.punchedAt,
+      source: "kiosk",
+      note: input.note?.trim() ? input.note.trim() : null,
+      shiftId: input.shiftId ?? null,
+      serviceType:
+        input.serviceType?.trim() ? input.serviceType.trim() : null,
+      individualId: input.individualId ?? null,
+      verificationMethod: "kiosk_pin",
+      offline: input.offline,
+      remote: false,
+    };
+  }
+
+  /* ----------------- hub.remote_punch grants (Worker 1) ------------------ */
+  /*
+   * Per-staff permission grants (hr_staff_permission_grants): the grant is
+   * what lets a staffer punch from a personal device instead of the house
+   * kiosk. Writes need hub.manage_pay_settings (RLS); the staffer can read
+   * their own row. Revocation is a soft delete (revoked_at), never a delete.
+   */
+
+  private mapRemoteGrant(
+    r: Record<string, unknown>,
+    employeeIdNumber: string | null,
+  ): RemotePunchGrant {
+    return {
+      staffId: String(r.staff_id),
+      grantedBy: r.granted_by == null ? null : String(r.granted_by),
+      grantedAt: String(r.granted_at),
+      employeeIdNumber,
+    };
+  }
+
+  /** staffer -> employee ID number, from clock credentials (best effort). */
+  private async remoteGrantIdNumbers(
+    staffIds: string[],
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (!staffIds.length) return map;
+    const { data, error } = await this.client
+      .from("hr_clock_credentials")
+      .select("staff_id, employee_id_number")
+      .eq("agency_id", this.agencyId)
+      .in("staff_id", staffIds);
+    if (error || !data) return map;
+    for (const r of data as Record<string, unknown>[]) {
+      map.set(String(r.staff_id), String(r.employee_id_number ?? ""));
+    }
+    return map;
+  }
+
+  async hasRemotePunch(staffId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("hr_staff_permission_grants")
+      .select("id")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .eq("permission_key", "hub.remote_punch")
+      .is("revoked_at", null)
+      .maybeSingle();
+    throwIf(error, "Could not check remote-punch access");
+    return data != null;
+  }
+
+  async grantRemotePunch(
+    staffId: string,
+    grantedBy?: string,
+  ): Promise<RemotePunchGrant> {
+    const existing = await this.listRemotePunchGrants();
+    const hit = existing.find((g) => g.staffId === staffId);
+    if (hit) return hit;
+    const { data, error } = await this.client
+      .from("hr_staff_permission_grants")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: staffId,
+        permission_key: "hub.remote_punch",
+        granted_by: grantedBy ?? this.userId,
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not grant remote punching");
+    const row = data as Record<string, unknown>;
+    const ids = await this.remoteGrantIdNumbers([staffId]);
+    return this.mapRemoteGrant(row, ids.get(staffId) ?? null);
+  }
+
+  async revokeRemotePunch(staffId: string): Promise<void> {
+    const { error } = await this.client
+      .from("hr_staff_permission_grants")
+      .update({ revoked_at: nowIso(), revoked_by: this.userId })
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .eq("permission_key", "hub.remote_punch")
+      .is("revoked_at", null);
+    throwIf(error, "Could not revoke remote punching");
+  }
+
+  async listRemotePunchGrants(): Promise<RemotePunchGrant[]> {
+    const { data, error } = await this.client
+      .from("hr_staff_permission_grants")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("permission_key", "hub.remote_punch")
+      .is("revoked_at", null)
+      .order("granted_at", { ascending: false });
+    throwIf(error, "Could not load remote-punch grants");
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const ids = await this.remoteGrantIdNumbers(
+      rows.map((r) => String(r.staff_id)),
+    );
+    return rows.map((r) =>
+      this.mapRemoteGrant(r, ids.get(String(r.staff_id)) ?? null),
+    );
+  }
+
+  async suggestKioskShift(
+    staffId: string,
+    siteId: string,
+  ): Promise<KioskShiftSuggestion | null> {
+    const now = new Date();
+    const stamp = todayStamp(now);
+    const shifts = await this.listShifts(
+      `${stamp}T00:00:00`,
+      `${stamp}T23:59:59.999`,
+      siteId,
+    );
+    const mine = shifts
+      .filter((s) => s.staffId === staffId)
+      .sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))[0];
+    if (mine) {
+      return {
+        shiftLabel: mine.title,
+        serviceType: null,
+        individualId: null,
+        individualName: null,
+      };
+    }
+    const patterns = await this.listStaffingPatterns({ staffId });
+    const weekday = now.getDay();
+    const pattern = patterns.find(
+      (p) =>
+        p.active &&
+        p.siteId === siteId &&
+        p.days.includes(weekday) &&
+        p.effectiveFrom <= stamp &&
+        (p.effectiveTo == null || p.effectiveTo >= stamp),
+    );
+    if (!pattern) return null;
+    return {
+      shiftLabel: pattern.shiftLabel ?? "Scheduled shift",
+      serviceType: pattern.serviceTags[0] ?? null,
+      individualId: pattern.individualId,
+      individualName: pattern.individualName ?? null,
+    };
+  }
+
+  async listKioskTokens(siteId?: string): Promise<HrKioskToken[]> {
+    let q = this.client
+      .from("hr_kiosk_tokens")
+      .select(
+        "id, agency_id, site_id, label, active, created_by, created_at, last_used_at, revoked_at",
+      )
+      .eq("agency_id", this.agencyId)
+      .eq("active", true)
+      .is("revoked_at", null)
+      .order("created_at", { ascending: false });
+    if (siteId) q = q.eq("site_id", siteId);
+    const { data, error } = await q;
+    throwIf(error, "Could not load kiosk tokens");
+    return (data ?? []).map((r) => mapKioskToken(r as Record<string, unknown>));
+  }
+
+  async generateKioskToken(
+    siteId: string,
+    label: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }> {
+    // Raw token is generated client-side (32 random bytes hex); only its
+    // sha256 hex is stored. The raw token is returned once for the admin to
+    // enter on the kiosk device.
+    const rawToken = randomTokenHex(32);
+    const tokenHash = await sha256Hex(rawToken);
+    const { data, error } = await this.client
+      .from("hr_kiosk_tokens")
+      .insert({
+        agency_id: this.agencyId,
+        site_id: siteId,
+        label: label.trim() ? label.trim() : null,
+        token_hash: tokenHash,
+        active: true,
+        created_by: this.userId,
+      })
+      .select(
+        "id, agency_id, site_id, label, active, created_by, created_at, last_used_at, revoked_at",
+      )
+      .single();
+    throwIf(error, "Could not generate kiosk token");
+    return {
+      token: mapKioskToken(data as Record<string, unknown>),
+      rawToken,
+    };
+  }
+
+  async revokeKioskToken(id: string): Promise<void> {
+    const { error } = await this.client
+      .from("hr_kiosk_tokens")
+      .update({ revoked_at: nowIso(), active: false })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId);
+    throwIf(error, "Could not revoke kiosk token");
+  }
+
+  async rotateKioskToken(
+    id: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }> {
+    const { data, error } = await this.client
+      .from("hr_kiosk_tokens")
+      .select(
+        "id, agency_id, site_id, label, active, created_by, created_at, last_used_at, revoked_at",
+      )
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(error, "Could not load kiosk token");
+    const current = mapKioskToken(data as Record<string, unknown>);
+    if (!current.active || current.revokedAt) {
+      throw new Error("This token is already revoked.");
+    }
+    await this.revokeKioskToken(id);
+    return this.generateKioskToken(
+      current.siteId,
+      current.label ? `${current.label} (rotated ${todayStamp()})` : "",
+    );
+  }
+
+  async issueClockCredential(
+    staffId: string,
+    employeeIdNumber: string,
+    pin: string,
+  ): Promise<HrClockCredential> {
+    assertPinFormat(pin);
+    if (!employeeIdNumber.trim()) {
+      throw new Error("An employee ID number is required.");
+    }
+    // bcrypt client-side (cost 10): the plaintext PIN never leaves the
+    // browser; the DB stores only pin_hash.
+    const pinHash = await bcrypt.hash(pin, 10);
+    const { data, error } = await this.client
+      .from("hr_clock_credentials")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: staffId,
+        employee_id_number: employeeIdNumber.trim(),
+        pin_hash: pinHash,
+        pin_updated_at: nowIso(),
+        updated_by: this.userId,
+      })
+      .select(CREDENTIAL_SAFE_COLUMNS)
+      .single();
+    throwIf(error, "Could not issue clock credential");
+    return mapCredential(data as Record<string, unknown>);
+  }
+
+  async resetClockPin(
+    staffId: string,
+    newPin: string,
+  ): Promise<HrClockCredential> {
+    assertPinFormat(newPin);
+    const pinHash = await bcrypt.hash(newPin, 10);
+    const { data, error } = await this.client
+      .from("hr_clock_credentials")
+      .update({
+        pin_hash: pinHash,
+        pin_updated_at: nowIso(),
+        failed_attempts: 0,
+        locked_until: null,
+        updated_by: this.userId,
+      })
+      .eq("staff_id", staffId)
+      .eq("agency_id", this.agencyId)
+      .select(CREDENTIAL_SAFE_COLUMNS)
+      .single();
+    throwIf(error, "Could not reset the PIN");
+    return mapCredential(data as Record<string, unknown>);
+  }
+
+  async listClockCredentials(): Promise<HrClockCredential[]> {
+    const { data, error } = await this.client
+      .from("hr_clock_credentials")
+      .select(CREDENTIAL_SAFE_COLUMNS)
+      .eq("agency_id", this.agencyId)
+      .order("staff_id", { ascending: true });
+    throwIf(error, "Could not load clock credentials");
+    return (data ?? []).map((r) =>
+      mapCredential(r as Record<string, unknown>),
+    );
+  }
+
+  async unlockCredential(staffId: string): Promise<HrClockCredential> {
+    const { data, error } = await this.client
+      .from("hr_clock_credentials")
+      .update({ failed_attempts: 0, locked_until: null })
+      .eq("staff_id", staffId)
+      .eq("agency_id", this.agencyId)
+      .select(CREDENTIAL_SAFE_COLUMNS)
+      .single();
+    throwIf(error, "Could not unlock the credential");
+    return mapCredential(data as Record<string, unknown>);
+  }
+
+  private async listSitePunchesToday(
+    siteId: string,
+  ): Promise<Record<string, unknown>[]> {
+    const stamp = todayStamp();
+    const { data, error } = await this.client
+      .from("hr_punches")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("site_id", siteId)
+      .gte("punched_at", `${stamp}T00:00:00`)
+      .order("punched_at", { ascending: true });
+    throwIf(error, "Could not load site punches");
+    return (data ?? []) as Record<string, unknown>[];
+  }
+
+  async listOpenPunches(siteId: string): Promise<HrPunch[]> {
+    const rows = await this.listSitePunchesToday(siteId);
+    const byStaff = new Map<string, Record<string, unknown>[]>();
+    for (const r of rows) {
+      const sid = String(r.staff_id);
+      const list = byStaff.get(sid) ?? [];
+      list.push(r);
+      byStaff.set(sid, list);
+    }
+    const open: HrPunch[] = [];
+    for (const staffRows of byStaff.values()) {
+      const guards: GuardPunch[] = staffRows.map((r) => ({
+        kind: r.kind as HrPunch["kind"],
+        punchedAt: String(r.punched_at),
+      }));
+      if (!kioskSessionOpen(guards)) continue;
+      const lastIn = [...staffRows]
+        .filter((r) => r.kind === "in")
+        .sort((a, b) => (String(a.punched_at) < String(b.punched_at) ? -1 : 1))
+        .pop();
+      if (lastIn) open.push(mapPunch(lastIn));
+    }
+    return open.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1));
+  }
+
+  async listMissedPunchReports(scope?: {
+    staffId?: string;
+    siteId?: string;
+    status?: HrMissedPunchReport["status"];
+  }): Promise<HrMissedPunchReport[]> {
+    let q = this.client
+      .from("hr_missed_punch_reports")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .order("work_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (scope?.staffId) q = q.eq("staff_id", scope.staffId);
+    if (scope?.siteId) q = q.eq("site_id", scope.siteId);
+    if (scope?.status) q = q.eq("status", scope.status);
+    const { data, error } = await q;
+    throwIf(error, "Could not load missed-punch reports");
+    return (data ?? []).map((r) =>
+      mapMissedReport(r as Record<string, unknown>),
+    );
+  }
+
+  async reportMissedPunch(
+    input: MissedPunchReportInput,
+  ): Promise<HrMissedPunchReport> {
+    validateMissedPunchInput(input);
+    // RLS note: staff file their own reports (staff_id = auth.uid()).
+    const { data, error } = await this.client
+      .from("hr_missed_punch_reports")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: input.staffId,
+        site_id: input.siteId ?? null,
+        work_date: input.workDate,
+        claimed_in_at: input.claimedInAt ?? null,
+        claimed_out_at: input.claimedOutAt ?? null,
+        reason: input.reason.trim(),
+        status: "pending",
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not file the missed-punch report");
+    return mapMissedReport(data as Record<string, unknown>);
+  }
+
+  async decideMissedPunchReport(
+    id: string,
+    approve: boolean,
+    note?: string,
+  ): Promise<HrMissedPunchReport> {
+    const { data: existing, error: fetchError } = await this.client
+      .from("hr_missed_punch_reports")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .single();
+    throwIf(fetchError, "Could not load the missed-punch report");
+    const report = mapMissedReport(existing as Record<string, unknown>);
+    if (report.status !== "pending") {
+      throw new Error("This report has already been decided.");
+    }
+    const decidedAt = nowIso();
+    const reviewNote = note?.trim() ? note.trim() : null;
+    if (approve) {
+      // Correction ledger: the actual punch rows (source = 'correction'),
+      // one per claimed time. NOTE: RLS on hr_punches/hr_punch_corrections
+      // requires staff_id = auth.uid(); see the integration-gap note above.
+      const claimed: Array<{ kind: "in" | "out"; at: string }> = [];
+      if (report.claimedInAt) claimed.push({ kind: "in", at: report.claimedInAt });
+      if (report.claimedOutAt)
+        claimed.push({ kind: "out", at: report.claimedOutAt });
+      for (const c of claimed) {
+        const { data: punchRow, error: punchError } = await this.client
+          .from("hr_punches")
+          .insert({
+            agency_id: this.agencyId,
+            site_id: report.siteId,
+            staff_id: report.staffId,
+            kind: c.kind,
+            punched_at: c.at,
+            source: "correction",
+            verification_method: "web",
+            note: `Missed-punch report approved${
+              reviewNote ? `: ${reviewNote}` : ""
+            }`,
+            shift_id: null,
+            created_by: this.userId,
+          })
+          .select("id")
+          .single();
+        throwIf(punchError, "Could not write the correction punch");
+        const { error: correctionError } = await this.client
+          .from("hr_punch_corrections")
+          .insert({
+            punch_id: String((punchRow as { id: unknown }).id),
+            staff_id: report.staffId,
+            requested_kind: c.kind,
+            requested_at: c.at,
+            reason: report.reason,
+            status: "approved",
+            reviewed_by: this.userId,
+            reviewed_at: decidedAt,
+            review_note: reviewNote,
+          });
+        throwIf(correctionError, "Could not write the correction ledger");
+      }
+    }
+    const { data, error } = await this.client
+      .from("hr_missed_punch_reports")
+      .update({
+        status: approve ? "approved" : "denied",
+        reviewed_by: this.userId,
+        reviewed_at: decidedAt,
+        review_note: reviewNote,
+      })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not decide the missed-punch report");
+    return mapMissedReport(data as Record<string, unknown>);
+  }
+
+  async getPunchRules(): Promise<HrPunchRules> {
+    const { data, error } = await this.client
+      .from("hr_punch_rules")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load punch rules");
+    return data
+      ? mapPunchRules(data as Record<string, unknown>, this.agencyId)
+      : defaultPunchRules(this.agencyId);
+  }
+
+  async savePunchRules(
+    patch: Partial<
+      Pick<
+        HrPunchRules,
+        | "roundingMinutes"
+        | "roundingApplies"
+        | "graceMinutes"
+        | "autoClockoutBufferMinutes"
+        | "autoApprovalScoreThreshold"
+      >
+    >,
+  ): Promise<HrPunchRules> {
+    assertPunchRulesPatch(patch);
+    const current = await this.getPunchRules();
+    const merged: HrPunchRules = {
+      ...current,
+      ...patch,
+      agencyId: this.agencyId,
+      updatedBy: this.userId,
+      updatedAt: nowIso(),
+    };
+    const { data, error } = await this.client
+      .from("hr_punch_rules")
+      .upsert(
+        {
+          agency_id: this.agencyId,
+          rounding_minutes: merged.roundingMinutes,
+          rounding_applies: merged.roundingApplies,
+          grace_minutes: merged.graceMinutes,
+          auto_clockout_buffer_minutes: merged.autoClockoutBufferMinutes,
+          auto_approval_score_threshold: merged.autoApprovalScoreThreshold,
+          updated_by: merged.updatedBy,
+          updated_at: merged.updatedAt,
+        },
+        { onConflict: "agency_id" },
+      )
+      .select()
+      .single();
+    throwIf(error, "Could not save punch rules");
+    return mapPunchRules(data as Record<string, unknown>, this.agencyId);
+  }
 }
 
 /* ------------------------ localStorage implementation -------------------- */
@@ -1615,6 +2800,40 @@ interface LocalBucket {
   ledger: HrAccrualLedgerEntry[];
   overtimeRules: HrOvertimeRules | null;
   swaps: HrShiftSwap[];
+  /* Kiosk time clock (Worker 3) */
+  kioskTokens: LocalKioskTokenRow[];
+  credentials: LocalCredentialRow[];
+  missedReports: HrMissedPunchReport[];
+  punchRules: HrPunchRules | null;
+  /** True once the kiosk test seed has been written (tests only). */
+  kioskTestSeeded?: boolean;
+  /* hub.remote_punch grants: active + revoked rows (revocation is soft). */
+  remoteGrants: LocalGrantRow[];
+}
+
+/** Local hub.remote_punch grant row (mirrors hr_staff_permission_grants). */
+interface LocalGrantRow {
+  staffId: string;
+  permissionKey: string;
+  grantedBy: string | null;
+  grantedAt: string;
+  revokedAt: string | null;
+  revokedBy: string | null;
+}
+
+/** Local kiosk token row: metadata + the sha256 hex of the raw token. */
+interface LocalKioskTokenRow extends HrKioskToken {
+  tokenHash: string;
+  /** Display hint for the seeded site; not a DB column. */
+  siteName?: string;
+}
+
+/** Local credential row: safe fields + the bcrypt PIN hash (never exposed). */
+interface LocalCredentialRow extends HrClockCredential {
+  /** Display hint; not a DB column. */
+  displayName?: string;
+  /** bcrypt hash — never exposed through any method. */
+  pinHash: string;
 }
 
 function emptyBucket(): LocalBucket {
@@ -1633,6 +2852,11 @@ function emptyBucket(): LocalBucket {
     ledger: [],
     overtimeRules: null,
     swaps: [],
+    kioskTokens: [],
+    credentials: [],
+    missedReports: [],
+    punchRules: null,
+    remoteGrants: [],
   };
 }
 
@@ -1740,6 +2964,7 @@ class LocalHrStore implements HrStore {
   constructor(
     private agencyId: string,
     private userId: string,
+    private kioskTestSeed?: KioskTestSeed,
   ) {}
 
   private storageAvailable(): boolean {
@@ -1766,6 +2991,13 @@ class LocalHrStore implements HrStore {
         if (!Array.isArray(bucket.ledger)) bucket.ledger = [];
         if (!Array.isArray(bucket.swaps)) bucket.swaps = [];
         if (bucket.overtimeRules === undefined) bucket.overtimeRules = null;
+        // Buckets written before the kiosk build existed have no kiosk arrays.
+        if (!Array.isArray(bucket.kioskTokens)) bucket.kioskTokens = [];
+        if (!Array.isArray(bucket.credentials)) bucket.credentials = [];
+        if (!Array.isArray(bucket.missedReports)) bucket.missedReports = [];
+        if (bucket.punchRules === undefined) bucket.punchRules = null;
+        // Buckets written before remote-punch grants existed have no grants array.
+        if (!Array.isArray(bucket.remoteGrants)) bucket.remoteGrants = [];
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -1857,7 +3089,24 @@ class LocalHrStore implements HrStore {
     return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
   }
 
+  /**
+   * Local mirror of the hr_punches_insert_remote RLS gate: hub clock in/out
+   * from a personal device REQUIRE an individual hub.remote_punch grant —
+   * otherwise the staffer clocks in on the house kiosk laptop.
+   */
+  private async requireRemotePunchGrantLocal(
+    action: "in" | "out",
+  ): Promise<void> {
+    if (await this.hasRemotePunch(this.userId)) return;
+    throw new Error(
+      action === "in"
+        ? "Clock in on the house kiosk laptop — remote clock-in isn't enabled for your account."
+        : "Clock out on the house kiosk laptop — remote clock-out isn't enabled for your account.",
+    );
+  }
+
   async clockIn(note?: string): Promise<HrPunch> {
+    await this.requireRemotePunchGrantLocal("in");
     const { from, to } = this.dayRange();
     const todays = await this.listPunches(this.userId, from, to);
     validateClockIn(todays, nowIso());
@@ -1872,6 +3121,10 @@ class LocalHrStore implements HrStore {
         source: "hub",
         note: note?.trim() ? note.trim() : null,
         shiftId: null,
+        // Mirrors the stamp_punch_remote trigger: a non-kiosk_pin punch is a
+        // remote punch (the grant above is what allows it).
+        verificationMethod: "web",
+        remote: true,
       };
       b.punches.push(punch);
       return punch;
@@ -1879,6 +3132,7 @@ class LocalHrStore implements HrStore {
   }
 
   async clockOut(note?: string): Promise<HrPunch> {
+    await this.requireRemotePunchGrantLocal("out");
     const { from, to } = this.dayRange();
     const todays = await this.listPunches(this.userId, from, to);
     validateClockOut(todays);
@@ -1893,6 +3147,8 @@ class LocalHrStore implements HrStore {
         source: "hub",
         note: note?.trim() ? note.trim() : null,
         shiftId: null,
+        verificationMethod: "web",
+        remote: true,
       };
       b.punches.push(punch);
       return punch;
@@ -2572,6 +3828,635 @@ class LocalHrStore implements HrStore {
       return swap;
     });
   }
+
+  /* ------------------------- kiosk time clock (Worker 3) ------------------ */
+  /*
+   * Local (localStorage) mirror of the Supabase impl. Entity shapes match
+   * Worker 1's hr.ts types; verifyKioskPin mirrors the verify_kiosk_pin RPC
+   * semantics (5 strikes → 15-minute lockout, lockout clears on success,
+   * unknown employee id → bad_pin without lockout) and returns its flat
+   * shape (no site fields); token resolution is a hash lookup.
+   */
+
+  /**
+   * Writes the test seed (known token + PIN credential) once. Test-only:
+   * only runs when createHrStore was given a kioskTestSeed.
+   */
+  private async ensureKioskSeed(): Promise<void> {
+    const seed = this.kioskTestSeed;
+    if (!seed) return;
+    const bucket = this.load();
+    if (bucket.kioskTestSeeded) return;
+    const tokenHash = await sha256Hex(seed.rawToken);
+    const now = nowIso();
+    bucket.kioskTokens.push({
+      id: newId(),
+      agencyId: this.agencyId,
+      siteId: seed.siteId,
+      label: "Test kiosk token",
+      active: true,
+      createdBy: this.userId,
+      createdAt: now,
+      lastUsedAt: null,
+      revokedAt: null,
+      siteName: seed.siteName,
+      tokenHash,
+    });
+    bucket.credentials.push({
+      staffId: seed.staffId,
+      agencyId: this.agencyId,
+      employeeIdNumber: seed.employeeIdNumber,
+      failedAttempts: 0,
+      lockedUntil: null,
+      pinUpdatedAt: now,
+      updatedBy: this.userId,
+      displayName: seed.displayName,
+      pinHash: bcrypt.hashSync(seed.pin, 10),
+    });
+    bucket.kioskTestSeeded = true;
+    this.save(bucket);
+  }
+
+  /** Safe credential: drops pinHash and displayName (never exposed). */
+  private credentialSafe(c: LocalCredentialRow): HrClockCredential {
+    return {
+      staffId: c.staffId,
+      agencyId: c.agencyId,
+      employeeIdNumber: c.employeeIdNumber,
+      failedAttempts: c.failedAttempts,
+      lockedUntil: c.lockedUntil,
+      pinUpdatedAt: c.pinUpdatedAt,
+      updatedBy: c.updatedBy,
+    };
+  }
+
+  /** Safe token: drops tokenHash and the siteName display hint. */
+  private tokenSafe(t: LocalKioskTokenRow): HrKioskToken {
+    return {
+      id: t.id,
+      agencyId: t.agencyId,
+      siteId: t.siteId,
+      label: t.label,
+      active: t.active,
+      createdBy: t.createdBy,
+      createdAt: t.createdAt,
+      lastUsedAt: t.lastUsedAt,
+      revokedAt: t.revokedAt,
+    };
+  }
+
+  private findTokenLocal(
+    bucket: LocalBucket,
+    tokenHash: string,
+  ): LocalKioskTokenRow | undefined {
+    return bucket.kioskTokens.find(
+      (t) => t.tokenHash === tokenHash && t.active && t.revokedAt == null,
+    );
+  }
+
+  async verifyKioskPin(
+    rawToken: string,
+    employeeId: string,
+    pin: string,
+  ): Promise<KioskVerifyResult> {
+    await this.ensureKioskSeed();
+    const bucket = this.load();
+    const token = this.findTokenLocal(bucket, await sha256Hex(rawToken));
+    if (!token) {
+      return { ok: false, reason: "bad_token" };
+    }
+    const credential = bucket.credentials.find(
+      (c) => c.employeeIdNumber === employeeId.trim(),
+    );
+    if (!credential) {
+      // Unknown employee id: same shape as a wrong PIN, no lockout (no row
+      // to lock), mirroring the RPC.
+      return { ok: false, reason: "bad_pin", attemptsLeft: null };
+    }
+    if (
+      credential.lockedUntil &&
+      Date.parse(credential.lockedUntil) > Date.now()
+    ) {
+      return {
+        ok: false,
+        reason: "locked",
+        attemptsLeft: 0,
+        lockedUntil: credential.lockedUntil,
+      };
+    }
+    const ok = await bcrypt.compare(pin, credential.pinHash);
+    if (ok) {
+      credential.failedAttempts = 0;
+      credential.lockedUntil = null;
+      token.lastUsedAt = nowIso();
+      this.save(bucket);
+      return {
+        ok: true,
+        staffId: credential.staffId,
+        displayName: credential.displayName ?? null,
+      };
+    }
+    credential.failedAttempts += 1;
+    const attemptsLeft = Math.max(
+      0,
+      MAX_PIN_ATTEMPTS - credential.failedAttempts,
+    );
+    let lockedUntil: string | null = null;
+    let reason: "bad_pin" | "locked" = "bad_pin";
+    if (credential.failedAttempts >= MAX_PIN_ATTEMPTS) {
+      lockedUntil = new Date(
+        Date.now() + PIN_LOCKOUT_MINUTES * 60_000,
+      ).toISOString();
+      credential.lockedUntil = lockedUntil;
+      reason = "locked";
+    }
+    this.save(bucket);
+    return { ok: false, reason, attemptsLeft, lockedUntil };
+  }
+
+  async resolveKioskToken(rawToken: string): Promise<KioskSite> {
+    await this.ensureKioskSeed();
+    const bucket = this.load();
+    const token = this.findTokenLocal(bucket, await sha256Hex(rawToken));
+    if (!token) {
+      throw new Error("Invalid kiosk token.");
+    }
+    return {
+      siteId: token.siteId,
+      siteName: token.siteName ?? "",
+      agencyId: token.agencyId,
+    };
+  }
+
+  /**
+   * Local mirror of the submit_kiosk_punch definer RPC: the raw token is
+   * required and must belong to an active token (otherwise it throws
+   * "Invalid kiosk token.", like the RPC's raise); verification_method is
+   * stamped 'kiosk_pin' and remote derives false, exactly as the server
+   * does. Never a direct insert in the Supabase impl.
+   */
+  async submitKioskPunch(
+    token: string,
+    input: KioskPunchInput,
+  ): Promise<HrPunch> {
+    await this.ensureKioskSeed();
+    const d = new Date(input.punchedAt);
+    if (Number.isNaN(d.getTime())) throw new Error("Invalid punch time.");
+    const bucket = this.load();
+    const tokenRow = this.findTokenLocal(bucket, await sha256Hex(token));
+    if (!tokenRow) {
+      throw new Error("Invalid kiosk token.");
+    }
+    const stamp = todayStamp(d);
+    const todays = await this.listPunches(
+      input.staffId,
+      `${stamp}T00:00:00`,
+      `${stamp}T23:59:59.999`,
+    );
+    guardKioskPunch(todays, input.kind, input.punchedAt);
+    const punch: HrPunch = {
+      id: newId(),
+      agencyId: this.agencyId,
+      siteId: tokenRow.siteId,
+      staffId: input.staffId,
+      kind: input.kind,
+      punchedAt: input.punchedAt,
+      source: "kiosk",
+      note: input.note?.trim() ? input.note.trim() : null,
+      shiftId: input.shiftId ?? null,
+      serviceType: input.serviceType?.trim()
+        ? input.serviceType.trim()
+        : undefined,
+      individualId: input.individualId ?? undefined,
+      verificationMethod: "kiosk_pin",
+      offline: input.offline,
+      remote: false,
+      attestation: input.attestation ?? undefined,
+    };
+    return this.mutate((b) => {
+      b.punches.push(punch);
+      return punch;
+    });
+  }
+
+  /* ----------------- hub.remote_punch grants (local mirror) ---------------- */
+  /*
+   * In-memory (+localStorage-persisted) mirror of hr_staff_permission_grants.
+   * Revocation is a soft delete (revoked_at), never a row delete.
+   */
+
+  private activeGrantLocal(
+    b: LocalBucket,
+    staffId: string,
+  ): LocalGrantRow | undefined {
+    return b.remoteGrants.find(
+      (g) =>
+        g.staffId === staffId &&
+        g.permissionKey === "hub.remote_punch" &&
+        g.revokedAt == null,
+    );
+  }
+
+  private mapGrantLocal(
+    b: LocalBucket,
+    g: LocalGrantRow,
+  ): RemotePunchGrant {
+    const cred = b.credentials.find((c) => c.staffId === g.staffId);
+    return {
+      staffId: g.staffId,
+      grantedBy: g.grantedBy,
+      grantedAt: g.grantedAt,
+      employeeIdNumber: cred ? cred.employeeIdNumber : null,
+    };
+  }
+
+  async hasRemotePunch(staffId: string): Promise<boolean> {
+    return this.activeGrantLocal(this.load(), staffId) != null;
+  }
+
+  async grantRemotePunch(
+    staffId: string,
+    grantedBy?: string,
+  ): Promise<RemotePunchGrant> {
+    return this.mutate((b) => {
+      const existing = this.activeGrantLocal(b, staffId);
+      if (existing) return this.mapGrantLocal(b, existing);
+      const row: LocalGrantRow = {
+        staffId,
+        permissionKey: "hub.remote_punch",
+        grantedBy: grantedBy ?? this.userId,
+        grantedAt: nowIso(),
+        revokedAt: null,
+        revokedBy: null,
+      };
+      b.remoteGrants.push(row);
+      return this.mapGrantLocal(b, row);
+    });
+  }
+
+  async revokeRemotePunch(staffId: string): Promise<void> {
+    this.mutate((b) => {
+      const now = nowIso();
+      for (const g of b.remoteGrants) {
+        if (
+          g.staffId === staffId &&
+          g.permissionKey === "hub.remote_punch" &&
+          g.revokedAt == null
+        ) {
+          g.revokedAt = now;
+          g.revokedBy = this.userId;
+        }
+      }
+    });
+  }
+
+  async listRemotePunchGrants(): Promise<RemotePunchGrant[]> {
+    const b = this.load();
+    return b.remoteGrants
+      .filter(
+        (g) => g.permissionKey === "hub.remote_punch" && g.revokedAt == null,
+      )
+      .sort((a, c) => (a.grantedAt < c.grantedAt ? 1 : -1))
+      .map((g) => this.mapGrantLocal(b, g));
+  }
+
+  async suggestKioskShift(
+    staffId: string,
+    siteId: string,
+  ): Promise<KioskShiftSuggestion | null> {
+    const now = new Date();
+    const stamp = todayStamp(now);
+    const shifts = await this.listShifts(
+      `${stamp}T00:00:00`,
+      `${stamp}T23:59:59.999`,
+      siteId,
+    );
+    const mine = shifts
+      .filter((s) => s.staffId === staffId)
+      .sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))[0];
+    if (mine) {
+      return {
+        shiftLabel: mine.title,
+        serviceType: null,
+        individualId: null,
+        individualName: null,
+      };
+    }
+    const patterns = await this.listStaffingPatterns({ staffId });
+    const weekday = now.getDay();
+    const pattern = patterns.find(
+      (p) =>
+        p.active &&
+        p.siteId === siteId &&
+        p.days.includes(weekday) &&
+        p.effectiveFrom <= stamp &&
+        (p.effectiveTo == null || p.effectiveTo >= stamp),
+    );
+    if (!pattern) return null;
+    return {
+      shiftLabel: pattern.shiftLabel ?? "Scheduled shift",
+      serviceType: pattern.serviceTags[0] ?? null,
+      individualId: pattern.individualId,
+      individualName: pattern.individualName ?? null,
+    };
+  }
+
+  async listKioskTokens(siteId?: string): Promise<HrKioskToken[]> {
+    const bucket = this.load();
+    return bucket.kioskTokens
+      .filter(
+        (t) =>
+          t.agencyId === this.agencyId &&
+          t.active &&
+          t.revokedAt == null &&
+          (!siteId || t.siteId === siteId),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((t) => this.tokenSafe(t));
+  }
+
+  async generateKioskToken(
+    siteId: string,
+    label: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }> {
+    const rawToken = randomTokenHex(32);
+    const tokenHash = await sha256Hex(rawToken);
+    const now = nowIso();
+    const row: LocalKioskTokenRow = {
+      id: newId(),
+      agencyId: this.agencyId,
+      siteId,
+      label: label.trim() ? label.trim() : null,
+      active: true,
+      createdBy: this.userId,
+      createdAt: now,
+      lastUsedAt: null,
+      revokedAt: null,
+      tokenHash,
+    };
+    return this.mutate((b) => {
+      b.kioskTokens.push(row);
+      return { token: this.tokenSafe(row), rawToken };
+    });
+  }
+
+  async revokeKioskToken(id: string): Promise<void> {
+    this.mutate((b) => {
+      const token = b.kioskTokens.find(
+        (t) => t.id === id && t.agencyId === this.agencyId,
+      );
+      if (!token) throw new Error("Kiosk token not found.");
+      token.active = false;
+      token.revokedAt = nowIso();
+    });
+  }
+
+  async rotateKioskToken(
+    id: string,
+  ): Promise<{ token: HrKioskToken; rawToken: string }> {
+    const bucket = this.load();
+    const current = bucket.kioskTokens.find(
+      (t) => t.id === id && t.agencyId === this.agencyId,
+    );
+    if (!current || !current.active || current.revokedAt) {
+      throw new Error("This token is already revoked.");
+    }
+    const siteId = current.siteId;
+    const label = current.label ? `${current.label} (rotated ${todayStamp()})` : "";
+    await this.revokeKioskToken(id);
+    return this.generateKioskToken(siteId, label);
+  }
+
+  async issueClockCredential(
+    staffId: string,
+    employeeIdNumber: string,
+    pin: string,
+  ): Promise<HrClockCredential> {
+    assertPinFormat(pin);
+    if (!employeeIdNumber.trim()) {
+      throw new Error("An employee ID number is required.");
+    }
+    const now = nowIso();
+    const row: LocalCredentialRow = {
+      staffId,
+      agencyId: this.agencyId,
+      employeeIdNumber: employeeIdNumber.trim(),
+      failedAttempts: 0,
+      lockedUntil: null,
+      pinUpdatedAt: now,
+      updatedBy: this.userId,
+      pinHash: await bcrypt.hash(pin, 10),
+    };
+    return this.mutate((b) => {
+      if (b.credentials.some((c) => c.staffId === staffId)) {
+        throw new Error("This staffer already has a clock credential.");
+      }
+      b.credentials.push(row);
+      return this.credentialSafe(row);
+    });
+  }
+
+  async resetClockPin(
+    staffId: string,
+    newPin: string,
+  ): Promise<HrClockCredential> {
+    assertPinFormat(newPin);
+    const pinHash = await bcrypt.hash(newPin, 10);
+    return this.mutate((b) => {
+      const c = b.credentials.find((x) => x.staffId === staffId);
+      if (!c) throw new Error("Credential not found.");
+      c.pinHash = pinHash;
+      c.pinUpdatedAt = nowIso();
+      c.failedAttempts = 0;
+      c.lockedUntil = null;
+      c.updatedBy = this.userId;
+      return this.credentialSafe(c);
+    });
+  }
+
+  async listClockCredentials(): Promise<HrClockCredential[]> {
+    const bucket = this.load();
+    return bucket.credentials
+      .filter((c) => c.agencyId === this.agencyId)
+      .map((c) => this.credentialSafe(c));
+  }
+
+  async unlockCredential(staffId: string): Promise<HrClockCredential> {
+    return this.mutate((b) => {
+      const c = b.credentials.find((x) => x.staffId === staffId);
+      if (!c) throw new Error("Credential not found.");
+      c.failedAttempts = 0;
+      c.lockedUntil = null;
+      return this.credentialSafe(c);
+    });
+  }
+
+  async listOpenPunches(siteId: string): Promise<HrPunch[]> {
+    const stamp = todayStamp();
+    const from = `${stamp}T00:00:00`;
+    const to = `${stamp}T23:59:59.999`;
+    const bucket = this.load();
+    const siteRows = bucket.punches.filter(
+      (p) =>
+        p.agencyId === this.agencyId &&
+        p.siteId === siteId &&
+        p.punchedAt >= from &&
+        p.punchedAt <= to,
+    );
+    const byStaff = new Map<string, HrPunch[]>();
+    for (const r of siteRows) {
+      const list = byStaff.get(r.staffId) ?? [];
+      list.push(r);
+      byStaff.set(r.staffId, list);
+    }
+    const open: HrPunch[] = [];
+    for (const staffRows of byStaff.values()) {
+      if (!kioskSessionOpen(staffRows)) continue;
+      const lastIn = [...staffRows]
+        .filter((p) => p.kind === "in")
+        .sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
+        .pop();
+      if (lastIn) open.push(lastIn);
+    }
+    return open.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1));
+  }
+
+  async listMissedPunchReports(scope?: {
+    staffId?: string;
+    siteId?: string;
+    status?: HrMissedPunchReport["status"];
+  }): Promise<HrMissedPunchReport[]> {
+    const bucket = this.load();
+    return bucket.missedReports
+      .filter(
+        (r) =>
+          r.agencyId === this.agencyId &&
+          (!scope?.staffId || r.staffId === scope.staffId) &&
+          (!scope?.siteId || r.siteId === scope.siteId) &&
+          (!scope?.status || r.status === scope.status),
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  async reportMissedPunch(
+    input: MissedPunchReportInput,
+  ): Promise<HrMissedPunchReport> {
+    validateMissedPunchInput(input);
+    const report: HrMissedPunchReport = {
+      id: newId(),
+      agencyId: this.agencyId,
+      staffId: input.staffId,
+      siteId: input.siteId ?? null,
+      workDate: input.workDate,
+      claimedInAt: input.claimedInAt ?? null,
+      claimedOutAt: input.claimedOutAt ?? null,
+      reason: input.reason.trim(),
+      status: "pending",
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNote: null,
+      createdAt: nowIso(),
+    };
+    return this.mutate((b) => {
+      b.missedReports.push(report);
+      return report;
+    });
+  }
+
+  async decideMissedPunchReport(
+    id: string,
+    approve: boolean,
+    note?: string,
+  ): Promise<HrMissedPunchReport> {
+    const reviewNote = note?.trim() ? note.trim() : null;
+    return this.mutate((b) => {
+      const report = b.missedReports.find(
+        (r) => r.id === id && r.agencyId === this.agencyId,
+      );
+      if (!report) throw new Error("Missed-punch report not found.");
+      if (report.status !== "pending") {
+        throw new Error("This report has already been decided.");
+      }
+      const decidedAt = nowIso();
+      if (approve) {
+        // Correction ledger: the actual punch rows (source = 'correction')
+        // plus a correction entry per punch, mirroring hr_punch_corrections.
+        const claimed: Array<{ kind: "in" | "out"; at: string }> = [];
+        if (report.claimedInAt)
+          claimed.push({ kind: "in", at: report.claimedInAt });
+        if (report.claimedOutAt)
+          claimed.push({ kind: "out", at: report.claimedOutAt });
+        for (const c of claimed) {
+          const punch: HrPunch = {
+            id: newId(),
+            agencyId: this.agencyId,
+            siteId: report.siteId,
+            staffId: report.staffId,
+            kind: c.kind,
+            punchedAt: c.at,
+            source: "correction",
+            verificationMethod: "web",
+            // A manager-entered web correction is a remote punch, exactly as
+            // the stamp_punch_remote server trigger derives it.
+            remote: true,
+            note: `Missed-punch report approved${
+              reviewNote ? `: ${reviewNote}` : ""
+            }`,
+            shiftId: null,
+          };
+          b.punches.push(punch);
+          b.corrections.push({
+            id: newId(),
+            punchId: punch.id,
+            staffId: report.staffId,
+            requestedKind: c.kind,
+            requestedAt: c.at,
+            reason: report.reason,
+            status: "approved",
+            reviewedBy: this.userId,
+            reviewedAt: decidedAt,
+            reviewNote,
+          });
+        }
+      }
+      report.status = approve ? "approved" : "denied";
+      report.reviewedBy = this.userId;
+      report.reviewedAt = decidedAt;
+      report.reviewNote = reviewNote;
+      return report;
+    });
+  }
+
+  async getPunchRules(): Promise<HrPunchRules> {
+    const bucket = this.load();
+    return bucket.punchRules ?? defaultPunchRules(this.agencyId);
+  }
+
+  async savePunchRules(
+    patch: Partial<
+      Pick<
+        HrPunchRules,
+        | "roundingMinutes"
+        | "roundingApplies"
+        | "graceMinutes"
+        | "autoClockoutBufferMinutes"
+        | "autoApprovalScoreThreshold"
+      >
+    >,
+  ): Promise<HrPunchRules> {
+    assertPunchRulesPatch(patch);
+    return this.mutate((b) => {
+      const merged: HrPunchRules = {
+        ...(b.punchRules ?? defaultPunchRules(this.agencyId)),
+        ...patch,
+        agencyId: this.agencyId,
+        updatedBy: this.userId,
+        updatedAt: nowIso(),
+      };
+      b.punchRules = merged;
+      return merged;
+    });
+  }
 }
 
 /* -------------------------------- factory -------------------------------- */
@@ -2580,10 +4465,15 @@ class LocalHrStore implements HrStore {
  * Build the HR store for this session. Hosted when Supabase env is present,
  * localStorage-backed otherwise.
  */
-export function createHrStore(opts: { agencyId: string; userId: string }): HrStore {
+export function createHrStore(opts: {
+  agencyId: string;
+  userId: string;
+  /** Test-only: seeds a known kiosk token + PIN credential in the local impl. */
+  kioskTestSeed?: KioskTestSeed;
+}): HrStore {
   const client = createSupabaseBrowserClient();
   if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId);
-  return new LocalHrStore(opts.agencyId, opts.userId);
+  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed);
 }
 
 /** CSV export is pure domain logic; re-exported here for page convenience. */

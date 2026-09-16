@@ -43,7 +43,9 @@ export type NotificationType =
   | "qa.schedule_overdue"
   | "hr.swap_requested"
   | "hr.swap_approved"
-  | "hr.swap_denied";
+  | "hr.swap_denied"
+  | "hr.punch_exception"
+  | "hr.overtime_alert";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -73,6 +75,8 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "hr.swap_requested",
   "hr.swap_approved",
   "hr.swap_denied",
+  "hr.punch_exception",
+  "hr.overtime_alert",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -224,6 +228,8 @@ export const NOTIFICATION_META: Record<
   "hr.swap_requested": { status: "pending", label: "Shift swap requested" },
   "hr.swap_approved": { status: "compliant", label: "Shift swap approved" },
   "hr.swap_denied": { status: "expired", label: "Shift swap denied" },
+  "hr.punch_exception": { status: "pending", label: "Punch flagged for review" },
+  "hr.overtime_alert": { status: "expiring", label: "Overtime trending" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
@@ -842,5 +848,69 @@ export function swapDecidedPayload(input: {
     entityType: "hr_shift_swap",
     entityId: input.swapId,
     dedupeKey: dedupeKeyFor(type, input.swapId),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Kiosk punch payloads (exception flagged → overtime trending)         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A manager flagged a staff member's punch for correction from the
+ * exceptions dashboard. Targeted at the staff member so they see why
+ * their punch is under review. Emitted once per correction (the dedupe
+ * key is the correction id).
+ */
+export function punchExceptionPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  correctionId: string;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "hr.punch_exception",
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_punch_exception",
+    entityId: input.correctionId,
+    dedupeKey: dedupeKeyFor("hr.punch_exception", input.correctionId),
+  };
+}
+
+/**
+ * A staff member is trending toward overtime this week. Broadcast to the
+ * scheduling managers (roleKey, e.g. "house_manager" / "program_manager")
+ * so they can adjust upcoming shifts. Dedupe is per staff member + week
+ * label so the dashboard's auto-refresh can't spam the same alert.
+ */
+export function overtimeAlertPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  staffId: string;
+  staffName: string;
+  hoursWorked: number;
+  thresholdHours: number;
+  weekLabel: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "hr.overtime_alert",
+    title: "Overtime trending",
+    body:
+      `${input.staffName} has worked ${input.hoursWorked.toFixed(1)}h this week ` +
+      `(overtime after ${input.thresholdHours}h). Review their upcoming shifts.`,
+    deepLink: "/hub",
+    entityType: "hr_punch_exception",
+    entityId: input.staffId,
+    dedupeKey: dedupeKeyFor("hr.overtime_alert", input.staffId, input.weekLabel),
   };
 }

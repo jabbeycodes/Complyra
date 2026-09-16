@@ -127,6 +127,20 @@ import type { PacketDetail } from "./data/types";
 import DemoBanner from "./demo/DemoBanner";
 import DemoTour from "./demo/DemoTour";
 import { DEMO_TOUR_SEEN_KEY, isDemoSession } from "./demo/tourSteps";
+// KIOSK-TIME-CLOCK (2026-09-16): standalone punch-only page, no app shell.
+import KioskClockPage from "./features/kiosk/KioskClockPage";
+
+const KIOSK_HASH_PREFIX = "#/clock/k/";
+
+/**
+ * Extract the kiosk token from a location hash, or null when the hash is
+ * not a kiosk route. Empty tokens count as invalid (the page shows its
+ * friendly error screen).
+ */
+function kioskTokenFromHash(hash: string): string | null {
+  if (!hash.startsWith(KIOSK_HASH_PREFIX)) return null;
+  return decodeURIComponent(hash.slice(KIOSK_HASH_PREFIX.length));
+}
 function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
@@ -194,6 +208,9 @@ export default function App() {
   const [auditOwner, setAuditOwner] = useState("All staff");
   const [auditFrom, setAuditFrom] = useState("2026-09-01");
   const [auditTo, setAuditTo] = useState("2026-09-30");
+  // KIOSK-TIME-CLOCK: track the raw hash so the kiosk page mounts/unmounts
+  // as a standalone screen without touching the app's own hash routing.
+  const [kioskHash, setKioskHash] = useState(() => window.location.hash);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 4500);
@@ -273,6 +290,12 @@ export default function App() {
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
+  // KIOSK-TIME-CLOCK: keep the standalone kiosk screen in sync with the hash.
+  useEffect(() => {
+    const syncKioskHash = () => setKioskHash(window.location.hash);
+    window.addEventListener("hashchange", syncKioskHash);
+    return () => window.removeEventListener("hashchange", syncKioskHash);
+  }, []);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -299,6 +322,13 @@ export default function App() {
     document.body.classList.toggle("nav-open", mobileOpen);
     return () => document.body.classList.remove("nav-open");
   }, [mobileOpen]);
+  // KIOSK-TIME-CLOCK: punch-only standalone page — no session, no app
+  // shell, no nav. Renders before every other gate so a kiosk never needs
+  // a login. Leaving the hash unmounts the kiosk and restores the app.
+  const kioskToken = kioskTokenFromHash(kioskHash);
+  if (kioskToken !== null) {
+    return <KioskClockPage token={kioskToken} />;
+  }
   if (loading) {
     return <div className="login-shell">Loading workspace…</div>;
   }

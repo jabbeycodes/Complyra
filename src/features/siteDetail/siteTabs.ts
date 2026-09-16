@@ -9,6 +9,7 @@ export type SiteDetailTabId =
   | "training"
   | "medications"
   | "mileage"
+  | "drills"
   | "documents"
   | "staff";
 
@@ -66,6 +67,11 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "mileage",
     label: "Mileage",
     visible: (s) => !!s && pageVisible(s, "Mileage"),
+  },
+  {
+    id: "drills",
+    label: "Drills",
+    visible: (s) => !!s && pageVisible(s, "Individuals"),
   },
   {
     id: "documents",
