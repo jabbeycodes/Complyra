@@ -118,7 +118,9 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
       }
       if (label === "Shift notes") {
         await expect(
-          page.locator(".site-detail-panel").getByRole("heading", { name: "Shift notes" }),
+          page
+            .locator(".site-detail-panel")
+            .getByRole("heading", { name: "Shift notes", exact: true }),
         ).toBeVisible();
       }
       const slug = label.toLowerCase().replace(/\s+/g, "_");
