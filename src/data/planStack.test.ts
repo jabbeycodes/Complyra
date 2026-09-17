@@ -15,6 +15,9 @@ import {
   canSeeRenewals,
   formatAllergiesLabel,
   normalizeAllergies,
+  normalizeGuardianContacts,
+  normalizeProfile,
+  normalizeProviderContacts,
   requiredForSigning,
   staffCanSignDelegation,
   type ObligationItem,
@@ -417,4 +420,69 @@ test("allergies normalize and format for the consultation packet", () => {
     formatAllergiesLabel([{ allergen: "Tree nuts", reaction: "Noted on diet order", status: "active" }]),
     "Tree nuts (active) — Noted on diet order",
   );
+});
+
+test("issue #81: guardian and provider contacts normalize; nameless rows drop", () => {
+  assert.deepEqual(
+    normalizeGuardianContacts([
+      { name: "  Dana Hart ", relationship: " Sibling ", phone: " 573-555-0199 ", email: "", preferredContact: "Phone" },
+      { name: "   ", relationship: "Friend" },
+    ]),
+    [
+      {
+        name: "Dana Hart",
+        relationship: "Sibling",
+        phone: "573-555-0199",
+        email: "",
+        preferredContact: "Phone",
+        address: "",
+        notes: "",
+      },
+    ],
+  );
+  assert.deepEqual(normalizeGuardianContacts("nope"), []);
+  assert.deepEqual(
+    normalizeProviderContacts([
+      {
+        id: "p1",
+        name: " Dr. Maya Chen ",
+        role: " PCP ",
+        phone: "573-555-0142",
+        email: "",
+        address: "",
+        notes: " Annual physical ",
+      },
+      { name: "" },
+    ]),
+    [
+      {
+        id: "p1",
+        name: "Dr. Maya Chen",
+        role: "PCP",
+        phone: "573-555-0142",
+        email: "",
+        address: "",
+        notes: "Annual physical",
+      },
+    ],
+  );
+  assert.deepEqual(normalizeProviderContacts(null), []);
+});
+
+test("issue #81: normalizeProfile keeps provider contacts and guardian extras", () => {
+  const person = {
+    id: "i1",
+    agencyId: "a1",
+    siteId: "s1",
+    fullName: "Ellis Hart",
+    dateOfBirth: "1984-03-12",
+  };
+  const normalized = normalizeProfile(person, {
+    guardians: [{ name: "Dana Hart", address: "1 Main St", notes: "Call first" }],
+    providerContacts: [{ id: "p1", name: "Dr. Maya Chen", role: "PCP" }],
+  } as never);
+  assert.equal(normalized.guardians[0]?.address, "1 Main St");
+  assert.equal(normalized.guardians[0]?.notes, "Call first");
+  assert.equal(normalized.providerContacts[0]?.name, "Dr. Maya Chen");
+  assert.equal(normalized.providerContacts[0]?.role, "PCP");
 });

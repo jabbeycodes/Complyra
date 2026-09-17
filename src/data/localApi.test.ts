@@ -6,6 +6,7 @@ import {
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
+  DEMO_HM_USERNAME,
   DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE, LOGIN_NO_MEMBERSHIP_MESSAGE } from "./types";
@@ -1108,4 +1109,64 @@ test("sign-in names a missing membership separately from a bad password", async 
       }),
     new RegExp(LOGIN_NO_MEMBERSHIP_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
+});
+
+test("issue #81: scoped contact/diagnosis updates enforce role gates", async () => {
+  const hmApi = new LocalApi(store());
+  const hm = await hmApi.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+password: DEMO_PASSWORD,
+  });
+  const hmPerson = (await hmApi.loadWorkspace(hm)).individuals[0];
+  assert.ok(hmPerson);
+
+  const provider = {
+    id: "p-test",
+    name: "Dr. Test",
+    role: "PCP",
+    phone: "",
+    email: "",
+    address: "",
+    notes: "",
+  };
+  await hmApi.updateIndividualContacts(hmPerson.id, { guardians: [], providerContacts: [provider] });
+  const hmStack = (await hmApi.loadWorkspace(hm)).planStacks.find(
+    (item) => item.individualId === hmPerson.id,
+  );
+  assert.equal(hmStack?.profile.providerContacts[0]?.name, "Dr. Test");
+  // The scoped contact update leaves the rest of the profile untouched.
+  assert.equal(hmStack?.profile.legalName, hmPerson.name);
+  await assert.rejects(
+    () => hmApi.updateIndividualDiagnosis(hmPerson.id, "Diabetes"),
+    /Only a nurse, PM, or administrator can edit diagnoses\./,
+  );
+
+  const nurseApi = new LocalApi(store());
+  const nurse = await nurseApi.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+password: DEMO_PASSWORD,
+  });
+  const nursePerson = (await nurseApi.loadWorkspace(nurse)).individuals[0];
+  assert.ok(nursePerson);
+  await nurseApi.updateIndividualDiagnosis(nursePerson.id, "  Diabetes ");
+  const nurseStack = (await nurseApi.loadWorkspace(nurse)).planStacks.find(
+    (item) => item.individualId === nursePerson.id,
+  );
+  assert.equal(nurseStack?.profile.diagnosis, "Diabetes");
+  await assert.rejects(
+    () => nurseApi.updateIndividualContacts(nursePerson.id, { guardians: [], providerContacts: [] }),
+    /Only a house manager, PM, or administrator can edit contacts\./,
+  );
+
+  const dspApi = new LocalApi(store());
+  const dsp = await dspApi.signIn(dspLogin());
+  const dspPerson = (await dspApi.loadWorkspace(dsp)).individuals[0];
+  if (dspPerson) {
+    await assert.rejects(
+      () => dspApi.updateIndividualContacts(dspPerson.id, { guardians: [], providerContacts: [] }),
+      /Only a house manager, PM, or administrator can edit contacts\./,
+    );
+  }
 });

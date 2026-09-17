@@ -44,7 +44,10 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await expect(chart.locator(".health-widget")).toContainText("Scheduled");
   await expect(chart.locator(".health-widget")).not.toContainText("Upcoming");
   await expect(chart).toContainText("Logged by Cameron Price");
-  await expect(chart.getByRole("heading", { name: "Shift notes" })).toHaveCount(0);
+  // Issue #81: the chart carries a labeled Shift-notes placeholder until
+  // shift-note entry ships (#80).
+  await expect(chart.getByRole("heading", { name: "Shift notes", exact: true })).toHaveCount(1);
+  await expect(chart.getByRole("heading", { name: "Shift notes live here soon" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Vitals" })).toHaveCount(0);
   await expect(chart.getByRole("button", { name: "Log BM" })).toHaveCount(0);
   const sep22 = appointmentCard(chart, "September 22, 2026");

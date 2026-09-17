@@ -399,6 +399,7 @@ export function profileFromRow(
     implementationEnd: typeof stored.implementationEnd === "string" ? stored.implementationEnd : "",
     serviceCoordinator: typeof stored.serviceCoordinator === "string" ? stored.serviceCoordinator : "",
     guardians: Array.isArray(stored.guardians) ? stored.guardians : [],
+    providerContacts: Array.isArray(stored.providerContacts) ? stored.providerContacts : [],
     sex: (stored.sex as IndividualProfile["sex"]) ?? "",
     medicaidStatus: (stored.medicaidStatus as IndividualProfile["medicaidStatus"]) ?? "",
     specializedDiet: typeof stored.specializedDiet === "string" ? stored.specializedDiet : "",

@@ -139,7 +139,9 @@ import {
   isObligationActive,
   nextAllergiesStamp,
   normalizeAllergies,
+  normalizeGuardianContacts,
   normalizeProfile,
+  normalizeProviderContacts,
   renewalStatus,
   requiredForSigning,
   sortObligations,
@@ -147,13 +149,17 @@ import {
   type Allergy,
   type ClinicalEvidenceKind,
   type ClinicalRenewal,
+  type GuardianContact,
   type IndividualProfile,
   type ObligationItem,
   type ObligationSignature,
   type PlanStackView,
+  type ProviderContact,
 } from "./planStack";
 import {
   allLinesInitialed,
+  canEditDiagnoses,
+  canEditIndividualContacts,
   canEditTrainingLine,
   canLogDoseException,
   canLogPrnDose,
@@ -1626,6 +1632,76 @@ export class HostedApi implements ComplyraApi {
         .eq("id", record.id);
       throwIf(nameError, "Cover page saved, but the legal name could not be updated.");
     }
+  }
+
+  /**
+   * Issue #81 — narrowly scoped contact update. Reads the stored profile,
+   * patches only guardians + providerContacts, and upserts the merged row so
+   * one role cannot overwrite fields outside its permission.
+   */
+  async updateIndividualContacts(
+    individualId: string,
+    patch: { guardians: GuardianContact[]; providerContacts: ProviderContact[] },
+  ) {
+    const session = await this.requireSession();
+    if (!canEditIndividualContacts(session.roleKey)) {
+      throw new Error("Only a house manager, PM, or administrator can edit contacts.");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("*")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    const record = mapIndividual(person!);
+    const { data: profileRow } = await this.client
+      .from("individual_profiles")
+      .select("profile")
+      .eq("individual_id", record.id)
+      .maybeSingle();
+    const current = normalizeProfile(record, profileRow?.profile ?? null);
+    current.guardians = normalizeGuardianContacts(patch.guardians);
+    current.providerContacts = normalizeProviderContacts(patch.providerContacts);
+    const { error: profileError } = await this.client.from("individual_profiles").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: record.id,
+        profile: current,
+      },
+      { onConflict: "individual_id" },
+    );
+    throwIf(profileError, "Could not save the contacts.");
+  }
+
+  /** Issue #81 — narrowly scoped diagnosis update; only the diagnosis field is written. */
+  async updateIndividualDiagnosis(individualId: string, diagnosis: string) {
+    const session = await this.requireSession();
+    if (!canEditDiagnoses(session.roleKey)) {
+      throw new Error("Only a nurse, PM, or administrator can edit diagnoses.");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("*")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    const record = mapIndividual(person!);
+    const { data: profileRow } = await this.client
+      .from("individual_profiles")
+      .select("profile")
+      .eq("individual_id", record.id)
+      .maybeSingle();
+    const current = normalizeProfile(record, profileRow?.profile ?? null);
+    current.diagnosis = diagnosis.trim();
+    const { error: profileError } = await this.client.from("individual_profiles").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: record.id,
+        profile: current,
+      },
+      { onConflict: "individual_id" },
+    );
+    throwIf(profileError, "Could not save the diagnosis.");
   }
 
   async updateObligation(

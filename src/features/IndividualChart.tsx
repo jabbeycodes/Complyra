@@ -7,15 +7,18 @@ import {
   Printer,
   ShieldAlert,
 } from "lucide-react";
-import { Badge, DueChip, formatDate, PageHeading } from "../components";
+import { Badge, DueChip, Empty, formatDate, PageHeading } from "../components";
 import { useData } from "../data/DataProvider";
 import {
   canLogPrnDose,
   canRecordDelivery,
+  canSeeChartOverview,
   canSeeChartWidgets,
   canSeeMeds,
   canSignTrainingAsHm,
   countdownLabel,
+  pcspTaskSummary,
+  todayIso,
 } from "../data/chart";
 import {
   canCompleteAppointments,
@@ -34,9 +37,16 @@ import {
 import { can } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
+import ChartOverview from "./ChartOverview";
 import HealthCard from "./HealthCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import TrainingSignCard from "./TrainingSignCard";
+// Issue #81: agency-branded Individual face sheet (distinct from the
+// appointment-scoped consultation packet).
+import {
+  buildIndividualProfilePdf,
+  individualProfileFileName,
+} from "../pdf/individualProfilePdf";
 // LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
 import DelegationFormDetail from "./delegations/DelegationFormDetail";
 // LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
@@ -68,6 +78,7 @@ export default function IndividualChart({
   const chartStack = stack;
   const chartPerson = person;
   const widgets = canSeeChartWidgets(chartSession.roleKey);
+  const showOverview = canSeeChartOverview(chartSession.roleKey);
   const showAnnuals = canSeeRenewals(chartSession.roleKey);
   const showMeds = canSeeMeds(chartSession.roleKey);
   const showHealth = canSeeAppointments(chartSession.roleKey);
@@ -84,6 +95,60 @@ export default function IndividualChart({
     } catch (err) {
       setError((err as Error).message);
     }
+  }
+
+  // Issue #81: "Print profile" — agency-branded Individual face sheet with the
+  // Overview content. Kept distinct from "Generate consultation", which is
+  // appointment-scoped.
+  async function printProfile() {
+    if (!workspace) return;
+    const generatedAt = new Date().toISOString();
+    const summary = pcspTaskSummary([...chartStack.required, ...chartStack.checked]);
+    const today = todayIso();
+    const siteManagers = (workspace.staff ?? []).filter(
+      (member) =>
+        ["house_manager", "program_manager"].includes(member.roleKey) &&
+        member.siteId === chartPerson.siteId &&
+        (!member.expiresOn || member.expiresOn >= today),
+    );
+    const admins = (workspace.staff ?? []).filter(
+      (member) =>
+        member.roleKey === "administrator" && (!member.expiresOn || member.expiresOn >= today),
+    );
+    const doc = buildIndividualProfilePdf({
+      agencyName: chartSession.agencyName,
+      legalName: profile.legalName.trim() || chartPerson.name,
+      goesBy: profile.goesBy,
+      dmhId: profile.dmhId,
+      siteName: chartPerson.site,
+      dateOfBirth: chartPerson.dateOfBirth,
+      pcspActive: summary.active,
+      pcspCompleted: summary.completed,
+      pcspTasks: summary.tasks,
+      diagnosis: profile.diagnosis,
+      medications: chartStack.medications.map((med) => ({
+        name: med.name,
+        strength: med.strength,
+        kind: med.kind,
+      })),
+      agencyContacts: [
+        ...siteManagers.map((member) => ({
+          name: member.name,
+          role: `${member.role} · ${chartPerson.site}`,
+        })),
+        ...admins.map((member) => ({ name: member.name, role: "Agency administrator" })),
+      ],
+      guardians: profile.guardians,
+      providers: profile.providerContacts,
+      generatedByName: chartSession.fullName,
+      generatedAt,
+      logoDataUrl: workspace.branding.logoUrl ?? null,
+    });
+    await openPrintable(
+      individualProfileFileName(chartPerson.name, generatedAt),
+      doc.output("blob") as Blob,
+      "print",
+    );
   }
 
   async function openFile(
@@ -126,8 +191,6 @@ export default function IndividualChart({
         title={person.name}
         description={`${person.site}${
           profile.dmhId ? ` · DMH ${profile.dmhId}` : ""
-        }${person.dateOfBirth ? ` · DOB ${formatDate(person.dateOfBirth)}` : ""} · ${
-          profile.legalName
         }`}
       >
         <button className="button" onClick={onBack}>
@@ -136,6 +199,24 @@ export default function IndividualChart({
       </PageHeading>
 
       {error && <p className="form-error">{error}</p>}
+
+      {showOverview && workspace && (
+        <ChartOverview
+          person={chartPerson}
+          profile={profile}
+          stack={chartStack}
+          staff={workspace.staff ?? []}
+          sessionRoleKey={chartSession.roleKey}
+          onUpdateContacts={(patch) =>
+            api.updateIndividualContacts(chartPerson.id, patch).then(() => undefined)
+          }
+          onUpdateDiagnosis={(diagnosis) =>
+            api.updateIndividualDiagnosis(chartPerson.id, diagnosis).then(() => undefined)
+          }
+          onPrintProfile={printProfile}
+          run={run}
+        />
+      )}
 
       <div className="chart-grid">
         {stack.carePlan && (
@@ -281,7 +362,8 @@ export default function IndividualChart({
         )}
 
         {showHealth && (
-          <HealthCard
+          <div id="chart-appointments" className="chart-anchor">
+            <HealthCard
             individualName={person.name}
             defaultVisitAddress={profile.address}
             appointments={stack.appointments}
@@ -312,11 +394,12 @@ export default function IndividualChart({
             onSaveAllergies={(allergies) =>
               run(() => api.updateIndividualAllergies(individualId, allergies))
             }
-          />
+            />
+          </div>
         )}
 
         {showMeds && (
-          <section className="chart-widget" aria-labelledby="meds-heading">
+          <section className="chart-widget" id="chart-meds" aria-labelledby="meds-heading">
             <h2 id="meds-heading">Medication board</h2>
             <p className="stack-help">
               After a delivery, set remaining pills to the counted bottle.
@@ -407,6 +490,21 @@ export default function IndividualChart({
               onPrint={() => openFile("training", row.checklist.id, "print")}
             />
           ))}
+        </section>
+
+        {/* Issue #81: quiet-link anchor. Shift note entry ships in a later
+            update; this placeholder keeps the Overview link honest. */}
+        <section
+          className="chart-widget"
+          id="chart-shift-notes"
+          aria-labelledby="shift-notes-heading"
+        >
+          <h2 id="shift-notes-heading">Shift notes</h2>
+          <Empty
+            mark="quiet"
+            title="Shift notes live here soon"
+            text="Shift note entry is coming in a later update."
+          />
         </section>
       </div>
 

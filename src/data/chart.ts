@@ -1,4 +1,4 @@
-import type { ObligationItem } from "./planStack";
+import type { ObligationItem, ObligationView } from "./planStack";
 
 export type ChartFileKind = "renewal" | "discontinue" | "training" | "other";
 
@@ -105,6 +105,70 @@ export function canSeeChartWidgets(roleKey: string) {
     "nurse",
     "auditor",
   ].includes(roleKey);
+}
+
+/**
+ * Issue #81 — Individual chart Overview visibility. DSPs see the Overview for
+ * Individuals on their caseload, HMs for their site, nurses for their clinical
+ * scope; PM/admin see everything. Per-Individual scoping itself is enforced by
+ * the API layer (canReadIndividual), which the Overview reads through.
+ */
+export function canSeeChartOverview(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "house_manager",
+    "program_manager",
+    "nurse",
+    "dsp",
+    "auditor",
+  ].includes(roleKey);
+}
+
+/**
+ * Issue #81 — who may add/edit personal contacts (family/guardian/other) and
+ * provider contacts on the Overview.
+ */
+export function canEditIndividualContacts(roleKey: string) {
+  return ["administrator", "house_manager", "program_manager"].includes(roleKey);
+}
+
+/** Issue #81 — who may edit diagnoses on the Overview. */
+export function canEditDiagnoses(roleKey: string) {
+  return ["administrator", "program_manager", "nurse"].includes(roleKey);
+}
+
+export interface PcspTaskSummary {
+  /** Active plan-year PCSP tasks (not yet completed). */
+  active: number;
+  /** PCSP tasks already completed. */
+  completed: number;
+  /** Every PCSP task, active first, with completion state. */
+  tasks: { id: string; title: string; frequency: string; completed: boolean }[];
+}
+
+/**
+ * Issue #81 — Overview "PCSP / trackables" summary. Derives the active
+ * plan-year task list and a completion rollup from the chart's obligations.
+ * Only states what the data holds: tasks are "completed" when their obligation
+ * row is checked off; anything else stays active.
+ */
+export function pcspTaskSummary(views: ObligationView[]): PcspTaskSummary {
+  const pcsp = views.filter((view) => view.item.kind === "pcsp");
+  const tasks = pcsp.map((view) => ({
+    id: view.item.id,
+    title: view.item.title,
+    frequency: view.item.frequency,
+    completed: view.item.mode === "checked",
+  }));
+  return {
+    active: tasks.filter((task) => !task.completed).length,
+    completed: tasks.filter((task) => task.completed).length,
+    tasks: [
+      ...tasks.filter((task) => !task.completed),
+      ...tasks.filter((task) => task.completed),
+    ],
+  };
 }
 
 export function canSeeMeds(roleKey: string) {

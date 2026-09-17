@@ -162,7 +162,9 @@ import {
   emptyProfile,
   nextAllergiesStamp,
   normalizeAllergies,
+  normalizeGuardianContacts,
   normalizeProfile,
+  normalizeProviderContacts,
   isObligationActive,
   proposeFromPcsp,
   requiredForSigning,
@@ -171,9 +173,11 @@ import {
   staffCanSignDelegation,
   type Allergy,
   type ClinicalEvidenceKind,
+  type GuardianContact,
   type IndividualProfile,
   type ObligationItem,
   type PlanStackView,
+  type ProviderContact,
 } from "./planStack";
 import {
   DIGITAL_RECORD_MARK,
@@ -231,6 +235,8 @@ import {
 import {
   allLinesInitialed,
   applyDailyMedDrop,
+  canEditDiagnoses,
+  canEditIndividualContacts,
   canEditTrainingLine,
   canLogDoseException,
   canLogPrnDose,
@@ -417,6 +423,23 @@ export interface ComplyraApi {
   updateIndividualProfile(
     individualId: string,
     profile: IndividualProfile,
+  ): Promise<void>;
+  /**
+   * Issue #81 — narrowly scoped contact update. Only guardians (personal
+   * contacts) and provider contacts are written; the rest of the profile is
+   * untouched. Gated by canEditIndividualContacts (HM / PM / administrator).
+   */
+  updateIndividualContacts(
+    individualId: string,
+    patch: { guardians: GuardianContact[]; providerContacts: ProviderContact[] },
+  ): Promise<void>;
+  /**
+   * Issue #81 — narrowly scoped diagnosis update. Only the diagnosis field is
+   * written. Gated by canEditDiagnoses (nurse / PM / administrator).
+   */
+  updateIndividualDiagnosis(
+    individualId: string,
+    diagnosis: string,
   ): Promise<void>;
   updateObligation(
     obligationId: string,
@@ -3149,6 +3172,34 @@ export class LocalApi implements ComplyraApi {
     accessibleIndividual(this.store, session, person.id);
     person.profile = normalizeProfile(person, profile);
     if (profile.legalName.trim()) person.fullName = profile.legalName.trim();
+    await persistMeta(this.store);
+  }
+
+  async updateIndividualContacts(
+    individualId: string,
+    patch: { guardians: GuardianContact[]; providerContacts: ProviderContact[] },
+  ) {
+    const session = assertSession(this.store);
+    if (!canEditIndividualContacts(session.roleKey)) {
+      throw new Error("Only a house manager, PM, or administrator can edit contacts.");
+    }
+    const person = accessibleIndividual(this.store, session, individualId);
+    const profile = normalizeProfile(person, person.profile);
+    profile.guardians = normalizeGuardianContacts(patch.guardians);
+    profile.providerContacts = normalizeProviderContacts(patch.providerContacts);
+    person.profile = profile;
+    await persistMeta(this.store);
+  }
+
+  async updateIndividualDiagnosis(individualId: string, diagnosis: string) {
+    const session = assertSession(this.store);
+    if (!canEditDiagnoses(session.roleKey)) {
+      throw new Error("Only a nurse, PM, or administrator can edit diagnoses.");
+    }
+    const person = accessibleIndividual(this.store, session, individualId);
+    const profile = normalizeProfile(person, person.profile);
+    profile.diagnosis = diagnosis.trim();
+    person.profile = profile;
     await persistMeta(this.store);
   }
 
