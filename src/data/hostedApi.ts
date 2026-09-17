@@ -114,8 +114,11 @@ import {
 import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
+  canConfigureIspTasks,
   canCreateIndividual,
+  canEnterShiftNotes,
   canGrantRole,
+  canSeeShiftNotes,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -124,6 +127,16 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
+import {
+  canEditShiftNoteRow,
+  ispProgramVisibleToStaff,
+  normalizeTaskTitle,
+  type IspProgram,
+  type IspProgramView,
+  type IspScoringMethod,
+  type ShiftNoteView,
+  type SiteShiftNoteView,
+} from "./shiftNotes";
 import { isValidRating } from "../recognition/scoring";
 import {
   allergiesChangeDetail,
@@ -1702,6 +1715,593 @@ export class HostedApi implements ComplyraApi {
       { onConflict: "individual_id" },
     );
     throwIf(profileError, "Could not save the diagnosis.");
+  }
+
+  // ------------------------------------------------------------------
+  // Issue #80 — ISP programs + shift notes (Therap-informed).
+  // ------------------------------------------------------------------
+
+  private mapIspScoringMethod(row: Record<string, unknown>): IspScoringMethod {
+    const levels = Array.isArray(row.levels) ? row.levels : [];
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      name: String(row.name ?? ""),
+      levels: levels.map((level: Record<string, unknown>, i: number) => ({
+        id: String(level.id ?? `${row.id}-l${i}`),
+        caption: String(level.caption ?? ""),
+        shortLabel: String(level.short_label ?? level.shortLabel ?? ""),
+        reportable: level.reportable !== false,
+        sortOrder: Number(level.sort_order ?? level.sortOrder ?? i),
+      })),
+      createdBy: String(row.created_by ?? ""),
+      createdByName: String(row.created_by_name ?? ""),
+      createdAt: String(row.created_at ?? ""),
+    };
+  }
+
+  private mapIspProgram(row: Record<string, unknown>): IspProgram {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      planYear: String(row.plan_year ?? ""),
+      name: String(row.name ?? ""),
+      effectiveOn: String(row.effective_on ?? "").slice(0, 10),
+      expiresOn: String(row.expires_on ?? "").slice(0, 10),
+      schedule: (row.schedule as IspProgram["schedule"]) ?? "per_shift",
+      maxEntriesPerDay: Number(row.max_entries_per_day ?? 1),
+      scoringMethodId: String(row.scoring_method_id ?? ""),
+      status: (row.status as IspProgram["status"]) ?? "draft",
+      approvedBy: String(row.approved_by ?? ""),
+      approvedByName: String(row.approved_by_name ?? ""),
+      approvedAt: String(row.approved_at ?? ""),
+      createdBy: String(row.created_by ?? ""),
+      createdByName: String(row.created_by_name ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+    };
+  }
+
+  async getIspData(individualId: string): Promise<{
+    programs: IspProgramView[];
+    scoringMethods: IspScoringMethod[];
+    notes: ShiftNoteView[];
+  }> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    void person;
+    const staffSeesAll = canConfigureIspTasks(session.roleKey);
+    let programQuery = this.client
+      .from("isp_programs")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("plan_year", { ascending: false });
+    if (!staffSeesAll) programQuery = programQuery.eq("status", "approved");
+    const { data: programRows, error: programError } = await programQuery;
+    throwIf(programError, "Could not load ISP programs.");
+    const programs = (programRows ?? []).map((row) => this.mapIspProgram(row));
+    const programIds = programs.map((program) => program.id);
+    const { data: taskRows, error: taskError } = programIds.length
+      ? await this.client
+          .from("isp_program_tasks")
+          .select("*")
+          .in("program_id", programIds)
+          .order("sort_order", { ascending: true })
+      : { data: [], error: null };
+    throwIf(taskError, "Could not load ISP tasks.");
+    const { data: methodRows, error: methodError } = await this.client
+      .from("isp_scoring_methods")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .order("name", { ascending: true });
+    throwIf(methodError, "Could not load scoring methods.");
+    const scoringMethods = (methodRows ?? []).map((row) => this.mapIspScoringMethod(row));
+    const { data: noteRows, error: noteError } = await this.client
+      .from("shift_notes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .is("deleted_at", null)
+      .order("note_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(30);
+    throwIf(noteError, "Could not load shift notes.");
+    const noteIds = (noteRows ?? []).map((row) => String(row.id));
+    const { data: scoreRows, error: scoreError } = noteIds.length
+      ? await this.client.from("shift_note_task_scores").select("*").in("note_id", noteIds)
+      : { data: [], error: null };
+    throwIf(scoreError, "Could not load note scores.");
+    const tasksByProgram = new Map<string, { id: string; programId: string; title: string; instructions: string; sortOrder: number }[]>();
+    for (const row of taskRows ?? []) {
+      const list = tasksByProgram.get(String(row.program_id)) ?? [];
+      list.push({
+        id: String(row.id),
+        programId: String(row.program_id),
+        title: String(row.title ?? ""),
+        instructions: String(row.instructions ?? ""),
+        sortOrder: Number(row.sort_order ?? 0),
+      });
+      tasksByProgram.set(String(row.program_id), list);
+    }
+    const taskTitleById = new Map<string, string>();
+    for (const tasks of tasksByProgram.values()) {
+      for (const task of tasks) taskTitleById.set(task.id, task.title);
+    }
+    const scoresByNote = new Map<string, ShiftNoteView["scores"]>();
+    for (const row of scoreRows ?? []) {
+      const list = scoresByNote.get(String(row.note_id)) ?? [];
+      list.push({
+        id: String(row.id),
+        noteId: String(row.note_id),
+        taskId: String(row.task_id),
+        taskTitle: taskTitleById.get(String(row.task_id)) ?? "",
+        levelId: String(row.level_id),
+        comment: String(row.comment ?? ""),
+      });
+      scoresByNote.set(String(row.note_id), list);
+    }
+    const methodById = new Map(scoringMethods.map((method) => [method.id, method]));
+    return {
+      programs: programs.map((program) => ({
+        ...program,
+        tasks: tasksByProgram.get(program.id) ?? [],
+        scoringMethod: methodById.get(program.scoringMethodId) ?? null,
+      })),
+      scoringMethods,
+      notes: (noteRows ?? []).map((row) => {
+        const program = programs.find((item) => item.id === String(row.program_id));
+        return {
+          id: String(row.id),
+          agencyId: String(row.agency_id),
+          individualId: String(row.individual_id),
+          programId: String(row.program_id),
+          noteDate: String(row.note_date ?? "").slice(0, 10),
+          shift: String(row.shift ?? ""),
+          summary: String(row.summary ?? ""),
+          timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
+          staffUserId: String(row.staff_user_id ?? ""),
+          staffName: String(row.staff_name ?? ""),
+          createdAt: String(row.created_at ?? ""),
+          updatedAt: String(row.updated_at ?? ""),
+          deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+          programName: program?.name ?? "ISP program",
+          scoringMethodName:
+            methodById.get(program?.scoringMethodId ?? "")?.name ?? "",
+          scores: scoresByNote.get(String(row.id)) ?? [],
+        };
+      }),
+    };
+  }
+
+  private async requireIspProgram(programId: string) {
+    const session = await this.requireSession();
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const { data, error } = await this.client
+      .from("isp_programs")
+      .select("*")
+      .eq("id", programId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(error, "ISP program not found.");
+    return { session, program: this.mapIspProgram(data as Record<string, unknown>) };
+  }
+
+  async createIspProgram(
+    individualId: string,
+    input: Parameters<ComplyraApi["createIspProgram"]>[1],
+  ) {
+    const session = await this.requireSession();
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    void person;
+    const name = input.name.trim();
+    if (!name) throw new Error("Give the ISP program a name.");
+    if (!/^\d{4}$/.test(input.planYear.trim())) {
+      throw new Error("Plan year must be a four-digit year.");
+    }
+    if (input.expiresOn < input.effectiveOn) {
+      throw new Error("The expiry date must be on or after the effective date.");
+    }
+    const { data: method, error: methodError } = await this.client
+      .from("isp_scoring_methods")
+      .select("id")
+      .eq("id", input.scoringMethodId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(methodError, "Choose a scoring method for the program.");
+    void method;
+    const maxEntries = Math.trunc(input.maxEntriesPerDay);
+    if (!Number.isFinite(maxEntries) || maxEntries < 1 || maxEntries > 10) {
+      throw new Error("Max entries per day must be between 1 and 10.");
+    }
+    const { data, error } = await this.client
+      .from("isp_programs")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: individualId,
+        plan_year: input.planYear.trim(),
+        name,
+        effective_on: input.effectiveOn,
+        expires_on: input.expiresOn,
+        schedule: input.schedule,
+        max_entries_per_day: maxEntries,
+        scoring_method_id: input.scoringMethodId,
+        status: "draft",
+        created_by: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not create the ISP program.");
+    return String((data as { id: string }).id);
+  }
+
+  async updateIspProgram(
+    programId: string,
+    patch: Parameters<ComplyraApi["updateIspProgram"]>[1],
+  ) {
+    const { session, program } = await this.requireIspProgram(programId);
+    void program;
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new Error("Give the ISP program a name.");
+      update.name = name;
+    }
+    if (patch.effectiveOn !== undefined) update.effective_on = patch.effectiveOn;
+    if (patch.expiresOn !== undefined) update.expires_on = patch.expiresOn;
+    if (patch.schedule !== undefined) update.schedule = patch.schedule;
+    if (patch.maxEntriesPerDay !== undefined) {
+      const maxEntries = Math.trunc(patch.maxEntriesPerDay);
+      if (!Number.isFinite(maxEntries) || maxEntries < 1 || maxEntries > 10) {
+        throw new Error("Max entries per day must be between 1 and 10.");
+      }
+      update.max_entries_per_day = maxEntries;
+    }
+    if (patch.scoringMethodId !== undefined) {
+      const { data: method, error: methodError } = await this.client
+        .from("isp_scoring_methods")
+        .select("id")
+        .eq("id", patch.scoringMethodId)
+        .eq("agency_id", session.agencyId)
+        .single();
+      throwIf(methodError, "Choose a scoring method for the program.");
+      void method;
+      update.scoring_method_id = patch.scoringMethodId;
+    }
+    const { error } = await this.client.from("isp_programs").update(update).eq("id", programId);
+    throwIf(error, "Could not update the ISP program.");
+  }
+
+  async approveIspProgram(programId: string) {
+    const { session, program } = await this.requireIspProgram(programId);
+    if (program.status === "approved") throw new Error("This program is already approved.");
+    const { data: tasks, error: taskError } = await this.client
+      .from("isp_program_tasks")
+      .select("id")
+      .eq("program_id", programId);
+    throwIf(taskError, "Could not load ISP tasks.");
+    if (!tasks?.length) throw new Error("Add at least one task before approving the program.");
+    const now = new Date().toISOString();
+    const { error: supersedeError } = await this.client
+      .from("isp_programs")
+      .update({ status: "superseded", updated_at: now })
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", program.individualId)
+      .eq("plan_year", program.planYear)
+      .eq("status", "approved")
+      .neq("id", programId);
+    throwIf(supersedeError, "Could not supersede the prior program.");
+    const { error } = await this.client
+      .from("isp_programs")
+      .update({
+        status: "approved",
+        approved_by: session.userId,
+        approved_by_name: session.fullName,
+        approved_at: now,
+        updated_at: now,
+      })
+      .eq("id", programId);
+    throwIf(error, "Could not approve the ISP program.");
+  }
+
+  async saveIspProgramTasks(
+    programId: string,
+    tasks: Parameters<ComplyraApi["saveIspProgramTasks"]>[1],
+  ) {
+    await this.requireIspProgram(programId);
+    const clean = tasks
+      .map((task) => ({
+        title: normalizeTaskTitle(task.title),
+        instructions: task.instructions.trim().slice(0, 500),
+      }))
+      .filter((task) => task.title.length > 0);
+    if (clean.length > 60) throw new Error("An ISP program holds at most 60 tasks.");
+    const { error: deleteError } = await this.client
+      .from("isp_program_tasks")
+      .delete()
+      .eq("program_id", programId);
+    throwIf(deleteError, "Could not replace the task list.");
+    if (clean.length) {
+      const { error } = await this.client.from("isp_program_tasks").insert(
+        clean.map((task, i) => ({
+          program_id: programId,
+          title: task.title,
+          instructions: task.instructions,
+          sort_order: i,
+        })),
+      );
+      throwIf(error, "Could not save the tasks.");
+    }
+  }
+
+  async createIspScoringMethod(
+    input: Parameters<ComplyraApi["createIspScoringMethod"]>[0],
+  ) {
+    const session = await this.requireSession();
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const name = input.name.trim();
+    if (!name) throw new Error("Give the scoring method a name.");
+    const levels = input.levels
+      .map((level) => ({
+        caption: level.caption.trim(),
+        short_label: level.shortLabel.trim().slice(0, 8),
+        reportable: level.reportable,
+      }))
+      .filter((level) => level.caption.length > 0 && level.short_label.length > 0);
+    if (levels.length < 2) throw new Error("A scoring method needs at least two levels.");
+    if (levels.length > 10) throw new Error("A scoring method holds at most 10 levels.");
+    const { data, error } = await this.client
+      .from("isp_scoring_methods")
+      .insert({
+        agency_id: session.agencyId,
+        name,
+        levels: levels.map((level, i) => ({ id: crypto.randomUUID(), ...level, sort_order: i })),
+        created_by: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not create the scoring method.");
+    return String((data as { id: string }).id);
+  }
+
+  async saveShiftNote(input: Parameters<ComplyraApi["saveShiftNote"]>[0]) {
+    const session = await this.requireSession();
+    if (!canEnterShiftNotes(session.roleKey)) {
+      throw new Error("Your role cannot enter shift notes.");
+    }
+    const { data: programRow, error: programError } = await this.client
+      .from("isp_programs")
+      .select("*")
+      .eq("id", input.programId)
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", input.individualId)
+      .single();
+    throwIf(programError, "ISP program not found.");
+    const program = this.mapIspProgram(programRow as Record<string, unknown>);
+    if (!ispProgramVisibleToStaff(program)) {
+      throw new Error("Notes can only be entered against an approved ISP program.");
+    }
+    const shift = input.shift.trim().slice(0, 40);
+    if (!shift) throw new Error("Choose the shift for this note.");
+    const { data: taskRows, error: taskError } = await this.client
+      .from("isp_program_tasks")
+      .select("id")
+      .eq("program_id", program.id);
+    throwIf(taskError, "Could not load ISP tasks.");
+    const taskIds = new Set((taskRows ?? []).map((row) => String(row.id)));
+    const { data: methodRow, error: methodError } = await this.client
+      .from("isp_scoring_methods")
+      .select("levels")
+      .eq("id", program.scoringMethodId)
+      .single();
+    throwIf(methodError, "Could not load the scoring method.");
+    const levelIds = new Set(
+      (Array.isArray(methodRow?.levels) ? methodRow.levels : []).map((level: { id: string }) =>
+        String(level.id),
+      ),
+    );
+    const cleanScores = input.scores
+      .map((score) => ({
+        taskId: score.taskId,
+        levelId: score.levelId,
+        comment: score.comment.trim().slice(0, 1000),
+      }))
+      .filter((score) => taskIds.has(score.taskId));
+    for (const score of cleanScores) {
+      if (!levelIds.has(score.levelId)) {
+        throw new Error("Choose a valid score for every scored task.");
+      }
+    }
+    const now = new Date().toISOString();
+    const summary = input.summary.trim().slice(0, 4000);
+    const timeSpent =
+      input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes));
+    let noteId = input.noteId ?? "";
+    if (noteId) {
+      const { data: existing, error: existingError } = await this.client
+        .from("shift_notes")
+        .select("*")
+        .eq("id", noteId)
+        .eq("agency_id", session.agencyId)
+        .eq("individual_id", input.individualId)
+        .eq("program_id", program.id)
+        .is("deleted_at", null)
+        .single();
+      throwIf(existingError, "Shift note not found.");
+      const existingUserId = String(
+        (existing as Record<string, unknown>).staff_user_id ?? "",
+      );
+      if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: existingUserId })) {
+        throw new Error("You can only edit your own shift notes.");
+      }
+      const { error } = await this.client
+        .from("shift_notes")
+        .update({
+          note_date: input.noteDate,
+          shift,
+          summary,
+          time_spent_minutes: timeSpent,
+          updated_at: now,
+        })
+        .eq("id", noteId);
+      throwIf(error, "Could not update the shift note.");
+      const { error: scoreDeleteError } = await this.client
+        .from("shift_note_task_scores")
+        .delete()
+        .eq("note_id", noteId);
+      throwIf(scoreDeleteError, "Could not replace the note scores.");
+    } else {
+      const { data, error } = await this.client
+        .from("shift_notes")
+        .insert({
+          agency_id: session.agencyId,
+          individual_id: input.individualId,
+          program_id: program.id,
+          note_date: input.noteDate,
+          shift,
+          summary,
+          time_spent_minutes: timeSpent,
+          staff_user_id: session.userId,
+          staff_name: session.fullName,
+        })
+        .select("id")
+        .single();
+      throwIf(error, "Could not save the shift note.");
+      noteId = String((data as { id: string }).id);
+    }
+    if (cleanScores.length) {
+      const { error } = await this.client.from("shift_note_task_scores").insert(
+        cleanScores.map((score) => ({
+          note_id: noteId,
+          task_id: score.taskId,
+          level_id: score.levelId,
+          comment: score.comment,
+        })),
+      );
+      throwIf(error, "Could not save the task scores.");
+    }
+    return noteId;
+  }
+
+  async deleteShiftNote(noteId: string) {
+    const session = await this.requireSession();
+    if (!canEnterShiftNotes(session.roleKey)) {
+      throw new Error("Your role cannot enter shift notes.");
+    }
+    const { data, error } = await this.client
+      .from("shift_notes")
+      .select("*")
+      .eq("id", noteId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .single();
+    throwIf(error, "Shift note not found.");
+    const noteUserId = String((data as Record<string, unknown>).staff_user_id ?? "");
+    if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: noteUserId })) {
+      throw new Error("You can only delete your own shift notes.");
+    }
+    const now = new Date().toISOString();
+    const { error: updateError } = await this.client
+      .from("shift_notes")
+      .update({ deleted_at: now, updated_at: now })
+      .eq("id", noteId);
+    throwIf(updateError, "Could not delete the shift note.");
+  }
+
+  async getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    const { data: individualRows, error: individualError } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(individualError, "Could not load shift notes.");
+    const individualIds = (individualRows ?? []).map((row) => String(row.id));
+    if (individualIds.length === 0) return [];
+    const { data: noteRows, error: noteError } = await this.client
+      .from("shift_notes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .in("individual_id", individualIds)
+      .is("deleted_at", null)
+      .order("note_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(100);
+    throwIf(noteError, "Could not load shift notes.");
+    const noteIds = (noteRows ?? []).map((row) => String(row.id));
+    const programIds = [...new Set((noteRows ?? []).map((row) => String(row.program_id)))];
+    const { data: scoreRows, error: scoreError } = noteIds.length
+      ? await this.client.from("shift_note_task_scores").select("*").in("note_id", noteIds)
+      : { data: [], error: null };
+    throwIf(scoreError, "Could not load note scores.");
+    const { data: programRows, error: programError } = programIds.length
+      ? await this.client.from("isp_programs").select("id, name").in("id", programIds)
+      : { data: [], error: null };
+    throwIf(programError, "Could not load shift notes.");
+    const nameById = new Map(
+      (individualRows ?? []).map((row) => [String(row.id), String(row.full_name ?? "")]),
+    );
+    const programById = new Map(
+      (programRows ?? []).map((row) => [String(row.id), String(row.name ?? "ISP program")]),
+    );
+    const scoresByNote = new Map<string, ShiftNoteView["scores"]>();
+    for (const row of scoreRows ?? []) {
+      const list = scoresByNote.get(String(row.note_id)) ?? [];
+      list.push({
+        id: String(row.id),
+        noteId: String(row.note_id),
+        taskId: String(row.task_id),
+        taskTitle: "",
+        levelId: String(row.level_id),
+        comment: String(row.comment ?? ""),
+      });
+      scoresByNote.set(String(row.note_id), list);
+    }
+    return (noteRows ?? []).map((row) => ({
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      programId: String(row.program_id),
+      noteDate: String(row.note_date ?? "").slice(0, 10),
+      shift: String(row.shift ?? ""),
+      summary: String(row.summary ?? ""),
+      timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
+      staffUserId: String(row.staff_user_id ?? ""),
+      staffName: String(row.staff_name ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+      deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+      programName: programById.get(String(row.program_id)) ?? "ISP program",
+      scoringMethodName: "",
+      scores: scoresByNote.get(String(row.id)) ?? [],
+      individualName: nameById.get(String(row.individual_id)) ?? "",
+    }));
   }
 
   async updateObligation(

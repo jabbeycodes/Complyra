@@ -17,6 +17,7 @@
  * provider list shows "No providers yet".
  */
 import { useState } from "react";
+import type { MouseEvent } from "react";
 import { Pencil, Plus, Printer } from "lucide-react";
 import { Empty } from "../components";
 import {
@@ -172,6 +173,14 @@ function ContactEditor({
       </div>
     </form>
   );
+}
+
+/** In-page scroll for the quiet section links (see note at the nav). */
+function scrollToChartSection(id: string) {
+  return (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 }
 
 export default function ChartOverview({
@@ -550,13 +559,15 @@ export default function ChartOverview({
         />
       ) : null}
 
-      {/* 6. Quiet links — Shift notes stays last. */}
+      {/* 6. Quiet links — Shift notes stays last.
+          Plain hash hrefs would trip the app's hash router (App.tsx treats
+          "#<page>" as a page key), so scroll in-page instead. */}
       <nav className="overview-links" aria-label="Chart sections">
-        <a href="#chart-appointments">Appointments</a>
+        <a href="#chart-appointments" onClick={scrollToChartSection("chart-appointments")}>Appointments</a>
         <span aria-hidden="true">·</span>
-        <a href="#chart-meds">Medication board</a>
+        <a href="#chart-meds" onClick={scrollToChartSection("chart-meds")}>Medication board</a>
         <span aria-hidden="true">·</span>
-        <a href="#chart-shift-notes">Shift notes</a>
+        <a href="#chart-shift-notes" onClick={scrollToChartSection("chart-shift-notes")}>Shift notes</a>
       </nav>
     </section>
   );

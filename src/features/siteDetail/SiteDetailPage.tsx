@@ -28,7 +28,6 @@ import { monthKeyOf, monthLabel } from "../../data/mileage";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
-  documentStatusLabel,
   formatDrillTypeLabel,
   sortOpenRequirements,
   trainingProgressLine,
@@ -43,7 +42,7 @@ import type {
   StaffTrainingProfile,
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
-import type { DocumentUpload } from "../../data/documents";
+import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
@@ -87,7 +86,7 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   medications: Pill,
   mileage: CarFront,
   drills: Flame,
-  documents: FileText,
+  shiftnotes: FileText,
   staff: Users,
 };
 
@@ -117,7 +116,7 @@ export default function SiteDetailPage({
   const [trainingRows, setTrainingRows] = useState<TrainingRow[] | null>(null);
   const [medStatus, setMedStatus] = useState<MedSupplyStatus | null>(null);
   const [trips, setTrips] = useState<MileageTripView[] | null>(null);
-  const [documents, setDocuments] = useState<DocumentUpload[] | null>(null);
+  const [siteNotes, setSiteNotes] = useState<SiteShiftNoteView[] | null>(null);
   const [loading, setLoading] = useState<Partial<Record<SiteDetailTabId, boolean>>>({});
   const [tabError, setTabError] = useState<Partial<Record<SiteDetailTabId, string>>>({});
 
@@ -236,9 +235,8 @@ export default function SiteDetailPage({
         if (tabId === "mileage") {
           setTrips(await api.listMileageTrips(siteId, monthKey));
         }
-        if (tabId === "documents" && documents === null) {
-          const all = await api.listDocumentUploads();
-          setDocuments(all.filter((d) => d.siteId === siteId));
+        if (tabId === "shiftnotes" && siteNotes === null) {
+          setSiteNotes(await api.getSiteShiftNotes(siteId));
         }
       } catch (err) {
         setTabError((prev) => ({
@@ -258,7 +256,7 @@ export default function SiteDetailPage({
       qaHistory,
       checklists,
       delegations,
-      documents,
+      siteNotes,
       medStatus,
       trainingRows,
     ],
@@ -982,44 +980,55 @@ export default function SiteDetailPage({
           </div>
         )}
 
-        {activeTab === "documents" && !loading.documents && (
+        {/* Issue #80: the Documents tab becomes Shift notes. Standalone
+            document uploads stay reachable via the Documents page. */}
+        {activeTab === "shiftnotes" && !loading.shiftnotes && (
           <div className="panel">
-            <h2>Site documents</h2>
-            {!documents?.length && (
+            <h2>Shift notes</h2>
+            <p className="stack-help">
+              Notes staff entered against approved ISP programs for Individuals
+              at this home. To enter a note, open the Individual's chart.
+            </p>
+            {!siteNotes?.length && (
               <Empty
-                mark="none"
-                title="No documents"
-                text="No documents filed for this home yet."
+                mark="quiet"
+                title="No shift notes yet"
+                text="No notes have been entered for this home yet."
                 actions={
                   onOpenPage && pageVisible(session, "Documents") ? (
                     <button
                       type="button"
-                      className="button primary"
+                      className="button"
                       onClick={() => onOpenPage("Documents")}
                     >
-                      Upload a document
+                      Open documents
                     </button>
                   ) : undefined
                 }
               />
             )}
-            {!!documents?.length && (
+            {!!siteNotes?.length && (
               <ul className="record-list">
-                {documents.map((d) => (
-                  <li key={d.id} className="record-row">
+                {siteNotes.map((note) => (
+                  <li key={note.id} className="record-row">
                     <div>
-                      <strong>{d.originalFilename}</strong>
+                      <strong>
+                        {note.individualName} · {note.noteDate} · {note.shift}
+                      </strong>
                       <span className="muted">
                         {" "}
-                        · {d.documentType} · uploaded {formatDate(d.uploadedAt)}
+                        · {note.programName} · {note.staffName}
+                        {note.scores.length > 0 &&
+                          ` · ${note.scores.length} task${note.scores.length === 1 ? "" : "s"} scored`}
                       </span>
+                      {note.summary && <p className="muted">{note.summary}</p>}
                     </div>
-                    <Badge status={documentStatusLabel(d.status)} />
+                    <Badge status={note.shift} />
                   </li>
                 ))}
               </ul>
             )}
-            {onOpenPage && !!documents?.length && pageVisible(session, "Documents") && (
+            {onOpenPage && !!siteNotes?.length && pageVisible(session, "Documents") && (
               <div className="site-panel-actions">
                 <button type="button" className="button" onClick={() => onOpenPage("Documents")}>
                   Open documents

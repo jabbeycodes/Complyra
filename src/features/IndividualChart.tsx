@@ -51,6 +51,15 @@ import {
 import DelegationFormDetail from "./delegations/DelegationFormDetail";
 // LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
 import MedInventoryCard from "./medInventory/MedInventoryCard";
+// Issue #80: ISP / PCSP task config + shift-note entry.
+import IspConfigSection from "./isp/IspConfigSection";
+import ShiftNoteSection from "./isp/ShiftNoteSection";
+import { useIspData } from "./isp/useIspData";
+import {
+  canConfigureIspTasks,
+  canEnterShiftNotes,
+  canSeeShiftNotes,
+} from "../data/permissions";
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
   { value: "doctor_notes", label: "Doctor's notes" },
@@ -71,6 +80,9 @@ export default function IndividualChart({
   const [error, setError] = useState("");
   // LIFEPATH-P3: which delegation's form detail is open (template toggle lives there).
   const [formDelegationId, setFormDelegationId] = useState<string | null>(null);
+  // Issue #80: ISP data (hook must run before the early return below).
+  const ispEnabled = session !== null && canSeeShiftNotes(session.roleKey);
+  const isp = useIspData(api, individualId, ispEnabled);
 
   if (!session || !stack || !person) return null;
 
@@ -86,6 +98,16 @@ export default function IndividualChart({
   const completeAppointments = canCompleteAppointments(chartSession.roleKey);
   const profile = chartStack.profile;
   const delegations = chartStack.required.filter((view) => view.item.kind === "delegation");
+  // Issue #80: ISP / PCSP tasks config + shift notes.
+  const configureIsp = canConfigureIspTasks(chartSession.roleKey);
+  const enterShiftNotes = canEnterShiftNotes(chartSession.roleKey);
+  const pcspSeedTitles = [...chartStack.required, ...chartStack.checked]
+    .filter((view) => view.item.kind === "pcsp" || view.item.kind === "shift_task")
+    .map((view) => view.item.title);
+  async function runIsp(action: () => Promise<unknown>) {
+    await run(() => action().then(() => undefined));
+    await isp.reload();
+  }
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -249,6 +271,18 @@ export default function IndividualChart({
               </div>
             )}
           </section>
+        )}
+
+        {/* Issue #80: ISP / PCSP task config sits right after Care plan —
+            DPM / administrator only (founder lock: Option A). */}
+        {widgets && configureIsp && isp.data && (
+          <IspConfigSection
+            individualId={individualId}
+            data={isp.data}
+            api={api}
+            runIsp={runIsp}
+            pcspSeedTitles={pcspSeedTitles}
+          />
         )}
 
         {widgets && (
@@ -492,20 +526,40 @@ export default function IndividualChart({
           ))}
         </section>
 
-        {/* Issue #81: quiet-link anchor. Shift note entry ships in a later
-            update; this placeholder keeps the Overview link honest. */}
-        <section
-          className="chart-widget"
-          id="chart-shift-notes"
-          aria-labelledby="shift-notes-heading"
-        >
-          <h2 id="shift-notes-heading">Shift notes</h2>
-          <Empty
-            mark="quiet"
-            title="Shift notes live here soon"
-            text="Shift note entry is coming in a later update."
+        {/* Issue #80: Shift notes (ISP Data) — real entry surface. Joshua:
+            DPMs also write notes. Keeps the quiet-link anchor honest. */}
+        {isp.loading && !isp.data && ispEnabled && (
+          <section
+            className="chart-widget"
+            id="chart-shift-notes"
+            aria-labelledby="shift-notes-heading"
+          >
+            <h2 id="shift-notes-heading">Shift notes</h2>
+            <p className="muted">Loading shift notes…</p>
+          </section>
+        )}
+        {ispEnabled && isp.data && (
+          <ShiftNoteSection
+            individualId={individualId}
+            data={isp.data}
+            api={api}
+            runIsp={runIsp}
+            sessionUserId={chartSession.userId}
+            roleKey={chartSession.roleKey}
+            canEnter={enterShiftNotes}
+            canConfigure={configureIsp}
           />
-        </section>
+        )}
+        {ispEnabled && isp.error && !isp.data && (
+          <section
+            className="chart-widget"
+            id="chart-shift-notes"
+            aria-labelledby="shift-notes-heading"
+          >
+            <h2 id="shift-notes-heading">Shift notes</h2>
+            <p className="form-error">{isp.error}</p>
+          </section>
+        )}
       </div>
 
       <AssignedDocsPanel

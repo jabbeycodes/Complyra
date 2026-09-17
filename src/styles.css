@@ -16,6 +16,8 @@
   --text: #241e18;
   --green: #4d6b42;
   --red: #b56a4e;
+  --white: #ffffff;
+  --focus-ring: #b7c4a8;
   --sidebar: 236px;
   /* Canvas inset: content and topbar share one token so they stay aligned.
      Middle band: enough air that chrome is not flush, not a giant empty rail. */
@@ -7119,4 +7121,150 @@ button.qa-row:hover {
 }
 .appointment-removed {
   opacity: 0.78;
+}
+
+/* Issue #80: ISP / PCSP task config + shift-note entry. Theme tokens only —
+   no new hex. "Individual/Individuals" wording only, never client/patient. */
+.isp-program-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: var(--sand);
+}
+.isp-program-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.isp-program-head > div:first-child {
+  min-width: 0;
+}
+.isp-program-head .chart-actions {
+  align-items: center;
+  gap: 12px;
+}
+.isp-program-body {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.isp-task-list {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+.isp-task-editor {
+  display: grid;
+  gap: 10px;
+}
+.isp-level-row {
+  grid-template-columns: 1fr 140px auto;
+  align-items: end;
+}
+.isp-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+/* Score picker: fieldset per task, radio options styled as segments. */
+.isp-score-field {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.isp-score-field legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.isp-score-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.isp-score-option {
+  position: relative;
+}
+.isp-score-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.isp-score-option span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--white);
+  cursor: pointer;
+  font-weight: 500;
+}
+.isp-score-option input:checked + span {
+  background: var(--moss);
+  border-color: var(--purple-dark);
+  color: var(--white);
+}
+.isp-score-option input:focus-visible + span {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.isp-comment-label {
+  display: grid;
+  gap: 4px;
+}
+/* Note cards. */
+.isp-notes-list {
+  display: grid;
+  gap: 10px;
+}
+.isp-notes-list h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.isp-note-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: var(--white);
+}
+.isp-note-scores {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.isp-score-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--moss);
+  color: var(--white);
+  font-weight: 600;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  .isp-level-row {
+    grid-template-columns: 1fr;
+  }
+  .isp-program-head {
+    align-items: flex-start;
+  }
 }

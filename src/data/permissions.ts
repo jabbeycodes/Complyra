@@ -641,3 +641,36 @@ export function canCreateIndividual(roleKey: string) {
     roleKey === "nurse"
   );
 }
+
+/**
+ * Issue #80 — Structured ISP Data: ISP program config. DPM/PM and administrators
+ * only: create/edit ISP programs, tasks, and scoring methods; approve programs.
+ * (DPM was merged into the PM role.)
+ */
+export function canConfigureIspTasks(roleKey: string) {
+  return ["administrator", "program_manager"].includes(roleKey);
+}
+
+/** Issue #80 — who may enter shift notes against an approved ISP program. */
+export function canEnterShiftNotes(roleKey: string) {
+  return [
+    "administrator",
+    "program_manager",
+    "house_manager",
+    "nurse",
+    "dsp",
+  ].includes(roleKey);
+}
+
+/** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
+export function canSeeShiftNotes(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "house_manager",
+    "nurse",
+    "dsp",
+    "auditor",
+  ].includes(roleKey);
+}

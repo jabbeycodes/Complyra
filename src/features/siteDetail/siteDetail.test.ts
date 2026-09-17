@@ -54,7 +54,7 @@ const EXPECTED_ORDER: SiteDetailTabId[] = [
   "medications",
   "mileage",
   "drills",
-  "documents",
+  "shiftnotes",
   "staff",
 ];
 
@@ -83,8 +83,8 @@ describe("site detail tabs", () => {
     assert.ok(ids.includes("overview"), "DSP still sees overview");
     assert.equal(
       ids[ids.length - 1],
-      "documents",
-      "last visible tab for DSP is documents",
+      "shiftnotes",
+      "last visible tab for DSP is shiftnotes",
     );
     // Administrator sees everything, staff still last.
     const adminIds = getSiteDetailTabs(sessionFor("administrator")).map((t) => t.id);
@@ -97,8 +97,8 @@ describe("site detail tabs", () => {
     // DSP has no audit.read, so no audits tab; checklists need HM/PM scope.
     assert.ok(!dspTabs.includes("audits"), "DSP does not see audits");
     assert.ok(!dspTabs.includes("checklists"), "DSP does not see checklists");
-    // DSP does see documents (documents.view is in the template).
-    assert.ok(dspTabs.includes("documents"), "DSP sees documents");
+    // DSP does see shift notes (canSeeShiftNotes covers dsp).
+    assert.ok(dspTabs.includes("shiftnotes"), "DSP sees shift notes");
   });
 
   it("shows audits to the auditor role", () => {
