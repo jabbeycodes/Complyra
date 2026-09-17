@@ -86,8 +86,7 @@ export default function MonthlyDueSettings({
         </form>
       ) : (
         <span className="monthly-due-readonly">
-          Equipment {dayOrdinal(due.equipmentDay)} · drills {dayOrdinal(due.drillDay)} ·
-          safety {dayOrdinal(due.safetyDay)}
+          {`Equipment ${dayOrdinal(due.equipmentDay)} · drills ${dayOrdinal(due.drillDay)} · safety ${dayOrdinal(due.safetyDay)}`}
         </span>
       )}
     </div>
