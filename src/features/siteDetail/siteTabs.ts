@@ -10,7 +10,7 @@ export type SiteDetailTabId =
   | "medications"
   | "mileage"
   | "drills"
-  | "documents"
+  | "shiftnotes"
   | "staff";
 
 export interface SiteDetailTab {
@@ -74,9 +74,12 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     visible: (s) => !!s && pageVisible(s, "Individuals"),
   },
   {
-    id: "documents",
-    label: "Documents",
-    visible: (s) => !!s && pageVisible(s, "Documents"),
+    // Issue #80: the Documents tab becomes Shift notes. Standalone document
+    // uploads stay reachable via the Documents page (linked from the tab's
+    // empty state). Tab order unchanged — Staff stays last (founder rule).
+    id: "shiftnotes",
+    label: "Shift notes",
+    visible: (s) => !!s && pageVisible(s, "ShiftNotes"),
   },
   { id: "staff", label: "Staff", visible: (s) => !!s && pageVisible(s, "Staff") },
 ];

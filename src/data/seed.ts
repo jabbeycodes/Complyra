@@ -150,6 +150,13 @@ export interface LocalDatabase {
   qaAudits: import("./qaAudit").QaAudit[];
   qaAuditItems: import("./qaAudit").StoredQaAuditItem[];
   qaSchedules: import("./qaAudit").QaAuditSchedule[];
+  // ISSUE-80 (shift notes / ISP Data): agency scoring methods, per-individual
+  // ISP programs + tasks, and staff shift notes with per-task scores.
+  ispScoringMethods: import("./shiftNotes").IspScoringMethod[];
+  ispPrograms: import("./shiftNotes").IspProgram[];
+  ispProgramTasks: import("./shiftNotes").IspProgramTask[];
+  shiftNotes: import("./shiftNotes").ShiftNote[];
+  shiftNoteScores: import("./shiftNotes").ShiftNoteTaskScore[];
 }
 
 /** Local demo shape for one AI extraction (mirrors document_extractions). */
@@ -704,6 +711,128 @@ export function createEvergreenSeed(): LocalDatabase {
     qaAudits: [],
     qaAuditItems: [],
     qaSchedules: [],
+    // ISSUE-80 (shift notes / ISP Data): agency scoring method + one approved
+    // program for Ellis Hart and one draft program for Morgan Pruitt (the
+    // draft exercises the approve gate — staff never see it). Shift notes
+    // accumulate at runtime.
+    ispScoringMethods: [
+      {
+        id: padId(950),
+        agencyId: AGENCY_ID,
+        name: "Daily ISP scoring",
+        levels: [
+          { id: padId(951), caption: "Yes", shortLabel: "Y", reportable: true, sortOrder: 0 },
+          { id: padId(952), caption: "No", shortLabel: "N", reportable: true, sortOrder: 1 },
+          { id: padId(953), caption: "Refused", shortLabel: "R", reportable: true, sortOrder: 2 },
+          { id: padId(954), caption: "Not applicable", shortLabel: "N/A", reportable: false, sortOrder: 3 },
+        ],
+        createdBy: profileByName["Sarah Mitchell"].id,
+        createdByName: "Sarah Mitchell",
+        createdAt: "2026-01-05T14:00:00.000Z",
+      },
+    ],
+    ispPrograms: [
+      {
+        id: padId(960),
+        agencyId: AGENCY_ID,
+        individualId: ellis.id,
+        planYear: "2026",
+        name: "2026 ISP — Daily living supports",
+        effectiveOn: "2026-01-01",
+        expiresOn: "2026-12-31",
+        schedule: "per_shift",
+        maxEntriesPerDay: 3,
+        scoringMethodId: padId(950),
+        status: "approved",
+        approvedBy: profileByName["Sarah Mitchell"].id,
+        approvedByName: "Sarah Mitchell",
+        approvedAt: "2026-01-06T10:00:00.000Z",
+        createdBy: profileByName["Sarah Mitchell"].id,
+        createdByName: "Sarah Mitchell",
+        createdAt: "2026-01-05T15:30:00.000Z",
+        updatedAt: "2026-01-06T10:00:00.000Z",
+      },
+      {
+        id: padId(961),
+        agencyId: AGENCY_ID,
+        individualId: individualByName["Morgan Pruitt"].id,
+        planYear: "2026",
+        name: "2026 ISP — Community participation",
+        effectiveOn: "2026-01-01",
+        expiresOn: "2026-12-31",
+        schedule: "per_day",
+        maxEntriesPerDay: 1,
+        scoringMethodId: padId(950),
+        status: "draft",
+        approvedBy: "",
+        approvedByName: "",
+        approvedAt: "",
+        createdBy: profileByName["Sarah Mitchell"].id,
+        createdByName: "Sarah Mitchell",
+        createdAt: "2026-02-10T09:00:00.000Z",
+        updatedAt: "2026-02-10T09:00:00.000Z",
+      },
+    ],
+    ispProgramTasks: [
+      {
+        id: padId(970),
+        programId: padId(960),
+        title: "Complete morning hygiene routine with minimal prompts",
+        instructions: "Prompt only as needed; note level of assistance.",
+        sortOrder: 0,
+      },
+      {
+        id: padId(971),
+        programId: padId(960),
+        title: "Take medications as scheduled",
+        instructions: "Observe ingestion; record any refusal.",
+        sortOrder: 1,
+      },
+      {
+        id: padId(972),
+        programId: padId(960),
+        title: "Participate in a community outing or activity",
+        instructions: "Note activity, duration, and Ellis's engagement.",
+        sortOrder: 2,
+      },
+      {
+        id: padId(973),
+        programId: padId(960),
+        title: "Follow mealtime routine and dietary guidelines",
+        instructions: "Texture-modified diet; no thin liquids.",
+        sortOrder: 3,
+      },
+      {
+        id: padId(974),
+        programId: padId(960),
+        title: "Use communication device to express needs",
+        instructions: "Encourage use before guessing needs.",
+        sortOrder: 4,
+      },
+      {
+        id: padId(975),
+        programId: padId(960),
+        title: "Complete evening routine and prepare for bed",
+        instructions: "",
+        sortOrder: 5,
+      },
+      {
+        id: padId(980),
+        programId: padId(961),
+        title: "Attend day habilitation shift",
+        instructions: "",
+        sortOrder: 0,
+      },
+      {
+        id: padId(981),
+        programId: padId(961),
+        title: "Practice bus-route independence skills",
+        instructions: "",
+        sortOrder: 1,
+      },
+    ],
+    shiftNotes: [],
+    shiftNoteScores: [],
   };
 }
 

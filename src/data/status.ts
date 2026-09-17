@@ -3,6 +3,7 @@ import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
+  canSeeShiftNotes,
   hasPermission,
   isRoleKey,
   type PermissionKey,
@@ -79,6 +80,8 @@ export function pageVisible(session: SessionUser, page: string) {
     );
   }
   if (page === "Documents") return can(session, "documents.view");
+  // Issue #80: the site-detail "Shift notes" tab mirrors chart visibility.
+  if (page === "ShiftNotes") return canSeeShiftNotes(session.roleKey);
   if (page === "Review queue") return can(session, "requirements.approve");
   if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {

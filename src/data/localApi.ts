@@ -55,8 +55,11 @@ import {
 import {
   PLAN_SIGNER_ROLE_KEYS,
   ROLE_TEMPLATES,
+  canConfigureIspTasks,
   canCreateIndividual,
   canCreateSite,
+  canEnterShiftNotes,
+  canSeeShiftNotes,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -67,6 +70,18 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
+import {
+  canEditShiftNoteRow,
+  ispProgramVisibleToStaff,
+  normalizeTaskTitle,
+  type IspProgram,
+  type IspProgramView,
+  type IspScoringMethod,
+  type ShiftNote,
+  type ShiftNoteTaskScore,
+  type ShiftNoteView,
+  type SiteShiftNoteView,
+} from "./shiftNotes";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
@@ -441,6 +456,85 @@ export interface ComplyraApi {
     individualId: string,
     diagnosis: string,
   ): Promise<void>;
+  /**
+   * Issue #80 — ISP program + shift-note data for one Individual's chart.
+   * Staff only ever receive approved programs (approve gate); DPM/admin
+   * receive drafts too. Notes are the caller's visible slice.
+   */
+  getIspData(individualId: string): Promise<{
+    programs: import("./shiftNotes").IspProgramView[];
+    scoringMethods: import("./shiftNotes").IspScoringMethod[];
+    notes: import("./shiftNotes").ShiftNoteView[];
+  }>;
+  /** Site-level shift-note list across the site's Individuals. */
+  getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]>;
+  /**
+   * Issue #80 — create an ISP program (draft). Gated by canConfigureIspTasks
+   * (PM / administrator).
+   */
+  createIspProgram(
+    individualId: string,
+    input: {
+      name: string;
+      planYear: string;
+      effectiveOn: string;
+      expiresOn: string;
+      schedule: import("./shiftNotes").IspSchedule;
+      maxEntriesPerDay: number;
+      scoringMethodId: string;
+    },
+  ): Promise<string>;
+  /** Issue #80 — edit a program's header fields. Gated by canConfigureIspTasks. */
+  updateIspProgram(
+    programId: string,
+    patch: {
+      name?: string;
+      effectiveOn?: string;
+      expiresOn?: string;
+      schedule?: import("./shiftNotes").IspSchedule;
+      maxEntriesPerDay?: number;
+      scoringMethodId?: string;
+    },
+  ): Promise<void>;
+  /**
+   * Issue #80 — approve a draft program (stamps who/when). Any other approved
+   * program for the same Individual + plan year is superseded so exactly one
+   * program stays active. Gated by canConfigureIspTasks.
+   */
+  approveIspProgram(programId: string): Promise<void>;
+  /**
+   * Issue #80 — replace a program's task list. Gated by canConfigureIspTasks.
+   */
+  saveIspProgramTasks(
+    programId: string,
+    tasks: { title: string; instructions: string }[],
+  ): Promise<void>;
+  /**
+   * Issue #80 — create an agency ISP scoring method. Gated by
+   * canConfigureIspTasks.
+   */
+  createIspScoringMethod(input: {
+    name: string;
+    levels: { caption: string; shortLabel: string; reportable: boolean }[];
+  }): Promise<string>;
+  /**
+   * Issue #80 — create or update a shift note (noteId set = update). The
+   * program must be approved. Updates are limited by canEditShiftNoteRow:
+   * authors always, HM/PM/admin within scope, DSP/nurse own-only.
+   * Soft-delete goes through deleteShiftNote.
+   */
+  saveShiftNote(input: {
+    noteId?: string;
+    individualId: string;
+    programId: string;
+    noteDate: string;
+    shift: string;
+    summary: string;
+    timeSpentMinutes: number | null;
+    scores: { taskId: string; levelId: string; comment: string }[];
+  }): Promise<string>;
+  /** Issue #80 — soft-delete a shift note. Same edit gate as saveShiftNote. */
+  deleteShiftNote(noteId: string): Promise<void>;
   updateObligation(
     obligationId: string,
     patch: Partial<
@@ -3200,6 +3294,418 @@ export class LocalApi implements ComplyraApi {
     const profile = normalizeProfile(person, person.profile);
     profile.diagnosis = diagnosis.trim();
     person.profile = profile;
+    await persistMeta(this.store);
+  }
+
+  // ------------------------------------------------------------------
+  // Issue #80 — ISP programs + shift notes (Therap-informed).
+  // ------------------------------------------------------------------
+
+  private ispProgramView(program: IspProgram): IspProgramView {
+    const tasks = this.store.db.ispProgramTasks
+      .filter((task) => task.programId === program.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const scoringMethod =
+      this.store.db.ispScoringMethods.find((method) => method.id === program.scoringMethodId) ??
+      null;
+    return { ...program, tasks, scoringMethod };
+  }
+
+  private shiftNoteView(note: ShiftNote): ShiftNoteView {
+    const program = this.store.db.ispPrograms.find((row) => row.id === note.programId);
+    const taskById = new Map(this.store.db.ispProgramTasks.map((task) => [task.id, task]));
+    const scoringMethod = this.store.db.ispScoringMethods.find(
+      (method) => method.id === program?.scoringMethodId,
+    );
+    const scores = this.store.db.shiftNoteScores
+      .filter((score) => score.noteId === note.id)
+      .sort((a, b) => a.taskId.localeCompare(b.taskId))
+      .map((score) => ({ ...score, taskTitle: taskById.get(score.taskId)?.title ?? "" }));
+    return {
+      ...note,
+      programName: program?.name ?? "ISP program",
+      scoringMethodName: scoringMethod?.name ?? "",
+      scores,
+    };
+  }
+
+  async getIspData(individualId: string) {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const staffSeesAll = canConfigureIspTasks(session.roleKey);
+    const programs = this.store.db.ispPrograms
+      .filter(
+        (program) =>
+          program.agencyId === session.agencyId &&
+          program.individualId === individualId &&
+          (staffSeesAll || ispProgramVisibleToStaff(program)),
+      )
+      .sort((a, b) => b.planYear.localeCompare(a.planYear))
+      .map((program) => this.ispProgramView(program));
+    const scoringMethods = this.store.db.ispScoringMethods.filter(
+      (method) => method.agencyId === session.agencyId,
+    );
+    const notes = this.store.db.shiftNotes
+      .filter(
+        (note) =>
+          note.agencyId === session.agencyId &&
+          note.individualId === individualId &&
+          !note.deletedAt,
+      )
+      .sort((a, b) => b.noteDate.localeCompare(a.noteDate) || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 30)
+      .map((note) => this.shiftNoteView(note));
+    return { programs, scoringMethods, notes };
+  }
+
+  async getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]> {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    const names = new Map(
+      this.store.db.individuals.map((person) => [
+        person.id,
+        { siteId: person.siteId, name: person.fullName },
+      ]),
+    );
+    return this.store.db.shiftNotes
+      .filter((note) => !note.deletedAt && names.get(note.individualId)?.siteId === siteId)
+      .sort(
+        (a, b) =>
+          b.noteDate.localeCompare(a.noteDate) || b.createdAt.localeCompare(a.createdAt),
+      )
+      .map((note) => ({
+        ...this.shiftNoteView(note),
+        individualName: names.get(note.individualId)?.name ?? "",
+      }));
+  }
+
+  async createIspProgram(
+    individualId: string,
+    input: Parameters<ComplyraApi["createIspProgram"]>[1],
+  ) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const name = input.name.trim();
+    if (!name) throw new Error("Give the ISP program a name.");
+    if (!/^\d{4}$/.test(input.planYear.trim())) {
+      throw new Error("Plan year must be a four-digit year.");
+    }
+    assertCalendarDate(input.effectiveOn, "Use a valid effective date.");
+    assertCalendarDate(input.expiresOn, "Use a valid expiry date.");
+    if (input.expiresOn < input.effectiveOn) {
+      throw new Error("The expiry date must be on or after the effective date.");
+    }
+    const method = this.store.db.ispScoringMethods.find(
+      (row) => row.id === input.scoringMethodId && row.agencyId === session.agencyId,
+    );
+    if (!method) throw new Error("Choose a scoring method for the program.");
+    const maxEntries = Math.trunc(input.maxEntriesPerDay);
+    if (!Number.isFinite(maxEntries) || maxEntries < 1 || maxEntries > 10) {
+      throw new Error("Max entries per day must be between 1 and 10.");
+    }
+    const now = new Date().toISOString();
+    const program: IspProgram = {
+      id: `isp-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      individualId,
+      planYear: input.planYear.trim(),
+      name,
+      effectiveOn: input.effectiveOn,
+      expiresOn: input.expiresOn,
+      schedule: input.schedule,
+      maxEntriesPerDay: maxEntries,
+      scoringMethodId: method.id,
+      status: "draft",
+      approvedBy: "",
+      approvedByName: "",
+      approvedAt: "",
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.store.db.ispPrograms.unshift(program);
+    await persistMeta(this.store);
+    return program.id;
+  }
+
+  async updateIspProgram(
+    programId: string,
+    patch: Parameters<ComplyraApi["updateIspProgram"]>[1],
+  ) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const program = this.store.db.ispPrograms.find(
+      (row) => row.id === programId && row.agencyId === session.agencyId,
+    );
+    if (!program) throw new Error("ISP program not found.");
+    accessibleIndividual(this.store, session, program.individualId);
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new Error("Give the ISP program a name.");
+      program.name = name;
+    }
+    if (patch.effectiveOn !== undefined) {
+      assertCalendarDate(patch.effectiveOn, "Use a valid effective date.");
+      program.effectiveOn = patch.effectiveOn;
+    }
+    if (patch.expiresOn !== undefined) {
+      assertCalendarDate(patch.expiresOn, "Use a valid expiry date.");
+      program.expiresOn = patch.expiresOn;
+    }
+    if (program.expiresOn < program.effectiveOn) {
+      throw new Error("The expiry date must be on or after the effective date.");
+    }
+    if (patch.schedule !== undefined) program.schedule = patch.schedule;
+    if (patch.maxEntriesPerDay !== undefined) {
+      const maxEntries = Math.trunc(patch.maxEntriesPerDay);
+      if (!Number.isFinite(maxEntries) || maxEntries < 1 || maxEntries > 10) {
+        throw new Error("Max entries per day must be between 1 and 10.");
+      }
+      program.maxEntriesPerDay = maxEntries;
+    }
+    if (patch.scoringMethodId !== undefined) {
+      const method = this.store.db.ispScoringMethods.find(
+        (row) => row.id === patch.scoringMethodId && row.agencyId === session.agencyId,
+      );
+      if (!method) throw new Error("Choose a scoring method for the program.");
+      program.scoringMethodId = method.id;
+    }
+    program.updatedAt = new Date().toISOString();
+    await persistMeta(this.store);
+  }
+
+  async approveIspProgram(programId: string) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can approve ISP programs.");
+    }
+    const program = this.store.db.ispPrograms.find(
+      (row) => row.id === programId && row.agencyId === session.agencyId,
+    );
+    if (!program) throw new Error("ISP program not found.");
+    accessibleIndividual(this.store, session, program.individualId);
+    if (program.status === "approved") throw new Error("This program is already approved.");
+    const tasks = this.store.db.ispProgramTasks.filter((task) => task.programId === program.id);
+    if (tasks.length === 0) {
+      throw new Error("Add at least one task before approving the program.");
+    }
+    const now = new Date().toISOString();
+    // Exactly one active program per Individual + plan year: supersede the rest.
+    for (const other of this.store.db.ispPrograms) {
+      if (
+        other.id !== program.id &&
+        other.agencyId === session.agencyId &&
+        other.individualId === program.individualId &&
+        other.planYear === program.planYear &&
+        other.status === "approved"
+      ) {
+        other.status = "superseded";
+        other.updatedAt = now;
+      }
+    }
+    program.status = "approved";
+    program.approvedBy = session.userId;
+    program.approvedByName = session.fullName;
+    program.approvedAt = now;
+    program.updatedAt = now;
+    await persistMeta(this.store);
+  }
+
+  async saveIspProgramTasks(
+    programId: string,
+    tasks: Parameters<ComplyraApi["saveIspProgramTasks"]>[1],
+  ) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const program = this.store.db.ispPrograms.find(
+      (row) => row.id === programId && row.agencyId === session.agencyId,
+    );
+    if (!program) throw new Error("ISP program not found.");
+    accessibleIndividual(this.store, session, program.individualId);
+    const clean = tasks
+      .map((task) => ({
+        title: normalizeTaskTitle(task.title),
+        instructions: task.instructions.trim().slice(0, 500),
+      }))
+      .filter((task) => task.title.length > 0);
+    if (clean.length > 60) throw new Error("An ISP program holds at most 60 tasks.");
+    this.store.db.ispProgramTasks = this.store.db.ispProgramTasks.filter(
+      (task) => task.programId !== program.id,
+    );
+    clean.forEach((task, i) => {
+      this.store.db.ispProgramTasks.push({
+        id: `ispt-${crypto.randomUUID().slice(0, 8)}`,
+        programId: program.id,
+        title: task.title,
+        instructions: task.instructions,
+        sortOrder: i,
+      });
+    });
+    program.updatedAt = new Date().toISOString();
+    await persistMeta(this.store);
+  }
+
+  async createIspScoringMethod(
+    input: Parameters<ComplyraApi["createIspScoringMethod"]>[0],
+  ) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can configure ISP programs.");
+    }
+    const name = input.name.trim();
+    if (!name) throw new Error("Give the scoring method a name.");
+    const levels = input.levels
+      .map((level) => ({
+        caption: level.caption.trim(),
+        shortLabel: level.shortLabel.trim().slice(0, 8),
+        reportable: level.reportable,
+      }))
+      .filter((level) => level.caption.length > 0 && level.shortLabel.length > 0);
+    if (levels.length < 2) {
+      throw new Error("A scoring method needs at least two levels.");
+    }
+    if (levels.length > 10) throw new Error("A scoring method holds at most 10 levels.");
+    const method: IspScoringMethod = {
+      id: `ispm-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      name,
+      levels: levels.map((level, i) => ({
+        id: `ispl-${crypto.randomUUID().slice(0, 8)}`,
+        ...level,
+        sortOrder: i,
+      })),
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      createdAt: new Date().toISOString(),
+    };
+    this.store.db.ispScoringMethods.unshift(method);
+    await persistMeta(this.store);
+    return method.id;
+  }
+
+  async saveShiftNote(input: Parameters<ComplyraApi["saveShiftNote"]>[0]) {
+    const session = assertSession(this.store);
+    if (!canEnterShiftNotes(session.roleKey)) {
+      throw new Error("Your role cannot enter shift notes.");
+    }
+    const person = accessibleIndividual(this.store, session, input.individualId);
+    void person;
+    const program = this.store.db.ispPrograms.find(
+      (row) =>
+        row.id === input.programId &&
+        row.agencyId === session.agencyId &&
+        row.individualId === input.individualId,
+    );
+    if (!program || !ispProgramVisibleToStaff(program)) {
+      throw new Error("Notes can only be entered against an approved ISP program.");
+    }
+    assertCalendarDate(input.noteDate, "Use a valid note date.");
+    const shift = input.shift.trim().slice(0, 40);
+    if (!shift) throw new Error("Choose the shift for this note.");
+    const tasks = this.store.db.ispProgramTasks
+      .filter((task) => task.programId === program.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const levels = new Map(
+      this.store.db.ispScoringMethods
+        .find((method) => method.id === program.scoringMethodId)
+        ?.levels.map((level) => [level.id, level]) ?? [],
+    );
+    const cleanScores = input.scores
+      .map((score) => ({
+        taskId: score.taskId,
+        levelId: score.levelId,
+        comment: score.comment.trim().slice(0, 1000),
+      }))
+      .filter((score) => tasks.some((task) => task.id === score.taskId));
+    for (const score of cleanScores) {
+      if (!levels.has(score.levelId)) {
+        throw new Error("Choose a valid score for every scored task.");
+      }
+    }
+    const now = new Date().toISOString();
+    let note: ShiftNote;
+    if (input.noteId) {
+      const existing = this.store.db.shiftNotes.find(
+        (row) => row.id === input.noteId && row.agencyId === session.agencyId && !row.deletedAt,
+      );
+      if (!existing) throw new Error("Shift note not found.");
+      if (existing.individualId !== input.individualId || existing.programId !== input.programId) {
+        throw new Error("Shift note not found.");
+      }
+      if (!canEditShiftNoteRow(session.roleKey, session.userId, existing)) {
+        throw new Error("You can only edit your own shift notes.");
+      }
+      existing.noteDate = input.noteDate;
+      existing.shift = shift;
+      existing.summary = input.summary.trim().slice(0, 4000);
+      existing.timeSpentMinutes =
+        input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes));
+      existing.updatedAt = now;
+      note = existing;
+      this.store.db.shiftNoteScores = this.store.db.shiftNoteScores.filter(
+        (score) => score.noteId !== note.id,
+      );
+    } else {
+      note = {
+        id: `sn-${crypto.randomUUID().slice(0, 8)}`,
+        agencyId: session.agencyId,
+        individualId: input.individualId,
+        programId: program.id,
+        noteDate: input.noteDate,
+        shift,
+        summary: input.summary.trim().slice(0, 4000),
+        timeSpentMinutes:
+          input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes)),
+        staffUserId: session.userId,
+        staffName: session.fullName,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+      this.store.db.shiftNotes.unshift(note);
+    }
+    for (const score of cleanScores) {
+      const row: ShiftNoteTaskScore = {
+        id: `sns-${crypto.randomUUID().slice(0, 8)}`,
+        noteId: note.id,
+        taskId: score.taskId,
+        levelId: score.levelId,
+        comment: score.comment,
+      };
+      this.store.db.shiftNoteScores.push(row);
+    }
+    await persistMeta(this.store);
+    return note.id;
+  }
+
+  async deleteShiftNote(noteId: string) {
+    const session = assertSession(this.store);
+    if (!canEnterShiftNotes(session.roleKey)) {
+      throw new Error("Your role cannot enter shift notes.");
+    }
+    const note = this.store.db.shiftNotes.find(
+      (row) => row.id === noteId && row.agencyId === session.agencyId && !row.deletedAt,
+    );
+    if (!note) throw new Error("Shift note not found.");
+    accessibleIndividual(this.store, session, note.individualId);
+    if (!canEditShiftNoteRow(session.roleKey, session.userId, note)) {
+      throw new Error("You can only delete your own shift notes.");
+    }
+    note.deletedAt = new Date().toISOString();
+    note.updatedAt = note.deletedAt;
     await persistMeta(this.store);
   }
 
