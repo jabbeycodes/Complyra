@@ -6,7 +6,6 @@ import {
   CarFront,
   ClipboardCheck,
   FileText,
-  Flame,
   GraduationCap,
   MapPin,
   Phone,
@@ -85,7 +84,6 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   training: GraduationCap,
   medications: Pill,
   mileage: CarFront,
-  drills: Flame,
   shiftnotes: FileText,
   staff: Users,
 };
@@ -729,6 +727,41 @@ export default function SiteDetailPage({
                 </ul>
               )}
             </div>
+            {/* Issue #92: drills live under Checklists now. The drill log keeps
+                its own section here; scheduling and downloads stay in the
+                monthly checks below. */}
+            <div className="panel">
+              <h2>Drills</h2>
+              {siteDrills.length === 0 && (
+                <Empty
+                  mark="none"
+                  title="No drills"
+                  text="No emergency drills recorded for this home yet."
+                />
+              )}
+              {siteDrills.length > 0 && (
+                <ul className="record-list">
+                  {siteDrills.map((d) => {
+                    const dateLabel = d.date?.trim()
+                      ? formatDate(d.date)
+                      : "Not logged";
+                    return (
+                    <li key={d.id} className="record-row">
+                      <div>
+                        <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
+                        <span className="muted">
+                          {" "}
+                          · {dateLabel}
+                          {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
+                          {d.leaderName ? ` · led by ${d.leaderName}` : ""}
+                        </span>
+                      </div>
+                    </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
             <SiteMonthlyChecks siteId={siteId} />
           </>
         )}
@@ -945,41 +978,7 @@ export default function SiteDetailPage({
           </div>
         )}
 
-        {activeTab === "drills" && (
-          <div className="panel">
-            <h2>Emergency drills</h2>
-            {siteDrills.length === 0 && (
-              <Empty
-                mark="none"
-                title="No drills"
-                text="No emergency drills recorded for this home yet."
-              />
-            )}
-            {siteDrills.length > 0 && (
-              <ul className="record-list">
-                {siteDrills.map((d) => {
-                  const dateLabel = d.date?.trim()
-                    ? formatDate(d.date)
-                    : "Not logged";
-                  return (
-                  <li key={d.id} className="record-row">
-                    <div>
-                      <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
-                      <span className="muted">
-                        {" "}
-                        · {dateLabel}
-                        {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
-                        {d.leaderName ? ` · led by ${d.leaderName}` : ""}
-                      </span>
-                    </div>
-                  </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
-
+        
         {/* Issue #80: the Documents tab becomes Shift notes. Standalone
             document uploads stay reachable via the Documents page. */}
         {activeTab === "shiftnotes" && !loading.shiftnotes && (

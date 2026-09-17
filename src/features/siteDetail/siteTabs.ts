@@ -9,7 +9,6 @@ export type SiteDetailTabId =
   | "training"
   | "medications"
   | "mileage"
-  | "drills"
   | "shiftnotes"
   | "staff";
 
@@ -69,11 +68,9 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     visible: (s) => !!s && pageVisible(s, "Mileage"),
   },
   {
-    id: "drills",
-    label: "Drills",
-    visible: (s) => !!s && pageVisible(s, "Individuals"),
-  },
-  {
+    // Issue #92: the Drills tab moves under Checklists. The drill log keeps
+    // its own "Drills" section inside the checklists panel below; the tab
+    // itself is gone. Tab order otherwise unchanged — Staff stays last.
     // Issue #80: the Documents tab becomes Shift notes. Standalone document
     // uploads stay reachable via the Documents page (linked from the tab's
     // empty state). Tab order unchanged — Staff stays last (founder rule).
