@@ -245,6 +245,7 @@ import {
   drillsForMonth,
   equipmentViewForPerson,
   monthKeyFrom,
+  monthLabel,
   normalizeMonthlyDue,
   safetyComplete,
   siteSafetyView,
@@ -308,6 +309,17 @@ import {
   weeklyChecklistPdfName,
   weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
+import {
+  buildHmChecklistsPdf,
+  buildServiceLogsPdf,
+  hmChecklistsFileName,
+  serviceLogsFileName,
+} from "../pdf/checklistsPdf";
+import {
+  buildDrillSchedulePdf,
+  drillScheduleFileName,
+} from "../pdf/drillSchedulePdf";
+import { drillScheduleYearSummary } from "./drillSchedule";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -3258,6 +3270,97 @@ export class HostedApi implements ComplyraApi {
       siteLocation: await this.siteLocationParts(site.id),
     });
     return { blob: pdf.output("blob"), name: safetyFileName(site.name, input.monthKey) };
+  }
+
+  // Issue #94: printable/downloads for the rebuilt Checklists tab. No new
+  // records are written — these only render existing data.
+  async downloadDrillSchedule(input: {
+    siteId: string;
+    year: number;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = await this.requireSession();
+    const site = await this.siteRecord(input.siteId);
+    if (!site || site.agencyId !== session.agencyId) throw new Error("Site not found.");
+    const { data: drillRows, error } = await this.client
+      .from("emergency_drills")
+      .select("*")
+      .eq("site_id", site.id);
+    throwIf(error, "Could not load drills.");
+    const records = (drillRows ?? []).map(mapEmergencyDrill);
+    const months = drillScheduleYearSummary(input.year, records);
+    const pdf = buildDrillSchedulePdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      year: input.year,
+      months,
+      logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: await this.siteLocationParts(site.id),
+    });
+    return { blob: pdf.output("blob"), name: drillScheduleFileName(site.name, input.year) };
+  }
+
+  private async checklistsForDownload(
+    session: SessionUser,
+    siteId: string,
+    monthKey: string | null,
+  ): Promise<HmWeeklyChecklist[]> {
+    let query = this.client
+      .from("hm_weekly_checklists")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    if (!this.checklistCanOversee(session)) {
+      query = query.eq("assigned_to_user_id", session.userId);
+    }
+    query = query.order("week_of", { ascending: false });
+    const { data, error } = await query;
+    throwIf(error, "Could not load checklists.");
+    return (data ?? [])
+      .map((r) => this.mapChecklistRow(r as Record<string, unknown>))
+      .filter((c) => !monthKey || c.weekOf.slice(0, 7) === monthKey);
+  }
+
+  async downloadHmChecklists(input: {
+    siteId: string;
+    monthKey: string | null;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = await this.requireSession();
+    const site = await this.siteRecord(input.siteId);
+    if (!site || site.agencyId !== session.agencyId) throw new Error("Site not found.");
+    const checklists = await this.checklistsForDownload(session, site.id, input.monthKey);
+    const scopeLabel = input.monthKey ? monthLabel(input.monthKey) : "All months";
+    const pdf = buildHmChecklistsPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      scopeLabel,
+      checklists,
+      logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: await this.siteLocationParts(site.id),
+    });
+    return { blob: pdf.output("blob"), name: hmChecklistsFileName(site.name, scopeLabel) };
+  }
+
+  async downloadServiceLogs(input: {
+    siteId: string;
+    monthKey: string | null;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = await this.requireSession();
+    const site = await this.siteRecord(input.siteId);
+    if (!site || site.agencyId !== session.agencyId) throw new Error("Site not found.");
+    const checklists = await this.checklistsForDownload(session, site.id, input.monthKey);
+    const logs = checklists
+      .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
+      .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    const scopeLabel = input.monthKey ? monthLabel(input.monthKey) : "All months";
+    const pdf = buildServiceLogsPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      scopeLabel,
+      logs,
+      logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
+      siteLocation: await this.siteLocationParts(site.id),
+    });
+    return { blob: pdf.output("blob"), name: serviceLogsFileName(site.name, scopeLabel) };
   }
   // ---- Site reviews / branding ----
 

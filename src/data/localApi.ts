@@ -292,6 +292,7 @@ import {
   ensureMonthlyCycles,
   equipmentViewForPerson,
   monthKeyFrom,
+  monthLabel,
   safetyComplete,
   siteSafetyView,
   drillDateConflict,
@@ -319,6 +320,17 @@ import {
   weeklyChecklistPdfName,
   weeklyServiceLogPdfName,
 } from "../pdf/hmChecklistPdf";
+import {
+  buildHmChecklistsPdf,
+  buildServiceLogsPdf,
+  hmChecklistsFileName,
+  serviceLogsFileName,
+} from "../pdf/checklistsPdf";
+import {
+  buildDrillSchedulePdf,
+  drillScheduleFileName,
+} from "../pdf/drillSchedulePdf";
+import { drillScheduleYearSummary } from "./drillSchedule";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -632,6 +644,22 @@ export interface ComplyraApi {
     kind: "equipment" | "drills" | "safety";
     id: string;
     monthKey: string;
+  }): Promise<{ blob: Blob; name: string }>;
+  /**
+   * Issue #94: printable/downloads for the rebuilt Checklists tab.
+   * monthKey null = all months on file.
+   */
+  downloadDrillSchedule(input: {
+    siteId: string;
+    year: number;
+  }): Promise<{ blob: Blob; name: string }>;
+  downloadHmChecklists(input: {
+    siteId: string;
+    monthKey: string | null;
+  }): Promise<{ blob: Blob; name: string }>;
+  downloadServiceLogs(input: {
+    siteId: string;
+    monthKey: string | null;
   }): Promise<{ blob: Blob; name: string }>;
   saveSiteFacts(siteId: string, facts: Partial<SiteFacts>): Promise<void>;
   saveSiteReview(input: {
@@ -4528,6 +4556,93 @@ export class LocalApi implements ComplyraApi {
       siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
     });
     return { blob: doc.output("blob"), name: safetyFileName(site.name, input.monthKey) };
+  }
+
+  // Issue #94: printable/downloads for the rebuilt Checklists tab. No new
+  // records are written — these only render existing data.
+  async downloadDrillSchedule(input: {
+    siteId: string;
+    year: number;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === input.siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    const records = this.store.db.emergencyDrills.filter((row) => row.siteId === site.id);
+    const months = drillScheduleYearSummary(input.year, records);
+    const doc = buildDrillSchedulePdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      year: input.year,
+      months,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
+    });
+    return { blob: doc.output("blob"), name: drillScheduleFileName(site.name, input.year) };
+  }
+
+  async downloadHmChecklists(input: {
+    siteId: string;
+    monthKey: string | null;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === input.siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    const oversight = this.checklistOversight(session);
+    const checklists = this.weeklyChecklists()
+      .filter(
+        (c) =>
+          c.agencyId === session.agencyId &&
+          c.siteId === site.id &&
+          (oversight || c.assignedToUserId === session.userId) &&
+          (!input.monthKey || c.weekOf.slice(0, 7) === input.monthKey),
+      )
+      .sort((a, b) => b.weekOf.localeCompare(a.weekOf));
+    const scopeLabel = input.monthKey ? monthLabel(input.monthKey) : "All months";
+    const doc = buildHmChecklistsPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      scopeLabel,
+      checklists,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
+    });
+    return { blob: doc.output("blob"), name: hmChecklistsFileName(site.name, scopeLabel) };
+  }
+
+  async downloadServiceLogs(input: {
+    siteId: string;
+    monthKey: string | null;
+  }): Promise<{ blob: Blob; name: string }> {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === input.siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    const oversight = this.checklistOversight(session);
+    const logs = this.weeklyChecklists()
+      .filter(
+        (c) =>
+          c.agencyId === session.agencyId &&
+          c.siteId === site.id &&
+          (oversight || c.assignedToUserId === session.userId) &&
+          (!input.monthKey || c.weekOf.slice(0, 7) === input.monthKey),
+      )
+      .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
+      .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    const scopeLabel = input.monthKey ? monthLabel(input.monthKey) : "All months";
+    const doc = buildServiceLogsPdf({
+      agencyName: session.agencyName,
+      siteName: site.name,
+      scopeLabel,
+      logs,
+      logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
+      siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
+    });
+    return { blob: doc.output("blob"), name: serviceLogsFileName(site.name, scopeLabel) };
   }
 
   async saveSiteFacts(siteId: string, facts: Partial<SiteFacts>) {
