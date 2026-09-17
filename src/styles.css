@@ -7145,6 +7145,7 @@ button.qa-row:hover {
 }
 .isp-program-head .chart-actions {
   align-items: center;
+  gap: 12px;
 }
 .isp-program-body {
   display: grid;
