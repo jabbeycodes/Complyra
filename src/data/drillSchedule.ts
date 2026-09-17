@@ -117,6 +117,51 @@ export function quarterResponsibilityForMonth(month: number): DrillQuarterRespon
   return DRILL_QUARTER_RESPONSIBILITIES[quarter];
 }
 
+/**
+ * Issue #94 (design polish): shift period metadata used by the visual
+ * schedule presentation — which shift runs drills in each quarter, with
+ * stable keys the UI maps to color + icon. Derived from
+ * DRILL_QUARTER_RESPONSIBILITIES; no data change.
+ */
+export type ShiftPeriodKey = "am" | "pm" | "overnight" | "weekend";
+
+export interface ShiftPeriod {
+  key: ShiftPeriodKey;
+  /** "AM shift" — the shift window label shown on month cards. */
+  periodLabel: string;
+  /** "AM staff" — who is responsible, shown on the responsibility band. */
+  staffLabel: string;
+  /** "1st Quarter" */
+  quarterLabel: string;
+  /** "January – March" */
+  months: string;
+}
+
+export const SHIFT_PERIODS: readonly ShiftPeriod[] = [
+  { key: "am", periodLabel: "AM shift", staffLabel: "AM staff", quarterLabel: "1st Quarter", months: "January – March" },
+  { key: "pm", periodLabel: "PM shift", staffLabel: "PM staff", quarterLabel: "2nd Quarter", months: "April – June" },
+  {
+    key: "overnight",
+    periodLabel: "Overnight shift",
+    staffLabel: "Overnight staff",
+    quarterLabel: "3rd Quarter",
+    months: "July – September",
+  },
+  {
+    key: "weekend",
+    periodLabel: "Weekend shift",
+    staffLabel: "Weekend staff",
+    quarterLabel: "4th Quarter",
+    months: "October – December",
+  },
+];
+
+/** Which shift period a 1-12 month falls in (clamped). */
+export function shiftPeriodForMonth(month: number): ShiftPeriod {
+  const quarter = Math.min(3, Math.max(0, Math.floor((month - 1) / 3)));
+  return SHIFT_PERIODS[quarter];
+}
+
 export function scheduleMonthLabel(type: ScheduleDrillType): string {
   return DRILL_LABELS[type] ?? type;
 }

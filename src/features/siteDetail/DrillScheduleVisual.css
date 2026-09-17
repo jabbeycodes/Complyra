@@ -1,0 +1,419 @@
+/* Issue #94 (design polish): visual annual drill schedule presentation.
+   Shift-color system: every month card, band segment, and ring picks up its
+   quarter's shift color through --shift / --shift-deep / --shift-tint. Color
+   is always paired with a text label or icon — never the only signal. */
+
+.dsv {
+  --dsv-am: #b57f2c;
+  --dsv-am-deep: #7c5620;
+  --dsv-am-tint: #f7eddc;
+  --dsv-pm: #a55a36;
+  --dsv-pm-deep: #7c4225;
+  --dsv-pm-tint: #f5e8dd;
+  --dsv-overnight: #4d5878;
+  --dsv-overnight-deep: #39415c;
+  --dsv-overnight-tint: #e9ecf4;
+  --dsv-weekend: #3f5c3b;
+  --dsv-weekend-deep: #2f4630;
+  --dsv-weekend-tint: #edf1e8;
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.dsv-shift-am { --shift: var(--dsv-am); --shift-deep: var(--dsv-am-deep); --shift-tint: var(--dsv-am-tint); }
+.dsv-shift-pm { --shift: var(--dsv-pm); --shift-deep: var(--dsv-pm-deep); --shift-tint: var(--dsv-pm-tint); }
+.dsv-shift-overnight { --shift: var(--dsv-overnight); --shift-deep: var(--dsv-overnight-deep); --shift-tint: var(--dsv-overnight-tint); }
+.dsv-shift-weekend { --shift: var(--dsv-weekend); --shift-deep: var(--dsv-weekend-deep); --shift-tint: var(--dsv-weekend-tint); }
+
+/* ---- Shift responsibility band ---- */
+.dsv-band {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.dsv-band-seg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--shift-tint);
+  border: 1px solid color-mix(in srgb, var(--shift) 28%, transparent);
+  min-width: 0;
+}
+
+.dsv-band-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--shift);
+  color: #fffdf9;
+}
+
+.dsv-band-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dsv-band-text strong {
+  font-size: 14px;
+  color: var(--shift-deep);
+}
+
+.dsv-band-sub {
+  font-size: 12px;
+  color: #6b5f52;
+}
+
+.dsv-band-active {
+  background: var(--shift-deep);
+  border-color: var(--shift-deep);
+}
+
+.dsv-band-active .dsv-band-text strong,
+.dsv-band-active .dsv-band-sub {
+  color: #fffdf9;
+}
+
+.dsv-band-active .dsv-band-icon {
+  background: rgba(255, 253, 249, 0.22);
+}
+
+/* ---- Due-by-the-7th callout ---- */
+.dsv-due {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eef2e9 0%, #f7f2ea 100%);
+  border: 1px solid #d9dccf;
+}
+
+.dsv-due-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #3f5c3b;
+  color: #fffdf9;
+}
+
+.dsv-due-title {
+  font-size: 16px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.dsv-due p {
+  margin: 0;
+  font-size: 13.5px;
+  color: #4a4036;
+}
+
+/* ---- Month grid ---- */
+.dsv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.dsv-month {
+  position: relative;
+  background: #fffdf9;
+  border: 1px solid #e4dccf;
+  border-radius: 16px;
+  padding: 16px 16px 12px;
+  overflow: hidden;
+}
+
+.dsv-month-accent {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: linear-gradient(90deg, var(--shift), color-mix(in srgb, var(--shift) 55%, #fffdf9));
+}
+
+.dsv-month-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dsv-month-id h3 {
+  margin: 0 0 4px;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+.dsv-shift-line {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--shift-deep);
+  font-weight: 600;
+}
+
+.dsv-month.dsv-current {
+  border-color: #3f5c3b;
+  box-shadow: 0 0 0 1.5px #3f5c3b, 0 6px 18px rgba(63, 92, 59, 0.12);
+}
+
+/* ---- Progress ring ---- */
+.dsv-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.dsv-ring-track {
+  fill: none;
+  stroke: #ece5d8;
+  stroke-width: 3.5;
+}
+
+.dsv-ring-fill {
+  fill: none;
+  stroke: var(--shift);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+}
+
+.dsv-ring-text {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--shift-deep);
+}
+
+/* ---- Status row ---- */
+.dsv-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.dsv-current-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #3f5c3b;
+  background: #eef2e9;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.dsv-medical-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b2e4e;
+  background: #f9ecef;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.dsv-medical-footnote {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #6b5f52;
+}
+
+/* ---- Drill rows ---- */
+.dsv-drills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.dsv-drill {
+  border: 1px solid #ece5d8;
+  border-radius: 12px;
+  background: #fbf8f2;
+  overflow: hidden;
+}
+
+.dsv-drill-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+}
+
+.dsv-drill-toggle:hover {
+  background: var(--shift-tint);
+}
+
+.dsv-drill-toggle:focus-visible {
+  outline: 2px solid var(--shift-deep);
+  outline-offset: -2px;
+}
+
+.dsv-drill-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--shift-tint);
+  color: var(--shift-deep);
+}
+
+.dsv-drill-done .dsv-drill-icon {
+  background: var(--shift);
+  color: #fffdf9;
+}
+
+.dsv-drill-check {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #3f5c3b;
+  color: #fffdf9;
+  border: 2px solid #fbf8f2;
+}
+
+.dsv-drill-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dsv-drill-title strong {
+  font-size: 14px;
+}
+
+.dsv-drill-sub {
+  font-size: 12px;
+  color: #8c745f;
+}
+
+.dsv-drill-late .dsv-drill-sub {
+  color: #b07a5a;
+  font-weight: 600;
+}
+
+.dsv-drill-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dsv-chevron {
+  transition: transform 0.15s ease;
+  color: #8c745f;
+}
+
+.dsv-chevron-open {
+  transform: rotate(180deg);
+}
+
+.dsv-drill-detail {
+  padding: 4px 12px 12px;
+  border-top: 1px dashed #e4dccf;
+}
+
+.dsv-drill-facts {
+  margin: 8px 0 0;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 900px) {
+  .dsv-band {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .dsv-grid {
+    grid-template-columns: 1fr;
+  }
+  .dsv-band {
+    grid-template-columns: 1fr;
+  }
+  .dsv-due {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsv-chevron {
+    transition: none;
+  }
+}
+
+/* ---- Print: keep the schedule clean and readable ---- */
+@media print {
+  .dsv-band-seg,
+  .dsv-due,
+  .dsv-month {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+  .dsv-month-accent {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .dsv-band-active {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .dsv-due-icon,
+  .dsv-band-icon,
+  .dsv-drill-icon {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
