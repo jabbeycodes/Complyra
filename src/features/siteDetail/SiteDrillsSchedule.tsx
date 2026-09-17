@@ -69,7 +69,7 @@ export default function SiteDrillsSchedule({
         <div>
           <h2 id="site-drills-heading">Emergency drills</h2>
           <p className="muted section-note">
-            The agency&apos;s annual Emergency Drills Schedule for {siteName}.
+            {`The agency's annual Emergency Drills Schedule for ${siteName}.`}
           </p>
         </div>
         <div className="drill-toolbar">
