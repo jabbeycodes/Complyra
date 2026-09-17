@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   EMERGENCY_DRILL_SCHEDULE,
   SHIFT_PERIODS,
+  drillExportScopeLabel,
   shiftPeriodForMonth,
 } from "./drillSchedule";
 
@@ -31,5 +32,20 @@ describe("shiftPeriodForMonth", () => {
     assert.equal(byKey.get("pm")?.staffLabel, "PM staff");
     assert.equal(byKey.get("overnight")?.staffLabel, "Overnight staff");
     assert.equal(byKey.get("weekend")?.staffLabel, "Weekend staff");
+  });
+});
+
+describe("drillExportScopeLabel", () => {
+  it("labels the full-year scope", () => {
+    assert.equal(drillExportScopeLabel(2026, "all"), "Full year 2026");
+  });
+
+  it("labels a single month scope", () => {
+    assert.equal(drillExportScopeLabel(2026, 9), "September 2026");
+    assert.equal(drillExportScopeLabel(2026, 1), "January 2026");
+  });
+
+  it("falls back to the full year for unknown months", () => {
+    assert.equal(drillExportScopeLabel(2026, 99), "Full year 2026");
   });
 });

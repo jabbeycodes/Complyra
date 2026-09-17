@@ -3,7 +3,7 @@ import { Download, Printer } from "lucide-react";
 import { useData } from "../../data/DataProvider";
 import { todayIso } from "../../data/chart";
 import { openPrintable } from "../../data/openFile";
-import { drillScheduleYearSummary } from "../../data/drillSchedule";
+import { drillExportScopeLabel, drillScheduleYearSummary } from "../../data/drillSchedule";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
 import DrillScheduleGrid from "./DrillScheduleVisual";
 import "./siteDetail.css";
@@ -47,12 +47,17 @@ export default function SiteDrillsSchedule({
         : months.filter((m) => m.month.month === monthFilter),
     [months, monthFilter],
   );
+  const scopeLabel = drillExportScopeLabel(year, monthFilter);
 
   async function handleExport(mode: "download" | "print") {
     setBusy(mode);
     setError("");
     try {
-      const file = await api.downloadDrillSchedule({ siteId, year });
+      const file = await api.downloadDrillSchedule({
+        siteId,
+        year,
+        month: monthFilter === "all" ? null : monthFilter,
+      });
       await openPrintable(file.name, file.blob, mode);
     } catch (err) {
       setError(
@@ -70,6 +75,9 @@ export default function SiteDrillsSchedule({
           <h2 id="site-drills-heading">Emergency drills</h2>
           <p className="muted section-note">
             {`The agency's annual Emergency Drills Schedule for ${siteName}.`}
+          </p>
+          <p className="muted export-scope" aria-live="polite">
+            Downloads and prints cover: {scopeLabel}
           </p>
         </div>
         <div className="drill-toolbar">
@@ -94,6 +102,7 @@ export default function SiteDrillsSchedule({
             type="button"
             className="button"
             disabled={busy !== null}
+            aria-label={`Download drill schedule — ${scopeLabel}`}
             onClick={() => void handleExport("download")}
           >
             <Download size={16} /> {busy === "download" ? "Preparing…" : "Download"}
@@ -102,6 +111,7 @@ export default function SiteDrillsSchedule({
             type="button"
             className="button"
             disabled={busy !== null}
+            aria-label={`Print drill schedule — ${scopeLabel}`}
             onClick={() => void handleExport("print")}
           >
             <Printer size={16} /> {busy === "print" ? "Preparing…" : "Print"}

@@ -428,6 +428,12 @@
   font-size: 13px;
 }
 
+.export-scope {
+  margin: 2px 0 0;
+  padding-inline: var(--panel-inline);
+  font-size: 12px;
+}
+
 .site-detail-error {
   border-left: 4px solid #8b5e3c;
 }

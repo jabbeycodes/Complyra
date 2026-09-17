@@ -240,3 +240,16 @@ export function drillScheduleYearSummary(
     };
   });
 }
+
+/**
+ * Issue #94 (design rev 2): human-readable label for the drill export scope —
+ * "Full year 2026" when all months, "September 2026" for a single month.
+ */
+export function drillExportScopeLabel(
+  year: number,
+  month: number | "all",
+): string {
+  if (month === "all") return `Full year ${year}`;
+  const found = EMERGENCY_DRILL_SCHEDULE.find((m) => m.month === month);
+  return found ? `${found.name} ${year}` : `Full year ${year}`;
+}

@@ -149,3 +149,63 @@ test("checklist and service-log file names reflect the month scope", () => {
     "complyrer-weekly-service-logs-maple-house-all-months.pdf",
   );
 });
+
+test("drill schedule file name supports a month scope", () => {
+  assert.equal(
+    drillScheduleFileName("Maple House", 2026, 9),
+    "complyrer-emergency-drill-schedule-maple-house-2026-09.pdf",
+  );
+  assert.equal(
+    drillScheduleFileName("Maple House", 2026, null),
+    "complyrer-emergency-drill-schedule-maple-house-2026.pdf",
+  );
+});
+
+test("drill schedule pdf renders a single-month scope with form fields", () => {
+  const records: EmergencyDrill[] = [
+    {
+      id: "d1",
+      agencyId: "a1",
+      siteId: "s1",
+      monthKey: "2026-09",
+      drillType: "fire",
+      date: "2026-09-05",
+      time: "10:00 AM",
+      evacTime: "3 minutes",
+      leaderName: "Dana Staff",
+      participants: "Team A",
+      awakeOrSleep: "sleep",
+    },
+    {
+      id: "d2",
+      agencyId: "a1",
+      siteId: "s1",
+      monthKey: "2026-09",
+      drillType: "missing_person",
+      date: "2026-09-06",
+      time: "11:00 PM",
+      evacTime: "",
+      leaderName: "Dana Staff",
+      participants: "Team B",
+      awakeOrSleep: "",
+    },
+  ];
+  const months = drillScheduleYearSummary(2026, records).filter(
+    (m) => m.month.month === 9,
+  );
+  const doc = buildDrillSchedulePdf({
+    agencyName: "Test Agency",
+    siteName: "Maple House",
+    year: 2026,
+    months,
+    scopeLabel: "September 2026",
+  });
+  const text = doc.output() as string;
+  assert.ok(text.includes("September 2026"), "shows the month scope label");
+  assert.ok(!text.includes("August ·"), "does not include other month sections");
+  assert.ok(text.includes("Awake / sleep"), "shows the awake/sleep form field");
+  assert.ok(text.includes("Sleep"), "renders the awake/sleep value");
+  assert.ok(text.includes("Evacuation time"), "shows drill form fields");
+  assert.ok(text.includes("Drill leader"), "shows the drill leader field");
+  assertIndividualSafe(text, "month-scoped drill schedule pdf");
+});

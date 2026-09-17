@@ -330,7 +330,7 @@ import {
   buildDrillSchedulePdf,
   drillScheduleFileName,
 } from "../pdf/drillSchedulePdf";
-import { drillScheduleYearSummary } from "./drillSchedule";
+import { drillExportScopeLabel, drillScheduleYearSummary } from "./drillSchedule";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -652,6 +652,8 @@ export interface ComplyraApi {
   downloadDrillSchedule(input: {
     siteId: string;
     year: number;
+    /** When set, the export is scoped to this 1-12 month. */
+    month?: number | null;
   }): Promise<{ blob: Blob; name: string }>;
   downloadHmChecklists(input: {
     siteId: string;
@@ -4563,6 +4565,7 @@ export class LocalApi implements ComplyraApi {
   async downloadDrillSchedule(input: {
     siteId: string;
     year: number;
+    month?: number | null;
   }): Promise<{ blob: Blob; name: string }> {
     const session = assertSession(this.store);
     const site = this.store.db.sites.find(
@@ -4570,16 +4573,24 @@ export class LocalApi implements ComplyraApi {
     );
     if (!site) throw new Error("Site not found.");
     const records = this.store.db.emergencyDrills.filter((row) => row.siteId === site.id);
-    const months = drillScheduleYearSummary(input.year, records);
+    const allMonths = drillScheduleYearSummary(input.year, records);
+    const months = input.month
+      ? allMonths.filter((m) => m.month.month === input.month)
+      : allMonths;
+    const scopeLabel = drillExportScopeLabel(input.year, input.month ?? "all");
     const doc = buildDrillSchedulePdf({
       agencyName: session.agencyName,
       siteName: site.name,
       year: input.year,
       months,
+      scopeLabel,
       logoDataUrl: await logoDataUrlFor(this.store, session.agencyId),
       siteLocation: siteLocationFrom(site, agencyState(this.store, session.agencyId)),
     });
-    return { blob: doc.output("blob"), name: drillScheduleFileName(site.name, input.year) };
+    return {
+      blob: doc.output("blob"),
+      name: drillScheduleFileName(site.name, input.year, input.month ?? null),
+    };
   }
 
   async downloadHmChecklists(input: {

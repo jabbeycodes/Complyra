@@ -319,7 +319,7 @@ import {
   buildDrillSchedulePdf,
   drillScheduleFileName,
 } from "../pdf/drillSchedulePdf";
-import { drillScheduleYearSummary } from "./drillSchedule";
+import { drillExportScopeLabel, drillScheduleYearSummary } from "./drillSchedule";
 import {
   buildDrillsMonthPdf,
   buildEquipmentMonthPdf,
@@ -3277,6 +3277,8 @@ export class HostedApi implements ComplyraApi {
   async downloadDrillSchedule(input: {
     siteId: string;
     year: number;
+    /** When set, the export is scoped to this 1-12 month. */
+    month?: number | null;
   }): Promise<{ blob: Blob; name: string }> {
     const session = await this.requireSession();
     const site = await this.siteRecord(input.siteId);
@@ -3287,16 +3289,24 @@ export class HostedApi implements ComplyraApi {
       .eq("site_id", site.id);
     throwIf(error, "Could not load drills.");
     const records = (drillRows ?? []).map(mapEmergencyDrill);
-    const months = drillScheduleYearSummary(input.year, records);
+    const allMonths = drillScheduleYearSummary(input.year, records);
+    const months = input.month
+      ? allMonths.filter((m) => m.month.month === input.month)
+      : allMonths;
+    const scopeLabel = drillExportScopeLabel(input.year, input.month ?? "all");
     const pdf = buildDrillSchedulePdf({
       agencyName: session.agencyName,
       siteName: site.name,
       year: input.year,
       months,
+      scopeLabel,
       logoDataUrl: await this.hostedLogoDataUrl(session.agencyId),
       siteLocation: await this.siteLocationParts(site.id),
     });
-    return { blob: pdf.output("blob"), name: drillScheduleFileName(site.name, input.year) };
+    return {
+      blob: pdf.output("blob"),
+      name: drillScheduleFileName(site.name, input.year, input.month ?? null),
+    };
   }
 
   private async checklistsForDownload(
