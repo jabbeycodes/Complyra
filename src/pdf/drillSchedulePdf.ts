@@ -13,8 +13,13 @@ function slug(value: string) {
   return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
 }
 
-export function drillScheduleFileName(siteName: string, year: number) {
-  return `complyrer-emergency-drill-schedule-${slug(siteName)}-${year}.pdf`;
+export function drillScheduleFileName(
+  siteName: string,
+  year: number,
+  month?: number | null,
+) {
+  const monthSlug = month ? `-${year}-${String(month).padStart(2, "0")}` : `-${year}`;
+  return `complyrer-emergency-drill-schedule-${slug(siteName)}${monthSlug}.pdf`;
 }
 
 function line(doc: import("jspdf").jsPDF, label: string, value: string, x: number, y: number) {
@@ -42,6 +47,8 @@ export function buildDrillSchedulePdf(input: {
   siteName: string;
   year: number;
   months: ScheduleMonthSummary[];
+  /** "Full year 2026" or "September 2026" — printed on the cover line. */
+  scopeLabel?: string;
   logoDataUrl?: string | null;
   siteLocation?: SiteAddressParts;
 }) {
@@ -53,7 +60,7 @@ export function buildDrillSchedulePdf(input: {
   line(doc, "Agency", input.agencyName, margin, y);
   y += 16;
   y = drawSiteLocationFields(doc, margin, y, input.siteLocation ?? { name: input.siteName });
-  line(doc, "Year", String(input.year), margin, y);
+  line(doc, "Covers", input.scopeLabel ?? String(input.year), margin, y);
   y += 24;
 
   doc.setFont("helvetica", "italic");
@@ -122,12 +129,28 @@ export function buildDrillSchedulePdf(input: {
         y += 16;
         line(doc, "Participants", record.participants ?? "", margin + 12, y);
         y += 16;
+        if (
+          (state.type === "fire" || state.type === "missing_person") &&
+          record.awakeOrSleep
+        ) {
+          line(
+            doc,
+            "Awake / sleep",
+            record.awakeOrSleep === "awake" ? "Awake" : "Sleep",
+            margin + 12,
+            y,
+          );
+          y += 16;
+        }
       }
       y += 6;
     }
     y += 8;
   }
 
-  stampRecordMark(doc, { documentId: `drill-schedule-${input.year}`, margin });
-  return doc;
+  const monthScope = input.months.length === 1 ? input.months[0].month.month : null;
+  const documentId = monthScope
+    ? `drill-schedule-${input.year}-${String(monthScope).padStart(2, "0")}`
+    : `drill-schedule-${input.year}`;
+  stampRecordMark(doc, { documentId, margin });  return doc;
 }

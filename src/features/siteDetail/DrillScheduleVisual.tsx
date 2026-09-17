@@ -75,36 +75,6 @@ export function monthStatusLabel(status: MonthScheduleStatus): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Progress ring                                                         */
-/* ------------------------------------------------------------------ */
-
-function ProgressRing({ complete, required }: { complete: number; required: number }) {
-  const pct = required === 0 ? 100 : Math.round((complete / required) * 100);
-  const radius = 15.5;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - pct / 100);
-  return (
-    <div className="dsv-ring" role="img" aria-label={`${complete} of ${required} drills logged`}>
-      <svg viewBox="0 0 36 36" width="44" height="44" aria-hidden="true">
-        <circle cx="18" cy="18" r={radius} className="dsv-ring-track" />
-        <circle
-          cx="18"
-          cy="18"
-          r={radius}
-          className="dsv-ring-fill"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          transform="rotate(-90 18 18)"
-        />
-      </svg>
-      <span className="dsv-ring-text" aria-hidden="true">
-        {pct === 100 ? <Check size={16} /> : `${complete}/${required}`}
-      </span>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Shift responsibility band                                             */
 /* ------------------------------------------------------------------ */
 
@@ -207,17 +177,15 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
       {open && (
         <div id={detailId} className="dsv-drill-detail">
           {record ? (
-            <dl className="fact-list dsv-drill-facts">
+            <dl className="dsv-facts">
               <div>
                 <dt>Date</dt>
                 <dd>{record.date ? formatDate(record.date) : "Not logged"}</dd>
               </div>
-              {record.time && (
-                <div>
-                  <dt>Time</dt>
-                  <dd>{record.time}</dd>
-                </div>
-              )}
+              <div>
+                <dt>Time</dt>
+                <dd>{record.time || "—"}</dd>
+              </div>
               <div>
                 <dt>Evacuation time</dt>
                 <dd>{record.evacTime || "—"}</dd>
@@ -230,6 +198,18 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
                 <dt>Participants</dt>
                 <dd>{record.participants || "—"}</dd>
               </div>
+              {(state.type === "fire" || state.type === "missing_person") && (
+                <div>
+                  <dt>Awake / sleep</dt>
+                  <dd>
+                    {record.awakeOrSleep === "awake"
+                      ? "Awake"
+                      : record.awakeOrSleep === "sleep"
+                        ? "Sleep"
+                        : "—"}
+                  </dd>
+                </div>
+              )}
               {state.late && (
                 <div>
                   <dt>Flag</dt>
@@ -241,7 +221,7 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
               )}
             </dl>
           ) : (
-            <p className="muted">Not logged for this month yet.</p>
+            <p className="dsv-drill-empty">Not logged for this month yet.</p>
           )}
         </div>
       )}
@@ -282,7 +262,13 @@ function MonthCard({
             </span>
           </p>
         </div>
-        <ProgressRing complete={summary.complete} required={summary.required} />
+        <span
+          className="dsv-fraction"
+          role="img"
+          aria-label={`${summary.complete} of ${summary.required} drills logged`}
+        >
+          {summary.complete}/{summary.required}
+        </span>
       </div>
 
       <div className="dsv-status-row">
