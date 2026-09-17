@@ -112,8 +112,10 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
           .locator(".site-detail-panel .panel")
           .filter({ has: page.getByRole("heading", { name: "Drills", exact: true }) });
         await expect(drillsPanel).toBeVisible();
+        // The demo seed holds multiple records of the same drill type
+        // (e.g. two fire drills), so assert on the first row of each type.
         for (const drill of ["Fire drill", "Tornado drill", "Earthquake drill"]) {
-          await expect(drillsPanel.getByText(drill, { exact: true })).toBeVisible();
+          await expect(drillsPanel.getByText(drill, { exact: true }).first()).toBeVisible();
         }
       }
       if (label === "QA Review") {
