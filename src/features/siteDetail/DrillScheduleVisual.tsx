@@ -251,7 +251,6 @@ function MonthCard({
       className={`dsv-month dsv-shift-${period.key}${isCurrent ? " dsv-current" : ""}`}
       aria-label={`${summary.month.name} ${year} drills — ${monthStatusLabel(status).toLowerCase()}`}
     >
-      <div className="dsv-month-accent" aria-hidden="true" />
       <div className="dsv-month-top">
         <div className="dsv-month-id">
           <h3>{summary.month.name}</h3>
