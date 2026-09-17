@@ -9,7 +9,7 @@ const TABS = [
   "Medications",
   "Mileage",
   "Drills",
-  "Documents",
+  "Shift notes",
   "Staff",
 ] as const;
 
@@ -116,8 +116,10 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
         await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
         await expect(page.getByRole("button", { name: /Start review/ })).toBeVisible();
       }
-      if (label === "Documents") {
-        await expect(page.getByRole("button", { name: "Upload a document" })).toBeVisible();
+      if (label === "Shift notes") {
+        await expect(
+          page.locator(".site-detail-panel").getByRole("heading", { name: "Shift notes" }),
+        ).toBeVisible();
       }
       const slug = label.toLowerCase().replace(/\s+/g, "_");
       await page.locator(".site-detail-panel").scrollIntoViewIfNeeded();
