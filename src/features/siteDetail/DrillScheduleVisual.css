@@ -153,13 +153,6 @@
   overflow: hidden;
 }
 
-.dsv-month-accent {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 4px;
-  background: var(--shift);
-}
-
 .dsv-month-top {
   display: flex;
   align-items: flex-start;
@@ -194,11 +187,6 @@
   border-radius: 999px;
   padding: 3px 10px;
   white-space: nowrap;
-}
-
-.dsv-month.dsv-current {
-  border-color: var(--dsv-weekend-deep);
-  box-shadow: 0 0 0 1px var(--dsv-weekend-deep);
 }
 
 /* ---- Status badges row ---- */
@@ -423,7 +411,6 @@
     break-inside: avoid;
     box-shadow: none !important;
   }
-  .dsv-month-accent,
   .dsv-band-icon,
   .dsv-drill-icon,
   .dsv-due-icon,
