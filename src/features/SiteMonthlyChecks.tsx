@@ -34,8 +34,16 @@ function badgeFor(tone: MonthlyTone) {
 
 export default function SiteMonthlyChecks({
   siteId,
+  showDrills = true,
 }: {
   siteId: string;
+  /**
+   * Issue #94: the site-detail Checklists tab leads with the new Emergency
+   * Drills Schedule section, so the monthly drill logging block can be hidden
+   * there to avoid a duplicate drills section. The standalone Monthly checks
+   * page keeps it (drill recording lives there).
+   */
+  showDrills?: boolean;
 }) {
   const { api, session, workspace, refresh } = useData();
   const today = todayIso();
@@ -112,9 +120,10 @@ export default function SiteMonthlyChecks({
       {error && <p className="form-error">{error}</p>}
 
       <div className="monthly-site-grid">
-        <div>
-          <div className="monthly-toolbar">
-            <h3>Emergency drills</h3>
+        {showDrills && (
+          <div>
+            <div className="monthly-toolbar">
+              <h3>Emergency drills</h3>
             <DueChip date={monthDueOn(monthKey, drillDay)} status={badgeFor(drillTone)} />
             <Badge status={badgeFor(drillTone)} />
             <button
@@ -153,7 +162,8 @@ export default function SiteMonthlyChecks({
               }
             />
           ))}
-        </div>
+          </div>
+        )}
         <div>
           <div className="monthly-toolbar">
             <h3>Home safety report</h3>
