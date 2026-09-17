@@ -150,8 +150,8 @@ export function DueDateCallout() {
       <div>
         <strong className="dsv-due-title">Due by the 7th</strong>
         <p>
-          {DRILLS_DUE_RULE} Drills recorded after the {DRILL_DUE_DAY}th are
-          accepted but flagged late.
+          {DRILLS_DUE_RULE} Drills recorded after the{" "}{DRILL_DUE_DAY}th
+          are accepted but flagged late.
         </p>
       </div>
     </aside>
@@ -234,7 +234,8 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
                 <div>
                   <dt>Flag</dt>
                   <dd>
-                    Recorded after the {DRILL_DUE_DAY}th — accepted, flagged late.
+                    Recorded after the{" "}{DRILL_DUE_DAY}th — accepted,
+                    flagged late.
                   </dd>
                 </div>
               )}
