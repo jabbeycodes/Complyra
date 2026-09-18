@@ -20,10 +20,6 @@ import {
   type DrillType,
   type EmergencyDrill,
 } from "../../data/monthlyChecks";
-import {
-  summarizeInvestigations,
-  type Investigation,
-} from "../../data/investigations";
 import { can } from "../../data/status";
 import { canSeeMeds, todayIso } from "../../data/chart";
 import { canSeeShiftNotes } from "../../data/permissions";
@@ -249,43 +245,6 @@ export function shiftNoteSiteRollup(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Investigations
-// ---------------------------------------------------------------------------
-
-export interface InvestigationRollup {
-  open: number;
-  overdue: number;
-  tone: RollupTone;
-  label: string;
-}
-
-/** Per-site slice of api.listInvestigations(), summarized with the shared helper. */
-export function investigationSiteRollup(
-  investigations: Investigation[],
-  siteId: string,
-  now: Date = new Date(),
-): InvestigationRollup {
-  const { open, overdue } = summarizeInvestigations(
-    investigations.filter((row) => row.siteId === siteId),
-    now,
-  );
-  const tone: RollupTone =
-    overdue > 0 ? "critical" : open > 0 ? "warning" : "ok";
-  return {
-    open,
-    overdue,
-    tone,
-    label:
-      open === 0
-        ? "No open investigations"
-        : overdue > 0
-          ? `${open} open · ${overdue} overdue`
-          : `${open} open`,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Role gating — which rollup columns the session may read
 // ---------------------------------------------------------------------------
 
@@ -295,7 +254,6 @@ export interface RollupMetricVisibility {
   certificates: boolean;
   meds: boolean;
   shiftNotes: boolean;
-  investigations: boolean;
 }
 
 /**
@@ -306,8 +264,6 @@ export interface RollupMetricVisibility {
  * - certificates require certificates.manage or hr.view_staff (assertCertificateRead).
  * - med supply requires canSeeMeds.
  * - shift notes require canSeeShiftNotes.
- * - investigation rollups require investigations.manage (the site counts are a
- *   management view; the API only exposes own rows to everyone else).
  */
 export function rollupMetricVisibility(session: SessionUser): RollupMetricVisibility {
   return {
@@ -317,7 +273,6 @@ export function rollupMetricVisibility(session: SessionUser): RollupMetricVisibi
       can(session, "certificates.manage") || can(session, "hr.view_staff"),
     meds: canSeeMeds(session.roleKey),
     shiftNotes: canSeeShiftNotes(session.roleKey),
-    investigations: can(session, "investigations.manage"),
   };
 }
 

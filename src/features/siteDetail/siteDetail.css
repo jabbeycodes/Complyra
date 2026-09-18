@@ -531,7 +531,7 @@
   }
 }
 
-/* Issue #98: clickable dashboard tiles, strip, drawer, investigations.
+/* Issue #98: clickable dashboard tiles, strip, drawer.
    Solid colors only — no gradients. */
 
 /* Clickable tiles: buttons that keep the site-hero-score/stat layout. */
@@ -676,13 +676,6 @@
   gap: 8px;
 }
 
-.inspection-notice {
-  margin: 0;
-  font-size: 13px;
-  color: #3f5c3b;
-  font-weight: 600;
-}
-
 .drawer-list {
   padding-left: 0;
   padding-right: 0;
@@ -693,11 +686,6 @@
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
-}
-
-.drawer-investigate {
-  font-size: 12px;
-  min-height: 32px;
 }
 
 .drawer-cards {
@@ -758,216 +746,8 @@
   padding: 8px 0;
 }
 
-/* Start-investigation form inside the drawer. */
-.investigation-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.investigation-form h3 {
-  margin: 0;
-  font-size: 15px;
-  color: #2f4630;
-}
-
-.investigation-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #4a4036;
-}
-
-.investigation-form input,
-.investigation-form textarea,
-.investigation-form select {
-  font: inherit;
-  font-weight: 400;
-  padding: 10px 12px;
-  border: 1px solid #d9d2c4;
-  border-radius: 8px;
-  background: #fff;
-  color: #2f2a24;
-  min-height: 44px;
-}
-
-.investigation-form textarea {
-  min-height: 0;
-  resize: vertical;
-}
-
-.investigation-form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.investigation-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.investigation-form-errors {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f6e8e2;
-  color: #8a5340;
-  font-size: 13px;
-  list-style-position: inside;
-}
-
-/* Investigations section. */
-.investigations-panel {
-  padding: 16px var(--panel-inline) 14px;
-}
-
-.investigations-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.investigations-filters button {
-  appearance: none;
-  border: 1px solid #d9d2c4;
-  border-radius: 999px;
-  background: transparent;
-  padding: 8px 14px;
-  font-size: 13px;
-  color: #4a4036;
-  cursor: pointer;
-  min-height: 36px;
-}
-
-.investigations-filters button.selected {
-  background: #3f5c3b;
-  border-color: #3f5c3b;
-  color: #f4efe4;
-  font-weight: 650;
-}
-
-.investigations-filters button:focus-visible {
-  outline: 2px solid #3f5c3b;
-  outline-offset: 2px;
-}
-
-.investigations-error {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f6e8e2;
-  color: #8a5340;
-  font-size: 13px;
-}
-
-.investigations-list {
-  padding-left: 0;
-  padding-right: 0;
-}
-
-.investigation-row {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.investigation-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-}
-
-.investigation-toggle {
-  appearance: none;
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.investigation-toggle:focus-visible {
-  outline: 2px solid #3f5c3b;
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.investigation-detail {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 8px;
-}
-
-.investigation-detail > p {
-  margin: 0;
-}
-
-.investigation-history {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 12px;
-  border-left: 2px solid #e2d5bd;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.investigation-history p {
-  margin: 2px 0 0;
-}
-
-.investigation-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-}
-
-.investigation-delete {
-  color: #8a5340;
-}
-
-.investigation-note-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-
-.investigation-note-form textarea {
-  font: inherit;
-  padding: 10px 12px;
-  border: 1px solid #d9d2c4;
-  border-radius: 8px;
-  background: #fff;
-  resize: vertical;
-  min-height: 60px;
-}
-
-.investigation-note-form > div {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 @media (max-width: 640px) {
   .inspection-drawer {
     width: 100%;
-  }
-
-  .investigation-form-row {
-    grid-template-columns: 1fr;
   }
 }

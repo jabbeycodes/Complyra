@@ -1,10 +1,6 @@
 import { ArrowUpRight } from "lucide-react";
 import { Avatar, Badge, Empty, formatDate } from "../../components";
 import { QA_SECTIONS } from "../../data/qaAudit";
-import {
-  INVESTIGATION_SOURCE_LABELS,
-  type InvestigationSourceMetric,
-} from "../../data/investigations";
 import { trainingProgressLine } from "./siteDetailCopy";
 import type {
   CertExpiryRow,
@@ -26,33 +22,6 @@ export type DrawerKind =
   | "meds"
   | "shiftnotes"
   | "qa_disputes";
-
-export function drawerMetric(kind: DrawerKind): InvestigationSourceMetric {
-  switch (kind) {
-    case "requirements-ready":
-    case "requirements-open":
-      return "requirements";
-    case "individuals":
-    case "staff":
-      return "general";
-    case "qa":
-      return "qa_score";
-    case "drills":
-      return "drills";
-    case "safety":
-      return "safety";
-    case "training":
-      return "training";
-    case "certificates":
-      return "certificates";
-    case "meds":
-      return "meds";
-    case "shiftnotes":
-      return "shiftnotes";
-    case "qa_disputes":
-      return "qa_disputes";
-  }
-}
 
 export function drawerTitle(kind: DrawerKind): string {
   switch (kind) {
@@ -152,43 +121,14 @@ export interface DrawerContext {
   shiftMonthLabel: string;
   disputes: QaDisputeRowLike[];
   onOpenIndividual: (name: string) => void;
-  /** Open the investigation form for a tile or a single record. */
-  onInvestigate: (metric: InvestigationSourceMetric, sourceRecordId: string | null, sourceLabel: string) => void;
-  canInvestigate: boolean;
 }
 
-function InvestigateButton({
-  metric,
-  recordId,
-  label,
-  onInvestigate,
-}: {
-  metric: InvestigationSourceMetric;
-  recordId: string | null;
-  label: string;
-  onInvestigate: DrawerContext["onInvestigate"];
-}) {
-  return (
-    <button
-      type="button"
-      className="text-button drawer-investigate"
-      onClick={() => onInvestigate(metric, recordId, label)}
-      aria-label={`Start investigation: ${INVESTIGATION_SOURCE_LABELS[metric]} — ${label}`}
-    >
-      Investigate
-    </button>
-  );
-}
 
 /**
- * The records behind each dashboard tile. Every row a manager can act on
- * carries an "Investigate" button that opens the investigation form with
- * the tile's metric key plus that record's id/label.
+ * The records behind each dashboard tile — a read-only drill-through of
+ * what's missing or due at the home.
  */
 export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext }) {
-  const metric = drawerMetric(kind);
-  const { canInvestigate, onInvestigate } = ctx;
-
   if (kind === "requirements-ready" || kind === "requirements-open") {
     if (ctx.requirements.length === 0) {
       return (
@@ -213,14 +153,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
             </div>
             <div className="drawer-row-actions">
               <Badge status={item.status} />
-              {canInvestigate && (
-                <InvestigateButton
-                  metric={metric}
-                  recordId={item.id}
-                  label={item.title}
-                  onInvestigate={onInvestigate}
-                />
-              )}
+              
             </div>
           </li>
         ))}
@@ -272,14 +205,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
                 {s.username || s.email ? ` · ${s.username || s.email}` : ""}
               </p>
             </div>
-            {canInvestigate && (
-              <InvestigateButton
-                metric={metric}
-                recordId={s.id}
-                label={s.name}
-                onInvestigate={onInvestigate}
-              />
-            )}
+            
           </li>
         ))}
       </ul>
@@ -332,14 +258,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
             </div>
             <div className="drawer-row-actions">
               <Badge status={b.done ? "Complete" : "Needs attention"} />
-              {canInvestigate && (
-                <InvestigateButton
-                  metric={metric}
-                  recordId={b.drillId}
-                  label={`${b.label} drill · ${ctx.drillMonthLabel}`}
-                  onInvestigate={onInvestigate}
-                />
-              )}
+              
             </div>
           </li>
         ))}
@@ -386,14 +305,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
               {row.profile && (
                 <Badge status={row.profile.clearedForInRatio ? "Complete" : "Needs attention"} />
               )}
-              {canInvestigate && (
-                <InvestigateButton
-                  metric={metric}
-                  recordId={row.userId}
-                  label={`${row.name} — training`}
-                  onInvestigate={onInvestigate}
-                />
-              )}
+              
             </div>
           </li>
         ))}
@@ -429,14 +341,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
             </div>
             <div className="drawer-row-actions">
               <Badge status={row.daysLeft < 0 ? "Needs attention" : "Due soon"} />
-              {canInvestigate && (
-                <InvestigateButton
-                  metric={metric}
-                  recordId={row.cert.id}
-                  label={`${row.name} — ${row.cert.certName} expires ${row.cert.expiresOn}`}
-                  onInvestigate={onInvestigate}
-                />
-              )}
+              
             </div>
           </li>
         ))}
@@ -479,14 +384,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
                     : "Due soon"
                 }
               />
-              {canInvestigate && (
-                <InvestigateButton
-                  metric={metric}
-                  recordId={alert.id}
-                  label={`${alert.individualName} — ${alert.medicationName}`}
-                  onInvestigate={onInvestigate}
-                />
-              )}
+              
             </div>
           </li>
         ))}
@@ -551,14 +449,7 @@ export function DrawerBody({ kind, ctx }: { kind: DrawerKind; ctx: DrawerContext
               </span>
               {row.item.disputeNote && <p className="muted">{row.item.disputeNote}</p>}
             </div>
-            {canInvestigate && (
-              <InvestigateButton
-                metric={metric}
-                recordId={row.auditId}
-                label={`${row.itemId} · ${row.auditLabel}`}
-                onInvestigate={onInvestigate}
-              />
-            )}
+            
           </li>
         ))}
       </ul>

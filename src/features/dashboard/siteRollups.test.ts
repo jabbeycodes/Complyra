@@ -5,7 +5,6 @@ import {
   certificateSiteRollup,
   currentMonthKey,
   drillSiteRollup,
-  investigationSiteRollup,
   medSiteRollup,
   rollupMetricVisibility,
   shiftNoteSiteRollup,
@@ -14,7 +13,6 @@ import {
   worstTone,
 } from "./siteRollups";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
-import type { Investigation } from "../../data/investigations";
 import type {
   ExpiringCertificate,
   MedSupplyStatus,
@@ -201,28 +199,12 @@ test("shift-note rollup: zero notes is critical, partial warns, full coverage is
   assert.equal(shiftNoteSiteRollup([], "2026-09", 0).tone, "ok");
 });
 
-test("investigation rollup summarizes the site's open and overdue counts", () => {
-  const rows = [
-    { siteId: "s1", storedStatus: "open", dueOn: "2026-12-01" },
-    { siteId: "s1", storedStatus: "in_progress", dueOn: "2026-09-01" }, // overdue
-    { siteId: "s1", storedStatus: "resolved", dueOn: null },
-    { siteId: "other", storedStatus: "open", dueOn: "2026-12-01" },
-  ] as Investigation[];
-  const result = investigationSiteRollup(rows, "s1", new Date("2026-09-17T12:00:00Z"));
-  assert.equal(result.open, 2);
-  assert.equal(result.overdue, 1);
-  assert.equal(result.tone, "critical");
-  const empty = investigationSiteRollup(rows, "nope", new Date("2026-09-17T12:00:00Z"));
-  assert.equal(empty.tone, "ok");
-  assert.equal(empty.label, "No open investigations");
-});
 
 test("rollupMetricVisibility mirrors the API read gates", () => {
   const admin = rollupMetricVisibility(
     session("administrator", {
       "hr.view_staff": true,
       "certificates.manage": true,
-      "investigations.manage": true,
     }),
   );
   assert.deepEqual(admin, {
@@ -231,14 +213,12 @@ test("rollupMetricVisibility mirrors the API read gates", () => {
     certificates: true,
     meds: true,
     shiftNotes: true,
-    investigations: true,
   });
   assert.ok(anyRollupVisible(admin));
 
   const auditor = rollupMetricVisibility(session("auditor"));
   assert.equal(auditor.training, false);
   assert.equal(auditor.certificates, false);
-  assert.equal(auditor.investigations, false);
   // Auditors may read shift notes and already receive drill records in the workspace.
   assert.equal(auditor.shiftNotes, true);
   assert.equal(auditor.drills, true);
@@ -247,7 +227,6 @@ test("rollupMetricVisibility mirrors the API read gates", () => {
   const hr = rollupMetricVisibility(session("hr", { "hr.view_staff": true, "certificates.manage": true }));
   assert.equal(hr.training, true);
   assert.equal(hr.certificates, true);
-  assert.equal(hr.investigations, false);
   assert.equal(hr.meds, false);
   assert.equal(hr.shiftNotes, false);
 
@@ -260,7 +239,6 @@ test("rollupMetricVisibility mirrors the API read gates", () => {
     certificates: false,
     meds: false,
     shiftNotes: false,
-    investigations: false,
   });
 });
 

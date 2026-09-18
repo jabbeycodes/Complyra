@@ -21,8 +21,6 @@ import type {
 } from "../../data/types";
 import type { QaAuditItemState } from "../../data/qaAudit";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
-import type { Investigation } from "../../data/investigations";
-import { summarizeInvestigations } from "../../data/investigations";
 
 /** "YYYY-MM" for the current day. */
 export function currentMonthKey(now: Date = new Date()): string {
@@ -222,16 +220,4 @@ export function openQaDisputes(
   return items.filter(
     (item) => item.disputeRaisedBy != null && item.disputeResolution == null,
   );
-}
-
-/* ------------------------------------------------------------------ */
-/* Investigations                                                      */
-/* ------------------------------------------------------------------ */
-
-/** Dashboard tile numbers for a site's investigations (overdue derived). */
-export function investigationTileSummary(
-  investigations: Array<Pick<Investigation, "storedStatus" | "dueOn">>,
-  now: Date = new Date(),
-): { open: number; overdue: number } {
-  return summarizeInvestigations(investigations, now);
 }

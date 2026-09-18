@@ -68,7 +68,6 @@ import {
   type SiteDelegationActivation,
 } from "../delegation/delegation";
 import type { CorrectiveAction } from "./correctiveActions";
-import type { Investigation } from "./investigations";
 import type { ScoreSnapshot } from "./complianceScore";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
@@ -120,8 +119,6 @@ export interface LocalDatabase {
   certificates: StaffCertificate[];
   // AUDIT-READINESS: corrective actions are created by managers after go-live.
   correctiveActions: CorrectiveAction[];
-  // ISSUE-98: investigations are created by managers after go-live.
-  investigations: Investigation[];
   // AUDIT-READINESS: compliance score snapshots for the trend chart.
   complianceSnapshots: ScoreSnapshot[];
   // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
@@ -680,8 +677,6 @@ export function createEvergreenSeed(): LocalDatabase {
     // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
     // AUDIT-READINESS: managers create corrective actions after go-live.
     correctiveActions: [],
-    // ISSUE-98: managers create investigations after go-live.
-    investigations: [],
     // AUDIT-READINESS: score snapshots accumulate as the command center runs.
     complianceSnapshots: [],
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.

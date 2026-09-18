@@ -7,7 +7,6 @@ import {
   currentMonthKey,
   daysUntilExpiry,
   drillTileSummary,
-  investigationTileSummary,
   medAlertSummary,
   openQaDisputes,
   safetyLinesAnswered,
@@ -244,19 +243,6 @@ describe("openQaDisputes", () => {
   });
 });
 
-describe("investigationTileSummary", () => {
-  it("uses summarizeInvestigations: overdue counts in open too", () => {
-    const summary = investigationTileSummary(
-      [
-        { storedStatus: "open", dueOn: null },
-        { storedStatus: "in_progress", dueOn: "2026-09-10" }, // overdue
-        { storedStatus: "resolved", dueOn: "2026-09-10" },
-      ],
-      NOW,
-    );
-    assert.deepEqual(summary, { open: 2, overdue: 1 });
-  });
-});
 
 describe("date helpers", () => {
   it("derives the current month key and expiry deltas", () => {

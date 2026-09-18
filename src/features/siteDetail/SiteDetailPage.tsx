@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -38,7 +38,6 @@ import {
   collectExpiringCerts,
   currentMonthKey,
   drillTileSummary,
-  investigationTileSummary,
   medAlertSummary,
   safetyLinesAnswered,
   safetyTileState,
@@ -47,16 +46,12 @@ import {
 } from "./trackables";
 import { useSiteTrackables } from "./useSiteTrackables";
 import InspectionDrawer from "./InspectionDrawer";
-import StartInvestigationForm from "./StartInvestigationForm";
-import InvestigationsPanel from "./InvestigationsPanel";
 import {
-  drawerMetric,
   drawerTitle,
   DrawerBody,
   type DrawerContext,
   type DrawerKind,
 } from "./drawerBodies";
-import type { InvestigationSourceMetric } from "../../data/investigations";
 import {
   formatDrillTypeLabel,
   sortOpenRequirements,
@@ -144,13 +139,6 @@ export default function SiteDetailPage({
   const [mileageError, setMileageError] = useState<string | undefined>();
 
   const [drawer, setDrawer] = useState<DrawerKind | null>(null);
-  const [investigating, setInvestigating] = useState<{
-    metric: InvestigationSourceMetric;
-    sourceRecordId: string | null;
-    sourceLabel: string;
-  } | null>(null);
-  const [investigationNotice, setInvestigationNotice] = useState("");
-  const investigationsRef = useRef<HTMLElement | null>(null);
 
   const site = workspace?.sites.find((s) => s.id === siteId) ?? null;
   const siteName = site?.name ?? "";
@@ -208,10 +196,7 @@ export default function SiteDetailPage({
     trainingRows,
     medStatus,
     siteNotes,
-    investigations,
   } = trackables;
-
-  const canInvestigate = !!session && can(session, "investigations.manage");
 
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? "overview";
 
@@ -275,10 +260,6 @@ export default function SiteDetailPage({
   const shiftCoverage = useMemo(
     () => (siteNotes ? shiftNoteCoverage(siteNotes, thisMonth) : null),
     [siteNotes, thisMonth],
-  );
-  const invSummary = useMemo(
-    () => (investigations ? investigationTileSummary(investigations) : null),
-    [investigations],
   );
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
@@ -417,18 +398,6 @@ export default function SiteDetailPage({
       drawer: "qa_disputes",
     });
   }
-  if (canInvestigate && invSummary) {
-    stripTiles.push({
-      key: "investigations",
-      label: "Open investigations",
-      value: `${invSummary.open}`,
-      sub: invSummary.overdue > 0 ? `${invSummary.overdue} overdue` : "open",
-      tone: invSummary.overdue > 0 ? "attention" : "neutral",
-      ariaLabel: `${invSummary.open} open investigations${invSummary.overdue > 0 ? `, ${invSummary.overdue} overdue` : ""}. Go to investigations.`,
-      onClick: () =>
-        investigationsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    });
-  }
 
   // ---- drawer ----------------------------------------------------------
 
@@ -510,11 +479,6 @@ export default function SiteDetailPage({
         item: row.item,
       })),
       onOpenIndividual,
-      onInvestigate: (metric, sourceRecordId, sourceLabel) => {
-        setInvestigationNotice("");
-        setInvestigating({ metric, sourceRecordId, sourceLabel });
-      },
-      canInvestigate,
     }),
     [
       siteName,
@@ -533,14 +497,12 @@ export default function SiteDetailPage({
       shiftCoverage,
       qaDisputes,
       onOpenIndividual,
-      canInvestigate,
     ],
   );
 
+
   const closeDrawer = () => {
     setDrawer(null);
-    setInvestigating(null);
-    setInvestigationNotice("");
   };
 
   const selectTab = (id: SiteDetailTabId) => {
@@ -582,8 +544,6 @@ export default function SiteDetailPage({
       </div>
     );
   }
-
-  const drawerMetricKey = drawer ? drawerMetric(drawer) : null;
 
   return (
     <div className="site-detail">
@@ -710,15 +670,6 @@ export default function SiteDetailPage({
             </button>
           ))}
         </section>
-      )}
-
-      {canInvestigate && (
-        <InvestigationsPanel
-          siteName={site.name}
-          investigations={investigations}
-          onChanged={() => trackables.refreshInvestigations()}
-          sectionRef={investigationsRef}
-        />
       )}
 
       <div className="site-detail-tabstrip">
@@ -1383,52 +1334,7 @@ export default function SiteDetailPage({
 
       <InspectionDrawer
         title={drawer ? drawerTitle(drawer) : null}
-        subtitle={
-          drawer && canInvestigate
-            ? `${site.name} · tap Investigate on any record to start a follow-up`
-            : undefined
-        }
         onClose={closeDrawer}
-        footer={
-          drawer && investigating ? (
-            <StartInvestigationForm
-              siteId={siteId}
-              sourceMetric={investigating.metric}
-              sourceRecordId={investigating.sourceRecordId}
-              sourceLabel={investigating.sourceLabel}
-              staff={siteStaff}
-              onCancel={() => setInvestigating(null)}
-              onCreated={(created) => {
-                setInvestigating(null);
-                setInvestigationNotice(
-                  `Investigation started${created.assignedToName ? ` — owner: ${created.assignedToName}` : ""}.`,
-                );
-                void trackables.refreshInvestigations();
-              }}
-            />
-          ) : drawer && canInvestigate ? (
-            <>
-              {investigationNotice && (
-                <p className="inspection-notice" role="status">
-                  {investigationNotice}
-                </p>
-              )}
-              <button
-                type="button"
-                className="button primary"
-                onClick={() =>
-                  setInvestigating({
-                    metric: drawerMetricKey ?? "general",
-                    sourceRecordId: null,
-                    sourceLabel: "",
-                  })
-                }
-              >
-                Start investigation
-              </button>
-            </>
-          ) : undefined
-        }
       >
         {drawer && <DrawerBody kind={drawer} ctx={drawerCtx} />}
       </InspectionDrawer>

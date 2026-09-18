@@ -49,8 +49,6 @@ export const PERMISSION_KEYS = [
   "sites.create",
   // AUDIT-READINESS (corrective actions)
   "correctiveActions.manage",
-  // ISSUE-98 (investigations)
-  "investigations.manage",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
@@ -147,7 +145,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       ALL.filter(
         (key) =>
           key !== "hr.view_staff" &&
-          key !== "investigations.manage" &&
           !key.startsWith("qa.") &&
           (key === "hub.access" || !key.startsWith("hub.")),
       ),
@@ -187,8 +184,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.view_team",
       // HR-STAFFING (2026-09-16): recurring staffing patterns for their home.
       "hub.manage_staffing",
-      // ISSUE-98: investigations at their home.
-      "investigations.manage",
     ]),
   },
   {
@@ -215,8 +210,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.export",
       "sites.create",
       "correctiveActions.manage",
-      // ISSUE-98 (investigations)
-      "investigations.manage",
       "mileage.manage",
       "recognition.view_winners",
       "recognition.manage",
@@ -418,7 +411,6 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "sites.create": "Add program sites",
   // AUDIT-READINESS (corrective actions)
   "correctiveActions.manage": "Manage corrective actions",
-  "investigations.manage": "Manage investigations",
   // LIFEPATH-P4 (certificates)
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)

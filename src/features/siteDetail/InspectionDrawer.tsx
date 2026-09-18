@@ -7,7 +7,8 @@ interface InspectionDrawerProps {
   subtitle?: string;
   onClose: () => void;
   children: React.ReactNode;
-  /** e.g. the "Start investigation" button — rendered under the body. */
+
+  /** Optional action area — rendered under the body. */
   footer?: React.ReactNode;
 }
 

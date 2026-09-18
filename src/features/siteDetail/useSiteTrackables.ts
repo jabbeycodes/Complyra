@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { can, pageVisible } from "../../data/status";
 import type {
   HmWeeklyChecklist,
@@ -9,7 +9,6 @@ import type {
 } from "../../data/types";
 import type { QaAudit, QaAuditItemState } from "../../data/qaAudit";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
-import type { Investigation } from "../../data/investigations";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { ComplyraApi } from "../../data/localApi";
 
@@ -42,7 +41,6 @@ export interface TrackablesState {
   trainingRows: TrainingRow[] | null;
   medStatus: MedSupplyStatus | null;
   siteNotes: SiteShiftNoteView[] | null;
-  investigations: Investigation[] | null;
   loading: boolean;
   error: string | null;
 }
@@ -55,7 +53,6 @@ export const EMPTY_TRACKABLES: TrackablesState = {
   trainingRows: null,
   medStatus: null,
   siteNotes: null,
-  investigations: null,
   loading: false,
   error: null,
 };
@@ -80,23 +77,12 @@ export function useSiteTrackables({
   siteId,
   siteStaff,
   hasAccess,
-}: HookArgs): TrackablesState & { refreshInvestigations: () => Promise<void> } {
+}: HookArgs): TrackablesState {
   const [state, setState] = useState<TrackablesState>({
     ...EMPTY_TRACKABLES,
     loading: true,
   });
   const cancelled = useRef(false);
-
-  const loadInvestigations = useCallback(async () => {
-    if (!session || !hasAccess || !can(session, "investigations.manage")) return;
-    try {
-      const rows = await api.listInvestigations({ siteId });
-      if (!cancelled.current) setState((s) => ({ ...s, investigations: rows }));
-    } catch {
-      // Investigations stay hidden on failure rather than erroring the page.
-      if (!cancelled.current) setState((s) => ({ ...s, investigations: [] }));
-    }
-  }, [api, session, siteId, hasAccess]);
 
   useEffect(() => {
     cancelled.current = false;
@@ -114,7 +100,6 @@ export function useSiteTrackables({
       pageVisible(session, "Training") || pageVisible(session, "Delegations");
     const canSeeMeds = pageVisible(session, "Supply forecast");
     const canSeeShiftNotes = pageVisible(session, "ShiftNotes");
-    const canSeeInvestigations = can(session, "investigations.manage");
 
     async function loadTraining(): Promise<TrainingRow[]> {
       const rows: TrainingRow[] = await Promise.all(
@@ -180,7 +165,7 @@ export function useSiteTrackables({
     (async () => {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const [qaHistory, checklists, delegations, trainingRows, medStatus, siteNotes, investigations] =
+        const [qaHistory, checklists, delegations, trainingRows, medStatus, siteNotes] =
           await Promise.all([
             canSeeQa
               ? api.getQaSiteHistory(siteId).catch(() => [] as QaAudit[])
@@ -198,9 +183,6 @@ export function useSiteTrackables({
             canSeeShiftNotes
               ? api.getSiteShiftNotes(siteId).catch(() => [] as SiteShiftNoteView[])
               : Promise.resolve(null as SiteShiftNoteView[] | null),
-            canSeeInvestigations
-              ? api.listInvestigations({ siteId }).catch(() => [] as Investigation[])
-              : Promise.resolve(null as Investigation[] | null),
           ]);
         const qaDisputes =
           qaHistory && qaHistory.length > 0
@@ -217,7 +199,6 @@ export function useSiteTrackables({
             trainingRows,
             medStatus,
             siteNotes,
-            investigations,
             loading: false,
             error: null,
           });
@@ -240,9 +221,5 @@ export function useSiteTrackables({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, hasAccess, siteId, session, siteStaff]);
 
-  const refreshInvestigations = useCallback(async () => {
-    await loadInvestigations();
-  }, [loadInvestigations]);
-
-  return { ...state, refreshInvestigations };
+  return state;
 }

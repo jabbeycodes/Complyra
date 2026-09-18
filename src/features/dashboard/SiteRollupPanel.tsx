@@ -9,7 +9,6 @@
  *
  * Data loading (per mount, in parallel):
  * - drills: synchronous from the preloaded workspace payload (no API call).
- * - investigations: one api.listInvestigations() call, summarized per site.
  * - certificates: one api.certificatesExpiringSoon(60) call, grouped by staff site.
  * - training: one api.listStaffNeedingClearance(siteId) call per site — the
  *   per-staff gate evaluation happens server-side, so this stays a single
@@ -26,7 +25,6 @@ import { Badge } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { monthLabel } from "../../data/monthlyChecks";
 import { todayIso } from "../../data/chart";
-import type { Investigation } from "../../data/investigations";
 import type {
   ExpiringCertificate,
   MedSupplyStatus,
@@ -38,7 +36,6 @@ import {
   certificateSiteRollup,
   currentMonthKey,
   drillSiteRollup,
-  investigationSiteRollup,
   medSiteRollup,
   rollupMetricVisibility,
   shiftNoteSiteRollup,
@@ -66,7 +63,6 @@ interface Props {
 type MetricKey = keyof RollupMetricVisibility;
 
 interface LoadedRollups {
-  investigations: Investigation[] | null;
   certsBySite: Map<string, ExpiringCertificate[]> | null;
   trainingBySite: Map<string, StaffClearanceRow[]> | null;
   medsBySite: Map<string, MedSupplyStatus> | null;
@@ -74,7 +70,6 @@ interface LoadedRollups {
 }
 
 const EMPTY: LoadedRollups = {
-  investigations: null,
   certsBySite: null,
   trainingBySite: null,
   medsBySite: null,
@@ -103,17 +98,6 @@ export default function SiteRollupPanel({ sites, site, onSite }: Props) {
       const siteIds = sites.map((s) => s.id);
       const jobs: Promise<void>[] = [];
 
-      if (gates.investigations) {
-        jobs.push(
-          api
-            .listInvestigations()
-            .then((rows) => {
-              if (!cancelled)
-                setData((d) => ({ ...d, investigations: rows }));
-            })
-            .catch(() => fail("investigations")),
-        );
-      }
       if (gates.certificates) {
         jobs.push(
           api
@@ -219,10 +203,6 @@ export default function SiteRollupPanel({ sites, site, onSite }: Props) {
     meds: visibility.meds && !failed.has("meds") && data.medsBySite !== null,
     shiftNotes:
       visibility.shiftNotes && !failed.has("shiftNotes") && data.notesBySite !== null,
-    investigations:
-      visibility.investigations &&
-      !failed.has("investigations") &&
-      data.investigations !== null,
   };
   const columns = (Object.keys(visible) as MetricKey[]).filter((k) => visible[k]);
   if (columns.length === 0) return null; // every permitted metric failed to load
@@ -230,8 +210,7 @@ export default function SiteRollupPanel({ sites, site, onSite }: Props) {
     (visibility.training && !failed.has("training") && data.trainingBySite === null) ||
     (visibility.certificates && !failed.has("certificates") && data.certsBySite === null) ||
     (visibility.meds && !failed.has("meds") && data.medsBySite === null) ||
-    (visibility.shiftNotes && !failed.has("shiftNotes") && data.notesBySite === null) ||
-    (visibility.investigations && !failed.has("investigations") && data.investigations === null);
+    (visibility.shiftNotes && !failed.has("shiftNotes") && data.notesBySite === null);
 
   const monthKey = currentMonthKey(todayIso());
   const dueDay = workspace.monthlyDue.drillDay;
@@ -247,7 +226,6 @@ export default function SiteRollupPanel({ sites, site, onSite }: Props) {
     certificates: "Certificates",
     meds: "Med supply",
     shiftNotes: "Shift notes",
-    investigations: "Investigations",
   };
 
   interface RowMetric {
@@ -290,10 +268,6 @@ export default function SiteRollupPanel({ sites, site, onSite }: Props) {
         individualsBySite.get(s.id) ?? 0,
       );
       metrics.push({ key: "shiftNotes", label: r.label, tone: r.tone });
-    }
-    if (visible.investigations) {
-      const r = investigationSiteRollup(data.investigations!, s.id);
-      metrics.push({ key: "investigations", label: r.label, tone: r.tone });
     }
     return { site: s, metrics, tone: worstTone(metrics.map((m) => m.tone)) };
   });
