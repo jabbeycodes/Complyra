@@ -7307,6 +7307,7 @@ button.qa-row:hover {
   font-size: 20px;
 }
 .isp-report-program h5,
+.isp-report-weekly h5,
 .isp-report-grid-wrap h5,
 .isp-report-signatures h5,
 .isp-report-summary h5 {
@@ -7339,6 +7340,98 @@ button.qa-row:hover {
   display: grid;
   gap: 6px;
   font-size: 13px;
+}
+/* Issue #96 — weekly task score summary chart. Solid earthy colors only,
+   no gradients; segments keep their color in print/PDF via color-adjust. */
+.isp-report-weekly h5 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.isp-weekly-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.isp-weekly-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.isp-weekly-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.isp-weekly-task {
+  margin-top: 12px;
+}
+.isp-weekly-task h6 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.isp-weekly-rows {
+  display: grid;
+  gap: 6px;
+}
+.isp-weekly-row {
+  display: grid;
+  grid-template-columns: 168px minmax(120px, 1fr) 130px;
+  align-items: center;
+  gap: 10px;
+}
+.isp-weekly-week {
+  font-size: 12px;
+  color: var(--muted);
+}
+.isp-weekly-bar {
+  display: flex;
+  align-items: stretch;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: #f4efe6;
+}
+.isp-weekly-empty {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 8px;
+  align-self: center;
+}
+.isp-weekly-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  min-width: 2px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.isp-weekly-seg-refused {
+  color: #4a4036;
+}
+.isp-weekly-seg-other {
+  color: #4a4036;
+}
+.isp-weekly-counts {
+  font-size: 12px;
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .isp-weekly-row {
+    grid-template-columns: 120px minmax(90px, 1fr);
+  }
+  .isp-weekly-counts {
+    grid-column: 1 / -1;
+  }
 }
 .isp-report-grid-note {
   margin: 0 0 8px;
@@ -7422,9 +7515,11 @@ button.qa-row:hover {
   }
   body.isp-report-printing .isp-report-header,
   body.isp-report-printing .isp-report-program,
+  body.isp-report-printing .isp-report-weekly,
   body.isp-report-printing .isp-report-signatures,
   body.isp-report-printing .isp-report-summary,
   body.isp-report-printing .isp-report-table tr,
+  body.isp-report-printing .isp-weekly-task,
   body.isp-report-printing .isp-report-objectives li {
     break-inside: avoid;
   }

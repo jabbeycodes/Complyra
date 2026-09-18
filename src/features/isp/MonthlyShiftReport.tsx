@@ -23,6 +23,7 @@ import {
 import {
   bucketNotesByDay,
   buildNotesCsv,
+  buildWeeklyScoreSummary,
   canReopenMonthlySummary,
   canSignMonthlySummary,
   collectSignatureLog,
@@ -32,6 +33,8 @@ import {
   monthDisplayLabel,
   notesInMonth,
   reportProgramForMonth,
+  weekDayRangeLabel,
+  type WeeklyScoreCounts,
 } from "./monthlyReport";
 import type { IspChartData } from "./useIspData";
 import {
@@ -50,6 +53,66 @@ function downloadFile(name: string, body: string, type: string) {
 
 function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * Issue #96 — the "Weekly task score summary" chart: stacked solid-color
+ * bars showing, per objective and per week, how many times the task was
+ * scored Yes / No (with Refused and N/A-or-other as muted segments).
+ * Inline CSS/SVG only — no chart library — so it survives print and PDF.
+ */
+const WEEKLY_BUCKET_META = [
+  { key: "yes", label: "Yes", color: "#4d6b42" },
+  { key: "no", label: "No", color: "#b56a4e" },
+  { key: "refused", label: "Refused", color: "#b59a74" },
+  { key: "other", label: "N/A or other", color: "#d8cbb6" },
+] as const;
+
+function weeklyCountsText(counts: WeeklyScoreCounts): string {
+  const parts = [`${counts.yes} Y`, `${counts.no} N`];
+  if (counts.refused > 0) parts.push(`${counts.refused} R`);
+  if (counts.other > 0) parts.push(`${counts.other} N/A`);
+  return parts.join(" · ");
+}
+
+function WeeklyScoreBar({
+  weekLabel,
+  counts,
+}: {
+  weekLabel: string;
+  counts: WeeklyScoreCounts;
+}) {
+  const { total } = counts;
+  const ariaLabel =
+    total === 0
+      ? `${weekLabel}: no scores recorded`
+      : `${weekLabel}: ${counts.yes} yes, ${counts.no} no, ${counts.refused} refused, ${counts.other} N/A or other`;
+  return (
+    <div className="isp-weekly-row">
+      <span className="isp-weekly-week">{weekLabel}</span>
+      <div className="isp-weekly-bar" role="img" aria-label={ariaLabel} title={ariaLabel}>
+        {total === 0 ? (
+          <span className="isp-weekly-empty">No scores</span>
+        ) : (
+          WEEKLY_BUCKET_META.map((meta) => {
+            const value = counts[meta.key];
+            if (value === 0) return null;
+            const width = (value / total) * 100;
+            return (
+              <span
+                key={meta.key}
+                className={`isp-weekly-seg isp-weekly-seg-${meta.key}`}
+                style={{ width: `${width}%`, backgroundColor: meta.color }}
+              >
+                {width >= 14 ? value : ""}
+              </span>
+            );
+          })
+        )}
+      </div>
+      <span className="isp-weekly-counts">{total === 0 ? "—" : weeklyCountsText(counts)}</span>
+    </div>
+  );
 }
 
 export default function MonthlyShiftReport({
@@ -137,6 +200,8 @@ export default function MonthlyShiftReport({
   const dayCount = daysInMonth(monthKey);
   const signatures = collectSignatureLog(notes, staffTitleByUserId);
   const signed = (report?.signedAt ?? "") !== "";
+  const captionById = new Map(levels.map((level) => [level.id, level.caption]));
+  const weeklySummary = buildWeeklyScoreSummary(notes, tasks, captionById);
 
   const persist = (action: () => Promise<unknown>) =>
     runIsp(async () => {
@@ -222,6 +287,20 @@ export default function MonthlyShiftReport({
       scheduleLabel: ispScheduleLabel(program.schedule),
       scoringMethodName: program.scoringMethod?.name ?? "",
       tasks: tasks.map((task) => ({ title: task.title, instructions: task.instructions })),
+      weekly: weeklySummary.map((taskWeek, taskIndex) => ({
+        title: taskWeek.taskTitle,
+        weeks: taskWeek.weeks.map((counts, weekIndex) => {
+          const range = weekDayRangeLabel(monthKey, weekIndex + 1);
+          return {
+            label: range ? `Week ${weekIndex + 1} (${range})` : "",
+            yes: counts.yes,
+            no: counts.no,
+            refused: counts.refused,
+            other: counts.other,
+          };
+        }),
+        taskNumber: taskIndex + 1,
+      })),
       grid,
       signatures,
       summary: report
@@ -346,6 +425,46 @@ export default function MonthlyShiftReport({
                 </li>
               ))}
             </ol>
+          </section>
+
+          {/* Weekly task score summary chart */}
+          <section className="isp-report-weekly">
+            <h5>Weekly task score summary</h5>
+            <p className="muted isp-report-grid-note">
+              For each objective, how many times the task was scored Yes or No in each week of
+              the month. Refused and N/A scores appear as muted segments so nothing is hidden.
+            </p>
+            <div className="isp-weekly-legend" aria-hidden="true">
+              {WEEKLY_BUCKET_META.map((meta) => (
+                <span key={meta.key} className="isp-weekly-legend-item">
+                  <span
+                    className="isp-weekly-swatch"
+                    style={{ backgroundColor: meta.color }}
+                  />
+                  {meta.label}
+                </span>
+              ))}
+            </div>
+            {weeklySummary.map((taskWeek, taskIndex) => (
+              <div className="isp-weekly-task" key={taskWeek.taskId}>
+                <h6>
+                  {taskIndex + 1}. {taskWeek.taskTitle}
+                </h6>
+                <div className="isp-weekly-rows">
+                  {taskWeek.weeks.map((counts, weekIndex) => {
+                    const range = weekDayRangeLabel(monthKey, weekIndex + 1);
+                    if (!range) return null;
+                    return (
+                      <WeeklyScoreBar
+                        key={weekIndex}
+                        weekLabel={`Week ${weekIndex + 1} (days ${range})`}
+                        counts={counts}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </section>
 
           {/* Day grid */}

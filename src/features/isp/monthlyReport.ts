@@ -164,6 +164,107 @@ export function dayCellEntries(
   return entries;
 }
 
+/* ------------------------------------------------------------------ */
+/* Weekly task score summary chart (founder request: clarity over the  */
+/* Therap-style grid — per-task Yes/No counts for each week).          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The chart bucket a score level falls into. Scoring levels are
+ * agency-defined, so this maps by caption: anything not recognizably
+ * Yes/No/Refused (e.g. "N/A", "Not applicable", custom levels) lands in
+ * "other" and is rendered as a muted segment so nothing is hidden.
+ */
+export type ScoreBucket = "yes" | "no" | "refused" | "other";
+
+export function scoreBucketForLevelCaption(caption: string): ScoreBucket {
+  const text = caption.trim().toLowerCase();
+  if (text === "yes") return "yes";
+  if (text === "no") return "no";
+  if (text === "refused") return "refused";
+  return "other";
+}
+
+/**
+ * Week of the month, 1–5, as plain 7-day chunks: days 1–7 → week 1,
+ * 8–14 → week 2, 15–21 → week 3, 22–28 → week 4, 29–end → week 5.
+ * Simple and unambiguous on a printed report.
+ */
+export function weekOfMonthIndex(day: number): number {
+  return Math.min(5, Math.max(1, Math.ceil(day / 7)));
+}
+
+/**
+ * Day-range label for a week, e.g. "1–7". Returns "" when the week has no
+ * days in the month (week 5 of February); the UI skips those rows.
+ */
+export function weekDayRangeLabel(monthKey: string, week: number): string {
+  const days = daysInMonth(monthKey);
+  const start = (week - 1) * 7 + 1;
+  if (start > days) return "";
+  return `${start}–${Math.min(week * 7, days)}`;
+}
+
+export interface WeeklyScoreCounts {
+  yes: number;
+  no: number;
+  refused: number;
+  other: number;
+  total: number;
+}
+
+export interface TaskWeeklySummary {
+  taskId: string;
+  taskTitle: string;
+  /** Five entries: weeks 1–5. */
+  weeks: WeeklyScoreCounts[];
+}
+
+export interface WeeklyTaskRef {
+  id: string;
+  title: string;
+}
+
+function emptyWeeklyCounts(): WeeklyScoreCounts {
+  return { yes: 0, no: 0, refused: 0, other: 0, total: 0 };
+}
+
+/**
+ * Per-task, per-week score counts for the chart. Pass notes already filtered
+ * to the month (notesInMonth). Scores for tasks not in `tasks` are ignored;
+ * deleted notes are skipped.
+ */
+export function buildWeeklyScoreSummary(
+  notes: ShiftNoteView[],
+  tasks: WeeklyTaskRef[],
+  levelCaptionById: Map<string, string>,
+): TaskWeeklySummary[] {
+  const indexByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
+  const perTask: WeeklyScoreCounts[][] = tasks.map(() =>
+    Array.from({ length: 5 }, emptyWeeklyCounts),
+  );
+  for (const note of notes) {
+    if (note.deletedAt) continue;
+    const day = Number(note.noteDate.slice(8, 10));
+    if (!Number.isFinite(day) || day < 1) continue;
+    const week = weekOfMonthIndex(day) - 1;
+    for (const score of note.scores) {
+      const taskIndex = indexByTaskId.get(score.taskId);
+      if (taskIndex === undefined) continue;
+      const bucket = scoreBucketForLevelCaption(
+        levelCaptionById.get(score.levelId) ?? "",
+      );
+      perTask[taskIndex][week][bucket] += 1;
+      perTask[taskIndex][week].total += 1;
+    }
+  }
+  return tasks.map((task, index) => ({
+    taskId: task.id,
+    taskTitle: task.title,
+    weeks: perTask[index],
+  }));
+}
+
 function csvCell(value: string | number | null | undefined): string {
   const text = value === null || value === undefined ? "" : String(value);
   return `"${text.replaceAll('"', '""')}"`;

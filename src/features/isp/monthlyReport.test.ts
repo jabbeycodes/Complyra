@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   bucketNotesByDay,
   buildNotesCsv,
+  buildWeeklyScoreSummary,
   canReopenMonthlySummary,
   canSignMonthlySummary,
   canWriteMonthlySummary,
@@ -21,6 +22,9 @@ import {
   monthStartOf,
   notesInMonth,
   reportProgramForMonth,
+  scoreBucketForLevelCaption,
+  weekDayRangeLabel,
+  weekOfMonthIndex,
 } from "./monthlyReport";
 import type { IspProgramView, ShiftNoteView } from "../../data/shiftNotes";
 
@@ -205,6 +209,110 @@ test("issue #96 buildNotesCsv emits one row per score with stable columns", () =
   assert.ok(lines[2].includes('"Community"'));
   assert.ok(lines[2].includes('"Yes"'));
   assert.ok(lines[2].includes('"Y"'));
+});
+
+test("issue #96 weekly chart: week boundaries are plain 7-day chunks", () => {
+  assert.equal(weekOfMonthIndex(1), 1);
+  assert.equal(weekOfMonthIndex(7), 1);
+  assert.equal(weekOfMonthIndex(8), 2);
+  assert.equal(weekOfMonthIndex(14), 2);
+  assert.equal(weekOfMonthIndex(21), 3);
+  assert.equal(weekOfMonthIndex(22), 4);
+  assert.equal(weekOfMonthIndex(28), 4);
+  assert.equal(weekOfMonthIndex(29), 5);
+  assert.equal(weekOfMonthIndex(30), 5);
+  assert.equal(weekOfMonthIndex(31), 5);
+});
+
+test("issue #96 weekly chart: week day-range labels clip to the month", () => {
+  assert.equal(weekDayRangeLabel("2026-09", 1), "1–7");
+  assert.equal(weekDayRangeLabel("2026-09", 4), "22–28");
+  assert.equal(weekDayRangeLabel("2026-09", 5), "29–30");
+  assert.equal(weekDayRangeLabel("2026-02", 5), "");
+  assert.equal(weekDayRangeLabel("2026-02", 4), "22–28");
+});
+
+test("issue #96 weekly chart: score captions map to buckets, unknown to other", () => {
+  assert.equal(scoreBucketForLevelCaption("Yes"), "yes");
+  assert.equal(scoreBucketForLevelCaption("  yes  "), "yes");
+  assert.equal(scoreBucketForLevelCaption("No"), "no");
+  assert.equal(scoreBucketForLevelCaption("Refused"), "refused");
+  assert.equal(scoreBucketForLevelCaption("N/A"), "other");
+  assert.equal(scoreBucketForLevelCaption("Not applicable"), "other");
+  assert.equal(scoreBucketForLevelCaption("Partial"), "other");
+  assert.equal(scoreBucketForLevelCaption(""), "other");
+});
+
+function weeklyNote(overrides: Partial<ShiftNoteView> = {}): ShiftNoteView {
+  return note(overrides);
+}
+
+test("issue #96 weekly chart: per-task per-week Yes/No counts", () => {
+  const tasks = [
+    { id: "t1", title: "Community" },
+    { id: "t2", title: "Housework" },
+  ];
+  const captions = new Map([
+    ["yes", "Yes"],
+    ["no", "No"],
+    ["ref", "Refused"],
+    ["na", "N/A"],
+  ]);
+  const score = (id: string, taskId: string, levelId: string) => ({
+    id,
+    noteId: "x",
+    taskId,
+    taskTitle: "",
+    levelId,
+    comment: "",
+  });
+  const notes = [
+    // Week 1 (Sep 3): t1 yes x2, t2 no x1
+    weeklyNote({
+      id: "w1",
+      noteDate: "2026-09-03",
+      scores: [score("a", "t1", "yes"), score("b", "t1", "yes"), score("c", "t2", "no")],
+    }),
+    // Week 2 (Sep 10): t1 no x1, refused x1; t2 n/a x1
+    weeklyNote({
+      id: "w2",
+      noteDate: "2026-09-10",
+      scores: [score("d", "t1", "no"), score("e", "t1", "ref"), score("f", "t2", "na")],
+    }),
+    // Week 5 (Sep 29): t1 yes x1 — but deleted, so it must be skipped
+    weeklyNote({
+      id: "w3",
+      noteDate: "2026-09-29",
+      deletedAt: "2026-09-30T00:00:00Z",
+      scores: [score("g", "t1", "yes")],
+    }),
+    // Week 3 (Sep 17): score for an unknown task — ignored
+    weeklyNote({
+      id: "w4",
+      noteDate: "2026-09-17",
+      scores: [score("h", "t9", "yes")],
+    }),
+  ];
+  const summary = buildWeeklyScoreSummary(notes, tasks, captions);
+  assert.equal(summary.length, 2);
+  assert.deepEqual(summary[0].weeks[0], { yes: 2, no: 0, refused: 0, other: 0, total: 2 });
+  assert.deepEqual(summary[0].weeks[1], { yes: 0, no: 1, refused: 1, other: 0, total: 2 });
+  assert.deepEqual(summary[0].weeks[2], { yes: 0, no: 0, refused: 0, other: 0, total: 0 });
+  assert.deepEqual(summary[0].weeks[4], { yes: 0, no: 0, refused: 0, other: 0, total: 0 });
+  assert.deepEqual(summary[1].weeks[0], { yes: 0, no: 1, refused: 0, other: 0, total: 1 });
+  assert.deepEqual(summary[1].weeks[1], { yes: 0, no: 0, refused: 0, other: 1, total: 1 });
+  // Every task always gets five week entries.
+  assert.equal(summary[0].weeks.length, 5);
+  assert.equal(summary[1].weeks.length, 5);
+});
+
+test("issue #96 weekly chart: missing caption falls into the other bucket", () => {
+  const summary = buildWeeklyScoreSummary(
+    [weeklyNote({ scores: [{ id: "a", noteId: "w", taskId: "t1", taskTitle: "", levelId: "mystery", comment: "" }] })],
+    [{ id: "t1", title: "Community" }],
+    new Map(),
+  );
+  assert.deepEqual(summary[0].weeks[0], { yes: 0, no: 0, refused: 0, other: 1, total: 1 });
 });
 
 test("issue #96 monthly summary gates: PM/administrator only", () => {

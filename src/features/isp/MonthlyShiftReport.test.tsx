@@ -292,3 +292,78 @@ describe("MonthlyShiftReport sign / re-open", () => {
     assert.equal(signButton.disabled, true, "disabled with no saved report");
   });
 });
+
+describe("MonthlyShiftReport weekly task score summary", () => {
+  const monthKey = monthKeyNow();
+  const year = monthKey.slice(0, 4);
+  const weekOne = `${monthKey}-03`; // day 3 -> week 1
+
+  function renderWithNotes() {
+    const apiWithNotes = {
+      getShiftNotesForMonth: async () => [
+        {
+          id: "note-1",
+          agencyId: "agency-1",
+          individualId: INDIVIDUAL_ID,
+          programId: "prog-1",
+          noteDate: weekOne,
+          shift: "7a–3p",
+          summary: "Calm shift.",
+          timeSpentMinutes: 120,
+          staffUserId: "u1",
+          staffName: "Jean Masumbuko",
+          createdAt: `${weekOne}T15:00:00.000Z`,
+          updatedAt: `${weekOne}T15:00:00.000Z`,
+          deletedAt: null,
+          programName: `${year} ISP — Daily living supports`,
+          scoringMethodName: "Yes/No",
+          scores: [
+            { id: "s1", noteId: "note-1", taskId: "task-1", taskTitle: "Complete morning hygiene routine", levelId: "lvl-yes", comment: "" },
+            { id: "s2", noteId: "note-1", taskId: "task-1", taskTitle: "Complete morning hygiene routine", levelId: "lvl-no", comment: "" },
+          ],
+        },
+      ],
+      getShiftNoteMonthlyReport: async () => null,
+    } as unknown as ComplyraApi;
+    const data: IspChartData = {
+      programs: [programFixture(monthKey)],
+      scoringMethods: [],
+      notes: [],
+    };
+    render(
+      <MonthlyShiftReport
+        individualId={INDIVIDUAL_ID}
+        individualName="Ellis Harper"
+        individualIdLabel="ID-123"
+        siteName="Cedar House"
+        agencyName="Evergreen Care"
+        data={data}
+        api={apiWithNotes}
+        runIsp={(action) => action().then(() => undefined)}
+        sessionName="Sarah Mitchell"
+        roleKey="administrator"
+        canWriteSummary={true}
+        staffTitleByUserId={new Map()}
+      />,
+    );
+  }
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the weekly chart between the program block and the day grid", async () => {
+    renderWithNotes();
+    const heading = await screen.findByRole("heading", { name: "Weekly task score summary" });
+    assert.ok(heading, "chart heading renders");
+    // Week 1 bar carries an accessible label with the counts.
+    const bar = await screen.findByRole("img", { name: /Week 1 \(days 1–7\): 1 yes, 1 no/ });
+    assert.ok(bar, "week 1 bar summarizes 1 yes + 1 no");
+    // Legend lists every bucket.
+    assert.ok(document.body.textContent?.includes("N/A or other"));
+    // Chart sits above the day grid in DOM order.
+    const chartIdx = document.body.innerHTML.indexOf("Weekly task score summary");
+    const gridIdx = document.body.innerHTML.indexOf("Daily scores");
+    assert.ok(chartIdx > -1 && gridIdx > -1 && chartIdx < gridIdx, "chart precedes day grid");
+  });
+});

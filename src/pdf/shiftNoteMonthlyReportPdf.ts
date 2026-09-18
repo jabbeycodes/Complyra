@@ -24,6 +24,22 @@ export interface MonthlyReportPdfSignature {
   title: string;
 }
 
+export interface MonthlyReportPdfWeeklyWeek {
+  /** e.g. "Week 1 (1–7)"; "" when the week has no days in the month. */
+  label: string;
+  yes: number;
+  no: number;
+  refused: number;
+  other: number;
+}
+
+export interface MonthlyReportPdfWeeklyTask {
+  taskNumber: number;
+  title: string;
+  /** Weeks 1–5. */
+  weeks: MonthlyReportPdfWeeklyWeek[];
+}
+
 export interface MonthlyReportPdfSummary {
   narrative: string;
   signedByName: string;
@@ -63,6 +79,8 @@ export function buildShiftNoteMonthlyReportPdf(input: {
   scheduleLabel: string;
   scoringMethodName: string;
   tasks: MonthlyReportPdfTask[];
+  /** Per-task weekly Yes/No chart data, weeks 1–5. */
+  weekly: MonthlyReportPdfWeeklyTask[];
   /** task index -> day (1-based) -> stacked cell entries like "Y · JM". */
   grid: string[][][];
   signatures: MonthlyReportPdfSignature[];
@@ -169,6 +187,93 @@ export function buildShiftNoteMonthlyReportPdf(input: {
     y += lines.length * 12 + 6;
   });
   y += 8;
+
+  // Weekly task score summary chart (same stacked bars as the on-screen
+  // chart): per objective, Yes/No counts per week with muted
+  // Refused / N/A-or-other segments.
+  needPage(64);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(36, 30, 24);
+  doc.text("Weekly task score summary", margin, y);
+  y += 10;
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(95, 81, 69);
+  doc.text(
+    "For each objective, how many times the task was scored Yes or No in each week of the month.",
+    margin,
+    y,
+  );
+  doc.setTextColor(36, 30, 24);
+  y += 8;
+  const legendDefs: Array<[string, [number, number, number]]> = [
+    ["Yes", [77, 107, 66]],
+    ["No", [181, 106, 78]],
+    ["Refused", [181, 154, 116]],
+    ["N/A or other", [216, 203, 182]],
+  ];
+  let legendX = margin;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  for (const [label, rgb] of legendDefs) {
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    doc.rect(legendX, y - 8, 10, 8, "F");
+    doc.text(label, legendX + 13, y);
+    legendX += doc.getTextWidth(label) + 32;
+  }
+  y += 8;
+  const barWidth = 300;
+  const labelWidth = 104;
+  for (const taskWeek of input.weekly) {
+    const rows = taskWeek.weeks.filter((week) => week.label !== "");
+    const blockHeight = 14 + rows.length * 14 + 6;
+    needPage(blockHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(36, 30, 24);
+    doc.text(
+      doc.splitTextToSize(`${taskWeek.taskNumber}. ${taskWeek.title}`, usable)[0],
+      margin,
+      y,
+    );
+    y += 12;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    for (const week of rows) {
+      const total = week.yes + week.no + week.refused + week.other;
+      doc.text(week.label, margin, y + 8, { maxWidth: labelWidth - 6 });
+      const barX = margin + labelWidth;
+      if (total > 0) {
+        let segX = barX;
+        const segments: Array<[number, [number, number, number]]> = [
+          [week.yes, [77, 107, 66]],
+          [week.no, [181, 106, 78]],
+          [week.refused, [181, 154, 116]],
+          [week.other, [216, 203, 182]],
+        ];
+        for (const [count, rgb] of segments) {
+          if (count <= 0) continue;
+          const segWidth = (count / total) * barWidth;
+          doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+          doc.rect(segX, y, segWidth, 10, "F");
+          segX += segWidth;
+        }
+      }
+      doc.setDrawColor(181, 154, 116);
+      doc.rect(barX, y, barWidth, 10);
+      const countParts = [`${week.yes} Y`, `${week.no} N`];
+      if (week.refused > 0) countParts.push(`${week.refused} R`);
+      if (week.other > 0) countParts.push(`${week.other} N/A`);
+      doc.text(
+        total === 0 ? "No scores" : countParts.join(" · "),
+        barX + barWidth + 8,
+        y + 8,
+      );
+      y += 14;
+    }
+    y += 6;
+  }
 
   // Day grid.
   const dayCount = input.grid[0]?.length ?? 0;
