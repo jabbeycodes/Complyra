@@ -280,6 +280,19 @@ import {
   type UpdateCorrectiveActionInput,
 } from "./correctiveActions";
 import {
+  buildInvestigationEvent,
+  deriveInvestigationStatus,
+  sortInvestigations,
+  validateInvestigationInput,
+  type AddInvestigationInput,
+  type Investigation,
+  isInvestigationSourceMetric,
+  type InvestigationEvent,
+  type InvestigationEventType,
+  type StoredInvestigationStatus,
+  type UpdateInvestigationInput,
+} from "./investigations";
+import {
   sortSnapshotsOldestFirst,
   type ComplianceScore,
   type ScoreSnapshot,
@@ -782,6 +795,30 @@ export interface ComplyraApi {
   ): Promise<CorrectiveAction>;
   /** Resolve an action: stamps resolved_at (correctiveActions.manage). */
   resolveCorrectiveAction(id: string): Promise<CorrectiveAction>;
+  // ===== ISSUE-98 API (investigations) =====
+  /** List investigations for the agency; creators and assignees see their own. */
+  listInvestigations(input?: {
+    siteId?: string;
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<Investigation[]>;
+  /** Load one investigation with its history. */
+  getInvestigation(id: string): Promise<Investigation>;
+  /** Create an investigation (investigations.manage). */
+  addInvestigation(input: AddInvestigationInput): Promise<Investigation>;
+  /** Update an investigation (investigations.manage). */
+  updateInvestigation(
+    id: string,
+    input: UpdateInvestigationInput,
+  ): Promise<Investigation>;
+  /** Resolve an investigation: stamps resolved_at (investigations.manage). */
+  resolveInvestigation(id: string): Promise<Investigation>;
+  /** Re-open a resolved investigation (investigations.manage). */
+  reopenInvestigation(id: string): Promise<Investigation>;
+  /** Append a note to the investigation history (investigations.manage). */
+  addInvestigationNote(id: string, note: string): Promise<Investigation>;
+  /** Soft-delete an investigation (investigations.manage). */
+  deleteInvestigation(id: string): Promise<void>;
   // ===== AUDIT-READINESS API (compliance score snapshots) =====
   /**
    * Record today's compliance score snapshot (agency-wide when siteId is
@@ -1518,6 +1555,8 @@ async function hydrate() {
       // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
       browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
       browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
+      // ISSUE-98 (2026-09-18): investigations collection for older stored DBs.
+      browserStore.db.investigations = browserStore.db.investigations ?? [];
       seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
@@ -6336,6 +6375,273 @@ export class LocalApi implements ComplyraApi {
 
   async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
     return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+
+  // ===== ISSUE-98 IMPL (investigations, LocalApi in-memory) =====
+  private investigationsOf() {
+    return (this.store.db.investigations ??= []);
+  }
+
+  private assertInvestigationWrite(session: SessionUser) {
+    assertCan(session, "investigations.manage");
+  }
+
+  private investigationVisible(
+    session: SessionUser,
+    row: Investigation,
+  ): boolean {
+    if (row.agencyId !== session.agencyId) return false;
+    if (hasPermission(session, "investigations.manage")) return true;
+    return (
+      row.createdByUserId === session.userId ||
+      row.assignedToUserId === session.userId
+    );
+  }
+
+  private findInvestigation(session: SessionUser, id: string): Investigation {
+    const row = this.investigationsOf().find(
+      (r) => r.id === id && !r.deletedAt && this.investigationVisible(session, r),
+    );
+    if (!row) throw new Error("Investigation not found.");
+    return row;
+  }
+
+  private recordInvestigationEvent(
+    session: SessionUser,
+    row: Investigation,
+    event: {
+      eventType: InvestigationEventType;
+      fromStatus?: StoredInvestigationStatus | null;
+      toStatus?: StoredInvestigationStatus | null;
+      note?: string | null;
+    },
+  ): void {
+    const entry = buildInvestigationEvent(
+      row.id,
+      session.agencyId,
+      session.userId,
+      session.fullName,
+      event,
+    );
+    entry.id = crypto.randomUUID();
+    row.history.push(entry);
+  }
+
+  async listInvestigations(input?: {
+    siteId?: string;
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<Investigation[]> {
+    const session = assertSession(this.store);
+    const now = new Date();
+    let rows = this.investigationsOf().filter(
+      (row) => !row.deletedAt && this.investigationVisible(session, row),
+    );
+    if (input?.siteId) rows = rows.filter((row) => row.siteId === input.siteId);
+    if (input?.assignedToUserId) {
+      rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
+    }
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveInvestigationStatus(row, now) === input.status,
+      );
+    }
+    return sortInvestigations(rows, now);
+  }
+
+  async getInvestigation(id: string): Promise<Investigation> {
+    const session = assertSession(this.store);
+    return this.findInvestigation(session, id);
+  }
+
+  async addInvestigation(input: AddInvestigationInput): Promise<Investigation> {
+    const session = assertSession(this.store);
+    this.assertInvestigationWrite(session);
+    const errors = validateInvestigationInput({
+      title: input.title,
+      dueOn: input.dueOn,
+      sourceMetric: input.sourceMetric,
+    });
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (!input.siteId) throw new Error("Pick the program site this investigation is for.");
+    const assigneeId = input.assignedToUserId ?? null;
+    if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+    const now = new Date().toISOString();
+    const row: Investigation = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      sourceMetric: input.sourceMetric,
+      sourceRecordId: input.sourceRecordId ?? null,
+      sourceLabel: (input.sourceLabel ?? "").trim(),
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      assignedToUserId: assigneeId,
+      assignedToName: this.assigneeName(session, assigneeId),
+      dueOn: input.dueOn?.trim() || null,
+      storedStatus: "open",
+      createdByUserId: session.userId,
+      createdByName:
+        session.fullName,
+      createdAt: now,
+      updatedAt: now,
+      resolvedAt: null,
+      deletedAt: null,
+      history: [],
+    };
+    this.recordInvestigationEvent(session, row, { eventType: "created" });
+    if (assigneeId) {
+      this.recordInvestigationEvent(session, row, {
+        eventType: "assigned",
+        note: `Assigned to ${row.assignedToName ?? "staff"}`,
+      });
+    }
+    this.investigationsOf().unshift(row);
+    log(
+      this.store,
+      session,
+      "investigation.added",
+      `Investigation "${row.title}" created${row.assignedToName ? `, assigned to ${row.assignedToName}` : ""}`,
+      "investigation",
+      row.id,
+    );
+    await persistMeta(this.store);
+    return row;
+  }
+
+  async updateInvestigation(
+    id: string,
+    input: UpdateInvestigationInput,
+  ): Promise<Investigation> {
+    const session = assertSession(this.store);
+    this.assertInvestigationWrite(session);
+    const row = this.findInvestigation(session, id);
+    const previousStatus = row.storedStatus;
+    const previousAssignee = row.assignedToUserId;
+    if (input.title !== undefined) {
+      const errors = validateInvestigationInput({
+        title: input.title,
+        dueOn: input.dueOn ?? row.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      row.title = input.title.trim();
+    }
+    if (input.dueOn !== undefined) {
+      const errors = validateInvestigationInput({
+        title: input.title ?? row.title,
+        dueOn: input.dueOn,
+      });
+      if (errors.length > 0) throw new Error(errors[0]);
+      row.dueOn = input.dueOn?.trim() || null;
+    }
+    if (input.description !== undefined)
+      row.description = input.description?.trim() ?? "";
+    if (input.sourceMetric !== undefined) {
+      if (!isInvestigationSourceMetric(input.sourceMetric)) {
+        throw new Error("Pick a valid source for the investigation.");
+      }
+      row.sourceMetric = input.sourceMetric;
+    }
+    if (input.sourceRecordId !== undefined) row.sourceRecordId = input.sourceRecordId;
+    if (input.sourceLabel !== undefined)
+      row.sourceLabel = input.sourceLabel?.trim() ?? "";
+    if (input.assignedToUserId !== undefined) {
+      const assigneeId = input.assignedToUserId ?? null;
+      if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+      row.assignedToUserId = assigneeId;
+      row.assignedToName = this.assigneeName(session, assigneeId);
+      if (previousAssignee !== assigneeId) {
+        this.recordInvestigationEvent(session, row, {
+          eventType: "assigned",
+          note: assigneeId
+            ? `Assigned to ${row.assignedToName ?? "staff"}`
+            : "Assignment cleared",
+        });
+      }
+    }
+    if (input.storedStatus !== undefined && input.storedStatus !== row.storedStatus) {
+      row.storedStatus = input.storedStatus;
+      this.recordInvestigationEvent(session, row, {
+        eventType:
+          input.storedStatus === "resolved" && previousStatus !== "resolved"
+            ? "status_changed"
+            : input.storedStatus !== "resolved" && previousStatus === "resolved"
+              ? "reopened"
+              : "status_changed",
+        fromStatus: previousStatus,
+        toStatus: row.storedStatus,
+      });
+    }
+    if (row.storedStatus === "resolved" && !row.resolvedAt) {
+      row.resolvedAt = new Date().toISOString();
+    } else if (row.storedStatus !== "resolved") {
+      row.resolvedAt = null;
+    }
+    row.updatedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "investigation.updated",
+      `Investigation "${row.title}" updated`,
+      "investigation",
+      row.id,
+    );
+    await persistMeta(this.store);
+    return row;
+  }
+
+  async resolveInvestigation(id: string): Promise<Investigation> {
+    return this.updateInvestigation(id, { storedStatus: "resolved" });
+  }
+
+  async reopenInvestigation(id: string): Promise<Investigation> {
+    const session = assertSession(this.store);
+    this.assertInvestigationWrite(session);
+    const row = this.findInvestigation(session, id);
+    if (row.storedStatus === "resolved") {
+      return this.updateInvestigation(id, { storedStatus: "open" });
+    }
+    return row;
+  }
+
+  async addInvestigationNote(id: string, note: string): Promise<Investigation> {
+    const session = assertSession(this.store);
+    this.assertInvestigationWrite(session);
+    const row = this.findInvestigation(session, id);
+    const text = note.trim();
+    if (!text) throw new Error("Write the note first.");
+    this.recordInvestigationEvent(session, row, {
+      eventType: "note",
+      note: text,
+    });
+    row.updatedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "investigation.note",
+      `Note added to investigation "${row.title}"`,
+      "investigation",
+      row.id,
+    );
+    await persistMeta(this.store);
+    return row;
+  }
+
+  async deleteInvestigation(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    this.assertInvestigationWrite(session);
+    const row = this.findInvestigation(session, id);
+    row.deletedAt = new Date().toISOString();
+    this.recordInvestigationEvent(session, row, { eventType: "deleted" });
+    log(
+      this.store,
+      session,
+      "investigation.deleted",
+      `Investigation "${row.title}" removed`,
+      "investigation",
+      row.id,
+    );
+    await persistMeta(this.store);
   }
 
   // ===== AUDIT-READINESS IMPL (score snapshots) =====

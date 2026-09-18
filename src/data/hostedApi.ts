@@ -227,6 +227,20 @@ import {
   type CorrectiveAction,
   type UpdateCorrectiveActionInput,
 } from "./correctiveActions";
+// ISSUE-98: investigation row mapping + validation.
+import {
+  buildInvestigationRow,
+  deriveInvestigationStatus,
+  isInvestigationSourceMetric,
+  investigationEventFromRow,
+  investigationFromRow,
+  sortInvestigations,
+  validateInvestigationInput,
+  type AddInvestigationInput,
+  type Investigation,
+  type InvestigationEvent,
+  type UpdateInvestigationInput,
+} from "./investigations";
 // AUDIT-READINESS: score snapshot rows for the trend chart.
 import {
   buildScoreSnapshotRow,
@@ -7154,6 +7168,296 @@ export class HostedApi implements ComplyraApi {
 
   async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
     return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+  // ===== ISSUE-98 HOSTED (investigations) =====
+  // Tables: public.investigations + public.investigation_events
+  // (migration 20260918120000_issue98_investigations.sql).
+
+  private requireInvestigationWrite(session: SessionUser) {
+    this.requirePermission(session, "investigations.manage");
+  }
+
+  private mapInvestigationRow(
+    row: Record<string, unknown>,
+    history: InvestigationEvent[] = [],
+  ): Investigation {
+    const investigation = investigationFromRow(row, history);
+    const profile = row.profiles as { full_name?: string } | null;
+    if (profile?.full_name) investigation.assignedToName = profile.full_name;
+    return investigation;
+  }
+
+  private async fetchInvestigationEvents(
+    session: SessionUser,
+    investigationId: string,
+  ): Promise<InvestigationEvent[]> {
+    const { data, error } = await this.client
+      .from("investigation_events")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("investigation_id", investigationId)
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the investigation history.");
+    return (data ?? []).map((row) =>
+      investigationEventFromRow(row as Record<string, unknown>),
+    );
+  }
+
+  private async fetchInvestigationRow(session: SessionUser, id: string) {
+    const { data, error } = await this.client
+      .from("investigations")
+      .select("*, profiles!investigations_assigned_to_user_id_fkey(full_name)")
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    throwIf(error, "Could not load the investigation.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Investigation not found.");
+    }
+    return data as Record<string, unknown>;
+  }
+
+  private async recordInvestigationEvent(
+    session: SessionUser,
+    investigationId: string,
+    event: {
+      eventType: string;
+      fromStatus?: string | null;
+      toStatus?: string | null;
+      note?: string | null;
+    },
+  ) {
+    const { error } = await this.client.from("investigation_events").insert({
+      investigation_id: investigationId,
+      agency_id: session.agencyId,
+      event_type: event.eventType,
+      from_status: event.fromStatus ?? null,
+      to_status: event.toStatus ?? null,
+      note: (event.note ?? "").trim(),
+      created_by_user_id: session.userId,
+      created_by_name: session.fullName,
+    });
+    throwIf(error, "Could not record the investigation history.");
+  }
+
+  async listInvestigations(input?: {
+    siteId?: string;
+    status?: "open" | "in_progress" | "resolved" | "overdue";
+    assignedToUserId?: string;
+  }): Promise<Investigation[]> {
+    const session = await this.requireSession();
+    const now = new Date();
+    let query = this.client
+      .from("investigations")
+      .select("*, profiles!investigations_assigned_to_user_id_fkey(full_name)")
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null);
+    if (input?.siteId) query = query.eq("site_id", input.siteId);
+    if (input?.assignedToUserId) {
+      query = query.eq("assigned_to_user_id", input.assignedToUserId);
+    }
+    const { data, error } = await query;
+    throwIf(error, "Could not load investigations.");
+    let rows = (data ?? []).map((row) =>
+      this.mapInvestigationRow(row as Record<string, unknown>),
+    );
+    if (input?.status) {
+      rows = rows.filter(
+        (row) => deriveInvestigationStatus(row, now) === input.status,
+      );
+    }
+    return sortInvestigations(rows, now);
+  }
+
+  async getInvestigation(id: string): Promise<Investigation> {
+    const session = await this.requireSession();
+    const row = await this.fetchInvestigationRow(session, id);
+    const history = await this.fetchInvestigationEvents(session, id);
+    return this.mapInvestigationRow(row, history);
+  }
+
+  async addInvestigation(input: AddInvestigationInput): Promise<Investigation> {
+    const session = await this.requireSession();
+    this.requireInvestigationWrite(session);
+    const errors = validateInvestigationInput({
+      title: input.title,
+      dueOn: input.dueOn,
+      sourceMetric: input.sourceMetric,
+    });
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (!input.siteId) throw new Error("Pick the program site this investigation is for.");
+    if (input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const { data, error } = await this.client
+      .from("investigations")
+      .insert(
+        buildInvestigationRow({
+          agencyId: session.agencyId,
+          createdByUserId: session.userId,
+          createdByName: session.fullName,
+          data: input,
+        }),
+      )
+      .select("*, profiles!investigations_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not save the investigation.");
+    const investigation = this.mapInvestigationRow(data as Record<string, unknown>);
+    await this.recordInvestigationEvent(session, investigation.id, {
+      eventType: "created",
+    });
+    if (investigation.assignedToUserId) {
+      await this.recordInvestigationEvent(session, investigation.id, {
+        eventType: "assigned",
+        note: `Assigned to ${investigation.assignedToName ?? "staff"}`,
+      });
+    }
+    await this.audit(
+      session,
+      "investigation.added",
+      `Investigation "${investigation.title}" created${investigation.assignedToName ? `, assigned to ${investigation.assignedToName}` : ""}`,
+      "investigation",
+      investigation.id,
+    );
+    return investigation;
+  }
+
+  async updateInvestigation(
+    id: string,
+    input: UpdateInvestigationInput,
+  ): Promise<Investigation> {
+    const session = await this.requireSession();
+    this.requireInvestigationWrite(session);
+    const current = this.mapInvestigationRow(await this.fetchInvestigationRow(session, id));
+    const title = input.title?.trim() ?? current.title;
+    const dueOn = input.dueOn !== undefined ? input.dueOn?.trim() || null : current.dueOn;
+    const errors = validateInvestigationInput({ title, dueOn });
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (input.assignedToUserId !== undefined && input.assignedToUserId) {
+      const { data: profile, error: profileError } = await this.client
+        .from("profiles")
+        .select("id")
+        .eq("id", input.assignedToUserId)
+        .eq("home_agency_id", session.agencyId)
+        .maybeSingle();
+      throwIf(profileError, "Could not verify the staff member.");
+      if (!profile) throw new Error("Staff member not found.");
+    }
+    const patch: Record<string, unknown> = {};
+    if (input.title !== undefined) patch.title = title;
+    if (input.description !== undefined)
+      patch.description = input.description?.trim() ?? "";
+    if (input.assignedToUserId !== undefined)
+      patch.assigned_to_user_id = input.assignedToUserId;
+    if (input.dueOn !== undefined) patch.due_on = dueOn;
+    if (input.storedStatus !== undefined) patch.status = input.storedStatus;
+    if (input.sourceMetric !== undefined) {
+      if (!isInvestigationSourceMetric(input.sourceMetric)) {
+        throw new Error("Pick a valid source for the investigation.");
+      }
+      patch.source_metric = input.sourceMetric;
+    }
+    if (input.sourceRecordId !== undefined)
+      patch.source_record_id = input.sourceRecordId;
+    if (input.sourceLabel !== undefined)
+      patch.source_label = input.sourceLabel?.trim() ?? "";
+    const { data, error } = await this.client
+      .from("investigations")
+      .update(patch)
+      .eq("id", id)
+      .select("*, profiles!investigations_assigned_to_user_id_fkey(full_name)")
+      .single();
+    throwIf(error, "Could not update the investigation.");
+    const updated = this.mapInvestigationRow(data as Record<string, unknown>);
+    if (current.assignedToUserId !== updated.assignedToUserId) {
+      await this.recordInvestigationEvent(session, id, {
+        eventType: "assigned",
+        note: updated.assignedToUserId
+          ? `Assigned to ${updated.assignedToName ?? "staff"}`
+          : "Assignment cleared",
+      });
+    }
+    if (current.storedStatus !== updated.storedStatus) {
+      await this.recordInvestigationEvent(session, id, {
+        eventType:
+          updated.storedStatus === "resolved" && current.storedStatus !== "resolved"
+            ? "status_changed"
+            : updated.storedStatus !== "resolved" && current.storedStatus === "resolved"
+              ? "reopened"
+              : "status_changed",
+        fromStatus: current.storedStatus,
+        toStatus: updated.storedStatus,
+      });
+    }
+    await this.audit(
+      session,
+      "investigation.updated",
+      `Investigation "${updated.title}" updated`,
+      "investigation",
+      updated.id,
+    );
+    return updated;
+  }
+
+  async resolveInvestigation(id: string): Promise<Investigation> {
+    return this.updateInvestigation(id, { storedStatus: "resolved" });
+  }
+
+  async reopenInvestigation(id: string): Promise<Investigation> {
+    const session = await this.requireSession();
+    this.requireInvestigationWrite(session);
+    const current = this.mapInvestigationRow(await this.fetchInvestigationRow(session, id));
+    if (current.storedStatus === "resolved") {
+      return this.updateInvestigation(id, { storedStatus: "open" });
+    }
+    return current;
+  }
+
+  async addInvestigationNote(id: string, note: string): Promise<Investigation> {
+    const session = await this.requireSession();
+    this.requireInvestigationWrite(session);
+    const current = this.mapInvestigationRow(await this.fetchInvestigationRow(session, id));
+    const text = note.trim();
+    if (!text) throw new Error("Write the note first.");
+    await this.recordInvestigationEvent(session, id, {
+      eventType: "note",
+      note: text,
+    });
+    await this.audit(
+      session,
+      "investigation.note",
+      `Note added to investigation "${current.title}"`,
+      "investigation",
+      id,
+    );
+    const history = await this.fetchInvestigationEvents(session, id);
+    return { ...current, history };
+  }
+
+  async deleteInvestigation(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requireInvestigationWrite(session);
+    const current = this.mapInvestigationRow(await this.fetchInvestigationRow(session, id));
+    const { error } = await this.client
+      .from("investigations")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id);
+    throwIf(error, "Could not remove the investigation.");
+    await this.recordInvestigationEvent(session, id, { eventType: "deleted" });
+    await this.audit(
+      session,
+      "investigation.deleted",
+      `Investigation "${current.title}" removed`,
+      "investigation",
+      id,
+    );
   }
   // ===== AUDIT-READINESS HOSTED (score snapshots) =====
   // Table: public.compliance_score_snapshots
