@@ -118,6 +118,33 @@ export interface SiteShiftNoteView extends ShiftNoteView {
   individualName: string;
 }
 
+/**
+ * Issue #96 — the manager's monthly summary report for an Individual's shift
+ * notes in one calendar month. The narrative is a draft until signed; a
+ * signed report is locked (a PM/administrator may re-open it). Soft deletes
+ * preserved like shift notes.
+ */
+export interface ShiftNoteMonthlyReport {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  programId: string;
+  /** Calendar month as "YYYY-MM". */
+  month: string;
+  /** Manager's narrative summary for the month. */
+  narrative: string;
+  signedBy: string;
+  signedByName: string;
+  signedByTitle: string;
+  /** ISO timestamp of the signature; "" while unsigned. */
+  signedAt: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
 /** The default scoring levels: Yes / No / Refused. */
 export function defaultScoreLevels(): Omit<IspScoreLevel, "id" | "sortOrder">[] {
   return [

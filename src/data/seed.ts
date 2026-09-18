@@ -157,6 +157,7 @@ export interface LocalDatabase {
   ispProgramTasks: import("./shiftNotes").IspProgramTask[];
   shiftNotes: import("./shiftNotes").ShiftNote[];
   shiftNoteScores: import("./shiftNotes").ShiftNoteTaskScore[];
+  shiftNoteMonthlyReports: import("./shiftNotes").ShiftNoteMonthlyReport[];
 }
 
 /** Local demo shape for one AI extraction (mirrors document_extractions). */
@@ -833,6 +834,7 @@ export function createEvergreenSeed(): LocalDatabase {
     ],
     shiftNotes: [],
     shiftNoteScores: [],
+    shiftNoteMonthlyReports: [],
   };
 }
 

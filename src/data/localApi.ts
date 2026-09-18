@@ -78,6 +78,7 @@ import {
   type IspProgramView,
   type IspScoringMethod,
   type ShiftNote,
+  type ShiftNoteMonthlyReport,
   type ShiftNoteTaskScore,
   type ShiftNoteView,
   type SiteShiftNoteView,
@@ -535,6 +536,46 @@ export interface ComplyraApi {
   }): Promise<string>;
   /** Issue #80 — soft-delete a shift note. Same edit gate as saveShiftNote. */
   deleteShiftNote(noteId: string): Promise<void>;
+  /**
+   * Issue #96 — every non-deleted shift note for an Individual in a calendar
+   * month (no 30-note cap; the monthly report needs complete data).
+   */
+  getShiftNotesForMonth(
+    individualId: string,
+    monthKey: string,
+  ): Promise<import("./shiftNotes").ShiftNoteView[]>;
+  /**
+   * Issue #96 — the manager's monthly summary report for an Individual +
+   * month, if one exists.
+   */
+  getShiftNoteMonthlyReport(
+    individualId: string,
+    monthKey: string,
+  ): Promise<import("./shiftNotes").ShiftNoteMonthlyReport | null>;
+  /**
+   * Issue #96 — create or update the monthly summary narrative (draft).
+   * Gated to program_manager / administrator.
+   */
+  saveShiftNoteMonthlyReport(input: {
+    individualId: string;
+    programId: string;
+    monthKey: string;
+    narrative: string;
+  }): Promise<import("./shiftNotes").ShiftNoteMonthlyReport>;
+  /**
+   * Issue #96 — sign (lock) the monthly summary. Stamps name, title, date.
+   * Gated to program_manager / administrator.
+   */
+  signShiftNoteMonthlyReport(
+    reportId: string,
+  ): Promise<import("./shiftNotes").ShiftNoteMonthlyReport>;
+  /**
+   * Issue #96 — re-open a signed monthly summary for further edits.
+   * Gated to program_manager / administrator.
+   */
+  reopenShiftNoteMonthlyReport(
+    reportId: string,
+  ): Promise<import("./shiftNotes").ShiftNoteMonthlyReport>;
   updateObligation(
     obligationId: string,
     patch: Partial<
@@ -3707,6 +3748,157 @@ export class LocalApi implements ComplyraApi {
     note.deletedAt = new Date().toISOString();
     note.updatedAt = note.deletedAt;
     await persistMeta(this.store);
+  }
+
+  /**
+   * Issue #96 — monthly summary report CRUD. Draft save / sign / re-open are
+   * gated to program_manager / administrator (the ISP config gate). Who/when
+   * is stamped on every save; deletes are soft (not yet surfaced in UI).
+   */
+  private monthlyReportOrThrow(reportId: string): ShiftNoteMonthlyReport {
+    const session = assertSession(this.store);
+    const report = this.store.db.shiftNoteMonthlyReports.find(
+      (row) => row.id === reportId && row.agencyId === session.agencyId && !row.deletedAt,
+    );
+    if (!report) throw new Error("Monthly report not found.");
+    accessibleIndividual(this.store, session, report.individualId);
+    return report;
+  }
+
+  async getShiftNotesForMonth(individualId: string, monthKey: string) {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+      throw new Error("Choose a valid month.");
+    }
+    return this.store.db.shiftNotes
+      .filter(
+        (note) =>
+          note.agencyId === session.agencyId &&
+          note.individualId === individualId &&
+          !note.deletedAt &&
+          note.noteDate.slice(0, 7) === monthKey,
+      )
+      .sort(
+        (a, b) => a.noteDate.localeCompare(b.noteDate) || a.createdAt.localeCompare(b.createdAt),
+      )
+      .map((note) => this.shiftNoteView(note));
+  }
+
+  async getShiftNoteMonthlyReport(individualId: string, monthKey: string) {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return (
+      this.store.db.shiftNoteMonthlyReports.find(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          row.month === monthKey &&
+          !row.deletedAt,
+      ) ?? null
+    );
+  }
+
+  async saveShiftNoteMonthlyReport(
+    input: Parameters<ComplyraApi["saveShiftNoteMonthlyReport"]>[0],
+  ) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can write the monthly summary.");
+    }
+    accessibleIndividual(this.store, session, input.individualId);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.monthKey)) {
+      throw new Error("Choose a valid month.");
+    }
+    const program = this.store.db.ispPrograms.find(
+      (row) =>
+        row.id === input.programId &&
+        row.agencyId === session.agencyId &&
+        row.individualId === input.individualId,
+    );
+    if (!program) throw new Error("ISP program not found.");
+    const now = new Date().toISOString();
+    const narrative = input.narrative.trim().slice(0, 20000);
+    const existing = this.store.db.shiftNoteMonthlyReports.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === input.individualId &&
+        row.month === input.monthKey &&
+        !row.deletedAt,
+    );
+    if (existing) {
+      if (existing.signedAt) {
+        throw new Error("This summary is signed. Re-open it before editing.");
+      }
+      existing.programId = program.id;
+      existing.narrative = narrative;
+      existing.updatedAt = now;
+      await persistMeta(this.store);
+      return existing;
+    }
+    const report: ShiftNoteMonthlyReport = {
+      id: `ismr-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      individualId: input.individualId,
+      programId: program.id,
+      month: input.monthKey,
+      narrative,
+      signedBy: "",
+      signedByName: "",
+      signedByTitle: "",
+      signedAt: "",
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    this.store.db.shiftNoteMonthlyReports.push(report);
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async signShiftNoteMonthlyReport(reportId: string) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can sign the monthly summary.");
+    }
+    const report = this.monthlyReportOrThrow(reportId);
+    if (report.signedAt) throw new Error("This summary is already signed.");
+    if (!report.narrative.trim()) {
+      throw new Error("Write the monthly summary before signing it.");
+    }
+    const now = new Date().toISOString();
+    report.signedBy = session.userId;
+    report.signedByName = session.fullName;
+    report.signedByTitle = session.jobTitle || roleLabel(session.roleKey);
+    report.signedAt = now;
+    report.updatedAt = now;
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async reopenShiftNoteMonthlyReport(reportId: string) {
+    const session = assertSession(this.store);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can re-open the monthly summary.");
+    }
+    const report = this.monthlyReportOrThrow(reportId);
+    if (!report.signedAt) throw new Error("This summary is not signed.");
+    const now = new Date().toISOString();
+    report.signedBy = "";
+    report.signedByName = "";
+    report.signedByTitle = "";
+    report.signedAt = "";
+    report.updatedAt = now;
+    await persistMeta(this.store);
+    return report;
   }
 
   async updateObligation(
