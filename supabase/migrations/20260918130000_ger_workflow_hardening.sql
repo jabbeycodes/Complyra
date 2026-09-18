@@ -20,17 +20,19 @@ as $$
         or (
           m.site_id is null
           and coalesce(m.role_key, m.role::text) in
-            ('administrator', 'compliance_admin', 'program_manager')
+            ('administrator', 'compliance_admin', 'program_manager', 'auditor')
         )
       )
       and (
         private.has_permission(p_agency_id, 'ger.create')
         or private.has_permission(p_agency_id, 'ger.review')
+        or private.has_permission(p_agency_id, 'individuals.view')
       )
   );
 $$;
 
 revoke all on function private.can_access_ger_site(uuid, uuid) from public;
+grant execute on function private.can_access_ger_site(uuid, uuid) to authenticated;
 
 drop policy if exists ger_reports_select on public.ger_reports;
 drop policy if exists ger_reports_insert on public.ger_reports;
@@ -92,7 +94,14 @@ begin
     if old.status in ('draft', 'returned') and new.status = 'submitted'
       and ((old.created_by_user_id = auth.uid() and private.has_permission(old.agency_id, 'ger.create'))
         or private.has_permission(old.agency_id, 'ger.review')) then
-      null;
+      -- Completeness is enforced here (not only in submit_ger_report) so a
+      -- direct status-only update cannot put an incomplete report on the queue.
+      if new.individual_id is null or new.event_date is null
+        or btrim(new.location) = '' or btrim(new.description) = ''
+        or btrim(new.actions_taken) = '' or btrim(new.reported_by_name) = ''
+        or btrim(new.signature_name) = '' then
+        raise exception 'Complete all required fields before submitting.';
+      end if;
     elsif old.status = 'submitted' and new.status in ('approved', 'returned')
       and private.has_permission(old.agency_id, 'ger.review') then
       if new.reviewer_id is distinct from auth.uid() then
