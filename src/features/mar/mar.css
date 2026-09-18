@@ -326,20 +326,14 @@ button.mar-cell-future:hover {
 
 @media print {
   /* The monthly grid is nested deep inside the chart, so hiding the shell's
-     top-level children would also hide the grid. Toggle visibility instead:
-     ancestors stay in the layout but paint nothing, and only the print area
-     (and its descendants) render, floated to the top of the page. */
-  body[data-mar-print="monthly"] * {
-    visibility: hidden;
-  }
-  body[data-mar-print="monthly"] .mar-print-area,
-  body[data-mar-print="monthly"] .mar-print-area * {
-    visibility: visible;
-  }
-  body[data-mar-print="monthly"] .mar-print-area {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
+     top-level children would also hide the grid. `visibility: hidden` kept the
+     rest of the chart in the layout, so the browser still paginated its (blank)
+     height as trailing pages. Instead `display: none` every element that is not
+     the print area, one of its descendants, or one of its ancestors (`:has()`
+     keeps the ancestor chain rendering the nested grid). Removing the other
+     widgets from flow collapses the document down to just the grid. */
+  body[data-mar-print="monthly"]
+    *:not(.mar-print-area):not(.mar-print-area *):not(:has(.mar-print-area)) {
+    display: none;
   }
 }

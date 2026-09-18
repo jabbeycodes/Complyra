@@ -169,15 +169,24 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
   const anchorPerDay = latest ? latest.pillsPerDay : med.pillsPerDay;
   const dosesPerDay = med.kind === "prn" ? 0 : anchorPerDay;
 
-  let deliveryQty = anchorQty;
-  let dosesLogged = med.kind === "prn" ? input.prnDoses : [];
-  if (med.kind === "prn" && dosesLogged.length === 0 && med.remainingPills < anchorQty) {
-    deliveryQty = med.remainingPills;
-  }
+  const dosesLogged = med.kind === "prn" ? input.prnDoses : [];
   const inWindow = dosesLogged.filter((dose) => {
     const on = dose.date.slice(0, 10);
     return on >= anchorDate.slice(0, 10) && on <= today;
   });
+
+  let deliveryQty = anchorQty;
+  if (med.kind === "prn" && !latest) {
+    // No delivery row (e.g. a freshly added PRN): med.remainingPills is the
+    // authoritative current count because both backends now decrement the row
+    // on every PRN dose. The per-dose logs are therefore already baked into the
+    // row, so rebuild the delivery-day quantity above them (current count plus
+    // the in-window doses) instead of subtracting the same doses a second time
+    // — otherwise each MAR PRN dose would be counted twice.
+    deliveryQty = anchorQty + inWindow.reduce((sum, dose) => sum + dose.pills, 0);
+  } else if (med.kind === "prn" && dosesLogged.length === 0 && med.remainingPills < anchorQty) {
+    deliveryQty = med.remainingPills;
+  }
   const inWindowExceptions = input.doseExceptions
     .filter((exception) => {
       const on = exception.occurredOn.slice(0, 10);
