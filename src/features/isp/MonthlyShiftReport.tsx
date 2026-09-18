@@ -60,7 +60,7 @@ function currentMonthKey(): string {
 function MonthlyScoreSummaryTables({ summary }: { summary: ObjectiveScoreSummary[] }) {
   if (summary.length === 0) return null;
   return (
-    <div className="isp-report-score">
+    <>
       <table className="isp-report-table isp-report-score-month">
         <caption className="isp-report-score-caption">
           Whole-month totals per objective. Refused and N/A scores are counted
@@ -130,7 +130,7 @@ function MonthlyScoreSummaryTables({ summary }: { summary: ObjectiveScoreSummary
           </table>
         </div>
       ))}
-    </div>
+    </>
   );
 }
 
