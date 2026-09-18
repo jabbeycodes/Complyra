@@ -111,6 +111,18 @@ import {
   stripBackfillMarker,
   withBackfillMarker,
 } from "./mileage";
+import { dedupeKeyFor } from "../features/notifications/notify";
+import {
+  canSeeHealthTrack,
+  dayKeyOf,
+  detectDailyIntakeAlert,
+  detectHealthAlert,
+  healthTrackAlertPayload,
+  validateHealthTrackInput,
+  type HealthTrackEntry,
+  type HealthTrackFilters,
+  type HealthTrackKind,
+} from "./healthTrack";
 import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
@@ -8322,6 +8334,345 @@ export class HostedApi implements ComplyraApi {
       );
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== HEALTH-TRACK HOSTED (health tracking, Supabase) =====
+  // Health Track: per-individual health logging (HostedApi, Supabase).
+  // Table: health_track_entries. RLS is a coarse backstop (agency reads,
+  // author/privileged writes); the role gates below are the real
+  // authorization.
+
+  private mapHealthEntry(row: Record<string, unknown>): HealthTrackEntry {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      siteId: String(row.site_id),
+      kind: row.kind as HealthTrackEntry["kind"],
+      occurredAt: String(row.occurred_at),
+      details: (row.details ?? {}) as HealthTrackEntry["details"],
+      recordedByUserId: String(row.recorded_by ?? ""),
+      recordedByName: String(row.recorded_by_name ?? ""),
+      flagForNurse: Boolean(row.flag_for_nurse),
+      flagReason: (row.flag_reason as string | null) ?? null,
+      nurseReviewedAt: (row.nurse_reviewed_at as string | null) ?? null,
+      nurseReviewedBy: (row.nurse_reviewed_by as string | null) ?? null,
+      nurseNote: (row.nurse_note as string | null) ?? null,
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+    };
+  }
+
+  private assertValidHealthInput(
+    kind: HealthTrackKind,
+    details: unknown,
+    occurredAt: string | undefined,
+  ) {
+    const errors = validateHealthTrackInput(kind, details);
+    if (errors.length > 0) throw new Error(errors.join(" "));
+    if (!occurredAt || Number.isNaN(Date.parse(occurredAt))) {
+      throw new Error("Enter a valid date and time for when this happened.");
+    }
+  }
+
+  private async healthEntryOrThrow(
+    session: SessionUser,
+    id: string,
+  ): Promise<HealthTrackEntry> {
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load the health entry.");
+    if (!data) throw new Error("Health entry not found.");
+    const entry = this.mapHealthEntry(data as Record<string, unknown>);
+    if (!canAccessSite(session, entry.siteId)) throw new Error("Health entry not found.");
+    return entry;
+  }
+
+  private async healthIndividualOrThrow(session: SessionUser, individualId: string) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    if (!canAccessSite(session, person.siteId)) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return person;
+  }
+
+  /** Page the nurse through the notify-event edge function; never breaks the mutation. */
+  private async emitHealthAlert(
+    session: SessionUser,
+    entry: HealthTrackEntry,
+    individualName: string,
+    siteName: string,
+    reason: string,
+  ) {
+    const payload = healthTrackAlertPayload({
+      agencyId: session.agencyId,
+      entryId: entry.id,
+      individualName,
+      siteName,
+      kind: entry.kind,
+      reason,
+      occurredAt: entry.occurredAt,
+    });
+    try {
+      // The notify-event function accepts snake_case fields.
+      await this.client.functions.invoke("notify-event", {
+        body: {
+          agency_id: payload.agencyId,
+          user_id: payload.userId ?? null,
+          role_key: payload.roleKey ?? null,
+          type: payload.type,
+          title: payload.title,
+          body: payload.body,
+          deep_link: payload.deepLink,
+          entity_type: payload.entityType ?? null,
+          entity_id: payload.entityId ?? null,
+          dedupe_key: payload.dedupeKey ?? null,
+        },
+      });
+    } catch (err) {
+      console.warn("[health-track] Could not page the nurse:", err);
+    }
+  }
+
+  /** Day-level very-low-intake alert for the hosted path (idempotent per individual + day). */
+  private async emitDailyIntakeAlert(
+    session: SessionUser,
+    entry: HealthTrackEntry,
+    individualName: string,
+    siteName: string,
+  ) {
+    try {
+      const day = dayKeyOf(entry.occurredAt);
+      const dayEntries = await this.listHealthEntries({
+        individualId: entry.individualId,
+        from: day,
+        to: day,
+        kinds: ["meal", "fluid"],
+      });
+      const reason = detectDailyIntakeAlert(dayEntries);
+      if (!reason) return;
+      await this.client.functions.invoke("notify-event", {
+        body: {
+          agency_id: session.agencyId,
+          user_id: null,
+          role_key: "nurse",
+          type: "incident.followup",
+          title: "Health alert: very low intake",
+          body:
+            `${reason} — ${individualName} (${siteName}) on ${day}. ` +
+            "Review the day's intake and follow up.",
+          deep_link: `/health/${entry.id}`,
+          entity_type: "health_entry",
+          entity_id: entry.id,
+          dedupe_key: dedupeKeyFor(
+            "incident.followup",
+            "health",
+            "daily-intake",
+            entry.individualId,
+            day,
+          ),
+        },
+      });
+    } catch (err) {
+      console.warn("[health-track] Could not page the nurse:", err);
+    }
+  }
+
+  async listHealthEntries(filters: HealthTrackFilters): Promise<HealthTrackEntry[]> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    let query = this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    if (filters.individualId) query = query.eq("individual_id", filters.individualId);
+    if (filters.siteId) query = query.eq("site_id", filters.siteId);
+    if (filters.kinds && filters.kinds.length > 0) query = query.in("kind", filters.kinds);
+    if (filters.flaggedOnly) query = query.eq("flag_for_nurse", true);
+    if (filters.needsNurseReview) {
+      query = query.eq("flag_for_nurse", true).is("nurse_reviewed_at", null);
+    }
+    if (filters.from) query = query.gte("occurred_at", `${filters.from}T00:00:00`);
+    if (filters.to) {
+      const dayAfter = new Date(`${filters.to}T12:00:00`);
+      dayAfter.setDate(dayAfter.getDate() + 1);
+      query = query.lt("occurred_at", dayAfter.toISOString().slice(0, 10) + "T00:00:00");
+    }
+    const { data, error } = await query
+      .order("occurred_at", { ascending: false })
+      .order("created_at", { ascending: false });
+    throwIf(error, "Could not load health entries.");
+    return ((data ?? []) as Record<string, unknown>[])
+      .map((row) => this.mapHealthEntry(row))
+      .filter((entry) => canAccessSite(session, entry.siteId));
+  }
+
+  async addHealthEntry(
+    input: import("./healthTrack").AddHealthTrackInput,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const person = await this.healthIndividualOrThrow(session, input.individualId);
+    this.assertValidHealthInput(input.kind, input.details, input.occurredAt);
+    const alert = detectHealthAlert(input.kind, input.details);
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .insert({
+        id: crypto.randomUUID(),
+        agency_id: session.agencyId,
+        individual_id: person.id,
+        site_id: person.siteId,
+        kind: input.kind,
+        occurred_at: input.occurredAt,
+        details: input.details,
+        recorded_by: session.userId,
+        recorded_by_name: session.fullName,
+        flag_for_nurse: alert.flagged,
+        flag_reason: alert.reason,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the health entry.");
+    const entry = this.mapHealthEntry(data as Record<string, unknown>);
+    if (alert.flagged && alert.reason) {
+      const site = await this.siteRecord(person.siteId);
+      await this.emitHealthAlert(
+        session,
+        entry,
+        person.fullName,
+        site?.name ?? "",
+        alert.reason,
+      );
+    }
+    if (input.kind === "meal" || input.kind === "fluid") {
+      const site = await this.siteRecord(person.siteId);
+      await this.emitDailyIntakeAlert(
+        session,
+        entry,
+        person.fullName,
+        site?.name ?? "",
+      );
+    }
+    return entry;
+  }
+
+  async updateHealthEntry(
+    id: string,
+    patch: import("./healthTrack").UpdateHealthTrackInput,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const entry = await this.healthEntryOrThrow(session, id);
+    const wasFlagged = entry.flagForNurse;
+    const occurredAt = patch.occurredAt ?? entry.occurredAt;
+    const details = patch.details ?? entry.details;
+    this.assertValidHealthInput(entry.kind, details, occurredAt);
+    const alert = detectHealthAlert(entry.kind, details);
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .update({
+        occurred_at: occurredAt,
+        details,
+        flag_for_nurse: alert.flagged,
+        flag_reason: alert.reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the health entry.");
+    const updated = this.mapHealthEntry(data as Record<string, unknown>);
+    if (!wasFlagged && alert.flagged && alert.reason) {
+      const person = await this.healthIndividualOrThrow(session, updated.individualId);
+      const site = await this.siteRecord(updated.siteId);
+      await this.emitHealthAlert(
+        session,
+        updated,
+        person.fullName,
+        site?.name ?? "",
+        alert.reason,
+      );
+    }
+    return updated;
+  }
+
+  async deleteHealthEntry(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    await this.healthEntryOrThrow(session, id);
+    const { error } = await this.client
+      .from("health_track_entries")
+      .delete()
+      .eq("id", id)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not delete the health entry.");
+  }
+
+  async markHealthEntryReviewed(id: string, note: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.review");
+    const entry = await this.healthEntryOrThrow(session, id);
+    if (!entry.flagForNurse) {
+      throw new Error("Only flagged entries need nurse review.");
+    }
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .update({
+        nurse_reviewed_at: new Date().toISOString(),
+        nurse_reviewed_by: session.fullName,
+        nurse_note: note.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not mark the health entry reviewed.");
+    return this.mapHealthEntry(data as Record<string, unknown>);
+  }
+
+  async uploadHealthPhoto(individualId: string, file: File): Promise<string> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const person = await this.healthIndividualOrThrow(session, individualId);
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      throw new Error("Upload a PNG or JPEG photo.");
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Keep the photo under 5 MB.");
+    }
+    const sanitized =
+      file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "photo";
+    const path = `${session.agencyId}/${person.id}/${crypto.randomUUID()}-${sanitized}`;
+    const { error: uploadError } = await this.client.storage
+      .from("health-photos")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    throwIf(uploadError, "Could not store the photo.");
+    return path;
+  }
+
+  async getHealthPhoto(fileId: string): Promise<{ name: string; blob: Blob } | null> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data, error } = await this.client.storage
+      .from("health-photos")
+      .download(fileId);
+    if (error || !data) return null;
+    const name =
+      fileId.split("/").pop()?.replace(/^[0-9a-fA-F-]{36}-/, "") || fileId;
+    return { name, blob: data };
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====

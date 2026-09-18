@@ -164,6 +164,7 @@ export function notificationPage(link: string): string | null {
   if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
+  if (/^\/health(?:\/|$)/.test(path)) return "Health Track";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;
 }

@@ -39,6 +39,13 @@ import {
   LogOut,
   KeyRound,
   ServerCog,
+  UtensilsCrossed,
+  Droplets,
+  ScanEye,
+  HeartPulse,
+  Zap,
+  CalendarHeart,
+  Candy,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import NotificationBell from "./features/notifications/NotificationBell";
@@ -106,6 +113,14 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+// HEALTH-TRACK (2026-09-18): per-individual health logging (meals, fluids,
+// elimination, skin, vitals, seizures, menses, blood sugar).
+import HealthTrackPage from "./features/healthTrack/HealthTrackPage";
+import {
+  HEALTH_TRACK_SECTIONS,
+  canSeeHealthTrack,
+  type HealthTrackSectionKey,
+} from "./data/healthTrack";
 // HR-EMPLOYEE-HUB (2026-09-16)
 import { Briefcase } from "lucide-react";
 import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
@@ -182,6 +197,10 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  // HEALTH-TRACK (2026-09-18): active left-nav section + selected individual.
+  const [healthTrackSection, setHealthTrackSection] =
+    useState<HealthTrackSectionKey>("meals");
+  const [healthTrackIndividualId, setHealthTrackIndividualId] = useState<string | null>(null);
   const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
   const [evidence, setEvidence] = useState("");
@@ -665,6 +684,42 @@ export default function App() {
       items: [["Employee Hub", Briefcase]],
     },
   ] as const;
+  // HEALTH-TRACK (2026-09-18): one nav item per section; clicking opens the
+  // page on that section with no individual selected.
+  const healthTrackIcons: Record<HealthTrackSectionKey, typeof UtensilsCrossed> = {
+    meals: UtensilsCrossed,
+    elimination: Droplets,
+    skin: ScanEye,
+    vitals: HeartPulse,
+    seizures: Zap,
+    menses: CalendarHeart,
+    blood_sugar: Candy,
+  };
+  const healthTrackNav = canSeeHealthTrack(session.roleKey) ? (
+    <div className="nav-group" key="health-track">
+      <div className="nav-label">HEALTH TRACK</div>
+      {HEALTH_TRACK_SECTIONS.map((htSection) => {
+        const HtIcon = healthTrackIcons[htSection.key];
+        const htActive =
+          page === "Health Track" && healthTrackSection === htSection.key;
+        return (
+          <button
+            key={htSection.key}
+            onClick={() => {
+              setHealthTrackSection(htSection.key);
+              setHealthTrackIndividualId(null);
+              navigate("Health Track");
+            }}
+            aria-current={htActive ? "page" : undefined}
+            className={`nav-item ${htActive ? "active" : ""}`}
+          >
+            <HtIcon size={18} />
+            <span>{htSection.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
     <div className="app-shell">
@@ -699,12 +754,11 @@ export default function App() {
           <ChevronDown size={15} />
         </button>
         <nav>
-          {navItems.map((group) => {
+          {navItems.flatMap((group) => {
             const items = group.items.filter(([name]) =>
               pageVisible(session, name),
             );
-            if (!items.length) return null;
-            return (
+            const rendered = items.length ? (
             <div className="nav-group" key={group.title}>
               <div className="nav-label">{group.title}</div>
               {items.map(([name, Icon]) => (
@@ -737,7 +791,11 @@ export default function App() {
                 </button>
               ))}
             </div>
-            );
+            ) : null;
+            // HEALTH-TRACK: this group sits right after the agency-named group.
+            return group.title === session.agencyName.toUpperCase() && healthTrackNav
+              ? [rendered, healthTrackNav]
+              : [rendered];
           })}
         </nav>
         <div className="sidebar-bottom">
@@ -1087,6 +1145,20 @@ export default function App() {
                     individuals.find((p) => p.name === person)?.id ?? ""
                   }
                   onBack={() => navigate("Individuals")}
+                  onOpenHealthTrack={(htSection) => {
+                    const chartPerson = individuals.find((p) => p.name === person);
+                    setHealthTrackIndividualId(chartPerson?.id ?? null);
+                    setHealthTrackSection(htSection);
+                    navigate("Health Track");
+                  }}
+                />
+              )}
+              {page === "Health Track" && canSeeHealthTrack(session.roleKey) && (
+                <HealthTrackPage
+                  section={healthTrackSection}
+                  individualId={healthTrackIndividualId}
+                  onSectionChange={setHealthTrackSection}
+                  onIndividualChange={setHealthTrackIndividualId}
                 />
               )}
               {page === "Site detail" && detailSiteId && (

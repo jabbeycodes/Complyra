@@ -53,6 +53,9 @@ export const PERMISSION_KEYS = [
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
   "mileage.manage",
+  // HEALTH-TRACK (health.record / health.review go here)
+  "health.record",
+  "health.review",
   // RECOGNITION (winners-only recognition: ratings/reviews + weekly winners)
   "recognition.rate_hm",
   "recognition.review_dsp",
@@ -168,6 +171,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      // HEALTH-TRACK: house managers record health entries for their home.
+      "health.record",
       "recognition.review_dsp",
       "recognition.view_winners",
       // QA-AUDIT (2026-09-14): dispute findings with photo evidence.
@@ -211,6 +216,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "sites.create",
       "correctiveActions.manage",
       "mileage.manage",
+      // HEALTH-TRACK: program managers record and review flagged entries.
+      "health.record",
+      "health.review",
       "recognition.view_winners",
       "recognition.manage",
       // QA-AUDIT (2026-09-14): schedule audits + dispute findings with evidence.
@@ -252,6 +260,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "mileage.manage",
+      // HEALTH-TRACK: DSPs record health entries during their shifts.
+      "health.record",
       "recognition.rate_hm",
       "recognition.view_winners",
       // DELEGATION: view templates + sign own acknowledgments.
@@ -280,6 +290,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      // HEALTH-TRACK: nurses record entries and review flagged ones.
+      "health.record",
+      "health.review",
       "recognition.view_winners",
       // DELEGATION: assign to individuals + review/approve training + sign own.
       "delegation.templates.view",
@@ -415,6 +428,9 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)
   "mileage.manage": "Log vehicle mileage",
+  // HEALTH-TRACK
+  "health.record": "Record health tracking entries",
+  "health.review": "Review flagged health entries",
   // RECOGNITION
   "recognition.rate_hm": "Rate assigned house managers",
   "recognition.review_dsp": "Review assigned DSPs",
