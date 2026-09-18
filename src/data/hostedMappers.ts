@@ -24,6 +24,12 @@ import type {
   SafetyLine,
 } from "./monthlyChecks";
 import type { SiteReview, SiteReviewLine } from "./siteReview";
+import type {
+  MarAdministration,
+  MarConcern,
+  MarPrnLog,
+  MedicationMarConfig,
+} from "./mar";
 
 type Row = Record<string, unknown>;
 
@@ -264,6 +270,103 @@ export function mapMedication(row: Row): Medication {
     remainingPills: num(row.remaining_pills),
     lastDeliveryOn: isoDate(row.last_delivery_on),
     lastCountdownOn: isoDate(row.last_countdown_on),
+    marConfig: mapMedicationMarConfig(row),
+  };
+}
+
+/** Issue #100 — map the MAR configuration columns onto the medication row. */
+export function mapMedicationMarConfig(row: Row): MedicationMarConfig {
+  const status =
+    row.status === "discontinued" ? "discontinued" : ("active" as const);
+  const orderPath = strOrNull(row.order_attachment_path);
+  const orderName = strOrNull(row.order_attachment_name);
+  return {
+    dosageForm: str(row.dosage_form),
+    indication: str(row.indication),
+    instructions: str(row.instructions),
+    beginAt: isoDateTime(row.begin_at),
+    frequencyLabel: str(row.frequency_label),
+    scheduleRepeat: str(row.schedule_repeat),
+    timeSlots: stringArray(row.time_slots).sort(),
+    route: str(row.route),
+    prescriber: str(row.prescriber),
+    prnCriteria: str(row.prn_criteria),
+    status,
+    discontinuedOn: isoDate(row.discontinued_on),
+    orderAttachment: orderPath ? { path: orderPath, name: orderName ?? "order.pdf" } : null,
+  };
+}
+
+/** Issue #100 — snake_case mar_config columns for insert/update payloads. */
+export function marConfigColumns(config: MedicationMarConfig): Record<string, unknown> {
+  return {
+    dosage_form: config.dosageForm,
+    indication: config.indication,
+    instructions: config.instructions,
+    begin_at: config.beginAt,
+    frequency_label: config.frequencyLabel,
+    schedule_repeat: config.scheduleRepeat,
+    time_slots: config.timeSlots,
+    route: config.route,
+    prescriber: config.prescriber,
+    prn_criteria: config.prnCriteria,
+    status: config.status,
+    discontinued_on: config.discontinuedOn,
+    order_attachment_path: config.orderAttachment?.path ?? null,
+    order_attachment_name: config.orderAttachment?.name ?? null,
+  };
+}
+
+export function mapMarAdministration(row: Row): MarAdministration {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    medicationId: str(row.medication_id),
+    administeredOn: isoDate(row.administered_on) ?? "",
+    timeSlot: str(row.time_slot),
+    pillsGiven: num(row.pills_given, 1),
+    status: (row.status as MarAdministration["status"]) ?? "given",
+    initials: str(row.initials),
+    administeredByName: str(row.administered_by_name),
+    administeredByUserId: strOrNull(row.administered_by_user_id),
+    reason: str(row.reason),
+    notifyNurse: bool(row.notify_nurse),
+    createdAt: isoDateTime(row.created_at) ?? "",
+  };
+}
+
+export function mapMarPrnLog(row: Row): MarPrnLog {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    medicationId: str(row.medication_id),
+    givenAt: isoDateTime(row.given_at) ?? "",
+    pillsGiven: num(row.pills_given, 1),
+    reasonGiven: str(row.reason_given),
+    effectiveness: str(row.effectiveness),
+    initials: str(row.initials),
+    administeredByName: str(row.administered_by_name),
+    createdAt: isoDateTime(row.created_at) ?? "",
+  };
+}
+
+export function mapMarConcern(row: Row): MarConcern {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    medicationId: str(row.medication_id),
+    administrationId: strOrNull(row.administration_id),
+    prnLogId: strOrNull(row.prn_log_id),
+    concernType: (row.concern_type as MarConcern["concernType"]) ?? "med_error",
+    description: str(row.description),
+    initials: str(row.initials),
+    flaggedByName: str(row.flagged_by_name),
+    nurseNotified: bool(row.nurse_notified),
+    resolvedAt: isoDateTime(row.resolved_at),
+    createdAt: isoDateTime(row.created_at) ?? "",
   };
 }
 
@@ -275,6 +378,7 @@ export function mapMedicationDelivery(row: Row): MedicationDelivery {
     remainingPills: num(row.remaining_pills),
     pillsPerDay: num(row.pills_per_day),
     recordedBy: str(row.recorded_by),
+    note: strOrNull(row.note) ?? undefined,
   };
 }
 

@@ -1,17 +1,8 @@
 import { useState } from "react";
-import {
-  ArrowLeft,
-  Download,
-  FileText,
-  Pill,
-  Printer,
-  ShieldAlert,
-} from "lucide-react";
+import { ArrowLeft, Download, FileText, Printer } from "lucide-react";
 import { Badge, DueChip, Empty, formatDate, PageHeading } from "../components";
 import { useData } from "../data/DataProvider";
 import {
-  canLogPrnDose,
-  canRecordDelivery,
   canSeeChartOverview,
   canSeeChartWidgets,
   canSeeMeds,
@@ -51,6 +42,7 @@ import {
 import DelegationFormDetail from "./delegations/DelegationFormDetail";
 // LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
 import MedInventoryCard from "./medInventory/MedInventoryCard";
+import MarHome from "./mar/MarHome";
 // Issue #80: ISP / PCSP task config + shift-note entry.
 import IspConfigSection from "./isp/IspConfigSection";
 import ShiftNoteSection from "./isp/ShiftNoteSection";
@@ -434,62 +426,9 @@ export default function IndividualChart({
 
         {showMeds && (
           <section className="chart-widget" id="chart-meds" aria-labelledby="meds-heading">
-            <h2 id="meds-heading">Medication board</h2>
-            <p className="stack-help">
-              After a delivery, set remaining pills to the counted bottle.
-              Scheduled meds drop by pills-per-day each calendar day. PRN does
-              not auto-drop.
-            </p>
-            {stack.medications.length === 0 && <p>No medications on this chart.</p>}
-            {stack.medications.map((med) => (
-              <article key={med.id} className="obligation-card med-card">
-                <header>
-                  <span className={`kind-pill ${med.kind}`}>{med.kind}</span>
-                  {med.controlled && (
-                    <span className="kind-pill control">
-                      <ShieldAlert size={12} /> Control
-                    </span>
-                  )}
-                  <h3>{med.name}</h3>
-                  {med.low && <Badge status="Due soon" />}
-                </header>
-                <p>
-                  {med.strength} · {med.remainingPills} pills left
-                  {med.kind === "scheduled"
-                    ? ` · ${med.pillsPerDay} per day · ${
-                        med.daysLeft === null ? "—" : `${med.daysLeft} days left`
-                      }`
-                    : " · PRN, no automatic drop"}
-                  {med.lastDeliveryOn
-                    ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
-                    : ""}
-                </p>
-                {canRecordDelivery(session.roleKey) && (
-                  <DeliveryForm
-                    defaultRemaining={med.remainingPills}
-                    defaultPerDay={med.pillsPerDay}
-                    scheduled={med.kind === "scheduled"}
-                    onSave={(remainingPills, pillsPerDay) =>
-                      run(() =>
-                        api.recordMedDelivery({
-                          medicationId: med.id,
-                          remainingPills,
-                          pillsPerDay,
-                        }),
-                      )
-                    }
-                  />
-                )}
-                {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
-                  <button
-                    className="button"
-                    onClick={() => run(() => api.logPrnDose(med.id, 1))}
-                  >
-                    <Pill size={16} /> PRN given
-                  </button>
-                )}
-              </article>
-            ))}
+            <h2 id="meds-heading">Medications</h2>
+            {/* Issue #100: profile header, medication list, monthly MAR grid, pill-count countdown. */}
+            <MarHome individualId={individualId} individualName={person.name} profile={person.profile} />
             {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
             <MedInventoryCard individualId={individualId} />
           </section>
@@ -712,54 +651,6 @@ function RenewalUpload({
       </label>
       <button className="button primary" type="submit">
         Upload and reset date
-      </button>
-    </form>
-  );
-}
-
-function DeliveryForm({
-  defaultRemaining,
-  defaultPerDay,
-  scheduled,
-  onSave,
-}: {
-  defaultRemaining: number;
-  defaultPerDay: number;
-  scheduled: boolean;
-  onSave: (remaining: number, perDay: number) => void;
-}) {
-  const [remaining, setRemaining] = useState(String(defaultRemaining));
-  const [perDay, setPerDay] = useState(String(defaultPerDay || 1));
-  return (
-    <form
-      className="renewal-upload"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSave(Number(remaining), scheduled ? Number(perDay) : 0);
-      }}
-    >
-      <label>
-        Pills remaining
-        <input
-          type="number"
-          min="0"
-          value={remaining}
-          onChange={(e) => setRemaining(e.target.value)}
-        />
-      </label>
-      {scheduled && (
-        <label>
-          Pills per day
-          <input
-            type="number"
-            min="1"
-            value={perDay}
-            onChange={(e) => setPerDay(e.target.value)}
-          />
-        </label>
-      )}
-      <button className="button primary" type="submit">
-        Record delivery count
       </button>
     </form>
   );

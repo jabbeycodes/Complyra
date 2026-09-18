@@ -1,0 +1,320 @@
+/* Issue #100 — MAR home styles. Solid colors only, no gradients. */
+
+.mar-home {
+  display: grid;
+  gap: 18px;
+}
+
+.mar-block {
+  background: #faf6ef;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  color: #241e18;
+  min-width: 0;
+}
+
+.mar-block h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.mar-help {
+  color: #5d544a;
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.mar-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.mar-profile-field dt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5d544a;
+  margin: 0 0 2px;
+}
+
+.mar-profile-field dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.mar-med-card {
+  background: #fffdf8;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.mar-med-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mar-med-card header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.mar-med-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 14px;
+  font-size: 0.88rem;
+}
+
+.mar-med-detail .label {
+  color: #5d544a;
+  font-weight: 600;
+}
+
+.mar-status-active {
+  background: #e7f3e8;
+  color: #1e5c2a;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mar-status-discontinued {
+  background: #f1e2e2;
+  color: #8a2c2c;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mar-form {
+  display: grid;
+  gap: 10px;
+  background: #fffdf8;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.mar-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #3c342b;
+}
+
+.mar-form input,
+.mar-form select,
+.mar-form textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  min-width: 0;
+}
+
+.mar-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.mar-form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mar-error {
+  background: #f8e8e6;
+  border: 1px solid #d9a5a0;
+  color: #8a2c2c;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.mar-grid-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffdf8;
+}
+
+table.mar-grid {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 760px;
+  font-size: 0.8rem;
+}
+
+table.mar-grid th,
+table.mar-grid td {
+  border: 1px solid #e3dccf;
+  padding: 5px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+table.mar-grid thead th {
+  background: #efe8d8;
+  font-weight: 600;
+}
+
+table.mar-grid tbody th {
+  text-align: left;
+  background: #faf6ef;
+  font-weight: 600;
+  max-width: 220px;
+  white-space: normal;
+}
+
+.mar-cell-given {
+  font-weight: 700;
+  color: #1e5c2a;
+}
+
+button.mar-cell-empty {
+  border: 0;
+  background: transparent;
+  color: #a89f8f;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+}
+
+button.mar-cell-empty:hover {
+  background: #efe8d8;
+  border-radius: 6px;
+  color: #241e18;
+}
+
+.mar-cell-outside {
+  color: #c9c1b2;
+}
+
+/* Circled initials for refused/omitted/held doses (DMH: circled time slot). */
+.mar-cell-circled {
+  display: inline-block;
+  border: 2px solid #8a2c2c;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-weight: 700;
+  color: #8a2c2c;
+  background: #f8e8e6;
+  cursor: help;
+}
+
+.mar-cell-held {
+  display: inline-block;
+  border: 2px solid #8a6a1f;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-weight: 700;
+  color: #8a6a1f;
+  background: #f7f0dc;
+  cursor: help;
+}
+
+.mar-signature-log {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.mar-signature-log th,
+.mar-signature-log td {
+  border: 1px solid #e3dccf;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.mar-signature-log thead th {
+  background: #efe8d8;
+}
+
+.mar-month-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mar-count-card {
+  background: #fffdf8;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.mar-count-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mar-count-card header h4 {
+  margin: 0;
+}
+
+.mar-badge {
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.mar-badge.ok {
+  background: #e7f3e8;
+  color: #1e5c2a;
+}
+
+.mar-badge.low {
+  background: #f7f0dc;
+  color: #8a6a1f;
+}
+
+.mar-badge.critical {
+  background: #f1e2e2;
+  color: #8a2c2c;
+}
+
+.mar-badge.out {
+  background: #8a2c2c;
+  color: #fff;
+}
+
+.mar-concern {
+  background: #f8e8e6;
+  border: 1px solid #d9a5a0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+}
+
+.mar-concern.resolved {
+  background: #eef3ee;
+  border-color: #c4d4c6;
+}
+
+@media print {
+  body[data-mar-print="monthly"] .app-shell > :not(.mar-print-area),
+  body[data-mar-print="monthly"] .app-shell .mar-print-area ~ * {
+    display: none;
+  }
+}
