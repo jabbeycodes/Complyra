@@ -7268,3 +7268,140 @@ button.qa-row:hover {
     align-items: flex-start;
   }
 }
+
+/* Issue #98 — agency-wide metrics: cross-site rollup panel on the Overview
+   dashboard. Solid colors only, no gradients. */
+.rollup-scroll {
+  overflow-x: auto;
+  padding: 4px var(--panel-inline) 20px;
+}
+.rollup-grid {
+  min-width: 720px;
+}
+.rollup-head,
+.rollup-row {
+  display: grid;
+  grid-template-columns:
+    minmax(170px, 1.5fr)
+    repeat(var(--rollup-cols, 6), minmax(118px, 1fr))
+    118px
+    24px;
+  align-items: center;
+  gap: 12px;
+}
+.rollup-head {
+  padding: 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8c857c;
+  border-bottom: 1px solid #f3f1ef;
+}
+.rollup-row {
+  width: 100%;
+  text-align: left;
+  padding: 14px 4px;
+  border: 0;
+  border-bottom: 1px solid #f3f1ef;
+  background: transparent;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.rollup-row:last-child {
+  border-bottom: 0;
+}
+.rollup-row:hover {
+  background: #f7f4f0;
+}
+.rollup-row.selected {
+  background: #f7f4f0;
+}
+.rollup-row.tone-warning {
+  border-left-color: #c4a06a;
+}
+.rollup-row.tone-critical {
+  border-left-color: #b3402e;
+}
+.rollup-row.tone-ok {
+  border-left-color: #5d7a52;
+}
+.rollup-site {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.rollup-site > span:last-child {
+  min-width: 0;
+}
+.rollup-site strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a4036;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rollup-site small {
+  display: block;
+  font-size: 11px;
+  color: #8c857c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rollup-cell {
+  font-size: 12px;
+  color: #4a4036;
+  line-height: 1.45;
+}
+.rollup-cell.tone-warning {
+  color: #9a6f2f;
+  font-weight: 600;
+}
+.rollup-cell.tone-critical {
+  color: #b3402e;
+  font-weight: 600;
+}
+.rollup-cell.tone-ok {
+  color: #5d7a52;
+}
+.rollup-status {
+  display: flex;
+}
+.rollup-chevron {
+  color: #b7b0a8;
+  justify-self: end;
+}
+.rollup-row:hover .rollup-chevron {
+  color: #5d7a52;
+}
+.rollup-empty {
+  padding: 18px var(--panel-inline) 26px;
+  color: #8c857c;
+  font-size: 13px;
+}
+/* Skeleton loading rows: solid pulse, no gradients. */
+.rollup-row.is-skeleton {
+  cursor: default;
+}
+.rollup-row.is-skeleton:hover {
+  background: transparent;
+}
+.skeleton-bar {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: #ece7e1;
+  animation: rollup-pulse 1.4s ease-in-out infinite;
+}
+.rollup-site .skeleton-bar {
+  width: 70%;
+  height: 14px;
+}
+@keyframes rollup-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
