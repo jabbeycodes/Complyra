@@ -86,6 +86,11 @@ export default function MonthlyShiftReport({
   const [narrative, setNarrative] = useState("");
   const [generatedAt, setGeneratedAt] = useState("");
   const [error, setError] = useState("");
+  // Issue #96 fix: native window.confirm() dialogs are auto-dismissed in
+  // headless browsers (and block the main thread on mobile), so signing used
+  // to silently no-op. Confirmation is now an inline two-step state.
+  const [confirmingSign, setConfirmingSign] = useState(false);
+  const [confirmingReopen, setConfirmingReopen] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,6 +98,8 @@ export default function MonthlyShiftReport({
     let cancelled = false;
     setLoading(true);
     setError("");
+    setConfirmingSign(false);
+    setConfirmingReopen(false);
     Promise.all([
       api.getShiftNotesForMonth(individualId, monthKey),
       api.getShiftNoteMonthlyReport(individualId, monthKey),
@@ -161,23 +168,25 @@ export default function MonthlyShiftReport({
     );
   };
 
-  const handleSign = () => {
+  const handleSignClick = () => {
     if (!report) return;
-    if (
-      !window.confirm(
-        "Sign this monthly summary? It will be locked. A PM or administrator can re-open it later.",
-      )
-    ) {
-      return;
-    }
+    setConfirmingSign(true);
+  };
+
+  const handleSignConfirm = () => {
+    if (!report) return;
+    setConfirmingSign(false);
     void persist(() => api.signShiftNoteMonthlyReport(report.id));
   };
 
-  const handleReopen = () => {
+  const handleReopenClick = () => {
     if (!report) return;
-    if (!window.confirm("Re-open this signed summary for editing? The signature will be cleared.")) {
-      return;
-    }
+    setConfirmingReopen(true);
+  };
+
+  const handleReopenConfirm = () => {
+    if (!report) return;
+    setConfirmingReopen(false);
     void persist(() => api.reopenShiftNoteMonthlyReport(report.id));
   };
 
@@ -425,9 +434,31 @@ export default function MonthlyShiftReport({
                 </p>
                 {canReopenMonthlySummary(roleKey, report.signedAt) && (
                   <div className="chart-actions isp-report-actions">
-                    <button type="button" className="button" onClick={handleReopen}>
-                      Re-open summary
-                    </button>
+                    {confirmingReopen ? (
+                      <>
+                        <span className="isp-report-confirm-text">
+                          Re-open for editing? The signature will be cleared.
+                        </span>
+                        <button
+                          type="button"
+                          className="button primary"
+                          onClick={handleReopenConfirm}
+                        >
+                          Confirm re-open
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => setConfirmingReopen(false)}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="button" onClick={handleReopenClick}>
+                        Re-open summary
+                      </button>
+                    )}
                   </div>
                 )}
               </>
@@ -449,15 +480,38 @@ export default function MonthlyShiftReport({
                   <button type="button" className="button primary" onClick={handleSaveDraft}>
                     Save summary
                   </button>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={handleSign}
-                    disabled={!canSignMonthlySummary(roleKey, report?.signedAt ?? "") || !report}
-                    title={!report ? "Save the summary first, then sign it." : undefined}
-                  >
-                    Sign summary
-                  </button>
+                  {confirmingSign ? (
+                    <>
+                      <span className="isp-report-confirm-text">
+                        Sign this summary? It will be locked. A PM or administrator can re-open it
+                        later.
+                      </span>
+                      <button
+                        type="button"
+                        className="button primary"
+                        onClick={handleSignConfirm}
+                      >
+                        Confirm sign
+                      </button>
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => setConfirmingSign(false)}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={handleSignClick}
+                      disabled={!canSignMonthlySummary(roleKey, report?.signedAt ?? "") || !report}
+                      title={!report ? "Save the summary first, then sign it." : undefined}
+                    >
+                      Sign summary
+                    </button>
+                  )}
                 </div>
                 {!report && (
                   <p className="muted">Save the summary first, then sign it to lock the report.</p>
