@@ -51,7 +51,7 @@ import Dashboard from "./Dashboard";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
-import { notificationPage } from "./features/notifications/notify";
+import { healthEntryIdFromLink, notificationPage } from "./features/notifications/notify";
 import {
   Avatar,
   Badge,
@@ -119,6 +119,7 @@ import HealthTrackPage from "./features/healthTrack/HealthTrackPage";
 import {
   HEALTH_TRACK_SECTIONS,
   canSeeHealthTrack,
+  sectionForKind,
   type HealthTrackSectionKey,
 } from "./data/healthTrack";
 // HR-EMPLOYEE-HUB (2026-09-16)
@@ -302,7 +303,13 @@ export default function App() {
       try {
         const fromHash = decodeURIComponent(window.location.hash.replace(/^#/, "")).trim();
         const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash;
-        if (next) setPage(next);
+        if (next) {
+          const healthEntryId = fromHash.startsWith("/")
+            ? healthEntryIdFromLink(fromHash)
+            : null;
+          if (healthEntryId) void openHealthEntryDeepLink(healthEntryId);
+          setPage(next);
+        }
       } catch { /* Ignore malformed external links. */ }
     };
     applyHash();
@@ -481,6 +488,20 @@ export default function App() {
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  // Health alerts deep-link to /health/<entryId>. Resolve the entry so the
+  // nurse lands on the flagged individual's record (HealthTrackPage adopts the
+  // person's site) instead of an empty "Choose an individual" page.
+  async function openHealthEntryDeepLink(entryId: string) {
+    try {
+      const rows = await api.listHealthEntries({});
+      const entry = rows.find((row) => row.id === entryId);
+      if (!entry) return;
+      setHealthTrackSection(sectionForKind(entry.kind));
+      setHealthTrackIndividualId(entry.individualId);
+    } catch {
+      /* Fall back to the section list if the entry can't be resolved. */
+    }
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
@@ -2393,6 +2414,8 @@ export default function App() {
                 return;
               }
               setModal(null);
+              const healthEntryId = healthEntryIdFromLink(link);
+              if (healthEntryId) void openHealthEntryDeepLink(healthEntryId);
               navigate(target);
             }} />
           {alertItems.length > 0 && <h3>Open priorities</h3>}

@@ -162,9 +162,13 @@ export function buildHealthLogHtml(options: HealthLogPrintOptions): string {
             `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`,
         )
         .join("");
-      const reviewLine = entry.nurseReviewedAt
-        ? `<p class="review">Reviewed by nurse${entry.nurseReviewedBy ? ` (${escapeHtml(entry.nurseReviewedBy)})` : ""} on ${escapeHtml(entry.nurseReviewedAt.slice(0, 10))}${entry.nurseNote ? ` — note: ${escapeHtml(entry.nurseNote)}` : ""}.</p>`
-        : `<p class="review pending">Not yet reviewed by a nurse.</p>`;
+      // Review state is only meaningful for entries flagged for a nurse;
+      // routine unflagged intake never enters the nurse queue.
+      const reviewLine = entry.flagForNurse
+        ? entry.nurseReviewedAt
+          ? `<p class="review">Reviewed by nurse${entry.nurseReviewedBy ? ` (${escapeHtml(entry.nurseReviewedBy)})` : ""} on ${escapeHtml(entry.nurseReviewedAt.slice(0, 10))}${entry.nurseNote ? ` — note: ${escapeHtml(entry.nurseNote)}` : ""}.</p>`
+          : `<p class="review pending">Not yet reviewed by a nurse.</p>`
+        : "";
       const flagLine = entry.flagForNurse
         ? `<p class="flag">Flagged for nurse review: ${escapeHtml(entry.flagReason ?? "see details")}</p>`
         : "";

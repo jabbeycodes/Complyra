@@ -59,7 +59,10 @@ for select to authenticated
 using ((select private.has_agency(agency_id)));
 
 -- Write (coarse backstop): any agency member may insert; only the author or
--- a privileged role may update; only privileged roles delete.
+-- a privileged role may update; staff who record entries (health.record —
+-- DSP, house manager, program manager, nurse, and both administrators) may
+-- delete, matching the app-layer gate so recorders can correct their own
+-- mistaken logs.
 create policy health_track_entries_insert on public.health_track_entries
 for insert to authenticated
 with check ((select private.has_agency(agency_id)));
@@ -77,7 +80,7 @@ with check (
 
 create policy health_track_entries_delete on public.health_track_entries
 for delete to authenticated
-using ((select private.role_key_in(agency_id, '{administrator,program_manager,nurse}')));
+using ((select private.has_permission(agency_id, 'health.record')));
 
 -- ----------------------------------------------------------------------------
 -- Health photos bucket
@@ -141,5 +144,52 @@ using (
     '{administrator,program_manager,nurse}'
   ))
 );
+
+-- ----------------------------------------------------------------------------
+-- Permission seeding — health.record / health.review
+--
+-- These keys are defined in src/data/permissions.ts, but the canonical
+-- role_permission_matrix insert lives in an already-applied 2026-09-15
+-- migration, so existing databases never received them and
+-- private.has_permission(..., 'health.record') stays false (blocking the
+-- skin-check photo upload above). Seed the keys here the way mileage and
+-- certificates did: add each key only where it is missing so explicit
+-- per-agency customizations are preserved.
+--
+-- Defaults (from ROLE_TEMPLATES):
+--   health.record — administrator, compliance_admin, house_manager,
+--                    program_manager, dsp, nurse (HR + auditor stay out).
+--   health.review — administrator, compliance_admin, program_manager, nurse.
+-- ----------------------------------------------------------------------------
+
+update public.role_templates
+set permissions = permissions || jsonb_build_object(
+  'health.record',
+  key in ('administrator', 'compliance_admin', 'house_manager',
+          'program_manager', 'dsp', 'nurse')
+)
+where not (permissions ? 'health.record');
+
+update public.role_templates
+set permissions = permissions || jsonb_build_object(
+  'health.review',
+  key in ('administrator', 'compliance_admin', 'program_manager', 'nurse')
+)
+where not (permissions ? 'health.review');
+
+update public.agency_roles
+set permissions = permissions || jsonb_build_object(
+  'health.record',
+  template_key in ('administrator', 'compliance_admin', 'house_manager',
+                   'program_manager', 'dsp', 'nurse')
+)
+where not (permissions ? 'health.record');
+
+update public.agency_roles
+set permissions = permissions || jsonb_build_object(
+  'health.review',
+  template_key in ('administrator', 'compliance_admin', 'program_manager', 'nurse')
+)
+where not (permissions ? 'health.review');
 
 commit;

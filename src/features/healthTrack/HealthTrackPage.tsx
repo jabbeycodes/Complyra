@@ -271,10 +271,16 @@ function QuickAddForm({
         const photoId = await api.uploadHealthPhoto(individualId, photo);
         (details as HealthTrackDetails & { photoId?: string }).photoId = photoId;
       }
-      const occurredAt =
+      // Store the local wall-clock time the staff entered, not a UTC-shifted
+      // instant: care logs are calendar-day records, and `dayKeyOf` slices the
+      // date prefix. Converting through `toISOString()` would push evening
+      // entries in western timezones onto the next calendar day.
+      const localInput =
         typeof fields.occurredAt === "string" && fields.occurredAt
-          ? new Date(fields.occurredAt).toISOString()
-          : new Date().toISOString();
+          ? fields.occurredAt
+          : nowLocalInput();
+      const occurredAt =
+        localInput.length === 16 ? `${localInput}:00` : localInput;
       await api.addHealthEntry({ individualId, kind, occurredAt, details });
       const alert = detectHealthAlert(kind, details);
       setSaveNote(
@@ -806,6 +812,15 @@ export default function HealthTrackPage({
   useEffect(() => {
     if (lockedSiteId && !siteId) setSiteId(lockedSiteId);
   }, [lockedSiteId, siteId]);
+  // When an individual is preselected (opening from the chart shortcut or a
+  // health alert deep link) but no site is chosen yet, adopt that person's
+  // site so agency-wide roles see them in the Individual dropdown. Guarded on
+  // an empty siteId so a later manual site change is never overridden.
+  useEffect(() => {
+    if (!lockedSiteId && !siteId && person?.siteId) {
+      setSiteId(person.siteId);
+    }
+  }, [lockedSiteId, siteId, person]);
   useEffect(() => {
     if (individualId && people.length > 0 && !people.some((p) => p.id === individualId)) {
       onIndividualChange(null);

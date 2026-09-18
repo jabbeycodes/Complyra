@@ -572,11 +572,16 @@ export function summarizeHealthWeek(
   weekStartIso: string,
 ): HealthDaySummary[] {
   const out: HealthDaySummary[] = [];
-  const start = new Date(`${weekStartIso}T00:00:00`);
+  const [y, m, d] = weekStartIso.split("-").map(Number);
   for (let i = 0; i < 7; i += 1) {
-    const day = new Date(start);
-    day.setDate(start.getDate() + i);
-    const key = day.toISOString().slice(0, 10);
+    // Build each day key from local date parts (matching the date pickers'
+    // local yyyy-mm-dd) instead of `toISOString()`, which shifts the day for
+    // users east of UTC.
+    const day = new Date(y, m - 1, d + i);
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(day.getDate()).padStart(2, "0")}`;
     out.push(summarizeHealthDay(entries, key));
   }
   return out;
