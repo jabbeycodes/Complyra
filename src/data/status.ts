@@ -127,6 +127,15 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
   if (page === "Mileage") return can(session, "mileage.manage");
+  // GER (2026-09-18): the program-site "Reporting" tab. Anyone with the
+  // report workflow permissions opens it; individuals.view (auditors) gets
+  // read-only access — the tab itself enforces create/review gates.
+  if (page === "Reporting")
+    return (
+      can(session, "ger.create") ||
+      can(session, "ger.review") ||
+      can(session, "individuals.view")
+    );
   // HR-EMPLOYEE-HUB-PAGEVIS (2026-09-16): the Employee Hub is reachable by
   // everyone with hub.access; each tab is permission-gated in-app.
   if (page === "Employee Hub") return can(session, "hub.access");

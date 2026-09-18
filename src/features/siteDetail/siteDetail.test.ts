@@ -55,6 +55,7 @@ const EXPECTED_ORDER: SiteDetailTabId[] = [
   "mileage",
   "drills",
   "shiftnotes",
+  "reporting",
   "staff",
 ];
 
@@ -81,10 +82,11 @@ describe("site detail tabs", () => {
     const ids = dspTabs.map((t) => t.id);
     assert.ok(!ids.includes("staff"), "DSP does not see the staff tab");
     assert.ok(ids.includes("overview"), "DSP still sees overview");
+    assert.ok(ids.includes("reporting"), "DSP sees the reporting tab (ger.create)");
     assert.equal(
       ids[ids.length - 1],
-      "shiftnotes",
-      "last visible tab for DSP is shiftnotes",
+      "reporting",
+      "last visible tab for DSP is reporting",
     );
     // Administrator sees everything, staff still last.
     const adminIds = getSiteDetailTabs(sessionFor("administrator")).map((t) => t.id);
@@ -104,6 +106,16 @@ describe("site detail tabs", () => {
   it("shows audits to the auditor role", () => {
     const ids = getSiteDetailTabs(sessionFor("auditor")).map((t) => t.id);
     assert.ok(ids.includes("audits"), "auditor sees audits");
+  });
+
+  it("shows the reporting tab read-only to the auditor role", () => {
+    const ids = getSiteDetailTabs(sessionFor("auditor")).map((t) => t.id);
+    assert.ok(ids.includes("reporting"), "auditor sees the reporting tab");
+  });
+
+  it("shows the reporting tab to house managers with review access", () => {
+    const ids = getSiteDetailTabs(sessionFor("house_manager")).map((t) => t.id);
+    assert.ok(ids.includes("reporting"), "HM sees the reporting tab");
   });
 
   it("shows only overview when there is no session", () => {

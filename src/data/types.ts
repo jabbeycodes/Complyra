@@ -737,6 +737,83 @@ export interface UpdateMileageTripInput {
 export interface MileageTripView extends MileageTrip {
   riderShares: Array<{ individualId: string; miles: number }>;
 }
+
+// ===== GER TYPES (General Event Reports) =====
+// GER: simplified incident/event reporting for a program site. One row per
+// reported event; the workflow is draft → submitted → approved | returned.
+
+/** One notification made about the event (guardian, nurse, PM, …). */
+export interface GerNotificationMadeRow {
+  channel: string;
+  name: string;
+  notifiedAt: string;
+}
+
+/** One General Event Report row. */
+export interface GerReport {
+  id: string;
+  agencyId: string;
+  siteId: string;
+  individualId: string;
+  eventDate: string; // ISO yyyy-mm-dd
+  eventTime: string; // HH:MM 24h, may be ""
+  location: string;
+  eventType: string;
+  severity: string;
+  description: string;
+  actionsTaken: string;
+  notificationsMade: GerNotificationMadeRow[];
+  witnesses: string;
+  reportedByName: string;
+  signatureName: string;
+  signedAt: string; // ISO timestamp, "" until signed
+  status: "draft" | "submitted" | "approved" | "returned";
+  reviewerId: string;
+  reviewerName: string;
+  reviewedAt: string; // ISO timestamp, "" until decided
+  reviewNote: string;
+  createdBy: string; // userId of the author
+  createdByName: string;
+  createdAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp
+}
+
+export interface AddGerReportInput {
+  siteId: string;
+  individualId: string;
+  eventDate: string;
+  eventTime?: string;
+  location?: string;
+  eventType: string;
+  severity?: string;
+  description?: string;
+  actionsTaken?: string;
+  notificationsMade?: GerNotificationMadeRow[];
+  witnesses?: string;
+  reportedByName?: string;
+  signatureName?: string;
+}
+
+export interface UpdateGerReportInput {
+  individualId?: string;
+  eventDate?: string;
+  eventTime?: string;
+  location?: string;
+  eventType?: string;
+  severity?: string;
+  description?: string;
+  actionsTaken?: string;
+  notificationsMade?: GerNotificationMadeRow[];
+  witnesses?: string;
+  reportedByName?: string;
+  signatureName?: string;
+}
+
+/** One report enriched for list/detail views. */
+export interface GerReportView extends GerReport {
+  individualName: string;
+  siteName: string;
+}
 // ===== LIFEPATH-P5 TYPES (HM weekly checklist) =====
 export type ChecklistAnswer = "Y" | "N" | "N/A";
 

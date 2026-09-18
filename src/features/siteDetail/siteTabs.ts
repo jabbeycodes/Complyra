@@ -11,6 +11,7 @@ export type SiteDetailTabId =
   | "mileage"
   | "drills"
   | "shiftnotes"
+  | "reporting"
   | "staff";
 
 export interface SiteDetailTab {
@@ -80,6 +81,13 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "shiftnotes",
     label: "Shift notes",
     visible: (s) => !!s && pageVisible(s, "ShiftNotes"),
+  },
+  {
+    // GER (2026-09-18): event reporting lives between Shift notes and Staff.
+    // Staff stays last (founder rule).
+    id: "reporting",
+    label: "Reporting",
+    visible: (s) => !!s && pageVisible(s, "Reporting"),
   },
   { id: "staff", label: "Staff", visible: (s) => !!s && pageVisible(s, "Staff") },
 ];

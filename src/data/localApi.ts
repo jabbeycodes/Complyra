@@ -911,6 +911,37 @@ export interface ComplyraApi {
     year: number,
     sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
   ): Promise<import("./mileage").MileageAgencyYearlySummary>;
+  // ===== GER API (General Event Reports — program-site incident reporting) =====
+  /** Event reports for one home, newest first (optionally filtered). */
+  listGerReports(
+    siteId: string,
+    filters?: import("./ger").GerReportFilters,
+  ): Promise<import("./types").GerReportView[]>;
+  /** One report with individual/site names resolved. */
+  getGerReport(reportId: string): Promise<import("./types").GerReportView>;
+  /** Start a draft report (ger.create). */
+  addGerReport(
+    input: import("./types").AddGerReportInput,
+  ): Promise<import("./types").GerReport>;
+  /** Edit a draft/returned report (author or reviewer; approved reports lock). */
+  updateGerReport(
+    reportId: string,
+    patch: import("./types").UpdateGerReportInput,
+  ): Promise<import("./types").GerReport>;
+  /**
+   * Submit a draft/returned report for review. High/Critical severities
+   * queue incident.followup notifications to program managers and nurses.
+   */
+  submitGerReport(reportId: string): Promise<import("./types").GerReport>;
+  /**
+   * Reviewer decision on a submitted report: "approve" or "return"
+   * (with a note explaining the corrections needed). ger.review only.
+   */
+  reviewGerReport(
+    reportId: string,
+    decision: "approve" | "return",
+    reviewNote?: string,
+  ): Promise<import("./types").GerReport>;
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
   /**
    * QA audit history for one program site (newest first). Read-only: the
@@ -7236,6 +7267,289 @@ export class LocalApi implements ComplyraApi {
       tripsBySite.set(site.siteId, this.siteMileageTrips(session, site.siteId));
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== GER IMPL (General Event Reports — LocalApi, in-memory) =====
+  private gerRows(): import("./types").GerReport[] {
+    const db = this.store.db as LocalDatabase & {
+      gerReports?: import("./types").GerReport[];
+    };
+    if (!db.gerReports) db.gerReports = [];
+    return db.gerReports;
+  }
+
+  private gerLib(): Promise<typeof import("./ger")> {
+    return import("./ger");
+  }
+
+  private async validatedGerInput(
+    input:
+      | import("./types").AddGerReportInput
+      | import("./types").UpdateGerReportInput,
+    existing?: import("./types").GerReport,
+  ): Promise<import("./ger").GerReportCore> {
+    const lib = await this.gerLib();
+    const merged = {
+      individualId: input.individualId ?? existing?.individualId ?? "",
+      eventDate: input.eventDate ?? existing?.eventDate ?? "",
+      eventTime: input.eventTime ?? existing?.eventTime ?? "",
+      location: input.location ?? existing?.location ?? "",
+      eventType: (input.eventType ?? existing?.eventType ?? "") as import("./ger").GerEventType,
+      severity: (input.severity ?? existing?.severity ?? "low") as import("./ger").GerSeverity,
+      description: input.description ?? existing?.description ?? "",
+      actionsTaken: input.actionsTaken ?? existing?.actionsTaken ?? "",
+      notificationsMade: (input.notificationsMade ?? existing?.notificationsMade ?? []).map(
+        (n) => ({
+          channel: n.channel as import("./ger").GerNotificationChannel,
+          name: n.name ?? "",
+          notifiedAt: n.notifiedAt ?? "",
+        }),
+      ),
+      witnesses: input.witnesses ?? existing?.witnesses ?? "",
+      reportedByName: input.reportedByName ?? existing?.reportedByName ?? "",
+      signatureName: input.signatureName ?? existing?.signatureName ?? "",
+    };
+    const errors = lib.validateGerInput(merged, { forSubmit: false });
+    if (errors.length > 0) throw new Error(errors[0].message);
+    return merged;
+  }
+
+  private findGerReport(session: { agencyId: string }, reportId: string) {
+    const report = this.gerRows().find(
+      (row) => row.id === reportId && row.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Event report not found.");
+    this.siteOrThrow(session, report.siteId);
+    return report;
+  }
+
+  private gerIndividualOrThrow(
+    session: { agencyId: string },
+    siteId: string,
+    individualId: string,
+  ) {
+    const person = this.store.db.individuals.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.id === individualId &&
+        row.siteId === siteId,
+    );
+    if (!person) throw new Error("The individual is not part of this home.");
+    return person;
+  }
+
+  private toGerReportView(
+    report: import("./types").GerReport,
+  ): import("./types").GerReportView {
+    const individual = this.store.db.individuals.find((p) => p.id === report.individualId);
+    const site = this.store.db.sites.find((s) => s.id === report.siteId);
+    return {
+      ...report,
+      individualName: individual?.fullName ?? "Unknown individual",
+      siteName: site?.name ?? "Unknown home",
+    };
+  }
+
+  /** Queue escalation notifications for a High/Critical submission. */
+  private async queueGerEscalation(
+    report: import("./types").GerReport,
+  ): Promise<void> {
+    const lib = await this.gerLib();
+    if (!lib.gerEscalatesOnSubmit(report.severity as import("./ger").GerSeverity)) return;
+    const view = this.toGerReportView(report);
+    for (const roleKey of ["program_manager", "nurse"]) {
+      const payload = lib.gerEscalationPayload({
+        agencyId: report.agencyId,
+        roleKey,
+        gerId: report.id,
+        siteId: report.siteId,
+        individualName: view.individualName,
+        eventType: report.eventType as import("./ger").GerEventType,
+        severity: report.severity as import("./ger").GerSeverity,
+        eventDate: report.eventDate,
+      });
+      const db = this.store.db;
+      if (db.notifications.some((n) => n.dedupeKey === payload.dedupeKey)) continue;
+      db.notifications.push({
+        id: crypto.randomUUID(),
+        agencyId: payload.agencyId,
+        userId: payload.userId ?? null,
+        roleKey: payload.roleKey ?? null,
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        deepLink: payload.deepLink,
+        entityType: payload.entityType ?? null,
+        entityId: payload.entityId ?? null,
+        dedupeKey: payload.dedupeKey ?? crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        readAt: null,
+      });
+    }
+    await persistMeta(this.store);
+  }
+
+  async listGerReports(
+    siteId: string,
+    filters?: import("./ger").GerReportFilters,
+  ): Promise<import("./types").GerReportView[]> {
+    const { filterGerReports, sortGerReports, EMPTY_GER_FILTERS } = await this.gerLib();
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
+    this.siteOrThrow(session, siteId);
+    const rows = this.gerRows().filter(
+      (row) => row.agencyId === session.agencyId && row.siteId === siteId,
+    );
+    return sortGerReports(filterGerReports(rows, filters ?? EMPTY_GER_FILTERS)).map((r) =>
+      this.toGerReportView(r),
+    );
+  }
+
+  async getGerReport(reportId: string): Promise<import("./types").GerReportView> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
+    return this.toGerReportView(this.findGerReport(session, reportId));
+  }
+
+  async addGerReport(
+    input: import("./types").AddGerReportInput,
+  ): Promise<import("./types").GerReport> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    if (!lib.canCreateGerReport(session)) throw new Error("Not authorized to write event reports.");
+    this.siteOrThrow(session, input.siteId);
+    if (input.individualId) this.gerIndividualOrThrow(session, input.siteId, input.individualId);
+    const core = await this.validatedGerInput(input);
+    const now = new Date().toISOString();
+    const report: import("./types").GerReport = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      individualId: core.individualId,
+      eventDate: core.eventDate,
+      eventTime: core.eventTime,
+      location: core.location,
+      eventType: core.eventType,
+      severity: core.severity,
+      description: core.description,
+      actionsTaken: core.actionsTaken,
+      notificationsMade: core.notificationsMade,
+      witnesses: core.witnesses,
+      reportedByName: core.reportedByName || session.fullName,
+      signatureName: core.signatureName,
+      signedAt: core.signatureName ? now : "",
+      status: "draft",
+      reviewerId: "",
+      reviewerName: "",
+      reviewedAt: "",
+      reviewNote: "",
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.gerRows().push(report);
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async updateGerReport(
+    reportId: string,
+    patch: import("./types").UpdateGerReportInput,
+  ): Promise<import("./types").GerReport> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    const report = this.findGerReport(session, reportId);
+    if (!lib.canEditGerReportBody(session, report)) {
+      throw new Error("This report can no longer be edited.");
+    }
+    if (patch.individualId && patch.individualId !== report.individualId) {
+      this.gerIndividualOrThrow(session, report.siteId, patch.individualId);
+    }
+    const core = await this.validatedGerInput(patch, report);
+    const now = new Date().toISOString();
+    Object.assign(report, {
+      individualId: core.individualId,
+      eventDate: core.eventDate,
+      eventTime: core.eventTime,
+      location: core.location,
+      eventType: core.eventType,
+      severity: core.severity,
+      description: core.description,
+      actionsTaken: core.actionsTaken,
+      notificationsMade: core.notificationsMade,
+      witnesses: core.witnesses,
+      reportedByName: core.reportedByName || report.reportedByName,
+      signatureName: core.signatureName,
+      signedAt: core.signatureName && !report.signedAt ? now : report.signedAt,
+      updatedAt: now,
+    });
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async submitGerReport(reportId: string): Promise<import("./types").GerReport> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    const report = this.findGerReport(session, reportId);
+    if (!lib.canEditGerReportBody(session, report)) {
+      throw new Error("Only the author or a reviewer can submit this report.");
+    }
+    const errors = lib.validateGerInput(
+      {
+        individualId: report.individualId,
+        eventDate: report.eventDate,
+        eventTime: report.eventTime,
+        location: report.location,
+        eventType: report.eventType as import("./ger").GerEventType,
+        severity: report.severity as import("./ger").GerSeverity,
+        description: report.description,
+        actionsTaken: report.actionsTaken,
+        notificationsMade: report.notificationsMade.map((n) => ({
+          channel: n.channel as import("./ger").GerNotificationChannel,
+          name: n.name,
+          notifiedAt: n.notifiedAt,
+        })),
+        witnesses: report.witnesses,
+        reportedByName: report.reportedByName,
+        signatureName: report.signatureName,
+      },
+      { forSubmit: true },
+    );
+    if (errors.length > 0) {
+      throw new Error(`Cannot submit: ${errors[0].message}`);
+    }
+    report.status = lib.transitionGerStatus(report.status, "submit");
+    report.updatedAt = new Date().toISOString();
+    await persistMeta(this.store);
+    await this.queueGerEscalation(report);
+    return report;
+  }
+
+  async reviewGerReport(
+    reportId: string,
+    decision: "approve" | "return",
+    reviewNote?: string,
+  ): Promise<import("./types").GerReport> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    const report = this.findGerReport(session, reportId);
+    if (!lib.canDecideGerReport(session, report)) {
+      throw new Error("Not authorized to review this report.");
+    }
+    if (decision === "return" && !reviewNote?.trim()) {
+      throw new Error("Add a note explaining what needs to be corrected.");
+    }
+    report.status = lib.transitionGerStatus(report.status, decision);
+    report.reviewerId = session.userId;
+    report.reviewerName = session.fullName;
+    report.reviewedAt = new Date().toISOString();
+    report.reviewNote = reviewNote?.trim() ?? "";
+    report.updatedAt = report.reviewedAt;
+    await persistMeta(this.store);
+    return report;
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
