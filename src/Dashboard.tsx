@@ -22,6 +22,7 @@ import { categories, metrics } from "./domain";
 import type { Requirement, Activity } from "./domain";
 import { Badge, Empty } from "./components";
 import StatusMixDonut from "./components/StatusMixDonut";
+import SiteRollupPanel from "./features/dashboard/SiteRollupPanel";
 import type { PersonalWorkItem } from "./data/dashboard";
 import type { SiteReview } from "./data/siteReview";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
@@ -363,6 +364,10 @@ export default function Dashboard({
           </div>
         )}
       </section>
+      {/* Issue #98 — agency-wide metrics: cross-site rollup so management sees
+          which homes need attention. One new panel; existing panels above are
+          untouched. */}
+      <SiteRollupPanel sites={sites} site={site} onSite={onSite} />
       <section className="panel personal-queue">
         <div className="panel-heading">
           <div>

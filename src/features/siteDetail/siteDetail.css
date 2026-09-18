@@ -530,3 +530,224 @@
     mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }
+
+/* Issue #98: clickable dashboard tiles, strip, drawer.
+   Solid colors only — no gradients. */
+
+/* Clickable tiles: buttons that keep the site-hero-score/stat layout. */
+.site-tile-button {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px 10px;
+  margin: -8px -10px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.site-tile-button:hover {
+  background: #f4efe4;
+  border-color: #e2d5bd;
+}
+
+.site-tile-button:focus-visible {
+  outline: 2px solid #3f5c3b;
+  outline-offset: 2px;
+}
+
+.site-tile-attention strong {
+  color: #8b5e3c;
+}
+
+.site-tile-neutral strong {
+  color: #6b6156;
+}
+
+/* Trackable strip: wraps into a responsive grid, collapsing on narrow screens. */
+.site-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.site-strip-tile {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #e9e6e1;
+  background: #fbfaf7;
+  border-radius: 12px;
+}
+
+.site-strip-tile:hover {
+  background: #f4efe4;
+  border-color: #e2d5bd;
+}
+
+.site-strip-tile strong {
+  font-size: 22px;
+}
+
+.site-strip-sub {
+  font-size: 12px;
+  color: #8a7f72;
+}
+
+@media (max-width: 640px) {
+  .site-strip {
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+    gap: 8px;
+  }
+
+  .site-strip-tile strong {
+    font-size: 19px;
+  }
+}
+
+/* Inspection drawer: shared slide-over for every tile. */
+.inspection-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(47, 70, 48, 0.45);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inspection-drawer {
+  width: min(480px, 100%);
+  height: 100%;
+  background: #fbfaf7;
+  box-shadow: -8px 0 24px rgba(47, 70, 48, 0.18);
+  display: flex;
+  flex-direction: column;
+  animation: inspection-drawer-in 160ms ease-out;
+}
+
+@keyframes inspection-drawer-in {
+  from {
+    transform: translateX(32px);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.inspection-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #eae8e4;
+}
+
+.inspection-drawer-head h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: #2f4630;
+}
+
+.inspection-drawer-head p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.inspection-drawer-close {
+  flex: 0 0 auto;
+}
+
+.inspection-drawer-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 20px 16px;
+}
+
+.inspection-drawer-foot {
+  border-top: 1px solid #eae8e4;
+  padding: 12px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-list {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.drawer-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.drawer-cards {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.drawer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+  width: 100%;
+}
+
+.drawer-card:hover {
+  border-color: #3f5c3b;
+}
+
+.drawer-card span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.drawer-qa-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.drawer-qa-head strong {
+  font-size: 34px;
+  color: #3f5c3b;
+}
+
+.drawer-qa-head span {
+  font-size: 14px;
+  color: #4a4036;
+}
+
+.drawer-qa .qa-badge-critical {
+  margin: 8px 0 0;
+  color: #8b5e3c;
+  font-size: 13px;
+}
+
+.drawer-safety {
+  padding: 8px 0;
+}
+
+@media (max-width: 640px) {
+  .inspection-drawer {
+    width: 100%;
+  }
+}

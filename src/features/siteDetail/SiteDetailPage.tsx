@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -20,7 +20,7 @@ import { useData } from "../../data/DataProvider";
 import { can, pageVisible } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
 import { metrics } from "../../domain";
-import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
+import { QA_SECTIONS, QA_ITEM_BY_ID, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
 import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
@@ -28,25 +28,45 @@ import { monthKeyOf, monthLabel } from "../../data/mileage";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
+  asMonthlyCollections,
+  monthlyTone,
+  siteSafetyView,
+  type MonthlyTone,
+} from "../../data/monthlyChecks";
+import {
+  bucketDrillCompletion,
+  collectExpiringCerts,
+  currentMonthKey,
+  drillTileSummary,
+  medAlertSummary,
+  safetyLinesAnswered,
+  safetyTileState,
+  shiftNoteCoverage,
+  trainingClearanceSummary,
+} from "./trackables";
+import { useSiteTrackables } from "./useSiteTrackables";
+import InspectionDrawer from "./InspectionDrawer";
+import {
+  drawerTitle,
+  DrawerBody,
+  type DrawerContext,
+  type DrawerKind,
+} from "./drawerBodies";
+import {
   formatDrillTypeLabel,
   sortOpenRequirements,
   trainingProgressLine,
 } from "./siteDetailCopy";
 import type { QaAuditSummary } from "../../data/localApi";
 import type {
-  HmWeeklyChecklist,
-  MedSupplyStatus,
   MileageTripView,
   ServiceLogEntry,
-  StaffCertificate,
-  StaffTrainingProfile,
 } from "../../data/types";
-import type { SiteDelegationActivation } from "../../delegation/delegation";
-import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
+
 
 interface SiteDetailPageProps {
   siteId: string;
@@ -90,13 +110,17 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   staff: Users,
 };
 
-interface TrainingRow {
-  userId: string;
-  name: string;
-  role: string;
-  profile: StaffTrainingProfile | null;
-  expiringCerts: StaffCertificate[];
-  failed: boolean;
+type TileTone = "ok" | "attention" | "neutral";
+
+interface StripTile {
+  key: string;
+  label: string;
+  value: string;
+  sub: string;
+  tone: TileTone;
+  ariaLabel: string;
+  drawer?: DrawerKind;
+  onClick?: () => void;
 }
 
 export default function SiteDetailPage({
@@ -110,15 +134,11 @@ export default function SiteDetailPage({
   const [tab, setTab] = useState<SiteDetailTabId>("overview");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
 
-  const [qaHistory, setQaHistory] = useState<QaAudit[] | null>(null);
-  const [checklists, setChecklists] = useState<HmWeeklyChecklist[] | null>(null);
-  const [delegations, setDelegations] = useState<SiteDelegationActivation[] | null>(null);
-  const [trainingRows, setTrainingRows] = useState<TrainingRow[] | null>(null);
-  const [medStatus, setMedStatus] = useState<MedSupplyStatus | null>(null);
   const [trips, setTrips] = useState<MileageTripView[] | null>(null);
-  const [siteNotes, setSiteNotes] = useState<SiteShiftNoteView[] | null>(null);
-  const [loading, setLoading] = useState<Partial<Record<SiteDetailTabId, boolean>>>({});
-  const [tabError, setTabError] = useState<Partial<Record<SiteDetailTabId, string>>>({});
+  const [mileageLoading, setMileageLoading] = useState(false);
+  const [mileageError, setMileageError] = useState<string | undefined>();
+
+  const [drawer, setDrawer] = useState<DrawerKind | null>(null);
 
   const site = workspace?.sites.find((s) => s.id === siteId) ?? null;
   const siteName = site?.name ?? "";
@@ -136,7 +156,10 @@ export default function SiteDetailPage({
     [workspace, site],
   );
   const siteStaff = useMemo(
-    () => (workspace?.staff ?? []).filter((s) => s.siteId === siteId),
+    () =>
+      (workspace?.staff ?? [])
+        .filter((s) => s.siteId === siteId)
+        .map((s) => ({ id: s.id, name: s.name, role: s.role })),
     [workspace, siteId],
   );
   const openRequirements = useMemo(
@@ -155,144 +178,333 @@ export default function SiteDetailPage({
   );
 
   const hasAccess = !!session && !!site && !!workspace && canAccessSite(session, siteId);
+
+  // Eager, permission-gated trackable loading: tiles render without tab
+  // clicks. Each fetch mirrors its tab's gate; null = the role can't read.
+  const trackables = useSiteTrackables({
+    api,
+    session,
+    siteId,
+    siteStaff,
+    hasAccess,
+  });
+  const {
+    qaHistory,
+    qaDisputes,
+    checklists,
+    delegations,
+    trainingRows,
+    medStatus,
+    siteNotes,
+    loading: trackablesLoading,
+  } = trackables;
+
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? "overview";
 
-  const loadTab = useCallback(
-    async (tabId: SiteDetailTabId, monthKey: string) => {
-      if (!hasAccess) return;
-      setLoading((prev) => ({ ...prev, [tabId]: true }));
-      setTabError((prev) => ({ ...prev, [tabId]: undefined }));
-      try {
-        if (tabId === "overview" || tabId === "audits") {
-          if (qaHistory === null) {
-            // Latest finalized QA Review scores power the Overview badge.
-            // Read-gated: no audit.read, no score.
-            if (
-              session &&
-              (can(session, "audit.read") ||
-                can(session, "qa.audit") ||
-                can(session, "audit.export"))
-            ) {
-              try {
-                setQaHistory(await api.getQaSiteHistory(siteId));
-              } catch {
-                setQaHistory([]);
-              }
-            } else {
-              setQaHistory([]);
-            }
-          }
-        }
-        if (tabId === "checklists" && checklists === null) {
-          setChecklists(await api.listWeeklyChecklists({ siteId }));
-        }
-        if (tabId === "training") {
-          if (delegations === null) {
-            setDelegations(await api.listSiteDelegationActivations({ siteId }));
-          }
-          if (trainingRows === null) {
-            const rows: TrainingRow[] = await Promise.all(
-              siteStaff.map(async (member) => {
-                try {
-                  const [profile, certs] = await Promise.all([
-                    api.getStaffTrainingProfile(member.id),
-                    api.listCertificates(member.id),
-                  ]);
-                  const expiring = certs
-                    .filter((c) => {
-                      const days = Math.round(
-                        (new Date(c.expiresOn).getTime() - Date.now()) / 86400000,
-                      );
-                      return days <= 60;
-                    })
-                    .sort((a, b) => a.expiresOn.localeCompare(b.expiresOn));
-                  return {
-                    userId: member.id,
-                    name: member.name,
-                    role: member.role,
-                    profile,
-                    expiringCerts: expiring,
-                    failed: false,
-                  };
-                } catch {
-                  return {
-                    userId: member.id,
-                    name: member.name,
-                    role: member.role,
-                    profile: null,
-                    expiringCerts: [],
-                    failed: true,
-                  };
-                }
-              }),
-            );
-            setTrainingRows(rows);
-          }
-        }
-        if (tabId === "medications" && medStatus === null) {
-          setMedStatus(await api.getMedicationSupplyStatus(siteId));
-        }
-        if (tabId === "mileage") {
-          setTrips(await api.listMileageTrips(siteId, monthKey));
-        }
-        if (tabId === "shiftnotes" && siteNotes === null) {
-          setSiteNotes(await api.getSiteShiftNotes(siteId));
-        }
-      } catch (err) {
-        setTabError((prev) => ({
-          ...prev,
-          [tabId]: err instanceof Error ? err.message : "Could not load this section.",
-        }));
-      } finally {
-        setLoading((prev) => ({ ...prev, [tabId]: false }));
-      }
-    },
-    [
-      api,
-      hasAccess,
-      session,
-      siteId,
-      siteStaff,
-      qaHistory,
-      checklists,
-      delegations,
-      siteNotes,
-      medStatus,
-      trainingRows,
-    ],
+  // Mileage stays tab-scoped: it is month-keyed, not a dashboard trackable.
+  useEffect(() => {
+    if (!hasAccess || activeTab !== "mileage") return;
+    let alive = true;
+    setMileageLoading(true);
+    setMileageError(undefined);
+    api
+      .listMileageTrips(siteId, month)
+      .then((rows) => {
+        if (alive) setTrips(rows);
+      })
+      .catch((err) => {
+        if (alive)
+          setMileageError(err instanceof Error ? err.message : "Could not load this section.");
+      })
+      .finally(() => {
+        if (alive) setMileageLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api, hasAccess, activeTab, siteId, month]);
+
+
+  // ---- tile data ------------------------------------------------------
+
+  const thisMonth = currentMonthKey();
+  const thisMonthLabel = monthLabel(thisMonth);
+
+  const drillBuckets = useMemo(
+    () => bucketDrillCompletion(siteDrills, thisMonth),
+    [siteDrills, thisMonth],
   );
+  const drillSummary = drillTileSummary(drillBuckets);
 
-  useEffect(() => {
-    if (hasAccess) void loadTab(activeTab, month);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, hasAccess, siteId]);
+  const safetyReport = useMemo(
+    () =>
+      workspace
+        ? siteSafetyView(asMonthlyCollections(workspace.monthly), siteId, thisMonth)
+        : undefined,
+    [workspace, siteId, thisMonth],
+  );
+  const safetyState = safetyTileState(safetyReport);
+  const safetyLines = safetyLinesAnswered(safetyReport);
+  const safetyTone: MonthlyTone = safetyState === "complete"
+    ? "current"
+    : monthlyTone(false, todayIso(), thisMonth, workspace?.monthlyDue.safetyDay);
 
-  useEffect(() => {
-    if (activeTab === "mileage" && hasAccess) void loadTab("mileage", month);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
-
-  if (!site || !workspace || !session || !canAccessSite(session, siteId)) {
-    return (
-      <div>
-        <button type="button" className="button" onClick={onBack}>
-          <ArrowLeft size={16} /> Back to sites
-        </button>
-        <Empty
-          title="Site not available"
-          text="You don't have access to this program site, or it no longer exists."
-        />
-      </div>
-    );
-  }
-
+  const trainingSummary = useMemo(
+    () => (trainingRows ? trainingClearanceSummary(trainingRows) : null),
+    [trainingRows],
+  );
+  const certRows = useMemo(
+    () => (trainingRows ? collectExpiringCerts(trainingRows) : null),
+    [trainingRows],
+  );
+  const medSummary = medAlertSummary(medStatus);
+  const shiftCoverage = useMemo(
+    () => (siteNotes ? shiftNoteCoverage(siteNotes, thisMonth) : null),
+    [siteNotes, thisMonth],
+  );
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
   const latestQaPct = latestQaScore?.pct;
-  const siteRequirements = (workspace.requirements ?? []).filter(
+  const siteRequirements = (workspace?.requirements ?? []).filter(
     (r) => r.site === siteName,
   );
   const siteReqMetrics = metrics(siteRequirements);
+  const sortedOpenRequirements = useMemo(
+    () => sortOpenRequirements(openRequirements),
+    [openRequirements],
+  );
+
+  const qaDetail = useMemo(
+    () =>
+      latestQa && latestQaScore
+        ? {
+            periodLabel: auditPeriodLabel(latestQa),
+            pct: latestQaScore.pct,
+            sections: QA_SECTIONS.map((s) => ({
+              id: s.id,
+              title: s.title,
+              pct: latestQaScore.sections[s.id]?.pct ?? null,
+            })),
+            criticalFails: latestQaScore.criticalFails.length,
+          }
+        : null,
+    [latestQa, latestQaScore],
+  );
+
+  const canSeeDrills = !!session && pageVisible(session, "Individuals");
+  const canSeeSafety =
+    !!session &&
+    (pageVisible(session, "Weekly checklist") ||
+      pageVisible(session, "Checklist assignments"));
+  const canSeeTraining =
+    !!session && (pageVisible(session, "Training") || pageVisible(session, "Delegations"));
+  const canSeeMeds = !!session && pageVisible(session, "Supply forecast");
+  const canSeeShiftNotes = !!session && pageVisible(session, "ShiftNotes");
+  const canSeeQa =
+    !!session &&
+    (can(session, "audit.read") || can(session, "qa.audit") || can(session, "audit.export"));
+
+  const toneToClass = (tone: TileTone) =>
+    tone === "attention" ? "site-tile-attention" : tone === "neutral" ? "site-tile-neutral" : "";
+
+  const stripTiles: StripTile[] = [];
+  if (canSeeDrills) {
+    stripTiles.push({
+      key: "drills",
+      label: "Emergency drills",
+      value: `${drillSummary.done}/${drillSummary.total}`,
+      sub:
+        drillSummary.missing === 0
+          ? `${thisMonthLabel} · all complete`
+          : `${thisMonthLabel} · ${drillSummary.missing} missing`,
+      tone: drillSummary.missing > 0 ? "attention" : "ok",
+      ariaLabel: `Emergency drills ${thisMonthLabel}: ${drillSummary.done} of ${drillSummary.total} complete. Open drill detail.`,
+      drawer: "drills",
+    });
+  }
+  if (canSeeSafety) {
+    const safetyLabel =
+      safetyState === "complete" ? "Complete" : safetyState === "in_progress" ? "In progress" : "Not started";
+    const toneWord = safetyTone === "current" ? "on track" : safetyTone === "due_soon" ? "due soon" : "overdue";
+    stripTiles.push({
+      key: "safety",
+      label: "Home safety report",
+      value: safetyLabel,
+      sub:
+        safetyLines.total > 0
+          ? `${thisMonthLabel} · ${safetyLines.answered}/${safetyLines.total} lines · ${toneWord}`
+          : `${thisMonthLabel} · ${toneWord}`,
+      tone: safetyTone === "overdue" ? "attention" : safetyTone === "due_soon" ? "neutral" : safetyState === "complete" ? "ok" : "neutral",
+      ariaLabel: `Home safety report ${thisMonthLabel}: ${safetyLabel}. Open safety detail.`,
+      drawer: "safety",
+    });
+  }
+  if (canSeeTraining && trainingSummary) {
+    stripTiles.push({
+      key: "training",
+      label: "Training & in-ratio",
+      value: `${trainingSummary.cleared}/${trainingSummary.total}`,
+      sub:
+        trainingSummary.notCleared > 0
+          ? `${trainingSummary.notCleared} not cleared for in-ratio`
+          : "everyone cleared",
+      tone: trainingSummary.notCleared > 0 ? "attention" : "ok",
+      ariaLabel: `Training and in-ratio clearance: ${trainingSummary.cleared} of ${trainingSummary.total} staff cleared. Open training detail.`,
+      drawer: "training",
+    });
+  }
+  if (canSeeTraining && certRows) {
+    stripTiles.push({
+      key: "certificates",
+      label: "Certificates",
+      value: `${certRows.length}`,
+      sub: "expiring within 60 days",
+      tone: certRows.length > 0 ? "attention" : "ok",
+      ariaLabel: `${certRows.length} certificates expiring within 60 days. Open certificate detail.`,
+      drawer: "certificates",
+    });
+  }
+  if (canSeeMeds && medStatus) {
+    stripTiles.push({
+      key: "meds",
+      label: "Medication supply",
+      value: medSummary.allClear ? "Stocked" : `${medSummary.attention}`,
+      sub: medSummary.allClear
+        ? `${medSummary.total} meds · all stocked`
+        : `${medSummary.attention} need attention`,
+      tone: medSummary.attention > 0 ? "attention" : "ok",
+      ariaLabel: `Medication supply: ${medSummary.allClear ? "all stocked" : `${medSummary.attention} need attention`}. Open supply detail.`,
+      drawer: "meds",
+    });
+  }
+  if (canSeeShiftNotes && shiftCoverage) {
+    stripTiles.push({
+      key: "shiftnotes",
+      label: "Shift notes",
+      value: `${shiftCoverage.length}`,
+      sub: `${thisMonthLabel}`,
+      tone: "neutral",
+      ariaLabel: `${shiftCoverage.length} shift notes in ${thisMonthLabel}. Open shift note detail.`,
+      drawer: "shiftnotes",
+    });
+  }
+  if (canSeeQa && qaDisputes) {
+    stripTiles.push({
+      key: "qa_disputes",
+      label: "QA disputes",
+      value: `${qaDisputes.length}`,
+      sub: "under dispute",
+      tone: qaDisputes.length > 0 ? "attention" : "ok",
+      ariaLabel: `${qaDisputes.length} QA findings under dispute. Open dispute detail.`,
+      drawer: "qa_disputes",
+    });
+  }
+
+  // ---- drawer ----------------------------------------------------------
+
+  const drawerCtx: DrawerContext = useMemo(
+    () => ({
+      siteName,
+      requirements: sortedOpenRequirements.map((r) => ({
+        id: r.id,
+        title: r.title,
+        person: r.person,
+        due: r.due,
+        status: r.status,
+      })),
+      individuals: siteIndividuals.map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        photoUrl: p.photoUrl,
+      })),
+      staff: siteStaff.map((s) => {
+        const full = (workspace?.staff ?? []).find((row) => row.id === s.id);
+        return {
+          id: s.id,
+          name: s.name,
+          role: s.role,
+          username: full?.username ?? null,
+          email: full?.email ?? null,
+        };
+      }),
+      qa: qaDetail,
+      drillBuckets,
+      drillMonthLabel: thisMonthLabel,
+      safetyState:
+        safetyState === "complete"
+          ? "Complete"
+          : safetyState === "in_progress"
+            ? "In progress"
+            : "Not started",
+      safetyAnswered: safetyLines.answered,
+      safetyTotal: safetyLines.total,
+      trainingRows: (trainingRows ?? []).map((r) => ({
+        userId: r.userId,
+        name: r.name,
+        role: r.role,
+        profile: r.profile
+          ? {
+              clearedForInRatio: r.profile.clearedForInRatio,
+              counts: r.profile.counts,
+            }
+          : null,
+        failed: r.failed,
+      })),
+      certRows: certRows ?? [],
+      medAlerts: (medStatus?.alerts ?? []).map((alert) => ({
+        id: alert.id,
+        individualId: alert.individualId,
+        individualName:
+          siteIndividuals.find((row) => row.id === alert.individualId)?.name ?? "Individual",
+        medicationName: alert.medicationName,
+        strength: alert.strength,
+        status: alert.status,
+        countdownLabel: inventoryCountdownLabel(alert),
+      })),
+      medCheckedOn: medStatus?.checkedOn ?? null,
+      shiftNotes: (shiftCoverage ?? []).map((n) => ({
+        id: n.id,
+        individualName: n.individualName,
+        noteDate: n.noteDate,
+        shift: n.shift,
+        programName: n.programName,
+        staffName: n.staffName,
+        summary: n.summary ?? null,
+      })),
+      shiftMonthLabel: thisMonthLabel,
+      disputes: (qaDisputes ?? []).map((row) => ({
+        auditId: row.auditId,
+        auditLabel: row.auditLabel,
+        itemId: QA_ITEM_BY_ID[row.item.itemId]?.text ?? row.item.itemId,
+        item: row.item,
+      })),
+      onOpenIndividual,
+    }),
+    [
+      siteName,
+      sortedOpenRequirements,
+      siteIndividuals,
+      siteStaff,
+      workspace,
+      qaDetail,
+      drillBuckets,
+      thisMonthLabel,
+      safetyState,
+      safetyLines,
+      trainingRows,
+      certRows,
+      medStatus,
+      shiftCoverage,
+      qaDisputes,
+      onOpenIndividual,
+    ],
+  );
+
+
+  const closeDrawer = () => {
+    setDrawer(null);
+  };
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -320,13 +532,16 @@ export default function SiteDetailPage({
     .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
-  if (!site) {
+  if (!site || !workspace || !session || !canAccessSite(session, siteId)) {
     return (
-      <div className="site-detail">
-        <button type="button" className="text-button site-back" onClick={onBack}>
+      <div>
+        <button type="button" className="button" onClick={onBack}>
           <ArrowLeft size={16} /> Back to sites
         </button>
-        <p>That site is not in this workspace.</p>
+        <Empty
+          title="Site not available"
+          text="You don't have access to this program site, or it no longer exists."
+        />
       </div>
     );
   }
@@ -361,7 +576,12 @@ export default function SiteDetailPage({
         <div className="site-hero-dash">
           <StatusMixDonut items={siteRequirements} />
           <div className="site-hero-scores site-hero-kpis" aria-label={`${site.name} status`}>
-            <div className="site-hero-score">
+            <button
+              type="button"
+              className="site-hero-score site-tile-button"
+              onClick={() => setDrawer("requirements-ready")}
+              aria-label={`Readiness ${siteReqMetrics.score} percent. View open requirements.`}
+            >
               <strong>
                 {siteReqMetrics.score}
                 <small>%</small>
@@ -370,23 +590,47 @@ export default function SiteDetailPage({
               <div className="progress-track" aria-hidden="true">
                 <span style={{ width: `${siteReqMetrics.score}%` }} />
               </div>
-            </div>
-            <div className="site-hero-stat">
+            </button>
+            <button
+              type="button"
+              className="site-hero-stat site-tile-button"
+              onClick={() => setDrawer("individuals")}
+              aria-label={`${siteIndividuals.length} individuals. View roster.`}
+            >
               <strong>{siteIndividuals.length}</strong>
               <span>Individuals</span>
-            </div>
-            <div className="site-hero-stat">
+            </button>
+            <button
+              type="button"
+              className="site-hero-stat site-tile-button"
+              onClick={() => setDrawer("staff")}
+              aria-label={`${siteStaff.length} staff. View roster.`}
+            >
               <strong>{siteStaff.length}</strong>
               <span>Staff</span>
-            </div>
-            <div className="site-hero-stat">
+            </button>
+            <button
+              type="button"
+              className="site-hero-stat site-tile-button"
+              onClick={() => setDrawer("requirements-open")}
+              aria-label={`${openRequirements.length} open requirements. View open requirements.`}
+            >
               <strong>{openRequirements.length}</strong>
               <span>Open</span>
-            </div>
-            <div className="site-hero-stat">
-              <strong>{latestQaPct ?? "None"}</strong>
+            </button>
+            <button
+              type="button"
+              className="site-hero-stat site-tile-button"
+              onClick={() => setDrawer("qa")}
+              aria-label={
+                latestQaPct != null && latestQa
+                  ? `QA review ${auditPeriodLabel(latestQa)}: ${latestQaPct} percent. View score detail.`
+                  : "QA review: none yet. View score detail."
+              }
+            >
+              <strong>{latestQaPct ?? (trackablesLoading ? "…" : "None")}</strong>
               <span>{latestQa ? auditPeriodLabel(latestQa) : "QA review"}</span>
-            </div>
+            </button>
           </div>
         </div>
         <div className="site-hero-people" aria-label="Individuals in this house">
@@ -407,6 +651,27 @@ export default function SiteDetailPage({
           )}
         </div>
       </header>
+
+      {stripTiles.length > 0 && (
+        <section className="site-strip" aria-label={`${site.name} trackables`}>
+          {stripTiles.map((tile) => (
+            <button
+              key={tile.key}
+              type="button"
+              className={`site-hero-stat site-tile-button site-strip-tile ${toneToClass(tile.tone)}`}
+              aria-label={tile.ariaLabel}
+              onClick={() => {
+                if (tile.drawer) setDrawer(tile.drawer);
+                else if (tile.onClick) tile.onClick();
+              }}
+            >
+              <strong>{tile.value}</strong>
+              <span>{tile.label}</span>
+              <span className="site-strip-sub">{tile.sub}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       <div className="site-detail-tabstrip">
       <div
@@ -442,24 +707,19 @@ export default function SiteDetailPage({
         aria-labelledby={`sited-tab-${activeTab}`}
         className="site-detail-panel"
       >
-        {tabError[activeTab] && (
+        {mileageError && activeTab === "mileage" && (
           <div className="panel site-detail-error" role="alert">
-            {tabError[activeTab]}
-          </div>
-        )}
-        {loading[activeTab] && (
-          <div className="panel">
-            <p className="muted">Loading…</p>
+            {mileageError}
           </div>
         )}
 
-        {activeTab === "overview" && !loading.overview && (
+        {activeTab === "overview" && (
           <>
             {openRequirements.length > 0 && (
               <div className="panel">
                 <h2>Needs attention</h2>
                 <ul className="record-list">
-                  {sortOpenRequirements(openRequirements)
+                  {sortedOpenRequirements
                     .slice(0, 8)
                     .map((item) => (
                       <li key={item.id} className="record-row">
@@ -601,7 +861,7 @@ export default function SiteDetailPage({
           </div>
         )}
 
-        {activeTab === "audits" && !loading.audits && (
+        {activeTab === "audits" && (
           <div className="panel">
             <h2>QA Review</h2>
             <div className="site-qa-body">
@@ -610,11 +870,14 @@ export default function SiteDetailPage({
           </div>
         )}
 
-        {activeTab === "checklists" && !loading.checklists && (
+        {activeTab === "checklists" && (
           <>
             <div className="panel">
               <h2>HM weekly checklists</h2>
-              {!checklists?.length && (
+              {checklists === null && (
+                <p className="muted section-note">Loading checklists…</p>
+              )}
+              {checklists !== null && !checklists.length && (
                 <Empty
                   mark="none"
                   title="No checklists"
@@ -690,7 +953,10 @@ export default function SiteDetailPage({
               <p className="muted section-note">
                 Service logs are a separate record from the weekly checklist.
               </p>
-              {serviceLogs.length === 0 && (
+              {checklists === null && (
+                <p className="muted section-note">Loading service logs…</p>
+              )}
+              {checklists !== null && serviceLogs.length === 0 && (
                 <Empty
                   mark="none"
                   title="No service logs"
@@ -733,11 +999,14 @@ export default function SiteDetailPage({
           </>
         )}
 
-        {activeTab === "training" && !loading.training && (
+        {activeTab === "training" && (
           <>
             <div className="panel">
               <h2>Active delegations at this home</h2>
-              {!delegations?.length && (
+              {delegations === null && (
+                <p className="muted section-note">Loading delegations…</p>
+              )}
+              {delegations !== null && !delegations.length && (
                 <Empty
                   mark="none"
                   title="No delegations"
@@ -763,7 +1032,10 @@ export default function SiteDetailPage({
             </div>
             <div className="panel">
               <h2>Staff training &amp; certificates</h2>
-              {!trainingRows?.length && (
+              {trainingRows === null && (
+                <p className="muted section-note">Loading staff…</p>
+              )}
+              {trainingRows !== null && !trainingRows.length && (
                 <Empty mark="none" title="No staff" text="No staff are assigned to this home." />
               )}
               {!!trainingRows?.length && (
@@ -819,10 +1091,13 @@ export default function SiteDetailPage({
           </>
         )}
 
-        {activeTab === "medications" && !loading.medications && (
+        {activeTab === "medications" && (
           <div className="panel">
             <h2>Medication supply</h2>
-            {!medStatus && (
+            {!medStatus && trackablesLoading && (
+              <p className="muted section-note">Loading medication supply…</p>
+            )}
+            {!medStatus && !trackablesLoading && (
               <Empty
                 mark="none"
                 title="No data"
@@ -911,8 +1186,8 @@ export default function SiteDetailPage({
                 onChange={(e) => e.target.value && setMonth(e.target.value)}
               />
             </div>
-            {loading.mileage && <p className="muted">Loading…</p>}
-            {!loading.mileage && (!trips || trips.length === 0) && (
+            {mileageLoading && <p className="muted">Loading…</p>}
+            {!mileageLoading && (!trips || trips.length === 0) && (
               <Empty
                 mark="none"
                 title="No trips"
@@ -982,14 +1257,17 @@ export default function SiteDetailPage({
 
         {/* Issue #80: the Documents tab becomes Shift notes. Standalone
             document uploads stay reachable via the Documents page. */}
-        {activeTab === "shiftnotes" && !loading.shiftnotes && (
+        {activeTab === "shiftnotes" && (
           <div className="panel">
             <h2>Shift notes</h2>
             <p className="stack-help">
               Notes staff entered against approved ISP programs for Individuals
               at this home. To enter a note, open the Individual's chart.
             </p>
-            {!siteNotes?.length && (
+            {siteNotes === null && (
+              <p className="muted section-note">Loading shift notes…</p>
+            )}
+            {siteNotes !== null && !siteNotes.length && (
               <Empty
                 mark="quiet"
                 title="No shift notes yet"
@@ -1050,7 +1328,9 @@ export default function SiteDetailPage({
             )}
             {siteStaff.length > 0 && (
               <ul className="record-list">
-                {siteStaff.map((s) => (
+                {siteStaff.map((s) => {
+                  const full = (workspace?.staff ?? []).find((row) => row.id === s.id);
+                  return (
                   <li key={s.id} className="record-row">
                     <div>
                       <span className="person-cell">
@@ -1059,16 +1339,24 @@ export default function SiteDetailPage({
                       </span>
                       <p className="muted">
                         {s.role}
-                        {s.username || s.email ? ` · ${s.username || s.email}` : ""}
+                        {full?.username || full?.email ? ` · ${full.username || full.email}` : ""}
                       </p>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
         )}
       </section>
+
+      <InspectionDrawer
+        title={drawer ? drawerTitle(drawer) : null}
+        onClose={closeDrawer}
+      >
+        {drawer && <DrawerBody kind={drawer} ctx={drawerCtx} />}
+      </InspectionDrawer>
     </div>
   );
 }
