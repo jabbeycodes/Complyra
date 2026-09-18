@@ -123,32 +123,7 @@ export interface SiteShiftNoteView extends ShiftNoteView {
  * notes in one calendar month. The narrative is a draft until signed; a
  * signed report is locked (a PM/administrator may re-open it). Soft deletes
  * preserved like shift notes.
- *
- * The support-coordinator section (per-objective narratives, overall status,
- * and the Support Coordinator / provider / Professional Manager signature
- * lines) rides the same row and the same sign-and-lock lifecycle.
  */
-export interface ScObjectiveNarrativeRow {
-  taskId: string;
-  narrative: string;
-}
-
-export interface ScSignatureLineRow {
-  name: string;
-  date: string;
-}
-
-export interface ScSignaturesRow {
-  supportCoordinator: ScSignatureLineRow;
-  provider: ScSignatureLineRow;
-  professionalManager: ScSignatureLineRow;
-}
-
-export function emptyScSignaturesRow(): ScSignaturesRow {
-  const blank = (): ScSignatureLineRow => ({ name: "", date: "" });
-  return { supportCoordinator: blank(), provider: blank(), professionalManager: blank() };
-}
-
 export interface ShiftNoteMonthlyReport {
   id: string;
   agencyId: string;
@@ -158,12 +133,6 @@ export interface ShiftNoteMonthlyReport {
   month: string;
   /** Manager's narrative summary for the month. */
   narrative: string;
-  /** Per-objective narratives for the support coordinator summary. */
-  scObjectiveNarratives: ScObjectiveNarrativeRow[];
-  /** Overall status narrative for the support coordinator summary. */
-  scOverallNarrative: string;
-  /** Signature lines for the support coordinator summary. */
-  scSignatures: ScSignaturesRow;
   signedBy: string;
   signedByName: string;
   signedByTitle: string;

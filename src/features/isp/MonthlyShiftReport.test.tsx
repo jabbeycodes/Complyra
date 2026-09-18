@@ -112,13 +112,6 @@ function draftReport(monthKey: string): ShiftNoteMonthlyReport {
     programId: "prog-1",
     month: monthKey,
     narrative: "Manager draft narrative.",
-    scObjectiveNarratives: [],
-    scOverallNarrative: "",
-    scSignatures: {
-      supportCoordinator: { name: "", date: "" },
-      provider: { name: "", date: "" },
-      professionalManager: { name: "", date: "" },
-    },
     signedBy: "",
     signedByName: "",
     signedByTitle: "",
@@ -281,7 +274,7 @@ describe("MonthlyShiftReport sign / re-open", () => {
 
   it("hides sign controls from roles outside the PM/administrator gate", async () => {
     renderReport("dsp", false);
-    await screen.findByText("Monthly summary");
+    await screen.findByText("Data collection monthly summary note");
     assert.equal(screen.queryByRole("button", { name: "Sign summary" }), null);
     assert.equal(screen.queryByRole("button", { name: "Save summary" }), null);
     assert.ok(
@@ -300,7 +293,7 @@ describe("MonthlyShiftReport sign / re-open", () => {
   });
 });
 
-describe("MonthlyShiftReport weekly task score summary", () => {
+describe("MonthlyShiftReport monthly score summary", () => {
   const monthKey = monthKeyNow();
   const year = monthKey.slice(0, 4);
   const weekOne = `${monthKey}-03`; // day 3 -> week 1
@@ -359,18 +352,27 @@ describe("MonthlyShiftReport weekly task score summary", () => {
     cleanup();
   });
 
-  it("renders the weekly chart between the program block and the day grid", async () => {
+  it("renders the score summary between the program block and the day grid", async () => {
     renderWithNotes();
-    const heading = await screen.findByRole("heading", { name: "Weekly task score summary" });
-    assert.ok(heading, "chart heading renders");
-    // Week 1 bar carries an accessible label with the counts.
-    const bar = await screen.findByRole("img", { name: /Week 1 \(days 1–7\): 1 yes, 1 no/ });
-    assert.ok(bar, "week 1 bar summarizes 1 yes + 1 no");
-    // Legend lists every bucket.
-    assert.ok(document.body.textContent?.includes("N/A or other"));
-    // Chart sits above the day grid in DOM order.
-    const chartIdx = document.body.innerHTML.indexOf("Weekly task score summary");
+    const heading = await screen.findByRole("heading", { name: "Monthly score summary" });
+    assert.ok(heading, "score summary heading renders");
+    // Month totals table: objective row plus plain-figure counts.
+    const body = document.body.textContent ?? "";
+    assert.ok(body.includes("Yes %"));
+    assert.ok(body.includes("Days unscored"));
+    assert.ok(body.includes("Week 1"));
+    assert.ok(body.includes("Complete morning hygiene routine — weekly breakdown"));
+    // Summary sits above the day grid in DOM order.
+    const summaryIdx = document.body.innerHTML.indexOf("Monthly score summary");
     const gridIdx = document.body.innerHTML.indexOf("Daily scores");
-    assert.ok(chartIdx > -1 && gridIdx > -1 && chartIdx < gridIdx, "chart precedes day grid");
+    assert.ok(summaryIdx > -1 && gridIdx > -1 && summaryIdx < gridIdx, "summary precedes day grid");
+  });
+
+  it("keeps the attestation line on the daily grid", async () => {
+    renderWithNotes();
+    const attestation = await screen.findByText(
+      "STAFF PROVIDING SERVICE/ACTION MUST INITIAL THE DATE THE SERVICE/ACTION WAS PROVIDED.",
+    );
+    assert.ok(attestation, "attestation line renders");
   });
 });

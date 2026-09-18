@@ -7307,8 +7307,7 @@ button.qa-row:hover {
   font-size: 20px;
 }
 .isp-report-program h5,
-.isp-report-weekly h5,
-.isp-report-sc h5,
+.isp-report-score h5,
 .isp-report-grid-wrap h5,
 .isp-report-signatures h5,
 .isp-report-summary h5 {
@@ -7342,159 +7341,40 @@ button.qa-row:hover {
   gap: 6px;
   font-size: 13px;
 }
-/* Issue #96 — weekly task score summary chart. Solid earthy colors only,
-   no gradients; segments keep their color in print/PDF via color-adjust. */
-.isp-report-weekly h5 {
+/* Issue #96 — monthly score summary: figures-first tables, no patterns,
+   no color-dependent meaning. Solid colors, high contrast, B&W-print safe. */
+.isp-report-score h5 {
   margin: 0 0 8px;
   font-size: 14px;
 }
-.isp-weekly-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin: 0 0 12px;
-  font-size: 12px;
+.isp-report-score-caption {
+  caption-side: bottom;
+  text-align: left;
+  font-size: 11px;
   color: var(--muted);
+  padding-top: 6px;
 }
-.isp-weekly-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-/* B&W-safe legend swatch: the rect inside carries the SVG fill pattern. */
-.isp-weekly-swatch {
-  border-radius: 3px;
-  display: block;
-}
-.isp-weekly-task {
+.isp-report-score-weekly {
   margin-top: 12px;
 }
-.isp-weekly-task h6 {
+.isp-report-score-weekly h6 {
   margin: 0 0 6px;
   font-size: 13px;
 }
-.isp-weekly-rows {
-  display: grid;
-  gap: 6px;
+.isp-report-score-month td,
+.isp-report-score-weekly td {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
-.isp-weekly-row {
-  display: grid;
-  grid-template-columns: 168px minmax(120px, 1fr) 130px;
-  align-items: center;
-  gap: 10px;
+.isp-report-score-month tbody th,
+.isp-report-score-weekly tbody th {
+  text-align: left;
 }
-.isp-weekly-week {
-  font-size: 12px;
-  color: var(--muted);
-}
-.isp-weekly-bar {
-  display: flex;
-  align-items: stretch;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  overflow: hidden;
-  background: #f4efe6;
-}
-/* B&W-safe weekly bar: inline SVG with one fill pattern per score bucket, so
-   the chart reads in plain black-and-white print. Percentages on the SVG
-   geometry keep segments proportional at any width. */
-.isp-weekly-bar-svg {
-  display: block;
-  width: 100%;
-  height: 22px;
-  border: 1px solid #111111;
-  border-radius: 5px;
-  background: #ffffff;
-}
-.isp-weekly-seg-text {
-  font-size: 11px;
+.isp-report-attestation {
   font-weight: 700;
-  fill: #111111;
-}
-.isp-weekly-empty {
   font-size: 11px;
-  color: var(--muted);
-  padding: 3px 8px;
-  align-self: center;
-}
-.isp-weekly-counts {
-  font-size: 12px;
-  white-space: nowrap;
-}
-@media (max-width: 700px) {
-  .isp-weekly-row {
-    grid-template-columns: 120px minmax(90px, 1fr);
-  }
-  .isp-weekly-counts {
-    grid-column: 1 / -1;
-  }
-}
-
-/* Issue #96 follow-up — Monthly summary for support coordinator. */
-.isp-report-sc h5 {
+  letter-spacing: 0.03em;
   margin: 0 0 8px;
-  font-size: 14px;
-}
-.isp-report-sc-objectives {
-  display: grid;
-  gap: 10px;
-  margin-top: 10px;
-}
-.isp-report-sc-objective {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.isp-report-sc-objective h6,
-.isp-report-sc-overall h6,
-.isp-report-sc-signatures h6 {
-  margin: 0 0 4px;
-  font-size: 13px;
-}
-.isp-report-sc-overall {
-  margin-top: 12px;
-}
-.isp-report-sc-progress {
-  margin: 0 0 6px;
-  font-size: 13px;
-}
-.isp-report-sc textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 72px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  font: inherit;
-}
-.isp-report-sc-signatures {
-  margin-top: 12px;
-}
-.isp-report-sc-sig {
-  display: grid;
-  grid-template-columns: 190px 1fr 170px;
-  gap: 10px;
-  align-items: end;
-  margin-top: 8px;
-}
-.isp-report-sc-sig-role {
-  font-size: 13px;
-  font-weight: 600;
-}
-.isp-report-sc-sig-locked {
-  font-size: 13px;
-  grid-column: 2 / -1;
-}
-.isp-report-sc-sig input[type="text"],
-.isp-report-sc-sig input[type="date"] {
-  width: 100%;
-  box-sizing: border-box;
-}
-@media (max-width: 700px) {
-  .isp-report-sc-sig {
-    grid-template-columns: 1fr;
-  }
 }
 .isp-report-grid-note {
   margin: 0 0 8px;
@@ -7598,13 +7478,12 @@ button.qa-row:hover {
   }
   body.isp-report-printing .isp-report-header,
   body.isp-report-printing .isp-report-program,
-  body.isp-report-printing .isp-report-weekly,
-  body.isp-report-printing .isp-report-sc,
-  body.isp-report-printing .isp-report-sc-objective,
+  body.isp-report-printing .isp-report-score,
+  body.isp-report-printing .isp-report-score-weekly,
   body.isp-report-printing .isp-report-signatures,
   body.isp-report-printing .isp-report-summary,
   body.isp-report-printing .isp-report-table tr,
-  body.isp-report-printing .isp-weekly-task,
+
   body.isp-report-printing .isp-report-objectives li {
     break-inside: avoid;
   }

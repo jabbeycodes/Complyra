@@ -83,7 +83,6 @@ import {
   type ShiftNoteView,
   type SiteShiftNoteView,
 } from "./shiftNotes";
-import { emptyScSignaturesRow } from "./shiftNotes";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
@@ -564,9 +563,6 @@ export interface ComplyraApi {
     programId: string;
     monthKey: string;
     narrative: string;
-    scObjectiveNarratives?: import("./shiftNotes").ScObjectiveNarrativeRow[];
-    scOverallNarrative?: string;
-    scSignatures?: import("./shiftNotes").ScSignaturesRow;
   }): Promise<import("./shiftNotes").ShiftNoteMonthlyReport>;
   /**
    * Issue #96 — sign (lock) the monthly summary. Stamps name, title, date.
@@ -3835,14 +3831,6 @@ export class LocalApi implements ComplyraApi {
     if (!program) throw new Error("ISP program not found.");
     const now = new Date().toISOString();
     const narrative = input.narrative.trim().slice(0, 20000);
-    const scObjectiveNarratives = (input.scObjectiveNarratives ?? [])
-      .map((entry) => ({
-        taskId: entry.taskId,
-        narrative: entry.narrative.trim().slice(0, 20000),
-      }))
-      .filter((entry) => entry.narrative);
-    const scOverallNarrative = (input.scOverallNarrative ?? "").trim().slice(0, 20000);
-    const scSignatures = input.scSignatures ?? emptyScSignaturesRow();
     const existing = this.store.db.shiftNoteMonthlyReports.find(
       (row) =>
         row.agencyId === session.agencyId &&
@@ -3856,9 +3844,6 @@ export class LocalApi implements ComplyraApi {
       }
       existing.programId = program.id;
       existing.narrative = narrative;
-      existing.scObjectiveNarratives = scObjectiveNarratives;
-      existing.scOverallNarrative = scOverallNarrative;
-      existing.scSignatures = scSignatures;
       existing.updatedAt = now;
       await persistMeta(this.store);
       return existing;
@@ -3870,9 +3855,6 @@ export class LocalApi implements ComplyraApi {
       programId: program.id,
       month: input.monthKey,
       narrative,
-      scObjectiveNarratives,
-      scOverallNarrative,
-      scSignatures,
       signedBy: "",
       signedByName: "",
       signedByTitle: "",

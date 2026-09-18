@@ -6,10 +6,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   bucketNotesByDay,
+  buildMonthlyScoreSummaryCsvRows,
   buildNotesCsv,
-  buildObjectiveProgress,
-  buildSupportCoordinatorCsvRows,
-  buildWeeklyScoreSummary,
+  buildObjectiveScoreSummary,
   canReopenMonthlySummary,
   canSignMonthlySummary,
   canWriteMonthlySummary,
@@ -23,8 +22,6 @@ import {
   monthKeyOf,
   monthStartOf,
   notesInMonth,
-  objectiveProgressLine,
-  patternKeyForBucket,
   reportProgramForMonth,
   scoreBucketForLevelCaption,
   weekDayRangeLabel,
@@ -215,7 +212,11 @@ test("issue #96 buildNotesCsv emits one row per score with stable columns", () =
   assert.ok(lines[2].includes('"Y"'));
 });
 
-test("issue #96 weekly chart: week boundaries are plain 7-day chunks", () => {
+function weeklyNote(overrides: Partial<ShiftNoteView> = {}): ShiftNoteView {
+  return note(overrides);
+}
+
+test("issue #96 score summary: week boundaries are plain 7-day chunks", () => {
   assert.equal(weekOfMonthIndex(1), 1);
   assert.equal(weekOfMonthIndex(7), 1);
   assert.equal(weekOfMonthIndex(8), 2);
@@ -228,7 +229,7 @@ test("issue #96 weekly chart: week boundaries are plain 7-day chunks", () => {
   assert.equal(weekOfMonthIndex(31), 5);
 });
 
-test("issue #96 weekly chart: week day-range labels clip to the month", () => {
+test("issue #96 score summary: week day-range labels clip to the month", () => {
   assert.equal(weekDayRangeLabel("2026-09", 1), "1–7");
   assert.equal(weekDayRangeLabel("2026-09", 4), "22–28");
   assert.equal(weekDayRangeLabel("2026-09", 5), "29–30");
@@ -236,7 +237,7 @@ test("issue #96 weekly chart: week day-range labels clip to the month", () => {
   assert.equal(weekDayRangeLabel("2026-02", 4), "22–28");
 });
 
-test("issue #96 weekly chart: score captions map to buckets, unknown to other", () => {
+test("issue #96 score summary: score captions map to buckets, unknown to other", () => {
   assert.equal(scoreBucketForLevelCaption("Yes"), "yes");
   assert.equal(scoreBucketForLevelCaption("  yes  "), "yes");
   assert.equal(scoreBucketForLevelCaption("No"), "no");
@@ -247,11 +248,7 @@ test("issue #96 weekly chart: score captions map to buckets, unknown to other", 
   assert.equal(scoreBucketForLevelCaption(""), "other");
 });
 
-function weeklyNote(overrides: Partial<ShiftNoteView> = {}): ShiftNoteView {
-  return note(overrides);
-}
-
-test("issue #96 weekly chart: per-task per-week Yes/No counts", () => {
+test("issue #96 score summary: month totals + per-week breakdown per objective", () => {
   const tasks = [
     { id: "t1", title: "Community" },
     { id: "t2", title: "Housework" },
@@ -297,26 +294,87 @@ test("issue #96 weekly chart: per-task per-week Yes/No counts", () => {
       scores: [score("h", "t9", "yes")],
     }),
   ];
-  const summary = buildWeeklyScoreSummary(notes, tasks, captions);
+  const summary = buildObjectiveScoreSummary(notes, tasks, captions, "2026-09");
   assert.equal(summary.length, 2);
-  assert.deepEqual(summary[0].weeks[0], { yes: 2, no: 0, refused: 0, other: 0, total: 2 });
-  assert.deepEqual(summary[0].weeks[1], { yes: 0, no: 1, refused: 1, other: 0, total: 2 });
-  assert.deepEqual(summary[0].weeks[2], { yes: 0, no: 0, refused: 0, other: 0, total: 0 });
-  assert.deepEqual(summary[0].weeks[4], { yes: 0, no: 0, refused: 0, other: 0, total: 0 });
-  assert.deepEqual(summary[1].weeks[0], { yes: 0, no: 1, refused: 0, other: 0, total: 1 });
-  assert.deepEqual(summary[1].weeks[1], { yes: 0, no: 0, refused: 0, other: 1, total: 1 });
+
+  // t1: month totals — 2 yes, 1 no, 1 refused (deleted note skipped).
+  const t1 = summary[0];
+  assert.equal(t1.taskId, "t1");
+  assert.equal(t1.taskNumber, 1);
+  assert.equal(t1.taskTitle, "Community");
+  assert.equal(t1.yes, 2);
+  assert.equal(t1.no, 1);
+  assert.equal(t1.refused, 1);
+  assert.equal(t1.other, 0);
+  assert.equal(t1.yesPercent, 50); // 2 of 4 scored attempts
+  assert.deepEqual(
+    { ...t1.weeks[0], dayRange: undefined },
+    { week: 1, yes: 2, no: 0, refused: 0, other: 0, dayRange: undefined },
+  );
+  assert.deepEqual(
+    { ...t1.weeks[1], dayRange: undefined },
+    { week: 2, yes: 0, no: 1, refused: 1, other: 0, dayRange: undefined },
+  );
+  assert.equal(t1.weeks[4].dayRange, "29–30");
+  assert.equal(t1.weeks[4].yes, 0); // deleted note contributes nothing
   // Every task always gets five week entries.
-  assert.equal(summary[0].weeks.length, 5);
-  assert.equal(summary[1].weeks.length, 5);
+  assert.equal(t1.weeks.length, 5);
+
+  // t2: 1 no + 1 N/A.
+  const t2 = summary[1];
+  assert.equal(t2.yes, 0);
+  assert.equal(t2.no, 1);
+  assert.equal(t2.other, 1);
+  assert.equal(t2.yesPercent, 0);
 });
 
-test("issue #96 weekly chart: missing caption falls into the other bucket", () => {
-  const summary = buildWeeklyScoreSummary(
+test("issue #96 score summary: days scored + days unscored cover the month", () => {
+  const tasks = [{ id: "t1", title: "Community" }];
+  const captions = new Map([["yes", "Yes"]]);
+  const score = (id: string) => ({
+    id,
+    noteId: "x",
+    taskId: "t1",
+    taskTitle: "",
+    levelId: "yes",
+    comment: "",
+  });
+  const notes = [
+    // Two scores on the same day count once for days-scored purposes.
+    weeklyNote({ noteDate: "2026-09-03", scores: [score("a"), score("b")] }),
+    weeklyNote({ noteDate: "2026-09-17", scores: [score("c")] }),
+  ];
+  const [summary] = buildObjectiveScoreSummary(notes, tasks, captions, "2026-09");
+  assert.equal(summary.yes, 3);
+  assert.equal(summary.daysScored, 2);
+  assert.equal(summary.daysUnscored, 28);
+  assert.equal(summary.daysScored + summary.daysUnscored, daysInMonth("2026-09"));
+
+  // An objective with no scores at all is fully unscored — never hidden.
+  const [empty] = buildObjectiveScoreSummary([], tasks, captions, "2026-09");
+  assert.equal(empty.yes, 0);
+  assert.equal(empty.yesPercent, 0);
+  assert.equal(empty.daysScored, 0);
+  assert.equal(empty.daysUnscored, 30);
+});
+
+test("issue #96 score summary: missing caption falls into the other bucket", () => {
+  const summary = buildObjectiveScoreSummary(
     [weeklyNote({ scores: [{ id: "a", noteId: "w", taskId: "t1", taskTitle: "", levelId: "mystery", comment: "" }] })],
     [{ id: "t1", title: "Community" }],
     new Map(),
+    "2026-09",
   );
-  assert.deepEqual(summary[0].weeks[0], { yes: 0, no: 0, refused: 0, other: 1, total: 1 });
+  assert.equal(summary[0].other, 1);
+  assert.equal(summary[0].yesPercent, 0);
+  assert.equal(summary[0].daysScored, 1);
+});
+
+test("issue #96 score summary: February week 5 has no days", () => {
+  const [summary] = buildObjectiveScoreSummary([], [{ id: "t1", title: "T" }], new Map(), "2026-02");
+  assert.equal(summary.weeks[4].dayRange, "");
+  assert.equal(summary.weeks[3].dayRange, "22–28");
+  assert.equal(summary.daysUnscored, 28);
 });
 
 test("issue #96 monthly summary gates: PM/administrator only", () => {
@@ -334,136 +392,35 @@ test("issue #96 monthly summary gates: PM/administrator only", () => {
   assert.equal(canReopenMonthlySummary("house_manager", "2026-10-01T00:00:00Z"), false);
 });
 
-test("issue #96 follow-up: B&W chart patterns cover every score bucket", () => {
-  assert.equal(patternKeyForBucket("yes"), "hatch");
-  assert.equal(patternKeyForBucket("no"), "crosshatch");
-  assert.equal(patternKeyForBucket("refused"), "dots");
-  assert.equal(patternKeyForBucket("other"), "lightgray");
-  // Every distinct score type a scoring method can carry maps to a pattern —
-  // the chart must never fall back to a solid color for a known type.
-  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("Yes")), "hatch");
-  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("No")), "crosshatch");
-  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("Refused")), "dots");
-  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("N/A")), "lightgray");
-  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("N/A or other")), "lightgray");
-});
-
-test("issue #96 follow-up: per-objective progress rolls up Yes shares with statuses", () => {
-  const tasks = [
-    { id: "t1", title: "Community" },
-    { id: "t2", title: "Housework" },
-    { id: "t3", title: "Hygiene" },
-  ];
-  const captions = new Map([
-    ["yes", "Yes"],
-    ["no", "No"],
-  ]);
-  const score = (id: string, taskId: string, levelId: string) => ({
-    id,
-    noteId: "x",
-    taskId,
-    taskTitle: "",
-    levelId,
-    comment: "",
-  });
-  const notes = [
-    // t1: 4 of 5 Yes (80%) — On track.
-    weeklyNote({
-      noteDate: "2026-09-03",
-      scores: [
-        score("a", "t1", "yes"),
-        score("b", "t1", "yes"),
-        score("c", "t1", "yes"),
-        score("d", "t1", "yes"),
-        score("e", "t1", "no"),
+test("issue #96 follow-up: CSV carries the monthly score summary", () => {
+  const csv = buildNotesCsv([], "2026 ISP", [], [
+    {
+      taskId: "t1",
+      taskTitle: "Community",
+      taskNumber: 1,
+      yes: 4,
+      no: 1,
+      refused: 0,
+      other: 1,
+      daysScored: 5,
+      daysUnscored: 25,
+      yesPercent: 67,
+      weeks: [
+        { week: 1, dayRange: "1–7", yes: 2, no: 0, refused: 0, other: 0 },
+        { week: 2, dayRange: "8–14", yes: 1, no: 1, refused: 0, other: 1 },
+        { week: 3, dayRange: "15–21", yes: 0, no: 0, refused: 0, other: 0 },
+        { week: 4, dayRange: "22–28", yes: 1, no: 0, refused: 0, other: 0 },
+        { week: 5, dayRange: "29–30", yes: 0, no: 0, refused: 0, other: 0 },
       ],
-    }),
-    // t2: 1 of 2 Yes (50%) — Making progress.
-    weeklyNote({
-      noteDate: "2026-09-10",
-      scores: [score("f", "t2", "yes"), score("g", "t2", "no")],
-    }),
-  ];
-  const progress = buildObjectiveProgress(notes, tasks, captions);
-  assert.deepEqual(progress[0], {
-    taskId: "t1",
-    taskNumber: 1,
-    taskTitle: "Community",
-    yes: 4,
-    total: 5,
-    percent: 80,
-    status: "On track",
-  });
-  assert.deepEqual(progress[1], {
-    taskId: "t2",
-    taskNumber: 2,
-    taskTitle: "Housework",
-    yes: 1,
-    total: 2,
-    percent: 50,
-    status: "Making progress",
-  });
-  // t3 has no scores at all.
-  assert.equal(progress[2].status, "No data recorded");
-  assert.equal(progress[2].percent, 0);
-  // Progress lines read naturally on screen and in the PDF.
-  assert.equal(
-    objectiveProgressLine(progress[0]),
-    "Objective 1: 4 of 5 scored Yes (80%) — On track",
-  );
-  assert.equal(
-    objectiveProgressLine(progress[2]),
-    "Objective 3: no scores recorded this month — No data recorded",
-  );
-});
-
-test("issue #96 follow-up: CSV carries the support-coordinator section", () => {
-  const csv = buildNotesCsv([], "2026 ISP", [], {
-    individualName: "Alex Doe",
-    individualIdLabel: "—",
-    siteName: "Cedar House",
-    monthLabel: "September 2026",
-    progress: [
-      {
-        taskId: "t1",
-        taskNumber: 1,
-        taskTitle: "Community",
-        yes: 4,
-        total: 5,
-        percent: 80,
-        status: "On track",
-      },
-    ],
-    objectiveNarratives: [{ taskId: "t1", narrative: "Joined two outings." }],
-    overallNarrative: "Steady month.",
-    signatures: {
-      supportCoordinator: { name: "Casey Coordinator", date: "2026-10-02" },
-      provider: { name: "Pat Manager", date: "2026-10-02" },
-      professionalManager: { name: "", date: "" },
     },
-  });
-  assert.ok(csv.includes("Monthly summary for support coordinator"));
-  assert.ok(csv.includes('"1. Community"'));
-  assert.ok(csv.includes('"On track"'));
-  assert.ok(csv.includes("Joined two outings."));
-  assert.ok(csv.includes("Steady month."));
-  assert.ok(csv.includes('"Support Coordinator","Casey Coordinator","2026-10-02"'));
-  assert.ok(csv.includes('"Professional Manager","—","—"'));
-  // buildSupportCoordinatorCsvRows mirrors the same section rows directly.
-  const rows = buildSupportCoordinatorCsvRows({
-    individualName: "Alex Doe",
-    individualIdLabel: "—",
-    siteName: "Cedar House",
-    monthLabel: "September 2026",
-    progress: [],
-    objectiveNarratives: [],
-    overallNarrative: "",
-    signatures: {
-      supportCoordinator: { name: "", date: "" },
-      provider: { name: "", date: "" },
-      professionalManager: { name: "", date: "" },
-    },
-  });
+  ]);
+  assert.ok(csv.includes("Monthly score summary"));
+  assert.ok(csv.includes('"Objective","Yes (month)","No (month)","Refused","N/A or other","Days scored","Days without scores","Yes %"'));
+  assert.ok(csv.includes('"1. Community","4","1","0","1","5","25","67%"'));
+  assert.ok(csv.includes("Weekly breakdown"));
+  assert.ok(csv.includes('"1. Community","Week 2","8–14","1","1","0","1"'));
+  // buildMonthlyScoreSummaryCsvRows mirrors the same section rows directly.
+  const rows = buildMonthlyScoreSummaryCsvRows([]);
   assert.ok(rows.length > 0);
-  assert.equal(rows[1][0], "Monthly summary for support coordinator");
+  assert.equal(rows[1][0], "Monthly score summary");
 });

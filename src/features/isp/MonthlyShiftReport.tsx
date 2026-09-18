@@ -2,16 +2,18 @@
  * Issue #96 — Monthly shift notes report.
  *
  * A manager-facing report for one calendar month against the ISP program that
- * was active that month: header block, numbered objectives, a day grid
- * (days 1..N as columns, score short label + staff initials per cell),
- * staff signature log, and the manager's monthly summary (draft -> signed ->
- * optionally re-opened). Print stylesheet renders it cleanly; PDF and CSV
- * downloads share the same data.
+ * was active that month: header block, ISP program block with numbered
+ * objectives, a "Monthly score summary" (Yes/No count clarity for the whole
+ * month plus a per-week breakdown — the clearer view Therap's version lacks),
+ * a day grid (days 1..N as columns, score short label + staff initials per
+ * cell), staff signature log, and the data collection monthly summary note
+ * (draft -> signed -> optionally re-opened). Print stylesheet renders it
+ * cleanly; PDF and CSV downloads share the same data.
  *
  * Complyrer's own wording and layout — not a replica of any third-party form.
  * Wording: "Individual/Individuals" only — never client/patient, never T-Log.
  */
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import type { ComplyraApi } from "../../data/localApi";
 import {
@@ -23,25 +25,17 @@ import {
 import {
   bucketNotesByDay,
   buildNotesCsv,
-  buildObjectiveProgress,
-  buildWeeklyScoreSummary,
+  buildObjectiveScoreSummary,
   canReopenMonthlySummary,
   canSignMonthlySummary,
   collectSignatureLog,
   dayCellEntries,
   daysInMonth,
-  emptySupportCoordinatorSignatures,
   isValidMonthKey,
   monthDisplayLabel,
   notesInMonth,
-  objectiveProgressLine,
-  patternKeyForBucket,
   reportProgramForMonth,
-  weekDayRangeLabel,
-  type ScoreBucket,
-  type SupportCoordinatorSignatures,
-  type WeeklyPatternKey,
-  type WeeklyScoreCounts,
+  type ObjectiveScoreSummary,
 } from "./monthlyReport";
 import type { IspChartData } from "./useIspData";
 import {
@@ -62,137 +56,80 @@ function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-/**
- * Issue #96 — the "Weekly task score summary" chart: stacked bars showing,
- * per objective and per week, how many times the task was scored Yes / No
- * (with Refused and N/A-or-other segments).
- *
- * B&W-safe: color does not survive plain black-and-white printing, so no
- * information rides on color alone. Each bucket gets a distinct SVG fill
- * pattern (diagonal hatch / cross-hatch / dots / light gray) and the text
- * summary next to every bar carries the exact counts.
- * Inline SVG only — no chart library — so it survives print and PDF.
- */
-const WEEKLY_BUCKET_META = [
-  { key: "yes", label: "Yes", pattern: "hatch" },
-  { key: "no", label: "No", pattern: "crosshatch" },
-  { key: "refused", label: "Refused", pattern: "dots" },
-  { key: "other", label: "N/A or other", pattern: "lightgray" },
-] as const;
-
-/** Shared SVG fill patterns for the B&W-safe weekly chart. Rendered once
- * (zero-size) per chart; bars and legend swatches reference by id. */
-function WeeklyChartPatterns({ idPrefix }: { idPrefix: string }) {
+/** Figures-first summary: month totals first, then the per-week breakdown. */
+function MonthlyScoreSummaryTables({ summary }: { summary: ObjectiveScoreSummary[] }) {
+  if (summary.length === 0) return null;
   return (
-    <defs>
-      <pattern
-        id={`${idPrefix}-hatch`}
-        width="6"
-        height="6"
-        patternUnits="userSpaceOnUse"
-      >
-        <rect width="6" height="6" fill="#ffffff" />
-        <path d="M0 6 L6 0" stroke="#111111" strokeWidth="1.6" />
-      </pattern>
-      <pattern
-        id={`${idPrefix}-crosshatch`}
-        width="7"
-        height="7"
-        patternUnits="userSpaceOnUse"
-      >
-        <rect width="7" height="7" fill="#ffffff" />
-        <path d="M0 7 L7 0 M0 0 L7 7" stroke="#111111" strokeWidth="1.1" />
-      </pattern>
-      <pattern
-        id={`${idPrefix}-dots`}
-        width="6"
-        height="6"
-        patternUnits="userSpaceOnUse"
-      >
-        <rect width="6" height="6" fill="#ffffff" />
-        <circle cx="3" cy="3" r="1.2" fill="#111111" />
-      </pattern>
-      <pattern
-        id={`${idPrefix}-lightgray`}
-        width="4"
-        height="4"
-        patternUnits="userSpaceOnUse"
-      >
-        <rect width="4" height="4" fill="#dcdcdc" />
-      </pattern>
-    </defs>
-  );
-}
-
-function weeklyCountsText(counts: WeeklyScoreCounts): string {
-  const parts = [`${counts.yes} Y`, `${counts.no} N`];
-  if (counts.refused > 0) parts.push(`${counts.refused} R`);
-  if (counts.other > 0) parts.push(`${counts.other} N/A`);
-  return parts.join(" · ");
-}
-
-function WeeklyScoreBar({
-  idPrefix,
-  weekLabel,
-  counts,
-}: {
-  idPrefix: string;
-  weekLabel: string;
-  counts: WeeklyScoreCounts;
-}) {
-  const { total } = counts;
-  const ariaLabel =
-    total === 0
-      ? `${weekLabel}: no scores recorded`
-      : `${weekLabel}: ${counts.yes} yes, ${counts.no} no, ${counts.refused} refused, ${counts.other} N/A or other`;
-  let cursor = 0;
-  return (
-    <div className="isp-weekly-row">
-      <span className="isp-weekly-week">{weekLabel}</span>
-      {total === 0 ? (
-        <div className="isp-weekly-bar" role="img" aria-label={ariaLabel}>
-          <span className="isp-weekly-empty">No scores</span>
+    <div className="isp-report-score">
+      <table className="isp-report-table isp-report-score-month">
+        <caption className="isp-report-score-caption">
+          Whole-month totals per objective. Refused and N/A scores are counted
+          separately — never folded into Yes/No. Days with no score appear as
+          unscored, never dropped.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Objective</th>
+            <th scope="col">Yes</th>
+            <th scope="col">No</th>
+            <th scope="col">Refused</th>
+            <th scope="col">N/A</th>
+            <th scope="col">Days scored</th>
+            <th scope="col">Days unscored</th>
+            <th scope="col">Yes %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summary.map((objective) => (
+            <tr key={objective.taskId}>
+              <th scope="row">
+                {objective.taskNumber}. {objective.taskTitle}
+              </th>
+              <td>{objective.yes}</td>
+              <td>{objective.no}</td>
+              <td>{objective.refused}</td>
+              <td>{objective.other}</td>
+              <td>{objective.daysScored}</td>
+              <td>{objective.daysUnscored}</td>
+              <td>{objective.yesPercent}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {summary.map((objective) => (
+        <div className="isp-report-score-weekly" key={objective.taskId}>
+          <h6>
+            {objective.taskNumber}. {objective.taskTitle} — weekly breakdown
+          </h6>
+          <table className="isp-report-table">
+            <thead>
+              <tr>
+                <th scope="col">Week</th>
+                <th scope="col">Days</th>
+                <th scope="col">Yes</th>
+                <th scope="col">No</th>
+                <th scope="col">Refused</th>
+                <th scope="col">N/A</th>
+              </tr>
+            </thead>
+            <tbody>
+              {objective.weeks.map((week) => {
+                if (!week.dayRange) return null;
+                return (
+                  <tr key={week.week}>
+                    <th scope="row">Week {week.week}</th>
+                    <td>{week.dayRange}</td>
+                    <td>{week.yes}</td>
+                    <td>{week.no}</td>
+                    <td>{week.refused}</td>
+                    <td>{week.other}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      ) : (
-        <svg
-          className="isp-weekly-bar-svg"
-          height="22"
-          role="img"
-          aria-label={ariaLabel}
-        >
-          {WEEKLY_BUCKET_META.map((meta) => {
-            const value = counts[meta.key];
-            if (value === 0) return null;
-            const width = (value / total) * 100;
-            const x = cursor;
-            cursor += width;
-            return (
-              <g key={meta.key}>
-                <rect
-                  x={`${x}%`}
-                  y="0"
-                  width={`${width}%`}
-                  height="22"
-                  fill={`url(#${idPrefix}-${meta.pattern})`}
-                  stroke="#111111"
-                  strokeWidth="0.75"
-                />
-                {width >= 14 && (
-                  <text
-                    x={`${x + width / 2}%`}
-                    y="15"
-                    textAnchor="middle"
-                    className="isp-weekly-seg-text"
-                  >
-                    {value}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      )}
-      <span className="isp-weekly-counts">{total === 0 ? "—" : weeklyCountsText(counts)}</span>
+      ))}
     </div>
   );
 }
@@ -231,15 +168,6 @@ export default function MonthlyShiftReport({
   const [narrative, setNarrative] = useState("");
   const [generatedAt, setGeneratedAt] = useState("");
   const [error, setError] = useState("");
-  // Issue #96 follow-up — support-coordinator summary fields. Editable while
-  // the report is unsigned; locked with the report on sign (same lifecycle
-  // as the manager's narrative).
-  const [scNarratives, setScNarratives] = useState<Record<string, string>>({});
-  const [scOverall, setScOverall] = useState("");
-  const [scSigs, setScSigs] = useState<SupportCoordinatorSignatures>(
-    emptySupportCoordinatorSignatures(),
-  );
-  const patternPrefix = useId().replace(/[^a-zA-Z0-9]/g, "p");
   // Issue #96 fix: native window.confirm() dialogs are auto-dismissed in
   // headless browsers (and block the main thread on mobile), so signing used
   // to silently no-op. Confirmation is now an inline two-step state.
@@ -247,17 +175,10 @@ export default function MonthlyShiftReport({
   const [confirmingReopen, setConfirmingReopen] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
-  /** Push a loaded report row into all editable state (manager + SC fields). */
+  /** Push a loaded report row into all editable state (manager fields). */
   const applyReportToState = (monthlyReport: ShiftNoteMonthlyReport | null) => {
     setReport(monthlyReport);
     setNarrative(monthlyReport?.narrative ?? "");
-    const byTask: Record<string, string> = {};
-    for (const entry of monthlyReport?.scObjectiveNarratives ?? []) {
-      byTask[entry.taskId] = entry.narrative;
-    }
-    setScNarratives(byTask);
-    setScOverall(monthlyReport?.scOverallNarrative ?? "");
-    setScSigs(monthlyReport?.scSignatures ?? emptySupportCoordinatorSignatures());
   };
 
   useEffect(() => {
@@ -304,21 +225,7 @@ export default function MonthlyShiftReport({
   const signatures = collectSignatureLog(notes, staffTitleByUserId);
   const signed = (report?.signedAt ?? "") !== "";
   const captionById = new Map(levels.map((level) => [level.id, level.caption]));
-  const weeklySummary = buildWeeklyScoreSummary(notes, tasks, captionById);
-  const scProgress = buildObjectiveProgress(notes, tasks, captionById);
-  const scLocked = signed || !canWriteSummary;
-
-  /** Support-coordinator fields for the save payload (live editor state). */
-  const scSaveFields = () => ({
-    scObjectiveNarratives: tasks
-      .map((task) => ({
-        taskId: task.id,
-        narrative: (scNarratives[task.id] ?? "").trim(),
-      }))
-      .filter((entry) => entry.narrative !== ""),
-    scOverallNarrative: scOverall.trim(),
-    scSignatures: scSigs,
-  });
+  const scoreSummary = buildObjectiveScoreSummary(notes, tasks, captionById, monthKey);
 
   const persist = (action: () => Promise<unknown>) =>
     runIsp(async () => {
@@ -345,7 +252,6 @@ export default function MonthlyShiftReport({
         programId: program.id,
         monthKey,
         narrative,
-        ...scSaveFields(),
       }),
     );
   };
@@ -366,7 +272,6 @@ export default function MonthlyShiftReport({
         programId: program.id,
         monthKey,
         narrative,
-        ...scSaveFields(),
       });
       await api.signShiftNoteMonthlyReport(saved.id);
     });
@@ -415,36 +320,27 @@ export default function MonthlyShiftReport({
       scheduleLabel: ispScheduleLabel(program.schedule),
       scoringMethodName: program.scoringMethod?.name ?? "",
       tasks: tasks.map((task) => ({ title: task.title, instructions: task.instructions })),
-      weekly: weeklySummary.map((taskWeek, taskIndex) => ({
-        title: taskWeek.taskTitle,
-        weeks: taskWeek.weeks.map((counts, weekIndex) => {
-          const range = weekDayRangeLabel(monthKey, weekIndex + 1);
-          return {
-            label: range ? `Week ${weekIndex + 1} (${range})` : "",
-            yes: counts.yes,
-            no: counts.no,
-            refused: counts.refused,
-            other: counts.other,
-          };
-        }),
-        taskNumber: taskIndex + 1,
+      scoreSummary: scoreSummary.map((objective) => ({
+        taskNumber: objective.taskNumber,
+        title: objective.taskTitle,
+        yes: objective.yes,
+        no: objective.no,
+        refused: objective.refused,
+        other: objective.other,
+        daysScored: objective.daysScored,
+        daysUnscored: objective.daysUnscored,
+        yesPercent: objective.yesPercent,
+        weeks: objective.weeks.map((week) => ({
+          week: week.week,
+          dayRange: week.dayRange,
+          yes: week.yes,
+          no: week.no,
+          refused: week.refused,
+          other: week.other,
+        })),
       })),
       grid,
       signatures,
-      scSummary: {
-        objectives: scProgress.map((progress) => ({
-          taskNumber: progress.taskNumber,
-          title: progress.taskTitle,
-          progressLine: objectiveProgressLine(progress),
-          narrative: (scNarratives[progress.taskId] ?? "").trim(),
-        })),
-        overallNarrative: scOverall.trim(),
-        signatures: [
-          { role: "Support Coordinator", ...scSigs.supportCoordinator },
-          { role: "Provider", ...scSigs.provider },
-          { role: "Professional Manager", ...scSigs.professionalManager },
-        ],
-      },
       // Serialize the live narrative so the PDF matches Print and the on-screen
       // textarea; fall back to the saved row for signature metadata.
       summary:
@@ -472,19 +368,7 @@ export default function MonthlyShiftReport({
           caption: level.caption,
           shortLabel: level.shortLabel,
         })),
-        {
-          individualName,
-          individualIdLabel,
-          siteName,
-          monthLabel: monthDisplayLabel(monthKey),
-          progress: scProgress,
-          objectiveNarratives: tasks.map((task) => ({
-            taskId: task.id,
-            narrative: (scNarratives[task.id] ?? "").trim(),
-          })),
-          overallNarrative: scOverall.trim(),
-          signatures: scSigs,
-        },
+        scoreSummary,
       ),
       "text/csv;charset=utf-8",
     );
@@ -585,206 +469,19 @@ export default function MonthlyShiftReport({
             </ol>
           </section>
 
-          {/* Weekly task score summary chart */}
-          <section className="isp-report-weekly">
-            <h5>Weekly task score summary</h5>
+          {/* Monthly score summary — the figures-first view: Yes/No count
+              clarity for the whole month plus a per-week breakdown. No color
+              or pattern carries meaning; the numbers stand on their own in
+              plain black-and-white print. */}
+          <section className="isp-report-score">
+            <h5>Monthly score summary</h5>
             <p className="muted isp-report-grid-note">
-              For each objective, how many times the task was scored Yes, No, Refused, or
-              N/A in each week of the month. Each score type has its own fill pattern so
-              the chart reads in plain black-and-white print; the counts beside each bar
-              carry the exact numbers.
+              Yes/No counts for each objective — the whole month first, then
+              broken down week by week. Refused and N/A scores are counted
+              separately, never folded into Yes/No. Days with no score appear
+              as unscored.
             </p>
-            <svg width="0" height="0" aria-hidden="true" style={{ position: "absolute" }}>
-              <WeeklyChartPatterns idPrefix={patternPrefix} />
-            </svg>
-            <div className="isp-weekly-legend" aria-hidden="true">
-              {WEEKLY_BUCKET_META.map((meta) => (
-                <span key={meta.key} className="isp-weekly-legend-item">
-                  <svg className="isp-weekly-swatch" width="14" height="14" aria-hidden="true">
-                    <rect
-                      x="0.5"
-                      y="0.5"
-                      width="13"
-                      height="13"
-                      fill={`url(#${patternPrefix}-${meta.pattern})`}
-                      stroke="#111111"
-                      strokeWidth="1"
-                    />
-                  </svg>
-                  {meta.label}
-                </span>
-              ))}
-            </div>
-            {weeklySummary.map((taskWeek, taskIndex) => (
-              <div className="isp-weekly-task" key={taskWeek.taskId}>
-                <h6>
-                  {taskIndex + 1}. {taskWeek.taskTitle}
-                </h6>
-                <div className="isp-weekly-rows">
-                  {taskWeek.weeks.map((counts, weekIndex) => {
-                    const range = weekDayRangeLabel(monthKey, weekIndex + 1);
-                    if (!range) return null;
-                    return (
-                      <WeeklyScoreBar
-                        key={weekIndex}
-                        idPrefix={patternPrefix}
-                        weekLabel={`Week ${weekIndex + 1} (days ${range})`}
-                        counts={counts}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </section>
-
-          {/* Monthly summary for support coordinator */}
-          <section className="isp-report-sc">
-            <h5>Monthly summary for support coordinator</h5>
-            <p className="muted isp-report-grid-note">
-              Progress on each ISP objective this month, computed from shift note scores,
-              with narratives and signatures for the support coordinator's monthly review.
-            </p>
-            <dl className="isp-report-fields">
-              <div>
-                <dt>Individual</dt>
-                <dd>{individualName}</dd>
-              </div>
-              <div>
-                <dt>Individual ID</dt>
-                <dd>{individualIdLabel}</dd>
-              </div>
-              <div>
-                <dt>Month</dt>
-                <dd>{monthDisplayLabel(monthKey)}</dd>
-              </div>
-              <div>
-                <dt>Site</dt>
-                <dd>{siteName}</dd>
-              </div>
-            </dl>
-            <div className="isp-report-sc-objectives">
-              {scProgress.map((progress) => {
-                const objectiveNarrative = scNarratives[progress.taskId] ?? "";
-                return (
-                  <div className="isp-report-sc-objective" key={progress.taskId}>
-                    <h6>
-                      {progress.taskNumber}. {progress.taskTitle}
-                    </h6>
-                    <p className="isp-report-sc-progress">{objectiveProgressLine(progress)}</p>
-                    {scLocked ? (
-                      objectiveNarrative.trim() ? (
-                        <p className="isp-report-narrative">{objectiveNarrative}</p>
-                      ) : (
-                        <p className="muted">No narrative recorded.</p>
-                      )
-                    ) : (
-                      <label>
-                        <span className="isp-report-summary-label">
-                          Progress notes for this objective
-                        </span>
-                        <textarea
-                          value={objectiveNarrative}
-                          onChange={(e) =>
-                            setScNarratives((prev) => ({
-                              ...prev,
-                              [progress.taskId]: e.target.value,
-                            }))
-                          }
-                          rows={3}
-                          placeholder="How did the Individual progress on this objective this month?"
-                        />
-                      </label>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="isp-report-sc-overall">
-              <h6>Overall status</h6>
-              {scLocked ? (
-                scOverall.trim() ? (
-                  <p className="isp-report-narrative">{scOverall}</p>
-                ) : (
-                  <p className="muted">No overall status recorded.</p>
-                )
-              ) : (
-                <label>
-                  <span className="isp-report-summary-label">
-                    Overall status for the support coordinator
-                  </span>
-                  <textarea
-                    value={scOverall}
-                    onChange={(e) => setScOverall(e.target.value)}
-                    rows={4}
-                    placeholder="Overall status, health and safety notes, and follow-ups for the month…"
-                  />
-                </label>
-              )}
-            </div>
-            <div className="isp-report-sc-signatures">
-              <h6>Signatures</h6>
-              {(
-                [
-                  { key: "supportCoordinator", label: "Support Coordinator" },
-                  { key: "provider", label: "Provider" },
-                  { key: "professionalManager", label: "Professional Manager" },
-                ] as const
-              ).map(({ key, label }) => (
-                <div
-                  className="isp-report-sc-sig"
-                  key={key}
-                  role="group"
-                  aria-label={label}
-                >
-                  <span className="isp-report-sc-sig-role" aria-hidden="true">
-                    {label}
-                  </span>
-                  {scLocked ? (
-                    <span className="isp-report-sc-sig-locked">
-                      {scSigs[key].name || "—"}
-                      {scSigs[key].date ? ` — ${scSigs[key].date}` : ""}
-                    </span>
-                  ) : (
-                    <>
-                      <label>
-                        <span className="isp-report-summary-label">Name</span>
-                        <input
-                          type="text"
-                          value={scSigs[key].name}
-                          onChange={(e) =>
-                            setScSigs((prev) => ({
-                              ...prev,
-                              [key]: { ...prev[key], name: e.target.value },
-                            }))
-                          }
-                          placeholder="Print name"
-                        />
-                      </label>
-                      <label>
-                        <span className="isp-report-summary-label">Date</span>
-                        <input
-                          type="date"
-                          value={scSigs[key].date}
-                          onChange={(e) =>
-                            setScSigs((prev) => ({
-                              ...prev,
-                              [key]: { ...prev[key], date: e.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                    </>
-                  )}
-                </div>
-              ))}
-              {signed && report && (
-                <p className="muted">
-                  Locked with the report — signed by {report.signedByName} on{" "}
-                  {report.signedAt.slice(0, 10)}. Re-open the summary to edit.
-                </p>
-              )}
-            </div>
+            <MonthlyScoreSummaryTables summary={scoreSummary} />
           </section>
 
           {/* Day grid */}
@@ -793,6 +490,10 @@ export default function MonthlyShiftReport({
             <p className="muted isp-report-grid-note">
               Each cell shows the score short label and the staff initials for that day. Multiple
               notes stack in the cell.
+            </p>
+            <p className="isp-report-attestation">
+              STAFF PROVIDING SERVICE/ACTION MUST INITIAL THE DATE THE SERVICE/ACTION WAS
+              PROVIDED.
             </p>
             <div className="isp-report-grid-scroll">
               <table className="isp-report-grid">
@@ -860,9 +561,9 @@ export default function MonthlyShiftReport({
             )}
           </section>
 
-          {/* Manager summary */}
+          {/* Data collection monthly summary note */}
           <section className="isp-report-summary">
-            <h5>Monthly summary</h5>
+            <h5>Data collection monthly summary note</h5>
             {signed && report ? (
               <>
                 <p className="isp-report-narrative">{report.narrative}</p>
