@@ -11,7 +11,7 @@ create table public.ger_reports (
   id uuid primary key default gen_random_uuid(),
   agency_id uuid not null references public.agencies (id) on delete cascade,
   site_id uuid not null references public.sites (id) on delete cascade,
-  individual_id uuid not null references public.individuals (id) on delete cascade,
+  individual_id uuid references public.individuals (id) on delete cascade,
   event_date date not null,
   event_time text not null default '',
   location text not null default '',
@@ -79,3 +79,69 @@ with check (
 create policy ger_reports_delete on public.ger_reports
 for delete to authenticated
 using ((select private.role_key_in(agency_id, '{administrator,program_manager,compliance_admin}')));
+
+-- ----------------------------------------------------------------------------
+-- Permission seeding (merge-only: never overwrite explicit agency choices)
+-- ----------------------------------------------------------------------------
+--
+-- ger.create / ger.review are new capability keys. Deployed databases already
+-- ran the earlier permission seed, so re-editing that seed does not reach
+-- them. Merge the GER defaults into role_templates, role_permission_matrix,
+-- and agency_roles here so existing agencies inherit the new keys without
+-- clobbering any per-agency customizations.
+
+create temporary table ger_perm_defaults (
+  role_key text not null,
+  perm_key text not null,
+  perm_value boolean not null,
+  primary key (role_key, perm_key)
+) on commit drop;
+
+insert into ger_perm_defaults (role_key, perm_key, perm_value)
+values
+  ('administrator', 'ger.create', true),
+  ('compliance_admin', 'ger.create', true),
+  ('house_manager', 'ger.create', true),
+  ('program_manager', 'ger.create', true),
+  ('dsp', 'ger.create', true),
+  ('nurse', 'ger.create', true),
+  ('hr', 'ger.create', false),
+  ('auditor', 'ger.create', false),
+  ('administrator', 'ger.review', true),
+  ('compliance_admin', 'ger.review', true),
+  ('house_manager', 'ger.review', true),
+  ('program_manager', 'ger.review', true),
+  ('dsp', 'ger.review', false),
+  ('nurse', 'ger.review', true),
+  ('hr', 'ger.review', false),
+  ('auditor', 'ger.review', false);
+
+-- Add each key only where it is missing, so per-agency customizations are
+-- never overwritten. New agencies inherit these defaults through
+-- public.provision_agency_roles (copied from role_templates).
+update public.role_templates rt
+set permissions = rt.permissions || (
+  select coalesce(jsonb_object_agg(d.perm_key, d.perm_value), '{}'::jsonb)
+  from ger_perm_defaults d
+  where d.role_key = rt.key
+    and not (rt.permissions ? d.perm_key)
+);
+
+update public.role_permission_matrix rpm
+set permissions = rpm.permissions || (
+  select coalesce(jsonb_object_agg(d.perm_key, d.perm_value), '{}'::jsonb)
+  from ger_perm_defaults d
+  where d.role_key = rpm.role_key
+    and not (rpm.permissions ? d.perm_key)
+),
+updated_at = now();
+
+update public.agency_roles ar
+set permissions = ar.permissions || (
+  select coalesce(jsonb_object_agg(d.perm_key, d.perm_value), '{}'::jsonb)
+  from ger_perm_defaults d
+  where d.role_key = ar.template_key
+    and not (ar.permissions ? d.perm_key)
+);
+
+drop table ger_perm_defaults;

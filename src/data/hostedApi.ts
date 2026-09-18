@@ -8334,7 +8334,7 @@ export class HostedApi implements ComplyraApi {
       id: row.id as string,
       agencyId: row.agency_id as string,
       siteId: row.site_id as string,
-      individualId: row.individual_id as string,
+      individualId: (row.individual_id as string) ?? "",
       eventDate: String(row.event_date).slice(0, 10),
       eventTime: (row.event_time as string) ?? "",
       location: (row.location as string) ?? "",
@@ -8368,7 +8368,9 @@ export class HostedApi implements ComplyraApi {
       .maybeSingle();
     throwIf(error, "Could not load the event report.");
     if (!data) throw new Error("Event report not found.");
-    await this.assertSiteInAgency(session, (data as Record<string, unknown>).site_id as string);
+    const siteId = (data as Record<string, unknown>).site_id as string;
+    await this.assertSiteInAgency(session, siteId);
+    if (!canAccessSite(session, siteId)) throw new Error("Event report not found.");
     return this.mapGerReport(data as Record<string, unknown>);
   }
 
@@ -8391,14 +8393,17 @@ export class HostedApi implements ComplyraApi {
   private async gerNameMaps(session: SessionUser) {
     const { data: individuals } = await this.client
       .from("individuals")
-      .select("id, name")
+      .select("id, full_name")
       .eq("agency_id", session.agencyId);
     const { data: sites } = await this.client
       .from("sites")
       .select("id, name")
       .eq("agency_id", session.agencyId);
     const individualNames = new Map<string, string>(
-      ((individuals ?? []) as Array<{ id: string; name: string }>).map((p) => [p.id, p.name]),
+      ((individuals ?? []) as Array<{ id: string; full_name: string }>).map((p) => [
+        p.id,
+        p.full_name,
+      ]),
     );
     const siteNames = new Map<string, string>(
       ((sites ?? []) as Array<{ id: string; name: string }>).map((s) => [s.id, s.name]),
@@ -8457,6 +8462,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
     await this.assertSiteInAgency(session, siteId);
+    if (!canAccessSite(session, siteId)) throw new Error("Home not found.");
     let query = this.client
       .from("ger_reports")
       .select("*")
@@ -8493,6 +8499,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!lib.canCreateGerReport(session)) throw new Error("Not authorized to write event reports.");
     await this.assertSiteInAgency(session, input.siteId);
+    if (!canAccessSite(session, input.siteId)) throw new Error("Home not found.");
     if (input.individualId) {
       await this.assertGerIndividualInSite(session, input.siteId, input.individualId);
     }
@@ -8503,7 +8510,7 @@ export class HostedApi implements ComplyraApi {
       .insert({
         agency_id: session.agencyId,
         site_id: input.siteId,
-        individual_id: valid.individualId,
+        individual_id: valid.individualId || null,
         event_date: valid.eventDate,
         event_time: valid.eventTime,
         location: valid.location,
@@ -8552,7 +8559,7 @@ export class HostedApi implements ComplyraApi {
     const { data, error } = await this.client
       .from("ger_reports")
       .update({
-        individual_id: valid.individualId,
+        individual_id: valid.individualId || null,
         event_date: valid.eventDate,
         event_time: valid.eventTime,
         location: valid.location,

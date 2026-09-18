@@ -111,7 +111,7 @@ function formErrors(form: FormState, forSubmit: boolean): string[] {
     eventDate: form.eventDate,
     eventTime: form.eventTime,
     location: form.location,
-    eventType: (form.eventType || "other") as GerEventType,
+    eventType: form.eventType as GerEventType,
     severity: form.severity,
     description: form.description,
     actionsTaken: form.actionsTaken,
