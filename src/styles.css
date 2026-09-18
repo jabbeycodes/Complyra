@@ -7268,3 +7268,229 @@ button.qa-row:hover {
     align-items: flex-start;
   }
 }
+
+/* Issue #96 — monthly shift notes report (Complyrer's own layout). */
+.isp-monthly-report-block {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.isp-monthly-report-block h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.isp-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.isp-monthly-report {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--white);
+  padding: 20px;
+  display: grid;
+  gap: 20px;
+}
+.isp-report-brand {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--moss);
+}
+.isp-report-header h4 {
+  margin: 6px 0 10px;
+  font-size: 20px;
+}
+.isp-report-program h5,
+.isp-report-score h5,
+.isp-report-grid-wrap h5,
+.isp-report-signatures h5,
+.isp-report-summary h5 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.isp-report-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.isp-report-fields div {
+  display: grid;
+  gap: 2px;
+}
+.isp-report-fields dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.isp-report-fields dd {
+  margin: 0;
+  font-weight: 600;
+}
+.isp-report-objectives {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+/* Issue #96 — monthly score summary: figures-first tables, no patterns,
+   no color-dependent meaning. Solid colors, high contrast, B&W-print safe. */
+.isp-report-score h5 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.isp-report-score-caption {
+  caption-side: bottom;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 6px;
+}
+.isp-report-score-weekly {
+  margin-top: 12px;
+}
+.isp-report-score-weekly h6 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.isp-report-score-month td,
+.isp-report-score-weekly td {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.isp-report-score-month tbody th,
+.isp-report-score-weekly tbody th {
+  text-align: left;
+}
+.isp-report-attestation {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  margin: 0 0 8px;
+}
+.isp-report-grid-note {
+  margin: 0 0 8px;
+}
+.isp-report-grid-scroll {
+  overflow-x: auto;
+}
+.isp-report-grid {
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.isp-report-grid th,
+.isp-report-grid td {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  min-width: 36px;
+  text-align: center;
+  background: var(--white);
+}
+.isp-report-grid thead th {
+  background: var(--sand);
+}
+.isp-report-grid tbody th {
+  text-align: left;
+  min-width: 160px;
+}
+.isp-report-grid td div + div {
+  margin-top: 2px;
+}
+.isp-report-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.isp-report-table th,
+.isp-report-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.isp-report-table thead th {
+  background: var(--sand);
+}
+.isp-report-narrative {
+  white-space: pre-wrap;
+  margin: 0 0 8px;
+}
+.isp-report-summary-label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.isp-report-summary textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+
+/* Issue #96 — print: report only, solid colors, no app chrome. */
+/* Named page keeps landscape scoped to this report only. A bare `@page` would
+   force landscape on every window.print() in the app (e.g. mileage sheets). */
+@page isp-report {
+  size: landscape;
+}
+@media print {
+  body.isp-report-printing .isp-monthly-report {
+    page: isp-report;
+  }
+  /* With the sidebar hidden, drop the shell inset so the report is not pushed
+     in by space reserved for chrome that no longer prints. */
+  body.isp-report-printing .main-shell {
+    margin-left: 0 !important;
+  }
+  body.isp-report-printing .page-shell {
+    padding-inline: 0 !important;
+  }
+  /* Isolate the report: hide every branch that does not contain it, level by
+     level from the app shell down to the shift-notes widget. */
+  body.isp-report-printing .app-shell > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .main-shell > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing main > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .individual-chart > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .chart-grid > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing section.chart-widget:has(.isp-monthly-report) > :not(.isp-monthly-report-block),
+  body.isp-report-printing .isp-monthly-report-block > :not(.isp-monthly-report) {
+    display: none !important;
+  }
+  body.isp-report-printing .isp-monthly-report {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+  }
+  /* Action controls live inside the report, so sibling isolation cannot reach
+     them. Hide them explicitly so the printed copy has no app chrome. */
+  body.isp-report-printing .isp-report-actions {
+    display: none !important;
+  }
+  body.isp-report-printing .isp-report-header,
+  body.isp-report-printing .isp-report-program,
+  body.isp-report-printing .isp-report-score,
+  body.isp-report-printing .isp-report-score-weekly,
+  body.isp-report-printing .isp-report-signatures,
+  body.isp-report-printing .isp-report-summary,
+  body.isp-report-printing .isp-report-table tr,
+
+  body.isp-report-printing .isp-report-objectives li {
+    break-inside: avoid;
+  }
+  body.isp-report-printing .isp-report-grid thead th,
+  body.isp-report-printing .isp-report-table thead th {
+    background: #efece6 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

@@ -134,6 +134,7 @@ import {
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
+  type ShiftNoteMonthlyReport,
   type ShiftNoteView,
   type SiteShiftNoteView,
 } from "./shiftNotes";
@@ -2229,6 +2230,304 @@ export class HostedApi implements ComplyraApi {
       .update({ deleted_at: now, updated_at: now })
       .eq("id", noteId);
     throwIf(updateError, "Could not delete the shift note.");
+  }
+
+  /**
+   * Issue #96 — monthly summary report CRUD against
+   * public.shift_note_monthly_reports. Same PM/administrator gate as ISP
+   * config; who/when stamped on every save; soft deletes preserved.
+   */
+  private mapShiftNoteMonthlyReport(row: Record<string, unknown>): ShiftNoteMonthlyReport {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      programId: String(row.program_id ?? ""),
+      month: String(row.month ?? ""),
+      narrative: String(row.narrative ?? ""),
+      signedBy: String(row.signed_by ?? ""),
+      signedByName: String(row.signed_by_name ?? ""),
+      signedByTitle: String(row.signed_by_title ?? ""),
+      signedAt: row.signed_at ? String(row.signed_at) : "",
+      createdBy: String(row.created_by ?? ""),
+      createdByName: String(row.created_by_name ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+      deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+    };
+  }
+
+  private async monthlyReportOrThrow(reportId: string) {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("shift_note_monthly_reports")
+      .select("*")
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .single();
+    throwIf(error, "Monthly report not found.");
+    const report = this.mapShiftNoteMonthlyReport(data as Record<string, unknown>);
+    // Enforce per-Individual access (can_read_individual RLS); has_agency alone
+    // is agency-wide and would leak PHI to site-scoped staff.
+    const { error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", report.individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    return { session, report };
+  }
+
+  async getShiftNotesForMonth(
+    individualId: string,
+    monthKey: string,
+  ): Promise<ShiftNoteView[]> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+      throw new Error("Choose a valid month.");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    void person;
+    // note_date is a Postgres `date`; `${monthKey}-32` is an invalid calendar
+    // date and errors the query. Bound with the first day of the next month.
+    const [year, month] = monthKey.split("-").map(Number);
+    const nextMonthStart =
+      month === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const { data: noteRows, error: noteError } = await this.client
+      .from("shift_notes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .is("deleted_at", null)
+      .gte("note_date", `${monthKey}-01`)
+      .lt("note_date", nextMonthStart)
+      .order("note_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    throwIf(noteError, "Could not load shift notes.");
+    const rows = noteRows ?? [];
+    const noteIds = rows.map((row) => String(row.id));
+    const { data: scoreRows, error: scoreError } = noteIds.length
+      ? await this.client.from("shift_note_task_scores").select("*").in("note_id", noteIds)
+      : { data: [], error: null };
+    throwIf(scoreError, "Could not load note scores.");
+    const programIds = [...new Set(rows.map((row) => String(row.program_id)))];
+    const { data: programRows, error: programError } = programIds.length
+      ? await this.client.from("isp_programs").select("id,name,scoring_method_id").in("id", programIds)
+      : { data: [], error: null };
+    throwIf(programError, "Could not load ISP programs.");
+    const programNameById = new Map(
+      (programRows ?? []).map((row) => [String(row.id), String(row.name ?? "ISP program")]),
+    );
+    const methodIds = [
+      ...new Set((programRows ?? []).map((row) => String(row.scoring_method_id)).filter(Boolean)),
+    ];
+    const { data: methodRows, error: methodError } = methodIds.length
+      ? await this.client.from("isp_scoring_methods").select("id,name").in("id", methodIds)
+      : { data: [], error: null };
+    throwIf(methodError, "Could not load scoring methods.");
+    const methodNameById = new Map(
+      (methodRows ?? []).map((row) => [String(row.id), String(row.name ?? "")]),
+    );
+    const programById = new Map(
+      (programRows ?? []).map((row) => [
+        String(row.id),
+        {
+          name: String(row.name ?? "ISP program"),
+          scoringMethodName: methodNameById.get(String(row.scoring_method_id)) ?? "",
+        },
+      ]),
+    );
+    const taskIds = [...new Set((scoreRows ?? []).map((row) => String(row.task_id)))];
+    const { data: taskRows, error: taskError } = taskIds.length
+      ? await this.client.from("isp_program_tasks").select("id,title").in("id", taskIds)
+      : { data: [], error: null };
+    throwIf(taskError, "Could not load ISP tasks.");
+    const taskTitleById = new Map(
+      (taskRows ?? []).map((row) => [String(row.id), String(row.title ?? "")]),
+    );
+    const scoresByNote = new Map<string, ShiftNoteView["scores"]>();
+    for (const row of scoreRows ?? []) {
+      const list = scoresByNote.get(String(row.note_id)) ?? [];
+      list.push({
+        id: String(row.id),
+        noteId: String(row.note_id),
+        taskId: String(row.task_id),
+        taskTitle: taskTitleById.get(String(row.task_id)) ?? "",
+        levelId: String(row.level_id),
+        comment: String(row.comment ?? ""),
+      });
+      scoresByNote.set(String(row.note_id), list);
+    }
+    return rows.map((row) => {
+      const program = programById.get(String(row.program_id));
+      return {
+        id: String(row.id),
+        agencyId: String(row.agency_id),
+        individualId: String(row.individual_id),
+        programId: String(row.program_id),
+        noteDate: String(row.note_date ?? "").slice(0, 10),
+        shift: String(row.shift ?? ""),
+        summary: String(row.summary ?? ""),
+        timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
+        staffUserId: String(row.staff_user_id ?? ""),
+        staffName: String(row.staff_name ?? ""),
+        createdAt: String(row.created_at ?? ""),
+        updatedAt: String(row.updated_at ?? ""),
+        deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+        programName: program?.name ?? "ISP program",
+        scoringMethodName: program?.scoringMethodName ?? "",
+        scores: scoresByNote.get(String(row.id)) ?? [],
+      };
+    });
+  }
+
+  async getShiftNoteMonthlyReport(
+    individualId: string,
+    monthKey: string,
+  ): Promise<ShiftNoteMonthlyReport | null> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
+      throw new Error("You do not have access to shift notes.");
+    }
+    // Enforce per-Individual access (can_read_individual RLS); has_agency alone
+    // is agency-wide and would leak PHI to site-scoped staff.
+    const { error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    const { data, error } = await this.client
+      .from("shift_note_monthly_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("month", monthKey)
+      .is("deleted_at", null)
+      .maybeSingle();
+    throwIf(error, "Could not load the monthly report.");
+    return data ? this.mapShiftNoteMonthlyReport(data as Record<string, unknown>) : null;
+  }
+
+  async saveShiftNoteMonthlyReport(
+    input: Parameters<ComplyraApi["saveShiftNoteMonthlyReport"]>[0],
+  ): Promise<ShiftNoteMonthlyReport> {
+    const session = await this.requireSession();
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can write the monthly summary.");
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.monthKey)) {
+      throw new Error("Choose a valid month.");
+    }
+    const { data: programRow, error: programError } = await this.client
+      .from("isp_programs")
+      .select("id")
+      .eq("id", input.programId)
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", input.individualId)
+      .single();
+    throwIf(programError, "ISP program not found.");
+    void programRow;
+    const now = new Date().toISOString();
+    const narrative = input.narrative.trim().slice(0, 20000);
+    const { data: existing, error: existingError } = await this.client
+      .from("shift_note_monthly_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", input.individualId)
+      .eq("month", input.monthKey)
+      .is("deleted_at", null)
+      .maybeSingle();
+    throwIf(existingError, "Could not load the monthly report.");
+    if (existing) {
+      const row = existing as Record<string, unknown>;
+      if (row.signed_at) {
+        throw new Error("This summary is signed. Re-open it before editing.");
+      }
+      const { data: updated, error: updateError } = await this.client
+        .from("shift_note_monthly_reports")
+        .update({ program_id: input.programId, narrative, updated_at: now })
+        .eq("id", String(row.id))
+        .select("*")
+        .single();
+      throwIf(updateError, "Could not save the monthly summary.");
+      return this.mapShiftNoteMonthlyReport(updated as Record<string, unknown>);
+    }
+    const { data: created, error: createError } = await this.client
+      .from("shift_note_monthly_reports")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: input.individualId,
+        program_id: input.programId,
+        month: input.monthKey,
+        narrative,
+        created_by: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("*")
+      .single();
+    throwIf(createError, "Could not save the monthly summary.");
+    return this.mapShiftNoteMonthlyReport(created as Record<string, unknown>);
+  }
+
+  async signShiftNoteMonthlyReport(reportId: string): Promise<ShiftNoteMonthlyReport> {
+    const { session, report } = await this.monthlyReportOrThrow(reportId);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can sign the monthly summary.");
+    }
+    if (report.signedAt) throw new Error("This summary is already signed.");
+    if (!report.narrative.trim()) {
+      throw new Error("Write the monthly summary before signing it.");
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("shift_note_monthly_reports")
+      .update({
+        signed_by: session.userId,
+        signed_by_name: session.fullName,
+        signed_by_title: session.jobTitle || roleLabel(session.roleKey),
+        signed_at: now,
+        updated_at: now,
+      })
+      .eq("id", reportId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not sign the monthly summary.");
+    return this.mapShiftNoteMonthlyReport(data as Record<string, unknown>);
+  }
+
+  async reopenShiftNoteMonthlyReport(reportId: string): Promise<ShiftNoteMonthlyReport> {
+    const { session, report } = await this.monthlyReportOrThrow(reportId);
+    if (!canConfigureIspTasks(session.roleKey)) {
+      throw new Error("Only a PM or administrator can re-open the monthly summary.");
+    }
+    if (!report.signedAt) throw new Error("This summary is not signed.");
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("shift_note_monthly_reports")
+      .update({
+        signed_by: null,
+        signed_by_name: "",
+        signed_by_title: "",
+        signed_at: null,
+        updated_at: now,
+      })
+      .eq("id", reportId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not re-open the monthly summary.");
+    return this.mapShiftNoteMonthlyReport(data as Record<string, unknown>);
   }
 
   async getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]> {

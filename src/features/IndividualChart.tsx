@@ -541,13 +541,19 @@ export default function IndividualChart({
         {ispEnabled && isp.data && (
           <ShiftNoteSection
             individualId={individualId}
+            individualName={chartPerson.name}
+            individualIdLabel={profile.dmhId?.trim() || "—"}
+            siteName={chartPerson.site}
+            agencyName={chartSession.agencyName}
             data={isp.data}
             api={api}
             runIsp={runIsp}
             sessionUserId={chartSession.userId}
+            sessionName={chartSession.fullName}
             roleKey={chartSession.roleKey}
             canEnter={enterShiftNotes}
             canConfigure={configureIsp}
+            staffTitleByUserId={new Map((workspace?.staff ?? []).map((s) => [s.id, s.role]))}
           />
         )}
         {ispEnabled && isp.error && !isp.data && (

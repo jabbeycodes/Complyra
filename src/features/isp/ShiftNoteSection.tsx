@@ -10,6 +10,7 @@ import {
   type ShiftNoteView,
 } from "../../data/shiftNotes";
 import { currentPlanYear, type IspChartData } from "./useIspData";
+import MonthlyShiftReport from "./MonthlyShiftReport";
 
 /**
  * Issue #80 — staff shift-note entry against the active approved ISP program.
@@ -249,26 +250,45 @@ function NoteCard({
 
 export default function ShiftNoteSection({
   individualId,
+  individualName,
+  individualIdLabel,
+  siteName,
+  agencyName,
   data,
   api,
   runIsp,
   sessionUserId,
+  sessionName,
   roleKey,
   canEnter,
   canConfigure,
+  staffTitleByUserId,
 }: {
   individualId: string;
+  individualName: string;
+  individualIdLabel: string;
+  siteName: string;
+  agencyName: string;
   data: IspChartData;
   api: ComplyraApi;
   runIsp: (action: () => Promise<unknown>) => Promise<void>;
   sessionUserId: string;
+  sessionName: string;
   roleKey: string;
   canEnter: boolean;
   canConfigure: boolean;
+  staffTitleByUserId: Map<string, string>;
 }) {
   const planYear = currentPlanYear();
   const program = activeIspProgram(data.programs, individualId, planYear);
   const [showForm, setShowForm] = useState(false);
+  const [filterMonth, setFilterMonth] = useState("");
+  const [filterShift, setFilterShift] = useState("");
+  const filteredNotes = data.notes.filter(
+    (note) =>
+      (!filterMonth || note.noteDate.startsWith(filterMonth)) &&
+      (!filterShift || note.shift === filterShift),
+  );
 
   return (
     <section className="chart-widget" id="chart-shift-notes" aria-labelledby="shift-notes-heading">
@@ -313,19 +333,71 @@ export default function ShiftNoteSection({
       {data.notes.length > 0 && (
         <div className="isp-notes-list">
           <h3>Recent notes</h3>
-          {data.notes.map((note) => (
-            <NoteCard
-              key={note.id}
-              note={note}
-              canEdit={canEnter && canEditShiftNoteRow(roleKey, sessionUserId, note)}
-              api={api}
-              individualId={individualId}
-              program={data.programs.find((p) => p.id === note.programId) ?? program}
-              runIsp={runIsp}
-            />
-          ))}
+          <div className="isp-filters chart-actions">
+            <label className="isp-filter-label">
+              Month
+              <input
+                type="month"
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(e.target.value)}
+                aria-label="Filter notes by month"
+              />
+            </label>
+            <label className="isp-filter-label">
+              Shift
+              <select value={filterShift} onChange={(e) => setFilterShift(e.target.value)}>
+                <option value="">All shifts</option>
+                {ISP_SHIFTS.map((shift) => (
+                  <option key={shift} value={shift}>
+                    {shift}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(filterMonth || filterShift) && (
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  setFilterMonth("");
+                  setFilterShift("");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+          {filteredNotes.length === 0 ? (
+            <p className="muted">No notes match these filters.</p>
+          ) : (
+            filteredNotes.map((note) => (
+              <NoteCard
+                key={note.id}
+                note={note}
+                canEdit={canEnter && canEditShiftNoteRow(roleKey, sessionUserId, note)}
+                api={api}
+                individualId={individualId}
+                program={data.programs.find((p) => p.id === note.programId) ?? program}
+                runIsp={runIsp}
+              />
+            ))
+          )}
         </div>
       )}
+      <MonthlyShiftReport
+        individualId={individualId}
+        individualName={individualName}
+        individualIdLabel={individualIdLabel}
+        siteName={siteName}
+        agencyName={agencyName}
+        data={data}
+        api={api}
+        runIsp={runIsp}
+        sessionName={sessionName}
+        roleKey={roleKey}
+        canWriteSummary={canConfigure}
+        staffTitleByUserId={staffTitleByUserId}
+      />
     </section>
   );
 }
