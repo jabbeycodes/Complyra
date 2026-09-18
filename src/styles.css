@@ -7495,17 +7495,32 @@ button.qa-row:hover {
 }
 
 /* Issue #96 — print: report only, solid colors, no app chrome. */
-@page {
+/* Named page keeps landscape scoped to this report only. A bare `@page` would
+   force landscape on every window.print() in the app (e.g. mileage sheets). */
+@page isp-report {
   size: landscape;
 }
 @media print {
-  body.isp-report-printing .isp-report-actions {
-    display: none !important;
+  body.isp-report-printing .isp-monthly-report {
+    page: isp-report;
   }
+  /* With the sidebar hidden, drop the shell inset so the report is not pushed
+     in by space reserved for chrome that no longer prints. */
+  body.isp-report-printing .main-shell {
+    margin-left: 0 !important;
+  }
+  body.isp-report-printing .page-shell {
+    padding-inline: 0 !important;
+  }
+  /* Isolate the report: hide every branch that does not contain it, level by
+     level from the app shell down to the shift-notes widget. */
+  body.isp-report-printing .app-shell > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .main-shell > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing main > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .individual-chart > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing .chart-grid > :not(:has(.isp-monthly-report)),
+  body.isp-report-printing section.chart-widget:has(.isp-monthly-report) > :not(.isp-monthly-report-block),
   body.isp-report-printing .isp-monthly-report-block > :not(.isp-monthly-report) {
-    display: none !important;
-  }
-  body.isp-report-printing section.chart-widget:has(.isp-monthly-report) > :not(.isp-monthly-report-block) {
     display: none !important;
   }
   body.isp-report-printing .isp-monthly-report {

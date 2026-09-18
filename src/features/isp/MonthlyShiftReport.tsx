@@ -239,9 +239,19 @@ export default function MonthlyShiftReport({
   };
 
   const handleSignConfirm = () => {
-    if (!report) return;
+    if (!program || !report) return;
     setConfirmingSign(false);
-    void persist(() => api.signShiftNoteMonthlyReport(report.id));
+    // Persist the live textarea first, then lock it. Otherwise edits made after
+    // the last Save are dropped and the signature stamps stale narrative.
+    void persist(async () => {
+      const saved = await api.saveShiftNoteMonthlyReport({
+        individualId,
+        programId: program.id,
+        monthKey,
+        narrative,
+      });
+      await api.signShiftNoteMonthlyReport(saved.id);
+    });
   };
 
   const handleReopenClick = () => {
@@ -303,14 +313,17 @@ export default function MonthlyShiftReport({
       })),
       grid,
       signatures,
-      summary: report
-        ? {
-            narrative: report.narrative,
-            signedByName: report.signedByName,
-            signedByTitle: report.signedByTitle,
-            signedAt: report.signedAt,
-          }
-        : null,
+      // Serialize the live narrative so the PDF matches Print and the on-screen
+      // textarea; fall back to the saved row for signature metadata.
+      summary:
+        report || narrative.trim()
+          ? {
+              narrative,
+              signedByName: report?.signedByName ?? "",
+              signedByTitle: report?.signedByTitle ?? "",
+              signedAt: report?.signedAt ?? "",
+            }
+          : null,
     });
     doc.save(shiftNoteMonthlyReportFileName(individualName, monthKey));
   };

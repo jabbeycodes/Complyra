@@ -2267,7 +2267,16 @@ export class HostedApi implements ComplyraApi {
       .is("deleted_at", null)
       .single();
     throwIf(error, "Monthly report not found.");
-    return { session, report: this.mapShiftNoteMonthlyReport(data as Record<string, unknown>) };
+    const report = this.mapShiftNoteMonthlyReport(data as Record<string, unknown>);
+    // Enforce per-Individual access (can_read_individual RLS); has_agency alone
+    // is agency-wide and would leak PHI to site-scoped staff.
+    const { error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", report.individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    return { session, report };
   }
 
   async getShiftNotesForMonth(
@@ -2288,6 +2297,13 @@ export class HostedApi implements ComplyraApi {
       .single();
     throwIf(personError, "Individual not found.");
     void person;
+    // note_date is a Postgres `date`; `${monthKey}-32` is an invalid calendar
+    // date and errors the query. Bound with the first day of the next month.
+    const [year, month] = monthKey.split("-").map(Number);
+    const nextMonthStart =
+      month === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(month + 1).padStart(2, "0")}-01`;
     const { data: noteRows, error: noteError } = await this.client
       .from("shift_notes")
       .select("*")
@@ -2295,7 +2311,7 @@ export class HostedApi implements ComplyraApi {
       .eq("individual_id", individualId)
       .is("deleted_at", null)
       .gte("note_date", `${monthKey}-01`)
-      .lt("note_date", `${monthKey}-32`)
+      .lt("note_date", nextMonthStart)
       .order("note_date", { ascending: true })
       .order("created_at", { ascending: true });
     throwIf(noteError, "Could not load shift notes.");
@@ -2384,6 +2400,14 @@ export class HostedApi implements ComplyraApi {
     if (!canSeeShiftNotes(session.roleKey) && !canConfigureIspTasks(session.roleKey)) {
       throw new Error("You do not have access to shift notes.");
     }
+    // Enforce per-Individual access (can_read_individual RLS); has_agency alone
+    // is agency-wide and would leak PHI to site-scoped staff.
+    const { error: personError } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
     const { data, error } = await this.client
       .from("shift_note_monthly_reports")
       .select("*")

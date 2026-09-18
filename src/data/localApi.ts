@@ -1559,6 +1559,10 @@ async function hydrate() {
       // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
       browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
       browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
+      // Issue #96: monthly reports collection is queried on chart mount; older
+      // stored DBs (saved after shift notes but before this) lack it.
+      browserStore.db.shiftNoteMonthlyReports =
+        browserStore.db.shiftNoteMonthlyReports ?? [];
       seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
