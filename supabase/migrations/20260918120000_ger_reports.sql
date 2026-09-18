@@ -4,8 +4,9 @@
 --   draft → submitted → approved | returned → submitted (resubmit after
 --   corrections). Approved reports are final — the app locks their body.
 --
--- This migration is included in the repository but intentionally NOT applied
--- yet (part of the GER reporting PR; applied when the feature ships).
+-- This migration is applied with the GER reporting feature.  The following
+-- hardening migration removes direct write policies and replaces them with
+-- security-definer workflow RPCs before release.
 
 create table public.ger_reports (
   id uuid primary key default gen_random_uuid(),
