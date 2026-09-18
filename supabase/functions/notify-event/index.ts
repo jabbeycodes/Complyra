@@ -54,6 +54,8 @@ const NOTIFICATION_TYPES = [
   "certificate.expiring",
   "certificate.expired",
   "med.low_stock",
+  "med.dose_refused",
+  "med.concern_flagged",
   "checklist.assigned",
   "checklist.late",
   "checklist.missed",

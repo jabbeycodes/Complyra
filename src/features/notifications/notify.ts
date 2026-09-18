@@ -23,6 +23,8 @@ export type NotificationType =
   | "certificate.expiring"
   | "certificate.expired"
   | "med.low_stock"
+  | "med.dose_refused"
+  | "med.concern_flagged"
   | "checklist.assigned"
   | "checklist.late"
   | "checklist.missed"
@@ -54,6 +56,8 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "certificate.expiring",
   "certificate.expired",
   "med.low_stock",
+  "med.dose_refused",
+  "med.concern_flagged",
   "checklist.assigned",
   "checklist.late",
   "checklist.missed",
@@ -210,6 +214,8 @@ export const NOTIFICATION_META: Record<
   "certificate.expiring": { status: "expiring", label: "Certificate expiring" },
   "certificate.expired": { status: "expired", label: "Certificate expired" },
   "med.low_stock": { status: "expiring", label: "Medication low stock" },
+  "med.dose_refused": { status: "late", label: "Dose refused/omitted" },
+  "med.concern_flagged": { status: "late", label: "Medication concern flagged" },
   "checklist.assigned": { status: "pending", label: "Checklist assigned" },
   "checklist.late": { status: "late", label: "Checklist late" },
   "checklist.missed": { status: "missing", label: "Checklist missed" },
@@ -365,6 +371,78 @@ export function medLowStockPayload(input: {
     entityType: "med_inventory",
     entityId: input.medId,
     dedupeKey: dedupeKeyFor("med.low_stock", input.medId),
+  };
+}
+
+/** Issue #100 — a MAR dose was refused/omitted/held: the charge nurse is notified. */
+export function medDoseRefusedPayload(input: {
+  agencyId: string;
+  roleKey?: string | null;
+  userId?: string | null;
+  medId: string;
+  medName: string;
+  individualId: string;
+  status: "refused" | "omitted" | "held";
+  administeredOn: string;
+  timeSlot: string;
+  reason: string;
+  initials: string;
+}): NotificationPayload {
+  const statusLabel =
+    input.status === "refused"
+      ? "refused"
+      : input.status === "omitted"
+        ? "omitted"
+        : "held";
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey ?? null,
+    userId: input.userId ?? null,
+    type: "med.dose_refused",
+    title: "Dose refused/omitted",
+    body: `The ${input.timeSlot} dose of ${input.medName} on ${input.administeredOn} was ${statusLabel} by ${input.initials}. Reason: ${input.reason}`,
+    deepLink: `/meds/${input.medId}`,
+    entityType: "medication",
+    entityId: input.medId,
+    dedupeKey: dedupeKeyFor(
+      "med.dose_refused",
+      input.medId,
+      input.administeredOn,
+      input.timeSlot,
+      input.userId ?? input.roleKey ?? "broadcast",
+    ),
+  };
+}
+
+/** Issue #100 — a medication error or adverse reaction was flagged: the nurse is notified. */
+export function medConcernFlaggedPayload(input: {
+  agencyId: string;
+  roleKey?: string | null;
+  userId?: string | null;
+  medId: string;
+  medName: string;
+  individualId: string;
+  concernId: string;
+  concernType: "med_error" | "adverse_reaction";
+  description: string;
+}): NotificationPayload {
+  const kindLabel =
+    input.concernType === "med_error" ? "medication error" : "adverse reaction";
+  return {
+    agencyId: input.agencyId,
+    roleKey: input.roleKey ?? null,
+    userId: input.userId ?? null,
+    type: "med.concern_flagged",
+    title: "Medication concern flagged",
+    body: `A ${kindLabel} was flagged for ${input.medName}: ${input.description}`,
+    deepLink: `/meds/${input.medId}`,
+    entityType: "mar_concern",
+    entityId: input.concernId,
+    dedupeKey: dedupeKeyFor(
+      "med.concern_flagged",
+      input.concernId,
+      input.userId ?? input.roleKey ?? "broadcast",
+    ),
   };
 }
 

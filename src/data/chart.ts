@@ -1,4 +1,5 @@
 import type { ObligationItem, ObligationView } from "./planStack";
+import type { MedicationMarConfig } from "./mar";
 
 export type ChartFileKind = "renewal" | "discontinue" | "training" | "other";
 
@@ -26,6 +27,8 @@ export interface Medication {
   remainingPills: number;
   lastDeliveryOn: string | null;
   lastCountdownOn: string | null;
+  /** Issue #100 — MAR configuration (dosage form, time slots, prescriber...). */
+  marConfig?: MedicationMarConfig | null;
 }
 
 export interface MedicationDelivery {
@@ -35,6 +38,8 @@ export interface MedicationDelivery {
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;
+  /** Issue #100 — reason for a manual count adjustment. */
+  note?: string;
 }
 
 export interface TrainingLine {

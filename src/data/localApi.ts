@@ -375,6 +375,28 @@ import {
   legacyTrainingDocId,
   trainingChecklistDocId,
 } from "../features/signatures/documentPayloads";
+import type {
+  MarAdministration,
+  MarConcern,
+  MarPrnLog,
+  MedicationMarView,
+  NewMarAdministrationInput,
+  NewMarConcernInput,
+  NewMedicationInput,
+  NewPrnAdministrationInput,
+} from "./mar";
+import {
+  canConfigureMar,
+  canRecordMarAdministration,
+  canResolveMarConcern,
+  defaultMarConfig,
+  initialsForName,
+  medicationMarView,
+  validateMarAdministration,
+  validateMarConcern,
+  validateMedicationInput,
+  validatePrnAdministration,
+} from "./mar";
 
 const META_KEY = "complyra-v2-meta";
 const FILE_PREFIX = "complyra-v2-file:";
@@ -589,6 +611,8 @@ export interface ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    /** Issue #100 — reason for a manual count adjustment (audit-logged). */
+    note?: string;
   }): Promise<void>;
   logPrnDose(medicationId: string, pills?: number): Promise<void>;
   signTrainingChecklist(
@@ -869,6 +893,45 @@ export interface ComplyraApi {
    * are new rows, never edits) and the reason is written to the audit trail.
    */
   addMedDoseException(input: AddMedDoseExceptionInput): Promise<void>;
+  // ===== Issue #100 MAR API (medication list + monthly administration grid) =====
+  /**
+   * Add a medication with full MAR configuration. Gated to staff who
+   * configure the MAR (nurse / administrator / compliance_admin /
+   * program_manager); every change is audit-logged.
+   */
+  addMedication(input: NewMedicationInput): Promise<string>;
+  updateMedication(id: string, input: Partial<NewMedicationInput>): Promise<void>;
+  discontinueMedication(id: string, discontinuedOn: string): Promise<void>;
+  /** Upload the physician order PDF for a medication (wires the existing chart file upload). */
+  uploadMedicationOrderAttachment(input: {
+    medicationId: string;
+    file: File;
+  }): Promise<void>;
+  getMedicationOrderAttachment(
+    medicationId: string,
+  ): Promise<{ blob: Blob; name: string } | null>;
+  /** One Individual's MAR data for a month ("YYYY-MM"). */
+  getMarMonth(
+    individualId: string,
+    monthKey: string,
+  ): Promise<{
+    meds: MedicationMarView[];
+    administrations: MarAdministration[];
+    prnLogs: MarPrnLog[];
+    concerns: MarConcern[];
+  }>;
+  /**
+   * Record one administration at a scheduled time slot. Initials and the
+   * administering staff's name default from the signed-in session. Refused /
+   * omitted doses credit their pills back in the countdown and notify nurses.
+   */
+  recordMarAdministration(input: NewMarAdministrationInput): Promise<string>;
+  /** Record a PRN administration (reason + effectiveness required by DMH). */
+  recordPrnAdministration(input: NewPrnAdministrationInput): Promise<string>;
+  /** Flag a medication error or adverse reaction; notifies the nurse. */
+  flagMarConcern(input: NewMarConcernInput): Promise<string>;
+  /** Resolve a flagged concern (nurse / supervisory roles). */
+  resolveMarConcern(id: string): Promise<void>;
   // ===== LIFEPATH-P7 API (mileage tracking) =====
   /** Monthly mileage log for one house (month as "YYYY-MM"). */
   listMileageTrips(
@@ -1953,6 +2016,10 @@ function ensurePlanCollections(store: MemoryStore) {
   store.db.chartFiles = store.db.chartFiles ?? [];
   store.db.medications = store.db.medications ?? [];
   store.db.medicationDeliveries = store.db.medicationDeliveries ?? [];
+  // Issue #100 (MAR): backfill for databases persisted before the MAR stores existed.
+  store.db.marAdministrations = store.db.marAdministrations ?? [];
+  store.db.marPrnLogs = store.db.marPrnLogs ?? [];
+  store.db.marConcerns = store.db.marConcerns ?? [];
   store.db.trainingChecklists = store.db.trainingChecklists ?? [];
   store.db.adaptiveEquipment = store.db.adaptiveEquipment ?? [];
   store.db.equipmentMonthLogs = store.db.equipmentMonthLogs ?? [];
@@ -4076,6 +4143,8 @@ export class LocalApi implements ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    /** Issue #100 — reason for a manual count adjustment (audit-logged). */
+    note?: string;
   }) {
     const session = assertSession(this.store);
     if (!canRecordDelivery(session.roleKey)) {
@@ -4096,6 +4165,7 @@ export class LocalApi implements ComplyraApi {
     med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
     med.lastDeliveryOn = countedOn;
     med.lastCountdownOn = countedOn;
+    const note = input.note?.trim() ?? "";
     this.store.db.medicationDeliveries.push({
       id: crypto.randomUUID(),
       medicationId: med.id,
@@ -4103,12 +4173,13 @@ export class LocalApi implements ComplyraApi {
       remainingPills: med.remainingPills,
       pillsPerDay: med.pillsPerDay,
       recordedBy: session.userId,
+      note,
     });
     log(
       this.store,
       session,
-      "medication.delivery",
-      `${session.fullName} counted ${med.name} at ${med.remainingPills} pills`,
+      note ? "medication.delivery_adjusted" : "medication.delivery",
+      `${session.fullName} counted ${med.name} at ${med.remainingPills} pills${note ? `: ${note}` : ""}`,
       "medication",
       med.id,
     );
@@ -6923,6 +6994,11 @@ export class LocalApi implements ComplyraApi {
           doseExceptions: this.p6doseExceptions().filter(
             (exception) => exception.medicationId === med.id,
           ),
+          // Issue #100: non-given MAR administrations credit their pills back,
+          // so the countdown (and site-tab supply alerts) reflects real use.
+          administrations: this.marRows().filter(
+            (row) => row.medicationId === med.id,
+          ),
           today,
         }),
       )
@@ -7063,6 +7139,461 @@ export class LocalApi implements ComplyraApi {
       "medication.dose_exception",
       `${session.fullName} logged a ${validated.kind} dose exception for ${med.name} (${validated.pillsAffected} pill${validated.pillsAffected === 1 ? "" : "s"}): ${validated.reason}`,
       "med_dose_exception",
+      row.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  // ===== Issue #100 MAR IMPL (medication list + monthly administration grid) =====
+  // All rows are insert-only: corrections are new rows, never edits (matching
+  // the med_dose_exceptions convention).
+
+  private marRows(): MarAdministration[] {
+    this.store.db.marAdministrations ??= [];
+    return this.store.db.marAdministrations;
+  }
+
+  private marPrnRows(): MarPrnLog[] {
+    this.store.db.marPrnLogs ??= [];
+    return this.store.db.marPrnLogs;
+  }
+
+  private marConcernRows(): MarConcern[] {
+    this.store.db.marConcerns ??= [];
+    return this.store.db.marConcerns;
+  }
+
+  private marMedicationOrThrow(medicationId: string) {
+    const session = assertSession(this.store);
+    const med = this.store.db.medications.find(
+      (row) => row.id === medicationId && row.agencyId === session.agencyId,
+    );
+    if (!med) throw new Error("Medication not found.");
+    accessibleIndividual(this.store, session, med.individualId);
+    return { session, med };
+  }
+
+  private async marNotify(
+    session: SessionUser,
+    individualId: string,
+    build: (recipient: { userId?: string; roleKey?: string }) => import("../features/notifications/notify").NotificationPayload,
+  ) {
+    const db = this.store.db;
+    const person = db.individuals.find((row) => row.id === individualId);
+    // Nurses of the agency, plus the house manager(s) of the individual's site.
+    const recipients: Array<{ userId?: string; roleKey?: string }> = [{ roleKey: "nurse" }];
+    if (person) {
+      for (const membership of db.memberships ?? []) {
+        if (
+          membership.agencyId !== session.agencyId ||
+          membership.roleKey !== "house_manager" ||
+          membership.siteId !== person.siteId
+        ) {
+          continue;
+        }
+        if (recipients.some((r) => r.userId === membership.userId)) continue;
+        recipients.push({ userId: membership.userId });
+      }
+      // Fallback: some workspaces (including the demo) title the house manager
+      // as an administrator profile while their job title remains
+      // "House Manager" — e.g. Sarah Mitchell at Cedar House. Reach the acting
+      // HM by job title + site assignment so MAR safety alerts never go silent.
+      const assignedUserIds = new Set(
+        (db.assignments ?? [])
+          .filter((a) => a.agencyId === session.agencyId && a.siteId === person.siteId)
+          .map((a) => a.userId),
+      );
+      for (const profile of db.profiles ?? []) {
+        if (profile.homeAgencyId !== session.agencyId) continue;
+        if ((profile.jobTitle ?? "").trim().toLowerCase() !== "house manager") continue;
+        if (!assignedUserIds.has(profile.id)) continue;
+        if (recipients.some((r) => r.userId === profile.id)) continue;
+        recipients.push({ userId: profile.id });
+      }
+    }
+    for (const recipient of recipients) {
+      this.queueMarNotificationLocal(build(recipient));
+    }
+  }
+
+  private queueMarNotificationLocal(payload: import("../features/notifications/notify").NotificationPayload) {
+    const db = this.store.db;
+    const dedupeKey = payload.dedupeKey ?? crypto.randomUUID();
+    if (db.notifications.some((n) => n.dedupeKey === dedupeKey)) return;
+    db.notifications.push({
+      id: crypto.randomUUID(),
+      agencyId: payload.agencyId,
+      userId: payload.userId ?? null,
+      roleKey: payload.roleKey ?? null,
+      type: payload.type,
+      title: payload.title,
+      body: payload.body,
+      deepLink: payload.deepLink,
+      entityType: payload.entityType ?? null,
+      entityId: payload.entityId ?? null,
+      dedupeKey,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    });
+  }
+
+  async addMedication(input: NewMedicationInput): Promise<string> {
+    const session = assertSession(this.store);
+    if (!canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const validated = validateMedicationInput(input);
+    const person = this.store.db.individuals.find(
+      (row) => row.id === validated.individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
+    const id = crypto.randomUUID();
+    this.store.db.medications.push({
+      id,
+      agencyId: session.agencyId,
+      individualId: person.id,
+      name: validated.name,
+      strength: validated.strength,
+      kind: validated.kind,
+      controlled: validated.controlled ?? false,
+      pillsPerDay: validated.kind === "prn" ? 0 : validated.pillsPerDay,
+      remainingPills: validated.remainingPills,
+      lastDeliveryOn: todayIso(),
+      lastCountdownOn: todayIso(),
+      marConfig: validated.config,
+    });
+    log(
+      this.store,
+      session,
+      "medication.added",
+      `${session.fullName} added ${validated.name} ${validated.strength} to the MAR`,
+      "medication",
+      id,
+    );
+    await persistMeta(this.store);
+    return id;
+  }
+
+  async updateMedication(id: string, input: Partial<NewMedicationInput>) {
+    const { session, med } = this.marMedicationOrThrow(id);
+    if (!canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const current = medicationMarView(med);
+    const merged: NewMedicationInput = {
+      individualId: med.individualId,
+      name: input.name ?? med.name,
+      strength: input.strength ?? med.strength,
+      kind: input.kind ?? med.kind,
+      controlled: input.controlled ?? med.controlled,
+      pillsPerDay: input.pillsPerDay ?? med.pillsPerDay,
+      remainingPills: input.remainingPills ?? med.remainingPills,
+      config: { ...current.mar, ...(input.config ?? {}) },
+    };
+    const validated = validateMedicationInput(merged);
+    med.name = validated.name;
+    med.strength = validated.strength;
+    med.kind = validated.kind;
+    med.controlled = validated.controlled ?? false;
+    med.pillsPerDay = validated.kind === "prn" ? 0 : validated.pillsPerDay;
+    med.remainingPills = validated.remainingPills;
+    med.marConfig = validated.config;
+    log(
+      this.store,
+      session,
+      "medication.updated",
+      `${session.fullName} updated ${med.name} on the MAR`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async discontinueMedication(id: string, discontinuedOn: string) {
+    const { session, med } = this.marMedicationOrThrow(id);
+    if (!canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const on = discontinuedOn.slice(0, 10);
+    assertCalendarDate(on, "Use a valid discontinued date.");
+    if (on > todayIso()) throw new Error("The discontinued date cannot be in the future.");
+    med.marConfig = {
+      ...defaultMarConfig(),
+      ...(med.marConfig ?? {}),
+      status: "discontinued",
+      discontinuedOn: on,
+    };
+    log(
+      this.store,
+      session,
+      "medication.discontinued",
+      `${session.fullName} discontinued ${med.name} as of ${on}`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async uploadMedicationOrderAttachment(input: { medicationId: string; file: File }) {
+    const { session, med } = this.marMedicationOrThrow(input.medicationId);
+    if (!canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const file = input.file;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      throw new Error("Attach the physician order as a PDF.");
+    }
+    const id = crypto.randomUUID();
+    const storagePath = `${session.agencyId}/${med.individualId}/med-order/${med.id}/${id}/${file.name}`;
+    await persistFile(storagePath, file);
+    med.marConfig = {
+      ...defaultMarConfig(),
+      ...(med.marConfig ?? {}),
+      orderAttachment: { path: storagePath, name: file.name },
+    };
+    log(
+      this.store,
+      session,
+      "medication.order_attached",
+      `${session.fullName} attached the physician order for ${med.name}`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async getMedicationOrderAttachment(medicationId: string) {
+    const { med } = this.marMedicationOrThrow(medicationId);
+    const attachment = med.marConfig?.orderAttachment;
+    if (!attachment) return null;
+    const blob = await readFile(attachment.path);
+    if (!blob) return null;
+    return { blob, name: attachment.name };
+  }
+
+  async getMarMonth(individualId: string, monthKey: string) {
+    const session = assertSession(this.store);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+      throw new Error("Use a valid month (YYYY-MM).");
+    }
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    accessibleIndividual(this.store, session, person.id);
+    const meds = this.store.db.medications
+      .filter((row) => row.individualId === individualId)
+      .map(medicationMarView);
+    const monthStart = `${monthKey}-01`;
+    const daysInMonth = new Date(
+      Number(monthKey.slice(0, 4)),
+      Number(monthKey.slice(5, 7)),
+      0,
+    ).getDate();
+    const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+    const administrations = this.marRows().filter(
+      (row) =>
+        row.individualId === individualId &&
+        row.administeredOn >= monthStart &&
+        row.administeredOn <= monthEnd,
+    );
+    const prnLogs = this.marPrnRows().filter((row) => {
+      if (row.individualId !== individualId) return false;
+      const on = row.givenAt.slice(0, 10);
+      return on >= monthStart && on <= monthEnd;
+    });
+    const concerns = this.marConcernRows().filter(
+      (row) => row.individualId === individualId,
+    );
+    return { meds, administrations, prnLogs, concerns };
+  }
+
+  async recordMarAdministration(input: NewMarAdministrationInput): Promise<string> {
+    const { session, med } = this.marMedicationOrThrow(input.medicationId);
+    if (!canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds record administrations.");
+    }
+    const view = medicationMarView(med);
+    if (med.kind !== "scheduled") {
+      throw new Error("Use the PRN log for PRN medications.");
+    }
+    const validated = validateMarAdministration(
+      {
+        ...input,
+        initials: input.initials.trim() || initialsForName(session.fullName),
+      },
+      view.mar.beginAt?.slice(0, 10) ?? null,
+    );
+    const duplicate = this.marRows().some(
+      (row) =>
+        row.medicationId === med.id &&
+        row.administeredOn === validated.administeredOn &&
+        row.timeSlot === validated.timeSlot,
+    );
+    if (duplicate) {
+      throw new Error("That time slot is already recorded for this medication.");
+    }
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.marRows().push({
+      id,
+      agencyId: session.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      administeredOn: validated.administeredOn,
+      timeSlot: validated.timeSlot,
+      pillsGiven: validated.pillsGiven,
+      status: validated.status,
+      initials: validated.initials,
+      administeredByName: session.fullName,
+      administeredByUserId: session.userId,
+      reason: validated.reason,
+      notifyNurse: validated.notifyNurse,
+      createdAt: now,
+    });
+    log(
+      this.store,
+      session,
+      "medication.administered",
+      `${session.fullName} recorded ${med.name} ${validated.timeSlot} on ${validated.administeredOn}: ${validated.status}${validated.reason ? ` — ${validated.reason}` : ""}`,
+      "mar_administration",
+      id,
+    );
+    await persistMeta(this.store);
+    if (
+      validated.status !== "given" &&
+      (validated.notifyNurse || validated.status === "refused" || validated.status === "omitted")
+    ) {
+      const { medDoseRefusedPayload } = await import("../features/notifications/notify");
+      const notifyStatus = validated.status; // narrowed: "refused" | "omitted" | "held"
+      await this.marNotify(session, med.individualId, (recipient) =>
+        medDoseRefusedPayload({
+          agencyId: session.agencyId,
+          ...recipient,
+          medId: med.id,
+          medName: med.name,
+          individualId: med.individualId,
+          status: notifyStatus,
+          administeredOn: validated.administeredOn,
+          timeSlot: validated.timeSlot,
+          reason: validated.reason,
+          initials: validated.initials,
+        }),
+      );
+      await persistMeta(this.store);
+    }
+    return id;
+  }
+
+  async recordPrnAdministration(input: NewPrnAdministrationInput): Promise<string> {
+    const { session, med } = this.marMedicationOrThrow(input.medicationId);
+    if (!canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds record PRN doses.");
+    }
+    if (med.kind !== "prn") {
+      throw new Error("Only PRN medications accept PRN logs.");
+    }
+    const validated = validatePrnAdministration(input);
+    if (!Number.isFinite(validated.pillsGiven) || validated.pillsGiven > med.remainingPills) {
+      throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    }
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.marPrnRows().push({
+      id,
+      agencyId: session.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      givenAt: validated.givenAt,
+      pillsGiven: validated.pillsGiven,
+      reasonGiven: validated.reasonGiven,
+      effectiveness: validated.effectiveness,
+      initials: validated.initials?.trim() || initialsForName(session.fullName),
+      administeredByName: session.fullName,
+      createdAt: now,
+    });
+    // Local backend decrements the medication row directly (same convention
+    // as logPrnDose): the projection then anchors on the row count.
+    med.remainingPills = Math.max(0, med.remainingPills - validated.pillsGiven);
+    log(
+      this.store,
+      session,
+      "medication.prn_administered",
+      `${session.fullName} gave PRN ${med.name} ${validated.pillsGiven} pill${validated.pillsGiven === 1 ? "" : "s"}: ${validated.reasonGiven} — ${validated.effectiveness}`,
+      "mar_prn_log",
+      id,
+    );
+    await persistMeta(this.store);
+    return id;
+  }
+
+  async flagMarConcern(input: NewMarConcernInput): Promise<string> {
+    const { session, med } = this.marMedicationOrThrow(input.medicationId);
+    if (!canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds flag concerns.");
+    }
+    const validated = validateMarConcern(input);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.marConcernRows().push({
+      id,
+      agencyId: session.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      administrationId: validated.administrationId,
+      prnLogId: validated.prnLogId,
+      concernType: validated.concernType,
+      description: validated.description,
+      initials: validated.initials,
+      flaggedByName: session.fullName,
+      nurseNotified: true,
+      resolvedAt: null,
+      createdAt: now,
+    });
+    log(
+      this.store,
+      session,
+      "medication.concern_flagged",
+      `${session.fullName} flagged a ${validated.concernType === "med_error" ? "medication error" : "adverse reaction"} for ${med.name}: ${validated.description}`,
+      "mar_concern",
+      id,
+    );
+    const { medConcernFlaggedPayload } = await import("../features/notifications/notify");
+    await this.marNotify(session, med.individualId, (recipient) =>
+      medConcernFlaggedPayload({
+        agencyId: session.agencyId,
+        ...recipient,
+        medId: med.id,
+        medName: med.name,
+        individualId: med.individualId,
+        concernId: id,
+        concernType: validated.concernType,
+        description: validated.description,
+      }),
+    );
+    await persistMeta(this.store);
+    return id;
+  }
+
+  async resolveMarConcern(id: string) {
+    const session = assertSession(this.store);
+    if (!canResolveMarConcern(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager resolves concerns.");
+    }
+    const row = this.marConcernRows().find(
+      (concern) => concern.id === id && concern.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("Concern not found.");
+    accessibleIndividual(this.store, session, row.individualId);
+    row.resolvedAt = new Date().toISOString();
+    const med = this.store.db.medications.find((m) => m.id === row.medicationId);
+    log(
+      this.store,
+      session,
+      "medication.concern_resolved",
+      `${session.fullName} resolved the ${row.concernType === "med_error" ? "medication error" : "adverse reaction"} flag for ${med?.name ?? "a medication"}`,
+      "mar_concern",
       row.id,
     );
     await persistMeta(this.store);

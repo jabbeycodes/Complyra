@@ -19,6 +19,7 @@ import {
   GraduationCap,
   Pill,
   RefreshCw,
+  Siren,
   X,
 } from "lucide-react";
 import type { NotificationType } from "./notify";
@@ -40,6 +41,9 @@ function iconForType(type: NotificationType) {
       return FileWarning;
     case "med.low_stock":
       return Pill;
+    case "med.dose_refused":
+    case "med.concern_flagged":
+      return Siren;
     case "checklist.assigned":
       return Clock;
     case "checklist.late":

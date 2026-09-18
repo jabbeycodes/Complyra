@@ -8,6 +8,10 @@
  */
 import { daysBetween, todayIso, type Medication, type MedicationDelivery } from "./chart";
 import {
+  creditedBackForAdministrations,
+  type MarAdministration,
+} from "./mar";
+import {
   DEFAULT_MED_LOW_THRESHOLD_DAYS,
   type AddMedDoseExceptionInput,
   type DoseExceptionKind,
@@ -34,6 +38,13 @@ export interface ProjectInventoryInput {
   dosesLogged?: Array<{ date: string; pills: number }>;
   /** Refused / held / wasted dose exceptions in the window: their pills are subtracted. */
   doseExceptions?: Array<{ date: string; pills: number }>;
+  /**
+   * Issue #100 — credited-back pills: refused / omitted / held MAR
+   * administrations whose pills were NOT consumed. The deterministic
+   * projection assumes scheduled days consume pills, so these are credited
+   * back. Dated outside [deliveredOn, today] are ignored.
+   */
+  creditedBack?: Array<{ date: string; pills: number }>;
   /** Days of doses remaining that trigger a reorder alert. */
   lowThresholdDays?: number;
   /** ISO date the reorder alert was last acknowledged, if any. */
@@ -55,8 +66,10 @@ export interface InventoryProjection {
  * Scheduled meds drop by dosesPerDay for each full calendar day since the
  * delivery-day count. PRN meds never auto-drop; only logged PRN doses
  * decrement them. Refused / held / wasted dose exceptions subtract pills for
- * any med kind. Status: "out" at zero pills, "critical" at <= 2 days (or
- * <= 2 pills for PRN), "low" at or under the reorder threshold, else "ok".
+ * any med kind. Credited-back pills (refused / omitted / held MAR doses) are
+ * added back, since the scheduled drop assumed they were consumed. Status:
+ * "out" at zero pills, "critical" at <= 2 days (or <= 2 pills for PRN), "low"
+ * at or under the reorder threshold, else "ok".
  */
 export function projectInventory(input: ProjectInventoryInput): InventoryProjection {
   const {
@@ -65,6 +78,7 @@ export function projectInventory(input: ProjectInventoryInput): InventoryProject
     today = todayIso(),
     dosesLogged = [],
     doseExceptions = [],
+    creditedBack = [],
     lowThresholdDays = DEFAULT_MED_LOW_THRESHOLD_DAYS,
     reorderAcknowledgedOn = null,
   } = input;
@@ -90,9 +104,19 @@ export function projectInventory(input: ProjectInventoryInput): InventoryProject
       exceptionUsed += exception.pills;
     }
   }
+  // Issue #100: refused / omitted / held MAR administrations credit their
+  // pills back — the scheduled drop assumed they were consumed, but the
+  // Individual never took them. Out-of-window credits are ignored.
+  let credited = 0;
+  for (const credit of creditedBack) {
+    const on = credit.date.slice(0, 10);
+    if (on >= deliveredOn && on <= today && credit.pills > 0) {
+      credited += credit.pills;
+    }
+  }
   const currentCount = Math.max(
     0,
-    Math.round((deliveryQty - scheduledUsed - prnUsed - exceptionUsed) * 100) / 100,
+    Math.round((deliveryQty - scheduledUsed - prnUsed - exceptionUsed + credited) * 100) / 100,
   );
   const daysRemaining = dosesPerDay > 0 ? Math.floor(currentCount / dosesPerDay) : null;
   const threshold = Math.max(1, Math.floor(lowThresholdDays));
@@ -121,6 +145,8 @@ export interface ProjectMedInventoryInput {
   prnDoses: Array<{ date: string; pills: number }>;
   /** Refused / held / wasted dose exceptions (subtracted from the forecast). */
   doseExceptions: MedDoseException[];
+  /** Issue #100 — MAR administrations; non-given ones credit pills back. */
+  administrations?: MarAdministration[];
   today?: string;
 }
 
@@ -143,21 +169,42 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
   const anchorPerDay = latest ? latest.pillsPerDay : med.pillsPerDay;
   const dosesPerDay = med.kind === "prn" ? 0 : anchorPerDay;
 
-  let deliveryQty = anchorQty;
-  let dosesLogged = med.kind === "prn" ? input.prnDoses : [];
-  if (med.kind === "prn" && dosesLogged.length === 0 && med.remainingPills < anchorQty) {
-    deliveryQty = med.remainingPills;
-  }
+  const dosesLogged = med.kind === "prn" ? input.prnDoses : [];
   const inWindow = dosesLogged.filter((dose) => {
     const on = dose.date.slice(0, 10);
     return on >= anchorDate.slice(0, 10) && on <= today;
   });
+
+  let deliveryQty = anchorQty;
+  if (med.kind === "prn" && !latest) {
+    // No delivery row (e.g. a freshly added PRN): med.remainingPills is the
+    // authoritative current count because both backends now decrement the row
+    // on every PRN dose. The per-dose logs are therefore already baked into the
+    // row, so rebuild the delivery-day quantity above them (current count plus
+    // the in-window doses) instead of subtracting the same doses a second time
+    // — otherwise each MAR PRN dose would be counted twice.
+    deliveryQty = anchorQty + inWindow.reduce((sum, dose) => sum + dose.pills, 0);
+  } else if (med.kind === "prn" && dosesLogged.length === 0 && med.remainingPills < anchorQty) {
+    deliveryQty = med.remainingPills;
+  }
   const inWindowExceptions = input.doseExceptions
     .filter((exception) => {
       const on = exception.occurredOn.slice(0, 10);
       return on >= anchorDate.slice(0, 10) && on <= today;
     })
     .map((exception) => ({ date: exception.occurredOn.slice(0, 10), pills: exception.pillsAffected }));
+  // Issue #100: non-given MAR administrations credit their pills back so the
+  // countdown (and the site-tab supply alerts built from it) reflects that
+  // the Individual never consumed those doses. This intentionally duplicates
+  // the creditedBackForAdministrations helper shape (pure, in-window) so the
+  // mapping stays beside the projection that consumes it.
+  const inWindowAdmins = (input.administrations ?? []).filter(
+    (row) =>
+      row.medicationId === med.id &&
+      row.administeredOn.slice(0, 10) >= anchorDate.slice(0, 10) &&
+      row.administeredOn.slice(0, 10) <= today,
+  );
+  const credits = creditedBackForAdministrations(inWindowAdmins);
 
   const projection = projectInventory({
     deliveryQty,
@@ -166,6 +213,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
     today,
     dosesLogged: inWindow,
     doseExceptions: inWindowExceptions,
+    creditedBack: credits,
     lowThresholdDays: input.inventory?.lowThresholdDays ?? DEFAULT_MED_LOW_THRESHOLD_DAYS,
     reorderAcknowledgedOn: input.inventory?.reorderAcknowledgedOn ?? null,
   });
@@ -263,6 +311,41 @@ export function inventoryCountdownLabel(view: MedInventoryView): string {
   const pills = `${view.currentCount} pill${view.currentCount === 1 ? "" : "s"} remaining`;
   if (view.kind === "prn" || view.daysRemaining === null) return `${pills} · PRN`;
   return `${pills} · ~${view.daysRemaining} day${view.daysRemaining === 1 ? "" : "s"} left`;
+}
+
+/**
+ * Supply-specific badge label. Pill-count supply is never "expired" — that
+ * word is reserved for actual order/lifecycle expiry. A stocked PRN med
+ * reads "Stocked", never "Expired".
+ */
+export function medSupplyStatusLabel(status: MedInventoryStatus): string {
+  switch (status) {
+    case "ok":
+      return "Stocked";
+    case "low":
+      return "Reorder soon";
+    case "critical":
+      return "Reorder now";
+    case "out":
+      return "Out of stock";
+  }
+}
+
+/** Supply-specific badge description (tooltip + screen-reader context). */
+export function medSupplyStatusDescription(
+  status: MedInventoryStatus,
+  reorderPointPills: number,
+): string {
+  switch (status) {
+    case "ok":
+      return "In stock — supply is above the reorder point.";
+    case "low":
+      return `Low stock — reorder at ${reorderPointPills} pills.`;
+    case "critical":
+      return "Critically low — reorder now.";
+    case "out":
+      return "Out of stock — no pills projected on hand. Reorder immediately.";
+  }
 }
 
 export interface ValidatedDoseExceptionInput {

@@ -446,6 +446,22 @@ export function edgeErrorFromBody(
 export class HostedApi implements ComplyraApi {
   constructor(private readonly client: SupabaseClient) {}
 
+  /**
+   * Issue #100: MAR tables only exist after the migration is applied.
+   * Queries that hit them degrade to [] instead of throwing.
+   */
+  private async safeMarRows(
+    fetch: () => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+  ): Promise<unknown[]> {
+    try {
+      const res = await fetch();
+      if (res.error) return [];
+      return res.data ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();
     const { data, error } = await this.client.from("notifications")
@@ -2766,6 +2782,8 @@ export class HostedApi implements ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    /** Issue #100 — reason for a manual count adjustment (audit-logged). */
+    note?: string;
   }) {
     const session = await this.requireSession();
     if (!canRecordDelivery(session.roleKey)) {
@@ -2793,6 +2811,34 @@ export class HostedApi implements ComplyraApi {
       p_daily: nextPillsPerDay, p_counted_on: countedOn,
     });
     throwIf(saveError, "Could not record the medication count.");
+    // Issue #100: store the adjustment reason on the delivery row the RPC
+    // just wrote (newest row for this medication + count date).
+    const note = input.note?.trim() ?? "";
+    if (note) {
+      const { data: latest } = await this.client
+        .from("medication_deliveries")
+        .select("id")
+        .eq("medication_id", med.id)
+        .eq("counted_on", countedOn)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const latestId = (latest as { id?: string } | null)?.id;
+      if (latestId) {
+        const { error: noteError } = await this.client
+          .from("medication_deliveries")
+          .update({ note })
+          .eq("id", latestId);
+        throwIf(noteError, "Count recorded, but the adjustment reason could not be saved.");
+      }
+      await this.audit(
+        session,
+        "medication.delivery_adjusted",
+        `${session.fullName} adjusted the ${med.name} count: ${note}`,
+        "medication",
+        med.id,
+      );
+    }
   }
 
   async logPrnDose(medicationId: string, pills = 1) {
@@ -7860,10 +7906,28 @@ export class HostedApi implements ComplyraApi {
         return [record.medicationId, record] as const;
       }),
     );
-    const { mapMedicationDelivery } = await import("./hostedMappers");
+    const { mapMedicationDelivery, mapMarAdministration } = await import("./hostedMappers");
     const deliveries = (
       (delRes.data ?? []) as Record<string, unknown>[]
     ).map((row) => mapMedicationDelivery(row));
+    // Issue #100: MAR administrations (may be [] when the migration is not
+    // yet applied). Non-given rows credit their pills back in the projection.
+    const marAdmRows = medIds.length
+      ? await this.safeMarRows(() =>
+          this.client
+            .from("mar_administrations")
+            .select("*")
+            .eq("agency_id", session.agencyId)
+            .in("medication_id", medIds),
+        )
+      : [];
+    const administrationsByMed = new Map<string, import("./mar").MarAdministration[]>();
+    for (const row of marAdmRows as Record<string, unknown>[]) {
+      const admin = mapMarAdministration(row);
+      const list = administrationsByMed.get(admin.medicationId) ?? [];
+      list.push(admin);
+      administrationsByMed.set(admin.medicationId, list);
+    }
     const prnByMed = new Map<string, Array<{ date: string; pills: number }>>();
     for (const row of (prnRes.data ?? []) as Record<string, unknown>[]) {
       const medId = row.medication_id as string;
@@ -7900,6 +7964,7 @@ export class HostedApi implements ComplyraApi {
           deliveries: deliveries.filter((row) => row.medicationId === med.id),
           prnDoses: prnByMed.get(med.id) ?? [],
           doseExceptions: excByMed.get(med.id) ?? [],
+          administrations: administrationsByMed.get(med.id) ?? [],
           today,
         }),
       )
@@ -8099,6 +8164,496 @@ export class HostedApi implements ComplyraApi {
       `${session.fullName} logged a ${validated.kind} dose exception for ${med.name} (${validated.pillsAffected} pill${validated.pillsAffected === 1 ? "" : "s"}): ${validated.reason}`,
       "med_dose_exception",
       (data as { id: string } | null)?.id,
+    );
+  }
+  // ===== Issue #100 MAR HOSTED (medication list + monthly administration grid) =====
+  // Direct table writes through RLS (the same roles the policies allow). The
+  // issue-#100 migration ships in this PR but is NOT applied yet: the
+  // administrations fetch degrades to [] until it is, so inventory keeps
+  // working either way.
+
+  private async marLib() {
+    return await import("./mar");
+  }
+
+  private async marMedicationOrThrow(medicationId: string) {
+    const session = await this.requireSession();
+    const { data: row, error } = await this.client
+      .from("medications")
+      .select("*")
+      .eq("id", medicationId)
+      .single();
+    throwIf(error, "Medication not found.");
+    const { mapMedication } = await import("./hostedMappers");
+    const med = mapMedication(row!);
+    if (med.agencyId !== session.agencyId) throw new Error("Medication not found.");
+    return { session, med };
+  }
+
+  /** Fire-and-forget med notification to nurses (+ role/user recipients). Never throws. */
+  private async marNotify(
+    session: SessionUser,
+    individualId: string,
+    build: (recipient: { userId?: string; roleKey?: string }) => import("../features/notifications/notify").NotificationPayload,
+  ) {
+    try {
+      // Nurses of the agency, plus the house manager(s) of the individual's site.
+      const { data: person } = await this.client
+        .from("individuals")
+        .select("site_id")
+        .eq("id", individualId)
+        .maybeSingle();
+      const siteId = (person as { site_id?: string } | null)?.site_id ?? null;
+      const recipients: Array<{ userId?: string; roleKey?: string }> = [{ roleKey: "nurse" }];
+      if (siteId) {
+        const { data: hmRows } = await this.client
+          .from("memberships")
+          .select("user_id")
+          .eq("agency_id", session.agencyId)
+          .eq("role_key", "house_manager")
+          .eq("site_id", siteId);
+        for (const row of (hmRows ?? []) as Array<{ user_id: string }>) {
+          if (recipients.some((r) => r.userId === row.user_id)) continue;
+          recipients.push({ userId: row.user_id });
+        }
+        // Fallback: some workspaces (including the demo) title the house manager
+        // as an administrator profile while their job title remains
+        // "House Manager" — e.g. Sarah Mitchell at Cedar House. Reach the acting
+        // HM by job title + site assignment so MAR safety alerts never go silent.
+        // Resolved through a SECURITY DEFINER RPC because assignments_select only
+        // exposes the recorder's OWN staff_assignments rows — a DSP or nurse (the
+        // typical MAR recorders) could never see the acting HM's site assignment
+        // with a direct table read, so the fallback would silently drop them.
+        const { data: hmRows2 } = await this.client.rpc("mar_site_house_managers", {
+          p_individual_id: individualId,
+        });
+        for (const row of (hmRows2 ?? []) as Array<{ user_id: string }>) {
+          if (recipients.some((r) => r.userId === row.user_id)) continue;
+          recipients.push({ userId: row.user_id });
+        }
+      }
+      for (const recipient of recipients) {
+        const payload = build(recipient);
+        const { error } = await this.client.functions.invoke("notify-event", {
+          body: {
+            agency_id: payload.agencyId,
+            user_id: payload.userId ?? null,
+            role_key: payload.roleKey ?? null,
+            type: payload.type,
+            title: payload.title,
+            body: payload.body,
+            deep_link: payload.deepLink,
+            entity_type: payload.entityType ?? null,
+            entity_id: payload.entityId ?? null,
+            dedupe_key: payload.dedupeKey ?? null,
+          },
+        });
+        if (error) console.warn("[mar] notify-event failed:", error.message);
+      }
+    } catch (err) {
+      console.warn("[mar] notify-event threw:", err);
+    }
+  }
+
+  async addMedication(input: import("./mar").NewMedicationInput): Promise<string> {
+    const session = await this.requireSession();
+    const mar = await this.marLib();
+    if (!mar.canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const validated = mar.validateMedicationInput(input);
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id,agency_id")
+      .eq("id", validated.individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    if ((person!.agency_id as string) !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const { marConfigColumns } = await import("./hostedMappers");
+    const { data, error } = await this.client
+      .from("medications")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: validated.individualId,
+        name: validated.name,
+        strength: validated.strength,
+        kind: validated.kind,
+        controlled: validated.controlled ?? false,
+        pills_per_day: validated.kind === "prn" ? 0 : validated.pillsPerDay,
+        remaining_pills: validated.remainingPills,
+        last_delivery_on: todayIso(),
+        last_countdown_on: todayIso(),
+        ...marConfigColumns(validated.config),
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not add the medication.");
+    const id = (data as { id: string }).id;
+    await this.audit(
+      session,
+      "medication.added",
+      `${session.fullName} added ${validated.name} ${validated.strength} to the MAR`,
+      "medication",
+      id,
+    );
+    return id;
+  }
+
+  async updateMedication(id: string, input: Partial<import("./mar").NewMedicationInput>) {
+    const { session, med } = await this.marMedicationOrThrow(id);
+    const mar = await this.marLib();
+    if (!mar.canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const current = mar.medicationMarView(med);
+    const validated = mar.validateMedicationInput({
+      individualId: med.individualId,
+      name: input.name ?? med.name,
+      strength: input.strength ?? med.strength,
+      kind: input.kind ?? med.kind,
+      controlled: input.controlled ?? med.controlled,
+      pillsPerDay: input.pillsPerDay ?? med.pillsPerDay,
+      remainingPills: input.remainingPills ?? med.remainingPills,
+      config: { ...current.mar, ...(input.config ?? {}) },
+    });
+    const { marConfigColumns } = await import("./hostedMappers");
+    const { error } = await this.client
+      .from("medications")
+      .update({
+        name: validated.name,
+        strength: validated.strength,
+        kind: validated.kind,
+        controlled: validated.controlled ?? false,
+        pills_per_day: validated.kind === "prn" ? 0 : validated.pillsPerDay,
+        remaining_pills: validated.remainingPills,
+        ...marConfigColumns(validated.config),
+      })
+      .eq("id", med.id);
+    throwIf(error, "Could not update the medication.");
+    await this.audit(
+      session,
+      "medication.updated",
+      `${session.fullName} updated ${med.name} on the MAR`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async discontinueMedication(id: string, discontinuedOn: string) {
+    const { session, med } = await this.marMedicationOrThrow(id);
+    const mar = await this.marLib();
+    if (!mar.canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    const on = discontinuedOn.slice(0, 10);
+    assertCalendarDate(on, "Use a valid discontinued date.");
+    if (on > todayIso()) throw new Error("The discontinued date cannot be in the future.");
+    const { error } = await this.client
+      .from("medications")
+      .update({ status: "discontinued", discontinued_on: on })
+      .eq("id", med.id);
+    throwIf(error, "Could not discontinue the medication.");
+    await this.audit(
+      session,
+      "medication.discontinued",
+      `${session.fullName} discontinued ${med.name} as of ${on}`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async uploadMedicationOrderAttachment(input: { medicationId: string; file: File }) {
+    const { session, med } = await this.marMedicationOrThrow(input.medicationId);
+    const mar = await this.marLib();
+    if (!mar.canConfigureMar(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager configures medications.");
+    }
+    this.requirePdfFile(input.file, "Attach the physician order as a PDF.");
+    const storagePath = `${session.agencyId}/${med.individualId}/med-order/${med.id}/${crypto.randomUUID()}/${input.file.name}`;
+    const { error: uploadError } = await this.client.storage
+      .from(CHART_BUCKET)
+      .upload(storagePath, input.file, { contentType: "application/pdf", upsert: false });
+    throwIf(uploadError, "Could not store the order attachment.");
+    const { error } = await this.client
+      .from("medications")
+      .update({
+        order_attachment_path: storagePath,
+        order_attachment_name: input.file.name,
+      })
+      .eq("id", med.id);
+    throwIf(error, "File stored, but the medication record could not be updated.");
+    await this.audit(
+      session,
+      "medication.order_attached",
+      `${session.fullName} attached the physician order for ${med.name}`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async getMedicationOrderAttachment(medicationId: string) {
+    const { med } = await this.marMedicationOrThrow(medicationId);
+    const attachment = med.marConfig?.orderAttachment;
+    if (!attachment) return null;
+    const { data: blob, error } = await this.client.storage
+      .from(CHART_BUCKET)
+      .download(attachment.path);
+    throwIf(error, "Could not open that order attachment.");
+    if (!blob) return null;
+    return { blob, name: attachment.name };
+  }
+
+  async getMarMonth(individualId: string, monthKey: string) {
+    const session = await this.requireSession();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+      throw new Error("Use a valid month (YYYY-MM).");
+    }
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id,agency_id")
+      .eq("id", individualId)
+      .single();
+    throwIf(personError, "Individual not found.");
+    if ((person!.agency_id as string) !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const mar = await this.marLib();
+    const { mapMedication, mapMarAdministration, mapMarPrnLog, mapMarConcern } =
+      await import("./hostedMappers");
+    const monthStart = `${monthKey}-01`;
+    const daysInMonth = new Date(
+      Number(monthKey.slice(0, 4)),
+      Number(monthKey.slice(5, 7)),
+      0,
+    ).getDate();
+    const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+    const medsRes = await this.client
+      .from("medications")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId);
+    throwIf(medsRes.error, "Could not load medications.");
+    const meds = ((medsRes.data ?? []) as Record<string, unknown>[]).map((row) =>
+      mar.medicationMarView(mapMedication(row)),
+    );
+    // Until the issue-#100 migration is applied these tables do not exist;
+    // degrade to empty arrays so the MAR shell still renders.
+    const [admRows, prnRows, concernRows] = await Promise.all([
+      this.safeMarRows(() =>
+        this.client
+          .from("mar_administrations")
+          .select("*")
+          .eq("agency_id", session.agencyId)
+          .eq("individual_id", individualId)
+          .gte("administered_on", monthStart)
+          .lte("administered_on", monthEnd),
+      ),
+      this.safeMarRows(() =>
+        this.client
+          .from("prn_dose_logs")
+          .select("*")
+          .eq("agency_id", session.agencyId)
+          .eq("individual_id", individualId)
+          .gte("logged_at", `${monthStart}T00:00:00`)
+          .lte("logged_at", `${monthEnd}T23:59:59`),
+      ),
+      this.safeMarRows(() =>
+        this.client.from("mar_concerns").select("*").eq("agency_id", session.agencyId).eq("individual_id", individualId),
+      ),
+    ]);
+    return {
+      meds,
+      administrations: (admRows as Record<string, unknown>[]).map(mapMarAdministration),
+      prnLogs: (prnRows as Record<string, unknown>[]).map(mapMarPrnLog),
+      concerns: (concernRows as Record<string, unknown>[]).map(mapMarConcern),
+    };
+  }
+
+  async recordMarAdministration(input: import("./mar").NewMarAdministrationInput): Promise<string> {
+    const { session, med } = await this.marMedicationOrThrow(input.medicationId);
+    const mar = await this.marLib();
+    if (!mar.canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds record administrations.");
+    }
+    if (med.kind !== "scheduled") {
+      throw new Error("Use the PRN log for PRN medications.");
+    }
+    const view = mar.medicationMarView(med);
+    const validated = mar.validateMarAdministration(
+      {
+        ...input,
+        initials: input.initials.trim() || mar.initialsForName(session.fullName),
+      },
+      view.mar.beginAt?.slice(0, 10) ?? null,
+    );
+    const { data, error } = await this.client
+      .from("mar_administrations")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        administered_on: validated.administeredOn,
+        time_slot: validated.timeSlot,
+        pills_given: validated.pillsGiven,
+        status: validated.status,
+        initials: validated.initials,
+        administered_by_name: session.fullName,
+        administered_by_user_id: session.userId,
+        reason: validated.reason,
+        notify_nurse: validated.notifyNurse,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      if (String(error.message ?? "").includes("duplicate") || String((error as { code?: string }).code) === "23505") {
+        throw new Error("That time slot is already recorded for this medication.");
+      }
+      throwIf(error, "Could not record the administration.");
+    }
+    const id = (data as { id: string }).id;
+    await this.audit(
+      session,
+      "medication.administered",
+      `${session.fullName} recorded ${med.name} ${validated.timeSlot} on ${validated.administeredOn}: ${validated.status}${validated.reason ? ` — ${validated.reason}` : ""}`,
+      "mar_administration",
+      id,
+    );
+    if (
+      validated.status !== "given" &&
+      (validated.notifyNurse || validated.status === "refused" || validated.status === "omitted")
+    ) {
+      const { medDoseRefusedPayload } = await import("../features/notifications/notify");
+      const notifyStatus = validated.status; // narrowed: "refused" | "omitted" | "held"
+      await this.marNotify(session, med.individualId, (recipient) =>
+        medDoseRefusedPayload({
+          agencyId: session.agencyId,
+          ...recipient,
+          medId: med.id,
+          medName: med.name,
+          individualId: med.individualId,
+          status: notifyStatus,
+          administeredOn: validated.administeredOn,
+          timeSlot: validated.timeSlot,
+          reason: validated.reason,
+          initials: validated.initials,
+        }),
+      );
+    }
+    return id;
+  }
+
+  async recordPrnAdministration(input: import("./mar").NewPrnAdministrationInput): Promise<string> {
+    const { session, med } = await this.marMedicationOrThrow(input.medicationId);
+    const mar = await this.marLib();
+    if (!mar.canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds record PRN doses.");
+    }
+    if (med.kind !== "prn") {
+      throw new Error("Only PRN medications accept PRN logs.");
+    }
+    const validated = mar.validatePrnAdministration(input);
+    if (!Number.isFinite(validated.pillsGiven) || validated.pillsGiven > med.remainingPills) {
+      throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    }
+    // Atomic RPC locks the medication row, re-checks the overdraw, decrements
+    // remaining_pills, and writes the richer PRN log in one transaction (the
+    // client cannot decrement medications directly under RLS).
+    const { data, error } = await this.client.rpc("record_prn_administration", {
+      p_medication_id: med.id,
+      p_pills: validated.pillsGiven,
+      p_reason_given: validated.reasonGiven,
+      p_effectiveness: validated.effectiveness,
+      p_initials: validated.initials?.trim() || mar.initialsForName(session.fullName),
+      p_administered_by_name: session.fullName,
+      p_given_at: validated.givenAt,
+    });
+    throwIf(error, "Could not record the PRN dose.");
+    const id = data as string;
+    await this.audit(
+      session,
+      "medication.prn_administered",
+      `${session.fullName} gave PRN ${med.name} ${validated.pillsGiven} pill${validated.pillsGiven === 1 ? "" : "s"}: ${validated.reasonGiven} — ${validated.effectiveness}`,
+      "mar_prn_log",
+      id,
+    );
+    return id;
+  }
+
+  async flagMarConcern(input: import("./mar").NewMarConcernInput): Promise<string> {
+    const { session, med } = await this.marMedicationOrThrow(input.medicationId);
+    const mar = await this.marLib();
+    if (!mar.canRecordMarAdministration(session.roleKey)) {
+      throw new Error("Only staff cleared to pass meds flag concerns.");
+    }
+    const validated = mar.validateMarConcern(input);
+    const { data, error } = await this.client
+      .from("mar_concerns")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        administration_id: validated.administrationId,
+        prn_log_id: validated.prnLogId,
+        concern_type: validated.concernType,
+        description: validated.description,
+        initials: validated.initials,
+        flagged_by_name: session.fullName,
+        flagged_by_user_id: session.userId,
+        nurse_notified: true,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not flag the concern.");
+    const id = (data as { id: string }).id;
+    await this.audit(
+      session,
+      "medication.concern_flagged",
+      `${session.fullName} flagged a ${validated.concernType === "med_error" ? "medication error" : "adverse reaction"} for ${med.name}: ${validated.description}`,
+      "mar_concern",
+      id,
+    );
+    const { medConcernFlaggedPayload } = await import("../features/notifications/notify");
+    await this.marNotify(session, med.individualId, (recipient) =>
+      medConcernFlaggedPayload({
+        agencyId: session.agencyId,
+        ...recipient,
+        medId: med.id,
+        medName: med.name,
+        individualId: med.individualId,
+        concernId: id,
+        concernType: validated.concernType,
+        description: validated.description,
+      }),
+    );
+    return id;
+  }
+
+  async resolveMarConcern(id: string) {
+    const session = await this.requireSession();
+    const mar = await this.marLib();
+    if (!mar.canResolveMarConcern(session.roleKey)) {
+      throw new Error("A nurse, administrator, compliance admin, or program manager resolves concerns.");
+    }
+    const { data: row, error } = await this.client
+      .from("mar_concerns")
+      .select("id,agency_id,medication_id")
+      .eq("id", id)
+      .single();
+    throwIf(error, "Concern not found.");
+    if ((row!.agency_id as string) !== session.agencyId) throw new Error("Concern not found.");
+    const { error: updateError } = await this.client
+      .from("mar_concerns")
+      .update({ resolved_at: new Date().toISOString() })
+      .eq("id", id);
+    throwIf(updateError, "Could not resolve the concern.");
+    await this.audit(
+      session,
+      "medication.concern_resolved",
+      `${session.fullName} resolved a flagged medication concern`,
+      "mar_concern",
+      id,
     );
   }
   // ===== LIFEPATH-P7 HOSTED (mileage tracking) =====

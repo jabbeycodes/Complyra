@@ -43,6 +43,11 @@ import {
   type MedicationDelivery,
   type TrainingChecklist,
 } from "./chart";
+import {
+  type MarAdministration,
+  type MarConcern,
+  type MarPrnLog,
+} from "./mar";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES, type AgencyRole } from "./permissions";
 import {
@@ -109,6 +114,11 @@ export interface LocalDatabase {
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
   medDoseExceptions: MedDoseException[];
+  // Issue #100 (MAR): administrations, PRN logs, and concern flags accrue
+  // through the MAR home after go-live.
+  marAdministrations: MarAdministration[];
+  marPrnLogs: MarPrnLog[];
+  marConcerns: MarConcern[];
   trainingChecklists: TrainingChecklist[];
   adaptiveEquipment: AdaptiveEquipment[];
   equipmentMonthLogs: EquipmentMonthLog[];
@@ -658,6 +668,10 @@ export function createEvergreenSeed(): LocalDatabase {
     medications: defaultEllisMedications(AGENCY_ID, ellis.id),
     medicationDeliveries: [],
     medDoseExceptions: [],
+    // Issue #100 (MAR): accrue through the MAR home after go-live.
+    marAdministrations: [],
+    marPrnLogs: [],
+    marConcerns: [],
     trainingChecklists: buildTrainingChecklists(
       AGENCY_ID,
       ellis.id,
