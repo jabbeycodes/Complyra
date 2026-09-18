@@ -634,9 +634,7 @@ export default function SiteDetailPage({
                             ))}
                           </dl>
                         ) : (
-                          <p className="muted site-detail-note">
-                            No highlights recorded yet.
-                          </p>
+                          <p className="muted">No highlights recorded yet.</p>
                         )}
                       </article>
                     );

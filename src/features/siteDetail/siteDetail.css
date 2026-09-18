@@ -592,7 +592,7 @@
    Solid colors, high contrast, no gradients. */
 .individual-highlight-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
   gap: 12px;
   padding: 12px var(--panel-inline) 20px;
 }
