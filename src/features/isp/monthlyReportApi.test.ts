@@ -165,6 +165,68 @@ test("issue #96: DSPs cannot write or sign the monthly summary", async () => {
   await assert.rejects(() => impl.reopenShiftNoteMonthlyReport(draft.id), /PM or administrator/);
 });
 
+test("issue #96 follow-up: support-coordinator fields save, lock on sign, and clear", async () => {
+  const impl = api();
+  const morganId = await individualId(impl, "Morgan Pruitt");
+  await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const programId = await approvedProgramId(impl, morganId);
+  const data = await impl.getIspData(morganId);
+  const approved = data.programs.find((p) => p.id === programId)!;
+  const taskId = approved.tasks[0].id;
+
+  // Save draft with SC narratives, overall status, and signatures.
+  const draft = await impl.saveShiftNoteMonthlyReport({
+    individualId: morganId,
+    programId,
+    monthKey: "2026-09",
+    narrative: "Manager draft.",
+    scObjectiveNarratives: [{ taskId, narrative: "Joined two outings." }],
+    scOverallNarrative: "Steady month.",
+    scSignatures: {
+      supportCoordinator: { name: "Casey Coordinator", date: "2026-10-02" },
+      provider: { name: "Pat Manager", date: "2026-10-02" },
+      professionalManager: { name: "", date: "" },
+    },
+  });
+  const loaded = await impl.getShiftNoteMonthlyReport(morganId, "2026-09");
+  assert.equal(loaded?.scObjectiveNarratives.length, 1);
+  assert.equal(loaded?.scObjectiveNarratives[0].narrative, "Joined two outings.");
+  assert.equal(loaded?.scOverallNarrative, "Steady month.");
+  assert.equal(loaded?.scSignatures.supportCoordinator.name, "Casey Coordinator");
+  assert.equal(loaded?.scSignatures.provider.date, "2026-10-02");
+
+  // Sign locks the report; clearing works on the re-opened draft.
+  await impl.signShiftNoteMonthlyReport(draft.id);
+  await assert.rejects(
+    () =>
+      impl.saveShiftNoteMonthlyReport({
+        individualId: morganId,
+        programId,
+        monthKey: "2026-09",
+        narrative: "Manager draft.",
+        scOverallNarrative: "Sneaky edit.",
+      }),
+    /signed/,
+  );
+  await impl.reopenShiftNoteMonthlyReport(draft.id);
+  const cleared = await impl.saveShiftNoteMonthlyReport({
+    individualId: morganId,
+    programId,
+    monthKey: "2026-09",
+    narrative: "Manager draft.",
+    scObjectiveNarratives: [],
+    scOverallNarrative: "",
+    scSignatures: {
+      supportCoordinator: { name: "", date: "" },
+      provider: { name: "", date: "" },
+      professionalManager: { name: "", date: "" },
+    },
+  });
+  assert.equal(cleared.scObjectiveNarratives.length, 0);
+  assert.equal(cleared.scOverallNarrative, "");
+  assert.equal(cleared.scSignatures.supportCoordinator.name, "");
+});
+
 test("issue #96: getShiftNotesForMonth returns the full month without the 30-note cap", async () => {
   const impl = api();
   const morganId = await individualId(impl, "Morgan Pruitt");

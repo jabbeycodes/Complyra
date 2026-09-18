@@ -279,11 +279,15 @@ export interface ReportLevel {
 /**
  * Raw month's notes as CSV: one row per task score so every data point is
  * preserved. Column order is stable for case-manager handoffs.
+ *
+ * Pass `sc` to append the support-coordinator summary section (per-objective
+ * progress + narratives, overall status, signature lines) after the raw rows.
  */
 export function buildNotesCsv(
   notes: ShiftNoteView[],
   programName: string,
   levels: ReportLevel[],
+  sc?: SupportCoordinatorCsvInput,
 ): string {
   const captionById = new Map(levels.map((level) => [level.id, level.caption]));
   const shortById = new Map(levels.map((level) => [level.id, level.shortLabel]));
@@ -334,7 +338,15 @@ export function buildNotesCsv(
       ]);
     }
   }
-  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return (
+    rows.map((row) => row.map(csvCell).join(",")).join("\r\n") +
+    "\r\n" +
+    (sc
+      ? buildSupportCoordinatorCsvRows(sc)
+          .map((row) => row.map(csvCell).join(","))
+          .join("\r\n") + "\r\n"
+      : "")
+  );
 }
 
 /** Writing/signing the monthly summary is gated to PMs and administrators. */
@@ -354,4 +366,195 @@ export function canReopenMonthlySummary(
   signedAt: string,
 ): boolean {
   return canWriteMonthlySummary(roleKey) && signedAt !== "";
+}
+
+/* ------------------------------------------------------------------ */
+/* B&W-safe weekly chart patterns (founder feedback: color does not    */
+/* survive plain black-and-white printing, so no information may ride  */
+/* on color alone — each bucket gets a distinct fill pattern and the   */
+/* text summary next to each bar carries the counts).                  */
+/* ------------------------------------------------------------------ */
+
+/** Distinct fill pattern per score bucket; renders in plain B&W print. */
+export type WeeklyPatternKey = "hatch" | "crosshatch" | "dots" | "lightgray";
+
+export const WEEKLY_PATTERN_BY_BUCKET: Record<ScoreBucket, WeeklyPatternKey> = {
+  yes: "hatch",
+  no: "crosshatch",
+  refused: "dots",
+  other: "lightgray",
+};
+
+export function patternKeyForBucket(bucket: ScoreBucket): WeeklyPatternKey {
+  return WEEKLY_PATTERN_BY_BUCKET[bucket];
+}
+
+/* ------------------------------------------------------------------ */
+/* Monthly summary for support coordinator (BCFR / SETWorks monthly    */
+/* progress note): per-objective progress computed from the month's    */
+/* scores, plus narratives and signatures stored on the report row.     */
+/* ------------------------------------------------------------------ */
+
+export type ObjectiveProgressStatus =
+  | "On track"
+  | "Making progress"
+  | "Needs attention"
+  | "No data recorded";
+
+export interface ObjectiveProgress {
+  taskId: string;
+  taskTitle: string;
+  taskNumber: number;
+  yes: number;
+  total: number;
+  /** Rounded 0–100; 0 when nothing was scored. */
+  percent: number;
+  status: ObjectiveProgressStatus;
+}
+
+function progressStatusFor(yes: number, total: number): ObjectiveProgressStatus {
+  if (total === 0) return "No data recorded";
+  const percent = (yes / total) * 100;
+  if (percent >= 80) return "On track";
+  if (percent >= 50) return "Making progress";
+  return "Needs attention";
+}
+
+/**
+ * Per-objective month progress from scored shift notes: how many times the
+ * task was scored Yes out of all scored attempts. Deleted notes and scores
+ * for unknown tasks are ignored.
+ */
+export function buildObjectiveProgress(
+  notes: ShiftNoteView[],
+  tasks: WeeklyTaskRef[],
+  levelCaptionById: Map<string, string>,
+): ObjectiveProgress[] {
+  const indexByTaskId = new Map(tasks.map((task, index) => [task.id, index]));
+  const yes = tasks.map(() => 0);
+  const total = tasks.map(() => 0);
+  for (const note of notes) {
+    if (note.deletedAt) continue;
+    for (const score of note.scores) {
+      const taskIndex = indexByTaskId.get(score.taskId);
+      if (taskIndex === undefined) continue;
+      total[taskIndex] += 1;
+      if (scoreBucketForLevelCaption(levelCaptionById.get(score.levelId) ?? "") === "yes") {
+        yes[taskIndex] += 1;
+      }
+    }
+  }
+  return tasks.map((task, index) => {
+    const taskTotal = total[index];
+    const taskYes = yes[index];
+    return {
+      taskId: task.id,
+      taskTitle: task.title,
+      taskNumber: index + 1,
+      yes: taskYes,
+      total: taskTotal,
+      percent: taskTotal === 0 ? 0 : Math.round((taskYes / taskTotal) * 100),
+      status: progressStatusFor(taskYes, taskTotal),
+    };
+  });
+}
+
+/**
+ * One-line progress statement for the support coordinator section, e.g.
+ * "Objective 1: 4 of 5 scored Yes (80%) — On track".
+ */
+export function objectiveProgressLine(progress: ObjectiveProgress): string {
+  if (progress.total === 0) {
+    return `Objective ${progress.taskNumber}: no scores recorded this month — No data recorded`;
+  }
+  return (
+    `Objective ${progress.taskNumber}: ${progress.yes} of ${progress.total} scored Yes ` +
+    `(${progress.percent}%) — ${progress.status}`
+  );
+}
+
+export interface SupportCoordinatorSignatureLine {
+  name: string;
+  date: string;
+}
+
+export interface SupportCoordinatorSignatures {
+  supportCoordinator: SupportCoordinatorSignatureLine;
+  provider: SupportCoordinatorSignatureLine;
+  professionalManager: SupportCoordinatorSignatureLine;
+}
+
+export function emptySupportCoordinatorSignatures(): SupportCoordinatorSignatures {
+  const blank = () => ({ name: "", date: "" });
+  return { supportCoordinator: blank(), provider: blank(), professionalManager: blank() };
+}
+
+export interface ScObjectiveNarrative {
+  taskId: string;
+  narrative: string;
+}
+
+export interface SupportCoordinatorCsvInput {
+  individualName: string;
+  individualIdLabel: string;
+  siteName: string;
+  monthLabel: string;
+  progress: ObjectiveProgress[];
+  objectiveNarratives: ScObjectiveNarrative[];
+  overallNarrative: string;
+  signatures: SupportCoordinatorSignatures;
+}
+
+const SC_SIGNATURE_ROLES: Array<{
+  key: keyof SupportCoordinatorSignatures;
+  label: string;
+}> = [
+  { key: "supportCoordinator", label: "Support Coordinator" },
+  { key: "provider", label: "Provider" },
+  { key: "professionalManager", label: "Professional Manager" },
+];
+
+/**
+ * The support-coordinator summary as CSV rows, appended after the raw-notes
+ * rows: per-objective progress + narrative, overall status, and the three
+ * signature lines. One CSV download keeps everything together.
+ */
+export function buildSupportCoordinatorCsvRows(
+  sc: SupportCoordinatorCsvInput,
+): string[][] {
+  const narrativeByTaskId = new Map(
+    sc.objectiveNarratives.map((entry) => [entry.taskId, entry.narrative]),
+  );
+  const rows: string[][] = [
+    [],
+    ["Monthly summary for support coordinator"],
+    [
+      "Individual",
+      sc.individualName,
+      "Individual ID",
+      sc.individualIdLabel,
+      "Month",
+      sc.monthLabel,
+      "Site",
+      sc.siteName,
+    ],
+    ["Objective", "Yes", "Total scored", "Percent", "Status", "Narrative"],
+  ];
+  for (const progress of sc.progress) {
+    rows.push([
+      `${progress.taskNumber}. ${progress.taskTitle}`,
+      String(progress.yes),
+      String(progress.total),
+      progress.total === 0 ? "—" : `${progress.percent}%`,
+      progress.status,
+      narrativeByTaskId.get(progress.taskId) ?? "",
+    ]);
+  }
+  rows.push(["Overall status", sc.overallNarrative || "—"]);
+  rows.push(["Signature role", "Name", "Date"]);
+  for (const role of SC_SIGNATURE_ROLES) {
+    const line = sc.signatures[role.key];
+    rows.push([role.label, line.name || "—", line.date || "—"]);
+  }
+  return rows;
 }

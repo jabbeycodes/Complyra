@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   bucketNotesByDay,
   buildNotesCsv,
+  buildObjectiveProgress,
+  buildSupportCoordinatorCsvRows,
   buildWeeklyScoreSummary,
   canReopenMonthlySummary,
   canSignMonthlySummary,
@@ -21,6 +23,8 @@ import {
   monthKeyOf,
   monthStartOf,
   notesInMonth,
+  objectiveProgressLine,
+  patternKeyForBucket,
   reportProgramForMonth,
   scoreBucketForLevelCaption,
   weekDayRangeLabel,
@@ -328,4 +332,138 @@ test("issue #96 monthly summary gates: PM/administrator only", () => {
   assert.equal(canReopenMonthlySummary("administrator", "2026-10-01T00:00:00Z"), true);
   assert.equal(canReopenMonthlySummary("administrator", ""), false);
   assert.equal(canReopenMonthlySummary("house_manager", "2026-10-01T00:00:00Z"), false);
+});
+
+test("issue #96 follow-up: B&W chart patterns cover every score bucket", () => {
+  assert.equal(patternKeyForBucket("yes"), "hatch");
+  assert.equal(patternKeyForBucket("no"), "crosshatch");
+  assert.equal(patternKeyForBucket("refused"), "dots");
+  assert.equal(patternKeyForBucket("other"), "lightgray");
+  // Every distinct score type a scoring method can carry maps to a pattern —
+  // the chart must never fall back to a solid color for a known type.
+  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("Yes")), "hatch");
+  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("No")), "crosshatch");
+  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("Refused")), "dots");
+  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("N/A")), "lightgray");
+  assert.equal(patternKeyForBucket(scoreBucketForLevelCaption("N/A or other")), "lightgray");
+});
+
+test("issue #96 follow-up: per-objective progress rolls up Yes shares with statuses", () => {
+  const tasks = [
+    { id: "t1", title: "Community" },
+    { id: "t2", title: "Housework" },
+    { id: "t3", title: "Hygiene" },
+  ];
+  const captions = new Map([
+    ["yes", "Yes"],
+    ["no", "No"],
+  ]);
+  const score = (id: string, taskId: string, levelId: string) => ({
+    id,
+    noteId: "x",
+    taskId,
+    taskTitle: "",
+    levelId,
+    comment: "",
+  });
+  const notes = [
+    // t1: 4 of 5 Yes (80%) — On track.
+    weeklyNote({
+      noteDate: "2026-09-03",
+      scores: [
+        score("a", "t1", "yes"),
+        score("b", "t1", "yes"),
+        score("c", "t1", "yes"),
+        score("d", "t1", "yes"),
+        score("e", "t1", "no"),
+      ],
+    }),
+    // t2: 1 of 2 Yes (50%) — Making progress.
+    weeklyNote({
+      noteDate: "2026-09-10",
+      scores: [score("f", "t2", "yes"), score("g", "t2", "no")],
+    }),
+  ];
+  const progress = buildObjectiveProgress(notes, tasks, captions);
+  assert.deepEqual(progress[0], {
+    taskId: "t1",
+    taskNumber: 1,
+    taskTitle: "Community",
+    yes: 4,
+    total: 5,
+    percent: 80,
+    status: "On track",
+  });
+  assert.deepEqual(progress[1], {
+    taskId: "t2",
+    taskNumber: 2,
+    taskTitle: "Housework",
+    yes: 1,
+    total: 2,
+    percent: 50,
+    status: "Making progress",
+  });
+  // t3 has no scores at all.
+  assert.equal(progress[2].status, "No data recorded");
+  assert.equal(progress[2].percent, 0);
+  // Progress lines read naturally on screen and in the PDF.
+  assert.equal(
+    objectiveProgressLine(progress[0]),
+    "Objective 1: 4 of 5 scored Yes (80%) — On track",
+  );
+  assert.equal(
+    objectiveProgressLine(progress[2]),
+    "Objective 3: no scores recorded this month — No data recorded",
+  );
+});
+
+test("issue #96 follow-up: CSV carries the support-coordinator section", () => {
+  const csv = buildNotesCsv([], "2026 ISP", [], {
+    individualName: "Alex Doe",
+    individualIdLabel: "—",
+    siteName: "Cedar House",
+    monthLabel: "September 2026",
+    progress: [
+      {
+        taskId: "t1",
+        taskNumber: 1,
+        taskTitle: "Community",
+        yes: 4,
+        total: 5,
+        percent: 80,
+        status: "On track",
+      },
+    ],
+    objectiveNarratives: [{ taskId: "t1", narrative: "Joined two outings." }],
+    overallNarrative: "Steady month.",
+    signatures: {
+      supportCoordinator: { name: "Casey Coordinator", date: "2026-10-02" },
+      provider: { name: "Pat Manager", date: "2026-10-02" },
+      professionalManager: { name: "", date: "" },
+    },
+  });
+  assert.ok(csv.includes("Monthly summary for support coordinator"));
+  assert.ok(csv.includes('"1. Community"'));
+  assert.ok(csv.includes('"On track"'));
+  assert.ok(csv.includes("Joined two outings."));
+  assert.ok(csv.includes("Steady month."));
+  assert.ok(csv.includes('"Support Coordinator","Casey Coordinator","2026-10-02"'));
+  assert.ok(csv.includes('"Professional Manager","—","—"'));
+  // buildSupportCoordinatorCsvRows mirrors the same section rows directly.
+  const rows = buildSupportCoordinatorCsvRows({
+    individualName: "Alex Doe",
+    individualIdLabel: "—",
+    siteName: "Cedar House",
+    monthLabel: "September 2026",
+    progress: [],
+    objectiveNarratives: [],
+    overallNarrative: "",
+    signatures: {
+      supportCoordinator: { name: "", date: "" },
+      provider: { name: "", date: "" },
+      professionalManager: { name: "", date: "" },
+    },
+  });
+  assert.ok(rows.length > 0);
+  assert.equal(rows[1][0], "Monthly summary for support coordinator");
 });

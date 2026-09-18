@@ -31,6 +31,25 @@ function weeklyFor(taskNumbers: number[]): import("./shiftNoteMonthlyReportPdf")
   }));
 }
 
+function scSummaryFixture(): import("./shiftNoteMonthlyReportPdf").MonthlyReportPdfScSummary {
+  return {
+    objectives: [
+      {
+        taskNumber: 1,
+        title: "Community",
+        progressLine: "Objective 1: 4 of 5 scored Yes (80%) — On track",
+        narrative: "Joined two outings this month.",
+      },
+    ],
+    overallNarrative: "Steady month overall.",
+    signatures: [
+      { role: "Support Coordinator", name: "Casey Coordinator", date: "2026-10-02" },
+      { role: "Provider", name: "Pat Manager", date: "2026-10-02" },
+      { role: "Professional Manager", name: "", date: "" },
+    ],
+  };
+}
+
 test("issue #96 monthly report PDF: filename + grid + summary + record mark", () => {
   assert.equal(
     shiftNoteMonthlyReportFileName("Samuel Catalano", "2026-02"),
@@ -61,6 +80,7 @@ test("issue #96 monthly report PDF: filename + grid + summary + record mark", ()
       signedByTitle: "Program Manager",
       signedAt: "2026-03-01T12:00:00Z",
     },
+    scSummary: scSummaryFixture(),
   });
   assert.ok(doc.getNumberOfPages() >= 1);
   const uri = doc.output("datauristring") as string;
@@ -85,6 +105,7 @@ test("issue #96 monthly report PDF: weekly chart section renders", () => {
     grid: gridFor(1, 30),
     signatures: [],
     summary: null,
+    scSummary: scSummaryFixture(),
   });
   const uri = doc.output("datauristring") as string;
   const pdfBytes = Buffer.from(uri.split(",")[1], "base64").toString("latin1");
@@ -109,6 +130,37 @@ test("issue #96 monthly report PDF: unsigned summary renders the placeholder", (
     grid: gridFor(1, 30),
     signatures: [],
     summary: null,
+    scSummary: scSummaryFixture(),
   });
   assert.ok(doc.getNumberOfPages() >= 1);
+});
+
+test("issue #96 monthly report PDF: support-coordinator section renders", () => {
+  const doc = buildShiftNoteMonthlyReportPdf({
+    agencyName: "Evergreen Care",
+    individualName: "Alex Doe",
+    individualIdLabel: "—",
+    siteName: "Cedar House",
+    monthLabel: "September 2026",
+    monthKey: "2026-09",
+    generatedBy: "Pat Manager",
+    generatedAt: "2026-10-01T10:00:00Z",
+    programName: "2026 ISP",
+    scheduleLabel: "Per shift",
+    scoringMethodName: "Yes/No",
+    tasks: [{ title: "Community", instructions: "" }],
+    weekly: weeklyFor([1]),
+    grid: gridFor(1, 30),
+    signatures: [],
+    summary: null,
+    scSummary: scSummaryFixture(),
+  });
+  const uri = doc.output("datauristring") as string;
+  const pdfBytes = Buffer.from(uri.split(",")[1], "base64").toString("latin1");
+  assert.ok(pdfBytes.includes("Monthly summary for support coordinator"));
+  assert.ok(pdfBytes.includes("Overall status"));
+  assert.ok(pdfBytes.includes("Support Coordinator:"));
+  assert.ok(pdfBytes.includes("Professional Manager:"));
+  assert.ok(pdfBytes.includes("Casey Coordinator"));
+  assert.ok(pdfBytes.includes("Steady month overall."));
 });

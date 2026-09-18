@@ -47,6 +47,26 @@ export interface MonthlyReportPdfSummary {
   signedAt: string;
 }
 
+export interface MonthlyReportPdfScObjective {
+  taskNumber: number;
+  title: string;
+  /** e.g. "Objective 1: 4 of 5 scored Yes (80%) — On track". */
+  progressLine: string;
+  narrative: string;
+}
+
+export interface MonthlyReportPdfScSignature {
+  role: string;
+  name: string;
+  date: string;
+}
+
+export interface MonthlyReportPdfScSummary {
+  objectives: MonthlyReportPdfScObjective[];
+  overallNarrative: string;
+  signatures: MonthlyReportPdfScSignature[];
+}
+
 function slug(value: string) {
   return value
     .toLowerCase()
@@ -56,6 +76,49 @@ function slug(value: string) {
 
 export function shiftNoteMonthlyReportFileName(personName: string, monthKey: string) {
   return `complyrer-shift-notes-monthly-report-${slug(personName)}-${monthKey}.pdf`;
+}
+
+type BwWeeklyBucket = "yes" | "no" | "refused" | "other";
+
+/**
+ * B&W-safe weekly chart segment: plain black-and-white printing drops color,
+ * so each bucket gets a distinct treatment — Yes: dark solid, No: medium
+ * gray solid, Refused: dotted, N/A or other: light gray solid — with a thin
+ * outline so segments stay separable. Matches the on-screen SVG patterns
+ * (hatch / cross-hatch / dots / light gray) closely enough that the two read
+ * the same on paper.
+ */
+function drawBwWeeklySegment(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  bucket: BwWeeklyBucket,
+) {
+  doc.setDrawColor(40, 40, 40);
+  doc.setLineWidth(0.75);
+  if (bucket === "yes") {
+    doc.setFillColor(45, 45, 45);
+    doc.rect(x, y, w, h, "FD");
+  } else if (bucket === "no") {
+    doc.setFillColor(150, 150, 150);
+    doc.rect(x, y, w, h, "FD");
+  } else if (bucket === "other") {
+    doc.setFillColor(222, 222, 222);
+    doc.rect(x, y, w, h, "FD");
+  } else {
+    // refused: white with a dot grid.
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, w, h, "FD");
+    doc.setFillColor(60, 60, 60);
+    const step = 4;
+    for (let dy = step / 2; dy < h; dy += step) {
+      for (let dx = step / 2; dx < w; dx += step) {
+        doc.circle(x + dx, y + dy, 0.7, "F");
+      }
+    }
+  }
 }
 
 function field(doc: jsPDF, label: string, value: string, x: number, y: number, maxWidth: number) {
@@ -85,6 +148,8 @@ export function buildShiftNoteMonthlyReportPdf(input: {
   grid: string[][][];
   signatures: MonthlyReportPdfSignature[];
   summary: MonthlyReportPdfSummary | null;
+  /** Support-coordinator summary section (B&W-safe like the rest). */
+  scSummary: MonthlyReportPdfScSummary;
   logoDataUrl?: string | null;
 }) {
   // Landscape letter: 792 x 612 pt.
@@ -189,8 +254,8 @@ export function buildShiftNoteMonthlyReportPdf(input: {
   y += 8;
 
   // Weekly task score summary chart (same stacked bars as the on-screen
-  // chart): per objective, Yes/No counts per week with muted
-  // Refused / N/A-or-other segments.
+  // chart): per objective, Yes/No counts per week with Refused /
+  // N/A-or-other segments. B&W-safe fills — no information rides on color.
   needPage(64);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
@@ -201,24 +266,25 @@ export function buildShiftNoteMonthlyReportPdf(input: {
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);
   doc.text(
-    "For each objective, how many times the task was scored Yes or No in each week of the month.",
+    "For each objective, how many times the task was scored Yes or No in each week of the month. Each score type has its own fill pattern so the chart reads in plain black-and-white print.",
     margin,
     y,
+    { maxWidth: usable },
   );
   doc.setTextColor(36, 30, 24);
   y += 8;
-  const legendDefs: Array<[string, [number, number, number]]> = [
-    ["Yes", [77, 107, 66]],
-    ["No", [181, 106, 78]],
-    ["Refused", [181, 154, 116]],
-    ["N/A or other", [216, 203, 182]],
+  const legendDefs: Array<[string, BwWeeklyBucket]> = [
+    ["Yes", "yes"],
+    ["No", "no"],
+    ["Refused", "refused"],
+    ["N/A or other", "other"],
   ];
   let legendX = margin;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-  for (const [label, rgb] of legendDefs) {
-    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-    doc.rect(legendX, y - 8, 10, 8, "F");
+  for (const [label, bucket] of legendDefs) {
+    drawBwWeeklySegment(doc, legendX, y - 8, 10, 8, bucket);
+    doc.setTextColor(36, 30, 24);
     doc.text(label, legendX + 13, y);
     legendX += doc.getTextWidth(label) + 32;
   }
@@ -246,21 +312,30 @@ export function buildShiftNoteMonthlyReportPdf(input: {
       const barX = margin + labelWidth;
       if (total > 0) {
         let segX = barX;
-        const segments: Array<[number, [number, number, number]]> = [
-          [week.yes, [77, 107, 66]],
-          [week.no, [181, 106, 78]],
-          [week.refused, [181, 154, 116]],
-          [week.other, [216, 203, 182]],
+        const segments: Array<[number, BwWeeklyBucket]> = [
+          [week.yes, "yes"],
+          [week.no, "no"],
+          [week.refused, "refused"],
+          [week.other, "other"],
         ];
-        for (const [count, rgb] of segments) {
+        for (const [count, bucket] of segments) {
           if (count <= 0) continue;
           const segWidth = (count / total) * barWidth;
-          doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-          doc.rect(segX, y, segWidth, 10, "F");
+          drawBwWeeklySegment(doc, segX, y, segWidth, 10, bucket);
+          if (bucket === "yes" && segWidth >= 18) {
+            doc.setTextColor(255, 255, 255);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            doc.text(String(count), segX + segWidth / 2, y + 7.5, { align: "center" });
+            doc.setTextColor(36, 30, 24);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8);
+          }
           segX += segWidth;
         }
       }
-      doc.setDrawColor(181, 154, 116);
+      doc.setDrawColor(40, 40, 40);
+      doc.setLineWidth(0.75);
       doc.rect(barX, y, barWidth, 10);
       const countParts = [`${week.yes} Y`, `${week.no} N`];
       if (week.refused > 0) countParts.push(`${week.refused} R`);
@@ -274,6 +349,92 @@ export function buildShiftNoteMonthlyReportPdf(input: {
     }
     y += 6;
   }
+
+  // Monthly summary for support coordinator.
+  needPage(60);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(36, 30, 24);
+  doc.text("Monthly summary for support coordinator", margin, y);
+  y += 10;
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(95, 81, 69);
+  doc.text(
+    "Progress on each ISP objective this month, computed from shift note scores.",
+    margin,
+    y,
+  );
+  doc.setTextColor(36, 30, 24);
+  y += 8;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  field(doc, "Individual", input.individualName, margin, y, usable);
+  y += 14;
+  field(doc, "Individual ID", input.individualIdLabel, margin, y, usable);
+  y += 14;
+  field(doc, "Month", input.monthLabel, margin, y, usable);
+  y += 14;
+  field(doc, "Site", input.siteName, margin, y, usable);
+  y += 20;
+  for (const objective of input.scSummary.objectives) {
+    needPage(44);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    const titleLines = doc.splitTextToSize(
+      `${objective.taskNumber}. ${objective.title}`,
+      usable - 8,
+    );
+    doc.text(titleLines, margin, y);
+    y += titleLines.length * 12;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const progressLines = doc.splitTextToSize(objective.progressLine, usable - 8);
+    doc.text(progressLines, margin + 4, y);
+    y += progressLines.length * 12;
+    const scNarrative = objective.narrative.trim() || "No narrative recorded.";
+    const scNarrativeLines = doc.splitTextToSize(scNarrative, usable - 8);
+    for (const chunk of scNarrativeLines) {
+      needPage(14);
+      doc.text(chunk, margin + 4, y);
+      y += 12;
+    }
+    y += 6;
+  }
+  needPage(44);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("Overall status", margin, y);
+  y += 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const overall = input.scSummary.overallNarrative.trim() || "No overall status recorded.";
+  for (const chunk of doc.splitTextToSize(overall, usable - 8)) {
+    needPage(14);
+    doc.text(chunk, margin + 4, y);
+    y += 12;
+  }
+  y += 6;
+  needPage(30);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("Signatures", margin, y);
+  y += 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  for (const sig of input.scSummary.signatures) {
+    needPage(20);
+    doc.text(`${sig.role}:`, margin, y);
+    doc.text(sig.name || "—", margin + 150, y, { maxWidth: 260 });
+    doc.setDrawColor(120, 110, 96);
+    doc.setLineWidth(0.5);
+    doc.line(margin + 148, y + 3, margin + 420, y + 3);
+    doc.text("Date:", margin + 440, y);
+    doc.text(sig.date || "—", margin + 480, y);
+    doc.line(margin + 478, y + 3, margin + 620, y + 3);
+    y += 18;
+  }
+  y += 6;
 
   // Day grid.
   const dayCount = input.grid[0]?.length ?? 0;

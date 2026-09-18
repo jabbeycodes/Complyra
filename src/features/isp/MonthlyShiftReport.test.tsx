@@ -112,6 +112,13 @@ function draftReport(monthKey: string): ShiftNoteMonthlyReport {
     programId: "prog-1",
     month: monthKey,
     narrative: "Manager draft narrative.",
+    scObjectiveNarratives: [],
+    scOverallNarrative: "",
+    scSignatures: {
+      supportCoordinator: { name: "", date: "" },
+      provider: { name: "", date: "" },
+      professionalManager: { name: "", date: "" },
+    },
     signedBy: "",
     signedByName: "",
     signedByTitle: "",

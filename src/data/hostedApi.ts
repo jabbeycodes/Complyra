@@ -138,6 +138,7 @@ import {
   type ShiftNoteView,
   type SiteShiftNoteView,
 } from "./shiftNotes";
+import { emptyScSignaturesRow } from "./shiftNotes";
 import { isValidRating } from "../recognition/scoring";
 import {
   allergiesChangeDetail,
@@ -2238,6 +2239,12 @@ export class HostedApi implements ComplyraApi {
    * config; who/when stamped on every save; soft deletes preserved.
    */
   private mapShiftNoteMonthlyReport(row: Record<string, unknown>): ShiftNoteMonthlyReport {
+    const rawNarratives = row.sc_objective_narratives;
+    const rawSignatures = row.sc_signatures as Record<string, { name?: unknown; date?: unknown }> | null | undefined;
+    const sigLine = (value: { name?: unknown; date?: unknown } | undefined) => ({
+      name: String(value?.name ?? ""),
+      date: String(value?.date ?? ""),
+    });
     return {
       id: String(row.id),
       agencyId: String(row.agency_id),
@@ -2245,6 +2252,20 @@ export class HostedApi implements ComplyraApi {
       programId: String(row.program_id ?? ""),
       month: String(row.month ?? ""),
       narrative: String(row.narrative ?? ""),
+      scObjectiveNarratives: Array.isArray(rawNarratives)
+        ? (rawNarratives as Array<{ taskId?: unknown; narrative?: unknown }>).map((entry) => ({
+            taskId: String(entry.taskId ?? ""),
+            narrative: String(entry.narrative ?? ""),
+          }))
+        : [],
+      scOverallNarrative: String(row.sc_overall_narrative ?? ""),
+      scSignatures: rawSignatures
+        ? {
+            supportCoordinator: sigLine(rawSignatures.supportCoordinator),
+            provider: sigLine(rawSignatures.provider),
+            professionalManager: sigLine(rawSignatures.professionalManager),
+          }
+        : emptyScSignaturesRow(),
       signedBy: String(row.signed_by ?? ""),
       signedByName: String(row.signed_by_name ?? ""),
       signedByTitle: String(row.signed_by_title ?? ""),
@@ -2441,6 +2462,30 @@ export class HostedApi implements ComplyraApi {
     void programRow;
     const now = new Date().toISOString();
     const narrative = input.narrative.trim().slice(0, 20000);
+    const scObjectiveNarratives = (input.scObjectiveNarratives ?? [])
+      .map((entry) => ({
+        taskId: entry.taskId,
+        narrative: entry.narrative.trim().slice(0, 20000),
+      }))
+      .filter((entry) => entry.narrative);
+    const scOverallNarrative = (input.scOverallNarrative ?? "").trim().slice(0, 20000);
+    const scSignatures = input.scSignatures ?? emptyScSignaturesRow();
+    // The sc_* columns land with the follow-up migration; a database that has
+    // not applied it yet rejects unknown columns, so only send them when the
+    // caller supplied the support-coordinator fields at all. Gate on
+    // *presence* in the input — not on whether they are non-empty — so a
+    // manager can deliberately clear previously saved SC content.
+    const scFieldsProvided =
+      input.scObjectiveNarratives !== undefined ||
+      input.scOverallNarrative !== undefined ||
+      input.scSignatures !== undefined;
+    const scColumns = scFieldsProvided
+      ? {
+          sc_objective_narratives: scObjectiveNarratives,
+          sc_overall_narrative: scOverallNarrative,
+          sc_signatures: scSignatures,
+        }
+      : {};
     const { data: existing, error: existingError } = await this.client
       .from("shift_note_monthly_reports")
       .select("*")
@@ -2457,7 +2502,7 @@ export class HostedApi implements ComplyraApi {
       }
       const { data: updated, error: updateError } = await this.client
         .from("shift_note_monthly_reports")
-        .update({ program_id: input.programId, narrative, updated_at: now })
+        .update({ program_id: input.programId, narrative, updated_at: now, ...scColumns })
         .eq("id", String(row.id))
         .select("*")
         .single();
@@ -2474,6 +2519,7 @@ export class HostedApi implements ComplyraApi {
         narrative,
         created_by: session.userId,
         created_by_name: session.fullName,
+        ...scColumns,
       })
       .select("*")
       .single();
