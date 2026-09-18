@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { can, pageVisible } from "../../data/status";
 import type {
   HmWeeklyChecklist,
@@ -82,10 +82,11 @@ export function useSiteTrackables({
     ...EMPTY_TRACKABLES,
     loading: true,
   });
-  const cancelled = useRef(false);
 
   useEffect(() => {
-    cancelled.current = false;
+    // Per-run flag: not shared across effect runs, so a stale fetch for the
+    // previous site cannot overwrite the current one after navigation.
+    let cancelled = false;
     if (!hasAccess || !session) {
       setState({ ...EMPTY_TRACKABLES, loading: false });
       return;
@@ -162,8 +163,11 @@ export function useSiteTrackables({
       return rows;
     }
 
+    // Clear the previous site's records up front so tiles and drawers never
+    // show stale data (or attach the wrong record ids) while the new home loads.
+    setState({ ...EMPTY_TRACKABLES, loading: true });
+
     (async () => {
-      setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const [qaHistory, checklists, delegations, trainingRows, medStatus, siteNotes] =
           await Promise.all([
@@ -190,7 +194,7 @@ export function useSiteTrackables({
             : qaHistory
               ? []
               : null;
-        if (!cancelled.current) {
+        if (!cancelled) {
           setState({
             qaHistory,
             qaDisputes,
@@ -204,7 +208,7 @@ export function useSiteTrackables({
           });
         }
       } catch (err) {
-        if (!cancelled.current) {
+        if (!cancelled) {
           setState((s) => ({
             ...s,
             loading: false,
@@ -215,7 +219,7 @@ export function useSiteTrackables({
     })();
 
     return () => {
-      cancelled.current = true;
+      cancelled = true;
     };
     // siteStaff is memoized upstream; refetch when the roster changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps

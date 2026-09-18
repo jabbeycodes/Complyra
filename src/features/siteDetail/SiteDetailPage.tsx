@@ -196,6 +196,7 @@ export default function SiteDetailPage({
     trainingRows,
     medStatus,
     siteNotes,
+    loading: trackablesLoading,
   } = trackables;
 
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? "overview";
@@ -873,7 +874,10 @@ export default function SiteDetailPage({
           <>
             <div className="panel">
               <h2>HM weekly checklists</h2>
-              {!checklists?.length && (
+              {checklists === null && (
+                <p className="muted section-note">Loading checklists…</p>
+              )}
+              {checklists !== null && !checklists.length && (
                 <Empty
                   mark="none"
                   title="No checklists"
@@ -1022,7 +1026,10 @@ export default function SiteDetailPage({
             </div>
             <div className="panel">
               <h2>Staff training &amp; certificates</h2>
-              {!trainingRows?.length && (
+              {trainingRows === null && (
+                <p className="muted section-note">Loading staff…</p>
+              )}
+              {trainingRows !== null && !trainingRows.length && (
                 <Empty mark="none" title="No staff" text="No staff are assigned to this home." />
               )}
               {!!trainingRows?.length && (
@@ -1081,7 +1088,10 @@ export default function SiteDetailPage({
         {activeTab === "medications" && (
           <div className="panel">
             <h2>Medication supply</h2>
-            {!medStatus && (
+            {!medStatus && trackablesLoading && (
+              <p className="muted section-note">Loading medication supply…</p>
+            )}
+            {!medStatus && !trackablesLoading && (
               <Empty
                 mark="none"
                 title="No data"
@@ -1248,7 +1258,10 @@ export default function SiteDetailPage({
               Notes staff entered against approved ISP programs for Individuals
               at this home. To enter a note, open the Individual's chart.
             </p>
-            {!siteNotes?.length && (
+            {siteNotes === null && (
+              <p className="muted section-note">Loading shift notes…</p>
+            )}
+            {siteNotes !== null && !siteNotes.length && (
               <Empty
                 mark="quiet"
                 title="No shift notes yet"
