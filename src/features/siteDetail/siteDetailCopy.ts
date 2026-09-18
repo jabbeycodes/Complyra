@@ -46,3 +46,48 @@ export function documentStatusLabel(status: string): string {
   }
   return status.replace(/_/g, " ");
 }
+
+/**
+ * Founder-locked (issue #78): the program site Overview "Site facts" keeps
+ * only actionable facts. Water (and any similar non-actionable utility
+ * entry) must not render. Terms listed here are matched exactly against
+ * the fact label.
+ */
+export const HIDDEN_SITE_FACT_TERMS: ReadonlySet<string> = new Set(["Water"]);
+
+export function siteFactVisible(term: string): boolean {
+  return !HIDDEN_SITE_FACT_TERMS.has((term ?? "").trim());
+}
+
+export interface SiteFactRow {
+  term: string;
+  detail: string;
+}
+
+export interface SiteFactInput {
+  program: string;
+  manager: string;
+  location: string;
+  staffing: string;
+  water: string;
+  contact: string | null;
+}
+
+/**
+ * Build the "Site facts" rows in display order, dropping non-actionable
+ * utility facts (currently: Water). Callers pass pre-formatted detail
+ * strings so this stays a pure, unit-testable filter.
+ */
+export function siteFactRows(input: SiteFactInput): SiteFactRow[] {
+  const rows: Array<SiteFactRow | null> = [
+    { term: "Program", detail: input.program },
+    { term: "House manager", detail: input.manager },
+    { term: "Location", detail: input.location },
+    { term: "Staffing", detail: input.staffing },
+    { term: "Water", detail: input.water },
+    input.contact ? { term: "Site contact", detail: input.contact } : null,
+  ];
+  return rows.filter(
+    (r): r is SiteFactRow => r !== null && siteFactVisible(r.term),
+  );
+}
