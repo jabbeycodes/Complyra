@@ -308,8 +308,11 @@ export default function App() {
             ? healthEntryIdFromLink(fromHash)
             : null;
           // Resolving the entry needs a session, so only attempt it once one
-          // exists. `session` is in the deps below, so cold-start deep links
-          // (email/bookmarked `#/health/<id>`) retry after sign-in loads.
+          // exists. `session?.userId` is in the deps below, so cold-start deep
+          // links (email/bookmarked `#/health/<id>`) retry after sign-in loads.
+          // Keying on the user id (not the whole session object) avoids
+          // re-applying the hash on every `refresh()`, which replaces the
+          // session object and would otherwise undo in-app navigation.
           if (healthEntryId && session) void openHealthEntryDeepLink(healthEntryId);
           setPage(next);
         }
@@ -318,7 +321,7 @@ export default function App() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [session]);
+  }, [session?.userId]);
   // KIOSK-TIME-CLOCK: keep the standalone kiosk screen in sync with the hash.
   useEffect(() => {
     const syncKioskHash = () => setKioskHash(window.location.hash);
