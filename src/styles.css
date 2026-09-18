@@ -7528,6 +7528,11 @@ button.qa-row:hover {
     border-radius: 0;
     padding: 0;
   }
+  /* Action controls live inside the report, so sibling isolation cannot reach
+     them. Hide them explicitly so the printed copy has no app chrome. */
+  body.isp-report-printing .isp-report-actions {
+    display: none !important;
+  }
   body.isp-report-printing .isp-report-header,
   body.isp-report-printing .isp-report-program,
   body.isp-report-printing .isp-report-weekly,
