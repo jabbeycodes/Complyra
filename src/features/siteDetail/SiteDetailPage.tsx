@@ -628,7 +628,7 @@ export default function SiteDetailPage({
                   : "QA review: none yet. View score detail."
               }
             >
-              <strong>{latestQaPct ?? "None"}</strong>
+              <strong>{latestQaPct ?? (trackablesLoading ? "…" : "None")}</strong>
               <span>{latestQa ? auditPeriodLabel(latestQa) : "QA review"}</span>
             </button>
           </div>
@@ -953,7 +953,10 @@ export default function SiteDetailPage({
               <p className="muted section-note">
                 Service logs are a separate record from the weekly checklist.
               </p>
-              {serviceLogs.length === 0 && (
+              {checklists === null && (
+                <p className="muted section-note">Loading service logs…</p>
+              )}
+              {checklists !== null && serviceLogs.length === 0 && (
                 <Empty
                   mark="none"
                   title="No service logs"
@@ -1000,7 +1003,10 @@ export default function SiteDetailPage({
           <>
             <div className="panel">
               <h2>Active delegations at this home</h2>
-              {!delegations?.length && (
+              {delegations === null && (
+                <p className="muted section-note">Loading delegations…</p>
+              )}
+              {delegations !== null && !delegations.length && (
                 <Empty
                   mark="none"
                   title="No delegations"
