@@ -641,15 +641,17 @@ export function canReviewHealthTrack(session: HealthSession): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/* Nurse alert notification                                            */
+/* Abnormal-finding alerts: every manager assigned to the individual    */
 /* ------------------------------------------------------------------ */
 
 /**
- * Abnormal findings page the nurse through the existing "incident.followup"
- * notification type — one broadcast payload per flagged entry, deduped on the
- * entry id. Callers queue it after the entry is stored.
+ * Targets for an abnormal health finding: the home's house manager(s)
+ * (direct user alerts), plus program-manager and nurse role broadcasts —
+ * mirroring the GER submit-alert pattern. One payload per target, deduped
+ * on entry id + target. Callers queue every payload after the entry is
+ * stored.
  */
-export function healthTrackAlertPayload(input: {
+export interface HealthAlertTargetInput {
   agencyId: string;
   entryId: string;
   individualName: string;
@@ -657,19 +659,82 @@ export function healthTrackAlertPayload(input: {
   kind: HealthTrackKind;
   reason: string;
   occurredAt: string;
-}): NotificationPayload {
+  /** Active house-manager user ids for the entry's site. */
+  hmUserIds: string[];
+}
+
+function healthAlertPayloads(
+  input: HealthAlertTargetInput,
+  title: string,
+  body: string,
+  dedupeParts: Array<string | number>,
+): NotificationPayload[] {
+  const payloads: NotificationPayload[] = [];
+  const seen = new Set<string>();
+  for (const userId of input.hmUserIds) {
+    if (!userId || seen.has(userId)) continue;
+    seen.add(userId);
+    payloads.push({
+      agencyId: input.agencyId,
+      userId,
+      roleKey: null,
+      type: "incident.followup",
+      title,
+      body,
+      deepLink: `/health/${input.entryId}`,
+      entityType: "health_entry",
+      entityId: input.entryId,
+      dedupeKey: dedupeKeyFor("incident.followup", "health", ...dedupeParts, userId),
+    });
+  }
+  for (const roleKey of ["program_manager", "nurse"] as const) {
+    payloads.push({
+      agencyId: input.agencyId,
+      userId: null,
+      roleKey,
+      type: "incident.followup",
+      title,
+      body,
+      deepLink: `/health/${input.entryId}`,
+      entityType: "health_entry",
+      entityId: input.entryId,
+      dedupeKey: dedupeKeyFor("incident.followup", "health", ...dedupeParts, roleKey),
+    });
+  }
+  return payloads;
+}
+
+/**
+ * Abnormal findings alert every manager assigned to the individual: the
+ * home's house manager(s) directly, plus program-manager and nurse role
+ * broadcasts — via the existing "incident.followup" notification type.
+ */
+export function healthTrackAlertTargets(
+  input: HealthAlertTargetInput,
+): NotificationPayload[] {
   const kindLabel = HEALTH_TRACK_KIND_LABELS[input.kind];
-  return {
-    agencyId: input.agencyId,
-    roleKey: "nurse",
-    type: "incident.followup",
-    title: `Health alert: ${kindLabel}`,
-    body:
-      `${input.reason} — ${input.individualName} (${input.siteName}) on ` +
+  return healthAlertPayloads(
+    input,
+    `Health alert: ${kindLabel}`,
+    `${input.reason} — ${input.individualName} (${input.siteName}) on ` +
       `${input.occurredAt.slice(0, 10)}. Review the entry and follow up.`,
-    deepLink: `/health/${input.entryId}`,
-    entityType: "health_entry",
-    entityId: input.entryId,
-    dedupeKey: dedupeKeyFor("incident.followup", "health", input.entryId),
-  };
+    [input.entryId],
+  );
+}
+
+/**
+ * Day-level very-low-intake alert targets: the same manager set as
+ * per-entry alerts, deduped on individual + day instead of entry id so the
+ * day's alert pages once no matter how many refused meals are logged.
+ */
+export function dailyIntakeAlertTargets(
+  input: HealthAlertTargetInput & { day: string; individualId: string },
+): NotificationPayload[] {
+  return healthAlertPayloads(
+    input,
+    "Health alert: very low intake",
+    `${input.reason} — ${input.individualName} (${input.siteName}) on ` +
+      `${input.day}. Review the day's intake and follow up.`,
+    ["daily-intake", input.individualId, input.day],
+  );
 }

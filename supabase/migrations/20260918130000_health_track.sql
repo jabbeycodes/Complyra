@@ -9,7 +9,7 @@
 -- RLS is enabled + forced on the table. Reads are agency-member wide.
 -- Writes are a coarse row-level backstop; field-level authorization lives in
 -- the app layer (src/data/localApi.ts, src/data/hostedApi.ts), gated by
--- health.record (DSP/HM/PM/nurse) and health.review (nurse/PM).
+-- health.record (DSP/HM/PM/nurse) and health.review (HM/PM/nurse).
 begin;
 
 -- ----------------------------------------------------------------------------
@@ -159,7 +159,8 @@ using (
 -- Defaults (from ROLE_TEMPLATES):
 --   health.record — administrator, compliance_admin, house_manager,
 --                    program_manager, dsp, nurse (HR + auditor stay out).
---   health.review — administrator, compliance_admin, program_manager, nurse.
+--   health.review — administrator, compliance_admin, house_manager,
+--                    program_manager, nurse.
 -- ----------------------------------------------------------------------------
 
 update public.role_templates
@@ -173,7 +174,8 @@ where not (permissions ? 'health.record');
 update public.role_templates
 set permissions = permissions || jsonb_build_object(
   'health.review',
-  key in ('administrator', 'compliance_admin', 'program_manager', 'nurse')
+  key in ('administrator', 'compliance_admin', 'house_manager',
+          'program_manager', 'nurse')
 )
 where not (permissions ? 'health.review');
 
@@ -188,7 +190,8 @@ where not (permissions ? 'health.record');
 update public.agency_roles
 set permissions = permissions || jsonb_build_object(
   'health.review',
-  template_key in ('administrator', 'compliance_admin', 'program_manager', 'nurse')
+  template_key in ('administrator', 'compliance_admin', 'house_manager',
+                   'program_manager', 'nurse')
 )
 where not (permissions ? 'health.review');
 

@@ -18,7 +18,7 @@ import {
   detectDailyIntakeAlert,
   detectHealthAlert,
   healthEntryMatches,
-  healthTrackAlertPayload,
+  healthTrackAlertTargets,
   isHealthTrackKind,
   sectionForKind,
   sortHealthEntriesDesc,
@@ -270,16 +270,16 @@ test("gates: auditors and HR stay out; DSP/HM record; nurse reviews", () => {
 
   assert.equal(canReviewHealthTrack({ role: "nurse" }), true);
   assert.equal(canReviewHealthTrack({ role: "program_manager" }), true);
+  assert.equal(canReviewHealthTrack({ role: "house_manager" }), true);
   assert.equal(canReviewHealthTrack({ role: "dsp" }), false);
-  assert.equal(canReviewHealthTrack({ role: "house_manager" }), false);
 });
 
 test("dayKeyOf: takes the date portion of an ISO datetime", () => {
   assert.equal(dayKeyOf("2026-09-18T23:59:59"), "2026-09-18");
 });
 
-test("alert payload: pages the nurse through incident.followup with dedupe", () => {
-  const payload = healthTrackAlertPayload({
+test("alert targets: home HM(s) direct + PM and nurse broadcasts, deduped per target", () => {
+  const targets = healthTrackAlertTargets({
     agencyId: "a1",
     entryId: "e9",
     individualName: "Sam",
@@ -287,14 +287,48 @@ test("alert payload: pages the nurse through incident.followup with dedupe", () 
     kind: "seizure",
     reason: "Seizure recorded",
     occurredAt: "2026-09-18T14:00:00",
+    hmUserIds: ["hm-1", "hm-2"],
   });
-  assert.equal(payload.type, "incident.followup");
-  assert.equal(payload.roleKey, "nurse");
-  assert.equal(payload.entityType, "health_entry");
-  assert.equal(payload.entityId, "e9");
-  assert.ok((payload.dedupeKey ?? "").includes("e9"));
-  assert.ok(payload.deepLink.startsWith("/health/"));
-  assert.match(payload.body, /Sam/);
+  assert.equal(targets.length, 4);
+  const direct = targets.filter((t) => t.userId != null);
+  assert.deepEqual(
+    direct.map((t) => t.userId).sort(),
+    ["hm-1", "hm-2"],
+  );
+  assert.ok(direct.every((t) => t.roleKey == null));
+  const broadcasts = targets.filter((t) => t.userId == null);
+  assert.deepEqual(
+    broadcasts.map((t) => t.roleKey).sort(),
+    ["nurse", "program_manager"],
+  );
+  for (const t of targets) {
+    assert.equal(t.type, "incident.followup");
+    assert.equal(t.entityType, "health_entry");
+    assert.equal(t.entityId, "e9");
+    assert.ok((t.dedupeKey ?? "").includes("e9"));
+    assert.ok(t.deepLink.startsWith("/health/"));
+    assert.match(t.body, /Sam/);
+  }
+  // Dedupe keys are unique per target so the queue never double-sends.
+  const keys = targets.map((t) => t.dedupeKey);
+  assert.equal(new Set(keys).size, targets.length);
+});
+
+test("alert targets: dedupe keys are deterministic across calls", () => {
+  const input = {
+    agencyId: "a1",
+    entryId: "e9",
+    individualName: "Sam",
+    siteName: "Evergreen",
+    kind: "vitals" as const,
+    reason: "Fever",
+    occurredAt: "2026-09-18T08:00:00",
+    hmUserIds: ["hm-1"],
+  };
+  const first = healthTrackAlertTargets(input).map((t) => t.dedupeKey);
+  const second = healthTrackAlertTargets(input).map((t) => t.dedupeKey);
+  assert.deepEqual(first, second);
+  assert.equal(first.length, 3);
 });
 
 test("daily intake alert: all meals refused across two or more meals", () => {

@@ -111,13 +111,14 @@ import {
   stripBackfillMarker,
   withBackfillMarker,
 } from "./mileage";
-import { dedupeKeyFor } from "../features/notifications/notify";
+import type { NotificationPayload } from "../features/notifications/notify";
 import {
   canSeeHealthTrack,
   dayKeyOf,
   detectDailyIntakeAlert,
   detectHealthAlert,
-  healthTrackAlertPayload,
+  healthTrackAlertTargets,
+  dailyIntakeAlertTargets,
   validateHealthTrackInput,
   type HealthTrackEntry,
   type HealthTrackFilters,
@@ -8403,7 +8404,53 @@ export class HostedApi implements ComplyraApi {
     return person;
   }
 
-  /** Page the nurse through the notify-event edge function; never breaks the mutation. */
+  /** Active house-manager user ids for a site (hosted path). */
+  private async hostedHealthSiteManagerIds(
+    agencyId: string,
+    siteId: string,
+  ): Promise<string[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("user_id, expires_on")
+      .eq("agency_id", agencyId)
+      .eq("site_id", siteId)
+      .eq("role_key", "house_manager");
+    if (error || !data) return [];
+    return (data as Array<{ user_id: string; expires_on: string | null }>)
+      .filter((m) => !m.expires_on || m.expires_on >= today)
+      .map((m) => m.user_id);
+  }
+
+  /** Emit one notify-event invocation per payload; never breaks the mutation. */
+  private async emitHealthAlertPayloads(payloads: NotificationPayload[]) {
+    const results = await Promise.allSettled(
+      payloads.map((payload) =>
+        this.client.functions.invoke("notify-event", {
+          // The notify-event function accepts snake_case fields.
+          body: {
+            agency_id: payload.agencyId,
+            user_id: payload.userId ?? null,
+            role_key: payload.roleKey ?? null,
+            type: payload.type,
+            title: payload.title,
+            body: payload.body,
+            deep_link: payload.deepLink,
+            entity_type: payload.entityType ?? null,
+            entity_id: payload.entityId ?? null,
+            dedupe_key: payload.dedupeKey ?? null,
+          },
+        }),
+      ),
+    );
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("[health-track] Could not emit a health alert:", r.reason);
+      }
+    }
+  }
+
+  /** Alert every manager assigned to the individual (hosted path). */
   private async emitHealthAlert(
     session: SessionUser,
     entry: HealthTrackEntry,
@@ -8411,33 +8458,23 @@ export class HostedApi implements ComplyraApi {
     siteName: string,
     reason: string,
   ) {
-    const payload = healthTrackAlertPayload({
-      agencyId: session.agencyId,
-      entryId: entry.id,
-      individualName,
-      siteName,
-      kind: entry.kind,
-      reason,
-      occurredAt: entry.occurredAt,
-    });
     try {
-      // The notify-event function accepts snake_case fields.
-      await this.client.functions.invoke("notify-event", {
-        body: {
-          agency_id: payload.agencyId,
-          user_id: payload.userId ?? null,
-          role_key: payload.roleKey ?? null,
-          type: payload.type,
-          title: payload.title,
-          body: payload.body,
-          deep_link: payload.deepLink,
-          entity_type: payload.entityType ?? null,
-          entity_id: payload.entityId ?? null,
-          dedupe_key: payload.dedupeKey ?? null,
-        },
+      const targets = healthTrackAlertTargets({
+        agencyId: session.agencyId,
+        entryId: entry.id,
+        individualName,
+        siteName,
+        kind: entry.kind,
+        reason,
+        occurredAt: entry.occurredAt,
+        hmUserIds: await this.hostedHealthSiteManagerIds(
+          session.agencyId,
+          entry.siteId,
+        ),
       });
+      await this.emitHealthAlertPayloads(targets);
     } catch (err) {
-      console.warn("[health-track] Could not page the nurse:", err);
+      console.warn("[health-track] Could not page the managers:", err);
     }
   }
 
@@ -8458,30 +8495,24 @@ export class HostedApi implements ComplyraApi {
       });
       const reason = detectDailyIntakeAlert(dayEntries);
       if (!reason) return;
-      await this.client.functions.invoke("notify-event", {
-        body: {
-          agency_id: session.agencyId,
-          user_id: null,
-          role_key: "nurse",
-          type: "incident.followup",
-          title: "Health alert: very low intake",
-          body:
-            `${reason} — ${individualName} (${siteName}) on ${day}. ` +
-            "Review the day's intake and follow up.",
-          deep_link: `/health/${entry.id}`,
-          entity_type: "health_entry",
-          entity_id: entry.id,
-          dedupe_key: dedupeKeyFor(
-            "incident.followup",
-            "health",
-            "daily-intake",
-            entry.individualId,
-            day,
-          ),
-        },
+      const targets = dailyIntakeAlertTargets({
+        agencyId: session.agencyId,
+        entryId: entry.id,
+        individualId: entry.individualId,
+        individualName,
+        siteName,
+        kind: entry.kind,
+        reason,
+        occurredAt: entry.occurredAt,
+        day,
+        hmUserIds: await this.hostedHealthSiteManagerIds(
+          session.agencyId,
+          entry.siteId,
+        ),
       });
+      await this.emitHealthAlertPayloads(targets);
     } catch (err) {
-      console.warn("[health-track] Could not page the nurse:", err);
+      console.warn("[health-track] Could not page the managers:", err);
     }
   }
 

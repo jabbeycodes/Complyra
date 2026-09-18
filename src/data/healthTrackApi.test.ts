@@ -110,19 +110,73 @@ test("add rejects invalid input", async () => {
   );
 });
 
-test("a flagged vitals entry queues a nurse notification", async () => {
-  const { client, store, people } = await clientAs(DEMO_DSP_USERNAME);
+test("a flagged vitals entry alerts the home's HM directly plus PM and nurse broadcasts", async () => {
+  const { client, store, session, site, people } = await clientAs(DEMO_DSP_USERNAME);
+  store.db.memberships.push({
+    id: "test-hm-1",
+    agencyId: session.agencyId,
+    userId: "test-hm-user",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: site.id,
+    expiresOn: null,
+  });
   const entry = await client.addHealthEntry(
     vitalsInput(people[0].id, { tempF: 102 }),
   );
   assert.equal(entry.flagForNurse, true);
   assert.match(entry.flagReason ?? "", /Fever/);
   const notes = store.db.notifications.filter(
-    (n) => n.entityId === entry.id && n.roleKey === "nurse",
+    (n) => n.entityId === entry.id,
   );
-  assert.equal(notes.length, 1);
-  assert.equal(notes[0].type, "incident.followup");
-  assert.match(notes[0].title, /Health alert/);
+  assert.equal(notes.length, 3);
+  // The home's house manager gets a direct user alert.
+  const direct = notes.filter((n) => n.userId != null);
+  assert.equal(direct.length, 1);
+  assert.equal(direct[0].userId, "test-hm-user");
+  assert.equal(direct[0].roleKey, null);
+  // PM and nurse get role broadcasts.
+  const broadcastRoles = notes
+    .filter((n) => n.userId == null)
+    .map((n) => n.roleKey)
+    .sort();
+  assert.deepEqual(broadcastRoles, ["nurse", "program_manager"]);
+  for (const note of notes) {
+    assert.equal(note.type, "incident.followup");
+    assert.match(note.title, /Health alert/);
+  }
+  // Dedupe keys are unique per target.
+  assert.equal(new Set(notes.map((n) => n.dedupeKey)).size, 3);
+});
+
+test("re-flagging an entry does not duplicate manager alerts (dedupe holds)", async () => {
+  const { client, store, session, site, people } = await clientAs(DEMO_DSP_USERNAME);
+  store.db.memberships.push({
+    id: "test-hm-2",
+    agencyId: session.agencyId,
+    userId: "test-hm-user",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: site.id,
+    expiresOn: null,
+  });
+  const entry = await client.addHealthEntry(
+    vitalsInput(people[0].id, { tempF: 102 }),
+  );
+  assert.equal(
+    store.db.notifications.filter((n) => n.entityId === entry.id).length,
+    3,
+  );
+  // Unflag then re-flag: the queue fires again, but dedupe blocks duplicates.
+  await client.updateHealthEntry(entry.id, { details: { tempF: 98.6 } });
+  const reflagged = await client.updateHealthEntry(entry.id, {
+    details: { tempF: 103 },
+  });
+  assert.equal(reflagged.flagForNurse, true);
+  assert.equal(
+    store.db.notifications.filter((n) => n.entityId === entry.id).length,
+    3,
+  );
 });
 
 test("list applies filters", async () => {
@@ -294,8 +348,17 @@ test("an auditor cannot fetch a health photo", async () => {
   await assert.rejects(() => client.getHealthPhoto(fileId), /permission/i);
 });
 
-test("two refused meals in one day pages the nurse once for very low intake", async () => {
-  const { client, store, people, session } = await clientAs(DEMO_DSP_USERNAME);
+test("two refused meals in one day alerts the home's HM, PM, and nurse once for very low intake", async () => {
+  const { client, store, people, session, site } = await clientAs(DEMO_DSP_USERNAME);
+  store.db.memberships.push({
+    id: "test-hm-3",
+    agencyId: session.agencyId,
+    userId: "test-hm-user",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: site.id,
+    expiresOn: null,
+  });
   const refused = (mealType: "breakfast" | "lunch") => ({
     individualId: people[0].id,
     kind: "meal" as const,
@@ -317,8 +380,9 @@ test("two refused meals in one day pages the nurse once for very low intake", as
   const after = store.db.notifications.filter((n) =>
     (n.dedupeKey ?? "").includes("daily-intake"),
   );
-  assert.equal(after.length, before + 1);
-  assert.equal(after[0].roleKey, "nurse");
+  assert.equal(after.length, before + 3);
+  const roles = after.map((n) => n.roleKey ?? `user:${n.userId}`).sort();
+  assert.deepEqual(roles, ["nurse", "program_manager", "user:test-hm-user"]);
   assert.match(after[0].body, /Very low intake/);
   // The same pair is idempotent: a third refused meal does not page again.
   await client.addHealthEntry(refused("breakfast"));
@@ -326,6 +390,6 @@ test("two refused meals in one day pages the nurse once for very low intake", as
     store.db.notifications.filter((n) =>
       (n.dedupeKey ?? "").includes("daily-intake"),
     ).length,
-    before + 1,
+    before + 3,
   );
 });

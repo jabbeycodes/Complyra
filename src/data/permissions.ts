@@ -171,8 +171,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
-      // HEALTH-TRACK: house managers record health entries for their home.
+      // HEALTH-TRACK: house managers record health entries for their home
+      // and see the flagged-entry review queue for the individuals they manage.
       "health.record",
+      "health.review",
       "recognition.review_dsp",
       "recognition.view_winners",
       // QA-AUDIT (2026-09-14): dispute findings with photo evidence.

@@ -88,7 +88,8 @@ import {
   detectDailyIntakeAlert,
   detectHealthAlert,
   healthEntryMatches,
-  healthTrackAlertPayload,
+  healthTrackAlertTargets,
+  dailyIntakeAlertTargets,
   sortHealthEntriesDesc,
   validateHealthTrackInput,
   type HealthTrackEntry,
@@ -153,7 +154,6 @@ import type {
 import { blankDelegationForm } from "./types";
 import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
 import {
-  dedupeKeyFor,
   dspRatingChangedPayload,
   dspWinnerBroadcastPayload,
   dspWinnerSelfPayload,
@@ -7448,7 +7448,25 @@ export class LocalApi implements ComplyraApi {
     return { person, site };
   }
 
-  /** Page the nurse through the existing incident.followup notification type. */
+  /** Active house-manager user ids for a site — the managers assigned there. */
+  private healthSiteManagerIds(agencyId: string, siteId: string): string[] {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.store.db.memberships
+      .filter(
+        (m) =>
+          m.agencyId === agencyId &&
+          m.roleKey === "house_manager" &&
+          m.siteId === siteId &&
+          (!m.expiresOn || m.expiresOn >= today),
+      )
+      .map((m) => m.userId);
+  }
+
+  /**
+   * Alert every manager assigned to the individual — the home's house
+   * manager(s) directly, plus program-manager and nurse role broadcasts —
+   * through the existing incident.followup notification type.
+   */
   private queueHealthAlert(
     session: SessionUser,
     entry: HealthTrackEntry,
@@ -7456,7 +7474,7 @@ export class LocalApi implements ComplyraApi {
     siteName: string,
     reason: string,
   ): boolean {
-    const payload = healthTrackAlertPayload({
+    const targets = healthTrackAlertTargets({
       agencyId: session.agencyId,
       entryId: entry.id,
       individualName,
@@ -7464,19 +7482,25 @@ export class LocalApi implements ComplyraApi {
       kind: entry.kind,
       reason,
       occurredAt: entry.occurredAt,
+      hmUserIds: this.healthSiteManagerIds(session.agencyId, entry.siteId),
     });
-    return this.queueDelegationNotification({
-      agencyId: payload.agencyId,
-      userId: payload.userId ?? null,
-      roleKey: payload.roleKey ?? null,
-      type: payload.type,
-      title: payload.title,
-      body: payload.body,
-      deepLink: payload.deepLink,
-      entityType: payload.entityType ?? null,
-      entityId: payload.entityId ?? null,
-      dedupeKey: payload.dedupeKey ?? null,
-    });
+    let queued = false;
+    for (const payload of targets) {
+      queued =
+        this.queueDelegationNotification({
+          agencyId: payload.agencyId,
+          userId: payload.userId ?? null,
+          roleKey: payload.roleKey ?? null,
+          type: payload.type,
+          title: payload.title,
+          body: payload.body,
+          deepLink: payload.deepLink,
+          entityType: payload.entityType ?? null,
+          entityId: payload.entityId ?? null,
+          dedupeKey: payload.dedupeKey ?? null,
+        }) || queued;
+    }
+    return queued;
   }
 
   /**
@@ -7499,26 +7523,32 @@ export class LocalApi implements ComplyraApi {
     );
     const reason = detectDailyIntakeAlert(dayEntries);
     if (!reason) return;
-    this.queueDelegationNotification({
+    const targets = dailyIntakeAlertTargets({
       agencyId: session.agencyId,
-      userId: null,
-      roleKey: "nurse",
-      type: "incident.followup",
-      title: "Health alert: very low intake",
-      body:
-        `${reason} — ${individualName} (${siteName}) on ${day}. ` +
-        "Review the day's intake and follow up.",
-      deepLink: `/health/${entry.id}`,
-      entityType: "health_entry",
-      entityId: entry.id,
-      dedupeKey: dedupeKeyFor(
-        "incident.followup",
-        "health",
-        "daily-intake",
-        entry.individualId,
-        day,
-      ),
+      entryId: entry.id,
+      individualId: entry.individualId,
+      individualName,
+      siteName,
+      kind: entry.kind,
+      reason,
+      occurredAt: entry.occurredAt,
+      day,
+      hmUserIds: this.healthSiteManagerIds(session.agencyId, entry.siteId),
     });
+    for (const payload of targets) {
+      this.queueDelegationNotification({
+        agencyId: payload.agencyId,
+        userId: payload.userId ?? null,
+        roleKey: payload.roleKey ?? null,
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        deepLink: payload.deepLink,
+        entityType: payload.entityType ?? null,
+        entityId: payload.entityId ?? null,
+        dedupeKey: payload.dedupeKey ?? null,
+      });
+    }
   }
 
   private assertValidHealthInput(
