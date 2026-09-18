@@ -307,7 +307,10 @@ export default function App() {
           const healthEntryId = fromHash.startsWith("/")
             ? healthEntryIdFromLink(fromHash)
             : null;
-          if (healthEntryId) void openHealthEntryDeepLink(healthEntryId);
+          // Resolving the entry needs a session, so only attempt it once one
+          // exists. `session` is in the deps below, so cold-start deep links
+          // (email/bookmarked `#/health/<id>`) retry after sign-in loads.
+          if (healthEntryId && session) void openHealthEntryDeepLink(healthEntryId);
           setPage(next);
         }
       } catch { /* Ignore malformed external links. */ }
@@ -315,7 +318,7 @@ export default function App() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, []);
+  }, [session]);
   // KIOSK-TIME-CLOCK: keep the standalone kiosk screen in sync with the hash.
   useEffect(() => {
     const syncKioskHash = () => setKioskHash(window.location.hash);
@@ -494,9 +497,7 @@ export default function App() {
   // person's site) instead of an empty "Choose an individual" page.
   async function openHealthEntryDeepLink(entryId: string) {
     try {
-      const rows = await api.listHealthEntries({});
-      const entry = rows.find((row) => row.id === entryId);
-      if (!entry) return;
+      const entry = await api.getHealthEntry(entryId);
       setHealthTrackSection(sectionForKind(entry.kind));
       setHealthTrackIndividualId(entry.individualId);
     } catch {

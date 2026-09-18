@@ -926,6 +926,8 @@ export interface ComplyraApi {
   ): Promise<import("./mileage").MileageAgencyYearlySummary>;
   // ===== HEALTH-TRACK API (health tracking) =====
   listHealthEntries(filters: import("./healthTrack").HealthTrackFilters): Promise<import("./healthTrack").HealthTrackEntry[]>;
+  /** Fetch a single health entry by id (used by nurse-alert deep links). */
+  getHealthEntry(id: string): Promise<import("./healthTrack").HealthTrackEntry>;
   addHealthEntry(input: import("./healthTrack").AddHealthTrackInput): Promise<import("./healthTrack").HealthTrackEntry>;
   updateHealthEntry(id: string, patch: import("./healthTrack").UpdateHealthTrackInput): Promise<import("./healthTrack").HealthTrackEntry>;
   deleteHealthEntry(id: string): Promise<void>;
@@ -7541,6 +7543,14 @@ export class LocalApi implements ComplyraApi {
         row.agencyId === session.agencyId && canAccessSite(session, row.siteId),
     );
     return sortHealthEntriesDesc(rows.filter((row) => healthEntryMatches(row, filters)));
+  }
+
+  async getHealthEntry(id: string): Promise<HealthTrackEntry> {
+    const session = assertSession(this.store);
+    if (!canSeeHealthTrack(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    return this.findHealthEntry(session, id);
   }
 
   async addHealthEntry(

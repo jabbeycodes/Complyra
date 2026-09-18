@@ -8516,6 +8516,14 @@ export class HostedApi implements ComplyraApi {
       .filter((entry) => canAccessSite(session, entry.siteId));
   }
 
+  async getHealthEntry(id: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    return this.healthEntryOrThrow(session, id);
+  }
+
   async addHealthEntry(
     input: import("./healthTrack").AddHealthTrackInput,
   ): Promise<HealthTrackEntry> {
