@@ -3,12 +3,13 @@ import type { ComplyraApi, WorkspaceView } from "./localApi";
 import { LocalApi } from "./localApi";
 import { HostedApi } from "./hostedApi";
 
-/** import.meta.env is undefined outside a Vite bundle (e.g. node tests). */
+/** import.meta.env is undefined outside a Vite bundle (e.g. node tests).
+ * NOTE: access import.meta.env directly — assigning import.meta to a variable
+ * first defeats Vite's static env replacement and silently drops every
+ * VITE_* variable from production bundles (the app then falls back to the
+ * local workspace instead of hosted Supabase). */
 function viteEnv(): Record<string, string | undefined> {
-  const meta = import.meta as unknown as {
-    env?: Record<string, string | undefined>;
-  };
-  return meta.env ?? {};
+  return import.meta.env ?? {};
 }
 
 export function isSupabaseConfigured() {
