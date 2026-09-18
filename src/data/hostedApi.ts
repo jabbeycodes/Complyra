@@ -8220,25 +8220,16 @@ export class HostedApi implements ComplyraApi {
         // as an administrator profile while their job title remains
         // "House Manager" — e.g. Sarah Mitchell at Cedar House. Reach the acting
         // HM by job title + site assignment so MAR safety alerts never go silent.
-        const { data: assignmentRows } = await this.client
-          .from("staff_assignments")
-          .select("user_id")
-          .eq("agency_id", session.agencyId)
-          .eq("site_id", siteId);
-        const assignedUserIds = new Set(
-          ((assignmentRows ?? []) as Array<{ user_id: string }>).map((a) => a.user_id),
-        );
-        if (assignedUserIds.size > 0) {
-          const { data: hmProfiles } = await this.client
-            .from("profiles")
-            .select("id, job_title")
-            .eq("home_agency_id", session.agencyId)
-            .in("id", [...assignedUserIds]);
-          for (const profile of (hmProfiles ?? []) as Array<{ id: string; job_title?: string }>) {
-            if ((profile.job_title ?? "").trim().toLowerCase() !== "house manager") continue;
-            if (recipients.some((r) => r.userId === profile.id)) continue;
-            recipients.push({ userId: profile.id });
-          }
+        // Resolved through a SECURITY DEFINER RPC because assignments_select only
+        // exposes the recorder's OWN staff_assignments rows — a DSP or nurse (the
+        // typical MAR recorders) could never see the acting HM's site assignment
+        // with a direct table read, so the fallback would silently drop them.
+        const { data: hmRows2 } = await this.client.rpc("mar_site_house_managers", {
+          p_individual_id: individualId,
+        });
+        for (const row of (hmRows2 ?? []) as Array<{ user_id: string }>) {
+          if (recipients.some((r) => r.userId === row.user_id)) continue;
+          recipients.push({ userId: row.user_id });
         }
       }
       for (const recipient of recipients) {

@@ -224,4 +224,36 @@ with check ((
   )
 ));
 
+-- ----------------------------------------------------------------------
+-- Acting house-manager recipients for MAR safety alerts
+-- ----------------------------------------------------------------------
+-- Some workspaces (including the demo) title the house manager as an
+-- administrator profile whose membership role is not house_manager and whose
+-- only link to the site is a staff_assignment. The typical MAR recorders (DSP,
+-- nurse) can only read their OWN staff_assignments rows under assignments_select,
+-- so a client-side lookup can never see the acting HM's site assignment and the
+-- HM silently drops off the recipient list. This SECURITY DEFINER function
+-- resolves the HM-titled staff assigned to the individual's site, staying scoped
+-- to the caller's own agency via private.has_agency.
+create or replace function public.mar_site_house_managers(p_individual_id uuid)
+returns table (user_id uuid)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select distinct a.user_id
+  from public.individuals ind
+  join public.staff_assignments a
+    on a.agency_id = ind.agency_id
+   and a.site_id = ind.site_id
+  join public.profiles p
+    on p.id = a.user_id
+  where ind.id = p_individual_id
+    and private.has_agency(ind.agency_id)
+    and lower(btrim(coalesce(p.job_title, ''))) = 'house manager';
+$$;
+revoke all on function public.mar_site_house_managers(uuid) from public, anon;
+grant execute on function public.mar_site_house_managers(uuid) to authenticated;
+
 commit;
