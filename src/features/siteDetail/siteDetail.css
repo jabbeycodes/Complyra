@@ -530,3 +530,72 @@
     mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }
+
+/* Issue #78: per-Individual staff highlight cards on the site Overview.
+   Solid colors, high contrast, no gradients. */
+.individual-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  padding: 12px var(--panel-inline) 20px;
+}
+
+.individual-highlight-card {
+  border: 1px solid #d9d2c7;
+  border-radius: 10px;
+  background: #fffdf9;
+  padding: 14px 14px 12px;
+}
+
+.individual-highlight-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.individual-highlight-top h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #2f4630;
+  flex: 1;
+  min-width: 0;
+}
+
+.individual-highlight-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.individual-highlight-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.individual-highlight-row dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a7f72;
+}
+
+.individual-highlight-row dd {
+  margin: 0;
+  font-size: 14px;
+  color: #2e2a24;
+}
+
+/* Safety-critical rows (allergies) get a solid banner: bold text plus a
+   left border and background so the signal is never color-only. */
+.individual-highlight-row.is-alert dd {
+  color: #8f1d1d;
+  font-weight: 700;
+  background: #fdecec;
+  border-left: 4px solid #8f1d1d;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
