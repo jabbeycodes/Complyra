@@ -80,10 +80,8 @@ const WEEKLY_BUCKET_META = [
   { key: "other", label: "N/A or other", pattern: "lightgray" },
 ] as const;
 
-/** Shared SVG fill patterns for the B&W-safe weekly chart. Inlined into every
- * chart SVG (each bar and legend swatch) so `url(#id)` resolves locally and
- * survives print; a zero-size/off-flow defs host gets dropped by some print
- * engines and browsers only resolve pattern refs inside the referencing SVG. */
+/** Shared SVG fill patterns for the B&W-safe weekly chart. Rendered once
+ * (zero-size) per chart; bars and legend swatches reference by id. */
 function WeeklyChartPatterns({ idPrefix }: { idPrefix: string }) {
   return (
     <defs>
@@ -162,7 +160,6 @@ function WeeklyScoreBar({
           role="img"
           aria-label={ariaLabel}
         >
-          <WeeklyChartPatterns idPrefix={idPrefix} />
           {WEEKLY_BUCKET_META.map((meta) => {
             const value = counts[meta.key];
             if (value === 0) return null;
@@ -592,16 +589,18 @@ export default function MonthlyShiftReport({
           <section className="isp-report-weekly">
             <h5>Weekly task score summary</h5>
             <p className="muted isp-report-grid-note">
-              For each objective, how many times the task was scored Yes or No in each week of
-              the month. Each score type has its own fill pattern so the chart reads in
-              plain black-and-white print; the counts beside each bar carry the exact
-              numbers.
+              For each objective, how many times the task was scored Yes, No, Refused, or
+              N/A in each week of the month. Each score type has its own fill pattern so
+              the chart reads in plain black-and-white print; the counts beside each bar
+              carry the exact numbers.
             </p>
+            <svg width="0" height="0" aria-hidden="true" style={{ position: "absolute" }}>
+              <WeeklyChartPatterns idPrefix={patternPrefix} />
+            </svg>
             <div className="isp-weekly-legend" aria-hidden="true">
               {WEEKLY_BUCKET_META.map((meta) => (
                 <span key={meta.key} className="isp-weekly-legend-item">
                   <svg className="isp-weekly-swatch" width="14" height="14" aria-hidden="true">
-                    <WeeklyChartPatterns idPrefix={patternPrefix} />
                     <rect
                       x="0.5"
                       y="0.5"
@@ -732,8 +731,15 @@ export default function MonthlyShiftReport({
                   { key: "professionalManager", label: "Professional Manager" },
                 ] as const
               ).map(({ key, label }) => (
-                <div className="isp-report-sc-sig" key={key}>
-                  <span className="isp-report-sc-sig-role">{label}</span>
+                <div
+                  className="isp-report-sc-sig"
+                  key={key}
+                  role="group"
+                  aria-label={label}
+                >
+                  <span className="isp-report-sc-sig-role" aria-hidden="true">
+                    {label}
+                  </span>
                   {scLocked ? (
                     <span className="isp-report-sc-sig-locked">
                       {scSigs[key].name || "—"}

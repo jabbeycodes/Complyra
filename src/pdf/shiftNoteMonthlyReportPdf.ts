@@ -265,15 +265,14 @@ export function buildShiftNoteMonthlyReportPdf(input: {
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);
-  // Wrap explicitly so y advances past every wrapped line; otherwise a second
-  // line overlaps the legend swatches drawn just below.
-  const introLines = doc.splitTextToSize(
-    "For each objective, how many times the task was scored Yes or No in each week of the month. Each score type has its own fill pattern so the chart reads in plain black-and-white print.",
-    usable,
+  doc.text(
+    "For each objective, how many times the task was scored Yes, No, Refused, or N/A in each week of the month. Each score type has its own fill pattern so the chart reads in plain black-and-white print.",
+    margin,
+    y,
+    { maxWidth: usable },
   );
-  doc.text(introLines, margin, y);
   doc.setTextColor(36, 30, 24);
-  y += 8 + (introLines.length - 1) * 10;
+  y += 8;
   const legendDefs: Array<[string, BwWeeklyBucket]> = [
     ["Yes", "yes"],
     ["No", "no"],
