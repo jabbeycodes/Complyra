@@ -115,34 +115,41 @@ test("nurse returns a report for corrections and the author resubmits", async ()
   assert.equal(resubmitted.status, "submitted");
 });
 
-test("high-severity submission notifies the program manager and the nurse", async () => {
+test("high-severity submission alerts the home's HM, the program manager, and the nurse", async () => {
   const { store, api, site, individual } = await setup();
   await api.signIn(login(DEMO_DSP_USERNAME));
   const draft = await api.addGerReport(
     completeInput(site.id, individual.id, { severity: "high", eventType: "er_visit" }),
   );
   await api.submitGerReport(draft.id);
-  const escalations = store.db.notifications.filter(
+  const alerts = store.db.notifications.filter(
     (n) => n.entityType === "ger_report" && n.entityId === draft.id,
   );
-  assert.equal(escalations.length, 2);
+  // The demo DSP's home has no house manager, so the HM role is broadcast.
+  assert.equal(alerts.length, 3);
   assert.deepEqual(
-    escalations.map((n) => n.roleKey).sort(),
-    ["nurse", "program_manager"],
+    alerts.map((n) => n.roleKey).sort(),
+    ["house_manager", "nurse", "program_manager"],
   );
-  assert.ok(escalations.every((n) => n.type === "incident.followup"));
-  assert.ok(escalations.every((n) => n.deepLink === `/reporting/${draft.id}`));
+  assert.ok(alerts.every((n) => n.type === "incident.followup"));
+  assert.ok(alerts.every((n) => n.deepLink === `/reporting/${draft.id}`));
+  assert.ok(alerts.every((n) => n.title.startsWith("High")));
 });
 
-test("low-severity submission sends no escalation notifications", async () => {
+test("low-severity submission still alerts the home's HM, the PM, and the nurse", async () => {
   const { store, api, site, individual } = await setup();
   await api.signIn(login(DEMO_DSP_USERNAME));
   const draft = await api.addGerReport(completeInput(site.id, individual.id, { severity: "low" }));
   await api.submitGerReport(draft.id);
-  const escalations = store.db.notifications.filter(
+  const alerts = store.db.notifications.filter(
     (n) => n.entityType === "ger_report" && n.entityId === draft.id,
   );
-  assert.equal(escalations.length, 0);
+  assert.equal(alerts.length, 3);
+  assert.deepEqual(
+    alerts.map((n) => n.roleKey).sort(),
+    ["house_manager", "nurse", "program_manager"],
+  );
+  assert.ok(alerts.every((n) => n.title.startsWith("Low")));
 });
 
 test("listGerReports filters by individual, type, status, and date range", async () => {

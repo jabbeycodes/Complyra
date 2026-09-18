@@ -56,6 +56,10 @@ interface SiteDetailPageProps {
   onOpenIndividual: (name: string) => void;
   /** Open the matching full page so site tabs stay a summary, not a gutted copy. */
   onOpenPage?: (page: string) => void;
+  /** Deep-link support: open straight on a tab (e.g. "reporting"). */
+  initialTab?: SiteDetailTabId;
+  /** Deep-link support: preselect one GER in the Reporting tab. */
+  initialReportId?: string | null;
 }
 
 /** Defensive read of the finalized score snapshot (shape owned by the audit workflow). */
@@ -107,10 +111,14 @@ export default function SiteDetailPage({
   onBack,
   onOpenIndividual,
   onOpenPage,
+  initialTab,
+  initialReportId,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
-  const [tab, setTab] = useState<SiteDetailTabId>("overview");
+  const [tab, setTab] = useState<SiteDetailTabId>(
+    initialTab && tabs.some((t) => t.id === initialTab) ? initialTab : "overview",
+  );
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
 
   const [qaHistory, setQaHistory] = useState<QaAudit[] | null>(null);
@@ -1048,6 +1056,7 @@ export default function SiteDetailPage({
                 siteId={site.id}
                 siteName={site.name}
                 individuals={siteIndividuals.map((p) => ({ id: p.id, name: p.name }))}
+                initialSelectedId={initialReportId}
               />
             )}
           </div>

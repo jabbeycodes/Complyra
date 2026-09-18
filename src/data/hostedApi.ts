@@ -77,7 +77,7 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, canSeeGerDashboardRows, isAgencyWideViewer } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import { assertSiteHasCapacity } from "./siteCapacity";
@@ -8492,6 +8492,51 @@ export class HostedApi implements ComplyraApi {
     return this.toGerReportView(report, names);
   }
 
+  /**
+   * Submitted GERs awaiting review, newest first, for the agency
+   * dashboard. Agency-wide viewers see every home (auditors excluded);
+   * house managers see only their assigned homes.
+   */
+  async listSubmittedGerReports(): Promise<import("./types").GerReportView[]> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    if (!canSeeGerDashboardRows(session)) {
+      throw new Error("Not authorized to view submitted event reports.");
+    }
+    let query = this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("status", "submitted")
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (!isAgencyWideViewer(session) && !session.platformAdmin) {
+      const { data: ms } = await this.client
+        .from("memberships")
+        .select("user_id, site_id")
+        .eq("agency_id", session.agencyId)
+        .eq("user_id", session.userId)
+        .eq("role_key", "house_manager");
+      const siteIds = [
+        ...new Set(
+          ((ms ?? []) as Array<{ site_id: string | null }>)
+            .map((row) => row.site_id)
+            .filter((id): id is string => !!id),
+        ),
+      ];
+      if (session.siteId) siteIds.push(session.siteId);
+      const unique = [...new Set(siteIds)];
+      if (unique.length === 0) return [];
+      query = query.in("site_id", unique);
+    }
+    const { data, error } = await query;
+    throwIf(error, "Could not load submitted event reports.");
+    const names = await this.gerNameMaps(session);
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      this.toGerReportView(this.mapGerReport(row), names),
+    );
+  }
+
   async addGerReport(
     input: import("./types").AddGerReportInput,
   ): Promise<import("./types").GerReport> {
@@ -8634,31 +8679,46 @@ export class HostedApi implements ComplyraApi {
       "ger_report",
       report.id,
     );
-    // High/Critical submissions page the PM and the nurse through the
-    // existing notify-event edge function (dedupe_key makes this idempotent).
-    if (lib.gerEscalatesOnSubmit(report.severity as import("./ger").GerSeverity)) {
-      try {
-        const { emitOne } = await import("../features/notifications/useNotifications");
-        const names = await this.gerNameMaps(session);
-        const view = this.toGerReportView(report, names);
-        for (const roleKey of ["program_manager", "nurse"]) {
-          await emitOne(
-            this.client,
-            lib.gerEscalationPayload({
-              agencyId: report.agencyId,
-              roleKey,
-              gerId: report.id,
-              siteId: report.siteId,
-              individualName: view.individualName,
-              eventType: report.eventType as import("./ger").GerEventType,
-              severity: report.severity as import("./ger").GerSeverity,
-              eventDate: report.eventDate,
-            }),
-          );
-        }
-      } catch (err) {
-        console.warn("[ger] Escalation notification failed:", err);
+    // Every submission (any severity) alerts the submitting home's house
+    // manager directly plus the program manager and nurse roles, through
+    // the existing notify-event edge function (dedupe_key makes this
+    // idempotent). High/Critical severities keep their escalation paging
+    // to PM + nurse as a subset of these alerts.
+    try {
+      const { emitOne } = await import("../features/notifications/useNotifications");
+      const names = await this.gerNameMaps(session);
+      const view = this.toGerReportView(report, names);
+      const { data: hmRows } = await this.client
+        .from("memberships")
+        .select("user_id")
+        .eq("agency_id", report.agencyId)
+        .eq("role_key", "house_manager")
+        .eq("site_id", report.siteId);
+      const hmUserIds = [
+        ...new Set(
+          ((hmRows ?? []) as Array<{ user_id: string | null }>)
+            .map((row) => row.user_id)
+            .filter((id): id is string => !!id),
+        ),
+      ];
+      for (const target of lib.gerSubmitNotificationTargets(hmUserIds)) {
+        await emitOne(
+          this.client,
+          lib.gerEscalationPayload({
+            agencyId: report.agencyId,
+            roleKey: target.roleKey ?? "house_manager",
+            userId: target.userId,
+            gerId: report.id,
+            siteId: report.siteId,
+            individualName: view.individualName,
+            eventType: report.eventType as import("./ger").GerEventType,
+            severity: report.severity as import("./ger").GerSeverity,
+            eventDate: report.eventDate,
+          }),
+        );
       }
+    } catch (err) {
+      console.warn("[ger] Submit notification failed:", err);
     }
     return report;
   }

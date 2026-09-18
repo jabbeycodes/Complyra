@@ -119,7 +119,9 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
-import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { individualsAtSite, personalQueue, sitesVisibleTo, canSeeGerDashboardRows } from "./data/dashboard";
+import type { GerReportView } from "./data/types";
+import type { SiteDetailTabId } from "./features/siteDetail/siteTabs";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -176,6 +178,11 @@ export default function App() {
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
   const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
+  // GER-DASHBOARD: deep-link state so a dashboard row opens the home's
+  // Reporting tab with the report preselected.
+  const [detailInitialTab, setDetailInitialTab] = useState<SiteDetailTabId | null>(null);
+  const [detailInitialReportId, setDetailInitialReportId] = useState<string | null>(null);
+  const [submittedGers, setSubmittedGers] = useState<GerReportView[]>([]);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
@@ -222,9 +229,32 @@ export default function App() {
     setSelectedId(null);
     setPerson(null);
     setDetailSiteId(null);
+    setDetailInitialTab(null);
+    setDetailInitialReportId(null);
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
+  // GER-DASHBOARD: submitted event reports awaiting review, shown in the
+  // agency dashboard's "awaiting review" section. Reloads whenever the
+  // Overview page is shown; viewers who may not see GER rows get none.
+  useEffect(() => {
+    if (page !== "Overview" || !session || !canSeeGerDashboardRows(session)) {
+      setSubmittedGers([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .listSubmittedGerReports()
+      .then((rows) => {
+        if (!cancelled) setSubmittedGers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setSubmittedGers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, page, session?.userId, session?.roleKey]);
   // Only the explicit demo action starts a tour; ordinary sign-in stays direct.
   useEffect(() => {
     if (!demoMode) return;
@@ -448,7 +478,11 @@ export default function App() {
   function navigate(next: string, nextStatus = "All statuses") {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
-    if (next !== "Site detail") setDetailSiteId(null);
+    if (next !== "Site detail") {
+      setDetailSiteId(null);
+      setDetailInitialTab(null);
+      setDetailInitialReportId(null);
+    }
     setPage(next);
     setStatus(nextStatus);
     setQuery("");
@@ -465,6 +499,18 @@ export default function App() {
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
+    setDetailInitialTab(null);
+    setDetailInitialReportId(null);
+    setPage("Site detail");
+    setQuery("");
+    setMobileOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  /** Open one submitted GER from the agency dashboard: the home's Reporting tab, preselected. */
+  function openGerReport(report: GerReportView) {
+    setDetailSiteId(report.siteId);
+    setDetailInitialTab("reporting");
+    setDetailInitialReportId(report.id);
     setPage("Site detail");
     setQuery("");
     setMobileOpen(false);
@@ -869,6 +915,8 @@ export default function App() {
               individuals={individuals}
               site={site}
               personalItems={personalItems}
+              submittedGers={submittedGers}
+              onOpenGer={openGerReport}
               onSite={setSite}
               onNavigate={navigate}
               onRequirement={selectRequirement}
@@ -1095,6 +1143,8 @@ export default function App() {
                   onBack={() => navigate("Sites & programs")}
                   onOpenIndividual={(name) => openPersonChart(name)}
                   onOpenPage={(next) => navigate(next)}
+                  initialTab={detailInitialTab ?? undefined}
+                  initialReportId={detailInitialReportId}
                 />
               )}
               {page === "Sites & programs" && (

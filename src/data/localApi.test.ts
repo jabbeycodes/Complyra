@@ -1170,3 +1170,180 @@ password: DEMO_PASSWORD,
     );
   }
 });
+
+// ===== GER submit alerts + dashboard rows (issue follow-up) =====
+
+function gerDraftInput(siteId: string, individualId: string, severity: string) {
+  return {
+    siteId,
+    individualId,
+    eventDate: "2026-09-17",
+    eventTime: "14:30",
+    location: "Living room",
+    eventType: "fall",
+    severity,
+    description: "Resident slipped on a wet floor.",
+    actionsTaken: "Checked for injury, applied ice.",
+    reportedByName: "Test Staff",
+    signatureName: "Test Staff",
+  };
+}
+
+const SEVERITY_LABEL: Record<string, string> = {
+  low: "Low",
+  moderate: "Moderate",
+  high: "High",
+  critical: "Critical",
+};
+
+test("submitting a GER at any severity alerts the home's HM directly, plus PM and nurse", async () => {
+  for (const severity of ["low", "moderate", "high", "critical"]) {
+    const memory = store();
+    const api = new LocalApi(memory);
+    // James Wilson is the house manager of Willow House.
+    const hm = await api.signIn({
+      agencyCode: DEMO_AGENCY_CODE,
+      username: DEMO_HM_USERNAME,
+      password: DEMO_PASSWORD,
+    });
+    const willow = memory.db.sites.find((s) => s.name === "Willow House")!;
+    const reese = memory.db.individuals.find((p) => p.siteId === willow.id)!;
+    const draft = await api.addGerReport(gerDraftInput(willow.id, reese.id, severity));
+    await api.submitGerReport(draft.id);
+
+    const rows = memory.db.notifications.filter((n) => n.entityId === draft.id);
+    assert.equal(rows.length, 3, `severity ${severity}: HM + PM + nurse alerts`);
+
+    const direct = rows.find((n) => n.userId === hm.userId);
+    assert.ok(direct, `severity ${severity}: home's HM gets a direct alert`);
+    assert.equal(direct!.roleKey, null);
+    assert.ok(direct!.title.startsWith(SEVERITY_LABEL[severity]));
+    assert.ok(direct!.body.includes(`${severity} severity`));
+
+    for (const roleKey of ["program_manager", "nurse"]) {
+      const row = rows.find((n) => n.roleKey === roleKey);
+      assert.ok(row, `severity ${severity}: ${roleKey} alerted`);
+      assert.equal(row!.userId, null);
+      assert.equal(row!.type, "incident.followup");
+      assert.equal(row!.dedupeKey, `incident.followup:${draft.id}:${roleKey}`);
+      assert.ok(row!.title.startsWith(SEVERITY_LABEL[severity]));
+    }
+  }
+});
+
+test("a high-severity submission keeps the escalation dedupe keys (no double-fire on resubmit)", async () => {
+  const memory = store();
+  const api = new LocalApi(memory);
+  const hm = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const willow = memory.db.sites.find((s) => s.name === "Willow House")!;
+  const reese = memory.db.individuals.find((p) => p.siteId === willow.id)!;
+  const draft = await api.addGerReport(gerDraftInput(willow.id, reese.id, "critical"));
+  await api.submitGerReport(draft.id);
+  const first = memory.db.notifications.filter((n) => n.entityId === draft.id);
+  assert.equal(first.length, 3);
+
+  // Reviewer returns it for corrections (Sarah Mitchell is an administrator).
+  const admin = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  await api.reviewGerReport(draft.id, "return", "Add the witness statement.");
+  assert.equal(admin.roleKey, "administrator");
+
+  // Author resubmits — dedupe keys mean nobody is alerted twice.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  await api.submitGerReport(draft.id);
+  const after = memory.db.notifications.filter((n) => n.entityId === draft.id);
+  assert.equal(after.length, 3);
+});
+
+test("a home with no assigned HM falls back to the HM role broadcast", async () => {
+  const memory = store();
+  const api = new LocalApi(memory);
+  // Alex Morgan is a DSP at Cedar House, which has no house manager member
+  // (Sarah Mitchell is the agency administrator there).
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const cedar = memory.db.sites.find((s) => s.name === "Cedar House")!;
+  const ellis = memory.db.individuals.find((p) => p.siteId === cedar.id)!;
+  const hmAtCedar = memory.db.memberships.filter(
+    (m) => m.roleKey === "house_manager" && m.siteId === cedar.id,
+  );
+  assert.equal(hmAtCedar.length, 0);
+  const draft = await api.addGerReport(gerDraftInput(cedar.id, ellis.id, "low"));
+  await api.submitGerReport(draft.id);
+
+  const rows = memory.db.notifications.filter((n) => n.entityId === draft.id);
+  assert.equal(rows.length, 3);
+  const broadcast = rows.find((n) => n.roleKey === "house_manager");
+  assert.ok(broadcast, "HM role broadcast queued");
+  assert.equal(broadcast!.userId, null);
+  assert.ok(broadcast!.title.startsWith("Low"));
+});
+
+test("listSubmittedGerReports: admin sees every home, HMs see only their homes, others are refused", async () => {
+  const memory = store();
+  const api = new LocalApi(memory);
+  const willow = memory.db.sites.find((s) => s.name === "Willow House")!;
+  const cedar = memory.db.sites.find((s) => s.name === "Cedar House")!;
+  const reese = memory.db.individuals.find((p) => p.siteId === willow.id)!;
+  const ellis = memory.db.individuals.find((p) => p.siteId === cedar.id)!;
+
+  // One submitted report per home.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const willowDraft = await api.addGerReport(gerDraftInput(willow.id, reese.id, "moderate"));
+  await api.submitGerReport(willowDraft.id);
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const cedarDraft = await api.addGerReport(gerDraftInput(cedar.id, ellis.id, "low"));
+  await api.submitGerReport(cedarDraft.id);
+
+  // Administrator: both homes, newest first, names resolved.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const all = await api.listSubmittedGerReports();
+  assert.equal(all.length, 2);
+  assert.ok(all.every((r) => r.status === "submitted"));
+  assert.ok(all[0].individualName.length > 0 && all[0].siteName.length > 0);
+
+  // House manager: only their own home.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_HM_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const hmRows = await api.listSubmittedGerReports();
+  assert.equal(hmRows.length, 1);
+  assert.equal(hmRows[0].siteId, willow.id);
+  assert.equal(hmRows[0].siteName, "Willow House");
+
+  // DSP: no GER dashboard rows.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  await assert.rejects(() => api.listSubmittedGerReports(), /Not authorized/);
+});

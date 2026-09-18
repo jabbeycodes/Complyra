@@ -49,6 +49,23 @@ export function isAgencyWideViewer(session: SessionUser): boolean {
   return (AGENCY_WIDE_ROLE_KEYS as readonly string[]).includes(session.roleKey);
 }
 
+/**
+ * Who sees submitted event reports on the agency dashboard. Agency-wide
+ * viewers see every submitted GER — except auditors, who are not GER
+ * reviewers (HM/PM/nurse are) and see QA Review + scores only. House
+ * managers see submitted GERs for their own homes (the data layer scopes
+ * them by assigned site). DSPs have no agency dashboard at all — that is
+ * enforced by the Overview pageVisible gate.
+ */
+export function canSeeGerDashboardRows(session: SessionUser): boolean {
+  if (session.roleKey === "auditor") return false;
+  if (session.platformAdmin) return true;
+  if ((AGENCY_WIDE_ROLE_KEYS as readonly string[]).includes(session.roleKey)) {
+    return true;
+  }
+  return session.roleKey === "house_manager";
+}
+
 export function assignedSiteIds(session: SessionUser, staff: StaffSiteRef[]): string[] {
   const ids = new Set<string>();
   if (session.siteId) ids.add(session.siteId);

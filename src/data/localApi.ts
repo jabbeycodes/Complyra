@@ -83,7 +83,7 @@ import {
   type SiteShiftNoteView,
 } from "./shiftNotes";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer, canSeeGerDashboardRows, assignedSiteIds } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
 import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
@@ -917,6 +917,13 @@ export interface ComplyraApi {
     siteId: string,
     filters?: import("./ger").GerReportFilters,
   ): Promise<import("./types").GerReportView[]>;
+  /**
+   * Submitted event reports awaiting review, newest first. Agency-wide
+   * viewers see every home (auditors excluded — no GER rows); house
+   * managers see only their assigned homes. Powers the agency dashboard
+   * "awaiting review" section.
+   */
+  listSubmittedGerReports(): Promise<import("./types").GerReportView[]>;
   /** One report with individual/site names resolved. */
   getGerReport(reportId: string): Promise<import("./types").GerReportView>;
   /** Start a draft report (ger.create). */
@@ -929,8 +936,11 @@ export interface ComplyraApi {
     patch: import("./types").UpdateGerReportInput,
   ): Promise<import("./types").GerReport>;
   /**
-   * Submit a draft/returned report for review. High/Critical severities
-   * queue incident.followup notifications to program managers and nurses.
+   * Submit a draft/returned report for review. Every submission (any
+   * severity) queues incident.followup alerts to the home's house
+   * manager, the program manager, and the nurse; High/Critical
+   * severities keep their escalation paging to PM + nurse as a subset
+   * of those alerts.
    */
   submitGerReport(reportId: string): Promise<import("./types").GerReport>;
   /**
@@ -7350,17 +7360,34 @@ export class LocalApi implements ComplyraApi {
     };
   }
 
-  /** Queue escalation notifications for a High/Critical submission. */
-  private async queueGerEscalation(
+  /**
+   * Queue submit-time alerts for a GER at any severity: the submitting
+   * home's house manager(s) get a direct alert, plus the program manager
+   * and nurse roles. The High/Critical escalation (PM + nurse paged
+   * immediately) is preserved as a subset — same payloads, same dedupe
+   * keys, so nothing double-fires on resubmit.
+   */
+  private async queueGerSubmitNotifications(
     report: import("./types").GerReport,
   ): Promise<void> {
     const lib = await this.gerLib();
-    if (!lib.gerEscalatesOnSubmit(report.severity as import("./ger").GerSeverity)) return;
     const view = this.toGerReportView(report);
-    for (const roleKey of ["program_manager", "nurse"]) {
+    const db = this.store.db;
+    const today = todayIso();
+    const siteHmUserIds = db.memberships
+      .filter(
+        (m) =>
+          m.agencyId === report.agencyId &&
+          m.roleKey === "house_manager" &&
+          m.siteId === report.siteId &&
+          (!m.expiresOn || m.expiresOn >= today),
+      )
+      .map((m) => m.userId);
+    for (const target of lib.gerSubmitNotificationTargets(siteHmUserIds)) {
       const payload = lib.gerEscalationPayload({
         agencyId: report.agencyId,
-        roleKey,
+        roleKey: target.roleKey ?? "house_manager",
+        userId: target.userId,
         gerId: report.id,
         siteId: report.siteId,
         individualName: view.individualName,
@@ -7368,7 +7395,6 @@ export class LocalApi implements ComplyraApi {
         severity: report.severity as import("./ger").GerSeverity,
         eventDate: report.eventDate,
       });
-      const db = this.store.db;
       if (db.notifications.some((n) => n.dedupeKey === payload.dedupeKey)) continue;
       db.notifications.push({
         id: crypto.randomUUID(),
@@ -7411,6 +7437,33 @@ export class LocalApi implements ComplyraApi {
     const lib = await this.gerLib();
     if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
     return this.toGerReportView(this.findGerReport(session, reportId));
+  }
+
+  /**
+   * Submitted GERs awaiting review, newest first, for the agency
+   * dashboard. Agency-wide viewers see every home (auditors excluded);
+   * house managers see only their assigned homes.
+   */
+  async listSubmittedGerReports(): Promise<import("./types").GerReportView[]> {
+    const session = assertSession(this.store);
+    const lib = await this.gerLib();
+    if (!canSeeGerDashboardRows(session)) {
+      throw new Error("Not authorized to view submitted event reports.");
+    }
+    const { sortGerReports } = lib;
+    let rows = this.gerRows().filter(
+      (row) => row.agencyId === session.agencyId && row.status === "submitted",
+    );
+    if (!isAgencyWideViewer(session) && !session.platformAdmin) {
+      const ids = new Set(
+        assignedSiteIds(
+          session,
+          this.store.db.memberships.map((m) => ({ id: m.userId, siteId: m.siteId })),
+        ),
+      );
+      rows = rows.filter((row) => ids.has(row.siteId));
+    }
+    return sortGerReports(rows).map((r) => this.toGerReportView(r));
   }
 
   async addGerReport(
@@ -7524,7 +7577,7 @@ export class LocalApi implements ComplyraApi {
     report.status = lib.transitionGerStatus(report.status, "submit");
     report.updatedAt = new Date().toISOString();
     await persistMeta(this.store);
-    await this.queueGerEscalation(report);
+    await this.queueGerSubmitNotifications(report);
     return report;
   }
 

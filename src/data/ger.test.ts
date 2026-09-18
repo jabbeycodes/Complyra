@@ -15,6 +15,7 @@ import {
   canDecideGerReport,
   gerEscalatesOnSubmit,
   gerEscalationPayload,
+  gerSubmitNotificationTargets,
   filterGerReports,
   sortGerReports,
   GER_STATUS_LABELS,
@@ -250,5 +251,87 @@ describe("filterGerReports / sortGerReports", () => {
     const sorted = sortGerReports([...rows].reverse());
     assert.equal(sorted[0].eventDate, "2026-09-17");
     assert.equal(sorted[2].eventDate, "2026-09-15");
+  });
+});
+
+describe("gerSubmitNotificationTargets", () => {
+  test("every submission alerts the home's HM directly, plus PM and nurse", () => {
+    const targets = gerSubmitNotificationTargets(["hm-1", "hm-2"]);
+    assert.deepEqual(
+      targets.map((t) => t.userId),
+      ["hm-1", "hm-2", null, null],
+    );
+    assert.deepEqual(
+      targets.map((t) => t.roleKey),
+      [null, null, "program_manager", "nurse"],
+    );
+  });
+
+  test("duplicate HM ids are collapsed", () => {
+    const targets = gerSubmitNotificationTargets(["hm-1", "hm-1"]);
+    assert.equal(targets.filter((t) => t.userId === "hm-1").length, 1);
+  });
+
+  test("with no assigned HM the HM role is broadcast instead", () => {
+    const targets = gerSubmitNotificationTargets([]);
+    assert.deepEqual(
+      targets.map((t) => t.roleKey),
+      ["house_manager", "program_manager", "nurse"],
+    );
+    assert.ok(targets.every((t) => t.userId === null));
+  });
+});
+
+describe("submit-time notification payload", () => {
+  test("a direct HM alert carries the member id and a member-scoped dedupe key", () => {
+    const payload = gerEscalationPayload({
+      agencyId: "a1",
+      roleKey: "house_manager",
+      userId: "hm-1",
+      gerId: "ger-9",
+      siteId: "s1",
+      individualName: "Reese L.",
+      eventType: "fall",
+      severity: "low",
+      eventDate: "2026-09-17",
+    });
+    assert.equal(payload.type, "incident.followup");
+    assert.equal(payload.userId, "hm-1");
+    assert.equal(payload.roleKey, null);
+    assert.equal(payload.dedupeKey, "incident.followup:ger-9:house_manager:hm-1");
+  });
+
+  test("severity reads differently in the title at each level", () => {
+    const base = {
+      agencyId: "a1",
+      roleKey: "nurse",
+      gerId: "ger-9",
+      siteId: "s1",
+      individualName: "Reese L.",
+      eventType: "injury" as const,
+      eventDate: "2026-09-17",
+    };
+    const low = gerEscalationPayload({ ...base, severity: "low" });
+    const critical = gerEscalationPayload({ ...base, severity: "critical" });
+    assert.ok(low.title.startsWith("Low"));
+    assert.ok(critical.title.startsWith("Critical"));
+    assert.ok(low.body.includes("low severity"));
+    assert.ok(critical.body.includes("critical severity"));
+    assert.notEqual(low.title, critical.title);
+  });
+
+  test("role broadcasts keep the per-gerId+roleKey dedupe scheme", () => {
+    const payload = gerEscalationPayload({
+      agencyId: "a1",
+      roleKey: "program_manager",
+      gerId: "ger-9",
+      siteId: "s1",
+      individualName: "Reese L.",
+      eventType: "fall",
+      severity: "high",
+      eventDate: "2026-09-17",
+    });
+    assert.equal(payload.roleKey, "program_manager");
+    assert.equal(payload.dedupeKey, "incident.followup:ger-9:program_manager");
   });
 });

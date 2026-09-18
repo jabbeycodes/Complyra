@@ -43,6 +43,8 @@ interface GerTabProps {
   siteId: string;
   siteName: string;
   individuals: GerTabIndividual[];
+  /** Deep-link support: preselect one report (e.g. from the agency dashboard). */
+  initialSelectedId?: string | null;
 }
 
 function todayIso(): string {
@@ -129,13 +131,13 @@ function formErrors(form: FormState, forSubmit: boolean): string[] {
   return validateGerInput(core, { forSubmit }).map((e) => e.message);
 }
 
-export default function GerTab({ siteId, siteName, individuals }: GerTabProps) {
+export default function GerTab({ siteId, siteName, individuals, initialSelectedId }: GerTabProps) {
   const { api, session } = useData();
   const [reports, setReports] = useState<GerReportView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState<GerReportFilters>(EMPTY_GER_FILTERS);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null);
   const [formState, setFormState] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");

@@ -65,7 +65,6 @@ export const GER_STATUS_LABELS: Record<GerStatus, string> = {
 
 /** Severities that page management the moment a report is submitted. */
 export const GER_ESCALATING_SEVERITIES: readonly GerSeverity[] = ["high", "critical"];
-
 export const GER_NOTIFICATION_CHANNELS = [
   "guardian",
   "nurse",
@@ -262,10 +261,19 @@ export function gerEscalatesOnSubmit(severity: GerSeverity): boolean {
  * High/Critical submissions page the program manager and the nurse via the
  * existing "incident.followup" notification type — no new notification
  * infrastructure. One payload per target role; callers queue both.
+ *
+ * Every submission (any severity) also alerts the submitting home's house
+ * manager(s) directly via `userId`: pass `userId` for a member-targeted
+ * alert, which clears `roleKey` (the payload contract takes exactly one of
+ * the two) and scopes the dedupe key to that member. Severity always
+ * appears in the title/body so a Low fall reads differently from a
+ * Critical injury.
  */
 export function gerEscalationPayload(input: {
   agencyId: string;
   roleKey: string;
+  /** Direct member target (the site's house manager). Overrides roleKey. */
+  userId?: string | null;
   gerId: string;
   siteId: string;
   individualName: string;
@@ -275,9 +283,11 @@ export function gerEscalationPayload(input: {
 }): NotificationPayload {
   const typeLabel = GER_EVENT_TYPE_LABELS[input.eventType];
   const severityLabel = GER_SEVERITY_LABELS[input.severity];
+  const direct = input.userId != null && input.userId !== "";
   return {
     agencyId: input.agencyId,
-    roleKey: input.roleKey,
+    userId: direct ? (input.userId as string) : null,
+    roleKey: direct ? null : input.roleKey,
     type: "incident.followup",
     title: `${severityLabel} event report submitted`,
     body:
@@ -286,8 +296,43 @@ export function gerEscalationPayload(input: {
     deepLink: `/reporting/${input.gerId}`,
     entityType: "ger_report",
     entityId: input.gerId,
-    dedupeKey: dedupeKeyFor("incident.followup", input.gerId, input.roleKey),
+    dedupeKey: direct
+      ? dedupeKeyFor("incident.followup", input.gerId, input.roleKey, input.userId as string)
+      : dedupeKeyFor("incident.followup", input.gerId, input.roleKey),
   };
+}
+
+export interface GerSubmitNotificationTarget {
+  /** Direct member target (the home's house manager), if known. */
+  userId: string | null;
+  /** Role broadcast target (PM, nurse, or HM fallback), if not direct. */
+  roleKey: string | null;
+}
+
+/**
+ * Who gets an alert on every GER submission, at any severity: the
+ * submitting home's house manager(s) directly, plus the program manager
+ * and nurse roles. When no house manager is assigned to the home, the HM
+ * role is broadcast instead so a manager still sees it. Pair each target
+ * with gerEscalationPayload (pass roleKey "house_manager" as its base when
+ * the target is a direct HM).
+ */
+export function gerSubmitNotificationTargets(
+  siteHouseManagerUserIds: string[],
+): GerSubmitNotificationTarget[] {
+  const targets: GerSubmitNotificationTarget[] = [];
+  const seen = new Set<string>();
+  for (const userId of siteHouseManagerUserIds) {
+    if (!userId || seen.has(userId)) continue;
+    seen.add(userId);
+    targets.push({ userId, roleKey: null });
+  }
+  if (targets.length === 0) {
+    targets.push({ userId: null, roleKey: "house_manager" });
+  }
+  targets.push({ userId: null, roleKey: "program_manager" });
+  targets.push({ userId: null, roleKey: "nurse" });
+  return targets;
 }
 
 export interface GerReportFilters {
