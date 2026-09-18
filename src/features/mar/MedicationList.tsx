@@ -6,11 +6,12 @@
  * (PDF), and active/discontinued status. Add/edit/discontinue are gated to
  * staff who configure the MAR; every change is audit-logged.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useData } from "../../data/DataProvider";
 import {
   canConfigureMar,
   defaultMarConfig,
+  normalizeBeginDateInput,
   type MedicationMarConfig,
   type MedicationMarView,
   type NewMedicationInput,
@@ -318,7 +319,10 @@ function MedicationForm({
   const [dosageForm, setDosageForm] = useState(cfg.dosageForm);
   const [indication, setIndication] = useState(cfg.indication);
   const [instructions, setInstructions] = useState(cfg.instructions);
-  const [beginAt, setBeginAt] = useState(cfg.beginAt?.slice(0, 10) ?? "");
+  // The begin date is read straight from the DOM at submit time (via ref)
+  // rather than React state: native date-picker commits have been observed to
+  // bypass onChange state updates, leaving the submitted value blank.
+  const beginAtRef = useRef<HTMLInputElement | null>(null);
   const [frequencyLabel, setFrequencyLabel] = useState(cfg.frequencyLabel);
   const [scheduleRepeat, setScheduleRepeat] = useState(cfg.scheduleRepeat);
   const [timeSlots, setTimeSlots] = useState((cfg.timeSlots ?? []).join(", "));
@@ -344,7 +348,7 @@ function MedicationForm({
             dosageForm,
             indication,
             instructions,
-            beginAt: beginAt || null,
+            beginAt: normalizeBeginDateInput(beginAtRef.current?.value ?? ""),
             frequencyLabel,
             scheduleRepeat,
             timeSlots: parseTimeSlots(timeSlots),
@@ -414,7 +418,12 @@ function MedicationForm({
         </label>
         <label>
           Begin date
-          <input type="date" value={beginAt} onChange={(e) => setBeginAt(e.target.value)} />
+          <input
+            ref={beginAtRef}
+            type="date"
+            name="beginAt"
+            defaultValue={cfg.beginAt?.slice(0, 10) ?? ""}
+          />
         </label>
       </div>
       {kind === "scheduled" && (

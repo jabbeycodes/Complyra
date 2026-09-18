@@ -201,6 +201,18 @@ button.mar-cell-empty:hover {
   color: #241e18;
 }
 
+/* Future-date cells are not recordable (doses are recorded at dispense time);
+   they stay visible for orientation but are inert and carry an accessible name. */
+button.mar-cell-future {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.mar-cell-future:hover {
+  background: transparent;
+  color: #a89f8f;
+}
+
 .mar-cell-outside {
   color: #c9c1b2;
 }

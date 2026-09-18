@@ -13,8 +13,10 @@ import {
   defaultMarConfig,
   initialsForName,
   marGridForMonth,
+  marTimeSlotLabel,
   medicationMarView,
   monthKeyFor,
+  normalizeBeginDateInput,
   shiftMonthKey,
   validateMarAdministration,
   validateMarConcern,
@@ -488,4 +490,27 @@ test("medicationMarView fills MAR config defaults", () => {
   assert.equal(view.mar.status, "active");
   assert.deepEqual(view.mar.timeSlots, []);
   assert.equal(view.mar.orderAttachment, null);
+});
+
+test("marTimeSlotLabel: PRN slots never render as a broken clock time", () => {
+  assert.equal(marTimeSlotLabel(null), "PRN");
+  assert.equal(marTimeSlotLabel(undefined), "PRN");
+  assert.equal(marTimeSlotLabel(""), "PRN");
+  assert.equal(marTimeSlotLabel("08:00"), "8:00 AM");
+  assert.equal(marTimeSlotLabel("12:00"), "12:00 PM");
+  assert.equal(marTimeSlotLabel("20:30"), "8:30 PM");
+  assert.equal(marTimeSlotLabel("bogus"), "PRN");
+});
+
+test("normalizeBeginDateInput: native date-input values pass through verbatim", () => {
+  assert.equal(normalizeBeginDateInput("2026-09-01"), "2026-09-01");
+  assert.equal(normalizeBeginDateInput(""), null);
+  assert.equal(normalizeBeginDateInput("  "), null);
+  assert.equal(normalizeBeginDateInput("not-a-date"), null);
+});
+
+test("validateMedicationInput keeps the begin date on the config", () => {
+  const input = validMedicationInput({ config: { beginAt: "2026-09-01" } });
+  const validated = validateMedicationInput(input);
+  assert.equal(validated.config.beginAt, "2026-09-01");
 });

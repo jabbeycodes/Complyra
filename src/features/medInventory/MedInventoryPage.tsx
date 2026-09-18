@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { BellRing, TriangleAlert } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
-import { medSupplyStatus } from "../../data/complianceStatus";
+import { medSupplyStatusFromInventory } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canRecordDelivery, canSeeMeds } from "../../data/chart";
-import { inventoryCountdownLabel } from "../../data/medInventory";
+import {
+  inventoryCountdownLabel,
+  medSupplyStatusDescription,
+  medSupplyStatusLabel,
+} from "../../data/medInventory";
 import type { MedSupplyStatus } from "../../data/types";
 import MedInventoryCard from "./MedInventoryCard";
 
@@ -107,7 +111,9 @@ export default function MedInventoryPage() {
                 style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
               >
                 <StatusBadge
-                  status={medSupplyStatus(alert.daysRemaining)}
+                  status={medSupplyStatusFromInventory(alert.status)}
+                  label={medSupplyStatusLabel(alert.status)}
+                  description={medSupplyStatusDescription(alert.status, alert.reorderPointPills)}
                   size="sm"
                 />
                 <span>

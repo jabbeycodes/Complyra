@@ -24,7 +24,7 @@ export default function MarHome({
   individualName: string;
   profile: IndividualProfile | null;
 }) {
-  const { api } = useData();
+  const { api, workspace } = useData();
   const [monthKey, setMonthKey] = useState(monthKeyFor());
   const [meds, setMeds] = useState<MedicationMarView[]>([]);
   const [administrations, setAdministrations] = useState<MarAdministration[]>([]);
@@ -55,7 +55,11 @@ export default function MarHome({
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // `workspace` is an intentional dep: inventory corrections and med
+    // deliveries go through DataProvider.refresh(), which swaps the workspace
+    // object — that refreshes this sibling view too, so the pill-count
+    // countdown never goes stale while the inventory card next to it updates.
+  }, [load, workspace]);
 
   return (
     <div className="mar-home">

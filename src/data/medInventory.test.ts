@@ -11,6 +11,8 @@ import { DEMO_PASSWORD } from "./types";
 import { todayIso, type Medication } from "./chart";
 import {
   inventoryCountdownLabel,
+  medSupplyStatusDescription,
+  medSupplyStatusLabel,
   projectInventory,
   projectMedInventory,
   summarizeMedSupply,
@@ -447,4 +449,20 @@ test("DSP can view inventory but cannot adjust it", async () => {
     client.setReorderThreshold({ medicationId: views[0].medicationId, lowThresholdDays: 10 }),
     /House manager, RN, or PM/,
   );
+});
+
+test("medSupplyStatusLabel: supply wording never borrows order-expiry language", () => {
+  assert.equal(medSupplyStatusLabel("ok"), "Stocked");
+  assert.equal(medSupplyStatusLabel("low"), "Reorder soon");
+  assert.equal(medSupplyStatusLabel("critical"), "Reorder now");
+  assert.equal(medSupplyStatusLabel("out"), "Out of stock");
+  // A stocked PRN medication must never render as "Expired".
+  assert.notEqual(medSupplyStatusLabel("ok"), "Expired");
+});
+
+test("medSupplyStatusDescription: supply-specific tooltip wording", () => {
+  assert.match(medSupplyStatusDescription("low", 14), /reorder at 14 pills/i);
+  assert.match(medSupplyStatusDescription("out", 14), /out of stock/i);
+  assert.match(medSupplyStatusDescription("ok", 14), /in stock/i);
+  assert.doesNotMatch(medSupplyStatusDescription("ok", 14), /deadline has passed/i);
 });

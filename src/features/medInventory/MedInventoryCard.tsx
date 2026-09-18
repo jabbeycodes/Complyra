@@ -2,22 +2,20 @@ import { useEffect, useState } from "react";
 import { BellRing, History, Pill, Settings2, TriangleAlert } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
-import { medSupplyStatus } from "../../data/complianceStatus";
+import { medSupplyStatusFromInventory } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canLogDoseException, canRecordDelivery } from "../../data/chart";
-import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
+import {
+  doseExceptionKindLabel,
+  inventoryCountdownLabel,
+  medSupplyStatusDescription,
+  medSupplyStatusLabel,
+} from "../../data/medInventory";
 import type {
   DoseExceptionKind,
   MedInventoryStatus,
   MedInventoryView,
 } from "../../data/types";
-
-const STATUS_LABEL: Record<MedInventoryStatus, string> = {
-  ok: "Stocked",
-  low: "Reorder soon",
-  critical: "Reorder now",
-  out: "Out of stock",
-};
 
 const EXCEPTION_KINDS: DoseExceptionKind[] = ["refused", "held", "wasted"];
 
@@ -102,10 +100,15 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             <header>
               <span className={`kind-pill ${view.kind}`}>{view.kind}</span>
               <h3>{view.medicationName}</h3>
-              {/* WS3 (accessible status system): shared badge — the band is
-                  computed with the same thresholds as the app's reorder logic
-                  (medSupplyStatus mirrors computeInventory). */}
-              <StatusBadge status={medSupplyStatus(view.daysRemaining)} />
+              {/* WS3 (accessible status system): shared badge — the band is the
+                  stored inventory band (medSupplyStatusFromInventory); the
+                  label/description are supply-specific so a stocked PRN never
+                  reads "Expired". */}
+              <StatusBadge
+                status={medSupplyStatusFromInventory(view.status)}
+                label={medSupplyStatusLabel(view.status)}
+                description={medSupplyStatusDescription(view.status, view.reorderPointPills)}
+              />
             </header>
             <p>
               {view.strength} · {inventoryCountdownLabel(view)}
@@ -119,7 +122,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             </p>
             <div
               role="progressbar"
-              aria-label={`${view.medicationName} supply: ${STATUS_LABEL[view.status]}`}
+              aria-label={`${view.medicationName} supply: ${medSupplyStatusLabel(view.status)}`}
               aria-valuenow={Math.round(depletion)}
               aria-valuemin={0}
               aria-valuemax={100}
@@ -142,7 +145,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
               />
             </div>
             <p className="stack-help" style={{ marginTop: 2 }}>
-              {STATUS_LABEL[view.status]}
+              {medSupplyStatusLabel(view.status)}
               {view.status !== "ok" && view.status !== "out"
                 ? ` — reorder at ${view.reorderPointPills} pills (${view.lowThresholdDays}-day threshold)`
                 : view.status === "out"

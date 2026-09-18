@@ -19,6 +19,11 @@ export interface StatusBadgeProps {
    * must still read "N/A"). The icon shape stays the same.
    */
   label?: string;
+  /**
+   * Optional description override (tooltip + SR context). Medication supply
+   * badges use this to avoid the shared order-lifecycle "Expired" wording.
+   */
+  description?: string;
 }
 
 /**
@@ -30,6 +35,7 @@ export default function StatusBadge({
   status,
   size = "md",
   label,
+  description,
 }: StatusBadgeProps) {
   const meta = STATUS_META[status];
   const text = label ?? meta.label;
@@ -38,7 +44,7 @@ export default function StatusBadge({
       className={`status-badge status-badge--${status} status-badge--${size}`}
       role="status"
       aria-label={text}
-      title={meta.description}
+      title={description ?? meta.description}
     >
       <span className="status-badge__icon" aria-hidden="true">
         {meta.icon}

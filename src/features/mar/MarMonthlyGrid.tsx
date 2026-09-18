@@ -15,6 +15,7 @@ import {
   marAdminStatusLabel,
   marConcernTypeLabel,
   marGridForMonth,
+  marTimeSlotLabel,
   shiftMonthKey,
   type MarAdminStatus,
   type MarAdministration,
@@ -26,13 +27,6 @@ import {
 import { formatDate } from "../../components";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { openPrintable } from "../../data/openFile";
-
-function formatSlot(slot: string): string {
-  const [h, m] = slot.split(":").map(Number);
-  const suffix = h >= 12 ? "PM" : "AM";
-  const hour = h % 12 === 0 ? 12 : h % 12;
-  return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
-}
 
 function inWindowForDay(med: MedicationMarView, day: number, monthKey: string): boolean {
   const iso = `${monthKey}-${String(day).padStart(2, "0")}`;
@@ -177,10 +171,11 @@ export default function MarMonthlyGrid({
                 <tr key={`${row.medicationId}-${row.timeSlot ?? "prn"}`}>
                   <th scope="row">
                     {row.medicationName}
-                    {row.timeSlot ? ` · ${formatSlot(row.timeSlot)}` : " · PRN"}
+                    {row.timeSlot ? ` · ${marTimeSlotLabel(row.timeSlot)}` : " · PRN"}
                   </th>
                   {row.cells.map((cell) => {
                     const inWindow = inWindowForDay(med, cell.day, monthKey);
+                    const iso = `${monthKey}-${String(cell.day).padStart(2, "0")}`;
                     const admin = cell.administration;
                     if (admin) {
                       const circled = admin.status !== "given";
@@ -206,6 +201,7 @@ export default function MarMonthlyGrid({
                               type="button"
                               className="mar-cell-empty"
                               title="Flag a medication error or adverse reaction"
+                              aria-label={`Flag a medication error or adverse reaction for ${med.name} on ${iso}`}
                               onClick={() =>
                                 setConcernFor({ administrationId: admin.id, prnLogId: null })
                               }
@@ -231,6 +227,7 @@ export default function MarMonthlyGrid({
                               type="button"
                               className="mar-cell-empty"
                               title="Flag a medication error or adverse reaction"
+                              aria-label={`Flag a medication error or adverse reaction for ${med.name} PRN dose on ${iso}`}
                               onClick={() => setConcernFor({ administrationId: null, prnLogId: prn.id })}
                             >
                               ⚑
@@ -247,14 +244,33 @@ export default function MarMonthlyGrid({
                       );
                     }
                     if (!recordable(med, cell.day)) {
+                      if (iso > today) {
+                        // Future dates are not recordable (doses are recorded
+                        // at dispense time), but the cell stays discoverable
+                        // with a proper accessible name.
+                        return (
+                          <td key={cell.day}>
+                            <button
+                              type="button"
+                              className="mar-cell-empty mar-cell-future"
+                              disabled
+                              aria-label={`Record dose on ${iso} — not yet due`}
+                            >
+                              <span aria-hidden="true">·</span>
+                            </button>
+                          </td>
+                        );
+                      }
                       return <td key={cell.day} />;
                     }
+                    const slotLabel = marTimeSlotLabel(row.timeSlot);
                     return (
                       <td key={cell.day}>
                         <button
                           type="button"
                           className="mar-cell-empty"
-                          title={`Record ${formatSlot(row.timeSlot ?? "")} dose on ${monthKey}-${String(cell.day).padStart(2, "0")}`}
+                          title={`Record ${slotLabel} dose on ${iso}`}
+                          aria-label={`Record ${slotLabel} dose on ${iso}`}
                           onClick={() =>
                             setRecording({
                               medicationId: row.medicationId,
@@ -442,7 +458,7 @@ function RecordAdministrationForm({
       }}
     >
       <h4>
-        Record {med.name} {med.strength} — {formatSlot(timeSlot)} on {formatDate(date)}
+        Record {med.name} {med.strength} — {marTimeSlotLabel(timeSlot)} on {formatDate(date)}
       </h4>
       <div className="mar-form-row">
         <label>

@@ -7194,6 +7194,22 @@ export class LocalApi implements ComplyraApi {
         if (recipients.some((r) => r.userId === membership.userId)) continue;
         recipients.push({ userId: membership.userId });
       }
+      // Fallback: some workspaces (including the demo) title the house manager
+      // as an administrator profile while their job title remains
+      // "House Manager" — e.g. Sarah Mitchell at Cedar House. Reach the acting
+      // HM by job title + site assignment so MAR safety alerts never go silent.
+      const assignedUserIds = new Set(
+        (db.assignments ?? [])
+          .filter((a) => a.agencyId === session.agencyId && a.siteId === person.siteId)
+          .map((a) => a.userId),
+      );
+      for (const profile of db.profiles ?? []) {
+        if (profile.homeAgencyId !== session.agencyId) continue;
+        if ((profile.jobTitle ?? "").trim().toLowerCase() !== "house manager") continue;
+        if (!assignedUserIds.has(profile.id)) continue;
+        if (recipients.some((r) => r.userId === profile.id)) continue;
+        recipients.push({ userId: profile.id });
+      }
     }
     for (const recipient of recipients) {
       this.queueMarNotificationLocal(build(recipient));

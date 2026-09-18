@@ -501,6 +501,32 @@ export function creditedBackForAdministrations(
     .map((row) => ({ date: row.administeredOn.slice(0, 10), pills: row.pillsGiven }));
 }
 
+/**
+ * Accessible time-slot label for grid cells, tooltips, and form headings.
+ * PRN rows have no fixed time slot — they render as "PRN", never a broken
+ * "12:undefined AM".
+ */
+export function marTimeSlotLabel(timeSlot: string | null | undefined): string {
+  if (!timeSlot) return "PRN";
+  const [h, m] = timeSlot.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "PRN";
+  const suffix = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
+}
+
+/**
+ * Normalize a native date-input value for the medication begin date:
+ * "" -> null (no begin date), otherwise the YYYY-MM-DD value. Native date
+ * inputs only ever yield "" or a valid calendar date, so anything else is
+ * treated as unset rather than persisted.
+ */
+export function normalizeBeginDateInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
 export function marAdminStatusLabel(status: MarAdminStatus): string {
   return status === "given"
     ? "Given"

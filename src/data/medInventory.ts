@@ -304,6 +304,41 @@ export function inventoryCountdownLabel(view: MedInventoryView): string {
   return `${pills} · ~${view.daysRemaining} day${view.daysRemaining === 1 ? "" : "s"} left`;
 }
 
+/**
+ * Supply-specific badge label. Pill-count supply is never "expired" — that
+ * word is reserved for actual order/lifecycle expiry. A stocked PRN med
+ * reads "Stocked", never "Expired".
+ */
+export function medSupplyStatusLabel(status: MedInventoryStatus): string {
+  switch (status) {
+    case "ok":
+      return "Stocked";
+    case "low":
+      return "Reorder soon";
+    case "critical":
+      return "Reorder now";
+    case "out":
+      return "Out of stock";
+  }
+}
+
+/** Supply-specific badge description (tooltip + screen-reader context). */
+export function medSupplyStatusDescription(
+  status: MedInventoryStatus,
+  reorderPointPills: number,
+): string {
+  switch (status) {
+    case "ok":
+      return "In stock — supply is above the reorder point.";
+    case "low":
+      return `Low stock — reorder at ${reorderPointPills} pills.`;
+    case "critical":
+      return "Critically low — reorder now.";
+    case "out":
+      return "Out of stock — no pills projected on hand. Reorder immediately.";
+  }
+}
+
 export interface ValidatedDoseExceptionInput {
   kind: DoseExceptionKind;
   pillsAffected: number;
