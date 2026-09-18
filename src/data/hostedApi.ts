@@ -8542,25 +8542,20 @@ export class HostedApi implements ComplyraApi {
     if (!Number.isFinite(validated.pillsGiven) || validated.pillsGiven > med.remainingPills) {
       throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
     }
-    const { data, error } = await this.client
-      .from("prn_dose_logs")
-      .insert({
-        agency_id: session.agencyId,
-        individual_id: med.individualId,
-        medication_id: med.id,
-        given_at: validated.givenAt,
-        pills_given: validated.pillsGiven,
-        reason_given: validated.reasonGiven,
-        effectiveness: validated.effectiveness,
-        initials: validated.initials?.trim() || mar.initialsForName(session.fullName),
-        administered_by_name: session.fullName,
-        logged_on: validated.givenAt.slice(0, 10),
-        pills_used: validated.pillsGiven,
-      })
-      .select("id")
-      .single();
+    // Atomic RPC locks the medication row, re-checks the overdraw, decrements
+    // remaining_pills, and writes the richer PRN log in one transaction (the
+    // client cannot decrement medications directly under RLS).
+    const { data, error } = await this.client.rpc("record_prn_administration", {
+      p_medication_id: med.id,
+      p_pills: validated.pillsGiven,
+      p_reason_given: validated.reasonGiven,
+      p_effectiveness: validated.effectiveness,
+      p_initials: validated.initials?.trim() || mar.initialsForName(session.fullName),
+      p_administered_by_name: session.fullName,
+      p_given_at: validated.givenAt,
+    });
     throwIf(error, "Could not record the PRN dose.");
-    const id = (data as { id: string }).id;
+    const id = data as string;
     await this.audit(
       session,
       "medication.prn_administered",

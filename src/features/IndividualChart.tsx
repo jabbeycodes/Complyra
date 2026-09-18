@@ -428,7 +428,7 @@ export default function IndividualChart({
           <section className="chart-widget" id="chart-meds" aria-labelledby="meds-heading">
             <h2 id="meds-heading">Medications</h2>
             {/* Issue #100: profile header, medication list, monthly MAR grid, pill-count countdown. */}
-            <MarHome individualId={individualId} individualName={person.name} profile={person.profile} />
+            <MarHome individualId={individualId} individualName={person.name} profile={profile} />
             {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
             <MedInventoryCard individualId={individualId} />
           </section>

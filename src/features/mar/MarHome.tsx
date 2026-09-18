@@ -61,9 +61,9 @@ export default function MarHome({
     <div className="mar-home">
       {loading && <p className="mar-help">Loading medication records…</p>}
       {error && <p className="mar-error">{error}</p>}
-      {!loading && profile && (
+      {!loading && (
         <>
-          <MedProfileHeader profile={profile} meds={meds} weightKg="" />
+          {profile && <MedProfileHeader profile={profile} meds={meds} weightKg="" />}
           <MedicationList individualId={individualId} meds={meds} onChanged={load} />
           <MarMonthlyGrid
             individualId={individualId}

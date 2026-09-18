@@ -65,6 +65,51 @@ alter table public.prn_dose_logs
 create index if not exists prn_dose_logs_individual_month_idx
   on public.prn_dose_logs (agency_id, individual_id, logged_on);
 
+-- Atomic PRN administration for the MAR: locks the medication row, rejects an
+-- overdraw, decrements remaining_pills, and writes the DMH PRN log (reason,
+-- effectiveness, initials, administering staff) in one transaction. Mirrors
+-- record_prn_dose but persists the richer MAR fields the grid renders.
+create or replace function public.record_prn_administration(
+  p_medication_id uuid,
+  p_pills numeric,
+  p_reason_given text,
+  p_effectiveness text,
+  p_initials text,
+  p_administered_by_name text,
+  p_given_at timestamptz
+) returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
+declare m medications%rowtype; remaining numeric; new_id uuid;
+begin
+  select * into m from medications where id = p_medication_id for update;
+  if m.id is null or m.kind <> 'prn' or not private.can_read_individual(m.agency_id, m.individual_id)
+    or not private.role_key_in(m.agency_id, array['administrator','compliance_admin','house_manager','program_manager','nurse','dsp']) then
+    raise exception 'PRN medication not found or dose access denied.';
+  end if;
+  if p_pills is null or p_pills::text in ('NaN','Infinity','-Infinity') or p_pills <= 0 then
+    raise exception 'Enter how many pills were given.';
+  end if;
+  if p_pills > m.remaining_pills then
+    raise exception 'The dose exceeds the recorded stock. Reconcile the count first.';
+  end if;
+  remaining := m.remaining_pills - p_pills;
+  update medications set remaining_pills = remaining where id = m.id;
+  insert into prn_dose_logs(
+    agency_id, medication_id, individual_id, logged_on, logged_at, pills_used,
+    remaining_after, reason_given, effectiveness, initials, administered_by_name,
+    logged_by, logged_by_user_id
+  )
+  values(
+    m.agency_id, m.id, m.individual_id, coalesce(p_given_at, now())::date,
+    coalesce(p_given_at, now()), p_pills, remaining, coalesce(p_reason_given, ''),
+    coalesce(p_effectiveness, ''), coalesce(p_initials, ''),
+    coalesce(p_administered_by_name, ''), coalesce(p_administered_by_name, ''), auth.uid()
+  )
+  returning id into new_id;
+  return new_id;
+end $$;
+revoke all on function public.record_prn_administration(uuid,numeric,text,text,text,text,timestamptz) from public, anon;
+grant execute on function public.record_prn_administration(uuid,numeric,text,text,text,text,timestamptz) to authenticated;
+
 -- ----------------------------------------------------------------------
 -- mar_administrations: one row per scheduled time slot actually recorded
 -- ----------------------------------------------------------------------
@@ -138,14 +183,10 @@ create policy mar_administrations_select on public.mar_administrations
 for select to authenticated
 using ((select private.has_agency(agency_id)));
 
-create policy mar_administrations_write on public.mar_administrations
-for all to authenticated
-using ((
-  select private.role_key_in(
-    agency_id,
-    '{administrator,compliance_admin,house_manager,program_manager,nurse,dsp}'
-  )
-))
+-- Administrations are an append-only audit trail (corrections are new rows),
+-- so this is insert-only: no UPDATE/DELETE is authorized for med-passing roles.
+create policy mar_administrations_insert on public.mar_administrations
+for insert to authenticated
 with check ((
   select private.role_key_in(
     agency_id,

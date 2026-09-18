@@ -313,8 +313,21 @@ button.mar-cell-empty:hover {
 }
 
 @media print {
-  body[data-mar-print="monthly"] .app-shell > :not(.mar-print-area),
-  body[data-mar-print="monthly"] .app-shell .mar-print-area ~ * {
-    display: none;
+  /* The monthly grid is nested deep inside the chart, so hiding the shell's
+     top-level children would also hide the grid. Toggle visibility instead:
+     ancestors stay in the layout but paint nothing, and only the print area
+     (and its descendants) render, floated to the top of the page. */
+  body[data-mar-print="monthly"] * {
+    visibility: hidden;
+  }
+  body[data-mar-print="monthly"] .mar-print-area,
+  body[data-mar-print="monthly"] .mar-print-area * {
+    visibility: visible;
+  }
+  body[data-mar-print="monthly"] .mar-print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
   }
 }
