@@ -8688,12 +8688,17 @@ export class HostedApi implements ComplyraApi {
       const { emitOne } = await import("../features/notifications/useNotifications");
       const names = await this.gerNameMaps(session);
       const view = this.toGerReportView(report, names);
+      const today = todayIso();
+      // Direct-alert only the home's active house manager(s). Skip expired
+      // memberships (parity with the local path) so an ex-manager never
+      // receives a resident's PHI.
       const { data: hmRows } = await this.client
         .from("memberships")
         .select("user_id")
         .eq("agency_id", report.agencyId)
         .eq("role_key", "house_manager")
-        .eq("site_id", report.siteId);
+        .eq("site_id", report.siteId)
+        .or(`expires_on.is.null,expires_on.gte.${today}`);
       const hmUserIds = [
         ...new Set(
           ((hmRows ?? []) as Array<{ user_id: string | null }>)

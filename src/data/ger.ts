@@ -312,10 +312,13 @@ export interface GerSubmitNotificationTarget {
 /**
  * Who gets an alert on every GER submission, at any severity: the
  * submitting home's house manager(s) directly, plus the program manager
- * and nurse roles. When no house manager is assigned to the home, the HM
- * role is broadcast instead so a manager still sees it. Pair each target
- * with gerEscalationPayload (pass roleKey "house_manager" as its base when
- * the target is a direct HM).
+ * and nurse roles. House managers are only alerted by direct `userId` for
+ * their own home — never a `house_manager` role broadcast, which
+ * notification RLS would deliver agency-wide (leaking a home's PHI to
+ * managers of other homes). When a home has no assigned house manager, the
+ * program manager (always notified below) provides review coverage. Pair
+ * each target with gerEscalationPayload (pass roleKey "house_manager" as its
+ * base when the target is a direct HM).
  */
 export function gerSubmitNotificationTargets(
   siteHouseManagerUserIds: string[],
@@ -326,9 +329,6 @@ export function gerSubmitNotificationTargets(
     if (!userId || seen.has(userId)) continue;
     seen.add(userId);
     targets.push({ userId, roleKey: null });
-  }
-  if (targets.length === 0) {
-    targets.push({ userId: null, roleKey: "house_manager" });
   }
   targets.push({ userId: null, roleKey: "program_manager" });
   targets.push({ userId: null, roleKey: "nurse" });

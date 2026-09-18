@@ -272,11 +272,13 @@ describe("gerSubmitNotificationTargets", () => {
     assert.equal(targets.filter((t) => t.userId === "hm-1").length, 1);
   });
 
-  test("with no assigned HM the HM role is broadcast instead", () => {
+  test("with no assigned HM there is no HM broadcast; PM + nurse cover review", () => {
     const targets = gerSubmitNotificationTargets([]);
+    // No house_manager role broadcast — that would leak a home's PHI to
+    // every HM in the agency. The program manager provides review coverage.
     assert.deepEqual(
       targets.map((t) => t.roleKey),
-      ["house_manager", "program_manager", "nurse"],
+      ["program_manager", "nurse"],
     );
     assert.ok(targets.every((t) => t.userId === null));
   });

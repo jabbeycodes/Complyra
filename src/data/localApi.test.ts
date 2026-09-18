@@ -1266,7 +1266,7 @@ test("a high-severity submission keeps the escalation dedupe keys (no double-fir
   assert.equal(after.length, 3);
 });
 
-test("a home with no assigned HM falls back to the HM role broadcast", async () => {
+test("a home with no assigned HM alerts PM + nurse only, never an HM role broadcast", async () => {
   const memory = store();
   const api = new LocalApi(memory);
   // Alex Morgan is a DSP at Cedar House, which has no house manager member
@@ -1286,11 +1286,15 @@ test("a home with no assigned HM falls back to the HM role broadcast", async () 
   await api.submitGerReport(draft.id);
 
   const rows = memory.db.notifications.filter((n) => n.entityId === draft.id);
-  assert.equal(rows.length, 3);
-  const broadcast = rows.find((n) => n.roleKey === "house_manager");
-  assert.ok(broadcast, "HM role broadcast queued");
-  assert.equal(broadcast!.userId, null);
-  assert.ok(broadcast!.title.startsWith("Low"));
+  // Only the program manager and nurse roles are alerted. A house_manager
+  // role broadcast would be delivered to every HM in the agency by
+  // notification RLS, leaking Cedar House's PHI to other homes' managers.
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((n) => n.roleKey).sort(),
+    ["nurse", "program_manager"],
+  );
+  assert.ok(!rows.some((n) => n.roleKey === "house_manager"), "no HM role broadcast");
 });
 
 test("listSubmittedGerReports: admin sees every home, HMs see only their homes, others are refused", async () => {

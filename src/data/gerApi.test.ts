@@ -125,11 +125,13 @@ test("high-severity submission alerts the home's HM, the program manager, and th
   const alerts = store.db.notifications.filter(
     (n) => n.entityType === "ger_report" && n.entityId === draft.id,
   );
-  // The demo DSP's home has no house manager, so the HM role is broadcast.
-  assert.equal(alerts.length, 3);
+  // The demo DSP's home has no house manager, so only the program manager
+  // and nurse roles are alerted — never an agency-wide HM broadcast (which
+  // would leak this home's PHI to managers of other homes).
+  assert.equal(alerts.length, 2);
   assert.deepEqual(
     alerts.map((n) => n.roleKey).sort(),
-    ["house_manager", "nurse", "program_manager"],
+    ["nurse", "program_manager"],
   );
   assert.ok(alerts.every((n) => n.type === "incident.followup"));
   assert.ok(alerts.every((n) => n.deepLink === `/reporting/${draft.id}`));
@@ -144,10 +146,11 @@ test("low-severity submission still alerts the home's HM, the PM, and the nurse"
   const alerts = store.db.notifications.filter(
     (n) => n.entityType === "ger_report" && n.entityId === draft.id,
   );
-  assert.equal(alerts.length, 3);
+  // No assigned HM → PM + nurse only, no agency-wide HM broadcast.
+  assert.equal(alerts.length, 2);
   assert.deepEqual(
     alerts.map((n) => n.roleKey).sort(),
-    ["house_manager", "nurse", "program_manager"],
+    ["nurse", "program_manager"],
   );
   assert.ok(alerts.every((n) => n.title.startsWith("Low")));
 });

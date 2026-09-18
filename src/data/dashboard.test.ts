@@ -158,7 +158,7 @@ test("site-scoped staff are locked to their home site; admins are not", async ()
   assert.equal(lockedSiteIdFor(hm), oakwood.id);
 });
 
-test("GER dashboard rows: agency-wide viewers except auditors see them; HMs see their homes", async () => {
+test("GER dashboard rows: GER reviewers see them (HR/auditor/DSP do not); HMs see their homes", async () => {
   const roleByKey: Record<string, SessionUser["role"]> = {
     administrator: "administrator",
     compliance_admin: "compliance_admin",
@@ -187,17 +187,22 @@ test("GER dashboard rows: agency-wide viewers except auditors see them; HMs see 
     platformAdmin: false,
     agencyStatus: "active",
   });
-  // Agency-wide viewers (per AGENCY_WIDE_ROLE_KEYS) see submitted GERs…
-  for (const roleKey of ["administrator", "compliance_admin", "program_manager", "hr"]) {
+  // GER reviewers (the ger.review permission) see submitted GERs…
+  for (const roleKey of [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "house_manager",
+    "nurse",
+  ]) {
     assert.equal(canSeeGerDashboardRows(sessionFor(roleKey)), true, roleKey);
   }
-  // …except auditors, who are not GER reviewers (QA Review + scores only).
+  // …auditors are not GER reviewers (QA Review + scores only).
   assert.equal(canSeeGerDashboardRows(sessionFor("auditor")), false);
-  // House managers see their own homes' submitted GERs.
-  assert.equal(canSeeGerDashboardRows(sessionFor("house_manager")), true);
-  // DSPs and nurses have no GER dashboard section.
+  // HR sees staff/employment only — never care records like GERs.
+  assert.equal(canSeeGerDashboardRows(sessionFor("hr")), false);
+  // DSPs have no GER dashboard section.
   assert.equal(canSeeGerDashboardRows(sessionFor("dsp")), false);
-  assert.equal(canSeeGerDashboardRows(sessionFor("nurse")), false);
   // Platform admins see everything.
   assert.equal(
     canSeeGerDashboardRows({ ...sessionFor("dsp"), platformAdmin: true }),
