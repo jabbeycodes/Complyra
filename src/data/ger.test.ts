@@ -156,6 +156,20 @@ describe("GER permission gates", () => {
     assert.ok(canViewGerReports(sessionFor("auditor")));
     assert.ok(!canCreateGerReport(sessionFor("auditor")));
     assert.ok(!canReviewGerReport(sessionFor("auditor")));
+    // 2026-09-19 founder ruling: auditors see everything, but read-only —
+    // they cannot edit, submit, decide, or be alerted.
+    const draft = { status: "draft" as const, createdBy: "u-other" };
+    const submitted = { status: "submitted" as const, createdBy: "u-other" };
+    const auditor = sessionFor("auditor");
+    assert.ok(!canEditGerReportBody(auditor, draft));
+    assert.ok(!canEditGerReportBody(auditor, submitted));
+    assert.ok(!canDecideGerReport(auditor, submitted));
+    assert.ok(!canDecideGerReport(auditor, draft));
+    const targets = gerSubmitNotificationTargets(["hm-1"]);
+    assert.ok(
+      targets.every((t) => t.roleKey !== "auditor"),
+      "auditors get no submit alerts",
+    );
   });
 
   test("HR sees nothing (no GER or individuals access)", () => {

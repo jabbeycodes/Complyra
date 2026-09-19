@@ -158,7 +158,7 @@ test("site-scoped staff are locked to their home site; admins are not", async ()
   assert.equal(lockedSiteIdFor(hm), oakwood.id);
 });
 
-test("GER dashboard rows: GER reviewers see them (HR/auditor/DSP do not); HMs see their homes", async () => {
+test("GER dashboard rows: GER reviewers and auditors see them (HR/DSP do not); HMs see their homes", async () => {
   const roleByKey: Record<string, SessionUser["role"]> = {
     administrator: "administrator",
     compliance_admin: "compliance_admin",
@@ -197,8 +197,9 @@ test("GER dashboard rows: GER reviewers see them (HR/auditor/DSP do not); HMs se
   ]) {
     assert.equal(canSeeGerDashboardRows(sessionFor(roleKey)), true, roleKey);
   }
-  // …auditors are not GER reviewers (QA Review + scores only).
-  assert.equal(canSeeGerDashboardRows(sessionFor("auditor")), false);
+  // …auditors see everything (2026-09-19 founder ruling), read-only — the
+  // rows they see cannot be edited or decided in the UI or the API.
+  assert.equal(canSeeGerDashboardRows(sessionFor("auditor")), true);
   // HR sees staff/employment only — never care records like GERs.
   assert.equal(canSeeGerDashboardRows(sessionFor("hr")), false);
   // DSPs have no GER dashboard section.

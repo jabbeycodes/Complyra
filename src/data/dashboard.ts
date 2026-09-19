@@ -21,7 +21,7 @@ import {
   type SiteFacts,
   type SiteReview,
 } from "./siteReview";
-import { hasPermission } from "./permissions";
+import { capabilityForRoleKey, hasPermission } from "./permissions";
 
 export const AGENCY_WIDE_ROLE_KEYS = [
   "administrator",
@@ -51,17 +51,23 @@ export function isAgencyWideViewer(session: SessionUser): boolean {
 }
 
 /**
- * Who sees submitted event reports on the agency dashboard. This is a
- * GER-reviewer gate (the `ger.review` permission), so it tracks the rest of
- * the GER workflow: administrators, compliance admins, program managers,
- * house managers, and nurses qualify, while HR, DSPs, and auditors do not.
- * Reviewers without an agency-wide scope (house managers, nurses) are
- * further limited to their assigned homes by the data layer. DSPs have no
- * agency dashboard at all — that is enforced by the Overview pageVisible gate.
+ * Who sees submitted event reports on the agency dashboard. Reviewers
+ * (`ger.review`) see rows they are expected to act on; auditors see the same
+ * rows read-only under Joshua's 2026-09-19 "auditors see everything" ruling.
+ * In practice that means administrators, compliance admins, program
+ * managers, house managers, nurses, and auditors qualify, while HR and DSPs
+ * do not. Reviewers without an agency-wide scope (house managers, nurses)
+ * are further limited to their assigned homes by the data layer. DSPs have
+ * no agency dashboard at all — that is enforced by the Overview pageVisible
+ * gate. Auditors are read-only here: the detail link opens the same
+ * read-only GER view the Reporting tab already gives them.
  */
 export function canSeeGerDashboardRows(session: SessionUser): boolean {
   if (session.platformAdmin) return true;
-  return hasPermission(session, "ger.review");
+  return (
+    hasPermission(session, "ger.review") ||
+    capabilityForRoleKey(session.roleKey) === "auditor"
+  );
 }
 
 export function assignedSiteIds(session: SessionUser, staff: StaffSiteRef[]): string[] {
