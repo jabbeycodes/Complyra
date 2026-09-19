@@ -73,6 +73,13 @@ with check (
   )
 );
 
+-- Table privileges for the PostgREST roles. RLS policies alone are not
+-- enough: without these grants every authenticated request fails with
+-- "permission denied for table ger_reports" before any policy evaluates.
+-- DELETE is granted deliberately with no delete policy, so direct deletes
+-- are rejected by RLS (42501) instead of failing closed at the grant layer.
+grant select, insert, update, delete on public.ger_reports to authenticated;
+
 create or replace function private.guard_ger_report_workflow()
 returns trigger
 language plpgsql

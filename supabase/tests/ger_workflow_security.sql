@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(7);
+select plan(8);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id,name,agency_code,state_code,status) values
@@ -32,11 +32,9 @@ select throws_ok($$select update_ger_report_body('66000000-0000-0000-0000-000000
 select lives_ok($$select update_ger_report_body('66000000-0000-0000-0000-000000000001',jsonb_build_object('individual_id','65000000-0000-0000-0000-000000000001','event_date',current_date::text,'event_type','other','severity','low','description','Updated','actions_taken','Action','location','Home A','reported_by_name','HM','signature_name','HM'))$$,'Author-site manager can edit through the controlled RPC');
 select lives_ok($$select submit_ger_report('66000000-0000-0000-0000-000000000001')$$,'Controlled RPC submits a complete report');
 
-reset role;
-select set_config('request.jwt.claims','{"role":"service_role"}',true);
-update ger_reports set status='approved' where id='66000000-0000-0000-0000-000000000001';
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"64000000-0000-0000-0000-000000000001"}',true);
+select lives_ok($$select review_ger_report('66000000-0000-0000-0000-000000000001','approve','Reviewed and approved')$$,'Administrator approves through the review RPC');
 select throws_ok($$select update_ger_report_body('66000000-0000-0000-0000-000000000001','{}'::jsonb)$$,'P0001',null,'Approved report is final even for an administrator');
 select throws_ok($$delete from ger_reports where id='66000000-0000-0000-0000-000000000001'$$,'42501',null,'GER records cannot be deleted through PostgREST');
 select * from finish();

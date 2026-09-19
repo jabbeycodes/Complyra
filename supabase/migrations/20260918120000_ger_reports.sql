@@ -5,8 +5,9 @@
 --   corrections). Approved reports are final — the app locks their body.
 --
 -- This migration is applied with the GER reporting feature.  The following
--- hardening migration removes direct write policies and replaces them with
--- security-definer workflow RPCs before release.
+-- hardening migration narrows the direct write policies to site-scoped
+-- permission holders, adds a tamper-resistant workflow trigger, and
+-- provides security-definer workflow RPCs before release.
 
 create table public.ger_reports (
   id uuid primary key default gen_random_uuid(),
