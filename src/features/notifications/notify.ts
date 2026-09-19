@@ -164,8 +164,21 @@ export function notificationPage(link: string): string | null {
   if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
+  if (/^\/health(?:\/|$)/.test(path)) return "Health Track";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;
+}
+
+/**
+ * Health alerts deep-link to `/health/<entryId>`. Extract that entry id so the
+ * app can select the flagged individual instead of landing on an empty page.
+ * Returns null for any other link.
+ */
+export function healthEntryIdFromLink(link: string): string | null {
+  if (!isWellFormedDeepLink(link)) return null;
+  const path = link.split(/[?#]/)[0];
+  const match = /^\/health\/([^/]+)$/.exec(path);
+  return match ? match[1] : null;
 }
 
 /** DB row as the client reads it. */
