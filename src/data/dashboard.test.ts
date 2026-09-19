@@ -13,10 +13,13 @@ import {
   individualsAtSite,
   isAgencyWideViewer,
   canAccessSite,
+  canSeeGerDashboardRows,
   lockedSiteIdFor,
   personalQueue,
   sitesVisibleTo,
 } from "./dashboard";
+import { defaultPermissions } from "./permissions";
+import type { SessionUser } from "./types";
 
 function api() {
   return new LocalApi(new MemoryStore(structuredClone(createEvergreenSeed())));
@@ -153,4 +156,57 @@ test("site-scoped staff are locked to their home site; admins are not", async ()
   assert.equal(canAccessSite(hm, oakwood.id), true);
   assert.equal(canAccessSite(hm, maple.id), false);
   assert.equal(lockedSiteIdFor(hm), oakwood.id);
+});
+
+test("GER dashboard rows: GER reviewers and auditors see them (HR/DSP do not); HMs see their homes", async () => {
+  const roleByKey: Record<string, SessionUser["role"]> = {
+    administrator: "administrator",
+    compliance_admin: "compliance_admin",
+    house_manager: "manager",
+    program_manager: "manager",
+    nurse: "nurse",
+    hr: "hr",
+    auditor: "auditor",
+    dsp: "dsp",
+  };
+  const sessionFor = (roleKey: string): SessionUser => ({
+    userId: `u-${roleKey}`,
+    email: "user@example.com",
+    username: "user1",
+    fullName: "Test Staff",
+    jobTitle: "Tester",
+    role: roleByKey[roleKey] ?? "dsp",
+    roleKey,
+    agencyId: "a1",
+    agencyName: "Test Agency",
+    agencyCode: "TEST",
+    siteId: null,
+    mustChangePassword: false,
+    expiresOn: null,
+    permissions: defaultPermissions(roleKey),
+    platformAdmin: false,
+    agencyStatus: "active",
+  });
+  // GER reviewers (the ger.review permission) see submitted GERs…
+  for (const roleKey of [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "house_manager",
+    "nurse",
+  ]) {
+    assert.equal(canSeeGerDashboardRows(sessionFor(roleKey)), true, roleKey);
+  }
+  // …auditors see everything (2026-09-19 founder ruling), read-only — the
+  // rows they see cannot be edited or decided in the UI or the API.
+  assert.equal(canSeeGerDashboardRows(sessionFor("auditor")), true);
+  // HR sees staff/employment only — never care records like GERs.
+  assert.equal(canSeeGerDashboardRows(sessionFor("hr")), false);
+  // DSPs have no GER dashboard section.
+  assert.equal(canSeeGerDashboardRows(sessionFor("dsp")), false);
+  // Platform admins see everything.
+  assert.equal(
+    canSeeGerDashboardRows({ ...sessionFor("dsp"), platformAdmin: true }),
+    true,
+  );
 });

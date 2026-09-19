@@ -53,6 +53,9 @@ export const PERMISSION_KEYS = [
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
   "mileage.manage",
+  // GER (ger.create / ger.review go here)
+  "ger.create",
+  "ger.review",
   // RECOGNITION (winners-only recognition: ratings/reviews + weekly winners)
   "recognition.rate_hm",
   "recognition.review_dsp",
@@ -168,6 +171,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      // GER (2026-09-18): house managers write and review event reports.
+      "ger.create",
+      "ger.review",
       "recognition.review_dsp",
       "recognition.view_winners",
       // QA-AUDIT (2026-09-14): dispute findings with photo evidence.
@@ -211,6 +217,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "sites.create",
       "correctiveActions.manage",
       "mileage.manage",
+      // GER (2026-09-18): program managers write and review event reports.
+      "ger.create",
+      "ger.review",
       "recognition.view_winners",
       "recognition.manage",
       // QA-AUDIT (2026-09-14): schedule audits + dispute findings with evidence.
@@ -252,6 +261,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "mileage.manage",
+      // GER (2026-09-18): DSPs write event reports.
+      "ger.create",
       "recognition.rate_hm",
       "recognition.view_winners",
       // DELEGATION: view templates + sign own acknowledgments.
@@ -280,6 +291,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "mileage.manage",
+      // GER (2026-09-18): nurses write and review event reports.
+      "ger.create",
+      "ger.review",
       "recognition.view_winners",
       // DELEGATION: assign to individuals + review/approve training + sign own.
       "delegation.templates.view",
@@ -415,6 +429,9 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)
   "mileage.manage": "Log vehicle mileage",
+  // GER (General Event Reports)
+  "ger.create": "Write event reports",
+  "ger.review": "Review and approve event reports",
   // RECOGNITION
   "recognition.rate_hm": "Rate assigned house managers",
   "recognition.review_dsp": "Review assigned DSPs",

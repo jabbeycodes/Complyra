@@ -24,6 +24,8 @@ import { Badge, Empty } from "./components";
 import StatusMixDonut from "./components/StatusMixDonut";
 import type { PersonalWorkItem } from "./data/dashboard";
 import type { SiteReview } from "./data/siteReview";
+import type { GerReportView } from "./data/types";
+import { GER_EVENT_TYPE_LABELS, GER_SEVERITY_LABELS } from "./data/ger";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 
@@ -55,6 +57,10 @@ interface Props {
   individuals: { name: string; site: string }[];
   site: string;
   personalItems: PersonalWorkItem[];
+  /** Submitted GERs awaiting review (agency-wide viewers see all; HMs see their homes). */
+  submittedGers?: GerReportView[];
+  /** Open one report: drills into the home's Reporting tab. */
+  onOpenGer?: (report: GerReportView) => void;
   onSite: (s: string) => void;
   onNavigate: (page: string, status?: string) => void;
   onRequirement: (r: Requirement) => void;
@@ -79,6 +85,8 @@ export default function Dashboard({
   individuals,
   site,
   personalItems,
+  submittedGers = [],
+  onOpenGer,
   onSite,
   onNavigate,
   onRequirement,
@@ -363,6 +371,49 @@ export default function Dashboard({
           </div>
         )}
       </section>
+      {submittedGers.length > 0 && (
+        <section className="panel gerdash-panel" aria-label="Event reports awaiting review">
+          <div className="panel-heading">
+            <div>
+              <h2>
+                Event reports awaiting review{" "}
+                <span className="count-pill">{submittedGers.length}</span>
+              </h2>
+              <p>Submitted incident reports waiting for a manager review.</p>
+            </div>
+          </div>
+          <ul className="gerdash-list">
+            {submittedGers.map((report) => (
+              <li key={report.id}>
+                <button
+                  type="button"
+                  className="gerdash-row"
+                  onClick={() => onOpenGer?.(report)}
+                  aria-label={`Open ${GER_SEVERITY_LABELS[report.severity as keyof typeof GER_SEVERITY_LABELS] ?? report.severity} ${GER_EVENT_TYPE_LABELS[report.eventType as keyof typeof GER_EVENT_TYPE_LABELS] ?? report.eventType} report for ${report.individualName}`}
+                >
+                  <span className={`gerdash-severity gerdash-severity-${report.severity}`}>
+                    {GER_SEVERITY_LABELS[report.severity as keyof typeof GER_SEVERITY_LABELS] ?? report.severity}
+                  </span>
+                  <span className="gerdash-copy">
+                    <strong>
+                      {GER_EVENT_TYPE_LABELS[report.eventType as keyof typeof GER_EVENT_TYPE_LABELS] ?? report.eventType}
+                      {" — "}
+                      {report.individualName}
+                    </strong>
+                    <small>
+                      {report.siteName}
+                      <span className="dot-separator">·</span>
+                      {report.eventDate}
+                      {report.eventTime ? ` ${report.eventTime}` : ""}
+                    </small>
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section className="panel personal-queue">
         <div className="panel-heading">
           <div>

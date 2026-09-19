@@ -77,7 +77,7 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, canSeeGerDashboardRows, isAgencyWideViewer } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
 import { assertCalendarDate } from "./access";
 import { assertSiteHasCapacity } from "./siteCapacity";
@@ -8322,6 +8322,451 @@ export class HostedApi implements ComplyraApi {
       );
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== GER API (General Event Reports — HostedApi, Supabase) =====
+  private async gerLib(): Promise<typeof import("./ger")> {
+    return import("./ger");
+  }
+
+  private mapGerReport(row: Record<string, unknown>): import("./types").GerReport {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      individualId: (row.individual_id as string) ?? "",
+      eventDate: String(row.event_date).slice(0, 10),
+      eventTime: (row.event_time as string) ?? "",
+      location: (row.location as string) ?? "",
+      eventType: row.event_type as string,
+      severity: (row.severity as string) ?? "low",
+      description: (row.description as string) ?? "",
+      actionsTaken: (row.actions_taken as string) ?? "",
+      notificationsMade: ((row.notifications_made as unknown[]) ?? []) as import("./types").GerNotificationMadeRow[],
+      witnesses: (row.witnesses as string) ?? "",
+      reportedByName: (row.reported_by_name as string) ?? "",
+      signatureName: (row.signature_name as string) ?? "",
+      signedAt: (row.signed_at as string) ?? "",
+      status: row.status as "draft" | "submitted" | "approved" | "returned",
+      reviewerId: (row.reviewer_id as string) ?? "",
+      reviewerName: (row.reviewer_name as string) ?? "",
+      reviewedAt: (row.reviewed_at as string) ?? "",
+      reviewNote: (row.review_note as string) ?? "",
+      createdBy: (row.created_by_user_id as string) ?? "",
+      createdByName: (row.created_by_name as string) ?? "",
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    };
+  }
+
+  private async fetchGerReportRow(session: SessionUser, reportId: string) {
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("id", reportId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load the event report.");
+    if (!data) throw new Error("Event report not found.");
+    const siteId = (data as Record<string, unknown>).site_id as string;
+    await this.assertSiteInAgency(session, siteId);
+    if (!canAccessSite(session, siteId)) throw new Error("Event report not found.");
+    return this.mapGerReport(data as Record<string, unknown>);
+  }
+
+  private async assertGerIndividualInSite(
+    session: SessionUser,
+    siteId: string,
+    individualId: string,
+  ) {
+    const { data, error } = await this.client
+      .from("individuals")
+      .select("id")
+      .eq("id", individualId)
+      .eq("site_id", siteId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not verify the individual.");
+    if (!data) throw new Error("The individual is not part of this home.");
+  }
+
+  private async gerNameMaps(session: SessionUser) {
+    const { data: individuals } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId);
+    const { data: sites } = await this.client
+      .from("sites")
+      .select("id, name")
+      .eq("agency_id", session.agencyId);
+    const individualNames = new Map<string, string>(
+      ((individuals ?? []) as Array<{ id: string; full_name: string }>).map((p) => [
+        p.id,
+        p.full_name,
+      ]),
+    );
+    const siteNames = new Map<string, string>(
+      ((sites ?? []) as Array<{ id: string; name: string }>).map((s) => [s.id, s.name]),
+    );
+    return { individualNames, siteNames };
+  }
+
+  private toGerReportView(
+    report: import("./types").GerReport,
+    names: { individualNames: Map<string, string>; siteNames: Map<string, string> },
+  ): import("./types").GerReportView {
+    return {
+      ...report,
+      individualName: names.individualNames.get(report.individualId) ?? "Unknown individual",
+      siteName: names.siteNames.get(report.siteId) ?? "Unknown home",
+    };
+  }
+
+  private async validatedGerInput(
+    input:
+      | import("./types").AddGerReportInput
+      | import("./types").UpdateGerReportInput,
+    existing?: import("./types").GerReport,
+  ): Promise<import("./ger").GerReportCore> {
+    const lib = await this.gerLib();
+    const merged = {
+      individualId: input.individualId ?? existing?.individualId ?? "",
+      eventDate: input.eventDate ?? existing?.eventDate ?? "",
+      eventTime: input.eventTime ?? existing?.eventTime ?? "",
+      location: input.location ?? existing?.location ?? "",
+      eventType: (input.eventType ?? existing?.eventType ?? "") as import("./ger").GerEventType,
+      severity: (input.severity ?? existing?.severity ?? "low") as import("./ger").GerSeverity,
+      description: input.description ?? existing?.description ?? "",
+      actionsTaken: input.actionsTaken ?? existing?.actionsTaken ?? "",
+      notificationsMade: (input.notificationsMade ?? existing?.notificationsMade ?? []).map(
+        (n) => ({
+          channel: n.channel as import("./ger").GerNotificationChannel,
+          name: n.name ?? "",
+          notifiedAt: n.notifiedAt ?? "",
+        }),
+      ),
+      witnesses: input.witnesses ?? existing?.witnesses ?? "",
+      reportedByName: input.reportedByName ?? existing?.reportedByName ?? "",
+      signatureName: input.signatureName ?? existing?.signatureName ?? "",
+    };
+    const errors = lib.validateGerInput(merged, { forSubmit: false });
+    if (errors.length > 0) throw new Error(errors[0].message);
+    return merged;
+  }
+
+  async listGerReports(
+    siteId: string,
+    filters?: import("./ger").GerReportFilters,
+  ): Promise<import("./types").GerReportView[]> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
+    await this.assertSiteInAgency(session, siteId);
+    if (!canAccessSite(session, siteId)) throw new Error("Home not found.");
+    let query = this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (filters?.individualId) query = query.eq("individual_id", filters.individualId);
+    if (filters?.eventType) query = query.eq("event_type", filters.eventType);
+    if (filters?.status) query = query.eq("status", filters.status);
+    if (filters?.from) query = query.gte("event_date", filters.from);
+    if (filters?.to) query = query.lte("event_date", filters.to);
+    const { data, error } = await query;
+    throwIf(error, "Could not load event reports.");
+    const names = await this.gerNameMaps(session);
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      this.toGerReportView(this.mapGerReport(row), names),
+    );
+  }
+
+  async getGerReport(reportId: string): Promise<import("./types").GerReportView> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    if (!lib.canViewGerReports(session)) throw new Error("Not authorized to view event reports.");
+    const report = await this.fetchGerReportRow(session, reportId);
+    const names = await this.gerNameMaps(session);
+    return this.toGerReportView(report, names);
+  }
+
+  /**
+   * Submitted GERs awaiting review, newest first, for the agency
+   * dashboard. Agency-wide viewers see every home (auditors excluded);
+   * house managers see only their assigned homes.
+   */
+  async listSubmittedGerReports(): Promise<import("./types").GerReportView[]> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    if (!canSeeGerDashboardRows(session)) {
+      throw new Error("Not authorized to view submitted event reports.");
+    }
+    let query = this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("status", "submitted")
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (!isAgencyWideViewer(session) && !session.platformAdmin) {
+      const { data: ms } = await this.client
+        .from("memberships")
+        .select("user_id, site_id")
+        .eq("agency_id", session.agencyId)
+        .eq("user_id", session.userId)
+        .eq("role_key", "house_manager");
+      const siteIds = [
+        ...new Set(
+          ((ms ?? []) as Array<{ site_id: string | null }>)
+            .map((row) => row.site_id)
+            .filter((id): id is string => !!id),
+        ),
+      ];
+      if (session.siteId) siteIds.push(session.siteId);
+      const unique = [...new Set(siteIds)];
+      if (unique.length === 0) return [];
+      query = query.in("site_id", unique);
+    }
+    const { data, error } = await query;
+    throwIf(error, "Could not load submitted event reports.");
+    const names = await this.gerNameMaps(session);
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      this.toGerReportView(this.mapGerReport(row), names),
+    );
+  }
+
+  async addGerReport(
+    input: import("./types").AddGerReportInput,
+  ): Promise<import("./types").GerReport> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    if (!lib.canCreateGerReport(session)) throw new Error("Not authorized to write event reports.");
+    await this.assertSiteInAgency(session, input.siteId);
+    if (!canAccessSite(session, input.siteId)) throw new Error("Home not found.");
+    if (input.individualId) {
+      await this.assertGerIndividualInSite(session, input.siteId, input.individualId);
+    }
+    const valid = await this.validatedGerInput(input);
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: input.siteId,
+        individual_id: valid.individualId || null,
+        event_date: valid.eventDate,
+        event_time: valid.eventTime,
+        location: valid.location,
+        event_type: valid.eventType,
+        severity: valid.severity,
+        description: valid.description,
+        actions_taken: valid.actionsTaken,
+        notifications_made: valid.notificationsMade,
+        witnesses: valid.witnesses,
+        reported_by_name: valid.reportedByName || session.fullName,
+        signature_name: valid.signatureName,
+        signed_at: valid.signatureName ? now : null,
+        status: "draft",
+        created_by_user_id: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the event report.");
+    const report = this.mapGerReport(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "ger.report_created",
+      `${session.fullName} started an event report (${lib.GER_EVENT_TYPE_LABELS[report.eventType as import("./ger").GerEventType] ?? report.eventType}) for ${report.eventDate}`,
+      "ger_report",
+      report.id,
+    );
+    return report;
+  }
+
+  async updateGerReport(
+    reportId: string,
+    patch: import("./types").UpdateGerReportInput,
+  ): Promise<import("./types").GerReport> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    const existing = await this.fetchGerReportRow(session, reportId);
+    if (!lib.canEditGerReportBody(session, existing)) {
+      throw new Error("This report can no longer be edited.");
+    }
+    if (patch.individualId && patch.individualId !== existing.individualId) {
+      await this.assertGerIndividualInSite(session, existing.siteId, patch.individualId);
+    }
+    const valid = await this.validatedGerInput(patch, existing);
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update({
+        individual_id: valid.individualId || null,
+        event_date: valid.eventDate,
+        event_time: valid.eventTime,
+        location: valid.location,
+        event_type: valid.eventType,
+        severity: valid.severity,
+        description: valid.description,
+        actions_taken: valid.actionsTaken,
+        notifications_made: valid.notificationsMade,
+        witnesses: valid.witnesses,
+        reported_by_name: valid.reportedByName || existing.reportedByName,
+        signature_name: valid.signatureName,
+        signed_at: valid.signatureName && !existing.signedAt ? now : existing.signedAt || null,
+        updated_at: now,
+      })
+      .eq("id", reportId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the event report.");
+    const report = this.mapGerReport(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "ger.report_updated",
+      `${session.fullName} edited the event report for ${report.eventDate}`,
+      "ger_report",
+      report.id,
+    );
+    return report;
+  }
+
+  async submitGerReport(reportId: string): Promise<import("./types").GerReport> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    const existing = await this.fetchGerReportRow(session, reportId);
+    if (!lib.canEditGerReportBody(session, existing)) {
+      throw new Error("Only the author or a reviewer can submit this report.");
+    }
+    const errors = lib.validateGerInput(
+      {
+        individualId: existing.individualId,
+        eventDate: existing.eventDate,
+        eventTime: existing.eventTime,
+        location: existing.location,
+        eventType: existing.eventType as import("./ger").GerEventType,
+        severity: existing.severity as import("./ger").GerSeverity,
+        description: existing.description,
+        actionsTaken: existing.actionsTaken,
+        notificationsMade: existing.notificationsMade.map((n) => ({
+          channel: n.channel as import("./ger").GerNotificationChannel,
+          name: n.name,
+          notifiedAt: n.notifiedAt,
+        })),
+        witnesses: existing.witnesses,
+        reportedByName: existing.reportedByName,
+        signatureName: existing.signatureName,
+      },
+      { forSubmit: true },
+    );
+    if (errors.length > 0) throw new Error(`Cannot submit: ${errors[0].message}`);
+    const status = lib.transitionGerStatus(existing.status, "submit");
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", reportId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not submit the event report.");
+    const report = this.mapGerReport(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "ger.report_submitted",
+      `${session.fullName} submitted the event report for ${report.eventDate} (${report.severity} severity)`,
+      "ger_report",
+      report.id,
+    );
+    // Every submission (any severity) alerts the submitting home's house
+    // manager directly plus the program manager and nurse roles, through
+    // the existing notify-event edge function (dedupe_key makes this
+    // idempotent). High/Critical severities keep their escalation paging
+    // to PM + nurse as a subset of these alerts.
+    try {
+      const { emitOne } = await import("../features/notifications/useNotifications");
+      const names = await this.gerNameMaps(session);
+      const view = this.toGerReportView(report, names);
+      const today = todayIso();
+      // Direct-alert only the home's active house manager(s). Skip expired
+      // memberships (parity with the local path) so an ex-manager never
+      // receives a resident's PHI.
+      const { data: hmRows } = await this.client
+        .from("memberships")
+        .select("user_id")
+        .eq("agency_id", report.agencyId)
+        .eq("role_key", "house_manager")
+        .eq("site_id", report.siteId)
+        .or(`expires_on.is.null,expires_on.gte.${today}`);
+      const hmUserIds = [
+        ...new Set(
+          ((hmRows ?? []) as Array<{ user_id: string | null }>)
+            .map((row) => row.user_id)
+            .filter((id): id is string => !!id),
+        ),
+      ];
+      for (const target of lib.gerSubmitNotificationTargets(hmUserIds)) {
+        await emitOne(
+          this.client,
+          lib.gerEscalationPayload({
+            agencyId: report.agencyId,
+            roleKey: target.roleKey ?? "house_manager",
+            userId: target.userId,
+            gerId: report.id,
+            siteId: report.siteId,
+            individualName: view.individualName,
+            eventType: report.eventType as import("./ger").GerEventType,
+            severity: report.severity as import("./ger").GerSeverity,
+            eventDate: report.eventDate,
+          }),
+        );
+      }
+    } catch (err) {
+      console.warn("[ger] Submit notification failed:", err);
+    }
+    return report;
+  }
+
+  async reviewGerReport(
+    reportId: string,
+    decision: "approve" | "return",
+    reviewNote?: string,
+  ): Promise<import("./types").GerReport> {
+    const lib = await this.gerLib();
+    const session = await this.requireSession();
+    const existing = await this.fetchGerReportRow(session, reportId);
+    if (!lib.canDecideGerReport(session, existing)) {
+      throw new Error("Not authorized to review this report.");
+    }
+    if (decision === "return" && !reviewNote?.trim()) {
+      throw new Error("Add a note explaining what needs to be corrected.");
+    }
+    const status = lib.transitionGerStatus(existing.status, decision);
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update({
+        status,
+        reviewer_id: session.userId,
+        reviewer_name: session.fullName,
+        reviewed_at: now,
+        review_note: reviewNote?.trim() ?? "",
+        updated_at: now,
+      })
+      .eq("id", reportId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not record the review decision.");
+    const report = this.mapGerReport(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      `ger.report_${decision === "approve" ? "approved" : "returned"}`,
+      `${session.fullName} ${decision === "approve" ? "approved" : "returned for corrections"} the event report for ${report.eventDate}`,
+      "ger_report",
+      report.id,
+    );
+    return report;
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====

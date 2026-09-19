@@ -7268,3 +7268,75 @@ button.qa-row:hover {
     align-items: flex-start;
   }
 }
+
+/* GER dashboard section: submitted event reports awaiting review. Solid
+   high-contrast colors only — no gradients. */
+.gerdash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gerdash-list li {
+  border-top: 1px solid #f3f1ef;
+}
+.gerdash-list li:first-child {
+  border-top: none;
+}
+.gerdash-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 4px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+.gerdash-row:hover .gerdash-copy strong {
+  color: #5d8353;
+}
+.gerdash-severity {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  border: 1px solid;
+}
+.gerdash-severity-low {
+  background: #dfe6d5;
+  color: #2e4630;
+  border-color: #aebfa0;
+}
+.gerdash-severity-moderate {
+  background: #f0e3bd;
+  color: #6b4d10;
+  border-color: #d4b96a;
+}
+.gerdash-severity-high {
+  background: #f3cdbb;
+  color: #8c3a14;
+  border-color: #d08a5f;
+}
+.gerdash-severity-critical {
+  background: #8c2f1f;
+  color: #fff;
+  border-color: #8c2f1f;
+}
+.gerdash-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gerdash-copy strong {
+  font-size: 0.95rem;
+  color: #2b2620;
+}
+.gerdash-copy small {
+  font-size: 0.82rem;
+  color: #6f655a;
+}

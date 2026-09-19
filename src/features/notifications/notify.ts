@@ -163,6 +163,10 @@ export function notificationPage(link: string): string | null {
   if (/^\/corrective-actions(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
+  // GER escalation notifications point at the Reporting tab, which lives in
+  // the program-site detail view — the sites list is the closest page-level
+  // destination (recipients drill into the home).
+  if (/^\/reporting(?:\/|$)/.test(path)) return "Sites & programs";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;

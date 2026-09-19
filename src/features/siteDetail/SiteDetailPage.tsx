@@ -6,6 +6,7 @@ import {
   CarFront,
   ClipboardCheck,
   FileText,
+  FileWarning,
   Flame,
   GraduationCap,
   MapPin,
@@ -46,6 +47,7 @@ import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
+import GerTab from "../ger/GerTab";
 import "./siteDetail.css";
 
 interface SiteDetailPageProps {
@@ -54,6 +56,10 @@ interface SiteDetailPageProps {
   onOpenIndividual: (name: string) => void;
   /** Open the matching full page so site tabs stay a summary, not a gutted copy. */
   onOpenPage?: (page: string) => void;
+  /** Deep-link support: open straight on a tab (e.g. "reporting"). */
+  initialTab?: SiteDetailTabId;
+  /** Deep-link support: preselect one GER in the Reporting tab. */
+  initialReportId?: string | null;
 }
 
 /** Defensive read of the finalized score snapshot (shape owned by the audit workflow). */
@@ -87,6 +93,7 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   mileage: CarFront,
   drills: Flame,
   shiftnotes: FileText,
+  reporting: FileWarning,
   staff: Users,
 };
 
@@ -104,10 +111,14 @@ export default function SiteDetailPage({
   onBack,
   onOpenIndividual,
   onOpenPage,
+  initialTab,
+  initialReportId,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
-  const [tab, setTab] = useState<SiteDetailTabId>("overview");
+  const [tab, setTab] = useState<SiteDetailTabId>(
+    initialTab && tabs.some((t) => t.id === initialTab) ? initialTab : "overview",
+  );
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
 
   const [qaHistory, setQaHistory] = useState<QaAudit[] | null>(null);
@@ -1034,6 +1045,19 @@ export default function SiteDetailPage({
                   Open documents
                 </button>
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "reporting" && (
+          <div className="panel">
+            {site && (
+              <GerTab
+                siteId={site.id}
+                siteName={site.name}
+                individuals={siteIndividuals.map((p) => ({ id: p.id, name: p.name }))}
+                initialSelectedId={initialReportId}
+              />
             )}
           </div>
         )}
