@@ -53,9 +53,10 @@ export const PERMISSION_KEYS = [
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
   "mileage.manage",
-  // HEALTH-TRACK (health.record / health.review go here)
+  // HEALTH-TRACK (health.record / health.review / health.view go here)
   "health.record",
   "health.review",
+  "health.view",
   // RECOGNITION (winners-only recognition: ratings/reviews + weekly winners)
   "recognition.rate_hm",
   "recognition.review_dsp",
@@ -346,6 +347,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      // HEALTH-TRACK (2026-09-19): auditors read health entries + photos
+      // agency-wide. Read-only — no health.record / health.review, so no
+      // recording, correcting, voiding, or reviewing, and no alert fan-out.
+      "health.view",
       // QA-AUDIT (2026-09-14): conduct QA audits — system-verified items stay
       // locked; the auditor scores the rest and resolves disputes.
       "qa.audit",
@@ -433,6 +438,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   // HEALTH-TRACK
   "health.record": "Record health tracking entries",
   "health.review": "Review flagged health entries",
+  "health.view": "View health tracking entries (read-only)",
   // RECOGNITION
   "recognition.rate_hm": "Rate assigned house managers",
   "recognition.review_dsp": "Review assigned DSPs",

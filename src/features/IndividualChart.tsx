@@ -516,7 +516,7 @@ export default function IndividualChart({
 
         {/* HEALTH-TRACK (2026-09-18): shortcuts into the agency Health Track
             page, one row per section. */}
-        {canSeeHealthTrack(chartSession.roleKey) && (
+        {canSeeHealthTrack(chartSession) && (
           <section
             className="chart-widget"
             id="chart-health-track"

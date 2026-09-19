@@ -12,6 +12,7 @@ import {
   BOWEL_CONSISTENCY_LABELS,
   HEALTH_TRACK_KIND_LABELS,
   HEALTH_TRACK_SECTIONS,
+  HEALTH_REVISION_ACTION_LABELS,
   MEAL_TYPES,
   MENSES_FLOWS,
   PORTIONS_EATEN,
@@ -24,6 +25,7 @@ import {
   canSeeHealthTrack,
   dayKeyOf,
   detectHealthAlert,
+  isMeaningfulNote,
   sortHealthEntriesDesc,
   summarizeHealthDay,
   summarizeHealthWeek,
@@ -33,6 +35,7 @@ import {
   type HealthTrackDetails,
   type HealthTrackEntry,
   type HealthTrackKind,
+  type HealthTrackRevision,
   type HealthTrackSectionKey,
   type MealType,
   type MensesFlow,
@@ -216,6 +219,91 @@ function buildDetails(kind: HealthTrackKind, f: FormFields): HealthTrackDetails 
 }
 
 /* ------------------------------------------------------------------ */
+/* Correction form: pre-fill fields from an existing entry's details    */
+/* ------------------------------------------------------------------ */
+
+function fieldsFromDetails(kind: HealthTrackKind, details: HealthTrackDetails): FormFields {
+  const base = blankFields(kind);
+  const d = details as unknown as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+  switch (kind) {
+    case "meal":
+      return {
+        ...base,
+        mealType: str(d.mealType) || "breakfast",
+        portion: str(d.portion) || "all",
+        items: str(d.items),
+        appetiteNote: str(d.appetiteNote),
+      };
+    case "fluid":
+      return { ...base, fluidType: str(d.fluidType) || "Water", ounces: str(d.ounces) };
+    case "bowel":
+      return {
+        ...base,
+        amount: str(d.amount) || "moderate",
+        consistency: str(d.consistency) || "formed",
+        color: str(d.color),
+        blood: d.blood === true,
+        pain: d.pain === true,
+        notes: str(d.notes),
+      };
+    case "bladder":
+      return {
+        ...base,
+        continent: d.continent !== false,
+        amount: str(d.amount) || "moderate",
+        notes: str(d.notes),
+      };
+    case "emesis":
+      return { ...base, amount: str(d.amount) || "moderate", description: str(d.description) };
+    case "skin":
+      return {
+        ...base,
+        bodyLocation: str(d.bodyLocation) || "Other",
+        observation: str(d.observation) || "redness",
+        size: str(d.size),
+        description: str(d.description),
+        followUpDate: str(d.followUpDate),
+        worsening: d.worsening === true,
+      };
+    case "vitals":
+      return {
+        ...base,
+        tempF: str(d.tempF),
+        bpSystolic: str(d.bpSystolic),
+        bpDiastolic: str(d.bpDiastolic),
+        pulse: str(d.pulse),
+        respirations: str(d.respirations),
+        o2Sat: str(d.o2Sat),
+        weightLb: str(d.weightLb),
+      };
+    case "seizure":
+      return {
+        ...base,
+        durationMinutes: str(d.durationMinutes),
+        description: str(d.description),
+        triggers: str(d.triggers),
+        postEventState: str(d.postEventState),
+      };
+    case "menses":
+      return {
+        ...base,
+        startDate: str(d.startDate) || todayLocalIso(),
+        endDate: str(d.endDate),
+        flow: str(d.flow) || "moderate",
+        symptoms: str(d.symptoms),
+      };
+    case "blood_sugar":
+      return {
+        ...base,
+        readingMgDl: str(d.readingMgDl),
+        context: str(d.context) || "before_meal",
+        symptoms: str(d.symptoms),
+      };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Quick-add form: one component, fields switch by kind                 */
 /* ------------------------------------------------------------------ */
 
@@ -223,33 +311,49 @@ function QuickAddForm({
   individualId,
   section,
   onSaved,
+  editing,
 }: {
   individualId: string;
   section: HealthTrackSectionKey;
   onSaved: () => void;
+  /** When set, the form corrects this entry instead of adding a new one. */
+  editing?: HealthTrackEntry | null;
 }) {
   const { api } = useData();
   const kinds = useMemo(
     () =>
-      (HEALTH_TRACK_SECTIONS.find((s) => s.key === section)?.kinds ??
-        []) as HealthTrackKind[],
-    [section],
+      editing
+        ? [editing.kind]
+        : (HEALTH_TRACK_SECTIONS.find((s) => s.key === section)?.kinds ??
+          []) as HealthTrackKind[],
+    [section, editing],
   );
-  const [kind, setKind] = useState<HealthTrackKind>(kinds[0] ?? "meal");
-  const [fields, setFields] = useState<FormFields>(() => blankFields(kinds[0] ?? "meal"));
+  const [kind, setKind] = useState<HealthTrackKind>(editing?.kind ?? kinds[0] ?? "meal");
+  const [fields, setFields] = useState<FormFields>(() => {
+    if (editing) {
+      const initial = fieldsFromDetails(editing.kind, editing.details);
+      // Pre-fill the recorded time (datetime-local wants "YYYY-MM-DDTHH:MM").
+      initial.occurredAt = editing.occurredAt.slice(0, 16);
+      return initial;
+    }
+    return blankFields(kinds[0] ?? "meal");
+  });
   const [photo, setPhoto] = useState<File | null>(null);
+  const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveNote, setSaveNote] = useState<{ flagged: boolean; text: string } | null>(null);
 
   useEffect(() => {
+    if (editing) return;
     const first = kinds[0] ?? "meal";
     setKind(first);
     setFields(blankFields(first));
     setPhoto(null);
+    setReason("");
     setErrors([]);
     setSaveNote(null);
-  }, [kinds]);
+  }, [kinds, editing]);
 
   function set(field: string, value: string | boolean) {
     setFields((prev) => ({ ...prev, [field]: value }));
@@ -265,12 +369,12 @@ function QuickAddForm({
       setErrors(problems);
       return;
     }
+    if (editing && !isMeaningfulNote(reason)) {
+      setErrors(["Say why you are correcting this entry."]);
+      return;
+    }
     setSaving(true);
     try {
-      if (kind === "skin" && photo) {
-        const photoId = await api.uploadHealthPhoto(individualId, photo);
-        (details as HealthTrackDetails & { photoId?: string }).photoId = photoId;
-      }
       // Store the local wall-clock time the staff entered, not a UTC-shifted
       // instant: care logs are calendar-day records, and `dayKeyOf` slices the
       // date prefix. Converting through `toISOString()` would push evening
@@ -281,15 +385,44 @@ function QuickAddForm({
           : nowLocalInput();
       const occurredAt =
         localInput.length === 16 ? `${localInput}:00` : localInput;
-      await api.addHealthEntry({ individualId, kind, occurredAt, details });
+      let savedEntry: HealthTrackEntry;
+      if (editing) {
+        // Keep an already-attached skin photo across corrections (a new
+        // upload replaces it below).
+        if (kind === "skin" && !photo) {
+          const existingPhotoId = (editing.details as { photoId?: string }).photoId;
+          if (existingPhotoId) {
+            (details as HealthTrackDetails & { photoId?: string }).photoId = existingPhotoId;
+          }
+        }
+        savedEntry = await api.updateHealthEntry(editing.id, {
+          occurredAt,
+          details,
+          reason: reason.trim(),
+        });
+      } else {
+        savedEntry = await api.addHealthEntry({ individualId, kind, occurredAt, details });
+      }
+      // Skin photos upload AFTER the entry is saved, then attach to it; if
+      // the attach fails the upload is deleted so no orphaned PHI remains.
+      if (kind === "skin" && photo) {
+        const photoId = await api.uploadHealthPhoto(individualId, photo);
+        try {
+          await api.attachHealthPhoto(savedEntry.id, photoId);
+        } catch (attachErr) {
+          await api.deleteHealthPhoto(photoId).catch(() => undefined);
+          throw attachErr;
+        }
+      }
       const alert = detectHealthAlert(kind, details);
       setSaveNote(
         alert.flagged
-          ? { flagged: true, text: `Saved — flagged for nurse review: ${alert.reason}` }
+          ? { flagged: true, text: `Saved — flagged for review: ${alert.reason}` }
           : { flagged: false, text: "Saved." },
       );
       setFields(blankFields(kind));
       setPhoto(null);
+      setReason("");
       onSaved();
     } catch (err) {
       setErrors([(err as Error).message]);
@@ -309,6 +442,12 @@ function QuickAddForm({
 
   return (
     <form className="delegation-editor" onSubmit={handleSubmit}>
+      {editing && (
+        <p className="delegation-small" role="status">
+          Correcting the {HEALTH_TRACK_KIND_LABELS[editing.kind].toLowerCase()} entry from{" "}
+          {formatDateTime(editing.occurredAt)}. The original stays in the history.
+        </p>
+      )}
       {kinds.length > 1 && (
         <div className="tabs" role="tablist" aria-label="Entry type">
           {kinds.map((k) => (
@@ -322,6 +461,7 @@ function QuickAddForm({
                 setKind(k);
                 setFields(blankFields(k));
                 setPhoto(null);
+                setReason("");
                 setErrors([]);
               }}
             >
@@ -627,6 +767,18 @@ function QuickAddForm({
           ))}
         </div>
       )}
+      {editing && (
+        <label className="form-label">
+          Reason for correction (required)
+          <input
+            type="text"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. wrong temperature typed"
+            maxLength={280}
+          />
+        </label>
+      )}
       {saveNote && (
         <p className={saveNote.flagged ? "delegation-warn" : "delegation-small"} role="status">
           {saveNote.flagged ? <TriangleAlert size={14} /> : <CircleCheck size={14} />}{" "}
@@ -634,7 +786,7 @@ function QuickAddForm({
         </p>
       )}
       <button className="button primary" type="submit" disabled={saving}>
-        {saving ? "Saving…" : `Save ${HEALTH_TRACK_KIND_LABELS[kind].toLowerCase()} entry`}
+        {saving ? "Saving…" : editing ? "Save correction" : `Save ${HEALTH_TRACK_KIND_LABELS[kind].toLowerCase()} entry`}
       </button>
     </form>
   );
@@ -649,23 +801,32 @@ function HealthEntryCard({
   canRecord,
   canReview,
   onChanged,
+  onCorrect,
 }: {
   entry: HealthTrackEntry;
   canRecord: boolean;
   canReview: boolean;
   onChanged: () => void;
+  onCorrect: (entry: HealthTrackEntry) => void;
 }) {
   const { api } = useData();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [revisions, setRevisions] = useState<HealthTrackRevision[] | null>(null);
   const photoId = (entry.details as HealthTrackDetails & { photoId?: string }).photoId;
 
-  async function handleDelete() {
-    if (!window.confirm("Delete this health entry? This cannot be undone.")) return;
+  async function handleVoid() {
+    const reason = window.prompt("Why are you voiding this entry? (required)");
+    if (reason === null) return;
+    if (!isMeaningfulNote(reason)) {
+      setError("Say why you are voiding this entry.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await api.deleteHealthEntry(entry.id);
+      await api.voidHealthEntry(entry.id, reason.trim());
       onChanged();
     } catch (err) {
       setError((err as Error).message);
@@ -675,7 +836,7 @@ function HealthEntryCard({
   }
 
   async function handleReview() {
-    const note = window.prompt("Nurse review note:");
+    const note = window.prompt("Add a review note (required):");
     if (note === null) return;
     setBusy(true);
     setError("");
@@ -686,6 +847,34 @@ function HealthEntryCard({
       setError((err as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleRetryAlerts() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.retryHealthAlerts(entry.id);
+      onChanged();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleHistory() {
+    if (showHistory) {
+      setShowHistory(false);
+      return;
+    }
+    setError("");
+    try {
+      const rows = await api.listHealthEntryRevisions(entry.id);
+      setRevisions(rows);
+      setShowHistory(true);
+    } catch (err) {
+      setError((err as Error).message);
     }
   }
 
@@ -705,6 +894,9 @@ function HealthEntryCard({
     }
   }
 
+  const deliveryFailed =
+    entry.alertDelivery === "failed" || entry.alertDelivery === "partial";
+
   return (
     <article className="health-entry">
       <header className="health-entry-head">
@@ -713,9 +905,9 @@ function HealthEntryCard({
           <span className="stack-help"> {formatDateTime(entry.occurredAt)}</span>
         </div>
         <div className="health-entry-badges">
-          {entry.flagForNurse && <Badge status="Flagged for nurse" />}
+          {entry.flagForNurse && <Badge status="Flagged for review" />}
           {entry.nurseReviewedAt ? (
-            <Badge status="Nurse reviewed" />
+            <Badge status="Reviewed" />
           ) : (
             entry.flagForNurse && <Badge status="Needs review" />
           )}
@@ -731,12 +923,23 @@ function HealthEntryCard({
       </dl>
       {entry.flagForNurse && entry.flagReason && (
         <p className="delegation-warn">
-          <TriangleAlert size={14} /> Flagged for nurse review: {entry.flagReason}
+          <TriangleAlert size={14} /> Flagged for review: {entry.flagReason}
+        </p>
+      )}
+      {entry.alertDelivery && entry.alertDelivery !== "ok" && (
+        <p className={`health-alert-status health-alert-status--${entry.alertDelivery}`}>
+          <TriangleAlert size={14} />{" "}
+          {entry.alertDelivery === "failed"
+            ? "Alerts failed to send — the house manager, program manager, and nurse were not notified."
+            : entry.alertDelivery === "partial"
+              ? "Some alerts failed to send."
+              : "Alerts are being sent…"}
+          {entry.alertDeliveryError ? ` ${entry.alertDeliveryError}` : ""}
         </p>
       )}
       {entry.nurseReviewedAt && (
         <p className="stack-help">
-          Reviewed by nurse{entry.nurseReviewedBy ? ` (${entry.nurseReviewedBy})` : ""} on{" "}
+          Reviewed{entry.nurseReviewedBy ? ` by ${entry.nurseReviewedBy}` : ""} on{" "}
           {formatDate(entry.nurseReviewedAt)}
           {entry.nurseNote ? ` — ${entry.nurseNote}` : ""}
         </p>
@@ -744,6 +947,23 @@ function HealthEntryCard({
       <p className="stack-help">
         Recorded by {entry.recordedByName} on {formatDate(entry.createdAt)}.
       </p>
+      {showHistory && revisions && (
+        <div className="health-history" aria-label="Entry history">
+          <h4>History</h4>
+          <ol>
+            {revisions.map((revision) => (
+              <li key={revision.id}>
+                <strong>{HEALTH_REVISION_ACTION_LABELS[revision.action]}</strong>
+                {" by "}
+                {revision.actorName || "unknown"}
+                {" on "}
+                {formatDateTime(revision.createdAt)}
+                {revision.reason ? ` — ${revision.reason}` : ""}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       {error && <p className="form-error">{error}</p>}
       <div className="health-entry-actions">
         {photoId && (
@@ -756,9 +976,22 @@ function HealthEntryCard({
             Mark reviewed
           </button>
         )}
+        {canRecord && deliveryFailed && (
+          <button className="button" onClick={handleRetryAlerts} disabled={busy}>
+            Retry alerts
+          </button>
+        )}
         {canRecord && (
-          <button className="button" onClick={handleDelete} disabled={busy}>
-            <Trash2 size={14} /> Delete
+          <button className="button" onClick={() => onCorrect(entry)} disabled={busy}>
+            Correct
+          </button>
+        )}
+        <button className="button" onClick={toggleHistory} disabled={busy}>
+          {showHistory ? "Hide history" : "History"}
+        </button>
+        {canRecord && (
+          <button className="button" onClick={handleVoid} disabled={busy}>
+            <Trash2 size={14} /> Void
           </button>
         )}
       </div>
@@ -787,6 +1020,7 @@ export default function HealthTrackPage({
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<HealthTrackEntry[]>([]);
   const [creating, setCreating] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<HealthTrackEntry | null>(null);
   const [from, setFrom] = useState(() => addDaysIso(todayLocalIso(), -6));
   const [to, setTo] = useState(() => todayLocalIso());
   const [summaryDate, setSummaryDate] = useState(() => todayLocalIso());
@@ -798,7 +1032,7 @@ export default function HealthTrackPage({
   const [siteId, setSiteId] = useState<string>(lockedSiteId ?? "");
   const canRecord = session ? canRecordHealthTrack(session) : false;
   const canReview = session ? canReviewHealthTrack(session) : false;
-  const visible = session ? canSeeHealthTrack(session.roleKey) : false;
+  const visible = session ? canSeeHealthTrack(session) : false;
 
   const sites = workspace?.sites ?? [];
   const selectedSite = sites.find((s) => s.id === siteId);
@@ -861,6 +1095,7 @@ export default function HealthTrackPage({
 
   async function reload() {
     setError("");
+    setEditingEntry(null);
     await refresh();
     if (!session || !individualId) return;
     try {
@@ -968,7 +1203,7 @@ export default function HealthTrackPage({
             className={tab === "review" ? "selected" : ""}
             onClick={() => setTab("review")}
           >
-            Needs nurse review
+            Needs review
           </button>
         )}
       </div>
@@ -1095,7 +1330,7 @@ export default function HealthTrackPage({
             <div className="panel-heading">
               <h2>
                 {tab === "review"
-                  ? "Needs nurse review"
+                  ? "Needs review"
                   : HEALTH_TRACK_SECTIONS.find((s) => s.key === section)?.label}
               </h2>
               <div className="panel-actions">
@@ -1122,13 +1357,24 @@ export default function HealthTrackPage({
                 }}
               />
             )}
+            {editingEntry && canRecord && (
+              <QuickAddForm
+                individualId={individualId}
+                section={section}
+                editing={editingEntry}
+                onSaved={() => {
+                  setEditingEntry(null);
+                  void reload();
+                }}
+              />
+            )}
             {loading ? (
               <p className="muted">Loading entries…</p>
             ) : grouped.length === 0 ? (
               <Empty
                 title={
                   tab === "review"
-                    ? "Nothing waiting for nurse review."
+                    ? "Nothing waiting for review."
                     : "No entries in this range."
                 }
               />
@@ -1143,6 +1389,10 @@ export default function HealthTrackPage({
                       canRecord={canRecord}
                       canReview={canReview}
                       onChanged={() => void reload()}
+                      onCorrect={(toCorrect) => {
+                        setCreating(false);
+                        setEditingEntry(toCorrect);
+                      }}
                     />
                   ))}
                 </div>

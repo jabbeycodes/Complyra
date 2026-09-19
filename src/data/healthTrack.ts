@@ -17,6 +17,7 @@
  */
 
 import { dedupeKeyFor, type NotificationPayload } from "../features/notifications/notify";
+export type { NotificationPayload };
 import { hasPermission } from "./permissions";
 
 /* ------------------------------------------------------------------ */
@@ -203,6 +204,8 @@ export interface SkinDetails {
   followUpDate?: string;
   /** True when the issue is new or getting worse since the last check. */
   worsening: boolean;
+  /** Storage path of the attached photo, when one was uploaded. */
+  photoId?: string;
 }
 
 export interface VitalsDetails {
@@ -291,8 +294,76 @@ export interface HealthTrackEntry {
   nurseReviewedAt: string | null;
   nurseReviewedBy: string | null;
   nurseNote: string | null;
+  /** Soft-delete (void): actor + timestamp + reason. Voided rows are hidden
+      from lists; their history stays in the revision trail. */
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidReason: string | null;
+  /**
+   * Abnormal-finding alert delivery: null when no alert was needed.
+   * A "failed"/"partial" value stays visible until the alerts are retried.
+   */
+  alertDelivery: AlertDeliveryStatus | null;
+  alertDeliveryError: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Delivery state for one entry's abnormal-finding alerts. */
+export type AlertDeliveryStatus = "pending" | "ok" | "partial" | "failed";
+
+/** Human-readable labels for revision-trail actions. */
+export const HEALTH_REVISION_ACTION_LABELS: Record<HealthTrackRevisionAction, string> = {
+  created: "Recorded",
+  amended: "Corrected",
+  reviewed: "Reviewed",
+  voided: "Voided",
+  alerts_retried: "Alerts retried",
+};
+
+/** One step in an entry's immutable revision trail. */
+export type HealthTrackRevisionAction =
+  | "created"
+  | "amended"
+  | "reviewed"
+  | "voided"
+  | "alerts_retried";
+
+export interface HealthTrackRevision {
+  id: string;
+  agencyId: string;
+  entryId: string;
+  revisionNo: number;
+  action: HealthTrackRevisionAction;
+  occurredAt: string;
+  details: HealthTrackDetails;
+  flagForNurse: boolean;
+  flagReason: string | null;
+  voidedAt: string | null;
+  actorUserId: string;
+  actorName: string;
+  /** Correction / void / review reason. */
+  reason: string | null;
+  createdAt: string;
+}
+
+/** One queued abnormal-finding alert target (the delivery ledger). */
+export interface HealthAlertOutboxItem {
+  id: string;
+  agencyId: string;
+  entryId: string;
+  siteId: string;
+  targetUserId: string | null;
+  targetRoleKey: string | null;
+  title: string;
+  body: string;
+  deepLink: string;
+  dedupeKey: string;
+  status: "pending" | "sent" | "failed";
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  sentAt: string | null;
 }
 
 export interface AddHealthTrackInput<K extends HealthTrackKind = HealthTrackKind> {
@@ -305,6 +376,11 @@ export interface AddHealthTrackInput<K extends HealthTrackKind = HealthTrackKind
 export interface UpdateHealthTrackInput {
   occurredAt?: string;
   details?: HealthTrackDetails;
+  /**
+   * Required when occurredAt/details change: why the entry is being
+   * corrected. Recorded in the immutable revision trail.
+   */
+  reason?: string;
 }
 
 export interface HealthTrackFilters {
@@ -613,22 +689,22 @@ export function sortHealthEntriesDesc(entries: HealthTrackEntry[]): HealthTrackE
 /* Role gates                                                          */
 /* ------------------------------------------------------------------ */
 
+type HealthSession = Parameters<typeof hasPermission>[0];
+
 /**
- * Who may open Health Track at all. Auditors see QA Review and scores only;
- * HR never sees clinical records — both stay out.
+ * Who may open Health Track at all. Follows the customizable permissions
+ * (health.record / health.review / health.view), not a hard-coded role
+ * list. Auditors hold health.view: agency-wide read-only access — they see
+ * entries and photos but cannot record, correct, void, or review. HR holds
+ * none of the three and stays out.
  */
-export function canSeeHealthTrack(roleKey: string | undefined): boolean {
+export function canSeeHealthTrack(session: HealthSession): boolean {
   return (
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin" ||
-    roleKey === "program_manager" ||
-    roleKey === "house_manager" ||
-    roleKey === "dsp" ||
-    roleKey === "nurse"
+    hasPermission(session, "health.record") ||
+    hasPermission(session, "health.review") ||
+    hasPermission(session, "health.view")
   );
 }
-
-type HealthSession = Parameters<typeof hasPermission>[0];
 
 /** DSPs and house managers record entries during care (permission health.record). */
 export function canRecordHealthTrack(session: HealthSession): boolean {
@@ -638,6 +714,33 @@ export function canRecordHealthTrack(session: HealthSession): boolean {
 /** Nurses (and program managers) review flagged entries (health.review). */
 export function canReviewHealthTrack(session: HealthSession): boolean {
   return hasPermission(session, "health.review");
+}
+
+/* ------------------------------------------------------------------ */
+/* Review notes, correction reasons, alert delivery                    */
+/* ------------------------------------------------------------------ */
+
+/** Minimum length (after trimming) for review notes and correction/void reasons. */
+export const HEALTH_NOTE_MIN_LENGTH = 3;
+
+/** An auditable review note cannot be empty or a stray character. */
+export function isMeaningfulNote(note: string | null | undefined): boolean {
+  return (note ?? "").trim().length >= HEALTH_NOTE_MIN_LENGTH;
+}
+
+/**
+ * Aggregate per-target delivery outcomes into one entry-level status.
+ * Used by both the local and hosted paths so they report identically.
+ */
+export function aggregateAlertStatus(
+  results: Array<{ ok: boolean }>,
+): AlertDeliveryStatus {
+  if (results.length === 0) return "pending";
+  const sent = results.filter((r) => r.ok).length;
+  const failed = results.length - sent;
+  if (failed === 0) return "ok";
+  if (sent > 0) return "partial";
+  return "failed";
 }
 
 /* ------------------------------------------------------------------ */

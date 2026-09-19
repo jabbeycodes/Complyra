@@ -58,7 +58,7 @@ export function healthEntryDetailRows(kind: HealthTrackKind, details: HealthTrac
         ["Amount", AMOUNT_LABELS[d.amount as string] ?? "—"],
         ["Consistency", BOWEL_CONSISTENCY_LABELS[d.consistency as keyof typeof BOWEL_CONSISTENCY_LABELS] ?? "—"],
         ["Color", text(d.color)],
-        ["Blood in stool", d.blood ? "Yes — flagged for nurse review" : "No"],
+        ["Blood in stool", d.blood ? "Yes — flagged for review" : "No"],
         ["Pain", d.pain ? "Yes" : "No"],
         ["Notes", text(d.notes)],
       ];
@@ -79,7 +79,7 @@ export function healthEntryDetailRows(kind: HealthTrackKind, details: HealthTrac
         ["Observation", SKIN_OBSERVATION_LABELS[d.observation as keyof typeof SKIN_OBSERVATION_LABELS] ?? "—"],
         ["Size", text(d.size)],
         ["Description", text(d.description)],
-        ["New or getting worse", d.worsening ? "Yes — flagged for nurse review" : "No"],
+        ["New or getting worse", d.worsening ? "Yes — flagged for review" : "No"],
         ["Follow-up date", text(d.followUpDate)],
         ["Photo attached", (d as { photoId?: string }).photoId ? "Yes" : "No"],
       ];
@@ -162,15 +162,15 @@ export function buildHealthLogHtml(options: HealthLogPrintOptions): string {
             `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`,
         )
         .join("");
-      // Review state is only meaningful for entries flagged for a nurse;
-      // routine unflagged intake never enters the nurse queue.
+      // Review state is only meaningful for entries flagged for review;
+      // routine unflagged intake never enters the review queue.
       const reviewLine = entry.flagForNurse
         ? entry.nurseReviewedAt
-          ? `<p class="review">Reviewed by nurse${entry.nurseReviewedBy ? ` (${escapeHtml(entry.nurseReviewedBy)})` : ""} on ${escapeHtml(entry.nurseReviewedAt.slice(0, 10))}${entry.nurseNote ? ` — note: ${escapeHtml(entry.nurseNote)}` : ""}.</p>`
-          : `<p class="review pending">Not yet reviewed by a nurse.</p>`
+          ? `<p class="review">Reviewed${entry.nurseReviewedBy ? ` (${escapeHtml(entry.nurseReviewedBy)})` : ""} on ${escapeHtml(entry.nurseReviewedAt.slice(0, 10))}${entry.nurseNote ? ` — note: ${escapeHtml(entry.nurseNote)}` : ""}.</p>`
+          : `<p class="review pending">Not yet reviewed.</p>`
         : "";
       const flagLine = entry.flagForNurse
-        ? `<p class="flag">Flagged for nurse review: ${escapeHtml(entry.flagReason ?? "see details")}</p>`
+        ? `<p class="flag">Flagged for review: ${escapeHtml(entry.flagReason ?? "see details")}</p>`
         : "";
       return `<article class="entry">
         <header>

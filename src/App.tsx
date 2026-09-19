@@ -720,7 +720,7 @@ export default function App() {
     menses: CalendarHeart,
     blood_sugar: Candy,
   };
-  const healthTrackNav = canSeeHealthTrack(session.roleKey) ? (
+  const healthTrackNav = canSeeHealthTrack(session) ? (
     <div className="nav-group" key="health-track">
       <div className="nav-label">HEALTH TRACK</div>
       {HEALTH_TRACK_SECTIONS.map((htSection) => {
@@ -1178,7 +1178,7 @@ export default function App() {
                   }}
                 />
               )}
-              {page === "Health Track" && canSeeHealthTrack(session.roleKey) && (
+              {page === "Health Track" && canSeeHealthTrack(session) && (
                 <HealthTrackPage
                   section={healthTrackSection}
                   individualId={healthTrackIndividualId}

@@ -167,10 +167,20 @@ test("re-flagging an entry does not duplicate manager alerts (dedupe holds)", as
     store.db.notifications.filter((n) => n.entityId === entry.id).length,
     3,
   );
-  // Unflag then re-flag: the queue fires again, but dedupe blocks duplicates.
-  await client.updateHealthEntry(entry.id, { details: { tempF: 98.6 } });
+  // Correcting an unreviewed flag keeps it: the review obligation survives,
+  // and dedupe blocks duplicate alerts.
+  await client.updateHealthEntry(entry.id, {
+    details: { tempF: 98.6 },
+    reason: "rechecked the thermometer",
+  });
+  assert.equal(
+    (await client.getHealthEntry(entry.id)).flagForNurse,
+    true,
+    "unreviewed flag survives a correction to normal values",
+  );
   const reflagged = await client.updateHealthEntry(entry.id, {
     details: { tempF: 103 },
+    reason: "new reading",
   });
   assert.equal(reflagged.flagForNurse, true);
   assert.equal(
@@ -232,6 +242,7 @@ test("update re-flags and pages the nurse on a newly abnormal reading", async ()
   assert.equal(entry.flagForNurse, false);
   const updated = await client.updateHealthEntry(entry.id, {
     details: { tempF: 103 },
+    reason: "new reading",
   });
   assert.equal(updated.flagForNurse, true);
   assert.match(updated.flagReason ?? "", /Fever/);
@@ -248,8 +259,14 @@ test("update validates the merged details", async () => {
     () =>
       client.updateHealthEntry(entry.id, {
         details: { mealType: "lunch", portion: "most", items: " " },
+        reason: "testing",
       }),
     /What was served/,
+  );
+  // A correction without a reason is rejected before validation.
+  await assert.rejects(
+    () => client.updateHealthEntry(entry.id, { details: { mealType: "lunch", portion: "most", items: "X" } }),
+    /why you are correcting/i,
   );
 });
 
@@ -292,18 +309,83 @@ test("reviewing an unflagged entry is rejected", async () => {
   );
 });
 
-test("DSP deletes their entry", async () => {
-  const { client, people } = await clientAs(DEMO_DSP_USERNAME);
+test("DSP voids their entry; void keeps the row with actor + reason, never deletes", async () => {
+  const { client, session, people } = await clientAs(DEMO_DSP_USERNAME);
   const entry = await client.addHealthEntry(mealInput(people[0].id));
-  await client.deleteHealthEntry(entry.id);
+  // A void without a reason is rejected.
+  await assert.rejects(() => client.voidHealthEntry(entry.id, "  "), /why you are voiding/i);
+  const voided = await client.voidHealthEntry(entry.id, "duplicate entry");
+  assert.ok(voided.voidedAt);
+  assert.equal(voided.voidedBy, session.userId);
+  assert.equal(voided.voidReason, "duplicate entry");
+  // Voided rows disappear from lists and direct reads.
   assert.deepEqual(await client.listHealthEntries({}), []);
-  await assert.rejects(() => client.deleteHealthEntry(entry.id), /not found/i);
+  await assert.rejects(() => client.getHealthEntry(entry.id), /not found/i);
+  // But the immutable revision trail keeps created + voided.
+  const revisions = await client.listHealthEntryRevisions(entry.id).catch(() => null);
+  assert.equal(revisions, null, "voided rows are hidden even from their own history reads");
 });
 
-test("an auditor cannot list health entries", async () => {
-  const { client, store, session } = await clientAs(DEMO_DSP_USERNAME);
+test("voiding preserves the full revision trail (created → amended → voided)", async () => {
+  const { client, store, session, people } = await clientAs(DEMO_DSP_USERNAME);
+  const entry = await client.addHealthEntry(mealInput(people[0].id));
+  await client.updateHealthEntry(entry.id, {
+    details: { mealType: "lunch", portion: "all", items: "Chicken and rice" },
+    reason: "fixed the portion",
+  });
+  const before = await client.listHealthEntryRevisions(entry.id);
+  assert.deepEqual(before.map((r) => r.action), ["created", "amended"]);
+  assert.equal(before[1].reason, "fixed the portion");
+  assert.equal(before[1].actorUserId, session.userId);
+
+  await client.voidHealthEntry(entry.id, "entered twice");
+  // The row is never deleted: void metadata + the whole trail survive in
+  // the store even though the entry is hidden from reads.
+  const rows = (store.db as unknown as { healthTrackEntries: { id: string; voidedAt: string | null }[] }).healthTrackEntries;
+  assert.equal(rows.filter((r) => r.id === entry.id && r.voidedAt).length, 1);
+  const trail = (store.db as unknown as { healthTrackRevisions: { entryId: string; action: string }[] }).healthTrackRevisions;
+  assert.deepEqual(
+    trail.filter((r) => r.entryId === entry.id).map((r) => r.action),
+    ["created", "amended", "voided"],
+  );
+});
+
+test("an auditor lists health entries read-only — add/update/void/review stay blocked", async () => {
+  const { client, store, session, people } = await clientAs(DEMO_DSP_USERNAME);
+  const entry = await client.addHealthEntry(
+    vitalsInput(people[0].id, { tempF: 102 }),
+  );
   setRole(store, session.userId, "auditor");
-  await assert.rejects(() => client.listHealthEntries({}), /permission/i);
+  // Reads work.
+  const listed = await client.listHealthEntries({});
+  assert.ok(listed.some((row) => row.id === entry.id));
+  assert.equal((await client.getHealthEntry(entry.id)).id, entry.id);
+  assert.ok((await client.listHealthEntryRevisions(entry.id)).length >= 1);
+  // Every write path stays blocked.
+  await assert.rejects(
+    () => client.addHealthEntry(mealInput(people[0].id)),
+    /permission/i,
+  );
+  await assert.rejects(
+    () =>
+      client.updateHealthEntry(entry.id, {
+        details: { tempF: 98.6 },
+        reason: "auditor correction attempt",
+      }),
+    /permission/i,
+  );
+  await assert.rejects(
+    () => client.voidHealthEntry(entry.id, "auditor void attempt"),
+    /permission/i,
+  );
+  await assert.rejects(
+    () => client.markHealthEntryReviewed(entry.id, "auditor review attempt"),
+    /permission/i,
+  );
+  await assert.rejects(
+    () => client.retryHealthAlerts(entry.id),
+    /permission|no failed/i,
+  );
 });
 
 test("an administrator can also review a flagged entry", async () => {
@@ -327,25 +409,41 @@ test("uploadHealthPhoto validates type and size", async () => {
 });
 
 test("uploadHealthPhoto round-trips through getHealthPhoto", async () => {
-  const { client, people } = await clientAs(DEMO_DSP_USERNAME);
+  const { client, session, people } = await clientAs(DEMO_DSP_USERNAME);
   const bytes = new Uint8Array([137, 80, 78, 71]);
   const file = new File([bytes], "rash photo.png", { type: "image/png" });
   const fileId = await client.uploadHealthPhoto(people[0].id, file);
-  assert.match(fileId, /^health\//);
+  // Namespaced per agency + individual so retrieval can be bound to the
+  // entry's own folders.
+  assert.ok(fileId.startsWith(`${session.agencyId}/${people[0].id}/`), fileId);
   const got = await client.getHealthPhoto(fileId);
   assert.ok(got);
   assert.equal(got.name, "rash_photo.png");
   assert.equal(got.blob.type, "image/png");
   assert.deepEqual(new Uint8Array(await got.blob.arrayBuffer()), bytes);
-  assert.equal(await client.getHealthPhoto("health/missing"), null);
+  // Well-formed but missing → null.
+  assert.equal(await client.getHealthPhoto(`${session.agencyId}/${people[0].id}/missing.png`), null);
+  // An arbitrary path outside the agency/individual folders is rejected.
+  await assert.rejects(() => client.getHealthPhoto("health/missing"), /not found/i);
+  await assert.rejects(
+    () => client.getHealthPhoto(`other-agency/${people[0].id}/x.png`),
+    /not found/i,
+  );
 });
 
-test("an auditor cannot fetch a health photo", async () => {
+test("an auditor can fetch a health photo (read-only)", async () => {
   const { client, store, session, people } = await clientAs(DEMO_DSP_USERNAME);
   const file = new File([new Uint8Array([1, 2])], "a.png", { type: "image/png" });
   const fileId = await client.uploadHealthPhoto(people[0].id, file);
   setRole(store, session.userId, "auditor");
-  await assert.rejects(() => client.getHealthPhoto(fileId), /permission/i);
+  const got = await client.getHealthPhoto(fileId);
+  assert.ok(got, "auditor reads photos");
+  // Uploads stay blocked for auditors.
+  const other = new File([new Uint8Array([3])], "b.png", { type: "image/png" });
+  await assert.rejects(
+    () => client.uploadHealthPhoto(people[0].id, other),
+    /permission/i,
+  );
 });
 
 test("two refused meals in one day alerts the home's HM, PM, and nurse once for very low intake", async () => {

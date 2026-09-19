@@ -7108,6 +7108,159 @@ button.qa-row:hover {
   color: #6b6156;
   font-size: 13px;
 }
+
+/* HEALTH TRACK (2026-09-19): solid, high-contrast entry chrome. No
+   gradients, no decorative colored edges — status is carried by text and
+   badges, never by color alone, so the printed log stays legible. */
+.health-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health-range input[type="date"] {
+  max-width: 100%;
+}
+.health-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+.health-summary-strip > div {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.health-summary-strip dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.health-summary-strip dd {
+  margin: 4px 0 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.health-day-group {
+  margin-top: 20px;
+}
+.health-day-heading {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  color: var(--purple-dark);
+}
+.health-entry {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.health-entry-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.health-entry-head strong {
+  color: var(--text);
+  font-size: 1.02rem;
+}
+.health-entry-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.badge.flagged-for-review,
+.badge.needs-review {
+  background: #f6e7dc;
+  color: #7c3f21;
+  font-weight: 700;
+}
+.badge.reviewed {
+  background: #e9efe4;
+  color: #2f4630;
+  font-weight: 700;
+}
+.health-entry-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.health-entry-details dt {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.health-entry-details dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.health-alert-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #f7efdf;
+  color: var(--text);
+  font-weight: 600;
+}
+.health-alert-status--failed {
+  background: #f6e3d9;
+  border-color: #b56a4e;
+}
+.health-alert-status--partial {
+  background: #f7ecdd;
+  border-color: #8b5e3c;
+}
+.health-history {
+  margin: 12px 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.health-history h4 {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.health-history ol {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.health-history li {
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.health-entry-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .health-entry {
+    padding: 12px;
+  }
+  .health-summary-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .health-entry-details {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .allergy-list {
   margin: 0;
   padding-left: 1.1rem;

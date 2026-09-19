@@ -83,6 +83,7 @@ import {
   type SiteShiftNoteView,
 } from "./shiftNotes";
 import {
+  aggregateAlertStatus,
   canSeeHealthTrack,
   dayKeyOf,
   detectDailyIntakeAlert,
@@ -90,10 +91,16 @@ import {
   healthEntryMatches,
   healthTrackAlertTargets,
   dailyIntakeAlertTargets,
+  isMeaningfulNote,
   sortHealthEntriesDesc,
   validateHealthTrackInput,
+  type AlertDeliveryStatus,
+  type HealthAlertOutboxItem,
   type HealthTrackEntry,
   type HealthTrackFilters,
+  type HealthTrackRevision,
+  type HealthTrackRevisionAction,
+  type UpdateHealthTrackInput,
 } from "./healthTrack";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
@@ -930,8 +937,23 @@ export interface ComplyraApi {
   getHealthEntry(id: string): Promise<import("./healthTrack").HealthTrackEntry>;
   addHealthEntry(input: import("./healthTrack").AddHealthTrackInput): Promise<import("./healthTrack").HealthTrackEntry>;
   updateHealthEntry(id: string, patch: import("./healthTrack").UpdateHealthTrackInput): Promise<import("./healthTrack").HealthTrackEntry>;
-  deleteHealthEntry(id: string): Promise<void>;
+  /**
+   * Void (soft-delete) an entry with a required reason. Never destructive:
+   * the row stays with voided_at/voided_by/void_reason and the revision
+   * trail keeps the full history.
+   */
+  voidHealthEntry(id: string, reason: string): Promise<import("./healthTrack").HealthTrackEntry>;
   markHealthEntryReviewed(id: string, note: string): Promise<import("./healthTrack").HealthTrackEntry>;
+  /** Re-attempt failed alert deliveries for an entry; updates the outbox + entry status. */
+  retryHealthAlerts(id: string): Promise<import("./healthTrack").HealthTrackEntry>;
+  /** Attach an already-uploaded photo to its entry (upload happens after the entry is saved). */
+  attachHealthPhoto(entryId: string, photoPath: string): Promise<import("./healthTrack").HealthTrackEntry>;
+  /** Remove an uploaded photo (orphan cleanup); path must belong to the caller's agency/individual. */
+  deleteHealthPhoto(fileId: string): Promise<void>;
+  /** Immutable revision trail for an entry, newest last. */
+  listHealthEntryRevisions(id: string): Promise<import("./healthTrack").HealthTrackRevision[]>;
+  /** Alert delivery ledger for an entry (pending → sent/failed). */
+  listHealthAlertOutbox(entryId: string): Promise<import("./healthTrack").HealthAlertOutboxItem[]>;
   uploadHealthPhoto(individualId: string, file: File): Promise<string>;
   getHealthPhoto(fileId: string): Promise<{ name: string; blob: Blob } | null>;
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
@@ -7411,6 +7433,8 @@ export class LocalApi implements ComplyraApi {
 
   // ===== HEALTH-TRACK IMPL (health tracking) =====
   // Health Track: per-individual health logging (LocalApi, in-memory).
+  // Mirrors the hosted RPC behavior: permission + site gates, immutable
+  // revision trail, void-instead-of-delete, and an alert delivery ledger.
 
   private healthTrackRows(): HealthTrackEntry[] {
     const db = this.store.db as LocalDatabase & {
@@ -7420,10 +7444,54 @@ export class LocalApi implements ComplyraApi {
     return db.healthTrackEntries;
   }
 
-  /** Entry must belong to the session's agency and a site the session may see. */
+  private healthTrackRevisions(): HealthTrackRevision[] {
+    const db = this.store.db as LocalDatabase & {
+      healthTrackRevisions?: HealthTrackRevision[];
+    };
+    if (!db.healthTrackRevisions) db.healthTrackRevisions = [];
+    return db.healthTrackRevisions;
+  }
+
+  private healthAlertOutbox(): HealthAlertOutboxItem[] {
+    const db = this.store.db as LocalDatabase & {
+      healthAlertOutbox?: HealthAlertOutboxItem[];
+    };
+    if (!db.healthAlertOutbox) db.healthAlertOutbox = [];
+    return db.healthAlertOutbox;
+  }
+
+  /** Append one step to an entry's immutable revision trail. */
+  private appendHealthRevision(
+    session: SessionUser,
+    entry: HealthTrackEntry,
+    action: HealthTrackRevisionAction,
+    reason: string | null,
+  ): void {
+    const revisions = this.healthTrackRevisions().filter((r) => r.entryId === entry.id);
+    const revisionNo = revisions.reduce((max, r) => Math.max(max, r.revisionNo), 0) + 1;
+    const now = new Date().toISOString();
+    this.healthTrackRevisions().push({
+      id: crypto.randomUUID(),
+      agencyId: entry.agencyId,
+      entryId: entry.id,
+      revisionNo,
+      action,
+      occurredAt: entry.occurredAt,
+      details: structuredClone(entry.details),
+      flagForNurse: entry.flagForNurse,
+      flagReason: entry.flagReason,
+      voidedAt: entry.voidedAt,
+      actorUserId: session.userId,
+      actorName: session.fullName,
+      reason,
+      createdAt: now,
+    });
+  }
+
+  /** Entry must belong to the session's agency and a site the session may see; voided rows are hidden. */
   private findHealthEntry(session: SessionUser, id: string): HealthTrackEntry {
     const entry = this.healthTrackRows().find(
-      (row) => row.id === id && row.agencyId === session.agencyId,
+      (row) => row.id === id && row.agencyId === session.agencyId && !row.voidedAt,
     );
     if (!entry) throw new Error("Health entry not found.");
     if (!canAccessSite(session, entry.siteId)) {
@@ -7463,9 +7531,103 @@ export class LocalApi implements ComplyraApi {
   }
 
   /**
+   * Delivery seam: one notification payload → the notification store.
+   * Protected so tests can simulate a delivery failure (the hosted
+   * equivalent is a failed notify-event invocation).
+   */
+  protected deliverNotificationPayload(
+    payload: import("./healthTrack").NotificationPayload,
+  ): void {
+    this.queueDelegationNotification({
+      agencyId: payload.agencyId,
+      userId: payload.userId ?? null,
+      roleKey: payload.roleKey ?? null,
+      type: payload.type,
+      title: payload.title,
+      body: payload.body,
+      deepLink: payload.deepLink,
+      entityType: payload.entityType ?? null,
+      entityId: payload.entityId ?? null,
+      dedupeKey: payload.dedupeKey ?? null,
+    });
+  }
+
+  /**
+   * Write one outbox row per alert target (status 'pending'), then attempt
+   * delivery of each. Returns per-target outcomes; failures stay visible on
+   * the outbox rows and the entry instead of being swallowed.
+   */
+  private sendHealthAlertTargets(
+    session: SessionUser,
+    entry: HealthTrackEntry,
+    targets: import("./healthTrack").NotificationPayload[],
+  ): Array<{ ok: boolean }> {
+    const outbox = this.healthAlertOutbox();
+    const now = new Date().toISOString();
+    const results: Array<{ ok: boolean }> = [];
+    for (const payload of targets) {
+      let row = outbox.find(
+        (item) => item.dedupeKey === payload.dedupeKey && item.entryId === entry.id,
+      );
+      if (!row) {
+        row = {
+          id: crypto.randomUUID(),
+          agencyId: entry.agencyId,
+          entryId: entry.id,
+          siteId: entry.siteId,
+          targetUserId: payload.userId ?? null,
+          targetRoleKey: payload.roleKey ?? null,
+          title: payload.title,
+          body: payload.body,
+          deepLink: payload.deepLink,
+          dedupeKey: payload.dedupeKey ?? crypto.randomUUID(),
+          status: "pending",
+          attempts: 0,
+          lastError: null,
+          createdAt: now,
+          sentAt: null,
+        };
+        outbox.push(row);
+      }
+      row.attempts += 1;
+      try {
+        this.deliverNotificationPayload(payload);
+        row.status = "sent";
+        row.lastError = null;
+        row.sentAt = new Date().toISOString();
+        results.push({ ok: true });
+      } catch (err) {
+        row.status = "failed";
+        row.lastError = (err as Error).message;
+        results.push({ ok: false });
+      }
+    }
+    return results;
+  }
+
+  /** Recompute the entry-level delivery status from its outbox rows. */
+  private refreshAlertDelivery(entry: HealthTrackEntry): AlertDeliveryStatus | null {
+    const rows = this.healthAlertOutbox().filter((item) => item.entryId === entry.id);
+    if (rows.length === 0) {
+      entry.alertDelivery = null;
+      entry.alertDeliveryError = null;
+      return null;
+    }
+    const status = aggregateAlertStatus(rows.map((row) => ({ ok: row.status === "sent" })));
+    // "pending" rows that were never attempted (e.g. queued then app
+    // restarted) read as not-yet-delivered rather than failed.
+    entry.alertDelivery = status;
+    entry.alertDeliveryError =
+      rows.find((row) => row.status === "failed")?.lastError ?? null;
+    return status;
+  }
+
+  /**
    * Alert every manager assigned to the individual — the home's house
    * manager(s) directly, plus program-manager and nurse role broadcasts —
-   * through the existing incident.followup notification type.
+   * through the existing incident.followup notification type. Every target
+   * is persisted to the outbox first; per-target failures are recorded,
+   * never swallowed.
    */
   private queueHealthAlert(
     session: SessionUser,
@@ -7473,7 +7635,7 @@ export class LocalApi implements ComplyraApi {
     individualName: string,
     siteName: string,
     reason: string,
-  ): boolean {
+  ): void {
     const targets = healthTrackAlertTargets({
       agencyId: session.agencyId,
       entryId: entry.id,
@@ -7484,23 +7646,8 @@ export class LocalApi implements ComplyraApi {
       occurredAt: entry.occurredAt,
       hmUserIds: this.healthSiteManagerIds(session.agencyId, entry.siteId),
     });
-    let queued = false;
-    for (const payload of targets) {
-      queued =
-        this.queueDelegationNotification({
-          agencyId: payload.agencyId,
-          userId: payload.userId ?? null,
-          roleKey: payload.roleKey ?? null,
-          type: payload.type,
-          title: payload.title,
-          body: payload.body,
-          deepLink: payload.deepLink,
-          entityType: payload.entityType ?? null,
-          entityId: payload.entityId ?? null,
-          dedupeKey: payload.dedupeKey ?? null,
-        }) || queued;
-    }
-    return queued;
+    this.sendHealthAlertTargets(session, entry, targets);
+    this.refreshAlertDelivery(entry);
   }
 
   /**
@@ -7535,20 +7682,8 @@ export class LocalApi implements ComplyraApi {
       day,
       hmUserIds: this.healthSiteManagerIds(session.agencyId, entry.siteId),
     });
-    for (const payload of targets) {
-      this.queueDelegationNotification({
-        agencyId: payload.agencyId,
-        userId: payload.userId ?? null,
-        roleKey: payload.roleKey ?? null,
-        type: payload.type,
-        title: payload.title,
-        body: payload.body,
-        deepLink: payload.deepLink,
-        entityType: payload.entityType ?? null,
-        entityId: payload.entityId ?? null,
-        dedupeKey: payload.dedupeKey ?? null,
-      });
-    }
+    this.sendHealthAlertTargets(session, entry, targets);
+    this.refreshAlertDelivery(entry);
   }
 
   private assertValidHealthInput(
@@ -7565,19 +7700,19 @@ export class LocalApi implements ComplyraApi {
 
   async listHealthEntries(filters: HealthTrackFilters): Promise<HealthTrackEntry[]> {
     const session = assertSession(this.store);
-    if (!canSeeHealthTrack(session.roleKey)) {
+    if (!canSeeHealthTrack(session)) {
       throw new Error("You do not have permission to do that.");
     }
     const rows = this.healthTrackRows().filter(
       (row) =>
-        row.agencyId === session.agencyId && canAccessSite(session, row.siteId),
+        row.agencyId === session.agencyId && !row.voidedAt && canAccessSite(session, row.siteId),
     );
     return sortHealthEntriesDesc(rows.filter((row) => healthEntryMatches(row, filters)));
   }
 
   async getHealthEntry(id: string): Promise<HealthTrackEntry> {
     const session = assertSession(this.store);
-    if (!canSeeHealthTrack(session.roleKey)) {
+    if (!canSeeHealthTrack(session)) {
       throw new Error("You do not have permission to do that.");
     }
     return this.findHealthEntry(session, id);
@@ -7607,10 +7742,16 @@ export class LocalApi implements ComplyraApi {
       nurseReviewedAt: null,
       nurseReviewedBy: null,
       nurseNote: null,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
+      alertDelivery: alert.flagged ? "pending" : null,
+      alertDeliveryError: null,
       createdAt: now,
       updatedAt: now,
     };
     this.healthTrackRows().unshift(entry);
+    this.appendHealthRevision(session, entry, "created", null);
     if (alert.flagged && alert.reason) {
       this.queueHealthAlert(session, entry, person.fullName, site.name, alert.reason);
     }
@@ -7621,23 +7762,51 @@ export class LocalApi implements ComplyraApi {
     return entry;
   }
 
+  /**
+   * Amend an entry: a correction with a required reason. The prior value is
+   * preserved in the immutable revision trail, and an unreviewed flag
+   * survives the correction — the review obligation stays visible until a
+   * reviewer clears it. A reviewed entry that still flags goes back for review.
+   */
   async updateHealthEntry(
     id: string,
-    patch: import("./healthTrack").UpdateHealthTrackInput,
+    patch: UpdateHealthTrackInput,
   ): Promise<HealthTrackEntry> {
     const session = assertSession(this.store);
     assertCan(session, "health.record");
     const entry = this.findHealthEntry(session, id);
+    const changingValues =
+      patch.occurredAt !== undefined || patch.details !== undefined;
+    if (changingValues && !isMeaningfulNote(patch.reason)) {
+      throw new Error("Say why you are correcting this entry.");
+    }
     const wasFlagged = entry.flagForNurse;
+    const wasReviewed = entry.nurseReviewedAt !== null;
     const occurredAt = patch.occurredAt ?? entry.occurredAt;
     const details = patch.details ?? entry.details;
     this.assertValidHealthInput(entry.kind, details, occurredAt);
     entry.occurredAt = occurredAt;
     entry.details = details;
-    const alert = detectHealthAlert(entry.kind, details);
+    let alert = detectHealthAlert(entry.kind, details);
+    if (wasFlagged && !wasReviewed) {
+      // An unreviewed alert survives corrections: keep the original reason
+      // so the review obligation stays visible, even if the new values
+      // look normal.
+      alert = { flagged: true, reason: entry.flagReason };
+    }
     entry.flagForNurse = alert.flagged;
     entry.flagReason = alert.reason;
+    if (alert.flagged && wasReviewed) {
+      // Still abnormal after review → back to the review queue with a
+      // fresh, auditable review obligation.
+      entry.nurseReviewedAt = null;
+      entry.nurseReviewedBy = null;
+      entry.nurseNote = null;
+    }
     entry.updatedAt = new Date().toISOString();
+    if (changingValues) {
+      this.appendHealthRevision(session, entry, "amended", patch.reason!.trim());
+    }
     if (!wasFlagged && alert.flagged && alert.reason) {
       const { person, site } = this.healthTrackIndividualOrThrow(session, entry.individualId);
       this.queueHealthAlert(session, entry, person.fullName, site.name, alert.reason);
@@ -7646,14 +7815,26 @@ export class LocalApi implements ComplyraApi {
     return entry;
   }
 
-  async deleteHealthEntry(id: string): Promise<void> {
+  /**
+   * Void (soft-delete) an entry: never destructive. The row keeps
+   * voided_at/voided_by/void_reason and drops out of lists; the immutable
+   * revision trail keeps the full history.
+   */
+  async voidHealthEntry(id: string, reason: string): Promise<HealthTrackEntry> {
     const session = assertSession(this.store);
     assertCan(session, "health.record");
     const entry = this.findHealthEntry(session, id);
-    const rows = this.healthTrackRows();
-    const index = rows.indexOf(entry);
-    if (index !== -1) rows.splice(index, 1);
+    if (!isMeaningfulNote(reason)) {
+      throw new Error("Say why you are voiding this entry.");
+    }
+    const now = new Date().toISOString();
+    entry.voidedAt = now;
+    entry.voidedBy = session.userId;
+    entry.voidReason = reason.trim();
+    entry.updatedAt = now;
+    this.appendHealthRevision(session, entry, "voided", reason.trim());
     await persistMeta(this.store);
+    return entry;
   }
 
   async markHealthEntryReviewed(id: string, note: string): Promise<HealthTrackEntry> {
@@ -7663,12 +7844,123 @@ export class LocalApi implements ComplyraApi {
     if (!entry.flagForNurse) {
       throw new Error("Only flagged entries need nurse review.");
     }
+    if (!isMeaningfulNote(note)) {
+      throw new Error("Add a review note (a few words) so the review is auditable.");
+    }
     entry.nurseReviewedAt = new Date().toISOString();
     entry.nurseReviewedBy = session.fullName;
     entry.nurseNote = note.trim();
     entry.updatedAt = new Date().toISOString();
+    this.appendHealthRevision(session, entry, "reviewed", note.trim());
     await persistMeta(this.store);
     return entry;
+  }
+
+  /**
+   * Re-attempt delivery of failed alert targets. Status moves back through
+   * the outbox and onto the entry (ok / partial / failed) — failures stay
+   * visible until they are actually delivered.
+   */
+  async retryHealthAlerts(id: string): Promise<HealthTrackEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    const entry = this.findHealthEntry(session, id);
+    const failed = this.healthAlertOutbox().filter(
+      (item) => item.entryId === entry.id && item.status === "failed",
+    );
+    if (failed.length === 0) {
+      throw new Error("There are no failed alert deliveries to retry.");
+    }
+    const targets: import("./healthTrack").NotificationPayload[] = failed.map((item) => ({
+      agencyId: item.agencyId,
+      userId: item.targetUserId,
+      roleKey: item.targetRoleKey,
+      type: "incident.followup",
+      title: item.title,
+      body: item.body,
+      deepLink: item.deepLink,
+      entityType: "health-track-entry",
+      entityId: item.entryId,
+      dedupeKey: item.dedupeKey,
+    }));
+    this.sendHealthAlertTargets(session, entry, targets);
+    this.refreshAlertDelivery(entry);
+    const rows = this.healthAlertOutbox().filter((item) => item.entryId === entry.id);
+    const sent = rows.filter((row) => row.status === "sent").length;
+    const failedCount = rows.filter((row) => row.status === "failed").length;
+    this.appendHealthRevision(
+      session,
+      entry,
+      "alerts_retried",
+      `Alert delivery: ${sent} sent, ${failedCount} failed`,
+    );
+    await persistMeta(this.store);
+    return entry;
+  }
+
+  async listHealthEntryRevisions(id: string): Promise<HealthTrackRevision[]> {
+    const session = assertSession(this.store);
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    this.findHealthEntry(session, id);
+    return this.healthTrackRevisions()
+      .filter((revision) => revision.entryId === id)
+      .sort((a, b) => a.revisionNo - b.revisionNo);
+  }
+
+  async listHealthAlertOutbox(entryId: string): Promise<HealthAlertOutboxItem[]> {
+    const session = assertSession(this.store);
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    this.findHealthEntry(session, entryId);
+    return this.healthAlertOutbox().filter((item) => item.entryId === entryId);
+  }
+
+  /**
+   * Attach an already-uploaded photo to its entry. The path must live in the
+   * entry's own agency/individual folders, and the entry must be one the
+   * caller may touch.
+   */
+  async attachHealthPhoto(entryId: string, photoPath: string): Promise<HealthTrackEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    const entry = this.findHealthEntry(session, entryId);
+    const prefix = `${session.agencyId}/${entry.individualId}/`;
+    if (!photoPath.startsWith(prefix)) {
+      throw new Error("Photo does not belong to this entry.");
+    }
+    if (!this.store.files.get(photoPath)) {
+      throw new Error("Photo upload not found.");
+    }
+    entry.details = { ...(entry.details as object), photoId: photoPath } as typeof entry.details;
+    entry.updatedAt = new Date().toISOString();
+    this.appendHealthRevision(session, entry, "amended", "Photo attached");
+    await persistMeta(this.store);
+    return entry;
+  }
+
+  /**
+   * Remove an uploaded photo (orphan cleanup when entry save fails).
+   * The path must belong to the caller's agency and an individual the
+   * caller may log health entries for.
+   */
+  async deleteHealthPhoto(fileId: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    const parts = fileId.split("/");
+    const [agencyId, individualId] = parts;
+    if (
+      parts.length < 3 ||
+      agencyId !== session.agencyId ||
+      !individualId
+    ) {
+      throw new Error("Photo does not belong to this entry.");
+    }
+    this.healthTrackIndividualOrThrow(session, individualId);
+    this.store.files.delete(fileId);
+    await persistMeta(this.store);
   }
 
   async uploadHealthPhoto(individualId: string, file: File): Promise<string> {
@@ -7683,7 +7975,9 @@ export class LocalApi implements ComplyraApi {
     }
     const sanitized =
       file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "photo";
-    const path = `health/${crypto.randomUUID()}-${sanitized}`;
+    // Namespaced per agency + individual so photo retrieval can be bound to
+    // the entry's own folders (and so orphan cleanup can verify ownership).
+    const path = `${session.agencyId}/${individualId}/${crypto.randomUUID()}-${sanitized}`;
     const bytes = await file.arrayBuffer();
     this.store.files.set(path, { mime: file.type, bytes });
     await persistMeta(this.store);
@@ -7692,9 +7986,21 @@ export class LocalApi implements ComplyraApi {
 
   async getHealthPhoto(fileId: string): Promise<{ name: string; blob: Blob } | null> {
     const session = assertSession(this.store);
-    if (!canSeeHealthTrack(session.roleKey)) {
+    if (!canSeeHealthTrack(session)) {
       throw new Error("You do not have permission to do that.");
     }
+    // Bind the path to the caller's agency and an individual the caller may
+    // log health entries for — an arbitrary storage path is not accepted.
+    const parts = fileId.split("/");
+    const [agencyId, individualId] = parts;
+    if (
+      parts.length < 3 ||
+      agencyId !== session.agencyId ||
+      !individualId
+    ) {
+      throw new Error("Photo not found.");
+    }
+    this.healthTrackIndividualOrThrow(session, individualId);
     const stored = this.store.files.get(fileId);
     if (!stored) return null;
     const name =

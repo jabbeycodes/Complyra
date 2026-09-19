@@ -20,6 +20,8 @@ import {
   healthEntryMatches,
   healthTrackAlertTargets,
   isHealthTrackKind,
+  isMeaningfulNote,
+  aggregateAlertStatus,
   sectionForKind,
   sortHealthEntriesDesc,
   summarizeHealthDay,
@@ -44,6 +46,11 @@ function entry(partial: Partial<HealthTrackEntry> = {}): HealthTrackEntry {
     nurseReviewedAt: null,
     nurseReviewedBy: null,
     nurseNote: null,
+    voidedAt: null,
+    voidedBy: null,
+    voidReason: null,
+    alertDelivery: null,
+    alertDeliveryError: null,
     createdAt: "2026-09-18T12:05:00",
     updatedAt: "2026-09-18T12:05:00",
     ...partial,
@@ -254,13 +261,32 @@ test("sorting: newest first", () => {
   assert.equal(sorted[0].id, "new");
 });
 
-test("gates: auditors and HR stay out; DSP/HM record; nurse reviews", () => {
+test("gates: auditors read everything read-only; HR stays out; DSP/HM record; nurse reviews", () => {
+  // canSeeHealthTrack follows the customizable permissions, not a
+  // hard-coded role list.
   for (const role of ["administrator", "compliance_admin", "program_manager", "house_manager", "dsp", "nurse"]) {
-    assert.equal(canSeeHealthTrack(role), true, role);
+    assert.equal(canSeeHealthTrack({ role }), true, role);
   }
-  assert.equal(canSeeHealthTrack("auditor"), false);
-  assert.equal(canSeeHealthTrack("hr"), false);
-  assert.equal(canSeeHealthTrack(undefined), false);
+  // Auditors see everything read-only (health.view), never write or review.
+  assert.equal(canSeeHealthTrack({ role: "auditor" }), true);
+  assert.equal(canRecordHealthTrack({ role: "auditor" }), false);
+  assert.equal(canReviewHealthTrack({ role: "auditor" }), false);
+  assert.equal(canSeeHealthTrack({ role: "hr" }), false);
+  // An agency that customized health.record away from DSPs hides the page
+  // from them too.
+  assert.equal(
+    canSeeHealthTrack({ role: "dsp", permissions: { "health.record": false } }),
+    false,
+  );
+  // health.view alone grants visibility without record/review power.
+  assert.equal(
+    canSeeHealthTrack({ role: "hr", permissions: { "health.view": true } }),
+    true,
+  );
+  assert.equal(
+    canRecordHealthTrack({ role: "hr", permissions: { "health.view": true } }),
+    false,
+  );
 
   assert.equal(canRecordHealthTrack({ role: "dsp" }), true);
   assert.equal(canRecordHealthTrack({ role: "house_manager" }), true);
@@ -272,6 +298,23 @@ test("gates: auditors and HR stay out; DSP/HM record; nurse reviews", () => {
   assert.equal(canReviewHealthTrack({ role: "program_manager" }), true);
   assert.equal(canReviewHealthTrack({ role: "house_manager" }), true);
   assert.equal(canReviewHealthTrack({ role: "dsp" }), false);
+});
+
+test("isMeaningfulNote: review notes and correction reasons cannot be empty", () => {
+  assert.equal(isMeaningfulNote("Will monitor temperature."), true);
+  assert.equal(isMeaningfulNote("  ok  "), false);
+  assert.equal(isMeaningfulNote(""), false);
+  assert.equal(isMeaningfulNote("   "), false);
+  assert.equal(isMeaningfulNote(null), false);
+  assert.equal(isMeaningfulNote(undefined), false);
+});
+
+test("aggregateAlertStatus: per-target outcomes roll up to one status", () => {
+  assert.equal(aggregateAlertStatus([]), "pending");
+  assert.equal(aggregateAlertStatus([{ ok: true }, { ok: true }]), "ok");
+  assert.equal(aggregateAlertStatus([{ ok: false }]), "failed");
+  assert.equal(aggregateAlertStatus([{ ok: true }, { ok: false }]), "partial");
+  assert.equal(aggregateAlertStatus([{ ok: false }, { ok: false }]), "failed");
 });
 
 test("dayKeyOf: takes the date portion of an ISO datetime", () => {
