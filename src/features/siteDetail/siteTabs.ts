@@ -9,7 +9,6 @@ export type SiteDetailTabId =
   | "training"
   | "medications"
   | "mileage"
-  | "drills"
   | "shiftnotes"
   | "staff";
 
@@ -67,11 +66,6 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "mileage",
     label: "Mileage",
     visible: (s) => !!s && pageVisible(s, "Mileage"),
-  },
-  {
-    id: "drills",
-    label: "Drills",
-    visible: (s) => !!s && pageVisible(s, "Individuals"),
   },
   {
     // Issue #80: the Documents tab becomes Shift notes. Standalone document
