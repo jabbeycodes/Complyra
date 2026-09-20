@@ -112,9 +112,9 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
           drillsSection.getByRole("heading", { name: "Emergency drills" }),
         ).toBeVisible();
         await expect(drillsSection).toContainText("by the 7th of each month");
-        await expect(drillsSection.locator(".drill-month")).toHaveCount(12);
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(12);
         // Each drill row is an accessible collapsible control.
-        const firstRow = drillsSection.locator(".drill-row-toggle").first();
+        const firstRow = drillsSection.locator(".dsv-drill-toggle").first();
         await expect(firstRow).toHaveAttribute("aria-expanded", "false");
         await firstRow.click();
         await expect(firstRow).toHaveAttribute("aria-expanded", "true");
@@ -123,10 +123,10 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
           name: "Drills month filter",
         });
         await monthFilter.selectOption("8");
-        await expect(drillsSection.locator(".drill-month")).toHaveCount(1);
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(1);
         await expect(drillsSection).toContainText("August");
         await monthFilter.selectOption("all");
-        await expect(drillsSection.locator(".drill-month")).toHaveCount(12);
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(12);
         // Section order: drills, monthly home checks, HM checklists, service
         // logs (HM content at the bottom).
         const order = await page.evaluate(() => {
