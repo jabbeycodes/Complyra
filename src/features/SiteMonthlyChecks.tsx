@@ -128,7 +128,6 @@ export default function SiteMonthlyChecks({
             <button
               className="button"
               disabled={!drillsDone}
-              aria-label="Download emergency drills report"
               onClick={() =>
                 run(async () => {
                   const file = await api.downloadMonthlyCheck({
@@ -172,7 +171,6 @@ export default function SiteMonthlyChecks({
             <button
               className="button"
               disabled={!safetyDone}
-              aria-label="Download home safety report"
               onClick={() =>
                 run(async () => {
                   const file = await api.downloadMonthlyCheck({
