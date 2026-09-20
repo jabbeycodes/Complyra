@@ -11,6 +11,13 @@ import type { AdaptiveEquipment } from "../../data/monthlyChecks";
 
 export type IndividualHighlightTone = "alert" | "neutral";
 
+/**
+ * Craft #78: a card shows at most this many highlight rows (clinical risk
+ * first); any extras collapse into a "+N more" affordance that opens the
+ * individual's chart. Kept here so the cap lives next to the selection logic.
+ */
+export const MAX_INDIVIDUAL_HIGHLIGHTS = 5;
+
 export interface IndividualHighlight {
   /** Short label, e.g. "Allergies". */
   label: string;

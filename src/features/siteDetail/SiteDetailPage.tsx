@@ -45,7 +45,10 @@ import type {
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
-import { individualHighlights } from "./individualHighlights";
+import {
+  individualHighlights,
+  MAX_INDIVIDUAL_HIGHLIGHTS,
+} from "./individualHighlights";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
@@ -549,17 +552,9 @@ export default function SiteDetailPage({
                 )}
               </div>
             )}
-            <div className="panel">
-              <h2>Site facts</h2>
-              <dl className="fact-list">
-                {factRows.map((f) => (
-                  <div key={f.term}>
-                    <dt>{f.term}</dt>
-                    <dd>{f.detail}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
+            {/* Craft #78: Individual cards sit BELOW "Needs attention" and
+                ABOVE "Site facts" — the day-to-day staff scan comes before
+                static utility facts. */}
             {siteIndividuals.length > 0 && (
               <div className="panel">
                 <h2>Individual highlights</h2>
@@ -574,11 +569,22 @@ export default function SiteDetailPage({
                       p.profile,
                       workspace?.monthly?.equipment ?? [],
                     );
+                    // Show clinical-risk-first highlights, capped; extras roll
+                    // into "+N more". The whole card opens the chart, so the
+                    // overflow hint is satisfied by tapping anywhere on it.
+                    const visibleHighlights = highlights.slice(
+                      0,
+                      MAX_INDIVIDUAL_HIGHLIGHTS,
+                    );
+                    const overflowCount =
+                      highlights.length - visibleHighlights.length;
                     return (
-                      <article
+                      <button
                         key={p.id}
+                        type="button"
                         className="individual-highlight-card"
-                        aria-label={`${p.name} highlights`}
+                        aria-label={`${p.name} — open chart`}
+                        onClick={() => onOpenIndividual(p.name)}
                       >
                         <div className="individual-highlight-top">
                           <Avatar
@@ -587,39 +593,55 @@ export default function SiteDetailPage({
                             src={p.photoUrl}
                           />
                           <h3>{p.name}</h3>
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => onOpenIndividual(p.name)}
-                          >
+                          <span className="individual-highlight-open">
                             Open chart
-                          </button>
+                          </span>
                         </div>
-                        {highlights.length > 0 ? (
-                          <dl className="individual-highlight-list">
-                            {highlights.map((h) => (
-                              <div
-                                key={h.label}
-                                className={
-                                  h.tone === "alert"
-                                    ? "individual-highlight-row is-alert"
-                                    : "individual-highlight-row"
-                                }
-                              >
-                                <dt>{h.label}</dt>
-                                <dd>{h.value}</dd>
-                              </div>
-                            ))}
-                          </dl>
+                        {visibleHighlights.length > 0 ? (
+                          <>
+                            <dl className="individual-highlight-list">
+                              {visibleHighlights.map((h) => (
+                                <div
+                                  key={h.label}
+                                  className={
+                                    h.tone === "alert"
+                                      ? "individual-highlight-row is-alert"
+                                      : "individual-highlight-row"
+                                  }
+                                >
+                                  <dt>{h.label}</dt>
+                                  <dd>{h.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                            {overflowCount > 0 && (
+                              <p className="individual-highlight-more">
+                                +{overflowCount} more — open chart
+                              </p>
+                            )}
+                          </>
                         ) : (
-                          <p className="muted">No highlights recorded yet.</p>
+                          <p className="muted">
+                            No clinical highlights yet — open chart to add.
+                          </p>
                         )}
-                      </article>
+                      </button>
                     );
                   })}
                 </div>
               </div>
             )}
+            <div className="panel">
+              <h2>Site facts</h2>
+              <dl className="fact-list">
+                {factRows.map((f) => (
+                  <div key={f.term}>
+                    <dt>{f.term}</dt>
+                    <dd>{f.detail}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
           </>
         )}
 
