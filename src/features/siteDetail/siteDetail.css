@@ -530,3 +530,104 @@
     mask-image: linear-gradient(to right, #000 88%, transparent);
   }
 }
+
+/* Issue #78: per-Individual staff highlight cards on the site Overview.
+   Solid colors, high contrast, no gradients. */
+.individual-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 12px;
+  padding: 12px var(--panel-inline) 20px;
+}
+
+/* The whole card is the click target (craft #78: tap anywhere → chart), so it
+   is a <button> with the native chrome reset. */
+.individual-highlight-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid #d9d2c7;
+  border-radius: 10px;
+  background: #fffdf9;
+  padding: 14px 14px 12px;
+}
+
+.individual-highlight-card:hover {
+  border-color: #b7ad9d;
+  background: #fffbf2;
+}
+
+.individual-highlight-card:focus-visible {
+  outline: 2px solid #3f5c3b;
+  outline-offset: 2px;
+}
+
+.individual-highlight-open {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3f5c3b;
+  white-space: nowrap;
+}
+
+.individual-highlight-more {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3f5c3b;
+}
+
+.individual-highlight-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.individual-highlight-top h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #2f4630;
+  flex: 1;
+  min-width: 0;
+}
+
+.individual-highlight-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.individual-highlight-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.individual-highlight-row dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a7f72;
+}
+
+.individual-highlight-row dd {
+  margin: 0;
+  font-size: 14px;
+  color: #2e2a24;
+}
+
+/* Safety-critical rows (allergies) get a solid banner: bold text plus a
+   left border and background so the signal is never color-only. */
+.individual-highlight-row.is-alert dd {
+  color: #8f1d1d;
+  font-weight: 700;
+  background: #fdecec;
+  border-left: 4px solid #8f1d1d;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
