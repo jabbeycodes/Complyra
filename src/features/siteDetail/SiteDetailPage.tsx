@@ -5,12 +5,13 @@ import {
   Building2,
   CarFront,
   ClipboardCheck,
+  Download,
   FileText,
-  Flame,
   GraduationCap,
   MapPin,
   Phone,
   Pill,
+  Printer,
   User,
   Users,
 } from "lucide-react";
@@ -24,14 +25,11 @@ import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
 import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
+import { openPrintable } from "../../data/openFile";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
-import {
-  formatDrillTypeLabel,
-  sortOpenRequirements,
-  trainingProgressLine,
-} from "./siteDetailCopy";
+import { siteFactRows, sortOpenRequirements, trainingProgressLine } from "./siteDetailCopy";
 import type { QaAuditSummary } from "../../data/localApi";
 import type {
   HmWeeklyChecklist,
@@ -43,7 +41,17 @@ import type {
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
-import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
+import {
+  canSeeSiteChecklists,
+  canSeeSiteDrills,
+  getSiteDetailTabs,
+  type SiteDetailTabId,
+} from "./siteTabs";
+import {
+  individualHighlights,
+  MAX_INDIVIDUAL_HIGHLIGHTS,
+} from "./individualHighlights";
+import SiteDrillsSchedule from "./SiteDrillsSchedule";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
@@ -85,7 +93,6 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   training: GraduationCap,
   medications: Pill,
   mileage: CarFront,
-  drills: Flame,
   shiftnotes: FileText,
   staff: Users,
 };
@@ -109,6 +116,11 @@ export default function SiteDetailPage({
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
   const [tab, setTab] = useState<SiteDetailTabId>("overview");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
+  // Issue #94: month filters for the rebuilt Checklists tab.
+  const [checklistMonth, setChecklistMonth] = useState<string | "all">("all");
+  const [serviceLogMonth, setServiceLogMonth] = useState<string | "all">("all");
+  const [exportBusy, setExportBusy] = useState<string | null>(null);
+  const [exportError, setExportError] = useState("");
 
   const [qaHistory, setQaHistory] = useState<QaAudit[] | null>(null);
   const [checklists, setChecklists] = useState<HmWeeklyChecklist[] | null>(null);
@@ -135,6 +147,28 @@ export default function SiteDetailPage({
     () => individualsAtSite(workspace?.individuals ?? [], site),
     [workspace, site],
   );
+  /** Issue #78: "Site facts" keeps only actionable facts (Water is dropped). */
+  const factRows = useMemo(() => {
+    if (!site) return [];
+    return siteFactRows({
+      program: SERVICE_TYPE_LABELS[site.serviceType] ?? site.serviceType ?? "—",
+      manager: site.manager || "—",
+      location: `${
+        siteAddressLine ||
+        site.address ||
+        [site.city, site.county, site.zip].filter(Boolean).join(", ") ||
+        "—"
+      }${site.county ? ` · ${site.county} County` : ""}`,
+      staffing: `${site.staffed24h ? "Staffed 24 hours" : "Not staffed 24 hours"}${site.overnightSleepStaff ? " · overnight sleep staff" : ""}`,
+      water: site.wellWater
+        ? `Well water${site.lastWaterTestOn ? ` · last tested ${formatDate(site.lastWaterTestOn)}` : ""}`
+        : "Municipal water",
+      contact:
+        site.contactName || site.contactPhone
+          ? [site.contactName, site.contactPhone].filter(Boolean).join(" · ")
+          : null,
+    });
+  }, [site, siteAddressLine]);
   const siteStaff = useMemo(
     () => (workspace?.staff ?? []).filter((s) => s.siteId === siteId),
     [workspace, siteId],
@@ -319,6 +353,60 @@ export default function SiteDetailPage({
   const serviceLogs: Array<ServiceLogEntry & { weekOf: string }> = (checklists ?? [])
     .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+  // Issue #94: month filters for HM checklists and service logs.
+  const checklistMonths = useMemo(
+    () =>
+      [...new Set((checklists ?? []).map((c) => c.weekOf.slice(0, 7)))].sort().reverse(),
+    [checklists],
+  );
+  const serviceLogMonths = useMemo(
+    () => [...new Set(serviceLogs.map((l) => l.weekOf.slice(0, 7)))].sort().reverse(),
+    [serviceLogs],
+  );
+  const filteredChecklists = useMemo(
+    () =>
+      (checklists ?? []).filter(
+        (c) => checklistMonth === "all" || c.weekOf.slice(0, 7) === checklistMonth,
+      ),
+    [checklists, checklistMonth],
+  );
+  const filteredServiceLogs = useMemo(
+    () =>
+      serviceLogs.filter(
+        (l) => serviceLogMonth === "all" || l.weekOf.slice(0, 7) === serviceLogMonth,
+      ),
+    [serviceLogs, serviceLogMonth],
+  );
+
+  async function exportTabSection(
+    kind: "checklists" | "serviceLogs",
+    mode: "download" | "print",
+    monthKey: string | "all",
+  ) {
+    const key = `${kind}:${mode}`;
+    setExportBusy(key);
+    setExportError("");
+    try {
+      const file =
+        kind === "checklists"
+          ? await api.downloadHmChecklists({
+              siteId,
+              monthKey: monthKey === "all" ? null : monthKey,
+            })
+          : await api.downloadServiceLogs({
+              siteId,
+              monthKey: monthKey === "all" ? null : monthKey,
+            });
+      await openPrintable(file.name, file.blob, mode);
+    } catch (err) {
+      setExportError(
+        err instanceof Error ? err.message : "Could not prepare the document.",
+      );
+    } finally {
+      setExportBusy(null);
+    }
+  }
 
   if (!site) {
     return (
@@ -525,50 +613,94 @@ export default function SiteDetailPage({
                 )}
               </div>
             )}
+            {/* Craft #78: Individual cards sit BELOW "Needs attention" and
+                ABOVE "Site facts" — the day-to-day staff scan comes before
+                static utility facts. */}
+            {siteIndividuals.length > 0 && (
+              <div className="panel">
+                <h2>Individual highlights</h2>
+                <p className="muted site-detail-note">
+                  Key facts for staff working this house. Full details live in
+                  each chart.
+                </p>
+                <div className="individual-highlight-grid">
+                  {siteIndividuals.map((p) => {
+                    const highlights = individualHighlights(
+                      p.id,
+                      p.profile,
+                      workspace?.monthly?.equipment ?? [],
+                    );
+                    // Show clinical-risk-first highlights, capped; extras roll
+                    // into "+N more". The whole card opens the chart, so the
+                    // overflow hint is satisfied by tapping anywhere on it.
+                    const visibleHighlights = highlights.slice(
+                      0,
+                      MAX_INDIVIDUAL_HIGHLIGHTS,
+                    );
+                    const overflowCount =
+                      highlights.length - visibleHighlights.length;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="individual-highlight-card"
+                        aria-label={`${p.name} — open chart`}
+                        onClick={() => onOpenIndividual(p.name)}
+                      >
+                        <div className="individual-highlight-top">
+                          <Avatar
+                            name={p.name}
+                            color={p.color}
+                            src={p.photoUrl}
+                          />
+                          <h3>{p.name}</h3>
+                          <span className="individual-highlight-open">
+                            Open chart
+                          </span>
+                        </div>
+                        {visibleHighlights.length > 0 ? (
+                          <>
+                            <dl className="individual-highlight-list">
+                              {visibleHighlights.map((h) => (
+                                <div
+                                  key={h.label}
+                                  className={
+                                    h.tone === "alert"
+                                      ? "individual-highlight-row is-alert"
+                                      : "individual-highlight-row"
+                                  }
+                                >
+                                  <dt>{h.label}</dt>
+                                  <dd>{h.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                            {overflowCount > 0 && (
+                              <p className="individual-highlight-more">
+                                +{overflowCount} more — open chart
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="muted">
+                            No clinical highlights yet — open chart to add.
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="panel">
               <h2>Site facts</h2>
               <dl className="fact-list">
-                <div>
-                  <dt>Program</dt>
-                  <dd>{SERVICE_TYPE_LABELS[site.serviceType] ?? site.serviceType}</dd>
-                </div>
-                <div>
-                  <dt>House manager</dt>
-                  <dd>{site.manager || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Location</dt>
-                  <dd>
-                    {siteAddressLine ||
-                      site.address ||
-                      [site.city, site.county, site.zip].filter(Boolean).join(", ") ||
-                      "—"}
-                    {site.county ? ` · ${site.county} County` : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Staffing</dt>
-                  <dd>
-                    {site.staffed24h ? "Staffed 24 hours" : "Not staffed 24 hours"}
-                    {site.overnightSleepStaff ? " · overnight sleep staff" : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Water</dt>
-                  <dd>
-                    {site.wellWater
-                      ? `Well water${site.lastWaterTestOn ? ` · last tested ${formatDate(site.lastWaterTestOn)}` : ""}`
-                      : "Municipal water"}
-                  </dd>
-                </div>
-                {(site.contactName || site.contactPhone) && (
-                  <div>
-                    <dt>Site contact</dt>
-                    <dd>
-                      {[site.contactName, site.contactPhone].filter(Boolean).join(" · ")}
-                    </dd>
+                {factRows.map((f) => (
+                  <div key={f.term}>
+                    <dt>{f.term}</dt>
+                    <dd>{f.detail}</dd>
                   </div>
-                )}
+                ))}
               </dl>
             </div>
           </>
@@ -612,124 +744,241 @@ export default function SiteDetailPage({
 
         {activeTab === "checklists" && !loading.checklists && (
           <>
-            <div className="panel">
-              <h2>HM weekly checklists</h2>
-              {!checklists?.length && (
-                <Empty
-                  mark="none"
-                  title="No checklists"
-                  text="No weekly checklists filed for this home yet."
-                  actions={
-                    onOpenPage &&
-                    (pageVisible(session, "Weekly checklist") ||
-                      pageVisible(session, "Checklist assignments")) ? (
+            {/* Issue #94: Drills FIRST. Visible to everyone who can open the
+                site detail page (the OLD Drills-tab gate) — it must not
+                inherit the checklist-permissions gate below. */}
+            {canSeeSiteDrills(session) && (
+              <SiteDrillsSchedule
+                siteId={siteId}
+                siteName={site.name}
+                drills={siteDrills}
+              />
+            )}
+            {canSeeSiteChecklists(session) && (
+              <>
+                {/* Issue #94: the drills schedule leads this tab, so the monthly
+                    drills logging block is hidden here (drill recording stays
+                    on the Monthly checks page). */}
+                <SiteMonthlyChecks siteId={siteId} showDrills={false} />
+                <div className="panel">
+                  <div className="panel-heading">
+                    <h2>HM weekly checklists</h2>
+                    <div className="drill-toolbar">
+                      <label>
+                        Month
+                        <select
+                          aria-label="Checklists month filter"
+                          value={checklistMonth}
+                          onChange={(e) =>
+                            setChecklistMonth(e.target.value as string | "all")
+                          }
+                        >
+                          <option value="all">All months</option>
+                          {checklistMonths.map((key) => (
+                            <option key={key} value={key}>
+                              {monthLabel(key)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <button
                         type="button"
-                        className="button primary"
+                        className="button"
+                        disabled={exportBusy !== null}
                         onClick={() =>
-                          onOpenPage(
-                            pageVisible(session, "Weekly checklist")
-                              ? "Weekly checklist"
-                              : "Checklist assignments",
-                          )
+                          void exportTabSection("checklists", "download", checklistMonth)
                         }
                       >
-                        Start weekly checklist
+                        <Download size={16} /> Download
                       </button>
-                    ) : undefined
-                  }
-                />
-              )}
-              {!!checklists?.length && (
-                <ul className="record-list">
-                  {checklists.map((c) => (
-                    <li key={c.id} className="record-row">
-                      <div>
-                        <strong>Week of {formatDate(c.weekOf)}</strong>
-                        <span className="muted">
-                          {" "}
-                          · {c.items.filter((i) => i.answer).length}/{c.items.length} items answered
-                        </span>
-                      </div>
-                      <Badge
-                        status={
-                          c.status === "submitted"
-                            ? "Complete"
-                            : c.status === "overdue" || c.late
-                              ? "Needs attention"
-                              : "On track"
-                        }
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {onOpenPage &&
-                !!checklists?.length &&
-                (pageVisible(session, "Weekly checklist") ||
-                  pageVisible(session, "Checklist assignments")) && (
-                  <div className="site-panel-actions">
-                    <button
-                      type="button"
-                      className="button"
-                      onClick={() =>
-                        onOpenPage(
-                          pageVisible(session, "Weekly checklist")
-                            ? "Weekly checklist"
-                            : "Checklist assignments",
-                        )
-                      }
-                    >
-                      Open weekly checklist
-                    </button>
-                  </div>
-                )}
-            </div>
-            <div className="panel">
-              <h2>Weekly service logs</h2>
-              <p className="muted section-note">
-                Service logs are a separate record from the weekly checklist.
-              </p>
-              {serviceLogs.length === 0 && (
-                <Empty
-                  mark="none"
-                  title="No service logs"
-                  text="No service log entries filed for this home yet."
-                  actions={
-                    onOpenPage && pageVisible(session, "Weekly checklist") ? (
                       <button
                         type="button"
-                        className="button primary"
-                        onClick={() => onOpenPage("Weekly checklist")}
+                        className="button"
+                        disabled={exportBusy !== null}
+                        onClick={() =>
+                          void exportTabSection("checklists", "print", checklistMonth)
+                        }
                       >
-                        File a service log
+                        <Printer size={16} /> Print
                       </button>
-                    ) : undefined
-                  }
-                />
-              )}
-              {serviceLogs.length > 0 && (
-                <ul className="record-list">
-                  {serviceLogs.map((log) => (
-                    <li key={log.id} className="record-row">
-                      <div>
-                        <strong>{SERVICE_LOG_KIND_LABELS[log.kind] ?? log.kind}</strong>
-                        <span className="muted"> · week of {formatDate(log.weekOf)}</span>
-                        <p>{log.detail}</p>
-                        {(log.staffName || log.dateTime) && (
-                          <span className="muted">
-                            {[log.staffName, log.dateTime ? formatDate(log.dateTime) : ""]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </span>
-                        )}
+                    </div>
+                  </div>
+                  {exportError && (
+                    <p className="form-error" role="alert">
+                      {exportError}
+                    </p>
+                  )}
+                  {!filteredChecklists.length && (
+                    <Empty
+                      mark="none"
+                      title="No checklists"
+                      text={
+                        checklistMonth === "all"
+                          ? "No weekly checklists filed for this home yet."
+                          : `No weekly checklists filed for ${monthLabel(checklistMonth)}.`
+                      }
+                      actions={
+                        onOpenPage &&
+                        (pageVisible(session, "Weekly checklist") ||
+                          pageVisible(session, "Checklist assignments")) ? (
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={() =>
+                              onOpenPage(
+                                pageVisible(session, "Weekly checklist")
+                                  ? "Weekly checklist"
+                                  : "Checklist assignments",
+                              )
+                            }
+                          >
+                            Start weekly checklist
+                          </button>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                  {!!filteredChecklists.length && (
+                    <ul className="record-list">
+                      {filteredChecklists.map((c) => (
+                        <li key={c.id} className="record-row">
+                          <div>
+                            <strong>Week of {formatDate(c.weekOf)}</strong>
+                            <span className="muted">
+                              {" "}
+                              · {c.items.filter((i) => i.answer).length}/{c.items.length} items answered
+                            </span>
+                          </div>
+                          <Badge
+                            status={
+                              c.status === "submitted"
+                                ? "Complete"
+                                : c.status === "overdue" || c.late
+                                  ? "Needs attention"
+                                  : "On track"
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {onOpenPage &&
+                    !!filteredChecklists.length &&
+                    (pageVisible(session, "Weekly checklist") ||
+                      pageVisible(session, "Checklist assignments")) && (
+                      <div className="site-panel-actions">
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() =>
+                            onOpenPage(
+                              pageVisible(session, "Weekly checklist")
+                                ? "Weekly checklist"
+                                : "Checklist assignments",
+                            )
+                          }
+                        >
+                          Open weekly checklist
+                        </button>
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <SiteMonthlyChecks siteId={siteId} />
+                    )}
+                </div>
+                <div className="panel">
+                  <div className="panel-heading">
+                    <h2>Weekly service logs</h2>
+                    <div className="drill-toolbar">
+                      <label>
+                        Month
+                        <select
+                          aria-label="Service logs month filter"
+                          value={serviceLogMonth}
+                          onChange={(e) =>
+                            setServiceLogMonth(e.target.value as string | "all")
+                          }
+                        >
+                          <option value="all">All months</option>
+                          {serviceLogMonths.map((key) => (
+                            <option key={key} value={key}>
+                              {monthLabel(key)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={exportBusy !== null}
+                        onClick={() =>
+                          void exportTabSection("serviceLogs", "download", serviceLogMonth)
+                        }
+                      >
+                        <Download size={16} /> Download
+                      </button>
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={exportBusy !== null}
+                        onClick={() =>
+                          void exportTabSection("serviceLogs", "print", serviceLogMonth)
+                        }
+                      >
+                        <Printer size={16} /> Print
+                      </button>
+                    </div>
+                  </div>
+                  {exportError && (
+                    <p className="form-error" role="alert">
+                      {exportError}
+                    </p>
+                  )}
+                  <p className="muted section-note">
+                    Service logs are a separate record from the weekly checklist.
+                  </p>
+                  {filteredServiceLogs.length === 0 && (
+                    <Empty
+                      mark="none"
+                      title="No service logs"
+                      text={
+                        serviceLogMonth === "all"
+                          ? "No service log entries filed for this home yet."
+                          : `No service log entries filed for ${monthLabel(serviceLogMonth)}.`
+                      }
+                      actions={
+                        onOpenPage && pageVisible(session, "Weekly checklist") ? (
+                          <button
+                            type="button"
+                            className="button primary"
+                            onClick={() => onOpenPage("Weekly checklist")}
+                          >
+                            File a service log
+                          </button>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                  {filteredServiceLogs.length > 0 && (
+                    <ul className="record-list">
+                      {filteredServiceLogs.map((log) => (
+                        <li key={log.id} className="record-row">
+                          <div>
+                            <strong>{SERVICE_LOG_KIND_LABELS[log.kind] ?? log.kind}</strong>
+                            <span className="muted"> · week of {formatDate(log.weekOf)}</span>
+                            <p>{log.detail}</p>
+                            {(log.staffName || log.dateTime) && (
+                              <span className="muted">
+                                {[log.staffName, log.dateTime ? formatDate(log.dateTime) : ""]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -945,40 +1194,8 @@ export default function SiteDetailPage({
           </div>
         )}
 
-        {activeTab === "drills" && (
-          <div className="panel">
-            <h2>Emergency drills</h2>
-            {siteDrills.length === 0 && (
-              <Empty
-                mark="none"
-                title="No drills"
-                text="No emergency drills recorded for this home yet."
-              />
-            )}
-            {siteDrills.length > 0 && (
-              <ul className="record-list">
-                {siteDrills.map((d) => {
-                  const dateLabel = d.date?.trim()
-                    ? formatDate(d.date)
-                    : "Not logged";
-                  return (
-                  <li key={d.id} className="record-row">
-                    <div>
-                      <strong>{formatDrillTypeLabel(d.drillType)} drill</strong>
-                      <span className="muted">
-                        {" "}
-                        · {dateLabel}
-                        {d.evacTime ? ` · evacuated in ${d.evacTime}` : ""}
-                        {d.leaderName ? ` · led by ${d.leaderName}` : ""}
-                      </span>
-                    </div>
-                  </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
+        {/* Issue #94: the standalone Drills tab is gone — drills live as the
+            first section of the Checklists tab (SiteDrillsSchedule). */}
 
         {/* Issue #80: the Documents tab becomes Shift notes. Standalone
             document uploads stay reachable via the Documents page. */}
