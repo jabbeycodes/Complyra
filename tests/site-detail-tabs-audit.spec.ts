@@ -102,6 +102,9 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
       if (label === "Overview") {
         await expect(page.locator(".site-detail-panel")).toContainText("Needs attention");
         await expect(page.locator(".site-detail-panel")).not.toContainText("Projects this home");
+        await expect(page.locator(".site-detail-panel")).toContainText("Individual highlights");
+        await expect(page.locator(".site-detail-panel")).not.toContainText("Municipal water");
+        await expect(page.locator(".site-detail-panel")).not.toContainText("Well water");
       }
       if (label === "Checklists") {
         // Issue #94: Drills FIRST — visible to everyone, rebuilt around the
@@ -151,6 +154,7 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
         await expect(
           page.getByRole("heading", { name: "Weekly service logs" }),
         ).toBeVisible();
+        await expect(page.getByRole("heading", { name: "Adaptive equipment" })).toBeVisible();
       }
       if (label === "QA Review") {
         await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
