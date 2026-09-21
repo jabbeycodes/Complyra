@@ -106,6 +106,17 @@ describe("individualHighlights (issue #78)", () => {
     assert.deepEqual(highlights, []);
   });
 
+  it("skips placeholder allergen and equipment names like None or n/a", () => {
+    const highlights = individualHighlights(
+      "ind-1",
+      profile({
+        allergies: [{ allergen: "None", reaction: "n/a", status: "active" }],
+      }),
+      [equipment({ name: "n/a" }), equipment({ id: "eq-dash", name: "-" })],
+    );
+    assert.deepEqual(highlights, []);
+  });
+
   it("ignores resolved allergies and inactive/other-individual equipment", () => {
     const highlights = individualHighlights(
       "ind-1",

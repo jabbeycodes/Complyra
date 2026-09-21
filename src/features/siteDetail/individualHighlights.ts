@@ -48,7 +48,7 @@ export function individualHighlights(
   const highlights: IndividualHighlight[] = [];
 
   const activeAllergies = (profile?.allergies ?? []).filter(
-    (a) => a.status === "active" && a.allergen.trim() !== "",
+    (a) => a.status === "active" && !isBlank(a.allergen),
   );
   if (activeAllergies.length > 0) {
     highlights.push({
@@ -82,7 +82,7 @@ export function individualHighlights(
   const activeEquipment = equipment
     .filter(
       (e) =>
-        e.individualId === individualId && e.active && e.name.trim() !== "",
+        e.individualId === individualId && e.active && !isBlank(e.name),
     )
     .map((e) => e.name.trim());
   if (activeEquipment.length > 0) {

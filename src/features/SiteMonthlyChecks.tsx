@@ -196,11 +196,13 @@ export default function SiteMonthlyChecks({
         </div>
       </div>
 
-      {people.some((person) =>
-        workspace.monthly.equipment.some((item) => item.individualId === person.id && item.active),
-      ) && (
-        <div className="monthly-people-summary">
-          <h3>Adaptive equipment this month</h3>
+      <div className="monthly-people-summary">
+        <h3>Adaptive equipment</h3>
+        {people.some((person) =>
+          workspace.monthly.equipment.some(
+            (item) => item.individualId === person.id && item.active,
+          ),
+        ) ? (
           <ul>
             {people.map((person) => {
               const view = equipmentViewForPerson(
@@ -219,8 +221,10 @@ export default function SiteMonthlyChecks({
               );
             })}
           </ul>
-        </div>
-      )}
+        ) : (
+          <p className="muted">No adaptive equipment</p>
+        )}
+      </div>
     </section>
   );
 }
