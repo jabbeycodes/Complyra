@@ -28,6 +28,7 @@ import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
   formatDrillTypeLabel,
+  siteFactRows,
   sortOpenRequirements,
   trainingProgressLine,
 } from "./siteDetailCopy";
@@ -43,6 +44,10 @@ import type {
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import { getSiteDetailTabs, type SiteDetailTabId } from "./siteTabs";
+import {
+  individualHighlights,
+  MAX_INDIVIDUAL_HIGHLIGHTS,
+} from "./individualHighlights";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
@@ -157,6 +162,28 @@ export default function SiteDetailPage({
     () => individualsAtSite(workspace?.individuals ?? [], site),
     [workspace, site],
   );
+  /** Issue #78: "Site facts" keeps only actionable facts (Water is dropped). */
+  const factRows = useMemo(() => {
+    if (!site) return [];
+    return siteFactRows({
+      program: SERVICE_TYPE_LABELS[site.serviceType] ?? site.serviceType ?? "—",
+      manager: site.manager || "—",
+      location: `${
+        siteAddressLine ||
+        site.address ||
+        [site.city, site.county, site.zip].filter(Boolean).join(", ") ||
+        "—"
+      }${site.county ? ` · ${site.county} County` : ""}`,
+      staffing: `${site.staffed24h ? "Staffed 24 hours" : "Not staffed 24 hours"}${site.overnightSleepStaff ? " · overnight sleep staff" : ""}`,
+      water: site.wellWater
+        ? `Well water${site.lastWaterTestOn ? ` · last tested ${formatDate(site.lastWaterTestOn)}` : ""}`
+        : "Municipal water",
+      contact:
+        site.contactName || site.contactPhone
+          ? [site.contactName, site.contactPhone].filter(Boolean).join(" · ")
+          : null,
+    });
+  }, [site, siteAddressLine]);
   const siteStaff = useMemo(
     () => (workspace?.staff ?? []).filter((s) => s.siteId === siteId),
     [workspace, siteId],
@@ -547,50 +574,94 @@ export default function SiteDetailPage({
                 )}
               </div>
             )}
+            {/* Craft #78: Individual cards sit BELOW "Needs attention" and
+                ABOVE "Site facts" — the day-to-day staff scan comes before
+                static utility facts. */}
+            {siteIndividuals.length > 0 && (
+              <div className="panel">
+                <h2>Individual highlights</h2>
+                <p className="muted site-detail-note">
+                  Key facts for staff working this house. Full details live in
+                  each chart.
+                </p>
+                <div className="individual-highlight-grid">
+                  {siteIndividuals.map((p) => {
+                    const highlights = individualHighlights(
+                      p.id,
+                      p.profile,
+                      workspace?.monthly?.equipment ?? [],
+                    );
+                    // Show clinical-risk-first highlights, capped; extras roll
+                    // into "+N more". The whole card opens the chart, so the
+                    // overflow hint is satisfied by tapping anywhere on it.
+                    const visibleHighlights = highlights.slice(
+                      0,
+                      MAX_INDIVIDUAL_HIGHLIGHTS,
+                    );
+                    const overflowCount =
+                      highlights.length - visibleHighlights.length;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="individual-highlight-card"
+                        aria-label={`${p.name} — open chart`}
+                        onClick={() => onOpenIndividual(p.name)}
+                      >
+                        <div className="individual-highlight-top">
+                          <Avatar
+                            name={p.name}
+                            color={p.color}
+                            src={p.photoUrl}
+                          />
+                          <h3>{p.name}</h3>
+                          <span className="individual-highlight-open">
+                            Open chart
+                          </span>
+                        </div>
+                        {visibleHighlights.length > 0 ? (
+                          <>
+                            <dl className="individual-highlight-list">
+                              {visibleHighlights.map((h) => (
+                                <div
+                                  key={h.label}
+                                  className={
+                                    h.tone === "alert"
+                                      ? "individual-highlight-row is-alert"
+                                      : "individual-highlight-row"
+                                  }
+                                >
+                                  <dt>{h.label}</dt>
+                                  <dd>{h.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                            {overflowCount > 0 && (
+                              <p className="individual-highlight-more">
+                                +{overflowCount} more — open chart
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="muted">
+                            No clinical highlights yet — open chart to add.
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="panel">
               <h2>Site facts</h2>
               <dl className="fact-list">
-                <div>
-                  <dt>Program</dt>
-                  <dd>{SERVICE_TYPE_LABELS[site.serviceType] ?? site.serviceType}</dd>
-                </div>
-                <div>
-                  <dt>House manager</dt>
-                  <dd>{site.manager || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Location</dt>
-                  <dd>
-                    {siteAddressLine ||
-                      site.address ||
-                      [site.city, site.county, site.zip].filter(Boolean).join(", ") ||
-                      "—"}
-                    {site.county ? ` · ${site.county} County` : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Staffing</dt>
-                  <dd>
-                    {site.staffed24h ? "Staffed 24 hours" : "Not staffed 24 hours"}
-                    {site.overnightSleepStaff ? " · overnight sleep staff" : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Water</dt>
-                  <dd>
-                    {site.wellWater
-                      ? `Well water${site.lastWaterTestOn ? ` · last tested ${formatDate(site.lastWaterTestOn)}` : ""}`
-                      : "Municipal water"}
-                  </dd>
-                </div>
-                {(site.contactName || site.contactPhone) && (
-                  <div>
-                    <dt>Site contact</dt>
-                    <dd>
-                      {[site.contactName, site.contactPhone].filter(Boolean).join(" · ")}
-                    </dd>
+                {factRows.map((f) => (
+                  <div key={f.term}>
+                    <dt>{f.term}</dt>
+                    <dd>{f.detail}</dd>
                   </div>
-                )}
+                ))}
               </dl>
             </div>
           </>
