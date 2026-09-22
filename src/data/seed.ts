@@ -109,6 +109,8 @@ export interface LocalDatabase {
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
   medDoseExceptions: MedDoseException[];
+  /** LIFEPATH-P6: per-medication inventory state (threshold, dose times). */
+  medInventory?: import("./types").MedInventoryRecord[];
   trainingChecklists: TrainingChecklist[];
   adaptiveEquipment: AdaptiveEquipment[];
   equipmentMonthLogs: EquipmentMonthLog[];
@@ -157,6 +159,10 @@ export interface LocalDatabase {
   ispProgramTasks: import("./shiftNotes").IspProgramTask[];
   shiftNotes: import("./shiftNotes").ShiftNote[];
   shiftNoteScores: import("./shiftNotes").ShiftNoteTaskScore[];
+  // ISSUE-75 (alone time) + #76 (MAR dose marks): HM-set unstaffed windows and
+  // per-dose MAR check-off statuses that clear the unmarked-overdue due item.
+  aloneTimeWindows: import("./types").AloneTimeWindow[];
+  medDoseMarks: import("./types").MedDoseMark[];
 }
 
 /** Local demo shape for one AI extraction (mirrors document_extractions). */
@@ -511,6 +517,22 @@ export function createEvergreenSeed(): LocalDatabase {
     createdAt: event.time,
   }));
 
+  // ISSUE #75 + #76 demo data. Computed relative to the seed's "today" so a
+  // fresh demo/QA seed shows: one alone-time non-flag (Ellis, mornings), one
+  // missing Day note (Morgan · Day, from Alex Morgan), one unmarked scheduled
+  // dose overdue (Ellis · Levetiracetam · 8:00 a.m.) and one already-marked
+  // dose that clears (Ellis · Oxycodone · 9:00 a.m.).
+  const dueDemo = buildDueItemsDemoSeed({
+    agencyId: AGENCY_ID,
+    profileByName,
+    individualByName,
+    programIdByIndividual: { "Ellis Hart": padId(960), "Morgan Pruitt": padId(961) },
+    ellisMedIds: {
+      levetiracetam: `${ellis.id}-med-keppra`,
+      oxycodone: `${ellis.id}-med-oxycodone`,
+    },
+  });
+
   return {
     agencies: [
       {
@@ -658,6 +680,7 @@ export function createEvergreenSeed(): LocalDatabase {
     medications: defaultEllisMedications(AGENCY_ID, ellis.id),
     medicationDeliveries: [],
     medDoseExceptions: [],
+    medInventory: dueDemo.medInventory,
     trainingChecklists: buildTrainingChecklists(
       AGENCY_ID,
       ellis.id,
@@ -831,8 +854,163 @@ export function createEvergreenSeed(): LocalDatabase {
         sortOrder: 1,
       },
     ],
-    shiftNotes: [],
+    shiftNotes: dueDemo.shiftNotes,
     shiftNoteScores: [],
+    aloneTimeWindows: dueDemo.aloneTimeWindows,
+    medDoseMarks: dueDemo.medDoseMarks,
+  };
+}
+
+/**
+ * Issue #75 + #76 — demo seed for the Overview due-items list. Kept in one
+ * place so the exact QA story is legible: Cedar shows one missing Day note and
+ * one alone-time non-flag; Ellis has one overdue unmarked dose and one marked
+ * dose that clears. Willow is fully documented (a clean contrast).
+ *
+ * Dates are relative to the seed's "today": Shift-note coverage is written for
+ * the last completed day (what the detector checks) and the alone-time window
+ * recurs on that weekday, so a freshly seeded demo reads correctly same-day.
+ */
+function buildDueItemsDemoSeed(args: {
+  agencyId: string;
+  profileByName: Record<string, Profile>;
+  individualByName: Record<string, IndividualRecord>;
+  programIdByIndividual: Record<string, string>;
+  ellisMedIds: { levetiracetam: string; oxycodone: string };
+}): {
+  shiftNotes: import("./shiftNotes").ShiftNote[];
+  aloneTimeWindows: import("./types").AloneTimeWindow[];
+  medDoseMarks: import("./types").MedDoseMark[];
+  medInventory: import("./types").MedInventoryRecord[];
+} {
+  const { agencyId, profileByName, individualByName, programIdByIndividual, ellisMedIds } = args;
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const serviceDate = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const serviceWeekday = new Date(`${serviceDate}T12:00:00`).getDay();
+  const stamp = `${serviceDate}T18:00:00.000Z`;
+
+  // Legacy shift labels the detector maps back onto Day / Evening / Overnight.
+  const BLOCK_LABEL = { day: "7a–3p", evening: "3p–11p", overnight: "11p–7a" } as const;
+
+  const profileId = (name: string) => profileByName[name]?.id ?? "";
+  const individualId = (name: string) => individualByName[name]?.id ?? "";
+
+  let seq = 0;
+  const note = (
+    individual: string,
+    staff: string,
+    block: keyof typeof BLOCK_LABEL,
+  ): import("./shiftNotes").ShiftNote => {
+    seq += 1;
+    return {
+      id: `sn-demo-${String(seq).padStart(3, "0")}`,
+      agencyId,
+      individualId: individualId(individual),
+      programId: programIdByIndividual[individual] ?? "",
+      noteDate: serviceDate,
+      shift: BLOCK_LABEL[block],
+      summary: `${block} shift documented.`,
+      timeSpentMinutes: null,
+      staffUserId: profileId(staff),
+      staffName: staff,
+      createdAt: stamp,
+      updatedAt: stamp,
+      deletedAt: null,
+    };
+  };
+
+  // Cedar: Alex Morgan + Taylor Reed write for Ellis Hart + Morgan Pruitt.
+  // Every (writer × Individual × block) is covered EXCEPT:
+  //   • Ellis · Day — suppressed by a full-morning alone-time window (non-flag)
+  //   • Morgan · Day from Alex Morgan — the one intentional gap (a due item)
+  const cedarNotes: import("./shiftNotes").ShiftNote[] = [
+    note("Ellis Hart", "Alex Morgan", "evening"),
+    note("Ellis Hart", "Alex Morgan", "overnight"),
+    note("Ellis Hart", "Taylor Reed", "evening"),
+    note("Ellis Hart", "Taylor Reed", "overnight"),
+    note("Morgan Pruitt", "Taylor Reed", "day"),
+    note("Morgan Pruitt", "Alex Morgan", "evening"),
+    note("Morgan Pruitt", "Alex Morgan", "overnight"),
+    note("Morgan Pruitt", "Taylor Reed", "evening"),
+    note("Morgan Pruitt", "Taylor Reed", "overnight"),
+  ];
+
+  // Willow: fully documented — no gaps (clean contrast to Cedar).
+  const willowNotes: import("./shiftNotes").ShiftNote[] = [];
+  for (const individual of ["Reese Lang", "Harper Soto"]) {
+    for (const staff of ["Jordan Lee", "Casey Adams"]) {
+      for (const block of ["day", "evening", "overnight"] as const) {
+        willowNotes.push(note(individual, staff, block));
+      }
+    }
+  }
+
+  const aloneTimeWindows: import("./types").AloneTimeWindow[] = [
+    {
+      id: "at-demo-ellis-morning",
+      agencyId,
+      individualId: individualId("Ellis Hart"),
+      recurrence: "weekly",
+      weekday: serviceWeekday,
+      onDate: null,
+      startTime: "06:00",
+      endTime: "14:00",
+      note: "Protected morning routine — community day program (demo).",
+      createdBy: profileId("Sarah Mitchell"),
+      createdByName: "Sarah Mitchell",
+      createdAt: "2026-01-06T15:00:00.000Z",
+      updatedAt: "2026-01-06T15:00:00.000Z",
+      deletedAt: null,
+    },
+  ];
+
+  // #76 — Ellis' scheduled meds get MAR dose times. Levetiracetam's 8:00 a.m.
+  // dose is left unmarked (overdue by mid-morning); Oxycodone's 9:00 a.m. dose
+  // is marked Given so it clears — proving a marked dose drops off the list.
+  const medInventory: import("./types").MedInventoryRecord[] = [
+    {
+      id: "mi-demo-lev",
+      agencyId,
+      individualId: individualId("Ellis Hart"),
+      medicationId: ellisMedIds.levetiracetam,
+      lowThresholdDays: 7,
+      doseTimes: ["08:00", "20:00"],
+      reorderAcknowledgedOn: null,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    },
+    {
+      id: "mi-demo-oxy",
+      agencyId,
+      individualId: individualId("Ellis Hart"),
+      medicationId: ellisMedIds.oxycodone,
+      lowThresholdDays: 10,
+      doseTimes: ["09:00", "21:00"],
+      reorderAcknowledgedOn: null,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    },
+  ];
+
+  const medDoseMarks: import("./types").MedDoseMark[] = [
+    {
+      id: "mm-demo-oxy-am",
+      agencyId,
+      individualId: individualId("Ellis Hart"),
+      medicationId: ellisMedIds.oxycodone,
+      doseDate: today,
+      doseTime: "09:00",
+      status: "given",
+      markedBy: profileId("Alex Morgan"),
+      markedByName: "Alex Morgan",
+      markedAt: `${today}T09:05:00.000Z`,
+    },
+  ];
+
+  return {
+    shiftNotes: [...cedarNotes, ...willowNotes],
+    aloneTimeWindows,
+    medDoseMarks,
+    medInventory,
   };
 }
 
