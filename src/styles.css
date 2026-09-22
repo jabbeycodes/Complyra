@@ -5062,6 +5062,10 @@ th {
   gap: 8px;
 }
 /* Issue #75 alone-time editor + #76 MAR check-off cards. */
+.alone-time-card,
+.mar-card {
+  align-content: start;
+}
 .chart-widget-head {
   display: flex;
   align-items: center;
