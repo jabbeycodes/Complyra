@@ -104,14 +104,53 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
         await expect(page.locator(".site-detail-panel")).not.toContainText("Projects this home");
       }
       if (label === "Checklists") {
-        // Drills nests under Checklists now (PR #86): no standalone Drills tab.
-        // Assert the accordion sections exist and drills content renders clean.
-        const sections = page.locator(".checklist-section-summary");
-        await expect(sections.filter({ hasText: "Emergency drills" })).toHaveCount(1);
-        await expect(sections.filter({ hasText: "Monthly home checks" })).toHaveCount(1);
-        await expect(page.locator(".site-detail-panel")).not.toContainText("severe_weather");
-        await expect(page.locator(".site-detail-panel")).not.toContainText("date not set");
-        await expect(page.getByRole("button", { name: "Start weekly checklist" })).toBeVisible();
+        // Issue #94: Drills FIRST — visible to everyone, rebuilt around the
+        // annual Emergency Drills Schedule.
+        const drillsSection = page.locator(".site-drills");
+        await expect(drillsSection).toBeVisible();
+        await expect(
+          drillsSection.getByRole("heading", { name: "Emergency drills" }),
+        ).toBeVisible();
+        await expect(drillsSection).toContainText("by the 7th of each month");
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(12);
+        // Each drill row is an accessible collapsible control.
+        const firstRow = drillsSection.locator(".dsv-drill-toggle").first();
+        await expect(firstRow).toHaveAttribute("aria-expanded", "false");
+        await firstRow.click();
+        await expect(firstRow).toHaveAttribute("aria-expanded", "true");
+        // Month filter narrows to one month and back.
+        const monthFilter = page.getByRole("combobox", {
+          name: "Drills month filter",
+        });
+        await monthFilter.selectOption("8");
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(1);
+        await expect(drillsSection).toContainText("August");
+        await monthFilter.selectOption("all");
+        await expect(drillsSection.locator(".dsv-month")).toHaveCount(12);
+        // Section order: drills, monthly home checks, HM checklists, service
+        // logs (HM content at the bottom).
+        const order = await page.evaluate(() => {
+          const html = document.querySelector(".site-detail-panel")?.innerHTML ?? "";
+          return [
+            html.indexOf("Emergency drills"),
+            html.indexOf("Monthly home checks"),
+            html.indexOf("HM weekly checklists"),
+            html.indexOf("Weekly service logs"),
+          ];
+        });
+        expect(order[0], "drills first").toBeGreaterThan(-1);
+        expect(order[1], "monthly checks after drills").toBeGreaterThan(order[0]);
+        expect(order[2], "HM checklists near bottom").toBeGreaterThan(order[1]);
+        expect(order[3], "service logs at bottom").toBeGreaterThan(order[2]);
+        await expect(
+          page.getByRole("heading", { name: /Monthly home checks/ }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("heading", { name: "HM weekly checklists" }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("heading", { name: "Weekly service logs" }),
+        ).toBeVisible();
       }
       if (label === "QA Review") {
         await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
