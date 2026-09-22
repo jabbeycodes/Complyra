@@ -20,6 +20,8 @@ import StatusMixDonut from "../../components/StatusMixDonut";
 import { useData } from "../../data/DataProvider";
 import { can, pageVisible } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
+import { canEnterShiftNotes } from "../../data/permissions";
+import { DUE_ITEMS_EMPTY_COPY, type SiteDueItem, type SiteDueItemsResult } from "../../data/dueItems";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
@@ -89,6 +91,32 @@ export function auditPeriodLabel(
   return `Q${audit.quarter} ${audit.year}`;
 }
 
+const DUE_ITEM_MANAGER_ROLES = [
+  "administrator",
+  "compliance_admin",
+  "house_manager",
+  "program_manager",
+];
+
+/**
+ * CTA copy for a due-item row (#75/#76). Meds always land on the MAR. A Shift
+ * note offers "Add note" only when the current user is the needed writer or a
+ * manager covering — otherwise "View chart" (an HM never fakes another staff's
+ * note as themselves).
+ */
+export function dueItemCtaLabel(
+  item: SiteDueItem,
+  userId: string,
+  roleKey: string,
+): string {
+  if (item.kind === "medication") return "Open MAR";
+  const canAuthor =
+    canEnterShiftNotes(roleKey) &&
+    (item.shift?.staffUserId === userId ||
+      DUE_ITEM_MANAGER_ROLES.includes(roleKey));
+  return canAuthor ? "Add note" : "View chart";
+}
+
 const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   overview: Building2,
   individuals: User,
@@ -133,6 +161,7 @@ export default function SiteDetailPage({
   const [medStatus, setMedStatus] = useState<MedSupplyStatus | null>(null);
   const [trips, setTrips] = useState<MileageTripView[] | null>(null);
   const [siteNotes, setSiteNotes] = useState<SiteShiftNoteView[] | null>(null);
+  const [dueItems, setDueItems] = useState<SiteDueItemsResult | null>(null);
   const [loading, setLoading] = useState<Partial<Record<SiteDetailTabId, boolean>>>({});
   const [tabError, setTabError] = useState<Partial<Record<SiteDetailTabId, string>>>({});
 
@@ -201,6 +230,22 @@ export default function SiteDetailPage({
       setLoading((prev) => ({ ...prev, [tabId]: true }));
       setTabError((prev) => ({ ...prev, [tabId]: undefined }));
       try {
+        if (tabId === "overview" && dueItems === null) {
+          // #75 + #76: the Overview due-items list (missing Shift notes +
+          // unmarked scheduled meds). Never leaves the panel blank.
+          try {
+            setDueItems(await api.getSiteDueItems(siteId));
+          } catch {
+            setDueItems({
+              items: [],
+              shiftNoteCount: 0,
+              medCount: 0,
+              basedOnAssignedStaff: false,
+              serviceDate: "",
+              doseDate: "",
+            });
+          }
+        }
         if (tabId === "overview" || tabId === "audits") {
           if (qaHistory === null) {
             // Latest finalized QA Review scores power the Overview badge.
@@ -295,6 +340,7 @@ export default function SiteDetailPage({
       checklists,
       delegations,
       siteNotes,
+      dueItems,
       medStatus,
       trainingRows,
     ],
@@ -448,7 +494,13 @@ export default function SiteDetailPage({
               </p>
             )}
           </div>
-          <Badge status={openRequirements.length ? "Needs attention" : "On track"} />
+          <Badge
+            status={
+              openRequirements.length || (dueItems?.items.length ?? 0)
+                ? "Needs attention"
+                : "On track"
+            }
+          />
         </div>
         <div className="site-hero-dash">
           <StatusMixDonut items={siteRequirements} />
@@ -474,6 +526,10 @@ export default function SiteDetailPage({
             <div className="site-hero-stat">
               <strong>{openRequirements.length}</strong>
               <span>Open</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{dueItems ? dueItems.items.length : "—"}</strong>
+              <span>Due items</span>
             </div>
             <div className="site-hero-stat">
               <strong>{latestQaPct ?? "None"}</strong>
@@ -547,6 +603,54 @@ export default function SiteDetailPage({
 
         {activeTab === "overview" && !loading.overview && (
           <>
+            {/* #75 + #76: the canonical Overview due-items list — typed rows for
+                missing Shift notes and unmarked scheduled meds. The hero
+                "Due items" count mirrors this list length. */}
+            <div className="panel">
+              <div className="panel-heading">
+                <h2>Due items</h2>
+                {dueItems && dueItems.items.length > 0 && (
+                  <span className="muted">{dueItems.items.length} open</span>
+                )}
+              </div>
+              {dueItems &&
+                dueItems.basedOnAssignedStaff &&
+                dueItems.shiftNoteCount > 0 && (
+                  <p className="muted site-detail-note">Based on assigned house staff.</p>
+                )}
+              {!dueItems || dueItems.items.length === 0 ? (
+                <p className="muted due-items-empty">{DUE_ITEMS_EMPTY_COPY}</p>
+              ) : (
+                <ul className="record-list">
+                  {dueItems.items.map((item) => (
+                    <li key={item.id} className="record-row due-item-row">
+                      <div className="due-item-body">
+                        <strong>{item.title}</strong>
+                        <span className="muted"> · {item.line2}</span>
+                        <p className="muted due-item-line3">{item.line3}</p>
+                        {item.reason && (
+                          <p className="muted due-item-why">{item.reason}</p>
+                        )}
+                      </div>
+                      <div className="due-item-cta">
+                        <Badge
+                          status={
+                            item.severity === "overdue" ? "Needs attention" : "Due soon"
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => onOpenIndividual(item.individualName)}
+                        >
+                          {dueItemCtaLabel(item, session.userId, session.roleKey)}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             {openRequirements.length > 0 && (
               <div className="panel">
                 <h2>Needs attention</h2>

@@ -404,6 +404,32 @@
   padding: 0 var(--panel-inline) 16px;
 }
 
+/* #75 + #76: Overview due-items rows. */
+.due-item-body {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.due-item-line3 {
+  margin-top: 2px;
+}
+.due-item-why {
+  font-style: italic;
+  opacity: 0.85;
+}
+.due-item-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.due-item-cta .button {
+  min-height: 44px;
+}
+.due-items-empty {
+  padding: 4px var(--panel-inline) 16px;
+}
+
 .score-figure {
   font-size: 20px;
   color: #3f5c3b;
