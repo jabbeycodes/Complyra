@@ -187,6 +187,15 @@ import {
   type Medication,
   type TrainingChecklist,
 } from "./chart";
+import {
+  buildSiteDueItems,
+  canEditAloneTime,
+  computeMedDueItems,
+  computeShiftNoteDueItems,
+  blockForShiftLabel,
+  type ScheduledDose,
+  type ShiftBlockId,
+} from "./dueItems";
 // Delegation template workflow: domain types + helpers.
 import {
   DIGITAL_RECORD_MARK,
@@ -8212,6 +8221,412 @@ export class HostedApi implements ComplyraApi {
       `${session.fullName} logged a ${validated.kind} dose exception for ${med.name} (${validated.pillsAffected} pill${validated.pillsAffected === 1 ? "" : "s"}): ${validated.reason}`,
       "med_dose_exception",
       (data as { id: string } | null)?.id,
+    );
+  }
+
+  // ===== ISSUE #75 alone time + #76 MAR marks + Overview due items =====
+
+  private mapAloneTimeWindow(
+    row: Record<string, unknown>,
+  ): import("./types").AloneTimeWindow {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      recurrence: (row.recurrence as import("./types").AloneTimeRecurrence) ?? "once",
+      weekday: row.weekday === null || row.weekday === undefined ? null : Number(row.weekday),
+      onDate: row.on_date ? String(row.on_date).slice(0, 10) : null,
+      startTime: String(row.start_time ?? "").slice(0, 5),
+      endTime: String(row.end_time ?? "").slice(0, 5),
+      note: String(row.note ?? ""),
+      createdBy: row.created_by ? String(row.created_by) : null,
+      createdByName: String(row.created_by_name ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+      deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+    };
+  }
+
+  private mapMedDoseMark(
+    row: Record<string, unknown>,
+  ): import("./types").MedDoseMark {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      medicationId: String(row.medication_id),
+      doseDate: String(row.dose_date ?? "").slice(0, 10),
+      doseTime: String(row.dose_time ?? "").slice(0, 5),
+      status: (row.status as import("./types").MedDoseMarkStatus) ?? "given",
+      markedBy: row.marked_by ? String(row.marked_by) : null,
+      markedByName: String(row.marked_by_name ?? ""),
+      markedAt: String(row.marked_at ?? ""),
+    };
+  }
+
+  async getSiteDueItems(
+    siteId: string,
+  ): Promise<import("./dueItems").SiteDueItemsResult> {
+    const session = await this.requireSession();
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const { data: site, error: siteError } = await this.client
+      .from("sites")
+      .select("id,name,agency_id")
+      .eq("id", siteId)
+      .single();
+    throwIf(siteError, "Site not found.");
+    if ((site!.agency_id as string) !== session.agencyId) {
+      throw new Error("Site not found.");
+    }
+    const siteFacts = await this.siteFacts(siteId);
+    const { data: peopleRows, error: peopleError } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(peopleError, "Could not load the due-items list.");
+    const people = ((peopleRows ?? []) as Array<{ id: string; full_name: string }>).map(
+      (row) => ({ id: String(row.id), name: String(row.full_name ?? "") }),
+    );
+    const peopleIds = people.map((p) => p.id);
+    const today = todayIso();
+    const serviceDate = todayIso(new Date(Date.now() - 86_400_000));
+
+    // On-duty writers = assigned house DSPs (no clock-in v1).
+    const { data: writerRows } = await this.client
+      .from("memberships")
+      .select("user_id, role_key")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .eq("role_key", "dsp");
+    const writerIds = [
+      ...new Set(((writerRows ?? []) as Array<{ user_id: string }>).map((r) => String(r.user_id))),
+    ];
+    const writerNames = new Map<string, string>();
+    if (writerIds.length) {
+      const { data: profs } = await this.client
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", writerIds);
+      for (const p of (profs ?? []) as Array<{ id: string; full_name: string }>) {
+        writerNames.set(String(p.id), String(p.full_name ?? "Staff"));
+      }
+    }
+    const requiredWriters = writerIds
+      .map((id) => ({ userId: id, name: writerNames.get(id) ?? "Staff" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    let shiftNoteItems: ReturnType<typeof computeShiftNoteDueItems> = [];
+    if (canSeeShiftNotes(session.roleKey) && peopleIds.length) {
+      const { data: noteRows } = await this.client
+        .from("shift_notes")
+        .select("individual_id, staff_user_id, shift, note_date")
+        .eq("agency_id", session.agencyId)
+        .in("individual_id", peopleIds)
+        .is("deleted_at", null)
+        .eq("note_date", serviceDate);
+      const notes = ((noteRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        individualId: String(row.individual_id),
+        staffUserId: String(row.staff_user_id ?? ""),
+        blockId: blockForShiftLabel(String(row.shift ?? "")) as ShiftBlockId | null,
+        noteDate: String(row.note_date ?? "").slice(0, 10),
+      }));
+      const { data: aloneRows } = await this.client
+        .from("alone_time_windows")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .is("deleted_at", null)
+        .in("individual_id", peopleIds);
+      shiftNoteItems = computeShiftNoteDueItems({
+        serviceDate,
+        staffed24h: siteFacts.staffed24h !== false,
+        individuals: people,
+        requiredWriters,
+        notes,
+        aloneTime: ((aloneRows ?? []) as Array<Record<string, unknown>>).map((r) =>
+          this.mapAloneTimeWindow(r),
+        ),
+      });
+    }
+
+    let medItems: ReturnType<typeof computeMedDueItems> = [];
+    if (canSeeMeds(session.roleKey) && peopleIds.length) {
+      const nameById = new Map(people.map((p) => [p.id, p.name]));
+      const { data: medRows } = await this.client
+        .from("medications")
+        .select("id, individual_id, name, strength, kind")
+        .eq("agency_id", session.agencyId)
+        .eq("kind", "scheduled")
+        .in("individual_id", peopleIds);
+      const meds = (medRows ?? []) as Array<Record<string, unknown>>;
+      const medIds = meds.map((m) => String(m.id));
+      const doseByMed = new Map<string, string[]>();
+      if (medIds.length) {
+        const { data: invRows } = await this.client
+          .from("med_inventory")
+          .select("medication_id, dose_times")
+          .eq("agency_id", session.agencyId)
+          .in("medication_id", medIds);
+        for (const inv of (invRows ?? []) as Array<Record<string, unknown>>) {
+          doseByMed.set(
+            String(inv.medication_id),
+            Array.isArray(inv.dose_times) ? (inv.dose_times as string[]) : [],
+          );
+        }
+      }
+      const scheduledDoses: ScheduledDose[] = meds
+        .map((m) => ({
+          individualId: String(m.individual_id),
+          individualName: nameById.get(String(m.individual_id)) ?? "",
+          medicationId: String(m.id),
+          medName: String(m.name ?? ""),
+          strength: String(m.strength ?? ""),
+          doseTimes: doseByMed.get(String(m.id)) ?? [],
+        }))
+        .filter((d) => d.doseTimes.length > 0);
+      const { data: markRows } = medIds.length
+        ? await this.client
+            .from("med_dose_marks")
+            .select("medication_id, dose_date, dose_time, status")
+            .eq("agency_id", session.agencyId)
+            .eq("dose_date", today)
+            .in("medication_id", medIds)
+        : { data: [] };
+      const now = new Date();
+      medItems = computeMedDueItems({
+        doseDate: today,
+        nowMinutes: now.getHours() * 60 + now.getMinutes(),
+        scheduledDoses,
+        marks: ((markRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+          medicationId: String(row.medication_id),
+          doseDate: String(row.dose_date ?? "").slice(0, 10),
+          doseTime: String(row.dose_time ?? "").slice(0, 5),
+          status: String(row.status ?? "") as import("./types").MedDoseMarkStatus,
+        })),
+      });
+    }
+
+    return {
+      items: buildSiteDueItems(shiftNoteItems, medItems),
+      shiftNoteCount: shiftNoteItems.length,
+      medCount: medItems.length,
+      basedOnAssignedStaff: requiredWriters.length > 0,
+      serviceDate,
+      doseDate: today,
+    };
+  }
+
+  async listAloneTime(
+    individualId: string,
+  ): Promise<import("./types").AloneTimeWindow[]> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to alone-time windows.");
+    }
+    const { data, error } = await this.client
+      .from("alone_time_windows")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .is("deleted_at", null)
+      .order("start_time", { ascending: true });
+    throwIf(error, "Could not load alone-time windows.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) =>
+      this.mapAloneTimeWindow(row),
+    );
+  }
+
+  async getSiteAloneTime(
+    siteId: string,
+  ): Promise<import("./types").AloneTimeWindowView[]> {
+    const session = await this.requireSession();
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to alone-time windows.");
+    }
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const { data: peopleRows, error: peopleError } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(peopleError, "Could not load alone-time windows.");
+    const names = new Map(
+      ((peopleRows ?? []) as Array<{ id: string; full_name: string }>).map((p) => [
+        String(p.id),
+        String(p.full_name ?? ""),
+      ]),
+    );
+    const ids = [...names.keys()];
+    if (!ids.length) return [];
+    const { data, error } = await this.client
+      .from("alone_time_windows")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .in("individual_id", ids)
+      .order("start_time", { ascending: true });
+    throwIf(error, "Could not load alone-time windows.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      ...this.mapAloneTimeWindow(row),
+      individualName: names.get(String(row.individual_id)) ?? "",
+    }));
+  }
+
+  async saveAloneTimeWindow(
+    input: Parameters<ComplyraApi["saveAloneTimeWindow"]>[0],
+  ): Promise<string> {
+    const session = await this.requireSession();
+    if (!canEditAloneTime(session.roleKey)) {
+      throw new Error("Only a house manager or administrator can set alone time.");
+    }
+    if (!/^\d{2}:\d{2}$/.test(input.startTime) || !/^\d{2}:\d{2}$/.test(input.endTime)) {
+      throw new Error("Use HH:MM start and end times.");
+    }
+    if (input.startTime === input.endTime) {
+      throw new Error("Start and end times cannot match.");
+    }
+    if (input.recurrence === "weekly") {
+      if (input.weekday == null || input.weekday < 0 || input.weekday > 6) {
+        throw new Error("Choose a weekday for a recurring window.");
+      }
+    } else if (!input.onDate) {
+      throw new Error("Choose a date for a one-off window.");
+    }
+    const payload = {
+      agency_id: session.agencyId,
+      individual_id: input.individualId,
+      recurrence: input.recurrence,
+      weekday: input.recurrence === "weekly" ? input.weekday ?? null : null,
+      on_date: input.recurrence === "once" ? input.onDate ?? null : null,
+      start_time: input.startTime,
+      end_time: input.endTime,
+      note: (input.note ?? "").trim(),
+      updated_at: new Date().toISOString(),
+    };
+    if (input.id) {
+      const { error } = await this.client
+        .from("alone_time_windows")
+        .update(payload)
+        .eq("id", input.id)
+        .eq("agency_id", session.agencyId);
+      throwIf(error, "Could not save the alone-time window.");
+      await this.audit(session, "alone_time.updated", `${session.fullName} updated an alone-time window`, "alone_time_window", input.id);
+      return input.id;
+    }
+    const { data, error } = await this.client
+      .from("alone_time_windows")
+      .insert({
+        ...payload,
+        created_by: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not save the alone-time window.");
+    const id = (data as { id: string } | null)?.id ?? "";
+    await this.audit(session, "alone_time.created", `${session.fullName} set an alone-time window`, "alone_time_window", id);
+    return id;
+  }
+
+  async deleteAloneTimeWindow(id: string): Promise<void> {
+    const session = await this.requireSession();
+    if (!canEditAloneTime(session.roleKey)) {
+      throw new Error("Only a house manager or administrator can set alone time.");
+    }
+    const { error } = await this.client
+      .from("alone_time_windows")
+      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("agency_id", session.agencyId);
+    throwIf(error, "Could not remove the alone-time window.");
+    await this.audit(session, "alone_time.deleted", `${session.fullName} removed an alone-time window`, "alone_time_window", id);
+  }
+
+  async setMedDoseTimes(
+    input: Parameters<ComplyraApi["setMedDoseTimes"]>[0],
+  ): Promise<void> {
+    const { session, med } = await this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or PM sets the dose schedule.");
+    }
+    if (med.kind !== "scheduled") {
+      throw new Error("Only scheduled medications carry dose times.");
+    }
+    const times = [...new Set(input.doseTimes.map((t) => t.trim()))]
+      .filter((t) => /^\d{2}:\d{2}$/.test(t))
+      .sort();
+    const { error } = await this.client.from("med_inventory").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        dose_times: times,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "agency_id,medication_id" },
+    );
+    throwIf(error, "Could not save the dose schedule.");
+  }
+
+  async getMedDoseMarks(
+    individualId: string,
+    doseDate: string,
+  ): Promise<import("./types").MedDoseMark[]> {
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    const { data, error } = await this.client
+      .from("med_dose_marks")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("dose_date", doseDate.slice(0, 10))
+      .order("dose_time", { ascending: true });
+    throwIf(error, "Could not load the medication record.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) =>
+      this.mapMedDoseMark(row),
+    );
+  }
+
+  async markMedDose(
+    input: Parameters<ComplyraApi["markMedDose"]>[0],
+  ): Promise<void> {
+    const { session, med } = await this.p6medicationOrThrow(input.medicationId);
+    if (!canLogDoseException(session.roleKey)) {
+      throw new Error("Your role cannot mark medications.");
+    }
+    if (med.kind !== "scheduled") {
+      throw new Error("Only scheduled medications are marked on the MAR.");
+    }
+    if (!/^\d{2}:\d{2}$/.test(input.doseTime)) {
+      throw new Error("Use an HH:MM dose time.");
+    }
+    const { error } = await this.client.from("med_dose_marks").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        dose_date: input.doseDate.slice(0, 10),
+        dose_time: input.doseTime,
+        status: input.status,
+        marked_by: session.userId,
+        marked_by_name: session.fullName,
+        marked_at: new Date().toISOString(),
+      },
+      { onConflict: "agency_id,medication_id,dose_date,dose_time" },
+    );
+    throwIf(error, "Could not mark the dose.");
+    await this.audit(
+      session,
+      "medication.dose_marked",
+      `${session.fullName} marked ${med.name} ${input.doseTime} as ${input.status}`,
+      "medication",
+      med.id,
     );
   }
   // ===== LIFEPATH-P7 HOSTED (mileage tracking) =====

@@ -1024,3 +1024,66 @@ export interface SignatureAuditRecord {
   userAgent: string | null;
   details: Record<string, unknown> | null;
 }
+
+// ===== ISSUE #75 (alone time) + #76 (MAR dose marks) =====
+
+/**
+ * Issue #75 — HM-set "alone time" windows for an Individual. During these
+ * hours the Individual is intentionally unstaffed, so a Shift note is NOT
+ * required for that Individual (the requirement range shrinks). Windows never
+ * flag missing notes and are soft-deleted (deletedAt) so the audit trail is
+ * preserved. Time-of-day is stored as site-local "HH:MM" (24-hour).
+ *
+ * A window is either recurring weekly (weekday 0=Sun..6=Sat) or a one-off on a
+ * specific ISO date. Overnight windows (end <= start) wrap past midnight.
+ */
+export type AloneTimeRecurrence = "weekly" | "once";
+
+export interface AloneTimeWindow {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  recurrence: AloneTimeRecurrence;
+  /** 0=Sunday .. 6=Saturday. Set when recurrence === "weekly". */
+  weekday: number | null;
+  /** ISO date (YYYY-MM-DD). Set when recurrence === "once". */
+  onDate: string | null;
+  /** Site-local start time, "HH:MM" 24-hour. */
+  startTime: string;
+  /** Site-local end time, "HH:MM" 24-hour. End <= start means it wraps midnight. */
+  endTime: string;
+  /** Optional "why" — ISP / family / community. Never required. */
+  note: string;
+  createdBy: string | null;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+/** Alone-time window with the Individual's display name attached (site read). */
+export interface AloneTimeWindowView extends AloneTimeWindow {
+  individualName: string;
+}
+
+/**
+ * Issue #76 — a MAR check-off status for a single scheduled dose. Any of the
+ * four statuses "marks" the dose and clears the unmarked-overdue due item; an
+ * absent row is the due item. One row per (medication × date × scheduled time).
+ */
+export type MedDoseMarkStatus = "given" | "missed" | "loa" | "on_hold";
+
+export interface MedDoseMark {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  medicationId: string;
+  /** ISO date (YYYY-MM-DD) of the dose. */
+  doseDate: string;
+  /** Scheduled time "HH:MM" this mark answers. */
+  doseTime: string;
+  status: MedDoseMarkStatus;
+  markedBy: string | null;
+  markedByName: string;
+  markedAt: string;
+}

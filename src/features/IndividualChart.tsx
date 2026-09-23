@@ -40,6 +40,8 @@ import { generateConsultationPacket } from "./appointments/generateConsultationP
 import ChartOverview from "./ChartOverview";
 import HealthCard from "./HealthCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
+import AloneTimeCard from "./AloneTimeCard";
+import MarCard from "./MarCard";
 import TrainingSignCard from "./TrainingSignCard";
 // Issue #81: agency-branded Individual face sheet (distinct from the
 // appointment-scoped consultation packet).
@@ -496,6 +498,19 @@ export default function IndividualChart({
         )}
 
         <MonthlyEquipmentCard individualId={individualId} />
+
+        {/* Issue #76: today's scheduled-med MAR check-off (clears Overview
+            unmarked-medication due items). */}
+        {canSeeChartWidgets(chartSession.roleKey) && (
+          <MarCard individualId={individualId} />
+        )}
+
+        {/* Issue #75: HM alone-time editor (shrinks the required Shift-note
+            range on the site Overview; never flags a missing note). */}
+        <AloneTimeCard
+          individualId={individualId}
+          individualName={person.name}
+        />
 
         <section className="chart-widget" aria-labelledby="staff-heading">
           <h2 id="staff-heading">Assigned staff</h2>

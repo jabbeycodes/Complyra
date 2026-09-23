@@ -5061,6 +5061,88 @@ th {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* Issue #75 alone-time editor + #76 MAR check-off cards. */
+.alone-time-card,
+.mar-card {
+  align-content: start;
+}
+.chart-widget-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.chart-widget-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.alone-time-help,
+.mar-help {
+  margin: 4px 0 8px;
+  font-size: 13px;
+}
+.alone-time-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2ded7;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.alone-time-form-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.alone-time-form label,
+.alone-time-form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  flex: 1 1 140px;
+}
+.alone-time-form input,
+.alone-time-form select {
+  min-height: 44px;
+}
+.alone-time-form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.alone-time-stamp {
+  font-size: 12px;
+}
+.alone-time-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.mar-row {
+  align-items: center;
+}
+.mar-row-body {
+  min-width: 0;
+  flex: 1 1 200px;
+}
+.mar-status-open {
+  color: #9a6b00;
+}
+.mar-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.mar-status-button {
+  min-height: 44px;
+}
 /* Issue #81: Individual chart Overview. Theme tokens only — no new hex. */
 .chart-widget.overview {
   gap: 14px;

@@ -267,6 +267,15 @@ import {
   type ChartFileKind,
 } from "./chart";
 import {
+  buildSiteDueItems,
+  canEditAloneTime,
+  computeMedDueItems,
+  computeShiftNoteDueItems,
+  blockForShiftLabel,
+  type ScheduledDose,
+  type ShiftBlockId,
+} from "./dueItems";
+import {
   daysRemaining,
   validateCertificateDates,
   validateCertificateFile,
@@ -547,6 +556,51 @@ export interface ComplyraApi {
   }): Promise<string>;
   /** Issue #80 — soft-delete a shift note. Same edit gate as saveShiftNote. */
   deleteShiftNote(noteId: string): Promise<void>;
+  /**
+   * Issue #75 + #76 — the site Overview due-items list: typed rows for missing
+   * Shift notes and unmarked scheduled meds, plus the counts the hero mirrors.
+   */
+  getSiteDueItems(
+    siteId: string,
+  ): Promise<import("./dueItems").SiteDueItemsResult>;
+  /** Issue #75 — HM alone-time windows for one Individual (read). */
+  listAloneTime(
+    individualId: string,
+  ): Promise<import("./types").AloneTimeWindow[]>;
+  /** Issue #75 — alone-time windows for every Individual at a site (read). */
+  getSiteAloneTime(
+    siteId: string,
+  ): Promise<import("./types").AloneTimeWindowView[]>;
+  /** Issue #75 — create or update an alone-time window. HM + Admin only. */
+  saveAloneTimeWindow(input: {
+    id?: string;
+    individualId: string;
+    recurrence: import("./types").AloneTimeRecurrence;
+    weekday?: number | null;
+    onDate?: string | null;
+    startTime: string;
+    endTime: string;
+    note?: string;
+  }): Promise<string>;
+  /** Issue #75 — soft-delete an alone-time window. HM + Admin only. */
+  deleteAloneTimeWindow(id: string): Promise<void>;
+  /** Issue #76 — set a scheduled medication's dose times (MAR schedule). */
+  setMedDoseTimes(input: {
+    medicationId: string;
+    doseTimes: string[];
+  }): Promise<void>;
+  /** Issue #76 — MAR check-off marks for one Individual on a date. */
+  getMedDoseMarks(
+    individualId: string,
+    doseDate: string,
+  ): Promise<import("./types").MedDoseMark[]>;
+  /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold. */
+  markMedDose(input: {
+    medicationId: string;
+    doseDate: string;
+    doseTime: string;
+    status: import("./types").MedDoseMarkStatus;
+  }): Promise<void>;
   updateObligation(
     obligationId: string,
     patch: Partial<
@@ -3736,6 +3790,347 @@ export class LocalApi implements ComplyraApi {
     }
     note.deletedAt = new Date().toISOString();
     note.updatedAt = note.deletedAt;
+    await persistMeta(this.store);
+  }
+
+  // ─────────── Issue #75 alone time + #76 MAR marks + due items ───────────
+
+  private aloneTimeRows(): import("./types").AloneTimeWindow[] {
+    const db = this.store.db as LocalDatabase & {
+      aloneTimeWindows?: import("./types").AloneTimeWindow[];
+    };
+    if (!db.aloneTimeWindows) db.aloneTimeWindows = [];
+    return db.aloneTimeWindows;
+  }
+
+  private medDoseMarkRows(): import("./types").MedDoseMark[] {
+    const db = this.store.db as LocalDatabase & {
+      medDoseMarks?: import("./types").MedDoseMark[];
+    };
+    if (!db.medDoseMarks) db.medDoseMarks = [];
+    return db.medDoseMarks;
+  }
+
+  /** Assigned house DSPs are the on-duty writers in the no-clock-in v1. */
+  private siteRequiredWriters(
+    session: SessionUser,
+    siteId: string,
+  ): { userId: string; name: string }[] {
+    const nameById = new Map(
+      this.store.db.profiles.map((p) => [p.id, p.fullName]),
+    );
+    const seen = new Set<string>();
+    const writers: { userId: string; name: string }[] = [];
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== session.agencyId) continue;
+      if (m.siteId !== siteId) continue;
+      if (m.roleKey !== "dsp") continue;
+      if (seen.has(m.userId)) continue;
+      seen.add(m.userId);
+      writers.push({ userId: m.userId, name: nameById.get(m.userId) ?? "Staff" });
+    }
+    return writers.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private siteScheduledDoses(
+    session: SessionUser,
+    people: { id: string; fullName: string }[],
+  ): ScheduledDose[] {
+    const inv = new Map(
+      this.p6rows().map((row) => [row.medicationId, row]),
+    );
+    const nameById = new Map(people.map((p) => [p.id, p.fullName]));
+    const ids = new Set(people.map((p) => p.id));
+    return this.store.db.medications
+      .filter(
+        (med) =>
+          med.agencyId === session.agencyId &&
+          med.kind === "scheduled" &&
+          ids.has(med.individualId),
+      )
+      .map((med) => ({
+        individualId: med.individualId,
+        individualName: nameById.get(med.individualId) ?? "",
+        medicationId: med.id,
+        medName: med.name,
+        strength: med.strength,
+        doseTimes: inv.get(med.id)?.doseTimes ?? [],
+      }))
+      .filter((dose) => dose.doseTimes.length > 0);
+  }
+
+  async getSiteDueItems(
+    siteId: string,
+  ): Promise<import("./dueItems").SiteDueItemsResult> {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const people = this.store.db.individuals.filter(
+      (row) => row.siteId === siteId && row.agencyId === session.agencyId,
+    );
+    const today = todayIso();
+    // Shift notes are checked against the last completed site-local day so a
+    // block is never flagged before its shift is over.
+    const serviceDate = todayIso(new Date(Date.now() - 86_400_000));
+
+    // #75 — missing Shift notes.
+    let shiftNoteItems: ReturnType<typeof computeShiftNoteDueItems> = [];
+    const canSeeNotes = canSeeShiftNotes(session.roleKey);
+    const requiredWriters = this.siteRequiredWriters(session, siteId);
+    if (canSeeNotes) {
+      const peopleById = new Set(people.map((p) => p.id));
+      const notes = this.store.db.shiftNotes
+        .filter(
+          (note) =>
+            !note.deletedAt &&
+            peopleById.has(note.individualId) &&
+            note.noteDate.slice(0, 10) === serviceDate,
+        )
+        .map((note) => ({
+          individualId: note.individualId,
+          staffUserId: note.staffUserId,
+          blockId: blockForShiftLabel(note.shift) as ShiftBlockId | null,
+          noteDate: note.noteDate,
+        }));
+      shiftNoteItems = computeShiftNoteDueItems({
+        serviceDate,
+        staffed24h: site.staffed24h !== false,
+        individuals: people.map((p) => ({ id: p.id, name: p.fullName })),
+        requiredWriters,
+        notes,
+        aloneTime: this.aloneTimeRows().filter(
+          (w) => w.agencyId === session.agencyId,
+        ),
+      });
+    }
+
+    // #76 — unmarked scheduled meds.
+    let medItems: ReturnType<typeof computeMedDueItems> = [];
+    if (canSeeMeds(session.roleKey)) {
+      const now = new Date();
+      medItems = computeMedDueItems({
+        doseDate: today,
+        nowMinutes: now.getHours() * 60 + now.getMinutes(),
+        scheduledDoses: this.siteScheduledDoses(session, people),
+        marks: this.medDoseMarkRows().filter(
+          (m) => m.agencyId === session.agencyId && m.doseDate.slice(0, 10) === today,
+        ),
+      });
+    }
+
+    const items = buildSiteDueItems(shiftNoteItems, medItems);
+    return {
+      items,
+      shiftNoteCount: shiftNoteItems.length,
+      medCount: medItems.length,
+      basedOnAssignedStaff: requiredWriters.length > 0,
+      serviceDate,
+      doseDate: today,
+    };
+  }
+
+  async listAloneTime(
+    individualId: string,
+  ): Promise<import("./types").AloneTimeWindow[]> {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to alone-time windows.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.aloneTimeRows()
+      .filter(
+        (w) =>
+          w.agencyId === session.agencyId &&
+          w.individualId === individualId &&
+          !w.deletedAt,
+      )
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  async getSiteAloneTime(
+    siteId: string,
+  ): Promise<import("./types").AloneTimeWindowView[]> {
+    const session = assertSession(this.store);
+    if (!canSeeShiftNotes(session.roleKey)) {
+      throw new Error("You do not have access to alone-time windows.");
+    }
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const names = new Map(
+      this.store.db.individuals
+        .filter((p) => p.siteId === siteId && p.agencyId === session.agencyId)
+        .map((p) => [p.id, p.fullName]),
+    );
+    return this.aloneTimeRows()
+      .filter(
+        (w) =>
+          w.agencyId === session.agencyId && !w.deletedAt && names.has(w.individualId),
+      )
+      .map((w) => ({ ...w, individualName: names.get(w.individualId) ?? "" }))
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  async saveAloneTimeWindow(
+    input: Parameters<ComplyraApi["saveAloneTimeWindow"]>[0],
+  ): Promise<string> {
+    const session = assertSession(this.store);
+    if (!canEditAloneTime(session.roleKey)) {
+      throw new Error("Only a house manager or administrator can set alone time.");
+    }
+    accessibleIndividual(this.store, session, input.individualId);
+    if (!/^\d{2}:\d{2}$/.test(input.startTime) || !/^\d{2}:\d{2}$/.test(input.endTime)) {
+      throw new Error("Use HH:MM start and end times.");
+    }
+    if (input.startTime === input.endTime) {
+      throw new Error("Start and end times cannot match.");
+    }
+    if (input.recurrence === "weekly") {
+      if (input.weekday == null || input.weekday < 0 || input.weekday > 6) {
+        throw new Error("Choose a weekday for a recurring window.");
+      }
+    } else if (!input.onDate) {
+      throw new Error("Choose a date for a one-off window.");
+    }
+    const now = new Date().toISOString();
+    const rows = this.aloneTimeRows();
+    if (input.id) {
+      const existing = rows.find(
+        (w) => w.id === input.id && w.agencyId === session.agencyId && !w.deletedAt,
+      );
+      if (!existing) throw new Error("Alone-time window not found.");
+      Object.assign(existing, {
+        recurrence: input.recurrence,
+        weekday: input.recurrence === "weekly" ? input.weekday ?? null : null,
+        onDate: input.recurrence === "once" ? input.onDate ?? null : null,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        note: (input.note ?? "").trim(),
+        updatedAt: now,
+      });
+      await persistMeta(this.store);
+      return existing.id;
+    }
+    const row: import("./types").AloneTimeWindow = {
+      id: `at-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      individualId: input.individualId,
+      recurrence: input.recurrence,
+      weekday: input.recurrence === "weekly" ? input.weekday ?? null : null,
+      onDate: input.recurrence === "once" ? input.onDate ?? null : null,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      note: (input.note ?? "").trim(),
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    rows.push(row);
+    await persistMeta(this.store);
+    return row.id;
+  }
+
+  async deleteAloneTimeWindow(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    if (!canEditAloneTime(session.roleKey)) {
+      throw new Error("Only a house manager or administrator can set alone time.");
+    }
+    const row = this.aloneTimeRows().find(
+      (w) => w.id === id && w.agencyId === session.agencyId && !w.deletedAt,
+    );
+    if (!row) throw new Error("Alone-time window not found.");
+    accessibleIndividual(this.store, session, row.individualId);
+    row.deletedAt = new Date().toISOString();
+    row.updatedAt = row.deletedAt;
+    await persistMeta(this.store);
+  }
+
+  async setMedDoseTimes(
+    input: Parameters<ComplyraApi["setMedDoseTimes"]>[0],
+  ): Promise<void> {
+    const { session, med } = this.p6medicationOrThrow(input.medicationId);
+    if (!canRecordDelivery(session.roleKey)) {
+      throw new Error("House manager, RN, or PM sets the dose schedule.");
+    }
+    if (med.kind !== "scheduled") {
+      throw new Error("Only scheduled medications carry dose times.");
+    }
+    const times = [...new Set(input.doseTimes.map((t) => t.trim()))]
+      .filter((t) => /^\d{2}:\d{2}$/.test(t))
+      .sort();
+    this.p6upsertRow(session, med, { doseTimes: times });
+    await persistMeta(this.store);
+  }
+
+  async getMedDoseMarks(
+    individualId: string,
+    doseDate: string,
+  ): Promise<import("./types").MedDoseMark[]> {
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const day = doseDate.slice(0, 10);
+    return this.medDoseMarkRows()
+      .filter(
+        (m) =>
+          m.agencyId === session.agencyId &&
+          m.individualId === individualId &&
+          m.doseDate.slice(0, 10) === day,
+      )
+      .sort((a, b) => a.doseTime.localeCompare(b.doseTime));
+  }
+
+  async markMedDose(
+    input: Parameters<ComplyraApi["markMedDose"]>[0],
+  ): Promise<void> {
+    const { session, med } = this.p6medicationOrThrow(input.medicationId);
+    if (!canLogDoseException(session.roleKey)) {
+      throw new Error("Your role cannot mark medications.");
+    }
+    if (med.kind !== "scheduled") {
+      throw new Error("Only scheduled medications are marked on the MAR.");
+    }
+    if (!/^\d{2}:\d{2}$/.test(input.doseTime)) {
+      throw new Error("Use an HH:MM dose time.");
+    }
+    const day = input.doseDate.slice(0, 10);
+    const rows = this.medDoseMarkRows();
+    const existing = rows.find(
+      (m) =>
+        m.agencyId === session.agencyId &&
+        m.medicationId === input.medicationId &&
+        m.doseDate.slice(0, 10) === day &&
+        m.doseTime === input.doseTime,
+    );
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.status = input.status;
+      existing.markedBy = session.userId;
+      existing.markedByName = session.fullName;
+      existing.markedAt = now;
+    } else {
+      rows.push({
+        id: `mm-${crypto.randomUUID().slice(0, 8)}`,
+        agencyId: session.agencyId,
+        individualId: med.individualId,
+        medicationId: input.medicationId,
+        doseDate: day,
+        doseTime: input.doseTime,
+        status: input.status,
+        markedBy: session.userId,
+        markedByName: session.fullName,
+        markedAt: now,
+      });
+    }
     await persistMeta(this.store);
   }
 
