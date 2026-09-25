@@ -1752,19 +1752,20 @@ export default function App() {
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     <SignatureSettingsSection onSaved={notify} />
-                    {/* Secondary/destructive chrome collapses by default so
-                        Settings reads as sections, not one long list (#110 Cut A). */}
-                    <Disclosure label="Advanced &amp; data" summary="Data handling · workspace reset">
-                      <div className="settings-row">
-                        <span>
-                          <strong>Data handling</strong>
-                          <small>
-                            Use fictional records only. This preview is not
-                            configured to store sensitive care data.
-                          </small>
-                        </span>
-                        <ShieldCheck size={20} />
-                      </div>
+                    {/* This is a PHI-safety warning, not secondary chrome: it must
+                        remain visible before anyone enters workspace data. */}
+                    <div className="settings-row">
+                      <span>
+                        <strong>Data handling</strong>
+                        <small>
+                          Use fictional records only. This preview is not
+                          configured to store sensitive care data.
+                        </small>
+                      </span>
+                      <ShieldCheck size={20} />
+                    </div>
+                    {/* Only the destructive reset action is secondary. */}
+                    <Disclosure label="Advanced &amp; data" summary="Workspace reset">
                       {!usingHostedBackend && (
                         <button
                           className="button danger"
