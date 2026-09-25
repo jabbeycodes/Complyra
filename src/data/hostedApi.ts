@@ -174,6 +174,7 @@ import {
   canEditDiagnoses,
   canEditIndividualContacts,
   canEditTrainingLine,
+  canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
   canRecordDelivery,
@@ -8605,6 +8606,23 @@ export class HostedApi implements ComplyraApi {
     }
     if (!/^\d{2}:\d{2}$/.test(input.doseTime)) {
       throw new Error("Use an HH:MM dose time.");
+    }
+    const { data: existingMark, error: existingError } = await this.client
+      .from("med_dose_marks")
+      .select("marked_by")
+      .eq("agency_id", session.agencyId)
+      .eq("medication_id", med.id)
+      .eq("dose_date", input.doseDate.slice(0, 10))
+      .eq("dose_time", input.doseTime)
+      .maybeSingle();
+    throwIf(existingError, "Could not load the MAR entry.");
+    if (
+      existingMark &&
+      !canCorrectDoseMark(session.roleKey, session.userId, {
+        markedBy: (existingMark as { marked_by: string | null }).marked_by,
+      })
+    ) {
+      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
     }
     const { error } = await this.client.from("med_dose_marks").upsert(
       {

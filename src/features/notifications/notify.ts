@@ -45,7 +45,13 @@ export type NotificationType =
   | "hr.swap_approved"
   | "hr.swap_denied"
   | "hr.punch_exception"
-  | "hr.overtime_alert";
+  | "hr.overtime_alert"
+  | "hr.overtime_approaching"
+  | "hr.open_shift_posted"
+  | "hr.open_shift_bid"
+  | "hr.open_shift_picked_up"
+  | "hr.open_shift_approved"
+  | "hr.open_shift_denied";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -77,6 +83,12 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "hr.swap_denied",
   "hr.punch_exception",
   "hr.overtime_alert",
+  "hr.overtime_approaching",
+  "hr.open_shift_posted",
+  "hr.open_shift_bid",
+  "hr.open_shift_picked_up",
+  "hr.open_shift_approved",
+  "hr.open_shift_denied",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -229,7 +241,13 @@ export const NOTIFICATION_META: Record<
   "hr.swap_approved": { status: "compliant", label: "Shift swap approved" },
   "hr.swap_denied": { status: "expired", label: "Shift swap denied" },
   "hr.punch_exception": { status: "pending", label: "Punch flagged for review" },
-  "hr.overtime_alert": { status: "expiring", label: "Overtime trending" },
+  "hr.overtime_alert": { status: "late", label: "Overtime" },
+  "hr.overtime_approaching": { status: "expiring", label: "Approaching overtime" },
+  "hr.open_shift_posted": { status: "pending", label: "Open shift posted" },
+  "hr.open_shift_bid": { status: "pending", label: "Bid on an open shift" },
+  "hr.open_shift_picked_up": { status: "compliant", label: "Open shift picked up" },
+  "hr.open_shift_approved": { status: "compliant", label: "Open shift approved" },
+  "hr.open_shift_denied": { status: "expired", label: "Open shift not approved" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },
@@ -884,6 +902,42 @@ export function punchExceptionPayload(input: {
 }
 
 /**
+ * A staff member is approaching overtime this week (36h+ of the 40-hour
+ * limit). Sent to the staff member and to the scheduling managers; dedupe is
+ * per staff member + week + recipient.
+ */
+export function overtimeApproachingPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  staffId: string;
+  staffName: string;
+  hoursWorked: number;
+  weekLabel: string;
+  forStaffMember: boolean;
+}): NotificationPayload {
+  const hours = input.hoursWorked.toFixed(1);
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "hr.overtime_approaching",
+    title: "Approaching overtime",
+    body: input.forStaffMember
+      ? `You're at ${hours}h this week (Sunday–Saturday). Past 41 hours needs your manager's approval.`
+      : `${input.staffName} is at ${hours}h this week. Past 41 hours is overtime; check their upcoming shifts.`,
+    deepLink: "/hub",
+    entityType: "hr_punch_exception",
+    entityId: input.staffId,
+    dedupeKey: dedupeKeyFor(
+      "hr.overtime_approaching",
+      input.staffId,
+      `${input.weekLabel}:${input.forStaffMember ? "self" : input.roleKey ?? input.userId ?? ""}`,
+    ),
+  };
+}
+
+/**
  * A staff member is trending toward overtime this week. Broadcast to the
  * scheduling managers (roleKey, e.g. "house_manager" / "program_manager")
  * so they can adjust upcoming shifts. Dedupe is per staff member + week
@@ -904,13 +958,13 @@ export function overtimeAlertPayload(input: {
     userId: input.userId ?? null,
     roleKey: input.roleKey ?? null,
     type: "hr.overtime_alert",
-    title: "Overtime trending",
+    title: "Overtime",
     body:
       `${input.staffName} has worked ${input.hoursWorked.toFixed(1)}h this week ` +
-      `(overtime after ${input.thresholdHours}h). Review their upcoming shifts.`,
+      `(flagged past ${input.thresholdHours}h). Review their upcoming shifts.`,
     deepLink: "/hub",
     entityType: "hr_punch_exception",
     entityId: input.staffId,
-    dedupeKey: dedupeKeyFor("hr.overtime_alert", input.staffId, input.weekLabel),
+    dedupeKey: dedupeKeyFor("hr.overtime_alert", input.staffId, input.weekLabel, input.roleKey ?? input.userId ?? ""),
   };
 }

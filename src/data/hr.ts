@@ -196,6 +196,38 @@ export interface ReadinessResult {
 
 /** Weekly hours before overtime accrues (FLSA standard). */
 export const OVERTIME_WEEKLY_HOURS = 40;
+/**
+ * Agency rule (2026-09-25): the work week runs Sunday through Saturday; staff
+ * are only FLAGGED for overtime past 41 hours, so running up to an hour over
+ * 40 (e.g. 30 minutes over) is ignored. Pay math still uses the configured
+ * threshold; this is the flag/approval line.
+ */
+export const OVERTIME_TOLERANCE_HOURS = 1;
+export const OVERTIME_FLAG_HOURS = OVERTIME_WEEKLY_HOURS + OVERTIME_TOLERANCE_HOURS;
+/** Heads-up to the staff member and managers once the week reaches this. */
+export const APPROACHING_OVERTIME_HOURS = 36;
+
+export type WeeklyHoursStatus = "ok" | "approaching" | "overtime";
+
+/**
+ * Weekly status for a staff member: "overtime" past the flag line (41h),
+ * "approaching" from 36h, otherwise "ok". A custom weekly threshold shifts
+ * both lines by the same amount.
+ */
+export function weeklyHoursStatus(hours: number, weeklyThresholdHours = OVERTIME_WEEKLY_HOURS): WeeklyHoursStatus {
+  const shift = weeklyThresholdHours - OVERTIME_WEEKLY_HOURS;
+  if (hours > OVERTIME_FLAG_HOURS + shift) return "overtime";
+  if (hours >= APPROACHING_OVERTIME_HOURS + shift) return "approaching";
+  return "ok";
+}
+
+/** Sunday 00:00 local of the work week containing `d`. */
+export function workWeekStart(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - x.getDay());
+  return x;
+}
 /** Days before a due date that a requirement flips to "due soon". */
 export const DUE_SOON_DAYS = 30;
 /** Clock-in may be this many minutes after shift start without flagging late. */

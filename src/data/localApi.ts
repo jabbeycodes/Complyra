@@ -253,6 +253,7 @@ import {
   canEditDiagnoses,
   canEditIndividualContacts,
   canEditTrainingLine,
+  canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
   canRecordDelivery,
@@ -1707,7 +1708,7 @@ function delegationSiteScope(session: SessionUser): string[] | null {
 
 function accessibleIndividual(store: MemoryStore, session: SessionUser, id: string) {
   const person = store.db.individuals.find((row) => row.id === id);
-  if (!person || !canReadIndividual(session, person, store.db.assignments)) {
+  if (!person || !canReadIndividual(session, person, store.db.assignments, store.db.individuals)) {
     throw new Error("Individual not found or outside your assigned access.");
   }
   return person;
@@ -2420,7 +2421,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   const canReadAudit = hasPermission(session, "audit.read") && isAgencyWideViewer(session);
   const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
   const individuals = canViewPeople
-    ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments))
+    ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
     : [];
   const personIds = new Set(individuals.map((row) => row.id));
   const siteIds = new Set(sites.map((row) => row.id));
@@ -4112,6 +4113,9 @@ export class LocalApi implements ComplyraApi {
         m.doseTime === input.doseTime,
     );
     const now = new Date().toISOString();
+    if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
+      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+    }
     if (existing) {
       existing.status = input.status;
       existing.markedBy = session.userId;
@@ -9579,7 +9583,7 @@ export class LocalApi implements ComplyraApi {
       if (filter?.siteId && a.siteId !== filter.siteId) return false;
       if (scope !== null && !scope.includes(a.siteId)) return false;
       const person = this.store.db.individuals.find(p => p.id === a.individualId);
-      return !!person && canReadIndividual(session, person, this.store.db.assignments);
+      return !!person && canReadIndividual(session, person, this.store.db.assignments, this.store.db.individuals);
     });
   }
 
@@ -10466,7 +10470,7 @@ export class LocalApi implements ComplyraApi {
     return db.documentUploads.filter((u) => {
       if (u.agencyId !== session.agencyId) return false;
       const person = db.individuals.find(p => p.id === u.individualId);
-      if (!person || !canReadIndividual(session, person, db.assignments)) return false;
+      if (!person || !canReadIndividual(session, person, db.assignments, db.individuals)) return false;
       if (filter?.individualId && u.individualId !== filter.individualId) return false;
       if (filter?.status && u.status !== filter.status) return false;
       if (isReviewer) return true;

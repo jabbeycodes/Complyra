@@ -56,7 +56,7 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 29);
+  assert.equal(NOTIFICATION_TYPES.length, 35);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -424,4 +424,30 @@ test("delegation payloads name template and individual and dedupe per (assignmen
 
   assert.notEqual(review.dedupe_key, published.dedupe_key, "different types differ");
   assert.notEqual(published.dedupe_key, overdue.dedupe_key, "different types differ");
+});
+
+test("open-shift notifications open the Employee Hub", async () => {
+  const { notificationPage } = await import("./notify");
+  for (const t of ["hr.open_shift_posted", "hr.open_shift_bid", "hr.open_shift_picked_up", "hr.open_shift_approved", "hr.open_shift_denied"]) {
+    assert.ok(isNotificationType(t), t);
+  }
+  assert.equal(notificationPage("/hub/open-shifts"), "Employee Hub");
+});
+
+test("weekly overtime: approaching from 36h, flagged only past 41h", async () => {
+  const { weeklyHoursStatus } = await import("../../data/hr");
+  assert.equal(weeklyHoursStatus(35.9), "ok");
+  assert.equal(weeklyHoursStatus(36), "approaching");
+  assert.equal(weeklyHoursStatus(40.5), "approaching", "30 minutes over is ignored");
+  assert.equal(weeklyHoursStatus(41), "approaching", "exactly 41 is not flagged");
+  assert.equal(weeklyHoursStatus(41.25), "overtime");
+});
+
+test("approaching-overtime notices reach the staff member and managers separately", async () => {
+  const { overtimeApproachingPayload } = await import("./notify");
+  const self = overtimeApproachingPayload({ agencyId: "a", userId: "u", staffId: "u", staffName: "Alex", hoursWorked: 37.5, weekLabel: "2026-09-27", forStaffMember: true });
+  const hm = overtimeApproachingPayload({ agencyId: "a", roleKey: "house_manager", staffId: "u", staffName: "Alex", hoursWorked: 37.5, weekLabel: "2026-09-27", forStaffMember: false });
+  assert.ok(self.body.startsWith("You're at 37.5h"));
+  assert.ok(hm.body.startsWith("Alex is at 37.5h"));
+  assert.notEqual(self.dedupeKey, hm.dedupeKey);
 });

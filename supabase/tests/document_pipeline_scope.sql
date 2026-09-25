@@ -44,9 +44,9 @@ insert into document_trackable_items(id,agency_id,extraction_id,item_type,title,
 insert into storage.objects(bucket_id,name) values('pcsp-documents','fixture/assigned.pdf'),('pcsp-documents','fixture/unassigned.pdf'),('pcsp-documents','fixture/other.pdf');
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d0000000-0000-0000-0000-000000000003"}',true);
-select is((select count(*)::int from document_uploads),1,'DSP sees only assigned individual uploads');
+select is((select count(*)::int from document_uploads),2,'DSP sees uploads for every Individual at their site, not other homes');
 select is((select count(*)::int from document_extractions),0,'DSP cannot see raw AI extraction');
-select is((select count(*)::int from document_trackable_items),1,'DSP can see assigned approved tasks without raw extraction access');
+select is((select count(*)::int from document_trackable_items),2,'DSP can see approved tasks for their site without raw extraction access');
 select is((select count(*)::int from storage.objects where bucket_id='pcsp-documents'),0,'DSP cannot download raw PCSPs by path');
 select ok((select count(*)>0 from delegation_templates where agency_id is null),'Common delegation library remains readable');
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d0000000-0000-0000-0000-000000000002"}',true);
