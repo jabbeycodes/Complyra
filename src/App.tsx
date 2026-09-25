@@ -77,6 +77,7 @@ import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
+import Disclosure from "./components/Disclosure";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
@@ -1751,24 +1752,28 @@ export default function App() {
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     <SignatureSettingsSection onSaved={notify} />
-                    <div className="settings-row">
-                      <span>
-                        <strong>Data handling</strong>
-                        <small>
-                          Use fictional records only. This preview is not
-                          configured to store sensitive care data.
-                        </small>
-                      </span>
-                      <ShieldCheck size={20} />
-                    </div>
-                    {!usingHostedBackend && (
-                      <button
-                        className="button danger"
-                        onClick={() => setModal("reset")}
-                      >
-                        <RotateCcw size={16} /> Reset sample workspace
-                      </button>
-                    )}
+                    {/* Secondary/destructive chrome collapses by default so
+                        Settings reads as sections, not one long list (#110 Cut A). */}
+                    <Disclosure label="Advanced &amp; data" summary="Data handling · workspace reset">
+                      <div className="settings-row">
+                        <span>
+                          <strong>Data handling</strong>
+                          <small>
+                            Use fictional records only. This preview is not
+                            configured to store sensitive care data.
+                          </small>
+                        </span>
+                        <ShieldCheck size={20} />
+                      </div>
+                      {!usingHostedBackend && (
+                        <button
+                          className="button danger"
+                          onClick={() => setModal("reset")}
+                        >
+                          <RotateCcw size={16} /> Reset sample workspace
+                        </button>
+                      )}
+                    </Disclosure>
                   </section>
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
