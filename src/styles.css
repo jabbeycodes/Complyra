@@ -7350,3 +7350,48 @@ button.qa-row:hover {
     align-items: flex-start;
   }
 }
+
+/* ===== #110 Cut A: reusable disclosure for secondary chrome ===== */
+.disclosure {
+  border-top: 1px solid #efedea;
+}
+.disclosure-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #897462;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+}
+.disclosure-trigger:focus-visible {
+  outline: 2px solid var(--moss, #2f4630);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.disclosure-caret {
+  flex: none;
+  color: #b0a494;
+  transition: transform 0.18s ease;
+}
+.disclosure.is-open .disclosure-caret {
+  transform: rotate(180deg);
+}
+.disclosure-summary {
+  margin-left: auto;
+  color: #c0b5a9;
+  font-weight: 500;
+  font-size: 12px;
+}
+.disclosure-panel {
+  padding-bottom: 6px;
+}
+.disclosure-panel[hidden] {
+  display: none;
+}
