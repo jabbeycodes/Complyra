@@ -13,6 +13,13 @@ import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 import {
   siteLocationFields,
 } from "../data/siteAddress";
+import {
+  INK,
+  contentWidth,
+  drawSectionHeader,
+  drawSignatureRow,
+  reserve,
+} from "./layout";
 
 function field(doc: jsPDF, label: string, value: string, x: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -104,38 +111,64 @@ export function buildSiteReviewPdf(input: {
   y += 22;
 
   for (const section of SITE_REVIEW_SECTIONS) {
-    if (y > 700) {
-      doc.addPage();
-      y = 64;
-    }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(section.title, margin, y);
-    y += 16;
+    // Section title kept with its first line; earthy ink preserved.
+    y = drawSectionHeader(doc, y, section.title, {
+      margin,
+      color: INK,
+      fontSize: 12,
+      gapAfter: 16,
+      keepWith: 26,
+    });
     for (const def of SITE_REVIEW_LINE_DEFS.filter((row) => row.section === section.id)) {
       const line = input.review.lines.find((row) => row.id === def.id);
+      const wrapped = doc.splitTextToSize(def.label, 360);
+      const notes = line?.comment.trim()
+        ? doc.splitTextToSize(line.comment, contentWidth(margin))
+        : [];
+      // Reserve the label (+ status) and any comment together so a row never
+      // splits across a page break or drops into the footer band.
+      const blockHeight =
+        wrapped.length * 12 + 2 + (notes.length ? notes.length * 10 + 4 : 0);
+      y = reserve(doc, y, blockHeight);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      const wrapped = doc.splitTextToSize(def.label, 360);
       doc.text(wrapped, margin, y);
       doc.setFont("helvetica", "normal");
       doc.text(lineStatusLabel(line?.status ?? "unchecked"), margin + 370, y);
       y += wrapped.length * 12 + 2;
-      if (line?.comment.trim()) {
+      if (notes.length) {
         doc.setFontSize(8);
         doc.setTextColor(95, 81, 69);
-        const notes = doc.splitTextToSize(line.comment, 514);
         doc.text(notes, margin, y);
         y += notes.length * 10 + 4;
         doc.setTextColor(36, 30, 24);
       }
-      if (y > 720) {
-        doc.addPage();
-        y = 64;
-      }
     }
     y += 8;
   }
+
+  // Completion area: the reviewer attests the environmental review.
+  y += 4;
+  y = drawSectionHeader(doc, y, "Reviewer sign-off", { margin, color: INK });
+  const sigWidth = Math.round(contentWidth(margin) * 0.6);
+  y = drawSignatureRow(
+    doc,
+    y,
+    [
+      {
+        label: "Reviewer signature",
+        width: sigWidth,
+        value: input.review.reviewerName,
+      },
+      {
+        label: "Date reviewed",
+        width: contentWidth(margin) - sigWidth - 16,
+        value: input.review.reviewedOn,
+      },
+    ],
+    { margin },
+  );
+
   stampRecordMark(doc, { documentId: `site-review-${input.siteName}`, margin });
   return doc;
 }
@@ -211,10 +244,8 @@ export function buildPreSurveyPdf(input: {
   y += 24;
 
   for (const row of input.rows) {
-    if (y > 620) {
-      doc.addPage();
-      y = 64;
-    }
+    // Keep each individual's whole block (name + 8 fields) together.
+    y = reserve(doc, y, 16 + 7 * 14 + 22);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.text(row.name || "Unnamed", margin, y);

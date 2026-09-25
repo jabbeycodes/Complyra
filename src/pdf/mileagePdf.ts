@@ -148,25 +148,24 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
 
   const columns = buildColumns(input.people);
   const lineH = 11;
+  const headerCells = Object.fromEntries(columns.map((c) => [c.key, c.label]));
+  const headerOpts = { bold: true, fill: HEADER_FILL as RGB, fontSize: 8 };
 
-  function drawRow(
+  // Paint one row at the current y (no pagination). Font is reset every call so
+  // a repeated header never leaks its bold weight into the following data row.
+  function paintRow(
     cells: Record<string, string>,
-    opts: { bold?: boolean; fill?: RGB | null; fontSize?: number } = {},
+    opts: { bold?: boolean; fill?: RGB | null; fontSize?: number },
   ) {
     const fontSize = opts.fontSize ?? 8;
     doc.setFont("helvetica", opts.bold ? "bold" : "normal");
     doc.setFontSize(fontSize);
-    // measure row height from the wrapped cell with the most lines
     let rowH = fontSize + 7;
     const wrapped = columns.map((col) => {
       const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 8);
       rowH = Math.max(rowH, lines.length * lineH + 8);
       return lines as string[];
     });
-    if (y + rowH > FOOTER_Y - 12) {
-      doc.addPage();
-      y = 52;
-    }
     let x = MARGIN;
     columns.forEach((col, i) => {
       if (opts.fill) {
@@ -182,8 +181,29 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
     y += rowH;
   }
 
-  const headerCells = Object.fromEntries(columns.map((c) => [c.key, c.label]));
-  drawRow(headerCells, { bold: true, fill: HEADER_FILL, fontSize: 8 });
+  function drawRow(
+    cells: Record<string, string>,
+    opts: { bold?: boolean; fill?: RGB | null; fontSize?: number } = {},
+  ) {
+    const fontSize = opts.fontSize ?? 8;
+    doc.setFont("helvetica", opts.bold ? "bold" : "normal");
+    doc.setFontSize(fontSize);
+    let rowH = fontSize + 7;
+    for (const col of columns) {
+      const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 8);
+      rowH = Math.max(rowH, lines.length * lineH + 8);
+    }
+    // Paginate before drawing, and repeat the column header on the new page so
+    // continuation pages are never a headerless grid.
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+      paintRow(headerCells, headerOpts);
+    }
+    paintRow(cells, opts);
+  }
+
+  paintRow(headerCells, headerOpts);
 
   for (const trip of input.trips) {
     const shareById = Object.fromEntries(
@@ -302,10 +322,12 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
   ];
   const lineH = 12;
   const rowById = new Map(input.rows.map((row) => [row.individualId, row]));
+  const headerCells = Object.fromEntries(columns.map((c) => [c.key, c.label]));
+  const headerOpts = { bold: true, fill: HEADER_FILL as RGB };
 
-  function drawRow(
+  function paintRow(
     cells: Record<string, string>,
-    opts: { bold?: boolean; fill?: RGB | null } = {},
+    opts: { bold?: boolean; fill?: RGB | null },
   ) {
     const fontSize = 9;
     doc.setFont("helvetica", opts.bold ? "bold" : "normal");
@@ -316,10 +338,6 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
       rowH = Math.max(rowH, lines.length * lineH + 8);
       return lines as string[];
     });
-    if (y + rowH > FOOTER_Y - 12) {
-      doc.addPage();
-      y = 52;
-    }
     let x = MARGIN;
     columns.forEach((col, i) => {
       if (opts.fill) {
@@ -335,10 +353,24 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
     y += rowH;
   }
 
-  drawRow(
-    Object.fromEntries(columns.map((c) => [c.key, c.label])),
-    { bold: true, fill: HEADER_FILL },
-  );
+  function drawRow(
+    cells: Record<string, string>,
+    opts: { bold?: boolean; fill?: RGB | null } = {},
+  ) {
+    let rowH = 9 + 10;
+    for (const col of columns) {
+      const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 8);
+      rowH = Math.max(rowH, lines.length * lineH + 8);
+    }
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+      paintRow(headerCells, headerOpts);
+    }
+    paintRow(cells, opts);
+  }
+
+  paintRow(headerCells, headerOpts);
 
   for (const person of input.people) {
     const row = rowById.get(person.id);
@@ -444,9 +476,12 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
     { key: "total", label: "Yearly Total", width: totalW },
   ];
 
-  function drawRow(
+  const headerCells = Object.fromEntries(columns.map((c) => [c.key, c.label]));
+  const headerOpts = { bold: true, fill: HEADER_FILL as RGB };
+
+  function paintRow(
     cells: Record<string, string>,
-    opts: { bold?: boolean; fill?: RGB | null } = {},
+    opts: { bold?: boolean; fill?: RGB | null },
   ) {
     const fontSize = 7;
     doc.setFont("helvetica", opts.bold ? "bold" : "normal");
@@ -457,10 +492,6 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
       rowH = Math.max(rowH, lines.length * lineH + 6);
       return lines as string[];
     });
-    if (y + rowH > FOOTER_Y - 12) {
-      doc.addPage();
-      y = 52;
-    }
     let x = MARGIN;
     columns.forEach((col, i) => {
       if (opts.fill) {
@@ -476,10 +507,24 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
     y += rowH;
   }
 
-  drawRow(
-    Object.fromEntries(columns.map((c) => [c.key, c.label])),
-    { bold: true, fill: HEADER_FILL },
-  );
+  function drawRow(
+    cells: Record<string, string>,
+    opts: { bold?: boolean; fill?: RGB | null } = {},
+  ) {
+    let rowH = 7 + 7;
+    for (const col of columns) {
+      const lines = doc.splitTextToSize(cells[col.key] ?? "", col.width - 6);
+      rowH = Math.max(rowH, lines.length * lineH + 6);
+    }
+    if (y + rowH > FOOTER_Y - 12) {
+      doc.addPage();
+      y = 52;
+      paintRow(headerCells, headerOpts);
+    }
+    paintRow(cells, opts);
+  }
+
+  paintRow(headerCells, headerOpts);
 
   const rowById = new Map(
     input.summary.rows.map((row) => [row.individualId, row]),
@@ -495,6 +540,7 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
     if (y + rowH > FOOTER_Y - 12) {
       doc.addPage();
       y = 52;
+      paintRow(headerCells, headerOpts);
     }
     doc.setFillColor(...GROUP_FILL);
     doc.rect(MARGIN, y, CONTENT_W, rowH, "F");

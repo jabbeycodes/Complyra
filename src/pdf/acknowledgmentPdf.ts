@@ -76,21 +76,27 @@ export function buildAcknowledgmentPdf(
   doc.setDrawColor(236, 236, 240);
   doc.line(margin, y, 558, y);
   y += 24;
-  doc.setFont("helvetica", "bold");
-  doc.text("Staff member", margin, y);
-  doc.text("Signature", 230, y);
-  doc.text("Initials", 380, y);
-  doc.text("Date", 470, y);
-  y += 10;
-  doc.setDrawColor(117, 97, 188);
-  doc.line(margin, y, 558, y);
-  y += 22;
-  doc.setFont("helvetica", "normal");
+
+  // Column header, redrawn at the top of every continuation page so a
+  // multi-page roster is never a headerless block of signatures.
+  const drawColumnHeader = (yy: number): number => {
+    doc.setFont("helvetica", "bold");
+    doc.text("Staff member", margin, yy);
+    doc.text("Signature", 230, yy);
+    doc.text("Initials", 380, yy);
+    doc.text("Date", 470, yy);
+    yy += 10;
+    doc.setDrawColor(117, 97, 188);
+    doc.line(margin, yy, 558, yy);
+    doc.setFont("helvetica", "normal");
+    return yy + 22;
+  };
+  y = drawColumnHeader(y);
 
   for (const row of rows) {
     if (y > 720) {
       doc.addPage();
-      y = 64;
+      y = drawColumnHeader(64);
     }
     doc.text(row.staffName, margin, y);
     if (row.signedAt && row.signatureMark && row.signatureMark.startsWith("data:image")) {
