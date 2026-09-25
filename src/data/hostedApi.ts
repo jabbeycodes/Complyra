@@ -111,6 +111,23 @@ import {
   stripBackfillMarker,
   withBackfillMarker,
 } from "./mileage";
+import type { NotificationPayload } from "../features/notifications/notify";
+import {
+  canSeeHealthTrack,
+  dayKeyOf,
+  detectDailyIntakeAlert,
+  detectHealthAlert,
+  healthTrackAlertTargets,
+  dailyIntakeAlertTargets,
+  isMeaningfulNote,
+  validateHealthTrackInput,
+  type HealthAlertOutboxItem,
+  type HealthTrackEntry,
+  type HealthTrackFilters,
+  type HealthTrackKind,
+  type HealthTrackRevision,
+  type HealthTrackRevisionAction,
+} from "./healthTrack";
 import {
   ROLE_TEMPLATES,
   capabilityForRoleKey,
@@ -8868,6 +8885,585 @@ export class HostedApi implements ComplyraApi {
       );
     }
     return summarizeAgencyYearlyMileage(tripsBySite, sites, year);
+  }
+
+  // ===== HEALTH-TRACK HOSTED (health tracking, Supabase) =====
+  // Health Track: per-individual health logging (HostedApi, Supabase).
+  // Tables: health_track_entries, health_track_entry_revisions (immutable),
+  // health_alert_outbox (delivery ledger).
+  //
+  // Authorization is enforced in the database: RLS scopes reads by role +
+  // site (health.record / health.review holders at their own scope;
+  // auditors hold the read-only health.view permission and read
+  // agency-wide; HR sees nothing), and every write goes through a
+  // SECURITY DEFINER RPC
+  // (health_entry_create / amend / void / review / attach_photo,
+  // health_alerts_queue / mark) that checks permission, site scope, field
+  // ownership, and allowed transitions. There are no direct
+  // insert/update/delete policies, so client-side writes are denied.
+  // The permission checks below are defense-in-depth for early, clear errors.
+
+  private mapHealthEntry(row: Record<string, unknown>): HealthTrackEntry {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      individualId: String(row.individual_id),
+      siteId: String(row.site_id),
+      kind: row.kind as HealthTrackEntry["kind"],
+      occurredAt: String(row.occurred_at),
+      details: (row.details ?? {}) as HealthTrackEntry["details"],
+      recordedByUserId: String(row.recorded_by ?? ""),
+      recordedByName: String(row.recorded_by_name ?? ""),
+      flagForNurse: Boolean(row.flag_for_nurse),
+      flagReason: (row.flag_reason as string | null) ?? null,
+      nurseReviewedAt: (row.nurse_reviewed_at as string | null) ?? null,
+      nurseReviewedBy: (row.nurse_reviewed_by as string | null) ?? null,
+      nurseNote: (row.nurse_note as string | null) ?? null,
+      voidedAt: (row.voided_at as string | null) ?? null,
+      voidedBy: (row.voided_by as string | null) ?? null,
+      voidReason: (row.void_reason as string | null) ?? null,
+      alertDelivery: (row.alert_delivery as HealthTrackEntry["alertDelivery"]) ?? null,
+      alertDeliveryError: (row.alert_delivery_error as string | null) ?? null,
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+    };
+  }
+
+  private mapHealthRevision(row: Record<string, unknown>): HealthTrackRevision {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      entryId: String(row.entry_id),
+      revisionNo: Number(row.revision_no),
+      action: row.action as HealthTrackRevisionAction,
+      occurredAt: String(row.occurred_at),
+      details: (row.details ?? {}) as HealthTrackRevision["details"],
+      flagForNurse: Boolean(row.flag_for_nurse),
+      flagReason: (row.flag_reason as string | null) ?? null,
+      voidedAt: (row.voided_at as string | null) ?? null,
+      actorUserId: String(row.actor_user_id ?? ""),
+      actorName: String(row.actor_name ?? ""),
+      reason: (row.reason as string | null) ?? null,
+      createdAt: String(row.created_at ?? ""),
+    };
+  }
+
+  private mapHealthOutboxItem(row: Record<string, unknown>): HealthAlertOutboxItem {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      entryId: String(row.entry_id),
+      siteId: String(row.site_id),
+      targetUserId: (row.target_user_id as string | null) ?? null,
+      targetRoleKey: (row.target_role_key as string | null) ?? null,
+      title: String(row.title ?? ""),
+      body: String(row.body ?? ""),
+      deepLink: String(row.deep_link ?? ""),
+      dedupeKey: String(row.dedupe_key ?? ""),
+      status: row.status as HealthAlertOutboxItem["status"],
+      attempts: Number(row.attempts ?? 0),
+      lastError: (row.last_error as string | null) ?? null,
+      createdAt: String(row.created_at ?? ""),
+      sentAt: (row.sent_at as string | null) ?? null,
+    };
+  }
+
+  private assertValidHealthInput(
+    kind: HealthTrackKind,
+    details: unknown,
+    occurredAt: string | undefined,
+  ) {
+    const errors = validateHealthTrackInput(kind, details);
+    if (errors.length > 0) throw new Error(errors.join(" "));
+    if (!occurredAt || Number.isNaN(Date.parse(occurredAt))) {
+      throw new Error("Enter a valid date and time for when this happened.");
+    }
+  }
+
+  private async healthEntryOrThrow(
+    session: SessionUser,
+    id: string,
+  ): Promise<HealthTrackEntry> {
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load the health entry.");
+    if (!data) throw new Error("Health entry not found.");
+    const entry = this.mapHealthEntry(data as Record<string, unknown>);
+    if (!canAccessSite(session, entry.siteId)) throw new Error("Health entry not found.");
+    return entry;
+  }
+
+  private async healthIndividualOrThrow(session: SessionUser, individualId: string) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    if (!canAccessSite(session, person.siteId)) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return person;
+  }
+
+  /** Active house-manager user ids for a site (hosted path). */
+  private async hostedHealthSiteManagerIds(
+    agencyId: string,
+    siteId: string,
+  ): Promise<string[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("user_id, expires_on")
+      .eq("agency_id", agencyId)
+      .eq("site_id", siteId)
+      .eq("role_key", "house_manager");
+    if (error || !data) return [];
+    return (data as Array<{ user_id: string; expires_on: string | null }>)
+      .filter((m) => !m.expires_on || m.expires_on >= today)
+      .map((m) => m.user_id);
+  }
+
+  /**
+   * Invoke notify-event once per target and record the per-target outcome
+   * through health_alerts_mark. A rejected call or an edge-function error
+   * marks that target failed — visible on the outbox and the entry, never
+   * silently swallowed. Returns the refreshed entry.
+   */
+  private async deliverHealthAlerts(
+    entry: HealthTrackEntry,
+    targets: NotificationPayload[],
+  ): Promise<HealthTrackEntry> {
+    const invocations = await Promise.allSettled(
+      targets.map((payload) =>
+        this.client.functions.invoke("notify-event", {
+          // The notify-event function accepts snake_case fields.
+          body: {
+            agency_id: payload.agencyId,
+            user_id: payload.userId ?? null,
+            role_key: payload.roleKey ?? null,
+            type: payload.type,
+            title: payload.title,
+            body: payload.body,
+            deep_link: payload.deepLink,
+            entity_type: payload.entityType ?? null,
+            entity_id: payload.entityId ?? null,
+            dedupe_key: payload.dedupeKey ?? null,
+          },
+        }),
+      ),
+    );
+    const results = targets.map((payload, index) => {
+      const settled = invocations[index];
+      if (settled.status === "rejected") {
+        const reason = settled.reason as { message?: string } | undefined;
+        return {
+          dedupe_key: payload.dedupeKey,
+          ok: false,
+          error: reason?.message ?? String(settled.reason ?? "send failed"),
+        };
+      }
+      const fnError = (settled.value as { error?: unknown } | null)?.error;
+      return {
+        dedupe_key: payload.dedupeKey,
+        ok: !fnError,
+        error: fnError ? String(fnError) : null,
+      };
+    });
+    const { data, error } = await this.client.rpc("health_alerts_mark", {
+      p_entry_id: entry.id,
+      p_results: results,
+    });
+    throwIf(error, "Could not record the alert delivery.");
+    return this.mapHealthEntry(data as Record<string, unknown>);
+  }
+
+  /** Shape client-built alert targets for the outbox (health_alerts_queue). */
+  private outboxJson(targets: NotificationPayload[]) {
+    return targets.map((payload) => ({
+      target_user_id: payload.userId ?? null,
+      target_role_key: payload.roleKey ?? null,
+      title: payload.title,
+      body: payload.body,
+      deep_link: payload.deepLink,
+      dedupe_key: payload.dedupeKey,
+    }));
+  }
+
+  /**
+   * Queue alert targets in the outbox (durable, idempotent on dedupe_key)
+   * and attempt delivery. Delivery failures stay visible for retry.
+   */
+  private async queueAndDeliverHealthAlerts(
+    entry: HealthTrackEntry,
+    targets: NotificationPayload[],
+  ): Promise<HealthTrackEntry> {
+    if (targets.length === 0) return entry;
+    const { error } = await this.client.rpc("health_alerts_queue", {
+      p_entry_id: entry.id,
+      p_alerts: this.outboxJson(targets),
+    });
+    throwIf(error, "Could not queue the health alerts.");
+    return this.deliverHealthAlerts(entry, targets);
+  }
+
+  /** Build the abnormal-finding alert targets for an entry (hosted path). */
+  private async abnormalAlertTargets(
+    session: SessionUser,
+    entry: { id: string; kind: HealthTrackEntry["kind"]; occurredAt: string; siteId: string },
+    individualName: string,
+    siteName: string,
+    reason: string,
+  ): Promise<NotificationPayload[]> {
+    return healthTrackAlertTargets({
+      agencyId: session.agencyId,
+      entryId: entry.id,
+      individualName,
+      siteName,
+      kind: entry.kind,
+      reason,
+      occurredAt: entry.occurredAt,
+      hmUserIds: await this.hostedHealthSiteManagerIds(session.agencyId, entry.siteId),
+    });
+  }
+
+  /** Day-level very-low-intake alert for the hosted path (idempotent per individual + day). */
+  private async queueAndDeliverDailyIntakeAlert(
+    session: SessionUser,
+    entry: HealthTrackEntry,
+    individualName: string,
+    siteName: string,
+  ): Promise<HealthTrackEntry> {
+    const day = dayKeyOf(entry.occurredAt);
+    const dayEntries = await this.listHealthEntries({
+      individualId: entry.individualId,
+      from: day,
+      to: day,
+      kinds: ["meal", "fluid"],
+    });
+    const reason = detectDailyIntakeAlert(dayEntries);
+    if (!reason) return entry;
+    const targets = dailyIntakeAlertTargets({
+      agencyId: session.agencyId,
+      entryId: entry.id,
+      individualId: entry.individualId,
+      individualName,
+      siteName,
+      kind: entry.kind,
+      reason,
+      occurredAt: entry.occurredAt,
+      day,
+      hmUserIds: await this.hostedHealthSiteManagerIds(session.agencyId, entry.siteId),
+    });
+    return this.queueAndDeliverHealthAlerts(entry, targets);
+  }
+
+  async listHealthEntries(filters: HealthTrackFilters): Promise<HealthTrackEntry[]> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    let query = this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    if (filters.individualId) query = query.eq("individual_id", filters.individualId);
+    if (filters.siteId) query = query.eq("site_id", filters.siteId);
+    if (filters.kinds && filters.kinds.length > 0) query = query.in("kind", filters.kinds);
+    if (filters.flaggedOnly) query = query.eq("flag_for_nurse", true);
+    if (filters.needsNurseReview) {
+      query = query.eq("flag_for_nurse", true).is("nurse_reviewed_at", null);
+    }
+    if (filters.from) query = query.gte("occurred_at", `${filters.from}T00:00:00`);
+    if (filters.to) {
+      const dayAfter = new Date(`${filters.to}T12:00:00`);
+      dayAfter.setDate(dayAfter.getDate() + 1);
+      query = query.lt("occurred_at", dayAfter.toISOString().slice(0, 10) + "T00:00:00");
+    }
+    const { data, error } = await query
+      .order("occurred_at", { ascending: false })
+      .order("created_at", { ascending: false });
+    throwIf(error, "Could not load health entries.");
+    return ((data ?? []) as Record<string, unknown>[])
+      .map((row) => this.mapHealthEntry(row))
+      .filter((entry) => canAccessSite(session, entry.siteId));
+  }
+
+  async getHealthEntry(id: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    return this.healthEntryOrThrow(session, id);
+  }
+
+  async addHealthEntry(
+    input: import("./healthTrack").AddHealthTrackInput,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const person = await this.healthIndividualOrThrow(session, input.individualId);
+    this.assertValidHealthInput(input.kind, input.details, input.occurredAt);
+    const alert = detectHealthAlert(input.kind, input.details);
+    const entryId = crypto.randomUUID();
+    // Alert targets are built client-side (manager names/site) but persisted
+    // to the outbox inside the create RPC, atomically with the entry.
+    let targets: NotificationPayload[] = [];
+    if (alert.flagged && alert.reason) {
+      const site = await this.siteRecord(person.siteId);
+      targets = await this.abnormalAlertTargets(
+        session,
+        { id: entryId, kind: input.kind, occurredAt: input.occurredAt, siteId: person.siteId },
+        person.fullName,
+        site?.name ?? "",
+        alert.reason,
+      );
+    }
+    const { data, error } = await this.client.rpc("health_entry_create", {
+      p_id: entryId,
+      p_individual_id: person.id,
+      p_kind: input.kind,
+      p_occurred_at: input.occurredAt,
+      p_details: input.details,
+      p_alerts: this.outboxJson(targets),
+    });
+    throwIf(error, "Could not save the health entry.");
+    let entry = this.mapHealthEntry(data as Record<string, unknown>);
+    if (targets.length > 0) {
+      entry = await this.deliverHealthAlerts(entry, targets);
+    }
+    if (input.kind === "meal" || input.kind === "fluid") {
+      const site = await this.siteRecord(person.siteId);
+      entry = await this.queueAndDeliverDailyIntakeAlert(
+        session,
+        entry,
+        person.fullName,
+        site?.name ?? "",
+      );
+    }
+    return entry;
+  }
+
+  async updateHealthEntry(
+    id: string,
+    patch: import("./healthTrack").UpdateHealthTrackInput,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const before = await this.healthEntryOrThrow(session, id);
+    const occurredAt = patch.occurredAt ?? before.occurredAt;
+    const details = patch.details ?? before.details;
+    this.assertValidHealthInput(before.kind, details, occurredAt);
+    if (
+      (patch.occurredAt !== undefined || patch.details !== undefined) &&
+      !isMeaningfulNote(patch.reason)
+    ) {
+      throw new Error("Say why you are correcting this entry.");
+    }
+    const { data, error } = await this.client.rpc("health_entry_amend", {
+      p_entry_id: id,
+      p_occurred_at: occurredAt,
+      p_details: details,
+      p_reason: (patch.reason ?? "").trim(),
+    });
+    throwIf(error, "Could not update the health entry.");
+    let updated = this.mapHealthEntry(data as Record<string, unknown>);
+    if (!before.flagForNurse && updated.flagForNurse && updated.flagReason) {
+      const person = await this.healthIndividualOrThrow(session, updated.individualId);
+      const site = await this.siteRecord(updated.siteId);
+      const targets = await this.abnormalAlertTargets(
+        session,
+        updated,
+        person.fullName,
+        site?.name ?? "",
+        updated.flagReason,
+      );
+      updated = await this.queueAndDeliverHealthAlerts(updated, targets);
+    }
+    return updated;
+  }
+
+  /**
+   * Void (soft-delete) an entry with a required reason. Never destructive:
+   * the row keeps voided_at/voided_by/void_reason and the immutable
+   * revision trail keeps the full history.
+   */
+  async voidHealthEntry(id: string, reason: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    if (!isMeaningfulNote(reason)) {
+      throw new Error("Say why you are voiding this entry.");
+    }
+    const { data, error } = await this.client.rpc("health_entry_void", {
+      p_entry_id: id,
+      p_reason: reason.trim(),
+    });
+    throwIf(error, "Could not void the health entry.");
+    return this.mapHealthEntry(data as Record<string, unknown>);
+  }
+
+  async markHealthEntryReviewed(id: string, note: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.review");
+    if (!isMeaningfulNote(note)) {
+      throw new Error("Add a review note (a few words) so the review is auditable.");
+    }
+    const { data, error } = await this.client.rpc("health_entry_review", {
+      p_entry_id: id,
+      p_note: note.trim(),
+    });
+    throwIf(error, "Could not mark the health entry reviewed.");
+    return this.mapHealthEntry(data as Record<string, unknown>);
+  }
+
+  /**
+   * Re-attempt delivery of failed alert targets. Delivery outcomes move back
+   * through the outbox onto the entry (ok / partial / failed) — failures
+   * stay visible until they are actually delivered.
+   */
+  async retryHealthAlerts(id: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const entry = await this.healthEntryOrThrow(session, id);
+    const { data: rows, error: queueError } = await this.client
+      .from("health_alert_outbox")
+      .select("*")
+      .eq("entry_id", id)
+      .eq("status", "failed");
+    throwIf(queueError, "Could not load the alert delivery status.");
+    const failed = (rows ?? []) as Record<string, unknown>[];
+    if (failed.length === 0) {
+      throw new Error("There are no failed alert deliveries to retry.");
+    }
+    const targets: NotificationPayload[] = failed.map((row) => ({
+      agencyId: entry.agencyId,
+      userId: (row.target_user_id as string | null) ?? null,
+      roleKey: (row.target_role_key as string | null) ?? null,
+      type: "incident.followup",
+      title: String(row.title ?? ""),
+      body: String(row.body ?? ""),
+      deepLink: String(row.deep_link ?? ""),
+      entityType: "health-track-entry",
+      entityId: entry.id,
+      dedupeKey: String(row.dedupe_key ?? ""),
+    }));
+    return this.deliverHealthAlerts(entry, targets);
+  }
+
+  async listHealthEntryRevisions(id: string): Promise<HealthTrackRevision[]> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.healthEntryOrThrow(session, id);
+    const { data, error } = await this.client
+      .from("health_track_entry_revisions")
+      .select("*")
+      .eq("entry_id", id)
+      .order("revision_no", { ascending: true });
+    throwIf(error, "Could not load the entry history.");
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      this.mapHealthRevision(row),
+    );
+  }
+
+  async listHealthAlertOutbox(entryId: string): Promise<HealthAlertOutboxItem[]> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.healthEntryOrThrow(session, entryId);
+    const { data, error } = await this.client
+      .from("health_alert_outbox")
+      .select("*")
+      .eq("entry_id", entryId)
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the alert delivery status.");
+    return ((data ?? []) as Record<string, unknown>[]).map((row) =>
+      this.mapHealthOutboxItem(row),
+    );
+  }
+
+  /**
+   * Attach an already-uploaded photo to its entry. The path must live in the
+   * entry's own agency/individual folders (enforced in the RPC too).
+   */
+  async attachHealthPhoto(entryId: string, photoPath: string): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const { data, error } = await this.client.rpc("health_entry_attach_photo", {
+      p_entry_id: entryId,
+      p_photo_path: photoPath,
+    });
+    throwIf(error, "Could not attach the photo.");
+    return this.mapHealthEntry(data as Record<string, unknown>);
+  }
+
+  /**
+   * Remove an uploaded photo (orphan cleanup when entry save fails). The
+   * path must belong to the caller's agency and an individual the caller
+   * may log health entries for; storage RLS enforces the same binding.
+   */
+  async deleteHealthPhoto(fileId: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const parts = fileId.split("/");
+    const [agencyId, individualId] = parts;
+    if (parts.length < 3 || agencyId !== session.agencyId || !individualId) {
+      throw new Error("Photo does not belong to this entry.");
+    }
+    await this.healthIndividualOrThrow(session, individualId);
+    const { error } = await this.client.storage
+      .from("health-photos")
+      .remove([fileId]);
+    throwIf(error, "Could not delete the photo.");
+  }
+
+  async uploadHealthPhoto(individualId: string, file: File): Promise<string> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const person = await this.healthIndividualOrThrow(session, individualId);
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      throw new Error("Upload a PNG or JPEG photo.");
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Keep the photo under 5 MB.");
+    }
+    const sanitized =
+      file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "photo";
+    // Namespaced per agency + individual so photo retrieval is bound to the
+    // entry's own folders (enforced by storage RLS and the attach RPC).
+    const path = `${session.agencyId}/${person.id}/${crypto.randomUUID()}-${sanitized}`;
+    const { error: uploadError } = await this.client.storage
+      .from("health-photos")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    throwIf(uploadError, "Could not store the photo.");
+    return path;
+  }
+
+  async getHealthPhoto(fileId: string): Promise<{ name: string; blob: Blob } | null> {
+    const session = await this.requireSession();
+    if (!canSeeHealthTrack(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    // Bind the path to the caller's agency and an individual the caller may
+    // log health entries for — an arbitrary storage path is not accepted.
+    // Storage RLS enforces the same binding.
+    const parts = fileId.split("/");
+    const [agencyId, individualId] = parts;
+    if (parts.length < 3 || agencyId !== session.agencyId || !individualId) {
+      throw new Error("Photo not found.");
+    }
+    await this.healthIndividualOrThrow(session, individualId);
+    const { data, error } = await this.client.storage
+      .from("health-photos")
+      .download(fileId);
+    if (error || !data) return null;
+    const name =
+      fileId.split("/").pop()?.replace(/^[0-9a-fA-F-]{36}-/, "") || fileId;
+    return { name, blob: data };
   }
 
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
