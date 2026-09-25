@@ -123,6 +123,23 @@ test("consultation packet has writable Findings, Comments, and Follow-Up section
   assert.ok(text.includes("Follow-Up Date"), "follow-up date line");
   assert.ok(text.includes("Appointment Details"), "appointment details line");
   assert.ok(text.includes("Consultant signature"), "signature completion area");
+  // These are actual AcroForm controls, not only lines drawn on the page.
+  assert.ok(text.includes("/AcroForm"), "PDF declares an interactive form");
+  for (const field of [
+    "consultation.findings",
+    "consultation.comments",
+    "consultation.follow_up_required",
+    "consultation.follow_up_date",
+    "consultation.follow_up_details",
+    "consultation.consultant_signature",
+    "consultation.signature_date",
+  ]) {
+    assert.ok(text.includes(field), `interactive field ${field}`);
+  }
+  assert.ok(
+    text.includes("/FT /Btn") && text.includes("/Kids ["),
+    "follow-up choice is one mutually exclusive radio-button group",
+  );
   // Identity locks: no full SSN ever appears on a consultation packet.
   assert.ok(!text.includes("SSN"), "no SSN on consultation packet");
 });
