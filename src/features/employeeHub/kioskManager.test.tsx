@@ -329,13 +329,13 @@ describe("PunchExceptions", () => {
     );
     assert.ok(html.includes("Punch exceptions"));
     assert.ok(html.includes("Late (1)"), "late filter chip with count");
-    assert.ok(html.includes("Overtime trending (1)"), "overtime filter chip with count");
+    assert.ok(html.includes("Over schedule (1)"), "over-schedule filter chip with count");
     assert.ok(html.includes("Remote (1)"), "remote filter chip with count");
     assert.ok(html.includes("Alex Rivera"));
     assert.ok(html.includes("Sam Chen"));
     assert.ok(html.includes("Approve"), "one-tap approve action");
     assert.ok(html.includes("Flag"), "one-tap flag action");
-    assert.ok(html.includes("Review upcoming shifts"), "overtime hint for system-level rows");
+    assert.ok(html.includes("Weekly overtime is tracked separately"), "over-schedule hint for system-level rows");
     assert.ok(html.includes("not a scoring demerit"), "remote hint for review rows");
     assert.ok(!html.includes("<img"), "no photo thumbnails");
   });

@@ -81,7 +81,7 @@ function myStatusLabel(r: HrOpenShiftResponse | undefined): { text: string; cls:
   if (!r) return null;
   if (r.decision === "approved") return { text: "Approved: it's yours", cls: "approved" };
   if (r.decision === "denied") return { text: "Not approved", cls: "denied" };
-  if (r.response === "requested" && r.wouldBeOvertime) return { text: "Bid sent · over 40 hours, needs approval", cls: "due_soon" };
+  if (r.response === "requested" && r.wouldBeOvertime) return { text: "Bid sent · past 41 hours, needs approval", cls: "due_soon" };
   return { text: RESPONSE_LABEL[r.response], cls: r.response === "declined" ? "denied" : r.response === "picked_up" ? "approved" : "pending" };
 }
 
@@ -219,8 +219,9 @@ export function OpenShiftsTab({
     <section className="hub-card" aria-label="Open shifts">
       <h2>Open Shifts</h2>
       <p className="hub-sub">
-        Pick up or bid on coverage your managers post. You can work up to {DEFAULT_WEEKLY_LIMIT_HOURS} hours a
-        week; anything that would go over needs your manager&rsquo;s approval.
+        Pick up or bid on coverage your managers post. The work week runs Sunday to Saturday. You can work up
+        to {DEFAULT_WEEKLY_LIMIT_HOURS} hours a week (up to an hour over is fine); anything past 41 hours needs
+        your manager&rsquo;s approval.
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
       {notice && <div className="hub-status approved" role="status" style={{ marginBottom: 12 }}>{notice}</div>}
@@ -375,7 +376,7 @@ export function OpenShiftsTab({
               </label>
               <p className="hub-form-wide hub-sub">
                 {kind === "temporary"
-                  ? `${draftHours || 0} hours. Anyone who would go over ${DEFAULT_WEEKLY_LIMIT_HOURS} hours that week sends a bid for your approval instead of taking it.`
+                  ? `${draftHours || 0} hours. Anyone who would go past 41 hours that week (Sunday–Saturday) sends a bid for your approval instead of taking it.`
                   : `${draftHours} hours a week. Permanent shifts are always bids; approving one adds it to that person's recurring schedule.`}
               </p>
             </div>
@@ -424,7 +425,7 @@ export function OpenShiftsTab({
                               </span>
                               <span className="hub-item-sub">
                                 {b.weekHoursBefore}h already {s.kind === "permanent" ? "per week" : "that week"}
-                                {b.wouldBeOvertime ? ` · over ${DEFAULT_WEEKLY_LIMIT_HOURS} hours: approving allows overtime` : ""}
+                                {b.wouldBeOvertime ? " · past 41 hours: approving allows overtime" : ""}
                                 {!b.trainedAtSite ? " · not trained at this site yet" : ""}
                               </span>
                             </div>

@@ -6,8 +6,9 @@
 --   slot). Staff trained at that site see it and bid, pick up, or decline.
 -- - HR posts PERMANENT openings visible to ALL staff in the agency; anyone
 --   eligible can apply.
--- - Staff may work up to 40 hours a week (the agency's overtime threshold).
---   Anything that would go over is never auto-assigned: it becomes a request
+-- - Staff may work up to 40 hours a week (Sunday–Saturday). Overtime is only
+--   flagged past 41 hours (an hour's tolerance, so 30 minutes over is
+--   ignored). A pickup past 41 hours is never auto-assigned: it becomes a bid
 --   that needs a manager's approval.
 --
 -- Modeled on OpenShifts in scheduling apps (When I Work, Deputy): eligible
@@ -25,8 +26,8 @@
 -- - Pickups run in one locked transaction, so two staff can never take the
 --   same last slot.
 --
--- Weeks for the overtime check are Monday-based in America/Chicago (Missouri
--- agencies), matching the documented convention in 20260914020000.
+-- The agency work week runs Sunday through Saturday, in America/Chicago
+-- (Missouri agencies; same time zone convention as 20260914020000).
 
 begin;
 
@@ -222,8 +223,10 @@ begin
       return;
     end if;
 
-    v_week_start := date_trunc('week', p_shift.starts_at at time zone 'America/Chicago')
-      at time zone 'America/Chicago';
+    -- Sunday-to-Saturday week: date_trunc('week') is Monday-based, so shift
+    -- by a day to land on the Sunday on or before the shift.
+    v_week_start := (date_trunc('week', (p_shift.starts_at at time zone 'America/Chicago') + interval '1 day')
+                     - interval '1 day') at time zone 'America/Chicago';
     select coalesce(sum(extract(epoch from (least(s.ends_at, v_week_start + interval '7 days')
                                             - greatest(s.starts_at, v_week_start))) / 3600.0), 0)
       into week_hours
@@ -253,7 +256,9 @@ begin
     v_new_hours := p_shift.weekly_hours;
   end if;
 
-  would_be_overtime := week_hours + v_new_hours > v_threshold;
+  -- Flag line is the threshold plus an hour's tolerance (41h for a 40-hour
+  -- week), so running up to an hour over (e.g. 30 minutes) is ignored.
+  would_be_overtime := week_hours + v_new_hours > v_threshold + 1;
 end;
 $$;
 
@@ -511,7 +516,7 @@ begin
                   week_hours_before = excluded.week_hours_before;
     perform private.notify_user(v_row.agency_id, v_row.posted_by, 'hr.open_shift_bid',
       coalesce(v_name, 'A staff member') || ' bid on ' || v_row.title,
-      case when v_check.would_be_overtime then 'Would go over 40 hours: needs your approval.'
+      case when v_check.would_be_overtime then 'Would go past 41 hours this week: needs your approval.'
            else 'Approve or deny in Open shifts.' end, v_row.id);
     return 'requested';
   end if;

@@ -160,10 +160,11 @@ function overlapDays(aStart: string, aEnd: string, bStart: string, bEnd: string)
   );
 }
 
+/** The agency work week runs Sunday through Saturday. */
 function startOfWeek(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  x.setDate(x.getDate() - x.getDay());
   return x;
 }
 

@@ -152,3 +152,30 @@ test("local store: only HR/administrators post agency-wide", async () => {
     /Only HR/,
   );
 });
+
+test("the work week runs Sunday to Saturday: a Sunday shift starts a new week", () => {
+  // 36 hours Mon Sep 28 - Thu Oct 1; the next Sunday (Oct 4) is a new week.
+  const existing = [0, 1, 2, 3].map((d) => ({
+    startsAt: new Date(`2026-09-${28 + d}T06:00:00`).toISOString(),
+    endsAt: new Date(`2026-09-${28 + d}T15:00:00`).toISOString(),
+    status: "published" as const,
+  }));
+  const saturday = temp({ startsAt: new Date("2026-10-03T06:30:00").toISOString(), endsAt: new Date("2026-10-03T14:30:00").toISOString() });
+  const sunday = temp({ startsAt: new Date("2026-10-04T06:30:00").toISOString(), endsAt: new Date("2026-10-04T14:30:00").toISOString() });
+  assert.equal(evaluatePickup({ shift: saturday, trainedAtSite: true, existingShifts: existing }).wouldBeOvertime, true);
+  const r = evaluatePickup({ shift: sunday, trainedAtSite: true, existingShifts: existing });
+  assert.equal(r.weekHours, 0);
+  assert.equal(r.direct, true);
+});
+
+test("30 minutes over 40 is ignored; past 41 hours becomes a bid", () => {
+  const worked = (hours: number) => [{
+    startsAt: new Date("2026-09-28T00:00:00").toISOString(),
+    endsAt: new Date(new Date("2026-09-28T00:00:00").getTime() + hours * 3_600_000).toISOString(),
+    status: "published" as const,
+  }];
+  // 32.5h + 8h = 40.5h: within tolerance, picked up directly.
+  assert.equal(evaluatePickup({ shift: temp(), trainedAtSite: true, existingShifts: worked(32.5) }).direct, true);
+  // 33.5h + 8h = 41.5h: past 41, a bid.
+  assert.equal(evaluatePickup({ shift: temp(), trainedAtSite: true, existingShifts: worked(33.5) }).direct, false);
+});

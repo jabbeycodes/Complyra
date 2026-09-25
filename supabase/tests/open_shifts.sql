@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(24);
+select plan(26);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency with Home A (Lawton) and Home B (Cedar).
@@ -58,6 +58,9 @@ select lives_ok($$insert into ids select 'temp_fc', post_open_shift('c2000000-00
 select lives_ok($$insert into ids select 'temp_fri', post_open_shift('c2000000-0000-0000-0000-000000000001','temporary','Friday evening',
   ((select mon from t) + interval '4 days' + time '14:30') at time zone 'America/Chicago', ((select mon from t) + interval '4 days' + time '22:30') at time zone 'America/Chicago',
   '{}',null,null,null,'',1,'first_come','site')$$, 'HM posts a second temporary shift');
+select lives_ok($$insert into ids select 'temp_sun', post_open_shift('c2000000-0000-0000-0000-000000000001','temporary','Sunday day',
+  ((select mon from t) + interval '6 days' + time '06:30') at time zone 'America/Chicago', ((select mon from t) + interval '6 days' + time '14:30') at time zone 'America/Chicago',
+  '{}',null,null,null,'',1,'first_come','site')$$, 'HM posts a Sunday shift');
 select lives_ok($$insert into ids select 'perm', post_open_shift('c2000000-0000-0000-0000-000000000001','permanent','Weekday evenings',
   null,null,'{1,2,3,4,5}','14:30','22:30',((select mon from t))::date,'',1,'first_come','site')$$, 'HM posts a permanent slot');
 select is((select pickup_mode from hr_open_shifts where id=(select id from ids where name='perm')),'approval','Permanent slots are always bids');
@@ -76,7 +79,7 @@ select throws_ok($$select post_open_shift('c2000000-0000-0000-0000-000000000001'
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2000000-0000-0000-0000-000000000004"}',true);
 select is((select count(*)::int from hr_open_shifts),0,'Staff not trained at the site don''t see its postings');
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2000000-0000-0000-0000-000000000002"}',true);
-select is((select count(*)::int from hr_open_shifts),3,'Trained staff see the site''s postings');
+select is((select count(*)::int from hr_open_shifts),4,'Trained staff see the site''s postings');
 select throws_ok($$insert into hr_open_shifts(agency_id,site_id,title,starts_at,ends_at,posted_by)
   values ('a2000000-0000-0000-0000-000000000001','c2000000-0000-0000-0000-000000000001','Sneaky',now()+interval '1 day',now()+interval '1 day 8 hours','d2000000-0000-0000-0000-000000000002')$$,
   '42501',null,'Postings can''t be written directly');
@@ -93,17 +96,22 @@ select throws_ok($$select respond_open_shift((select id from ids where name='tem
 -- ---------------- 40-hour limit: over-threshold pickups become bids ----------------
 select is(respond_open_shift((select id from ids where name='temp_fri'),'pick_up'),'requested',
   'At 36h, an 8h pickup would pass 40h, so it becomes a bid');
-select is((select would_be_overtime from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003'),true,
+select is((select would_be_overtime from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003' and open_shift_id=(select id from ids where name='temp_fri')),true,
   'The bid is flagged as overtime');
-select throws_ok($$select decide_open_shift_request((select id from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003'), true)$$,
+select throws_ok($$select decide_open_shift_request((select id from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003' and open_shift_id=(select id from ids where name='temp_fri')), true)$$,
   '42501',null,'A DSP cannot approve bids');
+
+-- The following Sunday starts a new Sunday-to-Saturday week, so DSP2 is back to 0 hours.
+select is(respond_open_shift((select id from ids where name='temp_sun'),'pick_up'),'picked_up',
+  'A Sunday shift starts a new week: no overtime, picked up directly');
 
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2000000-0000-0000-0000-000000000002"}',true);
 select is(respond_open_shift((select id from ids where name='perm'),'pick_up'),'requested','DSP1 bids on the permanent slot');
 
 -- ---------------- HM approves ----------------
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2000000-0000-0000-0000-000000000001"}',true);
-select is(decide_open_shift_request((select id from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003'), true),'approved',
+select is(decide_open_shift_request((select id from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000003'
+  and open_shift_id=(select id from ids where name='temp_fri')), true),'approved',
   'HM approves the overtime bid');
 select is(decide_open_shift_request((select id from hr_open_shift_responses where staff_id='d2000000-0000-0000-0000-000000000002'
   and open_shift_id=(select id from ids where name='perm')), true),'approved','HM awards the permanent slot');

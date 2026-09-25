@@ -49,7 +49,7 @@ describe("Open Shifts tab", () => {
       <OpenShiftsTab session={session({})} store={hmStore} sites={sites} canPostSite canPostAgency={false} />,
     );
 
-    expect(screen.getByText(/You can work up to 40 hours a week/)).toBeTruthy();
+    expect(screen.getByText(/anything past 41 hours needs/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Evening 2:30p–10:30p" }));
     fireEvent.change(screen.getByLabelText(/How it.s filled/), { target: { value: "first_come" } });
     fireEvent.click(screen.getByRole("button", { name: /Post shift/ }));

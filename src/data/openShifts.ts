@@ -6,7 +6,8 @@
  *   TEMPORARY (one dated shift) or PERMANENT (a recurring weekly slot).
  *   Staff trained at that site see it.
  * - HR (and administrators) post PERMANENT openings to the whole agency.
- * - Staff may work up to the agency's weekly threshold (40 hours). A pickup
+ * - Staff may work up to the agency's weekly threshold (40 hours in a
+ *   Sunday-to-Saturday week). A pickup
  *   that would go over is never assigned automatically: it becomes a bid a
  *   manager approves.
  * - Permanent slots are always bids; an approved bid becomes the staff
@@ -18,7 +19,7 @@
  * Wording: "Individual/Individuals" only — never client/patient.
  */
 
-import { computePatternWeeklyHours, STAFFING_DAY_LABELS, type HrShift } from "./hr";
+import { computePatternWeeklyHours, OVERTIME_TOLERANCE_HOURS, STAFFING_DAY_LABELS, type HrShift } from "./hr";
 
 export type OpenShiftKind = "temporary" | "permanent";
 export type OpenShiftAudience = "site" | "agency";
@@ -184,7 +185,8 @@ export function evaluatePickup(input: {
   weeklyLimitHours?: number;
 }): PickupEvaluation {
   const { shift } = input;
-  const limit = input.weeklyLimitHours ?? DEFAULT_WEEKLY_LIMIT_HOURS;
+  // Flag line: the weekly limit plus an hour's tolerance (41h for 40).
+  const limit = (input.weeklyLimitHours ?? DEFAULT_WEEKLY_LIMIT_HOURS) + OVERTIME_TOLERANCE_HOURS;
   if (shift.audience === "site" && !input.trainedAtSite) {
     return { blocker: "Not trained at this program site yet.", weekHours: 0, wouldBeOvertime: false, direct: false };
   }
@@ -197,7 +199,7 @@ export function evaluatePickup(input: {
     if (live.some((x) => Date.parse(x.startsAt) < e && Date.parse(x.endsAt) > s)) {
       return { blocker: "Already scheduled during this time.", weekHours: 0, wouldBeOvertime: false, direct: false };
     }
-    const weekStart = mondayOf(new Date(s)).getTime();
+    const weekStart = sundayOf(new Date(s)).getTime();
     const weekEnd = weekStart + 7 * 86_400_000;
     for (const x of live) {
       const a = Math.max(Date.parse(x.startsAt), weekStart);
@@ -218,17 +220,17 @@ export function evaluatePickup(input: {
 export function pickupActionLabel(shift: HrOpenShift, evaluation?: PickupEvaluation | null): string {
   if (shift.kind === "permanent") return "Bid on this shift";
   if (shift.pickupMode === "approval") return "Bid on this shift";
-  if (evaluation?.wouldBeOvertime) return "Request (over 40 hours)";
+  if (evaluation?.wouldBeOvertime) return "Request (past 41 hours)";
   return "Pick up";
 }
 
 /* ------------------------------- helpers ------------------------------- */
 
-function mondayOf(d: Date): Date {
+/** The agency work week runs Sunday through Saturday. */
+function sundayOf(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
-  const offset = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - offset);
+  x.setDate(x.getDate() - x.getDay());
   return x;
 }
 

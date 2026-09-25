@@ -13,9 +13,11 @@
  *    an audit trail in Timecard Review.
  *  - "Flag" opens an inline correction request; the staff member is
  *    notified via the hr.punch_exception event.
- * Overtime-trending flags additionally raise hr.overtime_alert to the
- * scheduling managers (house_manager + program_manager), deduped per
- * staff member per day.
+ * Weekly hours (Sunday–Saturday) drive overtime notifications: from 36h an
+ * "approaching overtime" heads-up goes to the staff member and the scheduling
+ * managers; past 41h (40 plus an hour's tolerance, so 30 minutes over is
+ * ignored) hr.overtime_alert goes to the managers. The day-level "Over
+ * schedule" flag (worked longer than scheduled that day) never notifies.
  *
  * A "Remote" filter lists punches made from a personal device under a
  * hub.remote_punch grant. Remote punches are reviewable here but are never
@@ -27,12 +29,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Flag } from "lucide-react";
 import { Empty } from "../../components";
 import { createSupabaseBrowserClient } from "../../data/index";
-import { detectExceptions } from "../../data/hr";
+import { detectExceptions, OVERTIME_FLAG_HOURS, weeklyHoursStatus, workWeekStart } from "../../data/hr";
 import type { HrPunch, HrPunchRules, HrShift } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
 import type { SessionUser } from "../../data/types";
 import { emitHrEvent } from "../notifications/useNotifications";
-import { overtimeAlertPayload, punchExceptionPayload } from "../notifications/notify";
+import { overtimeAlertPayload, overtimeApproachingPayload, punchExceptionPayload } from "../notifications/notify";
 import {
   adaptKioskStore,
   isKioskStoreAvailable,
@@ -57,7 +59,7 @@ const KIND_LABELS: Record<DisplayKind, string> = {
   missed_punch: "Missed punch",
   offline: "Offline",
   auto_clockout: "Auto clock-out",
-  overtime_trending: "Overtime trending",
+  overtime_trending: "Over schedule",
   overlap: "Overlap",
   remote: "Remote",
 };
@@ -255,12 +257,14 @@ export function PunchExceptions({
           }),
         );
 
-        // 7-day minutes per staff for the overtime alert body.
+        // Minutes this work week (Sunday–Saturday) per staff member.
+        const weekStartMs = workWeekStart(new Date(`${date}T12:00:00`)).getTime();
         const weekMin: Record<string, number> = {};
         for (const [staffId, list] of Object.entries(byStaff)) {
           let mins = 0;
           const open: HrPunch[] = [];
-          for (const p of [...list].sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))) {
+          const thisWeek = list.filter((p) => Date.parse(p.punchedAt) >= weekStartMs);
+          for (const p of [...thisWeek].sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))) {
             if (p.kind === "in") open.push(p);
             else {
               const first = open.shift();
@@ -286,34 +290,60 @@ export function PunchExceptions({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, date, siteFilter, visibleStaff, kioskAvailable]);
 
-  // Overtime alerts: emit once per staff member per day while the dashboard
-  // is open; the server dedupes on the payload's dedupe key as well.
+  // Weekly overtime notifications: approaching (36h+) to the staff member and
+  // managers, overtime (past 41h) to managers. Once per staff member, week and
+  // status while the dashboard is open; the server dedupes on the key too.
   useEffect(() => {
-    if (!notifyClient || exceptions.length === 0) return;
-    const weekLabel = dayStamp(new Date());
-    for (const ex of exceptions) {
-      if (ex.kind !== "overtime_trending") continue;
-      const key = `${ex.staffId}:${weekLabel}`;
+    if (!notifyClient) return;
+    const weekLabel = dayStamp(workWeekStart(new Date(`${date}T12:00:00`)));
+    for (const [staffId, minutes] of Object.entries(weekMinutesByStaff)) {
+      const hours = minutes / 60;
+      const status = weeklyHoursStatus(hours);
+      if (status === "ok") continue;
+      const key = `${staffId}:${weekLabel}:${status}`;
       if (emittedAlerts.current.has(key)) continue;
       emittedAlerts.current.add(key);
-      const hours = (weekMinutesByStaff[ex.staffId] ?? 0) / 60;
+      if (status === "approaching") {
+        void emitHrEvent(
+          notifyClient,
+          overtimeApproachingPayload({
+            agencyId: session.agencyId,
+            userId: staffId,
+            staffId,
+            staffName: staffName(staffId),
+            hoursWorked: hours,
+            weekLabel,
+            forStaffMember: true,
+          }),
+        );
+      }
       for (const roleKey of ["house_manager", "program_manager"]) {
         void emitHrEvent(
           notifyClient,
-          overtimeAlertPayload({
-            agencyId: session.agencyId,
-            roleKey,
-            staffId: ex.staffId,
-            staffName: staffName(ex.staffId),
-            hoursWorked: hours,
-            thresholdHours: 40,
-            weekLabel,
-          }),
+          status === "overtime"
+            ? overtimeAlertPayload({
+                agencyId: session.agencyId,
+                roleKey,
+                staffId,
+                staffName: staffName(staffId),
+                hoursWorked: hours,
+                thresholdHours: OVERTIME_FLAG_HOURS,
+                weekLabel,
+              })
+            : overtimeApproachingPayload({
+                agencyId: session.agencyId,
+                roleKey,
+                staffId,
+                staffName: staffName(staffId),
+                hoursWorked: hours,
+                weekLabel,
+                forStaffMember: false,
+              }),
         );
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exceptions, notifyClient]);
+  }, [weekMinutesByStaff, notifyClient, date]);
 
   // Timecard scores per staff (Worker 1), for the row subtitles.
   const scores = useMemo(() => {
@@ -530,7 +560,7 @@ export function PunchExceptions({
                       {ex.kind === "missed_punch"
                         ? "Use the missed-punch review below to add the missing punch."
                         : ex.kind === "overtime_trending"
-                          ? "Review upcoming shifts on the Team Schedule tab."
+                          ? "Worked longer than scheduled today. Weekly overtime is tracked separately (past 41 hours)."
                           : ex.kind === "remote"
                             ? "Punched from a personal device — reviewable, not a scoring demerit."
                             : "Resolve in Timecard Review."}
@@ -542,6 +572,32 @@ export function PunchExceptions({
           })}
         </ul>
       )}
+      {(() => {
+        const flagged = Object.entries(weekMinutesByStaff)
+          .map(([staffId, minutes]) => ({ staffId, hours: minutes / 60, status: weeklyHoursStatus(minutes / 60) }))
+          .filter((row) => row.status !== "ok")
+          .sort((a, b) => b.hours - a.hours);
+        if (flagged.length === 0) return null;
+        return (
+          <section aria-label="Weekly hours" style={{ marginTop: 20 }}>
+            <h3>Weekly hours (Sunday–Saturday)</h3>
+            <p className="hub-sub">Overtime is flagged past {OVERTIME_FLAG_HOURS} hours; up to an hour over 40 is ignored.</p>
+            <ul className="hub-list">
+              {flagged.map((row) => (
+                <li className="hub-list-item" key={row.staffId}>
+                  <div className="hub-item-main">
+                    <span className="hub-item-title">{staffName(row.staffId)}</span>
+                    <span className="hub-item-sub">{row.hours.toFixed(1)} hours this week</span>
+                  </div>
+                  <span className={`hub-status ${row.status === "overtime" ? "overdue" : "due_soon"}`}>
+                    {row.status === "overtime" ? "Overtime" : "Approaching overtime"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })()}
       {candidates.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <h3>Auto clock-out candidates ({candidates.length})</h3>
