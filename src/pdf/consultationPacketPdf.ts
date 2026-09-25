@@ -518,3 +518,34 @@ function drawMedHeader(
   doc.setFontSize(8);
   doc.setTextColor(47, 70, 48);
   let x = margin + 4;
+  for (const column of columns) {
+    doc.text(column.label, x, y + 12);
+    x += column.width;
+  }
+  return y + 18;
+}
+
+function drawMedRow(
+  doc: import("jspdf").jsPDF,
+  margin: number,
+  y: number,
+  columns: { label: string; width: number }[],
+  values: string[],
+) {
+  const wrapped = values.map((value, index) =>
+    doc.splitTextToSize(value, columns[index].width - 8),
+  );
+  const rowHeight = Math.max(18, ...wrapped.map((lines) => lines.length * 11 + 8));
+  y = ensureSpace(doc, y, rowHeight);
+  doc.setDrawColor(232, 224, 212);
+  doc.rect(margin, y, 504, rowHeight);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(36, 30, 24);
+  let x = margin + 4;
+  wrapped.forEach((lines, index) => {
+    doc.text(lines, x, y + 12);
+    x += columns[index].width;
+  });
+  return y + rowHeight;
+}
