@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(18);
+select plan(19);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -41,7 +41,8 @@ select throws_ok($$insert into documents(agency_id,individual_id,title,kind) val
 select is((select count(*)::int from agencies where id='a0000000-0000-0000-0000-000000000002'),0,'Other tenant is hidden');
 
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d0000000-0000-0000-0000-000000000003"}',true);
-select is((select count(*)::int from individuals),1,'DSP reads exactly their assigned person');
+select is((select count(*)::int from individuals),2,'DSP reads every Individual at the site where they are assigned');
+select is((select count(*)::int from individuals where site_id='c0000000-0000-0000-0000-000000000002'),0,'DSP cannot read Individuals at another site');
 select throws_ok($$update requirement_definitions set title='Changed terms' where id='f1000000-0000-0000-0000-000000000001'$$,'P0001',null,'DSP cannot edit assigned requirement terms');
 select throws_ok($$update requirement_definitions set status='compliant',evidence_note='' where id='f1000000-0000-0000-0000-000000000001'$$,'P0001',null,'Completion requires evidence');
 select lives_ok($$update requirement_definitions set status='compliant',evidence_note='Reviewed and filed' where id='f1000000-0000-0000-0000-000000000001'$$,'DSP completes their approved work');
@@ -53,7 +54,7 @@ select set_config('request.jwt.claims','{"role":"service_role"}',true);
 update staff_assignments set ends_on=current_date-1 where user_id='d0000000-0000-0000-0000-000000000003';
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d0000000-0000-0000-0000-000000000003"}',true);
-select is((select count(*)::int from individuals),0,'Ended assignments revoke individual access');
+select is((select count(*)::int from individuals),2,'Reassignment keeps access to the site the DSP worked at');
 reset role;
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 update memberships set expires_on=current_date-1 where user_id='d0000000-0000-0000-0000-000000000002';

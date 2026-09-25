@@ -206,6 +206,21 @@ export function canLogDoseException(roleKey: string) {
 }
 
 /**
+ * Who may change an existing MAR mark. DSPs correct their own entries at any
+ * time; managers and nurses may correct anyone's. Mirrors the
+ * med_dose_marks_update RLS policy (20260925140000).
+ */
+export function canCorrectDoseMark(
+  roleKey: string,
+  sessionUserId: string,
+  mark: { markedBy: string | null },
+) {
+  if (!canLogDoseException(roleKey)) return false;
+  if (roleKey !== "dsp") return true;
+  return mark.markedBy === sessionUserId;
+}
+
+/**
  * Who may edit a completed (but unlocked) training signoff line. Mirrors the
  * training_signoffs RLS update policy; the app enforces it before the API
  * so staff get a clear message instead of a database error.
