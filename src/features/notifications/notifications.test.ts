@@ -56,7 +56,7 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 29);
+  assert.equal(NOTIFICATION_TYPES.length, 34);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -424,4 +424,12 @@ test("delegation payloads name template and individual and dedupe per (assignmen
 
   assert.notEqual(review.dedupe_key, published.dedupe_key, "different types differ");
   assert.notEqual(published.dedupe_key, overdue.dedupe_key, "different types differ");
+});
+
+test("open-shift notifications open the Employee Hub", async () => {
+  const { notificationPage } = await import("./notify");
+  for (const t of ["hr.open_shift_posted", "hr.open_shift_bid", "hr.open_shift_picked_up", "hr.open_shift_approved", "hr.open_shift_denied"]) {
+    assert.ok(isNotificationType(t), t);
+  }
+  assert.equal(notificationPage("/hub/open-shifts"), "Employee Hub");
 });

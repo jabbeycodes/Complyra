@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   CalendarCheck,
   CalendarDays,
+  CalendarPlus,
   CalendarRange,
   Check,
   ChevronLeft,
@@ -105,6 +106,8 @@ import { PunchExceptions } from "./PunchExceptions";
 import { MissedPunchReview } from "./MissedPunchReview";
 import { PunchRulesConfig } from "./PunchRulesConfig";
 import { KioskAdmin } from "./KioskAdmin";
+import { OpenShiftsTab } from "./OpenShiftsTab";
+import { createOpenShiftStore, type OpenShiftStore } from "../../data/openShiftStore";
 import { scheduledVsActual } from "./punchInsights";
 import {
   adaptRemotePunchStore,
@@ -131,6 +134,8 @@ interface EmployeeHubShellProps {
   staffList: HubStaffEntry[];
   sites: HubSite[];
   initialTab?: string;
+  /** Injected in tests; defaults to the hosted/local open-shift store. */
+  openShiftStore?: OpenShiftStore;
 }
 
 /* --------------------------------- utils --------------------------------- */
@@ -347,6 +352,7 @@ interface TabDef {
 const EMPLOYEE_TABS: TabDef[] = [
   { id: "schedule", label: "My Schedule", icon: CalendarDays },
   { id: "staffing", label: "Staffing", icon: CalendarRange },
+  { id: "open-shifts", label: "Open Shifts", icon: CalendarPlus },
   { id: "timeclock", label: "Time Clock", icon: Clock },
   { id: "timecard", label: "My Timecard", icon: FileText },
   { id: "compliance", label: "My Compliance", icon: ShieldCheck },
@@ -378,8 +384,25 @@ export function EmployeeHubShell({
   staffList,
   sites,
   initialTab,
+  openShiftStore,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
+  // HMs/PMs post for their sites; HR and administrators also post agency-wide.
+  const canPostAgencyWide =
+    can("hub.manage_staffing") && ["hr", "administrator"].includes(session.roleKey);
+  const shiftStore = useMemo(
+    () =>
+      openShiftStore ??
+      createOpenShiftStore({
+        agencyId: session.agencyId,
+        userId: session.userId,
+        fullName: session.fullName,
+        canManageSchedule: can("hub.manage_schedule"),
+        canPostAgencyWide,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openShiftStore, session],
+  );
   const tabs = useMemo(
     () => [
       ...EMPLOYEE_TABS,
@@ -508,6 +531,15 @@ export function EmployeeHubShell({
         {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
         {tab === "staffing" && (
           <StaffingTab session={session} store={store} staffList={staffList} sites={sites} />
+        )}
+        {tab === "open-shifts" && (
+          <OpenShiftsTab
+            session={session}
+            store={shiftStore}
+            sites={sites}
+            canPostSite={can("hub.manage_schedule")}
+            canPostAgency={canPostAgencyWide}
+          />
         )}
         {tab === "timeclock" && <TimeClockTab session={session} store={store} onChanged={refresh} />}
         {tab === "timecard" && (

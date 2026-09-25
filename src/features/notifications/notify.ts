@@ -45,7 +45,12 @@ export type NotificationType =
   | "hr.swap_approved"
   | "hr.swap_denied"
   | "hr.punch_exception"
-  | "hr.overtime_alert";
+  | "hr.overtime_alert"
+  | "hr.open_shift_posted"
+  | "hr.open_shift_bid"
+  | "hr.open_shift_picked_up"
+  | "hr.open_shift_approved"
+  | "hr.open_shift_denied";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "training.assigned",
@@ -77,6 +82,11 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "hr.swap_denied",
   "hr.punch_exception",
   "hr.overtime_alert",
+  "hr.open_shift_posted",
+  "hr.open_shift_bid",
+  "hr.open_shift_picked_up",
+  "hr.open_shift_approved",
+  "hr.open_shift_denied",
 ];
 
 export function isNotificationType(value: unknown): value is NotificationType {
@@ -230,6 +240,11 @@ export const NOTIFICATION_META: Record<
   "hr.swap_denied": { status: "expired", label: "Shift swap denied" },
   "hr.punch_exception": { status: "pending", label: "Punch flagged for review" },
   "hr.overtime_alert": { status: "expiring", label: "Overtime trending" },
+  "hr.open_shift_posted": { status: "pending", label: "Open shift posted" },
+  "hr.open_shift_bid": { status: "pending", label: "Bid on an open shift" },
+  "hr.open_shift_picked_up": { status: "compliant", label: "Open shift picked up" },
+  "hr.open_shift_approved": { status: "compliant", label: "Open shift approved" },
+  "hr.open_shift_denied": { status: "expired", label: "Open shift not approved" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },
   "delegation.ack_overdue": { status: "late", label: "Delegation acknowledgment overdue" },

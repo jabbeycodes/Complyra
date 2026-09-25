@@ -574,7 +574,7 @@ function renderWith(session: SessionUser, store: HrStore, initialTab?: string): 
   );
 }
 
-const EMPLOYEE_TAB_LABELS = ["My Schedule", "Staffing", "Time Clock", "My Timecard", "My Compliance", "Documents", "Time Off"];
+const EMPLOYEE_TAB_LABELS = ["My Schedule", "Staffing", "Open Shifts", "Time Clock", "My Timecard", "My Compliance", "Documents", "Time Off"];
 const MANAGER_TAB_LABELS = ["Team Schedule", "Attendance", "Timecards", "Team Compliance", "Payroll"];
 
 describe("EmployeeHubShell", () => {
