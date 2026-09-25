@@ -140,6 +140,8 @@ test("consultation packet has writable Findings, Comments, and Follow-Up section
     text.includes("/FT /Btn") && text.includes("/Kids ["),
     "follow-up choice is one mutually exclusive radio-button group",
   );
+  assert.ok(text.includes("/yes") && text.includes("/no"), "radio choices preserve distinct export values");
+  assert.ok(!text.includes("/undefined"), "radio choices never serialize an undefined value");
   // Identity locks: no full SSN ever appears on a consultation packet.
   assert.ok(!text.includes("SSN"), "no SSN on consultation packet");
 });
