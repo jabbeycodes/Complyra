@@ -222,10 +222,24 @@ export function buildConsultationPacketPdf(input: {
   // Writable clinical sections — the consultant completes these on paper or on
   // screen after the visit. 24px between major sections.
   y += 24;
-  y = drawWriteInSection(doc, margin, keepTogether, "Findings / Recommendations", 5);
+  y = drawWriteInSection(
+    doc,
+    margin,
+    keepTogether,
+    "Findings / Recommendations",
+    5,
+    "consultation.findings",
+  );
 
   y += 20;
-  y = drawWriteInSection(doc, margin, keepTogether, "Comments / Notes", 4);
+  y = drawWriteInSection(
+    doc,
+    margin,
+    keepTogether,
+    "Comments / Notes",
+    4,
+    "consultation.comments",
+  );
 
   y += 20;
   y = drawFollowUpSection(doc, margin, keepTogether);
@@ -283,10 +297,14 @@ function drawWriteInSection(
   keepTogether: KeepTogether,
   label: string,
   lineCount: number,
+  fieldName: string,
 ) {
   const blockHeight = 18 + lineCount * WRITE_IN_LINE_GAP + 6;
   let y = keepTogether(blockHeight);
   y = sectionHeader(doc, margin, y, label);
+  addTextField(doc, fieldName, margin, y + 2, CONTENT_WIDTH, lineCount * WRITE_IN_LINE_GAP - 4, {
+    multiline: true,
+  });
   y = drawRuledLines(doc, margin, y, lineCount);
   return y;
 }
@@ -314,9 +332,8 @@ function drawFollowUpSection(
   let y = keepTogether(blockHeight);
   y = sectionHeader(doc, margin, y, "Follow-Up Required?");
 
-  drawCheckbox(doc, margin, y);
+  addFollowUpRadioButtons(doc, margin, y);
   labelText(doc, margin + 18, y, "Yes");
-  drawCheckbox(doc, margin + 92, y);
   labelText(doc, margin + 110, y, "No");
   y += 22;
 
@@ -327,11 +344,23 @@ function drawFollowUpSection(
   doc.text("If yes, complete the follow-up details below:", margin + indent, y);
   y += 14;
 
-  y = drawInlineLabeledLine(doc, margin, y, "Follow-Up Date", { indent });
+  y = drawInlineLabeledLine(doc, margin, y, "Follow-Up Date", {
+    indent,
+    fieldName: "consultation.follow_up_date",
+  });
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(95, 81, 69);
   doc.text("Appointment Details", margin + indent, y);
+  addTextField(
+    doc,
+    "consultation.follow_up_details",
+    margin + indent,
+    y + 2,
+    CONTENT_WIDTH - indent,
+    WRITE_IN_LINE_GAP * 2 - 4,
+    { multiline: true },
+  );
   y = drawRuledLines(doc, margin, y, 2, {
     indent,
     width: CONTENT_WIDTH - indent,
@@ -358,6 +387,8 @@ function drawSignatureSection(
   doc.setLineWidth(0.5);
   doc.line(margin, lineY, margin + signatureWidth, lineY);
   doc.line(dateX, lineY, dateX + dateWidth, lineY);
+  addTextField(doc, "consultation.consultant_signature", margin, y + 2, signatureWidth, WRITE_IN_LINE_GAP - 4);
+  addTextField(doc, "consultation.signature_date", dateX, y + 2, dateWidth, WRITE_IN_LINE_GAP - 4);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(95, 81, 69);
@@ -372,7 +403,7 @@ function drawInlineLabeledLine(
   margin: number,
   y: number,
   label: string,
-  { indent = 0 }: { indent?: number } = {},
+  { indent = 0, fieldName }: { indent?: number; fieldName?: string } = {},
 ) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -384,13 +415,56 @@ function drawInlineLabeledLine(
   doc.setDrawColor(206, 196, 182);
   doc.setLineWidth(0.5);
   doc.line(lineStart, lineY, margin + CONTENT_WIDTH, lineY);
+  if (fieldName) {
+    addTextField(doc, fieldName, lineStart, y - 12, margin + CONTENT_WIDTH - lineStart, WRITE_IN_LINE_GAP - 4);
+  }
   return y + WRITE_IN_LINE_GAP;
 }
 
-function drawCheckbox(doc: import("jspdf").jsPDF, x: number, y: number, size = 12) {
-  doc.setDrawColor(95, 81, 69);
-  doc.setLineWidth(0.9);
-  doc.rect(x, y - size + 2, size, size);
+/** Add a named AcroForm field so this packet can be completed in a normal PDF viewer. */
+function addTextField(
+  doc: import("jspdf").jsPDF,
+  fieldName: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  { multiline = false }: { multiline?: boolean } = {},
+) {
+  // jsPDF's runtime exposes these as constructors, while its TypeScript
+  // declaration models them as factories.
+  const TextField = doc.AcroForm.TextField as unknown as new () => any;
+  const field = new TextField();
+  field.fieldName = fieldName;
+  field.x = x;
+  field.y = y;
+  field.width = width;
+  field.height = height;
+  field.fontName = "helvetica";
+  field.fontSize = 10;
+  field.multiline = multiline;
+  field.showWhenPrinted = true;
+  doc.addField(field);
+}
+
+/** Yes/No is one radio group, preventing both answers from being selected. */
+function addFollowUpRadioButtons(doc: import("jspdf").jsPDF, x: number, y: number) {
+  const RadioButton = doc.AcroForm.RadioButton as unknown as new () => any;
+  const group = new RadioButton();
+  group.fieldName = "consultation.follow_up_required";
+  group.noToggleToOff = false;
+  // Register the group first so createOption has the document scope it needs.
+  doc.addField(group);
+  const yes = group.createOption("yes");
+  yes.x = x;
+  yes.y = y - 12 + 2;
+  yes.width = 12;
+  yes.height = 12;
+  const no = group.createOption("no");
+  no.x = x + 92;
+  no.y = y - 12 + 2;
+  no.width = 12;
+  no.height = 12;
 }
 
 function labelText(doc: import("jspdf").jsPDF, x: number, y: number, text: string) {
