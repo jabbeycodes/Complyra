@@ -211,12 +211,16 @@ export default function SitesList(props: {
                       <UserPlus size={16} /> Add an individual
                     </button>
                   )}
-                  <button type="button" className="button" onClick={() => onSiteFilter(site.name)}>
-                    Site review pack
-                  </button>
-                  <button type="button" className="button" onClick={() => onSiteFilter(site.name)}>
-                    This month’s checks
-                  </button>
+                  {/* Secondary utilities keep their own row so the primary actions
+                      never wrap 3+1 mid-card (#110 Cut C). */}
+                  <div className="location-card-links">
+                    <button type="button" className="button" onClick={() => onSiteFilter(site.name)}>
+                      Site review pack
+                    </button>
+                    <button type="button" className="button" onClick={() => onSiteFilter(site.name)}>
+                      This month’s checks
+                    </button>
+                  </div>
                 </div>
                 <span className="location-open-hint" aria-hidden="true">
                   Open <ChevronRight size={16} />

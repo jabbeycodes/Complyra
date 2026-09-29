@@ -123,6 +123,22 @@
   grid-column: auto;
 }
 
+/* Utility actions ("Site review pack", "This month's checks") share a second
+   row so the primary Open site / Add an individual pair never wraps 3+1. */
+.site-grid .location-card .location-card-links {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.site-grid .location-card .location-card-links .button {
+  min-height: 38px;
+  padding-block: 6px;
+  font-size: 13px;
+  color: #6b6156;
+}
+
 @media (min-width: 960px) {
   .site-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
