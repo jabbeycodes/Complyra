@@ -11,6 +11,7 @@ import {
 } from "../data/qaAudit";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
+import { contentWidth, drawSignatureRow } from "./layout";
 
 /**
  * QA-AUDIT report PDF (2026-09-14). White and print-friendly: black text on
@@ -106,7 +107,9 @@ export function buildQaAuditPdf(input: {
       if (item.individualName !== lastPerson) {
         lastPerson = item.individualName;
         if (lastPerson) {
-          y = ensure(doc, y, 20, margin);
+          // Keep the person sub-header with the first line of their item so it
+          // never orphans at the foot of a page.
+          y = ensure(doc, y, 44, margin);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
           doc.text(`Individual: ${lastPerson}`, margin, y);
@@ -177,21 +180,29 @@ export function buildQaAuditPdf(input: {
     y += 8;
   }
 
-  // Signatures.
-  y = ensure(doc, y, 60, margin);
+  // Signatures — labeled completion lines, kept whole above the footer band.
+  y = ensure(doc, y, 70, margin);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
+  doc.setTextColor(47, 70, 48);
   doc.text("Signatures", margin, y);
-  y += 16;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(
-    `Auditor: ${audit.auditorSignatureName ?? audit.auditorName ?? "—"}`,
-    margin,
+  doc.setTextColor(36, 30, 24);
+  y += 18;
+  const auditorName = audit.auditorSignatureName ?? audit.auditorName ?? "";
+  const signatureWidth = Math.round(contentWidth(margin) * 0.6);
+  y = drawSignatureRow(
+    doc,
     y,
+    [
+      { label: "Auditor signature", width: signatureWidth, value: auditorName },
+      {
+        label: "Date signed",
+        width: contentWidth(margin) - signatureWidth - 16,
+        value: audit.signedAt ?? "",
+      },
+    ],
+    { margin },
   );
-  y += 14;
-  doc.text(`Signed at: ${audit.signedAt ?? "—"}`, margin, y);
 
   stampRecordMark(doc, {
     documentId: audit.id,

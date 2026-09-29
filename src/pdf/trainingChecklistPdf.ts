@@ -43,18 +43,23 @@ export function buildTrainingChecklistPdf(input: {
     y += 18;
   }
   y += 10;
-  doc.setFont("helvetica", "bold");
-  doc.text("Training item", margin, y);
-  doc.text("Staff initial", 420, y);
-  y += 8;
-  doc.setDrawColor(47, 70, 48);
-  doc.line(margin, y, 558, y);
-  y += 20;
-  doc.setFont("helvetica", "normal");
+  // Column header, redrawn on every continuation page.
+  const drawColumnHeader = (yy: number): number => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Training item", margin, yy);
+    doc.text("Staff initial", 420, yy);
+    yy += 8;
+    doc.setDrawColor(47, 70, 48);
+    doc.line(margin, yy, 558, yy);
+    doc.setFont("helvetica", "normal");
+    return yy + 20;
+  };
+  y = drawColumnHeader(y);
   for (const line of input.checklist.items) {
     if (y > 700) {
       doc.addPage();
-      y = 64;
+      y = drawColumnHeader(64);
     }
     doc.text(line.title, margin, y, { maxWidth: 340 });
     // Show the staff member's ACTUAL initials — never the word "initialed".
@@ -170,6 +175,18 @@ export function buildStaffTrainingChecklistPdf(input: {
     y += 18;
   }
 
+  // Column sub-header ("Training item / Initials / date"), redrawn whenever a
+  // section wraps to a new page so continuation pages stay labeled.
+  const drawColumns = (yy: number): number => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("Training item", margin, yy);
+    doc.text("Initials / date", 420, yy);
+    yy += 6;
+    doc.setDrawColor(47, 70, 48);
+    doc.line(margin, yy, 558, yy);
+    return yy + 16;
+  };
   let lastSection = "";
   for (const line of input.lines) {
     if (line.section !== lastSection) {
@@ -183,17 +200,11 @@ export function buildStaffTrainingChecklistPdf(input: {
       doc.setFontSize(11);
       doc.text(line.section, margin, y);
       y += 6;
-      doc.setFontSize(9);
-      doc.text("Training item", margin, y);
-      doc.text("Initials / date", 420, y);
-      y += 6;
-      doc.setDrawColor(47, 70, 48);
-      doc.line(margin, y, 558, y);
-      y += 16;
+      y = drawColumns(y);
     }
     if (y > 710) {
       doc.addPage();
-      y = 64;
+      y = drawColumns(64);
     }
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);

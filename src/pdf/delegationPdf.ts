@@ -87,11 +87,16 @@ function rosterTable(
     doc.setFont("helvetica", "normal");
     doc.setDrawColor(160, 150, 140);
     doc.line(margin, y + 4, margin + width, y + 4);
+    y += 20;
   };
   drawHeader();
-  y += 20;
   roster.forEach((row, i) => {
-    y = ensureRoom(doc, y, 26);
+    // Repeat the column header when the roster wraps to a new page.
+    if (y + 26 > PAGE_BOTTOM) {
+      doc.addPage();
+      y = 64;
+      drawHeader();
+    }
     let x = margin;
     const name = row.printName ? `${row.printName}${row.title ? ` — ${row.title}` : ""}` : "";
     // Signature includes timestamp (date + time) per audit requirements.

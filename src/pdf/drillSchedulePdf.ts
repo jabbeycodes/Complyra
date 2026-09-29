@@ -8,6 +8,7 @@ import {
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 import { drawSiteLocationFields } from "./siteLocation";
 import type { SiteAddressParts } from "../data/siteAddress";
+import { reserve } from "./layout";
 
 function slug(value: string) {
   return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
@@ -82,11 +83,10 @@ export function buildDrillSchedulePdf(input: {
   doc.text(`* ${MEDICAL_EMERGENCY_RULE}`, margin, y, { maxWidth: 514 });
   y += 28;
 
+  // Keep-with-next: reserve the block before drawing so a month or drill
+  // header never orphans and nothing bleeds into the footer band.
   const pageBreak = (needed: number) => {
-    if (y + needed > 700) {
-      doc.addPage();
-      y = 64;
-    }
+    y = reserve(doc, y, needed);
   };
 
   for (const summary of input.months) {

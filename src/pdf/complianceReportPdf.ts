@@ -39,7 +39,8 @@ function sectionTitle(
   y: number,
   text: string,
 ): number {
-  y = ensureRoom(doc, y, 30);
+  // Keep the title with the first line of its section (no orphaned headers).
+  y = ensureRoom(doc, y, 30 + 24);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(47, 70, 48);
@@ -220,23 +221,33 @@ function renderRequirementTable(
         { label: "Due", w: 80 },
       ];
 
-  y = ensureRoom(doc, y, 24);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  let x = MARGIN;
-  for (const col of cols) {
-    doc.text(col.label, x, y);
-    x += col.w;
-  }
-  y += 4;
-  doc.setDrawColor(160, 150, 140);
-  doc.line(MARGIN, y, MARGIN + CONTENT_WIDTH, y);
-  y += 12;
+  // Header band is redrawn at the top of every continuation page so a table
+  // that wraps is never a headerless list of rows.
+  const drawHeader = (yy: number): number => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    let x = MARGIN;
+    for (const col of cols) {
+      doc.text(col.label, x, yy);
+      x += col.w;
+    }
+    yy += 4;
+    doc.setDrawColor(160, 150, 140);
+    doc.line(MARGIN, yy, MARGIN + CONTENT_WIDTH, yy);
+    doc.setFont("helvetica", "normal");
+    return yy + 12;
+  };
 
-  doc.setFont("helvetica", "normal");
+  // Keep the header with its first row so it never orphans at a page foot.
+  y = ensureRoom(doc, y, 24 + 26);
+  y = drawHeader(y);
+
   for (const r of requirements) {
-    y = ensureRoom(doc, y, 26);
-    x = MARGIN;
+    if (y + 26 > PAGE_BOTTOM) {
+      doc.addPage();
+      y = drawHeader(64);
+    }
+    let x = MARGIN;
     const cells = withStatus
       ? [r.title, r.person, r.site, r.owner, r.status, r.due]
       : [r.title, r.person, r.site, r.owner, r.due];
