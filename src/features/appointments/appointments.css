@@ -1,9 +1,26 @@
 .appointments-filters {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.appointments-filters-primary,
+.appointments-filters-secondary {
+  display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px 16px;
-  margin-bottom: 16px;
+}
+
+.appointments-filters-secondary {
+  padding-bottom: 4px;
+}
+
+/* Keep the disclosure flush with the filter panel padding (no extra top rule
+   that would read as a divider inside the toolbar). */
+.appointments-more-filters {
+  border-top: none;
 }
 
 .appointments-filters label,
