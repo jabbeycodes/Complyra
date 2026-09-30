@@ -559,7 +559,7 @@ export default function ChartOverview({
         />
       ) : null}
 
-      {/* 6. Quiet links — Shift notes stays last.
+      {/* 6. Quiet links — Health track stays last.
           Plain hash hrefs would trip the app's hash router (App.tsx treats
           "#<page>" as a page key), so scroll in-page instead. */}
       <nav className="overview-links" aria-label="Chart sections">
@@ -568,6 +568,8 @@ export default function ChartOverview({
         <a href="#chart-meds" onClick={scrollToChartSection("chart-meds")}>Medication board</a>
         <span aria-hidden="true">·</span>
         <a href="#chart-shift-notes" onClick={scrollToChartSection("chart-shift-notes")}>Shift notes</a>
+        <span aria-hidden="true">·</span>
+        <a href="#chart-health-track" onClick={scrollToChartSection("chart-health-track")}>Health track</a>
       </nav>
     </section>
   );

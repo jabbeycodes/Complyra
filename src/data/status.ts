@@ -9,6 +9,7 @@ import {
   type PermissionKey,
 } from "./permissions";
 import { canSeeAppointments } from "./appointments";
+import { canSeeHealthTrack } from "./healthTrack";
 
 const MS_PER_DAY = 86400000;
 
@@ -82,6 +83,8 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Documents") return can(session, "documents.view");
   // Issue #80: the site-detail "Shift notes" tab mirrors chart visibility.
   if (page === "ShiftNotes") return canSeeShiftNotes(session.roleKey);
+  // HEALTH-TRACK (2026-09-18): agency health-logging page.
+  if (page === "Health Track") return canSeeHealthTrack(session);
   if (page === "Review queue") return can(session, "requirements.approve");
   if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {
@@ -183,6 +186,8 @@ export const CANONICAL_PAGE_ORDER = [
   "Recognition",
   "Settings",
   "Employee Hub",
+  // HEALTH-TRACK (2026-09-18)
+  "Health Track",
 ] as const;
 
 export function defaultLandingPage(session: SessionUser): string {

@@ -39,12 +39,19 @@ import {
   LogOut,
   KeyRound,
   ServerCog,
+  UtensilsCrossed,
+  Droplets,
+  ScanEye,
+  HeartPulse,
+  Zap,
+  CalendarHeart,
+  Candy,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
-import { notificationPage } from "./features/notifications/notify";
+import { healthEntryIdFromLink, notificationPage } from "./features/notifications/notify";
 import {
   Avatar,
   Badge,
@@ -107,6 +114,15 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+// HEALTH-TRACK (2026-09-18): per-individual health logging (meals, fluids,
+// elimination, skin, vitals, seizures, menses, blood sugar).
+import HealthTrackPage from "./features/healthTrack/HealthTrackPage";
+import {
+  HEALTH_TRACK_SECTIONS,
+  canSeeHealthTrack,
+  sectionForKind,
+  type HealthTrackSectionKey,
+} from "./data/healthTrack";
 // HR-EMPLOYEE-HUB (2026-09-16)
 import { Briefcase } from "lucide-react";
 import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
@@ -183,6 +199,10 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  // HEALTH-TRACK (2026-09-18): active left-nav section + selected individual.
+  const [healthTrackSection, setHealthTrackSection] =
+    useState<HealthTrackSectionKey>("meals");
+  const [healthTrackIndividualId, setHealthTrackIndividualId] = useState<string | null>(null);
   const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
   const [evidence, setEvidence] = useState("");
@@ -284,13 +304,25 @@ export default function App() {
       try {
         const fromHash = decodeURIComponent(window.location.hash.replace(/^#/, "")).trim();
         const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash;
-        if (next) setPage(next);
+        if (next) {
+          const healthEntryId = fromHash.startsWith("/")
+            ? healthEntryIdFromLink(fromHash)
+            : null;
+          // Resolving the entry needs a session, so only attempt it once one
+          // exists. `session?.userId` is in the deps below, so cold-start deep
+          // links (email/bookmarked `#/health/<id>`) retry after sign-in loads.
+          // Keying on the user id (not the whole session object) avoids
+          // re-applying the hash on every `refresh()`, which replaces the
+          // session object and would otherwise undo in-app navigation.
+          if (healthEntryId && session) void openHealthEntryDeepLink(healthEntryId);
+          setPage(next);
+        }
       } catch { /* Ignore malformed external links. */ }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, []);
+  }, [session?.userId]);
   // KIOSK-TIME-CLOCK: keep the standalone kiosk screen in sync with the hash.
   useEffect(() => {
     const syncKioskHash = () => setKioskHash(window.location.hash);
@@ -463,6 +495,18 @@ export default function App() {
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  // Health alerts deep-link to /health/<entryId>. Resolve the entry so the
+  // nurse lands on the flagged individual's record (HealthTrackPage adopts the
+  // person's site) instead of an empty "Choose an individual" page.
+  async function openHealthEntryDeepLink(entryId: string) {
+    try {
+      const entry = await api.getHealthEntry(entryId);
+      setHealthTrackSection(sectionForKind(entry.kind));
+      setHealthTrackIndividualId(entry.individualId);
+    } catch {
+      /* Fall back to the section list if the entry can't be resolved. */
+    }
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
@@ -666,6 +710,42 @@ export default function App() {
       items: [["Employee Hub", Briefcase]],
     },
   ] as const;
+  // HEALTH-TRACK (2026-09-18): one nav item per section; clicking opens the
+  // page on that section with no individual selected.
+  const healthTrackIcons: Record<HealthTrackSectionKey, typeof UtensilsCrossed> = {
+    meals: UtensilsCrossed,
+    elimination: Droplets,
+    skin: ScanEye,
+    vitals: HeartPulse,
+    seizures: Zap,
+    menses: CalendarHeart,
+    blood_sugar: Candy,
+  };
+  const healthTrackNav = canSeeHealthTrack(session) ? (
+    <div className="nav-group" key="health-track">
+      <div className="nav-label">HEALTH TRACK</div>
+      {HEALTH_TRACK_SECTIONS.map((htSection) => {
+        const HtIcon = healthTrackIcons[htSection.key];
+        const htActive =
+          page === "Health Track" && healthTrackSection === htSection.key;
+        return (
+          <button
+            key={htSection.key}
+            onClick={() => {
+              setHealthTrackSection(htSection.key);
+              setHealthTrackIndividualId(null);
+              navigate("Health Track");
+            }}
+            aria-current={htActive ? "page" : undefined}
+            className={`nav-item ${htActive ? "active" : ""}`}
+          >
+            <HtIcon size={18} />
+            <span>{htSection.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
     <div className="app-shell">
@@ -700,12 +780,11 @@ export default function App() {
           <ChevronDown size={15} />
         </button>
         <nav>
-          {navItems.map((group) => {
+          {navItems.flatMap((group) => {
             const items = group.items.filter(([name]) =>
               pageVisible(session, name),
             );
-            if (!items.length) return null;
-            return (
+            const rendered = items.length ? (
             <div className="nav-group" key={group.title}>
               <div className="nav-label">{group.title}</div>
               {items.map(([name, Icon]) => (
@@ -738,7 +817,11 @@ export default function App() {
                 </button>
               ))}
             </div>
-            );
+            ) : null;
+            // HEALTH-TRACK: this group sits right after the agency-named group.
+            return group.title === session.agencyName.toUpperCase() && healthTrackNav
+              ? [rendered, healthTrackNav]
+              : [rendered];
           })}
         </nav>
         <div className="sidebar-bottom">
@@ -1088,6 +1171,20 @@ export default function App() {
                     individuals.find((p) => p.name === person)?.id ?? ""
                   }
                   onBack={() => navigate("Individuals")}
+                  onOpenHealthTrack={(htSection) => {
+                    const chartPerson = individuals.find((p) => p.name === person);
+                    setHealthTrackIndividualId(chartPerson?.id ?? null);
+                    setHealthTrackSection(htSection);
+                    navigate("Health Track");
+                  }}
+                />
+              )}
+              {page === "Health Track" && canSeeHealthTrack(session) && (
+                <HealthTrackPage
+                  section={healthTrackSection}
+                  individualId={healthTrackIndividualId}
+                  onSectionChange={setHealthTrackSection}
+                  onIndividualChange={setHealthTrackIndividualId}
                 />
               )}
               {page === "Site detail" && detailSiteId && (
@@ -2326,6 +2423,8 @@ export default function App() {
                 return;
               }
               setModal(null);
+              const healthEntryId = healthEntryIdFromLink(link);
+              if (healthEntryId) void openHealthEntryDeepLink(healthEntryId);
               navigate(target);
             }} />
           {alertItems.length > 0 && <h3>Open priorities</h3>}

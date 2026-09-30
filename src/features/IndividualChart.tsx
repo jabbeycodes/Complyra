@@ -62,6 +62,12 @@ import {
   canEnterShiftNotes,
   canSeeShiftNotes,
 } from "../data/permissions";
+// HEALTH-TRACK (2026-09-18): chart-widget shortcuts into the agency page.
+import {
+  HEALTH_TRACK_SECTIONS,
+  canSeeHealthTrack,
+  type HealthTrackSectionKey,
+} from "../data/healthTrack";
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
   { value: "doctor_notes", label: "Doctor's notes" },
@@ -69,12 +75,25 @@ const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "pdf", label: "PDF / other" },
 ];
 
+// HEALTH-TRACK (2026-09-18): plain-language blurbs for the chart shortcuts.
+const HEALTH_TRACK_SECTION_BLURBS: Record<HealthTrackSectionKey, string> = {
+  meals: "Meals, portions eaten, and fluid ounces.",
+  elimination: "Bowel movements, bladder, and emesis.",
+  skin: "Skin observations with nurse follow-up.",
+  vitals: "Temperature, blood pressure, pulse, and more.",
+  seizures: "Seizure events with duration and description.",
+  menses: "Cycle start and end, flow, and symptoms.",
+  blood_sugar: "Blood sugar readings with context.",
+};
+
 export default function IndividualChart({
   individualId,
   onBack,
+  onOpenHealthTrack,
 }: {
   individualId: string;
   onBack: () => void;
+  onOpenHealthTrack?: (section: HealthTrackSectionKey) => void;
 }) {
   const { api, session, workspace, refresh } = useData();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
@@ -494,6 +513,41 @@ export default function IndividualChart({
             ))}
             {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
             <MedInventoryCard individualId={individualId} />
+          </section>
+        )}
+
+        {/* HEALTH-TRACK (2026-09-18): shortcuts into the agency Health Track
+            page, one row per section. */}
+        {canSeeHealthTrack(chartSession) && (
+          <section
+            className="chart-widget"
+            id="chart-health-track"
+            aria-labelledby="health-track-heading"
+          >
+            <h2 id="health-track-heading">Health track</h2>
+            <p className="stack-help">
+              Daily health logging for this individual — meals, fluids,
+              elimination, skin checks, vitals, seizures, menses, and blood
+              sugar.
+            </p>
+            {HEALTH_TRACK_SECTIONS.map((htSection) => (
+              <div key={htSection.key} className="health-track-shortcut">
+                <div>
+                  <strong>{htSection.label}</strong>
+                  <div className="stack-help">
+                    {HEALTH_TRACK_SECTION_BLURBS[htSection.key]}
+                  </div>
+                </div>
+                {onOpenHealthTrack && (
+                  <button
+                    className="button"
+                    onClick={() => onOpenHealthTrack(htSection.key)}
+                  >
+                    Open
+                  </button>
+                )}
+              </div>
+            ))}
           </section>
         )}
 
