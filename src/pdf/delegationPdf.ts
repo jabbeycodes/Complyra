@@ -69,58 +69,66 @@ function rosterTable(
   margin: number,
   width: number,
 ) {
-  const cols = [
-    { label: "Name / title", w: 130 },
-    { label: "Competency", w: 130 },
-    { label: "Signature", w: 110 },
-    { label: "Training date", w: 70 },
-    { label: "Initials", w: 40 },
-  ];
-  const drawHeader = () => {
+  // Weights sum to the content width so a wrapped competency cell cannot
+  // run into the signature, and the rule under the row matches the columns.
+  const weights = [140, 190, 100, 92, 36];
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+  const cols = ["Name / title", "Competency", "Signature", "Training date", "Initials"].map(
+    (label, index) => ({ label, w: (width * weights[index]) / weightSum }),
+  );
+
+  const paintHeader = (top: number) => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     let x = margin;
     for (const col of cols) {
-      doc.text(col.label, x + 2, y);
+      doc.text(col.label, x + 4, top);
       x += col.w;
     }
-    doc.setFont("helvetica", "normal");
     doc.setDrawColor(160, 150, 140);
-    doc.line(margin, y + 4, margin + width, y + 4);
-    y += 20;
+    doc.line(margin, top + 5, margin + width, top + 5);
+    doc.setFont("helvetica", "normal");
+    return top + 16;
   };
-  drawHeader();
-  roster.forEach((row, i) => {
-    // Repeat the column header when the roster wraps to a new page.
-    if (y + 26 > PAGE_BOTTOM) {
-      doc.addPage();
-      y = 64;
-      drawHeader();
-    }
-    let x = margin;
+
+  y = paintHeader(y);
+  for (const row of roster) {
     const name = row.printName ? `${row.printName}${row.title ? ` — ${row.title}` : ""}` : "";
-    // Signature includes timestamp (date + time) per audit requirements.
-    const sigText = row.signatureName
-      ? row.signedAt
-        ? `${row.signatureName}\n${formatSignatureTimestamp(row.signedAt)}`
-        : row.signatureName
-      : "";
+    // The time stays in the Training date column. Putting it inside the
+    // signature made that cell two lines tall while the row stayed one line.
+    const signed = row.signedAt ? formatSignatureTimestamp(row.signedAt) : "";
+    const training = row.rescindedDate
+      ? signed
+        ? `${signed}\nEnded ${row.rescindedDate}`
+        : `Ended ${row.rescindedDate}`
+      : signed;
     const cells = [
       name,
       row.competency.length > 0 ? row.competency.join("; ") : "",
-      sigText,
-      row.rescindedDate || "",
+      row.signatureName || "",
+      training,
       row.initials || "",
     ];
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    cells.forEach((cell, ci) => {
-      doc.text(cell || "—", x + 2, y, { maxWidth: cols[ci].w - 6 });
-      x += cols[ci].w;
+    const lineH = doc.getLineHeight();
+    const wrapped = cells.map(
+      (cell, index) => doc.splitTextToSize(cell || "—", Math.max(12, cols[index].w - 8)) as string[],
+    );
+    const rowH = Math.max(...wrapped.map((lines) => lines.length)) * lineH + 8;
+    if (y + rowH > PAGE_BOTTOM) {
+      doc.addPage();
+      y = paintHeader(56);
+    }
+    let x = margin;
+    wrapped.forEach((lines, index) => {
+      doc.text(lines, x + 4, y + lineH);
+      x += cols[index].w;
     });
     doc.setDrawColor(210, 200, 190);
-    doc.line(margin, y + 5, margin + width, y + 5);
-    y += 17;
-  });
+    doc.line(margin, y + rowH - 2, margin + width, y + rowH - 2);
+    y += rowH;
+  }
   return y + 6;
 }
 
@@ -230,7 +238,7 @@ export function buildDelegationPdf(input: {
   // 8. Review schedule
   y = ensureRoom(doc, y, 70);
   y = heading(doc, y, "Review schedule", margin);
-  y = fieldLine(doc, y, "Review / expiry date", form.reviewDate || "Not set", margin, width);
+  y = fieldLine(doc, y, "Review date", form.reviewDate || "Not set", margin, width);
   y = fieldLine(
     doc,
     y,

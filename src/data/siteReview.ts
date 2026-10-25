@@ -2,6 +2,13 @@ import type { IndividualRecord, SiteRecord, SiteServiceType } from "./types";
 import type { IndividualProfile, ObligationItem } from "./planStack";
 import type { AdaptiveEquipment } from "./monthlyChecks";
 import { safetyComplete, type HomeSafetyReport } from "./monthlyChecks";
+import {
+  DEFAULT_SHIFT_STARTS,
+  minutesToHhmm,
+  shiftBlocksFromStarts,
+  shiftScheduleProblem,
+  type ShiftStarts,
+} from "./dueItems";
 
 export type { SiteServiceType };
 
@@ -30,6 +37,13 @@ export type SiteFacts = {
   city: string;
   county: string;
   zip: string;
+  /** 24-hour clock. Ends are the shift's own end, so windows may overlap. */
+  dayShiftStart: string;
+  dayShiftEnd: string;
+  eveningShiftStart: string;
+  eveningShiftEnd: string;
+  overnightShiftStart: string;
+  overnightShiftEnd: string;
 };
 
 export const DEFAULT_SITE_FACTS: SiteFacts = {
@@ -44,6 +58,12 @@ export const DEFAULT_SITE_FACTS: SiteFacts = {
   city: "",
   county: "",
   zip: "",
+  dayShiftStart: DEFAULT_SHIFT_STARTS.dayStart,
+  dayShiftEnd: DEFAULT_SHIFT_STARTS.dayEnd ?? "14:00",
+  eveningShiftStart: DEFAULT_SHIFT_STARTS.eveningStart,
+  eveningShiftEnd: DEFAULT_SHIFT_STARTS.eveningEnd ?? "22:00",
+  overnightShiftStart: DEFAULT_SHIFT_STARTS.overnightStart,
+  overnightShiftEnd: DEFAULT_SHIFT_STARTS.overnightEnd ?? "06:00",
 };
 
 export type SiteReviewLineDef = {
@@ -281,6 +301,51 @@ export function normalizeSiteFacts(value?: Partial<SiteFacts> | null): SiteFacts
     city: value?.city?.trim() ?? "",
     county: value?.county?.trim() ?? "",
     zip: value?.zip?.trim() ?? "",
+    ...normalizedShiftStarts(value),
+  };
+}
+
+function clockFromFacts(value?: Partial<SiteFacts> | null): ShiftStarts {
+  const starts: ShiftStarts = {
+    dayStart: value?.dayShiftStart?.trim() || DEFAULT_SITE_FACTS.dayShiftStart,
+    eveningStart: value?.eveningShiftStart?.trim() || DEFAULT_SITE_FACTS.eveningShiftStart,
+    overnightStart: value?.overnightShiftStart?.trim() || DEFAULT_SITE_FACTS.overnightShiftStart,
+  };
+  const dayEnd = value?.dayShiftEnd?.trim() ?? "";
+  const eveningEnd = value?.eveningShiftEnd?.trim() ?? "";
+  const overnightEnd = value?.overnightShiftEnd?.trim() ?? "";
+  if (!dayEnd && !eveningEnd && !overnightEnd) {
+    if (shiftScheduleProblem(starts)) return { ...DEFAULT_SHIFT_STARTS };
+    const blocks = shiftBlocksFromStarts(starts);
+    return {
+      ...starts,
+      dayEnd: minutesToHhmm(blocks.day.endMin),
+      eveningEnd: minutesToHhmm(blocks.evening.endMin),
+      overnightEnd: minutesToHhmm(blocks.overnight.endMin),
+    };
+  }
+  return { ...starts, dayEnd, eveningEnd, overnightEnd };
+}
+
+/** A broken clock falls back to 6:00–14:00 / 14:00–22:00 / 22:00–06:00. */
+function normalizedShiftStarts(value?: Partial<SiteFacts> | null): Pick<
+  SiteFacts,
+  | "dayShiftStart"
+  | "dayShiftEnd"
+  | "eveningShiftStart"
+  | "eveningShiftEnd"
+  | "overnightShiftStart"
+  | "overnightShiftEnd"
+> {
+  const clock = clockFromFacts(value);
+  const safe = shiftScheduleProblem(clock) ? DEFAULT_SHIFT_STARTS : clock;
+  return {
+    dayShiftStart: safe.dayStart,
+    dayShiftEnd: safe.dayEnd ?? DEFAULT_SITE_FACTS.dayShiftEnd,
+    eveningShiftStart: safe.eveningStart,
+    eveningShiftEnd: safe.eveningEnd ?? DEFAULT_SITE_FACTS.eveningShiftEnd,
+    overnightShiftStart: safe.overnightStart,
+    overnightShiftEnd: safe.overnightEnd ?? DEFAULT_SITE_FACTS.overnightShiftEnd,
   };
 }
 

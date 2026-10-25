@@ -9,7 +9,38 @@ import {
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import type { SessionUser } from "./types";
-import { activeIspProgram, canEditShiftNoteRow, defaultScoreLevels } from "./shiftNotes";
+import {
+  activeIspProgram,
+  canEditShiftNoteRow,
+  clinicianTimes,
+  defaultScoreLevels,
+  noteBeginMinutes,
+  formatDurationHhmm,
+  shiftDurationMinutes,
+  formatMonthLabel,
+  monthBounds,
+  monthsWithNotes,
+  progressNoteName,
+  progressNoteProblem,
+  shiftNotesForMonth,
+  shiftNotesForPrint,
+} from "./shiftNotes";
+
+const PNG_1X1 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+function acceptableProgress(summary: string) {
+  return {
+    beginTime: "07:00",
+    endTime: "15:00",
+    waiverService: "Individualized Supported Living",
+    staffTitle: "Direct support professional",
+    signatureDataUrl: PNG_1X1,
+    summary,
+    timeSpentMinutes: null as number | null,
+    scores: [] as { taskId: string; levelId: string; comment: string }[],
+  };
+}
 import { canConfigureIspTasks, canEnterShiftNotes, canSeeShiftNotes } from "./permissions";
 
 function api() {
@@ -120,6 +151,9 @@ test("issue #80: DSPs edit only their own notes; HM/PM/admin may edit in scope",
   const program = data.programs.find((p) => p.status === "approved");
   assert.ok(program);
   const yesLevel = program.scoringMethod!.levels.find((l) => l.caption === "Yes")!;
+  await impl.updateIspProgram(program.id, {
+    goalService: "Complete the morning routine with one or fewer prompts.",
+  });
   const dsp = await signInAs(impl, DEMO_DSP_USERNAME);
 
   // DSP enters a note.
@@ -128,7 +162,7 @@ test("issue #80: DSPs edit only their own notes; HM/PM/admin may edit in scope",
     programId: program.id,
     noteDate: "2026-09-17",
     shift: "Day",
-    summary: "Quiet morning.",
+    ...acceptableProgress("Quiet morning. Supported the morning-routine goal."),
     timeSpentMinutes: 30,
     scores: [{ taskId: program.tasks[0].id, levelId: yesLevel.id, comment: "Independent" }],
   });
@@ -178,14 +212,17 @@ test("issue #80: cross-record edit is rejected", async () => {
     scoringMethodId: data.scoringMethods[0].id,
   });
   await impl.saveIspProgramTasks(otherId, [{ title: "Other task", instructions: "" }]);
+  await impl.updateIspProgram(program.id, {
+    goalService: "Evening support named in the current PCSP.",
+  });
   const noteId = await impl.saveShiftNote({
     individualId: ellisId,
     programId: program.id,
     noteDate: "2026-09-17",
     shift: "Evening",
-    summary: "",
-    timeSpentMinutes: null,
-    scores: [],
+    ...acceptableProgress("Supported the evening goal in the current PCSP."),
+    beginTime: "14:00",
+    endTime: "22:00",
   });
   // Approving the second program supersedes the first; the cross-record
   // attempt uses the still-approved second program id.
@@ -232,9 +269,212 @@ test("issue #80: approving a new program supersedes the old approved one", async
   assert.equal(after.programs.find((p) => p.id === nextId)?.status, "approved");
 });
 
+test("a shift note keeps its own clock when another note overlaps it", () => {
+  assert.equal(shiftDurationMinutes("06:30", "14:30"), 8 * 60);
+  assert.equal(shiftDurationMinutes("14:30", "22:30"), 8 * 60);
+  assert.equal(shiftDurationMinutes("22:00", "06:30"), 8 * 60 + 30);
+  assert.equal(shiftDurationMinutes("14:30", "14:30"), 0);
+  assert.equal(formatDurationHhmm(0), "00:00");
+  assert.equal(formatDurationHhmm(89), "01:29");
+  const morning = clinicianTimes({
+    beginTime: "06:30",
+    endTime: "14:30",
+    shift: "Day",
+    timeSpentMinutes: null,
+  });
+  const evening = clinicianTimes({
+    beginTime: "14:30",
+    endTime: "22:30",
+    shift: "Evening",
+    timeSpentMinutes: null,
+  });
+  assert.equal(morning.beginLabel, "06:30 AM");
+  assert.equal(morning.durationLabel, "08:00");
+  assert.equal(evening.beginLabel, "02:30 PM");
+  assert.equal(evening.endLabel, "10:30 PM");
+  assert.equal(
+    clinicianTimes({ shift: "7a–3p", timeSpentMinutes: 60 }).durationLabel,
+    "08:00",
+  );
+  assert.ok(
+    noteBeginMinutes({ shift: "7a–3p" }) < noteBeginMinutes({ shift: "3p–11p" }),
+  );
+  assert.ok(
+    noteBeginMinutes({ shift: "3p–11p" }) < noteBeginMinutes({ shift: "11p–7a" }),
+  );
+});
+
+test("overlapping shift notes both save, including a zero-length note", async () => {
+  const impl = api();
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const ellisId = await individualId(impl, admin, "Ellis Hart");
+  const data = await impl.getIspData(ellisId);
+  const program = data.programs.find((p) => p.status === "approved");
+  assert.ok(program);
+  await impl.updateIspProgram(program.id, {
+    goalService: "Residential support at Cedar House.",
+    completionCriteria: "Complete the morning routine with one or fewer prompts.",
+    scheduleComment: "Document every overlapping shift.",
+  });
+  const morningId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-06",
+    shift: "Day 6:30 a.m.–3:00 p.m.",
+    beginTime: "06:30",
+    endTime: "14:30",
+    location: "Cedar House",
+    staffTitle: "Direct Support Staff",
+    waiverService: "Individualized Supported Living",
+    signatureDataUrl: PNG_1X1,
+    summary: "Morning shift overlapped the evening handoff.",
+    timeSpentMinutes: null,
+    scores: [],
+  });
+  const eveningId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-06",
+    shift: "Evening 2:00–10:30 p.m.",
+    beginTime: "14:30",
+    endTime: "22:30",
+    location: "Cedar House",
+    waiverService: "Individualized Supported Living",
+    signatureDataUrl: PNG_1X1,
+    summary: "Evening shift started while the day note was still open.",
+    timeSpentMinutes: null,
+    scores: [],
+  });
+  const zeroId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-06",
+    shift: "Other",
+    beginTime: "14:30",
+    endTime: "14:30",
+    location: "Cedar House",
+    waiverService: "Individualized Supported Living",
+    signatureDataUrl: PNG_1X1,
+    summary: "Handoff only. Supported the residential goal during the overlap.",
+    timeSpentMinutes: null,
+    scores: [],
+  });
+  const after = await impl.getIspData(ellisId);
+  const morning = after.notes.find((note) => note.id === morningId);
+  const evening = after.notes.find((note) => note.id === eveningId);
+  const zero = after.notes.find((note) => note.id === zeroId);
+  assert.equal(morning?.timeSpentMinutes, 480);
+  assert.equal(morning?.location, "Cedar House");
+  assert.equal(morning?.staffTitle, "Direct Support Staff");
+  assert.equal(evening?.beginTime, "14:30");
+  assert.equal(evening?.endTime, "22:30");
+  assert.equal(zero?.timeSpentMinutes, 0);
+  assert.equal(after.programs.find((row) => row.id === program.id)?.goalService, "Residential support at Cedar House.");
+});
+
+test("a new progress note needs the current PCSP goal, a waiver service, and a signature", async () => {
+  const impl = api();
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const ellisId = await individualId(impl, admin, "Ellis Hart");
+  const data = await impl.getIspData(ellisId);
+  const program = data.programs.find((p) => p.status === "approved");
+  assert.ok(program);
+  assert.equal(progressNoteName("Ellis James Hart"), "Ellis J. Hart");
+  assert.equal(progressNoteName("Ellis Hart"), "Ellis Hart");
+  assert.match(
+    progressNoteProblem({
+      goalService: "",
+      beginTime: "07:00",
+      endTime: "15:00",
+      waiverService: "Individualized Supported Living",
+      summary: "Supported the goal.",
+      staffTitle: "Direct support professional",
+      signatureDataUrl: PNG_1X1,
+    }) ?? "",
+    /current PCSP/,
+  );
+  await assert.rejects(
+    () =>
+      impl.saveShiftNote({
+        individualId: ellisId,
+        programId: program.id,
+        noteDate: "2026-10-07",
+        shift: "Day",
+        ...acceptableProgress("Supported the goal before it was on the program."),
+      }),
+    /current PCSP/,
+  );
+  await impl.updateIspProgram(program.id, {
+    goalService: "Morning routine in the current PCSP.",
+  });
+  await assert.rejects(
+    () =>
+      impl.saveShiftNote({
+        individualId: ellisId,
+        programId: program.id,
+        noteDate: "2026-10-07",
+        shift: "Day",
+        ...acceptableProgress("Supported the morning routine."),
+        signatureDataUrl: "",
+      }),
+    /signature/,
+  );
+  const noteId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-07",
+    shift: "Day",
+    ...acceptableProgress("Ellis completed the morning routine. I prompted once, which is the support the PCSP asks for."),
+  });
+  const saved = (await impl.getIspData(ellisId)).notes.find((note) => note.id === noteId);
+  assert.equal(saved?.waiverService, "Individualized Supported Living");
+  assert.equal(saved?.signatureDataUrl, PNG_1X1);
+  assert.equal(saved?.staffTitle, "Direct support professional");
+});
+
 test("issue #80: default scoring levels are Yes / No / Refused", () => {
   assert.deepEqual(
     defaultScoreLevels().map((l) => l.caption),
     ["Yes", "No", "Refused"],
   );
+});
+
+test("a calendar month is that month's notes and nothing written around it", () => {
+  const notes = [
+    { noteDate: "2026-09-30" },
+    { noteDate: "2026-10-01" },
+    { noteDate: "2026-10-31" },
+    { noteDate: "2026-11-01" },
+  ];
+  const october = shiftNotesForMonth(notes, "2026-10");
+  assert.deepEqual(
+    october.notes.map((note) => note.noteDate),
+    ["2026-10-01", "2026-10-31"],
+  );
+  assert.equal(october.from, "2026-10-01");
+  assert.equal(october.to, "2026-10-31");
+  assert.equal(formatMonthLabel("2026-10"), "October 2026");
+  assert.deepEqual(monthsWithNotes(notes), ["2026-11", "2026-10", "2026-09"]);
+  assert.equal(monthBounds("2026-02")?.to, "2026-02-28");
+  assert.equal(monthBounds("2024-02")?.to, "2024-02-29");
+  assert.equal(monthBounds("2026-13"), null);
+  assert.equal(shiftNotesForMonth(notes, "nope").notes.length, 0);
+});
+
+test("shift note print window stays on the last 14 days, then falls back to notes on file", () => {
+  const live = shiftNotesForPrint(
+    [{ noteDate: "2026-10-01" }, { noteDate: "2026-09-01" }],
+    "2026-10-13",
+  );
+  assert.equal(live.coversToday, true);
+  assert.deepEqual(live.notes.map((note) => note.noteDate), ["2026-10-01"]);
+
+  const saved = shiftNotesForPrint(
+    [{ noteDate: "2026-09-16" }, { noteDate: "2026-09-29" }, { noteDate: "2026-08-01" }],
+    "2026-10-13",
+  );
+  assert.equal(saved.coversToday, false);
+  assert.equal(saved.from, "2026-09-16");
+  assert.equal(saved.to, "2026-09-29");
+  assert.equal(saved.notes.length, 2);
 });

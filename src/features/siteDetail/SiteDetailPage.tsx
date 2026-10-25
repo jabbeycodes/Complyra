@@ -21,7 +21,7 @@ import { useData } from "../../data/DataProvider";
 import { can, pageVisible } from "../../data/status";
 import { canAccessSite, individualsAtSite } from "../../data/dashboard";
 import { canEnterShiftNotes } from "../../data/permissions";
-import { DUE_ITEMS_EMPTY_COPY, type SiteDueItem, type SiteDueItemsResult } from "../../data/dueItems";
+import { DUE_ITEMS_EMPTY_COPY, shiftClockFromFacts, shiftScheduleSummary, type SiteDueItem, type SiteDueItemsResult } from "../../data/dueItems";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
 import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
@@ -193,6 +193,7 @@ export default function SiteDetailPage({
         "—"
       }${site.county ? ` · ${site.county} County` : ""}`,
       staffing: `${site.staffed24h ? "Staffed 24 hours" : "Not staffed 24 hours"}${site.overnightSleepStaff ? " · overnight sleep staff" : ""}`,
+      shifts: shiftScheduleSummary(shiftClockFromFacts(site)),
       water: site.wellWater
         ? `Well water${site.lastWaterTestOn ? ` · last tested ${formatDate(site.lastWaterTestOn)}` : ""}`
         : "Municipal water",

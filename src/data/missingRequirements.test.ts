@@ -32,6 +32,21 @@ function input(overrides: Partial<MissingInput> = {}): MissingInput {
   };
 }
 
+test("CPI and PBS are due a set number of days after hire", () => {
+  const items = findMissing(
+    input({
+      requiredCertificateKinds: [],
+      requiredTrainingTopics: [],
+      requiredIndividualDocuments: [],
+      cpiPbsDueDays: 30,
+      staff: [{ userId: "u1", name: "Ava", siteName: "Maple", hireOn: "2026-09-01" }],
+    }),
+  );
+  const cpi = items.find((item) => item.what === "CPI certificate");
+  assert.equal(cpi?.dueOn, "2026-10-01");
+  assert.equal(cpi?.expired, false);
+});
+
 test("missing: staffer with nothing on file misses everything required", () => {
   const items = findMissing(input());
   const whats = items.map((item) => item.what).sort();

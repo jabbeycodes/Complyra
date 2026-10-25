@@ -20,6 +20,14 @@ import {
   pcspTaskSummary,
   todayIso,
 } from "../data/chart";
+import { shiftClockFromFacts } from "../data/dueItems";
+import {
+  clinicianScheduleLabel,
+  displayStaffTitle,
+  progressNoteName,
+  waiverServiceNames,
+} from "../data/shiftNotes";
+import { SERVICE_TYPE_LABELS } from "../data/siteReview";
 import {
   canCompleteAppointments,
   canManageAppointments,
@@ -34,7 +42,7 @@ import {
   renewalBadge,
   type ClinicalEvidenceKind,
 } from "../data/planStack";
-import { can } from "../data/status";
+import { can, roleLabel } from "../data/status";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import ChartOverview from "./ChartOverview";
@@ -49,6 +57,7 @@ import {
   buildIndividualProfilePdf,
   individualProfileFileName,
 } from "../pdf/individualProfilePdf";
+import { buildShiftNotesPdf, shiftNotesFileName } from "../pdf/shiftNotesPdf";
 // LIFEPATH-P3: hook the delegation form detail into the chart's delegation section.
 import DelegationFormDetail from "./delegations/DelegationFormDetail";
 // LIFEPATH-P6: med inventory countdown panel (minimal hook — inventory only)
@@ -80,6 +89,7 @@ export default function IndividualChart({
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
   const person = workspace?.individuals.find((item) => item.id === individualId);
   const [error, setError] = useState("");
+  const [followup, setFollowup] = useState<Record<string, { indication: string; result: string }>>({});
   // LIFEPATH-P3: which delegation's form detail is open (template toggle lives there).
   const [formDelegationId, setFormDelegationId] = useState<string | null>(null);
   // Issue #80: ISP data (hook must run before the early return below).
@@ -173,6 +183,65 @@ export default function IndividualChart({
       doc.output("blob") as Blob,
       "print",
     );
+  }
+
+  async function openShiftNotes(
+    mode: "download" | "print",
+    reportDescription: string,
+    range: { from: string; to: string },
+  ) {
+    if (!workspace || !isp.data) return;
+    const generatedAt = new Date().toISOString();
+    const printed = {
+      from: range.from,
+      to: range.to,
+      notes: isp.data.notes.filter((note) => note.noteDate >= range.from && note.noteDate <= range.to),
+    };
+    const { from, to } = printed;
+    const titleById = new Map(
+      (workspace.staff ?? []).map((member) => [
+        member.id,
+        member.role || roleLabel(member.roleKey),
+      ]),
+    );
+    const notes = printed.notes.map((note) => ({
+      ...note,
+      location: note.location?.trim() || chartPerson.site,
+      staffTitle: note.staffTitle?.trim() || titleById.get(note.staffUserId) || "",
+    }));
+    const program = isp.data.programs.find((row) => notes.some((note) => note.programId === row.id))
+      ?? isp.data.programs[0];
+    const levelLabels: Record<string, { shortLabel: string; caption: string }> = {};
+    for (const method of isp.data.scoringMethods) {
+      for (const level of method.levels) {
+        levelLabels[level.id] = { shortLabel: level.shortLabel, caption: level.caption };
+      }
+    }
+    const doc = buildShiftNotesPdf({
+      agencyName: chartSession.agencyName,
+      individualName: progressNoteName(profile.legalName.trim() || chartPerson.name),
+      dateOfBirth: chartPerson.dateOfBirth,
+      siteName: chartPerson.site,
+      programName: program?.name ?? notes[0]?.programName ?? "ISP program",
+      from,
+      to,
+      notes,
+      levelLabels,
+      reportDescription,
+      timeZone: "US/Central",
+      programId: program?.id,
+      programStatus: program ? (program.status === "approved" ? "Approved" : program.status === "draft" ? "Draft" : "Superseded") : "",
+      scheduleLabel: program ? clinicianScheduleLabel(program.schedule) : "",
+      frequency: program?.maxEntriesPerDay ?? null,
+      scoringMethodName: program?.scoringMethod?.name ?? notes[0]?.scoringMethodName ?? "",
+      goalService: program?.goalService,
+      completionCriteria: program?.completionCriteria,
+      scheduleComment: program?.scheduleComment,
+      generatedByName: chartSession.fullName,
+      generatedAt,
+      logoDataUrl: workspace.branding.logoUrl ?? null,
+    });
+    await openPrintable(shiftNotesFileName(chartPerson.name, from, to), doc.output("blob") as Blob, mode);
   }
 
   async function openFile(
@@ -483,12 +552,60 @@ export default function IndividualChart({
                   />
                 )}
                 {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
-                  <button
-                    className="button"
-                    onClick={() => run(() => api.logPrnDose(med.id, 1))}
-                  >
-                    <Pill size={16} /> PRN given
-                  </button>
+                  <div className="stack">
+                    <button
+                      className="button"
+                      onClick={() => run(() => api.logPrnDose(med.id, 1))}
+                    >
+                      <Pill size={16} /> PRN given
+                    </button>
+                    <form
+                      className="stack"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const draft = followup[med.id] ?? { indication: "", result: "" };
+                        void run(() =>
+                          api.recordPrnFollowup(med.id, draft).then(() => {
+                            setFollowup((prev) => ({ ...prev, [med.id]: { indication: "", result: "" } }));
+                          }),
+                        );
+                      }}
+                    >
+                      <label>
+                        Why {med.name} was given
+                        <input
+                          value={followup[med.id]?.indication ?? ""}
+                          onChange={(event) =>
+                            setFollowup((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                indication: event.target.value,
+                                result: prev[med.id]?.result ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        What you saw after
+                        <input
+                          value={followup[med.id]?.result ?? ""}
+                          onChange={(event) =>
+                            setFollowup((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                indication: prev[med.id]?.indication ?? "",
+                                result: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <button className="button secondary" type="submit">
+                        Record follow-up
+                      </button>
+                    </form>
+                  </div>
                 )}
               </article>
             ))}
@@ -563,6 +680,30 @@ export default function IndividualChart({
             roleKey={chartSession.roleKey}
             canEnter={enterShiftNotes}
             canConfigure={configureIsp}
+            shiftClock={shiftClockFromFacts(
+              workspace?.sites.find((site) => site.id === chartPerson.siteId) ?? {
+                dayShiftStart: "06:00",
+                eveningShiftStart: "14:00",
+                overnightShiftStart: "22:00",
+              },
+            )}
+            defaultLocation={chartPerson.site}
+            staffTitle={displayStaffTitle(chartSession.jobTitle, chartSession.roleKey)}
+            staffName={chartSession.fullName}
+            legalName={profile.legalName.trim() || chartPerson.name}
+            dateOfBirth={chartPerson.dateOfBirth}
+            defaultWaiverService={(() => {
+              const site = workspace?.sites.find((row) => row.id === chartPerson.siteId);
+              const label = site?.serviceType ? SERVICE_TYPE_LABELS[site.serviceType] : "";
+              return waiverServiceNames().includes(label) ? label : "";
+            })()}
+            staffTitles={Object.fromEntries(
+              (workspace?.staff ?? []).map((member) => [
+                member.id,
+                member.role || roleLabel(member.roleKey),
+              ]),
+            )}
+            onOpenNotes={openShiftNotes}
           />
         )}
         {ispEnabled && isp.error && !isp.data && (

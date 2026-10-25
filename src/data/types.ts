@@ -70,6 +70,8 @@ export interface Profile {
   homeAgencyId: string;
   mustChangePassword: boolean;
   platformAdmin?: boolean;
+  /** First day with the agency. CPI and PBS are due this many days later. */
+  hiredOn?: string | null;
 }
 
 export interface Membership {
@@ -513,7 +515,7 @@ export interface DelegationForm {
   nonTransferableAcknowledged: boolean;
   /** Free text; inspections run "as determined by the delegating RN". */
   inspectionInterval: string;
-  /** Explicit review/expiry date with automatic renewal reminders. */
+  /** Nurse review reminder. Does not end the delegation. */
   reviewDate: string | null;
   /** Structured inspection cadence with reminders. */
   inspectionCadence: string | null;

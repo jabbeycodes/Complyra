@@ -54,7 +54,9 @@ test('audit: site history uses saved quarterly audits and omits other homes', as
   await api.signIn(login('sarah.mitchell'));
   const site = store.db.sites.find(s => s.name === 'Cedar House')!;
   const audit = await api.createQaAudit(site.id, 2026, 3);
-  assert.equal((await api.listQaAuditHistory(site.id))[0].id, audit.id);
+  const history = await api.listQaAuditHistory(site.id);
+  assert.equal(history.some((row) => row.id === audit.id), true);
+  assert.equal(history.every((row) => row.year === 2026), true);
   await api.signIn(login('james.wilson'));
   assert.deepEqual(await api.listQaAuditHistory(site.id), []);
 });

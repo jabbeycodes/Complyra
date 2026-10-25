@@ -71,6 +71,7 @@ export interface SiteFactInput {
   staffing: string;
   water: string;
   contact: string | null;
+  shifts?: string | null;
 }
 
 /**
@@ -84,6 +85,7 @@ export function siteFactRows(input: SiteFactInput): SiteFactRow[] {
     { term: "House manager", detail: input.manager },
     { term: "Location", detail: input.location },
     { term: "Staffing", detail: input.staffing },
+    input.shifts ? { term: "Shift times", detail: input.shifts } : null,
     { term: "Water", detail: input.water },
     input.contact ? { term: "Site contact", detail: input.contact } : null,
   ];

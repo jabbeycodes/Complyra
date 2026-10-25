@@ -162,6 +162,11 @@ export default function RecognitionPage() {
     null,
   );
   const [running, setRunning] = useState(false);
+  const [awardTo, setAwardTo] = useState("");
+  const [awardPoints, setAwardPoints] = useState("1");
+  const [awardReason, setAwardReason] = useState("");
+  const [awardNote, setAwardNote] = useState("");
+  const [awarding, setAwarding] = useState(false);
 
   const canRateHm = session ? can(session, "recognition.rate_hm") : false;
   const canReviewDsp = session
@@ -190,20 +195,25 @@ export default function RecognitionPage() {
       if (!session) return;
       try {
         await loadWinners();
-        if (ratesOrReviews) {
+        const ratingRole =
+          session.roleKey === "dsp" || session.roleKey === "house_manager";
+        if (ratingRole || canReviewDsp || canManage) {
           const list = await api.listRecognitionPartners();
           if (!alive) return;
           setPartners(list);
-          const initial: Record<string, number | null> = {};
-          for (const partner of list) {
-            const current = canRateHm
-              ? await api.getMyDspHmRating(partner.userId)
-              : await api.getMyHmDspReview(partner.userId);
-            initial[partner.userId] = current?.rating ?? null;
+          if (ratingRole) {
+            const initial: Record<string, number | null> = {};
+            for (const partner of list) {
+              const current =
+                session.roleKey === "dsp"
+                  ? await api.getMyDspHmRating(partner.userId)
+                  : await api.getMyHmDspReview(partner.userId);
+              initial[partner.userId] = current?.rating ?? null;
+            }
+            if (!alive) return;
+            setPendingRatings(initial);
+            setSavedRatings(initial);
           }
-          if (!alive) return;
-          setPendingRatings(initial);
-          setSavedRatings(initial);
         }
         if (isHm) {
           const rows = await api.listDspHmRatingsAboutMe();
@@ -368,7 +378,8 @@ export default function RecognitionPage() {
           </section>
 
           {/* ---- Rate / review: DSPs and HMs only ---- */}
-          {ratesOrReviews && (
+          {(session.roleKey === "dsp" || session.roleKey === "house_manager") &&
+            ratesOrReviews && (
             <section
               className="panel"
               aria-label={canRateHm ? "Rate your house manager" : "Review your DSPs"}
@@ -479,6 +490,81 @@ export default function RecognitionPage() {
                     history={r.history}
                   />
                 ))}
+            </section>
+          )}
+
+          {(canReviewDsp || canManage) && (
+            <section className="panel" aria-label="Award recognition points">
+              <div className="panel-heading">
+                <div>
+                  <h2>Award points</h2>
+                  <p>
+                    Points you can give this month. The weekly winner selection
+                    does not use these points.
+                  </p>
+                </div>
+              </div>
+              <form
+                className="stack"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const points = Number(awardPoints);
+                  setAwarding(true);
+                  setError("");
+                  setAwardNote("");
+                  void api
+                    .awardRecognitionPoints({
+                      recipientId: awardTo,
+                      points,
+                      reason: awardReason,
+                    })
+                    .then((result) => {
+                      setAwardReason("");
+                      setAwardNote(
+                        `Awarded. ${result.usedThisMonth} of ${result.cap} points used this month.`,
+                      );
+                    })
+                    .catch((err: unknown) => setError((err as Error).message))
+                    .finally(() => setAwarding(false));
+                }}
+              >
+                <label>
+                  Staff member
+                  <select
+                    value={awardTo}
+                    onChange={(event) => setAwardTo(event.target.value)}
+                    required
+                  >
+                    <option value="">Choose someone</option>
+                    {partners.map((partner) => (
+                      <option key={partner.userId} value={partner.userId}>
+                        {partner.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Points
+                  <input
+                    inputMode="numeric"
+                    value={awardPoints}
+                    onChange={(event) => setAwardPoints(event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Why
+                  <input
+                    value={awardReason}
+                    onChange={(event) => setAwardReason(event.target.value)}
+                    required
+                  />
+                </label>
+                <button className="button" type="submit" disabled={awarding || partners.length === 0}>
+                  {awarding ? "Awarding…" : "Award points"}
+                </button>
+                {awardNote && <p role="status">{awardNote}</p>}
+              </form>
             </section>
           )}
 

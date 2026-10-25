@@ -10,7 +10,6 @@ import { Check, Send, X } from "lucide-react";
 import { Empty } from "../../components";
 import type { SessionUser } from "../../data/types";
 import {
-  DEFAULT_WEEKLY_LIMIT_HOURS,
   describeOpenShiftWhen,
   isOpenForResponses,
   permanentWeeklyHours,
@@ -25,6 +24,14 @@ import {
 } from "../../data/openShifts";
 import type { OpenShiftStore } from "../../data/openShiftStore";
 import { STAFFING_DAY_LABELS } from "../../data/hr";
+import {
+  describePickupHours,
+  formatHours,
+  overtimeFlagHours,
+  workWeekRangeLabel,
+  type OvertimeLines,
+} from "../../data/rules";
+import { useOvertimeLines } from "./useOvertimeLines";
 
 interface SiteOption {
   id: string;
@@ -77,11 +84,11 @@ const RESPONSE_LABEL: Record<HrOpenShiftResponse["response"], string> = {
   declined: "Declined",
 };
 
-function myStatusLabel(r: HrOpenShiftResponse | undefined): { text: string; cls: string } | null {
+function myStatusLabel(r: HrOpenShiftResponse | undefined, flagHours: number): { text: string; cls: string } | null {
   if (!r) return null;
   if (r.decision === "approved") return { text: "Approved: it's yours", cls: "approved" };
   if (r.decision === "denied") return { text: "Not approved", cls: "denied" };
-  if (r.response === "requested" && r.wouldBeOvertime) return { text: "Bid sent · past 41 hours, needs approval", cls: "due_soon" };
+  if (r.response === "requested" && r.wouldBeOvertime) return { text: `Bid sent · past ${formatHours(flagHours)} hours, needs approval`, cls: "due_soon" };
   return { text: RESPONSE_LABEL[r.response], cls: r.response === "declined" ? "denied" : r.response === "picked_up" ? "approved" : "pending" };
 }
 
@@ -96,13 +103,20 @@ export function OpenShiftsTab({
   sites,
   canPostSite,
   canPostAgency,
+  overtimeLines,
 }: {
   session: SessionUser;
   store: OpenShiftStore;
   sites: SiteOption[];
   canPostSite: boolean;
   canPostAgency: boolean;
+  /** Tests pass lines directly; the live tab loads the agency's settings. */
+  overtimeLines?: OvertimeLines;
 }) {
+  const loadedLines = useOvertimeLines(session);
+  const lines = overtimeLines ?? loadedLines;
+  const flagHours = overtimeFlagHours(lines);
+  const weekRange = workWeekRangeLabel(lines.weekStartsOn);
   const [shifts, setShifts] = useState<HrOpenShift[]>([]);
   const [responses, setResponses] = useState<HrOpenShiftResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,9 +233,7 @@ export function OpenShiftsTab({
     <section className="hub-card" aria-label="Open shifts">
       <h2>Open Shifts</h2>
       <p className="hub-sub">
-        Pick up or bid on coverage your managers post. The work week runs Sunday to Saturday. You can work up
-        to {DEFAULT_WEEKLY_LIMIT_HOURS} hours a week (up to an hour over is fine); anything past 41 hours needs
-        your manager&rsquo;s approval.
+        Pick up or bid on coverage your managers post. {describePickupHours(lines)}
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
       {notice && <div className="hub-status approved" role="status" style={{ marginBottom: 12 }}>{notice}</div>}
@@ -234,7 +246,7 @@ export function OpenShiftsTab({
       ) : (
         <ul className="hub-list">
           {available.map((s) => {
-            const status = myStatusLabel(mine(s.id));
+            const status = myStatusLabel(mine(s.id), flagHours);
             const mineRow = mine(s.id);
             const taken = mineRow?.response === "picked_up" || mineRow?.decision === "approved";
             const bidPending = mineRow?.response === "requested" && !mineRow.decision;
@@ -376,7 +388,7 @@ export function OpenShiftsTab({
               </label>
               <p className="hub-form-wide hub-sub">
                 {kind === "temporary"
-                  ? `${draftHours || 0} hours. Anyone who would go past 41 hours that week (Sunday–Saturday) sends a bid for your approval instead of taking it.`
+                  ? `${draftHours || 0} hours. Anyone who would go past ${formatHours(flagHours)} hours that week (${weekRange}) sends a bid for your approval instead of taking it.`
                   : `${draftHours} hours a week. Permanent shifts are always bids; approving one adds it to that person's recurring schedule.`}
               </p>
             </div>
@@ -425,7 +437,7 @@ export function OpenShiftsTab({
                               </span>
                               <span className="hub-item-sub">
                                 {b.weekHoursBefore}h already {s.kind === "permanent" ? "per week" : "that week"}
-                                {b.wouldBeOvertime ? " · past 41 hours: approving allows overtime" : ""}
+                                {b.wouldBeOvertime ? ` · past ${formatHours(flagHours)} hours: approving allows overtime` : ""}
                                 {!b.trainedAtSite ? " · not trained at this site yet" : ""}
                               </span>
                             </div>

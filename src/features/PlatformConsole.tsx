@@ -5,14 +5,28 @@ import { useData } from "../data/DataProvider";
 import { buildAgencyCode, suggestAgencySlug } from "../data/agencyCode";
 import { US_STATES } from "../data/usStates";
 import type { PendingAgency } from "../data/types";
+import { createRulesStore } from "../data/rulesStore";
+import { AgencyRulesPanel } from "./AgencyRulesPanel";
 
 export default function PlatformConsole({
   onSaved,
 }: {
   onSaved: (message: string) => void;
 }) {
-  const { api, refresh } = useData();
+  const { api, refresh, session } = useData();
   const [pending, setPending] = useState<PendingAgency[]>([]);
+  const [allAgencies, setAllAgencies] = useState<PendingAgency[]>([]);
+  const rulesStore = useMemo(
+    () =>
+      createRulesStore({
+        userId: session?.userId ?? "",
+        fullName: session?.fullName ?? "",
+        isOperator: Boolean(session?.platformAdmin),
+        adminOfAgencyId: null,
+        memberOfAgencyIds: session ? [session.agencyId] : [],
+      }),
+    [session],
+  );
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [stateCode, setStateCode] = useState("MO");
@@ -31,7 +45,12 @@ export default function PlatformConsole({
   );
 
   async function load() {
-    setPending(await api.listPendingAgencies());
+    const [pendingRows, everyAgency] = await Promise.all([
+      api.listPendingAgencies(),
+      api.listAgencies().catch(() => [] as PendingAgency[]),
+    ]);
+    setPending(pendingRows);
+    setAllAgencies(everyAgency.filter((a) => a.status === "active"));
   }
 
   useEffect(() => {
@@ -234,6 +253,7 @@ export default function PlatformConsole({
           </form>
         )}
       </section>
+      <AgencyRulesPanel agencies={allAgencies} store={rulesStore} onSaved={onSaved} />
     </>
   );
 }

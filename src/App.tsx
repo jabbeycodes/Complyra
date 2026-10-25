@@ -39,12 +39,13 @@ import {
   LogOut,
   KeyRound,
   ServerCog,
+  Trophy,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
-import { notificationPage } from "./features/notifications/notify";
+import { notificationDestination, notificationPage } from "./features/notifications/notify";
 import {
   Avatar,
   Badge,
@@ -77,6 +78,8 @@ import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
+import { AgencyAdminRules } from "./features/AgencyRulesPanel";
+import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
@@ -120,6 +123,8 @@ import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
+import { furthestReminderDay } from "./data/rules";
+import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
 import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible } from "./data/status";
@@ -161,6 +166,7 @@ export default function App() {
     signOut,
     usingHostedBackend,
   } = useData();
+  const operating = useOperatingRules(session);
   const [page, setPage] = useState("Overview");
   const notifications = useWorkspaceNotifications();
   const [site, setSite] = useState("All sites");
@@ -255,7 +261,9 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const soon = await api.certificatesExpiringSoon(90);
+        const soon = await api.certificatesExpiringSoon(
+          furthestReminderDay(operating.certificationReminderDays),
+        );
         if (cancelled) return;
         const alerts: Record<string, number> = {};
         for (const row of soon) {
@@ -272,7 +280,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session, page, api]);
+  }, [session, page, api, operating.certificationReminderDays]);
   useEffect(() => {
     if (!session) return;
     if (!pageVisible(session, page)) {
@@ -446,6 +454,18 @@ export default function App() {
       r.due >= auditFrom &&
       r.due <= auditTo,
   );
+  function scrollWhenPresent(hash: string) {
+    const started = Date.now();
+    const tick = () => {
+      const node = document.querySelector(hash);
+      if (node) {
+        node.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (Date.now() - started < 4000) window.setTimeout(tick, 200);
+    };
+    window.setTimeout(tick, 50);
+  }
   function navigate(next: string, nextStatus = "All statuses") {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
@@ -663,7 +683,10 @@ export default function App() {
     },
     {
       title: "EMPLOYEE HUB",
-      items: [["Employee Hub", Briefcase]],
+      items: [
+        ["Employee Hub", Briefcase],
+        ["Recognition", Trophy],
+      ],
     },
   ] as const;
   return (
@@ -1666,6 +1689,7 @@ export default function App() {
               {page === "Mileage" && <MileagePage />}
               {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}
               {page === "Employee Hub" && <EmployeeHubPage />}
+              {page === "Recognition" && <RecognitionPage />}
               {page === "AI settings" && <AiSettingsPage />}
               {/* QA-AUDIT-PAGE (2026-09-14) */}
               {page === "QA Review" && <QaAuditsPage />}
@@ -1751,6 +1775,9 @@ export default function App() {
                     )}
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
+                    {session.roleKey === "administrator" && (
+                      <AgencyAdminRules session={session} onSaved={notify} />
+                    )}
                     <SignatureSettingsSection onSaved={notify} />
                     {/* Secondary/destructive chrome collapses by default so
                         Settings reads as sections, not one long list (#110 Cut A). */}
@@ -2319,14 +2346,26 @@ export default function App() {
             onMarkAllRead={() => void notifications.markAllAsRead()}
             onRetry={() => void notifications.refresh()}
             onClose={() => setModal(null)}
-            onNavigate={(link) => {
-              const target = notificationPage(link);
-              if (!target || !pageVisible(session, target)) {
+            onNavigate={(link, row) => {
+              const target = notificationDestination(link);
+              if (!target || !pageVisible(session, target.page)) {
                 notify("This notification's destination is unavailable for your current access.");
                 return;
               }
+              const individualId =
+                target.individualId ??
+                (row.entity_type === "shift_note" ? row.entity_id : null);
+              const person = individualId
+                ? workspace.individuals.find((item) => item.id === individualId)
+                : undefined;
               setModal(null);
-              navigate(target);
+              if (person) {
+                openPersonChart(person.name);
+                const hash = target.hash ?? (row.entity_type === "shift_note" ? "#chart-shift-notes" : null);
+                if (hash) scrollWhenPresent(hash);
+                return;
+              }
+              navigate(target.page);
             }} />
           {alertItems.length > 0 && <h3>Open priorities</h3>}
           {alertItems.length > 0 && (

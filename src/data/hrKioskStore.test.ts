@@ -634,4 +634,21 @@ describe("suggestKioskShift", () => {
     const suggestion = await store.suggestKioskShift(SEED.staffId, SEED.siteId);
     assert.equal(suggestion, null);
   });
+
+  test("keeps the published shift start so a late clock-in can cost a point", async () => {
+    const store = makeStore();
+    const startsAt = todayAt(8);
+    await store.createShift({
+      siteId: SEED.siteId,
+      staffId: SEED.staffId,
+      title: "Day",
+      startsAt,
+      endsAt: todayAt(16),
+      status: "published",
+      notes: null,
+    });
+    const suggestion = await store.suggestKioskShift(SEED.staffId, SEED.siteId);
+    assert.equal(suggestion?.shiftLabel, "Day");
+    assert.equal(suggestion?.startsAt, startsAt);
+  });
 });

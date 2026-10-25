@@ -129,8 +129,11 @@ import {
 } from "./permissions";
 import {
   canEditShiftNoteRow,
+  displayStaffTitle,
   ispProgramVisibleToStaff,
   normalizeTaskTitle,
+  progressNoteProblem,
+  shiftDurationMinutes,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -194,9 +197,18 @@ import {
   computeMedDueItems,
   computeShiftNoteDueItems,
   blockForShiftLabel,
+  matchingShiftId,
+  shiftBlocksForSite,
+  zonedWallTimeMs,
+  consecutiveRefusals,
+  marRecordingProblem,
+  recordingCostsAPoint,
   type ScheduledDose,
   type ShiftBlockId,
 } from "./dueItems";
+import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
+import { dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { operatingRulesFrom, type EffectiveRule } from "./rules";
 // Delegation template workflow: domain types + helpers.
 import {
   DIGITAL_RECORD_MARK,
@@ -470,6 +482,7 @@ export class HostedApi implements ComplyraApi {
 
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();
+    await this.sweepOperatingReminders(session);
     const { data, error } = await this.client.from("notifications")
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);
@@ -724,6 +737,26 @@ export class HostedApi implements ComplyraApi {
     };
   }
 
+  async listAgencies(): Promise<PendingAgency[]> {
+    const session = await this.requireSession();
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can list agencies.");
+    }
+    const { data, error } = await this.client
+      .from("agencies")
+      .select("id, name, agency_code, state_code, provisioned_by, status")
+      .order("name");
+    throwIf(error, "Could not load agencies.");
+    return (data ?? []).map((row) => ({
+      id: row.id as string,
+      name: row.name as string,
+      agencyCode: String(row.agency_code),
+      stateCode: String(row.state_code),
+      provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
+      status: row.status as AgencyStatus,
+    }));
+  }
+
   async listPendingAgencies(): Promise<PendingAgency[]> {
     const session = await this.requireSession();
     if (!session.platformAdmin) {
@@ -957,9 +990,13 @@ export class HostedApi implements ComplyraApi {
     const versionLabelById = new Map<string, string | null>(
       versions.map((version) => [version.id, version.versionLabel]),
     );
+    const orderReminderDays = canViewPeople
+      ? (await this.loadOperatingRules(session.agencyId)).orderReminderDays
+      : undefined;
     const planStacks = canViewPeople
       ? individuals.map((person) =>
           this.hostedPlanStack(session, person, {
+            orderReminderDays,
             profileRow:
               ((indProfilesRes.data ?? []) as Record<string, unknown>[]).find(
                 (row) => row.individual_id === person.id,
@@ -1065,6 +1102,7 @@ export class HostedApi implements ComplyraApi {
           expiresOn: membership.expires_on
             ? String(membership.expires_on).slice(0, 10)
             : null,
+          hiredOn: null,
         };
       }),
       requirements: requirements.map((row) => {
@@ -1782,6 +1820,9 @@ export class HostedApi implements ComplyraApi {
       createdByName: String(row.created_by_name ?? ""),
       createdAt: String(row.created_at ?? ""),
       updatedAt: String(row.updated_at ?? ""),
+      goalService: String(row.goal_service ?? ""),
+      completionCriteria: String(row.completion_criteria ?? ""),
+      scheduleComment: String(row.schedule_comment ?? ""),
     };
   }
 
@@ -1889,10 +1930,17 @@ export class HostedApi implements ComplyraApi {
           programId: String(row.program_id),
           noteDate: String(row.note_date ?? "").slice(0, 10),
           shift: String(row.shift ?? ""),
+          beginTime: String(row.begin_time ?? ""),
+          endTime: String(row.end_time ?? ""),
+          location: String(row.location ?? ""),
+          staffTitle: String(row.staff_title ?? ""),
+          waiverService: String(row.waiver_service ?? ""),
+          signatureDataUrl: String(row.signature_data_url ?? ""),
           summary: String(row.summary ?? ""),
           timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
           staffUserId: String(row.staff_user_id ?? ""),
           staffName: String(row.staff_name ?? ""),
+          hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
           createdAt: String(row.created_at ?? ""),
           updatedAt: String(row.updated_at ?? ""),
           deletedAt: row.deleted_at ? String(row.deleted_at) : null,
@@ -1967,6 +2015,9 @@ export class HostedApi implements ComplyraApi {
         schedule: input.schedule,
         max_entries_per_day: maxEntries,
         scoring_method_id: input.scoringMethodId,
+        goal_service: input.goalService?.trim().slice(0, 4000) ?? "",
+        completion_criteria: input.completionCriteria?.trim().slice(0, 4000) ?? "",
+        schedule_comment: input.scheduleComment?.trim().slice(0, 4000) ?? "",
         status: "draft",
         created_by: session.userId,
         created_by_name: session.fullName,
@@ -2009,6 +2060,13 @@ export class HostedApi implements ComplyraApi {
       throwIf(methodError, "Choose a scoring method for the program.");
       void method;
       update.scoring_method_id = patch.scoringMethodId;
+    }
+    if (patch.goalService !== undefined) update.goal_service = patch.goalService.trim().slice(0, 4000);
+    if (patch.completionCriteria !== undefined) {
+      update.completion_criteria = patch.completionCriteria.trim().slice(0, 4000);
+    }
+    if (patch.scheduleComment !== undefined) {
+      update.schedule_comment = patch.scheduleComment.trim().slice(0, 4000);
     }
     const { error } = await this.client.from("isp_programs").update(update).eq("id", programId);
     throwIf(error, "Could not update the ISP program.");
@@ -2109,6 +2167,54 @@ export class HostedApi implements ComplyraApi {
     return String((data as { id: string }).id);
   }
 
+  /** The published staff shift this note belongs to, or null when the house has no schedule. */
+  private async linkedHrShiftId(input: {
+    agencyId: string;
+    individualId: string;
+    staffUserId: string;
+    noteDate: string;
+    beginTime: string;
+    endTime: string;
+    shift: string;
+  }): Promise<string | null> {
+    const { data: person } = await this.client
+      .from("individuals")
+      .select("site_id")
+      .eq("id", input.individualId)
+      .eq("agency_id", input.agencyId)
+      .maybeSingle();
+    const siteId = person?.site_id ? String(person.site_id) : "";
+    if (!siteId) return null;
+    const clock = dueItemClock();
+    const dayStart = new Date(zonedWallTimeMs(input.noteDate, 0, clock.timeZone)).toISOString();
+    const dayEnd = new Date(zonedWallTimeMs(input.noteDate, 36 * 60, clock.timeZone)).toISOString();
+    const { data: shiftRows } = await this.client
+      .from("hr_shifts")
+      .select("id, staff_id, starts_at, ends_at")
+      .eq("agency_id", input.agencyId)
+      .eq("site_id", siteId)
+      .eq("staff_id", input.staffUserId)
+      .in("status", ["scheduled", "published"])
+      .lt("starts_at", dayEnd)
+      .gt("ends_at", dayStart);
+    if (!shiftRows?.length) return null;
+    const blocks = shiftBlocksForSite(await this.siteFacts(siteId));
+    const blockId = blockForShiftLabel(input.shift);
+    return matchingShiftId({
+      shifts: shiftRows.map((row) => ({
+        id: String(row.id),
+        staffUserId: String(row.staff_id),
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
+      })),
+      staffUserId: input.staffUserId,
+      noteDate: input.noteDate,
+      beginTime: input.beginTime,
+      endTime: input.endTime,
+      block: blockId ? blocks[blockId] : null,
+    });
+  }
+
   async saveShiftNote(input: Parameters<ComplyraApi["saveShiftNote"]>[0]) {
     const session = await this.requireSession();
     if (!canEnterShiftNotes(session.roleKey)) {
@@ -2126,8 +2232,44 @@ export class HostedApi implements ComplyraApi {
     if (!ispProgramVisibleToStaff(program)) {
       throw new Error("Notes can only be entered against an approved ISP program.");
     }
-    const shift = input.shift.trim().slice(0, 40);
+    const shift = input.shift.trim().slice(0, 80);
     if (!shift) throw new Error("Choose the shift for this note.");
+    const beginTime = input.beginTime?.trim().slice(0, 5) ?? "";
+    const endTime = input.endTime?.trim().slice(0, 5) ?? "";
+    if ((beginTime && !endTime) || (!beginTime && endTime)) {
+      throw new Error("Use a begin time and an end time.");
+    }
+    const clockDuration = beginTime && endTime ? shiftDurationMinutes(beginTime, endTime) : null;
+    if (beginTime && endTime && clockDuration === null) {
+      throw new Error("Use a clock time for the begin and end.");
+    }
+    const location = input.location?.trim().slice(0, 160) ?? "";
+    const staffTitle = displayStaffTitle(input.staffTitle || session.jobTitle, session.roleKey);
+    const waiverService = input.waiverService?.trim().slice(0, 80) ?? "";
+    let signatureDataUrl = input.signatureDataUrl?.trim() ?? "";
+    if (!input.noteId && !signatureDataUrl) {
+      const adopted = await this.getMySignature();
+      if (adopted) {
+        try {
+          signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+        } catch {
+          signatureDataUrl = "";
+        }
+      }
+    }
+    if (!input.noteId) {
+      if (signatureDataUrl) assertAdoptableSignature("Signature", signatureDataUrl);
+      const problem = progressNoteProblem({
+        goalService: program.goalService ?? "",
+        beginTime,
+        endTime,
+        waiverService,
+        summary: input.summary,
+        staffTitle,
+        signatureDataUrl,
+      });
+      if (problem) throw new Error(problem);
+    }
     const { data: taskRows, error: taskError } = await this.client
       .from("isp_program_tasks")
       .select("id")
@@ -2160,7 +2302,11 @@ export class HostedApi implements ComplyraApi {
     const now = new Date().toISOString();
     const summary = input.summary.trim().slice(0, 4000);
     const timeSpent =
-      input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes));
+      clockDuration !== null
+        ? clockDuration
+        : input.timeSpentMinutes === null
+          ? null
+          : Math.max(0, Math.trunc(input.timeSpentMinutes));
     let noteId = input.noteId ?? "";
     if (noteId) {
       const { data: existing, error: existingError } = await this.client
@@ -2179,11 +2325,27 @@ export class HostedApi implements ComplyraApi {
       if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: existingUserId })) {
         throw new Error("You can only edit your own shift notes.");
       }
+      const hrShiftId = await this.linkedHrShiftId({
+        agencyId: session.agencyId,
+        individualId: input.individualId,
+        staffUserId: existingUserId,
+        noteDate: input.noteDate,
+        beginTime,
+        endTime,
+        shift,
+      });
       const { error } = await this.client
         .from("shift_notes")
         .update({
           note_date: input.noteDate,
           shift,
+          hr_shift_id: hrShiftId,
+          begin_time: beginTime,
+          end_time: endTime,
+          location,
+          ...(staffTitle ? { staff_title: staffTitle } : {}),
+          ...(waiverService ? { waiver_service: waiverService } : {}),
+          ...(signatureDataUrl ? { signature_data_url: signatureDataUrl } : {}),
           summary,
           time_spent_minutes: timeSpent,
           updated_at: now,
@@ -2196,6 +2358,15 @@ export class HostedApi implements ComplyraApi {
         .eq("note_id", noteId);
       throwIf(scoreDeleteError, "Could not replace the note scores.");
     } else {
+      const hrShiftId = await this.linkedHrShiftId({
+        agencyId: session.agencyId,
+        individualId: input.individualId,
+        staffUserId: session.userId,
+        noteDate: input.noteDate,
+        beginTime,
+        endTime,
+        shift,
+      });
       const { data, error } = await this.client
         .from("shift_notes")
         .insert({
@@ -2204,6 +2375,13 @@ export class HostedApi implements ComplyraApi {
           program_id: program.id,
           note_date: input.noteDate,
           shift,
+          hr_shift_id: hrShiftId,
+          begin_time: beginTime,
+          end_time: endTime,
+          location,
+          staff_title: staffTitle,
+          waiver_service: waiverService,
+          signature_data_url: signatureDataUrl,
           summary,
           time_spent_minutes: timeSpent,
           staff_user_id: session.userId,
@@ -2224,6 +2402,16 @@ export class HostedApi implements ComplyraApi {
         })),
       );
       throwIf(error, "Could not save the task scores.");
+    }
+    const block = blockForShiftLabel(shift);
+    if (block) {
+      // The note is already saved. A missing function, or a database that
+      // has not had this migration, must not fail the save.
+      await this.client.rpc("resolve_missing_note_notices", {
+        p_individual_id: input.individualId,
+        p_note_date: input.noteDate,
+        p_block: block,
+      });
     }
     return noteId;
   }
@@ -2312,10 +2500,17 @@ export class HostedApi implements ComplyraApi {
       programId: String(row.program_id),
       noteDate: String(row.note_date ?? "").slice(0, 10),
       shift: String(row.shift ?? ""),
+      beginTime: String(row.begin_time ?? ""),
+      endTime: String(row.end_time ?? ""),
+      location: String(row.location ?? ""),
+      staffTitle: String(row.staff_title ?? ""),
+      waiverService: String(row.waiver_service ?? ""),
+      signatureDataUrl: String(row.signature_data_url ?? ""),
       summary: String(row.summary ?? ""),
       timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
       staffUserId: String(row.staff_user_id ?? ""),
       staffName: String(row.staff_name ?? ""),
+      hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
       createdAt: String(row.created_at ?? ""),
       updatedAt: String(row.updated_at ?? ""),
       deletedAt: row.deleted_at ? String(row.deleted_at) : null,
@@ -2383,6 +2578,7 @@ export class HostedApi implements ComplyraApi {
         mode,
         enabled,
         expiresOn: item.expiresOn,
+        kind: item.kind,
       });
     }
   }
@@ -2496,7 +2692,8 @@ export class HostedApi implements ComplyraApi {
       .eq("id", row!.obligation_id)
       .maybeSingle();
     const item = itemRow ? mapObligation(itemRow) : null;
-    if (!item || !isObligationActive(item)) {
+    const rules = await this.loadOperatingRules(session.agencyId);
+    if (!item || !isObligationActive(item, undefined, { delegationsExpire: rules.delegationsExpire })) {
       throw new Error("This document is not open for signature.");
     }
     if (!staffCanSignDelegation(item)) {
@@ -2838,6 +3035,137 @@ export class HostedApi implements ComplyraApi {
       p_medication_id: med.id, p_pills: pills,
     });
     throwIf(saveError, "Could not record the PRN dose.");
+    const rules = await this.loadOperatingRules(session.agencyId);
+    await this.audit(
+      session,
+      "medication.prn_followup",
+      `Effectiveness follow-up for ${med.name} is due in ${rules.prnFollowupMinutes} minutes. Remind the house every ${rules.prnReminderRepeatMinutes} minutes until it is recorded.`,
+      "medication",
+      med.id,
+    );
+    const givenAt = new Date().toISOString();
+    await this.queueOperatingNotice({
+      agencyId: session.agencyId,
+      userId: null,
+      roleKey: "nurse",
+      type: "med.prn_followup",
+      title: "PRN follow-up",
+      body: `${session.fullName} gave ${med.name}. Effectiveness follow-up is due in ${rules.prnFollowupMinutes} minutes.`,
+      deepLink: "/meds",
+      entityId: med.id,
+      dedupeKey: `med.prn_followup:${med.id}:${givenAt}`,
+    });
+  }
+
+  async recordPrnFollowup(
+    medicationId: string,
+    input: { indication: string; result: string },
+  ) {
+    const session = await this.requireSession();
+    if (!canLogPrnDose(session.roleKey)) throw new Error("You cannot log a PRN dose.");
+    const { data: row, error } = await this.client.from("medications").select("*").eq("id", medicationId).single();
+    throwIf(error, "PRN medication not found.");
+    const med = mapMedication(row!);
+    if (med.agencyId !== session.agencyId || med.kind !== "prn") throw new Error("PRN medication not found.");
+    const indication = input.indication.trim();
+    const result = input.result.trim();
+    if (!indication) throw new Error("Say why the PRN was given.");
+    if (!result) throw new Error("Record what you saw at follow-up.");
+    await this.audit(
+      session,
+      "medication.prn_effectiveness",
+      `Indication: ${indication.slice(0, 240)}. Result: ${result.slice(0, 240)}.`,
+      "medication",
+      med.id,
+    );
+  }
+
+  async noteLateClockIn(input: {
+    staffId: string;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }) {
+    const session = await this.requireSession();
+    if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
+      throw new Error("You cannot record a clock-in point for someone else.");
+    }
+    const rules = await this.loadOperatingRules(session.agencyId);
+    if (!clockInIsLate(input.scheduledStart, input.punchedAt, rules.lateClockInMinutes)) return;
+    const sourceKey = input.sourceKey.trim();
+    if (!sourceKey) throw new Error("A clock-in point needs a source.");
+    await this.audit(
+      session,
+      "accountability.point",
+      `Late clock-in costs ${rules.pointsPerLateItem} point. source=${sourceKey}`,
+      "profile",
+      input.staffId,
+    );
+    await this.queueOperatingNotice({
+      agencyId: session.agencyId,
+      userId: input.staffId,
+      roleKey: null,
+      type: "accountability.warning",
+      title: "Late clock-in",
+      body: `Clocking in more than ${rules.lateClockInMinutes} minutes late costs ${rules.pointsPerLateItem} point.`,
+      deepLink: "/hub",
+      entityId: sourceKey,
+      dedupeKey: sourceKey,
+    });
+  }
+
+  async awardRecognitionPoints(input: {
+    recipientId: string;
+    points: number;
+    reason: string;
+  }): Promise<{ usedThisMonth: number; cap: number }> {
+    const session = await this.requireSession();
+    if (
+      !hasPermission(session, "recognition.manage") &&
+      !hasPermission(session, "recognition.review_dsp")
+    ) {
+      throw new Error("You cannot award recognition points.");
+    }
+    if (input.recipientId === session.userId) throw new Error("You cannot award points to yourself.");
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Say why you are awarding the points.");
+    const points = Math.trunc(input.points);
+    const rules = await this.loadOperatingRules(session.agencyId);
+    const month = new Date().toISOString().slice(0, 7);
+    const { data, error } = await this.client
+      .from("audit_events")
+      .select("detail, created_at")
+      .eq("agency_id", session.agencyId)
+      .eq("actor_id", session.userId)
+      .eq("action", "recognition.award");
+    throwIf(error, "Could not check this month's recognition points.");
+    const used = ((data ?? []) as Array<{ detail?: string; created_at?: string }>)
+      .filter((row) => String(row.created_at ?? "").startsWith(month))
+      .reduce((sum, row) => {
+        const match = /^points=(\d+)/.exec(String(row.detail ?? ""));
+        return sum + (match ? Number(match[1]) : 0);
+      }, 0);
+    const problem = recognitionAwardProblem(used, points, rules.recognitionMonthlyCap);
+    if (problem) throw new Error(problem);
+    await this.audit(
+      session,
+      "recognition.award",
+      `points=${points};recipient=${input.recipientId};reason=${reason.slice(0, 240)}`,
+      "profile",
+      input.recipientId,
+    );
+    await this.queueOperatingNotice({
+      agencyId: session.agencyId,
+      userId: input.recipientId,
+      roleKey: null,
+      type: "recognition.awarded",
+      title: "Recognition points",
+      body: `${session.fullName} awarded you ${points} point${points === 1 ? "" : "s"}. ${reason.slice(0, 240)}`,
+      deepLink: "/recognition",
+      entityId: input.recipientId,
+      dedupeKey: `recognition.award:${crypto.randomUUID()}`,
+    });
+    return { usedThisMonth: used + points, cap: rules.recognitionMonthlyCap };
   }
 
   // ---- Training ----
@@ -4237,6 +4565,7 @@ export class HostedApi implements ComplyraApi {
       appointments: Appointment[];
       checklists: TrainingChecklist[];
       versionLabelById: Map<string, string | null>;
+      orderReminderDays?: number[];
     },
   ): PlanStackView {
     const items = input.obligations.filter((item) => item.individualId === person.id);
@@ -4274,7 +4603,10 @@ export class HostedApi implements ComplyraApi {
       renewals: canSeeRenewals(session.roleKey)
         ? input.renewals
             .filter((row) => row.individualId === person.id)
-            .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn) }))
+            .map((row) => ({
+              ...row,
+              status: renewalStatus(row.nextDueOn, undefined, input.orderReminderDays),
+            }))
             .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
         : [],
       carePlan: pcsp
@@ -4435,11 +4767,12 @@ export class HostedApi implements ComplyraApi {
       mode: string;
       enabled: boolean;
       expiresOn: string | null;
+      kind?: string;
     },
   ) {
     if (item.mode !== "required") return;
     if (!item.enabled) return;
-    if (item.expiresOn && item.expiresOn < todayIso()) return;
+    if (item.kind !== "delegation" && item.expiresOn && item.expiresOn < todayIso()) return;
     const person = await this.individualRecord(item.individualId);
     if (!person) return;
     const userIds = await this.obligationRosterUserIds(session, item.individualId, person.siteId);
@@ -8223,6 +8556,44 @@ export class HostedApi implements ComplyraApi {
       "med_dose_exception",
       (data as { id: string } | null)?.id,
     );
+    if (validated.kind === "refused") {
+      const rules = await this.loadOperatingRules(session.agencyId);
+      const { data: recent } = await this.client
+        .from("med_dose_exceptions")
+        .select("kind, created_at")
+        .eq("agency_id", session.agencyId)
+        .eq("medication_id", med.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const streak = consecutiveRefusals(
+        ((recent ?? []) as Array<{ kind: string; created_at: string }>).map((row) => ({
+          medicationId: med.id,
+          kind: String(row.kind),
+          createdAt: String(row.created_at ?? ""),
+        })),
+        med.id,
+      );
+      if (streak >= rules.refusalsBeforeRn) {
+        await this.audit(
+          session,
+          "medication.refusal_review",
+          `Nurse review: ${med.name} has been refused ${streak} times in a row.`,
+          "medication",
+          med.id,
+        );
+        await this.queueOperatingNotice({
+          agencyId: session.agencyId,
+          userId: null,
+          roleKey: "nurse",
+          type: "med.refusal_review",
+          title: "Nurse review — refusals",
+          body: `${med.name} has been refused ${streak} times in a row.`,
+          deepLink: "/meds",
+          entityId: med.id,
+          dedupeKey: `med.refusal_review:${med.id}:${streak}`,
+        });
+      }
+    }
   }
 
   // ===== ISSUE #75 alone time + #76 MAR marks + Overview due items =====
@@ -8265,6 +8636,28 @@ export class HostedApi implements ComplyraApi {
     };
   }
 
+  /**
+   * Saved settings from effective_rules. Catalog defaults apply when the
+   * migration is not on this database yet, so due items keep working.
+   */
+  private async loadOperatingRules(agencyId: string) {
+    const { data, error } = await this.client.rpc("effective_rules", {
+      p_agency_id: agencyId,
+      p_site_id: null,
+    });
+    if (error || !data) return operatingRulesFrom(null);
+    return operatingRulesFrom(
+      (data as Array<Record<string, unknown>>).map(
+        (row): EffectiveRule => ({
+          key: String(row.key),
+          value: row.value as EffectiveRule["value"],
+          lock: (row.lock as EffectiveRule["lock"]) ?? "agency",
+          source: (row.source as EffectiveRule["source"]) ?? "default",
+        }),
+      ),
+    );
+  }
+
   async getSiteDueItems(
     siteId: string,
   ): Promise<import("./dueItems").SiteDueItemsResult> {
@@ -8292,8 +8685,11 @@ export class HostedApi implements ComplyraApi {
       (row) => ({ id: String(row.id), name: String(row.full_name ?? "") }),
     );
     const peopleIds = people.map((p) => p.id);
-    const today = todayIso();
-    const serviceDate = todayIso(new Date(Date.now() - 86_400_000));
+    const rules = await this.loadOperatingRules(session.agencyId);
+    const clock = dueItemClock();
+    const today = clock.doseDate;
+    const serviceDate = clock.serviceDate;
+    const now = clock.now;
 
     // On-duty writers = assigned house DSPs (no clock-in v1).
     const { data: writerRows } = await this.client
@@ -8323,7 +8719,7 @@ export class HostedApi implements ComplyraApi {
     if (canSeeShiftNotes(session.roleKey) && peopleIds.length) {
       const { data: noteRows } = await this.client
         .from("shift_notes")
-        .select("individual_id, staff_user_id, shift, note_date")
+        .select("individual_id, staff_user_id, shift, note_date, hr_shift_id")
         .eq("agency_id", session.agencyId)
         .in("individual_id", peopleIds)
         .is("deleted_at", null)
@@ -8333,6 +8729,30 @@ export class HostedApi implements ComplyraApi {
         staffUserId: String(row.staff_user_id ?? ""),
         blockId: blockForShiftLabel(String(row.shift ?? "")) as ShiftBlockId | null,
         noteDate: String(row.note_date ?? "").slice(0, 10),
+        hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
+      }));
+      const dayStart = new Date(zonedWallTimeMs(serviceDate, 0, clock.timeZone)).toISOString();
+      const dayEnd = new Date(zonedWallTimeMs(serviceDate, 36 * 60, clock.timeZone)).toISOString();
+      const { data: shiftRows } = await this.client
+        .from("hr_shifts")
+        .select("id, staff_id, title, starts_at, ends_at, status")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .in("status", ["scheduled", "published"])
+        .not("staff_id", "is", null)
+        .lt("starts_at", dayEnd)
+        .gt("ends_at", dayStart);
+      const shiftStaffIds = [...new Set((shiftRows ?? []).map((row) => String(row.staff_id)))];
+      const { data: shiftProfiles } = shiftStaffIds.length
+        ? await this.client.from("profiles").select("id, full_name").in("id", shiftStaffIds)
+        : { data: [] };
+      const shiftNames = new Map((shiftProfiles ?? []).map((row) => [String(row.id), String(row.full_name ?? "Staff")]));
+      const scheduledShifts = (shiftRows ?? []).map((row) => ({
+        id: String(row.id),
+        staffUserId: String(row.staff_id),
+        staffName: shiftNames.get(String(row.staff_id)) ?? "Staff",
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
       }));
       const { data: aloneRows } = await this.client
         .from("alone_time_windows")
@@ -8342,10 +8762,15 @@ export class HostedApi implements ComplyraApi {
         .in("individual_id", peopleIds);
       shiftNoteItems = computeShiftNoteDueItems({
         serviceDate,
+        now,
+        graceMinutes: rules.noteGraceMinutes,
+        timeZone: clock.timeZone,
+        blocks: shiftBlocksForSite(siteFacts),
         staffed24h: siteFacts.staffed24h !== false,
         individuals: people,
         requiredWriters,
         notes,
+        scheduledShifts,
         aloneTime: ((aloneRows ?? []) as Array<Record<string, unknown>>).map((r) =>
           this.mapAloneTimeWindow(r),
         ),
@@ -8395,10 +8820,11 @@ export class HostedApi implements ComplyraApi {
             .eq("dose_date", today)
             .in("medication_id", medIds)
         : { data: [] };
-      const now = new Date();
       medItems = computeMedDueItems({
         doseDate: today,
-        nowMinutes: now.getHours() * 60 + now.getMinutes(),
+        nowMinutes: clock.nowMinutes,
+        windowBeforeMinutes: rules.medWindowBeforeMinutes,
+        windowAfterMinutes: rules.medWindowAfterMinutes,
         scheduledDoses,
         marks: ((markRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
           medicationId: String(row.medication_id),
@@ -8607,6 +9033,15 @@ export class HostedApi implements ComplyraApi {
     if (!/^\d{2}:\d{2}$/.test(input.doseTime)) {
       throw new Error("Use an HH:MM dose time.");
     }
+    const rules = await this.loadOperatingRules(session.agencyId);
+    const early = marRecordingProblem({
+      doseDate: input.doseDate,
+      doseTime: input.doseTime,
+      now: new Date(),
+      windowBeforeMinutes: rules.medWindowBeforeMinutes,
+      blockEarly: rules.blockEarlyRecording,
+    });
+    if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
       .from("med_dose_marks")
       .select("marked_by")
@@ -8639,6 +9074,26 @@ export class HostedApi implements ComplyraApi {
       { onConflict: "agency_id,medication_id,dose_date,dose_time" },
     );
     throwIf(error, "Could not mark the dose.");
+    const late = !existingMark && recordingCostsAPoint({
+      doseDate: input.doseDate.slice(0, 10),
+      doseTime: input.doseTime,
+      now: new Date(),
+      windowAfterMinutes: rules.medWindowAfterMinutes,
+      lateAfterHours: rules.lateRecordingAfterHours,
+    });
+    if (late) {
+      await this.queueOperatingNotice({
+        agencyId: session.agencyId,
+        userId: session.userId,
+        roleKey: null,
+        type: "med.late_recording",
+        title: "Late medication recording",
+        body: `Recording ${med.name} at ${input.doseTime} after the window costs ${rules.pointsPerLateItem} point. You can dispute it for ${rules.disputeWindowDays} days.`,
+        deepLink: "/meds",
+        entityId: med.id,
+        dedupeKey: `med.late_recording:${med.id}:${input.doseDate.slice(0, 10)}:${input.doseTime}`,
+      });
+    }
     await this.audit(
       session,
       "medication.dose_marked",
@@ -8646,6 +9101,163 @@ export class HostedApi implements ComplyraApi {
       "medication",
       med.id,
     );
+  }
+
+  /**
+   * Opening the bell queues the same gaps the unattended sweep writes.
+   * A failure leaves the existing notices readable.
+   */
+  private async sweepOperatingReminders(session: SessionUser) {
+    try {
+      const rules = await this.loadOperatingRules(session.agencyId);
+      const { data: siteRows, error: siteError } = await this.client
+        .from("sites")
+        .select("id, name")
+        .eq("agency_id", session.agencyId);
+      if (siteError || !siteRows) return;
+      const { data: membershipRows } = await this.client
+        .from("memberships")
+        .select("user_id, role_key, role, site_id, expires_on")
+        .eq("agency_id", session.agencyId);
+      const clock = dueItemClock();
+      const today = clock.doseDate;
+      const memberships = (membershipRows ?? []).map((membership) => ({
+        userId: String(membership.user_id),
+        role: String(membership.role_key ?? membership.role ?? ""),
+        siteId: membership.site_id ? String(membership.site_id) : null,
+        expiresOn: membership.expires_on ? String(membership.expires_on).slice(0, 10) : null,
+      }));
+      const now = clock.now;
+      const sites = [];
+      for (const site of siteRows) {
+        const siteId = String(site.id);
+        if (!canAccessSite(session, siteId)) continue;
+        try {
+          const due = await this.getSiteDueItems(siteId);
+          sites.push({
+            id: siteId,
+            name: String(site.name),
+            items: due.items,
+            medRecipients: reminderRecipientIds(memberships, siteId, ["dsp", "house_manager", "administrator", "nurse"], today),
+            noteManagers: reminderRecipientIds(memberships, siteId, ["house_manager", "administrator"], today),
+          });
+        } catch {
+          continue;
+        }
+      }
+      const { data: events } = await this.client
+        .from("audit_events")
+        .select("action, target_id, actor_id, created_at")
+        .eq("agency_id", session.agencyId)
+        .in("action", ["medication.prn", "medication.prn_followup", "medication.prn_effectiveness"])
+        .order("created_at", { ascending: false })
+        .limit(500);
+      const mapped = (events ?? []).map((event) => ({
+        action: String(event.action),
+        targetId: event.target_id ? String(event.target_id) : null,
+        actorId: event.actor_id ? String(event.actor_id) : null,
+        createdAt: String(event.created_at),
+      }));
+      const latestGiven = new Map<string, { createdAt: string; actorId: string | null }>();
+      for (const event of mapped) {
+        if (!event.targetId || (event.action !== "medication.prn" && event.action !== "medication.prn_followup")) continue;
+        const prev = latestGiven.get(event.targetId);
+        if (!prev || event.createdAt > prev.createdAt) {
+          latestGiven.set(event.targetId, { createdAt: event.createdAt, actorId: event.actorId });
+        }
+      }
+      const openIds = [...latestGiven.keys()];
+      const { data: medRows } = openIds.length
+        ? await this.client.from("medications").select("id, name, individual_id").in("id", openIds)
+        : { data: [] };
+      const individualIds = [...new Set((medRows ?? []).map((row) => String(row.individual_id)))];
+      const { data: people } = individualIds.length
+        ? await this.client.from("individuals").select("id, site_id").in("id", individualIds)
+        : { data: [] };
+      const siteByPerson = new Map((people ?? []).map((row) => [String(row.id), row.site_id ? String(row.site_id) : null]));
+      const medById = new Map((medRows ?? []).map((row) => [String(row.id), row]));
+      for (const notice of operatingReminderNotices({
+        now,
+        noteDay: clock.noteDay,
+        unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
+        prnReminderRepeatMinutes: rules.prnReminderRepeatMinutes,
+        prnFollowupMinutes: rules.prnFollowupMinutes,
+        sites,
+        prnFollowups: [...latestGiven].flatMap(([medicationId, given]) => {
+          const med = medById.get(medicationId);
+          if (!med) return [];
+          const homeId = siteByPerson.get(String(med.individual_id)) ?? null;
+          return [{
+            medicationId,
+            medName: String(med.name),
+            createdAt: given.createdAt,
+            stillOpen: prnFollowupStillOpen(mapped, medicationId, given.createdAt),
+            actorId: given.actorId,
+            homeRecipients: homeId
+              ? reminderRecipientIds(memberships, homeId, ["house_manager", "administrator", "nurse"], today)
+              : [],
+          }];
+        }),
+      })) {
+        if (!notice.userId) continue;
+        await this.queueOperatingNotice({
+          agencyId: session.agencyId,
+          userId: notice.userId,
+          roleKey: null,
+          type: notice.type,
+          title: notice.title,
+          body: notice.body,
+          deepLink: notice.deepLink,
+          entityId: notice.entityId,
+          dedupeKey: notice.dedupeKey,
+        });
+      }
+      const loadedSiteIds = sites.map((site) => site.id);
+      const liveIds = sites.flatMap((site) =>
+        site.items.filter((item) => item.kind === "shift_note").map((item) => item.id),
+      );
+      if (loadedSiteIds.length) {
+        const { data: loadedPeople } = await this.client
+          .from("individuals")
+          .select("id")
+          .eq("agency_id", session.agencyId)
+          .in("site_id", loadedSiteIds);
+        await this.client.rpc("retire_stale_missing_note_notices", {
+          p_agency_id: session.agencyId,
+          p_service_date: clock.serviceDate,
+          p_individual_ids: (loadedPeople ?? []).map((row) => String(row.id)),
+          p_live_ids: liveIds,
+        });
+      }
+    } catch {
+      // The bell still opens if a reminder cannot be queued.
+    }
+  }
+
+  /** Best-effort notice. A missing database function must not undo the action. */
+  private async queueOperatingNotice(input: {
+    agencyId: string;
+    userId: string | null;
+    roleKey: string | null;
+    type: string;
+    title: string;
+    body: string;
+    deepLink: string;
+    entityId: string;
+    dedupeKey: string;
+  }) {
+    const { error } = await this.client.rpc("queue_operating_notice", {
+      p_agency_id: input.agencyId,
+      p_user_id: input.userId,
+      p_role_key: input.roleKey,
+      p_type: input.type,
+      p_title: input.title,
+      p_body: input.body,
+      p_deep_link: input.deepLink,
+      p_entity_id: input.entityId,
+      p_dedupe_key: input.dedupeKey,
+    });
+    void error;
   }
   // ===== LIFEPATH-P7 HOSTED (mileage tracking) =====
   // LIFEPATH-P7 (mileage): vehicle mileage log (HostedApi, Supabase).

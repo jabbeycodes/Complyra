@@ -6,10 +6,10 @@
  *   TEMPORARY (one dated shift) or PERMANENT (a recurring weekly slot).
  *   Staff trained at that site see it.
  * - HR (and administrators) post PERMANENT openings to the whole agency.
- * - Staff may work up to the agency's weekly threshold (40 hours in a
- *   Sunday-to-Saturday week). A pickup
- *   that would go over is never assigned automatically: it becomes a bid a
- *   manager approves.
+ * - Staff may work up to the agency's weekly limit (rule setting, 40 hours
+ *   by default) in a work week that starts Sunday unless the agency set
+ *   Monday. A pickup past the limit plus the overtime tolerance is never
+ *   assigned automatically: it becomes a bid a manager approves.
  * - Permanent slots are always bids; an approved bid becomes the staff
  *   member's recurring pattern.
  *
@@ -19,7 +19,8 @@
  * Wording: "Individual/Individuals" only — never client/patient.
  */
 
-import { computePatternWeeklyHours, OVERTIME_TOLERANCE_HOURS, STAFFING_DAY_LABELS, type HrShift } from "./hr";
+import { computePatternWeeklyHours, STAFFING_DAY_LABELS, workWeekStart, type HrShift } from "./hr";
+import { DEFAULT_OVERTIME_LINES, type OvertimeLines } from "./rules";
 
 export type OpenShiftKind = "temporary" | "permanent";
 export type OpenShiftAudience = "site" | "agency";
@@ -81,9 +82,6 @@ export interface OpenShiftInput {
   slots?: number;
   pickupMode?: OpenShiftPickupMode;
 }
-
-/** The agency's weekly limit when no overtime rules are saved. */
-export const DEFAULT_WEEKLY_LIMIT_HOURS = 40;
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -182,11 +180,18 @@ export function evaluatePickup(input: {
   trainedAtSite: boolean;
   existingShifts: Pick<HrShift, "startsAt" | "endsAt" | "status">[];
   recurringHours?: number;
+  /** Kept so older callers can override only the weekly limit. */
   weeklyLimitHours?: number;
+  /** Agency rule settings. Defaults are the platform catalog (40 + 1, Sunday). */
+  lines?: OvertimeLines;
 }): PickupEvaluation {
   const { shift } = input;
-  // Flag line: the weekly limit plus an hour's tolerance (41h for 40).
-  const limit = (input.weeklyLimitHours ?? DEFAULT_WEEKLY_LIMIT_HOURS) + OVERTIME_TOLERANCE_HOURS;
+  const lines: OvertimeLines = input.lines ?? {
+    ...DEFAULT_OVERTIME_LINES,
+    weeklyLimitHours: input.weeklyLimitHours ?? DEFAULT_OVERTIME_LINES.weeklyLimitHours,
+  };
+  // Flag line: weekly limit plus tolerance (41h when the defaults are 40 + 1).
+  const limit = lines.weeklyLimitHours + lines.toleranceHours;
   if (shift.audience === "site" && !input.trainedAtSite) {
     return { blocker: "Not trained at this program site yet.", weekHours: 0, wouldBeOvertime: false, direct: false };
   }
@@ -199,7 +204,7 @@ export function evaluatePickup(input: {
     if (live.some((x) => Date.parse(x.startsAt) < e && Date.parse(x.endsAt) > s)) {
       return { blocker: "Already scheduled during this time.", weekHours: 0, wouldBeOvertime: false, direct: false };
     }
-    const weekStart = sundayOf(new Date(s)).getTime();
+    const weekStart = workWeekStart(new Date(s), lines.weekStartsOn).getTime();
     const weekEnd = weekStart + 7 * 86_400_000;
     for (const x of live) {
       const a = Math.max(Date.parse(x.startsAt), weekStart);
@@ -217,22 +222,18 @@ export function evaluatePickup(input: {
 }
 
 /** Label for the pick-up button, so the outcome is clear before tapping. */
-export function pickupActionLabel(shift: HrOpenShift, evaluation?: PickupEvaluation | null): string {
+export function pickupActionLabel(
+  shift: HrOpenShift,
+  evaluation?: PickupEvaluation | null,
+  flagHours = DEFAULT_OVERTIME_LINES.weeklyLimitHours + DEFAULT_OVERTIME_LINES.toleranceHours,
+): string {
   if (shift.kind === "permanent") return "Bid on this shift";
   if (shift.pickupMode === "approval") return "Bid on this shift";
-  if (evaluation?.wouldBeOvertime) return "Request (past 41 hours)";
+  if (evaluation?.wouldBeOvertime) return `Request (past ${flagHours} hours)`;
   return "Pick up";
 }
 
 /* ------------------------------- helpers ------------------------------- */
-
-/** The agency work week runs Sunday through Saturday. */
-function sundayOf(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - x.getDay());
-  return x;
-}
 
 function localDate(d: Date): string {
   const y = d.getFullYear();

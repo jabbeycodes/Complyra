@@ -40,7 +40,7 @@ test("well-water annual is current for 365 days and ignored when the home is on 
   );
 });
 
-test("Cedar seed review is in place; Willow is still open", async () => {
+test("Cedar and Willow seed reviews are both in place", async () => {
   const client = api();
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -53,8 +53,8 @@ test("Cedar seed review is in place; Willow is still open", async () => {
   const cedarReview = workspace.siteReviews.find((row) => row.siteId === cedar.id);
   const oakwoodReview = workspace.siteReviews.find((row) => row.siteId === oakwood.id);
   assert.equal(isSiteReviewInPlace(cedarReview, cedar, todayIso()), true);
-  assert.equal(isSiteReviewInPlace(oakwoodReview, oakwood, todayIso()), false);
-  assert.ok((oakwoodReview ? siteReviewGaps(oakwoodReview, oakwood, todayIso()) : []).length > 3);
+  assert.equal(isSiteReviewInPlace(oakwoodReview, oakwood, todayIso()), true);
+  assert.equal(siteReviewGaps(oakwoodReview, oakwood, todayIso()).length, 0);
 });
 
 test("pre-survey rows pull equipment and chart facts", async () => {
@@ -209,17 +209,34 @@ test("Your work lists an open site review for PM and house manager, not DSP", as
     sites: adminWorkspace.sites,
     siteReviews: adminWorkspace.siteReviews,
   });
-  assert.ok(
-    adminQueue.some(
-      (item) =>
-        item.kind === "site_review" && item.detail.includes("Willow"),
-    ),
-  );
   assert.equal(
     adminQueue.some(
-      (item) => item.kind === "site_review" && item.detail.includes("Cedar"),
+      (item) =>
+        item.kind === "site_review" &&
+        (item.detail.includes("Willow") || item.detail.includes("Cedar")),
     ),
     false,
+    "completed walkthrough reviews stay off the work list",
+  );
+  const created = await client.createSite({
+    name: "Hemlock House",
+    address: "9 Hemlock Court",
+    programName: "Residential services",
+  });
+  const withNew = await client.loadWorkspace(admin);
+  const openQueue = personalQueue({
+    session: admin,
+    items: withNew.requirements,
+    packets: withNew.packets,
+    planStacks: withNew.planStacks,
+    canApprove: true,
+    sites: withNew.sites.filter((row) => row.id === created.id),
+    siteReviews: withNew.siteReviews,
+  });
+  assert.ok(
+    openQueue.some(
+      (item) => item.kind === "site_review" && item.detail.includes("Hemlock"),
+    ),
   );
 
   const hmClient = api();
@@ -238,7 +255,11 @@ test("Your work lists an open site review for PM and house manager, not DSP", as
     sites: hmWorkspace.sites.filter((row) => row.name === "Willow House"),
     siteReviews: hmWorkspace.siteReviews,
   });
-  assert.ok(hmQueue.some((item) => item.kind === "site_review"));
+  assert.equal(
+    hmQueue.some((item) => item.kind === "site_review"),
+    false,
+    "Willow's review is already in place",
+  );
 
   const dspClient = api();
   const dsp = await dspClient.signIn({

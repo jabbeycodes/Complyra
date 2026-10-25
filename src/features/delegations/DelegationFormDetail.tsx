@@ -508,7 +508,7 @@ function FormEditor({
         </label>
       </div>
       <label className="form-label">
-        Review / expiry date
+        Review date
         <input type="date" value={reviewDate} onChange={(e) => setReviewDate(e.target.value)} />
       </label>
       <h4>Instructional licensed medical professional</h4>

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Modal, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { furthestReminderDay } from "../../data/rules";
+import { useOperatingRules } from "../employeeHub/useOvertimeLines";
 import { hasPermission } from "../../data/permissions";
 import { todayIso } from "../../data/chart";
 import {
@@ -99,6 +101,7 @@ function CertRow({
 
 export default function CertificateManager() {
   const { api, session, workspace } = useData();
+  const operating = useOperatingRules(session);
   const staff = workspace?.staff ?? [];
   const canManage = Boolean(
     session && hasPermission(session, "certificates.manage"),
@@ -128,7 +131,7 @@ export default function CertificateManager() {
     try {
       const [list, soon] = await Promise.all([
         api.listCertificates(activeStaffId),
-        api.certificatesExpiringSoon(90),
+        api.certificatesExpiringSoon(furthestReminderDay(operating.certificationReminderDays)),
       ]);
       setCerts(list);
       setExpiring(soon);
@@ -142,7 +145,7 @@ export default function CertificateManager() {
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeStaffId]);
+  }, [activeStaffId, operating.certificationReminderDays]);
 
   async function downloadFile(cert: StaffCertificate) {
     try {

@@ -283,6 +283,64 @@ function TaskEditor({
   );
 }
 
+function ProgramNarrative({
+  program,
+  onSave,
+}: {
+  program: IspProgramView;
+  onSave: (patch: {
+    goalService: string;
+    completionCriteria: string;
+    scheduleComment: string;
+  }) => Promise<void>;
+}) {
+  const [goal, setGoal] = useState(program.goalService ?? "");
+  const [criteria, setCriteria] = useState(program.completionCriteria ?? "");
+  const [comment, setComment] = useState(program.scheduleComment ?? "");
+  return (
+    <form
+      className="overview-editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave({ goalService: goal, completionCriteria: criteria, scheduleComment: comment });
+      }}
+    >
+      <label>
+        Goal / service
+        <textarea
+          aria-label="Goal / service"
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          rows={3}
+        />
+      </label>
+      <label>
+        Criteria for completion
+        <textarea
+          aria-label="Criteria for completion"
+          value={criteria}
+          onChange={(e) => setCriteria(e.target.value)}
+          rows={3}
+        />
+      </label>
+      <label>
+        Schedule and frequency comment
+        <textarea
+          aria-label="Schedule and frequency comment"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          rows={2}
+        />
+      </label>
+      <div className="overview-editor-actions">
+        <button type="submit" className="button">
+          Save report header
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function ProgramCard({
   program,
   api,
@@ -294,7 +352,9 @@ function ProgramCard({
   runIsp: (action: () => Promise<unknown>) => Promise<void>;
   pcspSeedTitles: string[];
 }) {
-  const [open, setOpen] = useState(program.status === "draft");
+  const [open, setOpen] = useState(
+    program.status === "draft" || !(program.goalService ?? "").trim(),
+  );
   return (
     <div className="isp-program-card">
       <div className="isp-program-head">
@@ -349,6 +409,10 @@ function ProgramCard({
               ))}
             </ol>
           )}
+          <ProgramNarrative
+            program={program}
+            onSave={(patch) => runIsp(() => api.updateIspProgram(program.id, patch))}
+          />
           <TaskEditor
             program={program}
             pcspSeedTitles={pcspSeedTitles}

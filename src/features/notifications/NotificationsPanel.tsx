@@ -78,7 +78,7 @@ interface NotificationsPanelProps {
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
   /** Navigate to the notification's deep link (app route like /checklists/<id>). */
-  onNavigate: (deepLink: string) => void;
+  onNavigate: (deepLink: string, row: NotificationRow) => void;
   onClose: () => void;
   onRetry?: () => void;
 }
@@ -172,7 +172,7 @@ export default function NotificationsPanel({
                   className={`notif-row${unreadRow ? " unread" : ""}`}
                   onClick={() => {
                     if (unreadRow) onMarkRead(n.id);
-                    onNavigate(n.deep_link);
+                    onNavigate(n.deep_link, n);
                   }}
                   aria-label={`${meta.label}: ${n.title}${unreadRow ? " (unread)" : ""}`}
                 >

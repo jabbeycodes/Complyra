@@ -30,6 +30,8 @@
  *    in summarizeTimecard; the exporter only escapes and formats.
  */
 
+import { DEFAULT_OVERTIME_LINES, type OvertimeLines } from "./rules";
+
 /* ------------------------------------------------------------------ */
 /* Entity interfaces — the UI workstream codes against this contract.  */
 /* Field names are frozen: do not rename without coordinating.         */
@@ -210,22 +212,26 @@ export const APPROACHING_OVERTIME_HOURS = 36;
 export type WeeklyHoursStatus = "ok" | "approaching" | "overtime";
 
 /**
- * Weekly status for a staff member: "overtime" past the flag line (41h),
- * "approaching" from 36h, otherwise "ok". A custom weekly threshold shifts
- * both lines by the same amount.
+ * Weekly status for a staff member: "overtime" past the flag line (limit +
+ * tolerance, 41h by default), "approaching" from the approaching line (36h),
+ * otherwise "ok". Lines come from the agency's rule settings
+ * (overtimeLinesFrom in ./rules); defaults apply when not loaded.
  */
-export function weeklyHoursStatus(hours: number, weeklyThresholdHours = OVERTIME_WEEKLY_HOURS): WeeklyHoursStatus {
-  const shift = weeklyThresholdHours - OVERTIME_WEEKLY_HOURS;
-  if (hours > OVERTIME_FLAG_HOURS + shift) return "overtime";
-  if (hours >= APPROACHING_OVERTIME_HOURS + shift) return "approaching";
+export function weeklyHoursStatus(
+  hours: number,
+  lines: Pick<OvertimeLines, "weeklyLimitHours" | "toleranceHours" | "approachingHours"> = DEFAULT_OVERTIME_LINES,
+): WeeklyHoursStatus {
+  if (hours > lines.weeklyLimitHours + lines.toleranceHours) return "overtime";
+  if (hours >= lines.approachingHours) return "approaching";
   return "ok";
 }
 
-/** Sunday 00:00 local of the work week containing `d`. */
-export function workWeekStart(d: Date): Date {
+/** 00:00 local on the first day of the work week containing `d` (Sunday by default). */
+export function workWeekStart(d: Date, startsOn: OvertimeLines["weekStartsOn"] = "sunday"): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - x.getDay());
+  const offset = startsOn === "monday" ? (x.getDay() + 6) % 7 : x.getDay();
+  x.setDate(x.getDate() - offset);
   return x;
 }
 /** Days before a due date that a requirement flips to "due soon". */
@@ -577,6 +583,8 @@ export interface DetectExceptionsInput {
   timecardApprovals: HrTimecardApproval[];
   payPeriods: HrPayPeriod[];
   nowIso: string;
+  /** Minutes after shift start before a clock-in is late. Defaults to LATE_GRACE_MINUTES. */
+  lateClockInMinutes?: number;
 }
 
 /**
@@ -627,6 +635,7 @@ function fmtTime(iso: string): string {
  */
 export function detectExceptions(input: DetectExceptionsInput): Exception[] {
   const { punches, shifts, timecardApprovals, payPeriods, nowIso } = input;
+  const lateAfterMinutes = input.lateClockInMinutes ?? LATE_GRACE_MINUTES;
   const exceptions: Exception[] = [];
   const { segments, overlaps } = analyzePunches(punches);
   const now = parseTime(nowIso);
@@ -637,12 +646,12 @@ export function detectExceptions(input: DetectExceptionsInput): Exception[] {
     const clockedInLate =
       shift !== null &&
       parseTime(segment.in.punchedAt) >
-        parseTime(shift.startsAt) + LATE_GRACE_MINUTES * MS_PER_MINUTE;
+        parseTime(shift.startsAt) + lateAfterMinutes * MS_PER_MINUTE;
     if (clockedInLate && shift !== null) {
       exceptions.push({
         kind: "late_clock_in",
         staffId,
-        detail: `Clocked in at ${fmtTime(segment.in.punchedAt)}, ${LATE_GRACE_MINUTES} minutes after the ${fmtTime(shift.startsAt)} shift start.`,
+        detail: `Clocked in at ${fmtTime(segment.in.punchedAt)}, ${lateAfterMinutes} minutes after the ${fmtTime(shift.startsAt)} shift start.`,
         at: segment.in.punchedAt,
       });
     }

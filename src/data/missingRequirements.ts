@@ -12,6 +12,8 @@
  * Conservative: a missing record is "missing", never assumed present.
  */
 
+import { cpiPbsDueOn } from "./rules";
+
 export type MissingScope = "site" | "staff" | "individual";
 
 export interface MissingRequirement {
@@ -50,7 +52,9 @@ export interface MissingInput {
     /** Days a completion stays current (default 365). */
     validDays?: number;
   }>;
-  staff: Array<{ userId: string; name: string; siteName?: string }>;
+  staff: Array<{ userId: string; name: string; siteName?: string; hireOn?: string | null }>;
+  /** When set, staff with a hire date owe CPI and PBS by hire date plus this many days. */
+  cpiPbsDueDays?: number;
   individuals: Array<{ id: string; name: string; siteName: string }>;
   /** Required documents per individual (e.g. plan, ISP, emergency contacts). */
   requiredIndividualDocuments: string[];
@@ -112,6 +116,28 @@ export function findMissing(input: MissingInput): MissingRequirement[] {
         expired: !!expiresOn && expiredOn(expiresOn, nowIso),
         deepLink: "/certificates",
       });
+    }
+
+    if (person.hireOn && input.cpiPbsDueDays) {
+      const dueOn = cpiPbsDueOn(person.hireOn, input.cpiPbsDueDays);
+      for (const kind of ["CPI", "PBS"]) {
+        if (input.requiredCertificateKinds.some((required) => required.toLowerCase() === kind.toLowerCase())) {
+          continue;
+        }
+        const expiresOn = certs.get(kind.toLowerCase());
+        if (expiresOn && !expiredOn(expiresOn, nowIso)) continue;
+        missing.push({
+          id: `missing:cert:${person.userId}:${kind.toLowerCase()}`,
+          scope: "staff",
+          kind: "certificate",
+          what: expiresOn ? `${kind} certificate (expired ${expiresOn})` : `${kind} certificate`,
+          ownerName: person.name,
+          contextName: person.siteName,
+          dueOn,
+          expired: dueOn < nowIso,
+          deepLink: "/certificates",
+        });
+      }
     }
 
     const completed = trainingByUser.get(person.userId) ?? new Map();

@@ -22,6 +22,8 @@ import {
   type HrOpenShiftResponse,
   type OpenShiftInput,
 } from "./openShifts";
+import { DEFAULT_OVERTIME_LINES, overtimeLinesFrom, type OvertimeLines } from "./rules";
+import { LocalRulesStore } from "./rulesStore";
 
 export type OpenShiftRespondResult = "picked_up" | "requested" | "declined";
 
@@ -183,7 +185,12 @@ export interface LocalOpenShiftActor {
 const localMemory = new Map<string, LocalOpenShiftBucket>();
 
 export class LocalOpenShiftStore implements OpenShiftStore {
-  constructor(private actor: LocalOpenShiftActor, private now: () => Date = () => new Date()) {}
+  constructor(
+    private actor: LocalOpenShiftActor,
+    private now: () => Date = () => new Date(),
+    /** Agency overtime lines. Defaults keep demo behavior when rules aren't loaded. */
+    private overtimeLines: () => OvertimeLines = () => DEFAULT_OVERTIME_LINES,
+  ) {}
 
   private load(): LocalOpenShiftBucket {
     let bucket = localMemory.get(this.actor.agencyId) ?? { shifts: [], responses: [], awards: [] };
@@ -280,6 +287,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
         .filter((a) => a.kind === "temporary")
         .map((a) => ({ startsAt: a.startsAt, endsAt: a.endsAt, status: "published" as const })),
       recurringHours: awards.filter((a) => a.kind === "permanent").reduce((sum, a) => sum + a.weeklyHours, 0),
+      lines: this.overtimeLines(),
     });
   }
 
@@ -371,5 +379,13 @@ export class LocalOpenShiftStore implements OpenShiftStore {
 export function createOpenShiftStore(actor: LocalOpenShiftActor): OpenShiftStore {
   const client = createSupabaseBrowserClient();
   if (client) return new SupabaseOpenShiftStore(client, actor.agencyId);
-  return new LocalOpenShiftStore(actor);
+  // Demo pickups use the same rule history the operator console writes.
+  const rules = new LocalRulesStore({
+    userId: actor.userId,
+    fullName: actor.fullName,
+    isOperator: false,
+    adminOfAgencyId: null,
+    memberOfAgencyIds: [actor.agencyId],
+  });
+  return new LocalOpenShiftStore(actor, () => new Date(), () => overtimeLinesFrom(rules.effectiveNow(actor.agencyId)));
 }

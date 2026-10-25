@@ -93,6 +93,7 @@ const baseData: CommandCenterData = {
       appRole: "manager",
       roleKey: "house_manager",
       expiresOn: null,
+      hiredOn: null,
     },
     {
       id: "u2",
@@ -105,6 +106,7 @@ const baseData: CommandCenterData = {
       appRole: "dsp",
       roleKey: "dsp",
       expiresOn: null,
+      hiredOn: null,
     },
   ],
   sites: [

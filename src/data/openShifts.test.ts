@@ -168,6 +168,28 @@ test("the work week runs Sunday to Saturday: a Sunday shift starts a new week", 
   assert.equal(r.direct, true);
 });
 
+test("a Monday work week keeps Sunday in the previous week", () => {
+  const existing = [0, 1, 2, 3].map((d) => ({
+    startsAt: new Date(`2026-09-${28 + d}T06:00:00`).toISOString(),
+    endsAt: new Date(`2026-09-${28 + d}T15:00:00`).toISOString(),
+    status: "published" as const,
+  }));
+  const sunday = temp({ startsAt: new Date("2026-10-04T06:30:00").toISOString(), endsAt: new Date("2026-10-04T14:30:00").toISOString() });
+  const lines = { weeklyLimitHours: 40, toleranceHours: 1, approachingHours: 36, weekStartsOn: "monday" as const };
+  assert.equal(evaluatePickup({ shift: sunday, trainedAtSite: true, existingShifts: existing, lines }).weekHours > 0, true);
+});
+
+test("a higher weekly limit lets a pickup stay direct", () => {
+  const worked = (hours: number) => [{
+    startsAt: new Date("2026-09-28T00:00:00").toISOString(),
+    endsAt: new Date(new Date("2026-09-28T00:00:00").getTime() + hours * 3_600_000).toISOString(),
+    status: "published" as const,
+  }];
+  const lines = { weeklyLimitHours: 45, toleranceHours: 1, approachingHours: 40, weekStartsOn: "sunday" as const };
+  // 33.5 + 8 = 41.5, under a 46-hour flag line.
+  assert.equal(evaluatePickup({ shift: temp(), trainedAtSite: true, existingShifts: worked(33.5), lines }).direct, true);
+});
+
 test("30 minutes over 40 is ignored; past 41 hours becomes a bid", () => {
   const worked = (hours: number) => [{
     startsAt: new Date("2026-09-28T00:00:00").toISOString(),

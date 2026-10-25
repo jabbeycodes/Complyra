@@ -81,6 +81,8 @@ export interface KioskShiftSuggestion {
   serviceType: string | null;
   individualId: string | null;
   individualName: string | null;
+  /** Scheduled start, when the house has a shift or staffing window today. */
+  startsAt?: string | null;
 }
 
 /** Live clock state for one staff member at one site (derived client-side). */
@@ -122,6 +124,21 @@ export interface KioskClient {
    * provenance server-side — the input carries no method or photo.
    */
   submitKioskPunch: (token: string, input: KioskPunchInput) => Promise<unknown>;
+  /**
+   * Optional. A hosted kiosk records the lateness point through the
+   * database. A local kiosk can omit this and use the demo store instead.
+   */
+  noteKioskLateClockIn?: (
+    token: string,
+    input: {
+      agencyId: string;
+      staffId: string;
+      siteId: string | null;
+      scheduledStart: string;
+      punchedAt: string;
+      sourceKey: string;
+    },
+  ) => Promise<boolean>;
   /** Current clock state, derived from today's open punches. */
   fetchKioskStatus: (staffId: string, siteId: string) => Promise<KioskShiftStatus>;
   /** Individuals served at this site, for the EVV "individual served" picker. */

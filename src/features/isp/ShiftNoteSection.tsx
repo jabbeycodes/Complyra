@@ -1,11 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Download, Printer } from "lucide-react";
 import { Empty } from "../../components";
+import { todayIso } from "../../data/chart";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import type { ComplyraApi } from "../../data/localApi";
+import { shiftNoteShiftOptions, type ShiftStarts } from "../../data/dueItems";
 import {
   activeIspProgram,
   canEditShiftNoteRow,
-  ISP_SHIFTS,
+  clinicianProvider,
+  clinicianTimes,
+  clocksFromShiftLabel,
+  formatDurationHhmm,
+  formatMonthLabel,
+  monthsWithNotes,
+  progressNoteName,
+  shiftDurationMinutes,
+  shiftNotesForMonth,
+  waiverServiceNames,
+  waiverServiceWriteAbout,
+  shiftNotesForPrint,
   type IspProgramView,
   type ShiftNoteView,
 } from "../../data/shiftNotes";
@@ -32,6 +46,13 @@ function NoteForm({
   individualId,
   runIsp,
   initial,
+  shiftOptions,
+  defaultLocation,
+  staffTitle,
+  staffName,
+  legalName,
+  dateOfBirth,
+  defaultWaiverService,
   onDone,
 }: {
   program: IspProgramView;
@@ -39,11 +60,30 @@ function NoteForm({
   individualId: string;
   runIsp: (action: () => Promise<unknown>) => Promise<void>;
   initial?: ShiftNoteView;
+  /** This house's windows, including ones that overlap. */
+  shiftOptions: string[];
+  defaultLocation: string;
+  staffTitle: string;
+  staffName: string;
+  legalName: string;
+  dateOfBirth: string;
+  defaultWaiverService: string;
   onDone?: () => void;
 }) {
   const levels = [...(program.scoringMethod?.levels ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  const choices = initial?.shift && !shiftOptions.includes(initial.shift)
+    ? [initial.shift, ...shiftOptions]
+    : shiftOptions;
+  const seededClock = clocksFromShiftLabel(initial?.shift ?? choices[0] ?? "");
   const [noteDate, setNoteDate] = useState(initial?.noteDate ?? new Date().toISOString().slice(0, 10));
-  const [shift, setShift] = useState(initial?.shift ?? ISP_SHIFTS[0]);
+  const [shift, setShift] = useState(initial?.shift ?? choices[0] ?? "");
+  const [beginTime, setBeginTime] = useState(initial?.beginTime || seededClock?.begin || "");
+  const [endTime, setEndTime] = useState(initial?.endTime || seededClock?.end || "");
+  const [location, setLocation] = useState(initial?.location || defaultLocation);
+  const [waiverService, setWaiverService] = useState(
+    initial?.waiverService || defaultWaiverService || "",
+  );
+  const [signatureUrl, setSignatureUrl] = useState(initial?.signatureDataUrl ?? "");
   const [scores, setScores] = useState<ScoreDraft[]>(() =>
     program.tasks.map((task) => {
       const existing = initial?.scores.find((s) => s.taskId === task.id);
@@ -51,8 +91,33 @@ function NoteForm({
     }),
   );
   const [summary, setSummary] = useState(initial?.summary ?? "");
-  const [timeSpent, setTimeSpent] = useState(initial?.timeSpentMinutes?.toString() ?? "");
-  const canSave = noteDate.length > 0 && shift.trim().length > 0;
+  const duration = shiftDurationMinutes(beginTime, endTime);
+  const goal = program.goalService?.trim() ?? "";
+  const signed = Boolean(signatureUrl || initial?.signatureDataUrl);
+  const canSave =
+    noteDate.length > 0 &&
+    shift.trim().length > 0 &&
+    duration !== null &&
+    waiverServiceNames().includes(waiverService) &&
+    summary.trim().length > 0 &&
+    (Boolean(initial) || (signed && goal.length > 0));
+
+  useEffect(() => {
+    if (initial?.signatureDataUrl) return;
+    let cancelled = false;
+    void api.getMySignature().then(async (adopted) => {
+      if (!adopted || cancelled) return;
+      try {
+        const url = await api.getSignatureImageUrl(adopted.signaturePath);
+        if (!cancelled) setSignatureUrl(url);
+      } catch {
+        // An unreadable signature stays unsigned. The save explains why.
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, initial?.signatureDataUrl]);
 
   const setScore = (taskId: string, patch: Partial<ScoreDraft>) =>
     setScores((prev) => prev.map((s) => (s.taskId === taskId ? { ...s, ...patch } : s)));
@@ -71,8 +136,14 @@ function NoteForm({
               programId: program.id,
               noteDate,
               shift,
+              beginTime,
+              endTime,
+              location,
+              staffTitle: initial?.staffTitle || staffTitle,
+              waiverService,
+              signatureDataUrl: signatureUrl || initial?.signatureDataUrl,
               summary,
-              timeSpentMinutes: timeSpent.trim() === "" ? null : Number(timeSpent),
+              timeSpentMinutes: duration,
               scores: scores.filter((s) => s.levelId.length > 0),
             })
             .then(() => undefined),
@@ -80,23 +151,106 @@ function NoteForm({
       }}
     >
       <h3>{initial ? "Edit shift note" : `New shift note — ${program.name}`}</h3>
+      <p className="muted">
+        {progressNoteName(legalName) || "Name not on file"}
+        {dateOfBirth ? ` · Date of birth ${dateOfBirth}` : " · Date of birth not on file"}
+      </p>
       <div className="overview-form-grid">
         <label>
           Date
           <input type="date" value={noteDate} onChange={(e) => setNoteDate(e.target.value)} required />
         </label>
         <label>
-          Shift
-          <select value={shift} onChange={(e) => setShift(e.target.value)}>
-            {ISP_SHIFTS.map((s) => (
-              <option key={s} value={s}>
-                {s}
+          Begin time
+          <input
+            type="time"
+            aria-label="Begin time"
+            value={beginTime}
+            onChange={(e) => setBeginTime(e.target.value)}
+            required
+          />
+        </label>
+        <label>
+          End time
+          <input
+            type="time"
+            aria-label="End time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Duration
+          <input
+            aria-label="Duration"
+            value={duration === null ? "" : formatDurationHhmm(duration)}
+            readOnly
+          />
+        </label>
+        <label>
+          Location
+          <input
+            aria-label="Location"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            autoComplete="off"
+            placeholder="House or address"
+          />
+        </label>
+        <label>
+          Counts toward
+          <select
+            value={shift}
+            aria-label="Counts toward"
+            onChange={(e) => {
+              const next = e.target.value;
+              const previous = clocksFromShiftLabel(shift);
+              const stillDefault =
+                !beginTime ||
+                !endTime ||
+                (previous !== null && beginTime === previous.begin && endTime === previous.end);
+              setShift(next);
+              const clock = clocksFromShiftLabel(next);
+              if (clock && stillDefault) {
+                setBeginTime(clock.begin);
+                setEndTime(clock.end);
+              }
+            }}
+          >
+            {choices.map((option) => (
+              <option key={option} value={option}>
+                {option}
               </option>
             ))}
             <option value="Other">Other</option>
           </select>
         </label>
+        <label className="overview-form-span">
+          Waiver service
+          <select
+            aria-label="Waiver service"
+            value={waiverService}
+            onChange={(e) => setWaiverService(e.target.value)}
+            required
+          >
+            <option value="">Choose the service</option>
+            {waiverServiceNames().map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      {waiverServiceWriteAbout(waiverService) && (
+        <p className="muted">{waiverServiceWriteAbout(waiverService)}</p>
+      )}
+      <p className="muted">
+        {goal
+          ? `PCSP goal: ${goal}`
+          : "A program manager saves the goal or outcome from the current PCSP on this ISP before a progress note can be saved."}
+      </p>
       {program.tasks.map((task) => {
         const draft = scores.find((s) => s.taskId === task.id)!;
         return (
@@ -119,7 +273,7 @@ function NoteForm({
               ))}
             </div>
             <label className="isp-comment-label">
-              Comment
+              Scoring comment
               <input
                 value={draft.comment}
                 onChange={(e) => setScore(task.id, { comment: e.target.value })}
@@ -132,26 +286,40 @@ function NoteForm({
         );
       })}
       <label>
-        Other summary
+        Progress note
         <textarea
+          aria-label="Progress note"
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
-          rows={3}
-          placeholder="Shift summary, time-relevant notes not tied to a task"
+          rows={4}
+          required
+          placeholder="What the person did, and how you supported a goal in the current PCSP"
         />
       </label>
       <div className="overview-form-grid">
-        <label>
-          Time spent (minutes)
-          <input
-            value={timeSpent}
-            onChange={(e) => setTimeSpent(e.target.value)}
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="Optional"
-          />
-        </label>
+        <p>
+          Printed name
+          <br />
+          <strong>{initial?.staffName || staffName || "You"}</strong>
+        </p>
+        <p>
+          Title
+          <br />
+          <strong>{initial?.staffTitle || staffTitle || "Title not on file"}</strong>
+        </p>
       </div>
+      {signatureUrl ? (
+        <p>
+          Signature
+          <br />
+          <img src={signatureUrl} alt="Adopted signature" style={{ maxHeight: 48 }} />
+        </p>
+      ) : (
+        <p className="muted">Adopt your signature from Your profile before this progress note can be saved. A printed name is not a signature.</p>
+      )}
+      <p className="muted">
+        End time may be the same as begin time, or earlier when the shift crosses midnight. A note does not replace another note that overlaps it.
+      </p>
       <div className="overview-editor-actions">
         {onDone && (
           <button type="button" className="button" onClick={onDone}>
@@ -173,6 +341,14 @@ function NoteCard({
   individualId,
   program,
   runIsp,
+  shiftOptions,
+  defaultLocation,
+  staffTitle,
+  staffName,
+  staffTitles,
+  legalName,
+  dateOfBirth,
+  defaultWaiverService,
 }: {
   note: ShiftNoteView;
   canEdit: boolean;
@@ -180,8 +356,22 @@ function NoteCard({
   individualId: string;
   program: IspProgramView | null;
   runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  shiftOptions: string[];
+  defaultLocation: string;
+  staffTitle: string;
+  staffName: string;
+  staffTitles: Record<string, string>;
+  legalName: string;
+  dateOfBirth: string;
+  defaultWaiverService: string;
 }) {
   const [editing, setEditing] = useState(false);
+  const times = clinicianTimes(note);
+  const shown = {
+    ...note,
+    location: note.location?.trim() || defaultLocation,
+    staffTitle: note.staffTitle?.trim() || staffTitles[note.staffUserId] || "",
+  };
   const levelById = new Map(
     (program?.scoringMethod?.levels ?? []).map((level) => [level.id, level]),
   );
@@ -190,11 +380,14 @@ function NoteCard({
       <div className="isp-program-head">
         <div>
           <strong>
-            {note.noteDate} · {note.shift}
+            {note.noteDate} · {times.beginLabel || note.shift}
+            {times.endLabel ? `–${times.endLabel}` : ""}
+            {times.durationLabel ? ` · ${times.durationLabel}` : ""}
           </strong>
           <span className="muted">
             {" "}
-            · {note.programName} · {note.staffName}
+            · {clinicianProvider(shown)}
+            {shown.location ? ` · ${shown.location}` : ""}
           </span>
         </div>
         {canEdit && !editing && (
@@ -223,23 +416,55 @@ function NoteCard({
           individualId={individualId}
           runIsp={runIsp}
           initial={note}
+          shiftOptions={shiftOptions}
+          defaultLocation={defaultLocation}
+          staffTitle={staffTitle}
+          staffName={staffName}
+          legalName={legalName}
+          dateOfBirth={dateOfBirth}
+          defaultWaiverService={defaultWaiverService}
           onDone={() => setEditing(false)}
         />
       ) : (
         <>
-          <ul className="isp-note-scores">
-            {note.scores.map((score) => (
-              <li key={score.id}>
-                <span className="isp-score-chip">{levelById.get(score.levelId)?.shortLabel ?? "?"}</span>{" "}
-                {levelById.get(score.levelId)?.caption ?? "Scored"}
-                {score.comment && <span className="muted"> — {score.comment}</span>}
-              </li>
-            ))}
-          </ul>
-          {note.summary && <p>{note.summary}</p>}
-          {note.timeSpentMinutes !== null && (
-            <p className="muted">Time spent: {note.timeSpentMinutes} minutes</p>
-          )}
+          <table className="clinician-note">
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Score</th>
+                <th>Scoring comments</th>
+              </tr>
+            </thead>
+            <tbody>
+              {note.scores.map((score) => (
+                <tr key={score.id}>
+                  <td>{score.taskTitle}</td>
+                  <td>{levelById.get(score.levelId)?.caption ?? "Scored"}</td>
+                  <td>{score.comment}</td>
+                </tr>
+              ))}
+              <tr>
+                <th>Progress note</th>
+                <td colSpan={2}>{note.summary}</td>
+              </tr>
+              {note.waiverService ? (
+                <tr>
+                  <th>Waiver service</th>
+                  <td colSpan={2}>{note.waiverService}</td>
+                </tr>
+              ) : null}
+              <tr>
+                <th>Signature</th>
+                <td colSpan={2}>
+                  {note.signatureDataUrl ? (
+                    <img src={note.signatureDataUrl} alt={`Signature of ${note.staffName}`} style={{ maxHeight: 40 }} />
+                  ) : (
+                    "Signature not on this note"
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
           <ComplyrerRecordMark documentId={note.id} generatedAt={note.createdAt} />
         </>
       )}
@@ -256,6 +481,15 @@ export default function ShiftNoteSection({
   roleKey,
   canEnter,
   canConfigure,
+  shiftClock,
+  defaultLocation,
+  staffTitle,
+  staffName,
+  staffTitles,
+  legalName,
+  dateOfBirth,
+  defaultWaiverService,
+  onOpenNotes,
 }: {
   individualId: string;
   data: IspChartData;
@@ -265,10 +499,42 @@ export default function ShiftNoteSection({
   roleKey: string;
   canEnter: boolean;
   canConfigure: boolean;
+  /** This house's shift clock. Omitted houses use 6:00 a.m. / 2:00 p.m. / 10:00 p.m. */
+  shiftClock?: ShiftStarts;
+  defaultLocation: string;
+  staffTitle: string;
+  staffName: string;
+  staffTitles?: Record<string, string>;
+  legalName: string;
+  dateOfBirth: string;
+  defaultWaiverService: string;
+  /** Print or download the selected window. Omitted when the chart has no session. */
+  onOpenNotes?: (
+    mode: "download" | "print",
+    reportDescription: string,
+    range: { from: string; to: string },
+  ) => Promise<void>;
 }) {
   const planYear = currentPlanYear();
   const program = activeIspProgram(data.programs, individualId, planYear);
+  const shiftOptions = shiftNoteShiftOptions(shiftClock ?? {
+    dayStart: "06:00",
+    dayEnd: "14:00",
+    eveningStart: "14:00",
+    eveningEnd: "22:00",
+    overnightStart: "22:00",
+    overnightEnd: "06:00",
+  });
   const [showForm, setShowForm] = useState(false);
+  const [reportDescription, setReportDescription] = useState(program?.name ?? "");
+  const [windowKey, setWindowKey] = useState("recent");
+  const printed = shiftNotesForPrint(data.notes, todayIso());
+  const monthPacket = windowKey === "recent" ? null : shiftNotesForMonth(data.notes, windowKey);
+  const recent = monthPacket?.notes ?? printed.notes;
+  const windowFrom = monthPacket?.from ?? printed.from;
+  const windowTo = monthPacket?.to ?? printed.to;
+  const windowLabel = monthPacket ? formatMonthLabel(windowKey) : printed.coversToday ? "Last 14 days" : "Latest notes on file";
+  const months = monthsWithNotes(data.notes);
 
   return (
     <section className="chart-widget" id="chart-shift-notes" aria-labelledby="shift-notes-heading">
@@ -302,6 +568,13 @@ export default function ShiftNoteSection({
               api={api}
               individualId={individualId}
               runIsp={runIsp}
+              shiftOptions={shiftOptions}
+              defaultLocation={defaultLocation}
+              staffTitle={staffTitle}
+              staffName={staffName}
+              legalName={legalName}
+              dateOfBirth={dateOfBirth}
+              defaultWaiverService={defaultWaiverService}
               onDone={() => setShowForm(false)}
             />
           )}
@@ -310,10 +583,69 @@ export default function ShiftNoteSection({
           )}
         </>
       )}
-      {data.notes.length > 0 && (
+      {recent.length > 0 && onOpenNotes && (
+        <div className="overview-form-grid">
+          <label className="overview-form-span">
+            Report description
+            <input
+              aria-label="Report description"
+              value={reportDescription}
+              onChange={(e) => setReportDescription(e.target.value)}
+              maxLength={150}
+              placeholder={program?.name ?? "Shift notes"}
+            />
+          </label>
+          <label>
+            Report window
+            <select
+              aria-label="Report window"
+              value={months.includes(windowKey) || windowKey === "recent" ? windowKey : "recent"}
+              onChange={(e) => setWindowKey(e.target.value)}
+            >
+              <option value="recent">{printed.coversToday ? "Last 14 days" : "Latest notes on file"}</option>
+              {months.map((month) => (
+                <option key={month} value={month}>
+                  {formatMonthLabel(month)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="chart-actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() =>
+                void onOpenNotes("print", reportDescription.trim() || program?.name || "Shift notes", {
+                  from: windowFrom,
+                  to: windowTo,
+                })
+              }
+            >
+              <Printer size={16} aria-hidden="true" /> Print {windowLabel}
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() =>
+                void onOpenNotes("download", reportDescription.trim() || program?.name || "Shift notes", {
+                  from: windowFrom,
+                  to: windowTo,
+                })
+              }
+            >
+              <Download size={16} aria-hidden="true" /> Download
+            </button>
+          </div>
+        </div>
+      )}
+      {recent.length > 0 && (
         <div className="isp-notes-list">
-          <h3>Recent notes</h3>
-          {data.notes.map((note) => (
+          <h3>{windowLabel}</h3>
+          <p className="muted">
+            {recent.length} notes, newest first
+            {` · ${windowFrom} to ${windowTo}.`}
+          </p>
+          {recent.map((note) => (
             <NoteCard
               key={note.id}
               note={note}
@@ -322,6 +654,14 @@ export default function ShiftNoteSection({
               individualId={individualId}
               program={data.programs.find((p) => p.id === note.programId) ?? program}
               runIsp={runIsp}
+              shiftOptions={shiftOptions}
+              defaultLocation={defaultLocation}
+              staffTitle={staffTitle}
+              staffName={staffName}
+              staffTitles={staffTitles ?? {}}
+              legalName={legalName}
+              dateOfBirth={dateOfBirth}
+              defaultWaiverService={defaultWaiverService}
             />
           ))}
         </div>

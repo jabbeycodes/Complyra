@@ -18,6 +18,7 @@ import {
   normalizeGuardianContacts,
   normalizeProfile,
   normalizeProviderContacts,
+  isObligationActive,
   requiredForSigning,
   staffCanSignDelegation,
   type ObligationItem,
@@ -194,6 +195,32 @@ test("PM can edit cover fields and a DSP cannot", async () => {
       }),
     /cover-page/,
   );
+});
+
+test("a past review date does not turn a delegation off", () => {
+  const today = "2026-10-13";
+  const items = requiredForSigning(
+    [
+      item({
+        id: "d1",
+        kind: "delegation",
+        mode: "required",
+        title: "Enteral feeding",
+        expiresOn: "2026-01-01",
+      }),
+    ],
+    today,
+  );
+  assert.deepEqual(items.map((row) => row.title), ["Enteral feeding"]);
+  const expired = item({
+    id: "d1",
+    kind: "delegation",
+    mode: "required",
+    title: "Enteral feeding",
+    expiresOn: "2026-01-01",
+  });
+  assert.equal(isObligationActive(expired, today, { delegationsExpire: true }), false);
+  assert.equal(isObligationActive(expired, today), true);
 });
 
 test("requiredForSigning skips off, expired, and inventory items", () => {

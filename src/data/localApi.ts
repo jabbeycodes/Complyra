@@ -1,5 +1,6 @@
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
+import { SHOWCASE_REVISION } from "./demoShowcase";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -72,8 +73,11 @@ import {
 } from "./permissions";
 import {
   canEditShiftNoteRow,
+  displayStaffTitle,
   ispProgramVisibleToStaff,
   normalizeTaskTitle,
+  progressNoteProblem,
+  shiftDurationMinutes,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -150,6 +154,7 @@ import {
   delegationReviewReadyPayload,
   delegationPublishedPayload,
   delegationAckOverduePayload,
+  shiftNoteDeepLink,
 } from "../features/notifications/notify";
 import {
   addDaysIso,
@@ -273,9 +278,28 @@ import {
   computeMedDueItems,
   computeShiftNoteDueItems,
   blockForShiftLabel,
+  shiftBlocksForSite,
+  consecutiveRefusals,
+  marRecordingProblem,
+  recordingCostsAPoint,
   type ScheduledDose,
   type ShiftBlockId,
 } from "./dueItems";
+import {
+  applyLatenessPoint,
+  clockInIsLate,
+  notePastGrace,
+  prnFollowupStillOpen,
+  recognitionAwardProblem,
+  recognitionUsedThisMonth,
+  type LatenessEntry,
+  type LatenessKind,
+  type LatenessPostResult,
+  type RecognitionAward,
+} from "./lateness";
+import { dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import { operatingRulesFrom } from "./rules";
+import { LocalRulesStore } from "./rulesStore";
 import {
   daysRemaining,
   validateCertificateDates,
@@ -419,6 +443,8 @@ export interface ComplyraApi {
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
   listPendingAgencies(): Promise<PendingAgency[]>;
+  /** Operator only: every agency, any status (for the Rules console). */
+  listAgencies(): Promise<PendingAgency[]>;
   setAgencyStatus(agencyId: string, status: AgencyStatus): Promise<void>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
@@ -504,6 +530,9 @@ export interface ComplyraApi {
       schedule: import("./shiftNotes").IspSchedule;
       maxEntriesPerDay: number;
       scoringMethodId: string;
+      goalService?: string;
+      completionCriteria?: string;
+      scheduleComment?: string;
     },
   ): Promise<string>;
   /** Issue #80 — edit a program's header fields. Gated by canConfigureIspTasks. */
@@ -516,6 +545,9 @@ export interface ComplyraApi {
       schedule?: import("./shiftNotes").IspSchedule;
       maxEntriesPerDay?: number;
       scoringMethodId?: string;
+      goalService?: string;
+      completionCriteria?: string;
+      scheduleComment?: string;
     },
   ): Promise<void>;
   /**
@@ -551,6 +583,12 @@ export interface ComplyraApi {
     programId: string;
     noteDate: string;
     shift: string;
+    beginTime?: string;
+    endTime?: string;
+    location?: string;
+    staffTitle?: string;
+    waiverService?: string;
+    signatureDataUrl?: string;
     summary: string;
     timeSpentMinutes: number | null;
     scores: { taskId: string; levelId: string; comment: string }[];
@@ -658,6 +696,27 @@ export interface ComplyraApi {
     countedOn?: string;
   }): Promise<void>;
   logPrnDose(medicationId: string, pills?: number): Promise<void>;
+  /** Closes the open PRN follow-up so the repeat reminder stops. */
+  recordPrnFollowup(
+    medicationId: string,
+    input: { indication: string; result: string },
+  ): Promise<void>;
+  /**
+   * Adds a lateness point when this clock-in is past the saved minutes.
+   * On time, or already recorded, does nothing.
+   */
+  noteLateClockIn(input: {
+    staffId: string;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }): Promise<void>;
+  /** Manager award. Refuses when this month's cap would be exceeded. */
+  awardRecognitionPoints(input: {
+    recipientId: string;
+    points: number;
+    reason: string;
+  }): Promise<{ usedThisMonth: number; cap: number }>;
   signTrainingChecklist(
     checklistId: string,
     role: "staff" | "hm",
@@ -1407,6 +1466,7 @@ export interface WorkspaceView {
     appRole: AppRole;
     roleKey: string;
     expiresOn: string | null;
+    hiredOn: string | null;
   }[];
   roles: AgencyRole[];
   requirements: Requirement[];
@@ -1565,6 +1625,18 @@ async function hydrate() {
       sessionUserId: string | null;
     };
     if (parsed?.db?.agencies?.length) {
+      // An older saved demo has no walkthrough records. Reload the seed once
+      // so mileage, notes, and print packets show up without a manual reset.
+      if ((parsed.db.showcaseRevision ?? 0) < SHOWCASE_REVISION) {
+        browserStore.db = cloneSeed();
+        const sessionUserId = parsed.sessionUserId;
+        const stillThere = sessionUserId
+          ? browserStore.db.profiles.some((profile) => profile.id === sessionUserId)
+          : false;
+        browserStore.sessionUserId = stillThere ? sessionUserId : null;
+        void persistMeta(browserStore);
+        return;
+      }
       browserStore.db = parsed.db;
       browserStore.sessionUserId = parsed.sessionUserId;
       for (const membership of browserStore.db.memberships) {
@@ -2184,6 +2256,7 @@ function mapPlanStack(
   store: MemoryStore,
   session: SessionUser,
   person: IndividualRecord,
+  orderReminderDays?: number[],
 ): PlanStackView {
   const items = (store.db.obligations ?? []).filter(
     (item) => item.individualId === person.id,
@@ -2220,7 +2293,7 @@ function mapPlanStack(
     renewals: canSeeRenewals(session.roleKey)
       ? (store.db.clinicalRenewals ?? [])
           .filter((row) => row.individualId === person.id)
-          .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn) }))
+          .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn, undefined, orderReminderDays) }))
           .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
       : [],
     carePlan: (() => {
@@ -2460,6 +2533,15 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
       (p) => memberships.find((m) => m.userId === p.id)?.role === "administrator",
     )?.fullName ?? session.fullName;
   const colors = ["purple", "green", "peach", "blue"];
+  const orderReminderDays = operatingRulesFrom(
+    new LocalRulesStore({
+      userId: session.userId,
+      fullName: session.fullName,
+      isOperator: false,
+      adminOfAgencyId: null,
+      memberOfAgencyIds: [session.agencyId],
+    }).effectiveNow(session.agencyId),
+  ).orderReminderDays;
   return {
     session,
     sites: sites.map((site, i) => ({
@@ -2509,6 +2591,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         appRole: membership.role,
         roleKey: membership.roleKey ?? membership.role,
         expiresOn: membership.expiresOn ?? null,
+        hiredOn: profile.hiredOn ?? null,
       };
     }),
     requirements: requirements.map((row) => mapRequirement(store, row)),
@@ -2528,7 +2611,9 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
               : "document",
     })),
     packets: packets.map((packet) => packetDetail(store, packet)),
-    planStacks: individuals.map((person) => mapPlanStack(store, session, person)),
+    planStacks: individuals.map((person) =>
+      mapPlanStack(store, session, person, orderReminderDays),
+    ),
     roles: rolesFor(store, session.agencyId),
     scorecard,
     monthly: {
@@ -2564,6 +2649,7 @@ export class LocalApi implements ComplyraApi {
 
   async listNotifications() {
     const session = assertSession(this.store);
+    await this.sweepOperatingReminders();
     return (this.store.db.notifications ?? []).filter((row) => row.agencyId === session.agencyId &&
       (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
       .map((row) => ({
@@ -2777,6 +2863,7 @@ export class LocalApi implements ComplyraApi {
       username,
       homeAgencyId: session.agencyId,
       mustChangePassword: true,
+      hiredOn: todayIso(),
     });
     this.store.db.memberships.push({
       id: crypto.randomUUID(),
@@ -2901,6 +2988,23 @@ export class LocalApi implements ComplyraApi {
     );
     await persistMeta(this.store);
     return { tempPassword };
+  }
+
+  async listAgencies(): Promise<PendingAgency[]> {
+    const session = assertSession(this.store);
+    if (!session.platformAdmin) {
+      throw new Error("Only the Complyrer operator can list agencies.");
+    }
+    return this.store.db.agencies
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        agencyCode: row.agencyCode,
+        stateCode: row.stateCode,
+        provisionedBy: row.provisionedBy ?? "self",
+        status: row.status,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async listPendingAgencies(): Promise<PendingAgency[]> {
@@ -3508,6 +3612,9 @@ export class LocalApi implements ComplyraApi {
       schedule: input.schedule,
       maxEntriesPerDay: maxEntries,
       scoringMethodId: method.id,
+      goalService: input.goalService?.trim().slice(0, 4000) ?? "",
+      completionCriteria: input.completionCriteria?.trim().slice(0, 4000) ?? "",
+      scheduleComment: input.scheduleComment?.trim().slice(0, 4000) ?? "",
       status: "draft",
       approvedBy: "",
       approvedByName: "",
@@ -3565,6 +3672,13 @@ export class LocalApi implements ComplyraApi {
       );
       if (!method) throw new Error("Choose a scoring method for the program.");
       program.scoringMethodId = method.id;
+    }
+    if (patch.goalService !== undefined) program.goalService = patch.goalService.trim().slice(0, 4000);
+    if (patch.completionCriteria !== undefined) {
+      program.completionCriteria = patch.completionCriteria.trim().slice(0, 4000);
+    }
+    if (patch.scheduleComment !== undefined) {
+      program.scheduleComment = patch.scheduleComment.trim().slice(0, 4000);
     }
     program.updatedAt = new Date().toISOString();
     await persistMeta(this.store);
@@ -3698,8 +3812,50 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Notes can only be entered against an approved ISP program.");
     }
     assertCalendarDate(input.noteDate, "Use a valid note date.");
-    const shift = input.shift.trim().slice(0, 40);
+    const shift = input.shift.trim().slice(0, 80);
     if (!shift) throw new Error("Choose the shift for this note.");
+    const beginTime = input.beginTime?.trim().slice(0, 5) ?? "";
+    const endTime = input.endTime?.trim().slice(0, 5) ?? "";
+    if ((beginTime && !endTime) || (!beginTime && endTime)) {
+      throw new Error("Use a begin time and an end time.");
+    }
+    const clockDuration = beginTime && endTime ? shiftDurationMinutes(beginTime, endTime) : null;
+    if (beginTime && endTime && clockDuration === null) {
+      throw new Error("Use a clock time for the begin and end.");
+    }
+    const location = input.location?.trim().slice(0, 160) ?? "";
+    const staffTitle = displayStaffTitle(input.staffTitle || session.jobTitle, session.roleKey);
+    const waiverService = input.waiverService?.trim().slice(0, 80) ?? "";
+    let signatureDataUrl = input.signatureDataUrl?.trim() ?? "";
+    if (!input.noteId && !signatureDataUrl) {
+      const adopted = await this.getMySignature();
+      if (adopted) {
+        try {
+          signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+        } catch {
+          signatureDataUrl = "";
+        }
+      }
+    }
+    if (!input.noteId) {
+      if (signatureDataUrl) assertAdoptableSignature("Signature", signatureDataUrl);
+      const problem = progressNoteProblem({
+        goalService: program.goalService ?? "",
+        beginTime,
+        endTime,
+        waiverService,
+        summary: input.summary,
+        staffTitle,
+        signatureDataUrl,
+      });
+      if (problem) throw new Error(problem);
+    }
+    const timeSpent =
+      clockDuration !== null
+        ? clockDuration
+        : input.timeSpentMinutes === null
+          ? null
+          : Math.max(0, Math.trunc(input.timeSpentMinutes));
     const tasks = this.store.db.ispProgramTasks
       .filter((task) => task.programId === program.id)
       .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -3735,9 +3891,14 @@ export class LocalApi implements ComplyraApi {
       }
       existing.noteDate = input.noteDate;
       existing.shift = shift;
+      existing.beginTime = beginTime;
+      existing.endTime = endTime;
+      existing.location = location;
+      if (staffTitle) existing.staffTitle = staffTitle;
+      if (waiverService) existing.waiverService = waiverService;
+      if (signatureDataUrl) existing.signatureDataUrl = signatureDataUrl;
       existing.summary = input.summary.trim().slice(0, 4000);
-      existing.timeSpentMinutes =
-        input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes));
+      existing.timeSpentMinutes = timeSpent;
       existing.updatedAt = now;
       note = existing;
       this.store.db.shiftNoteScores = this.store.db.shiftNoteScores.filter(
@@ -3751,9 +3912,14 @@ export class LocalApi implements ComplyraApi {
         programId: program.id,
         noteDate: input.noteDate,
         shift,
+        beginTime,
+        endTime,
+        location,
+        staffTitle,
+        waiverService,
+        signatureDataUrl,
         summary: input.summary.trim().slice(0, 4000),
-        timeSpentMinutes:
-          input.timeSpentMinutes === null ? null : Math.max(0, Math.trunc(input.timeSpentMinutes)),
+        timeSpentMinutes: timeSpent,
         staffUserId: session.userId,
         staffName: session.fullName,
         createdAt: now,
@@ -3772,6 +3938,46 @@ export class LocalApi implements ComplyraApi {
       };
       this.store.db.shiftNoteScores.push(row);
     }
+    if (!input.noteId) {
+      const rules = this.agencyOperatingRules();
+      const homeId = this.store.db.individuals.find((row) => row.id === input.individualId)?.siteId ?? null;
+      const home = homeId ? this.store.db.sites.find((row) => row.id === homeId) : undefined;
+      if (
+        notePastGrace({
+          noteDate: input.noteDate,
+          shift,
+          now: new Date(),
+          graceMinutes: rules.noteGraceMinutes,
+          blocks: home ? shiftBlocksForSite(siteFactsFrom(home)) : undefined,
+        })
+      ) {
+        const posted = this.recordLateness({
+          userId: session.userId,
+          kind: "late_note",
+          sourceKey: `late_note:${note.id}`,
+          siteId: homeId,
+          deepLink: shiftNoteDeepLink(input.individualId),
+          entityId: note.id,
+        });
+        if (posted?.added) {
+          this.notifyRole({
+            userId: session.userId,
+            roleKey: null,
+            type: "accountability.warning",
+            title: "Late shift note",
+            body: `Saving the ${shift} note after the grace period costs ${posted.points} point. ${this.latenessBalanceSentence(posted, rules.resetAfterWriteup)}`,
+            deepLink: shiftNoteDeepLink(input.individualId),
+            entityId: note.id,
+            dedupeKey: `late_note:${note.id}`,
+          });
+        }
+      }
+    }
+    this.clearMissingNoteNotices({
+      individualId: input.individualId,
+      noteDate: input.noteDate,
+      shift,
+    });
     await persistMeta(this.store);
     return note.id;
   }
@@ -3860,6 +4066,22 @@ export class LocalApi implements ComplyraApi {
       .filter((dose) => dose.doseTimes.length > 0);
   }
 
+  /** Saved agency settings, or catalog defaults when none have been saved. */
+  private rulesForAgency(agencyId: string) {
+    const rules = new LocalRulesStore({
+      userId: "kiosk",
+      fullName: "Kiosk",
+      isOperator: false,
+      adminOfAgencyId: null,
+      memberOfAgencyIds: [agencyId],
+    });
+    return operatingRulesFrom(rules.effectiveNow(agencyId));
+  }
+
+  private agencyOperatingRules() {
+    return this.rulesForAgency(assertSession(this.store).agencyId);
+  }
+
   async getSiteDueItems(
     siteId: string,
   ): Promise<import("./dueItems").SiteDueItemsResult> {
@@ -3874,10 +4096,13 @@ export class LocalApi implements ComplyraApi {
     const people = this.store.db.individuals.filter(
       (row) => row.siteId === siteId && row.agencyId === session.agencyId,
     );
-    const today = todayIso();
-    // Shift notes are checked against the last completed site-local day so a
-    // block is never flagged before its shift is over.
-    const serviceDate = todayIso(new Date(Date.now() - 86_400_000));
+    const rules = this.agencyOperatingRules();
+    // Yesterday and the dose clock are Central, the same day the closed-app
+    // job uses. A UTC date would flag a different shift after 7 p.m.
+    const clock = dueItemClock();
+    const today = clock.doseDate;
+    const serviceDate = clock.serviceDate;
+    const now = clock.now;
 
     // #75 — missing Shift notes.
     let shiftNoteItems: ReturnType<typeof computeShiftNoteDueItems> = [];
@@ -3900,6 +4125,10 @@ export class LocalApi implements ComplyraApi {
         }));
       shiftNoteItems = computeShiftNoteDueItems({
         serviceDate,
+        now,
+        graceMinutes: rules.noteGraceMinutes,
+        timeZone: clock.timeZone,
+        blocks: shiftBlocksForSite(siteFactsFrom(site)),
         staffed24h: site.staffed24h !== false,
         individuals: people.map((p) => ({ id: p.id, name: p.fullName })),
         requiredWriters,
@@ -3913,10 +4142,11 @@ export class LocalApi implements ComplyraApi {
     // #76 — unmarked scheduled meds.
     let medItems: ReturnType<typeof computeMedDueItems> = [];
     if (canSeeMeds(session.roleKey)) {
-      const now = new Date();
       medItems = computeMedDueItems({
         doseDate: today,
-        nowMinutes: now.getHours() * 60 + now.getMinutes(),
+        nowMinutes: clock.nowMinutes,
+        windowBeforeMinutes: rules.medWindowBeforeMinutes,
+        windowAfterMinutes: rules.medWindowAfterMinutes,
         scheduledDoses: this.siteScheduledDoses(session, people),
         marks: this.medDoseMarkRows().filter(
           (m) => m.agencyId === session.agencyId && m.doseDate.slice(0, 10) === today,
@@ -4104,6 +4334,15 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Use an HH:MM dose time.");
     }
     const day = input.doseDate.slice(0, 10);
+    const rules = this.agencyOperatingRules();
+    const early = marRecordingProblem({
+      doseDate: day,
+      doseTime: input.doseTime,
+      now: new Date(),
+      windowBeforeMinutes: rules.medWindowBeforeMinutes,
+      blockEarly: rules.blockEarlyRecording,
+    });
+    if (early) throw new Error(early);
     const rows = this.medDoseMarkRows();
     const existing = rows.find(
       (m) =>
@@ -4116,6 +4355,13 @@ export class LocalApi implements ComplyraApi {
     if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
       throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
     }
+    const late = !existing && recordingCostsAPoint({
+      doseDate: day,
+      doseTime: input.doseTime,
+      now: new Date(),
+      windowAfterMinutes: rules.medWindowAfterMinutes,
+      lateAfterHours: rules.lateRecordingAfterHours,
+    });
     if (existing) {
       existing.status = input.status;
       existing.markedBy = session.userId;
@@ -4133,6 +4379,29 @@ export class LocalApi implements ComplyraApi {
         markedBy: session.userId,
         markedByName: session.fullName,
         markedAt: now,
+      });
+    }
+    if (late) {
+      const homeId = this.store.db.individuals.find((row) => row.id === med.individualId)?.siteId ?? null;
+      const posted = this.recordLateness({
+        userId: session.userId,
+        kind: "late_recording",
+        sourceKey: `med.late_recording:${med.id}:${day}:${input.doseTime}`,
+        siteId: homeId,
+        deepLink: "/meds",
+        entityId: med.id,
+      });
+      const points = posted?.points || rules.pointsPerLateItem;
+      const balance = posted?.added ? ` ${this.latenessBalanceSentence(posted, rules.resetAfterWriteup)}` : "";
+      this.notifyRole({
+        userId: session.userId,
+        roleKey: null,
+        type: "med.late_recording",
+        title: "Late medication recording",
+        body: `Recording ${med.name} at ${input.doseTime} after the window costs ${points} point.${balance} You can dispute it until ${posted?.disputeUntil ?? ""}.`,
+        deepLink: "/meds",
+        entityId: med.id,
+        dedupeKey: `med.late_recording:${med.id}:${day}:${input.doseTime}`,
       });
     }
     await persistMeta(this.store);
@@ -4247,7 +4516,8 @@ export class LocalApi implements ComplyraApi {
       throw new Error("Staff must sign their own row.");
     }
     const item = this.store.db.obligations.find((r) => r.id === row.obligationId);
-    if (!item || !isObligationActive(item)) {
+    const rules = this.agencyOperatingRules();
+    if (!item || !isObligationActive(item, undefined, { delegationsExpire: rules.delegationsExpire })) {
       throw new Error("This document is not open for signature.");
     }
     if (!staffCanSignDelegation(item)) {
@@ -4565,7 +4835,222 @@ export class LocalApi implements ComplyraApi {
       "medication",
       med.id,
     );
+    const rules = this.agencyOperatingRules();
+    log(
+      this.store,
+      session,
+      "medication.prn_followup",
+      `Effectiveness follow-up for ${med.name} is due in ${rules.prnFollowupMinutes} minutes. Remind the house every ${rules.prnReminderRepeatMinutes} minutes until it is recorded.`,
+      "medication",
+      med.id,
+    );
+    const givenAt = new Date().toISOString();
+    this.notifyRole({
+      userId: null,
+      roleKey: "nurse",
+      type: "med.prn_followup",
+      title: "PRN follow-up",
+      body: `${session.fullName} gave ${med.name}. Effectiveness follow-up is due in ${rules.prnFollowupMinutes} minutes.`,
+      deepLink: "/meds",
+      entityId: med.id,
+      dedupeKey: `med.prn_followup:${med.id}:${givenAt}`,
+    });
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    const uses = this.store.db.audit.filter(
+      (event) =>
+        event.action === "medication.prn" &&
+        event.targetId === med.id &&
+        Date.parse(event.createdAt) >= weekAgo,
+    ).length;
+    if (uses >= rules.prnFrequencyReviewCount) {
+      const week = givenAt.slice(0, 10);
+      this.notifyRole({
+        userId: null,
+        roleKey: "nurse",
+        type: "med.prn_frequency",
+        title: "PRN frequency review",
+        body: `${med.name} has been given ${uses} times in the last 7 days. The nurse review line is ${rules.prnFrequencyReviewCount}.`,
+        deepLink: "/meds",
+        entityId: med.id,
+        dedupeKey: `med.prn_frequency:${med.id}:${week}`,
+      });
+    }
     await persistMeta(this.store);
+  }
+
+  async recordPrnFollowup(
+    medicationId: string,
+    input: { indication: string; result: string },
+  ) {
+    const session = assertSession(this.store);
+    if (!canLogPrnDose(session.roleKey)) {
+      throw new Error("You cannot log a PRN dose.");
+    }
+    const med = this.store.db.medications.find((row) => row.id === medicationId);
+    if (!med || med.kind !== "prn") throw new Error("PRN medication not found.");
+    accessibleIndividual(this.store, session, med.individualId);
+    const indication = input.indication.trim();
+    const result = input.result.trim();
+    if (!indication) throw new Error("Say why the PRN was given.");
+    if (!result) throw new Error("Record what you saw at follow-up.");
+    log(
+      this.store,
+      session,
+      "medication.prn_effectiveness",
+      `Indication: ${indication.slice(0, 240)}. Result: ${result.slice(0, 240)}.`,
+      "medication",
+      med.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async noteLateClockIn(input: {
+    staffId: string;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }) {
+    const session = assertSession(this.store);
+    if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
+      throw new Error("You cannot record a clock-in point for someone else.");
+    }
+    const rules = this.agencyOperatingRules();
+    if (!clockInIsLate(input.scheduledStart, input.punchedAt, rules.lateClockInMinutes)) return;
+    const sourceKey = input.sourceKey.trim();
+    if (!sourceKey) throw new Error("A clock-in point needs a source.");
+    const posted = this.recordLateness({
+      userId: input.staffId,
+      kind: "late_clock_in",
+      sourceKey,
+      siteId: this.siteIdFor(input.staffId),
+      deepLink: "/hub",
+      entityId: sourceKey,
+    });
+    if (posted?.added) {
+      this.notifyRole({
+        userId: input.staffId,
+        roleKey: null,
+        type: "accountability.warning",
+        title: "Late clock-in",
+        body: `Clocking in more than ${rules.lateClockInMinutes} minutes late costs ${posted.points} point. ${this.latenessBalanceSentence(posted, rules.resetAfterWriteup)}`,
+        deepLink: "/hub",
+        entityId: sourceKey,
+        dedupeKey: sourceKey,
+      });
+    }
+    await persistMeta(this.store);
+  }
+
+  /**
+   * The site kiosk has no Complyrer session. A successful local clock-in
+   * still uses the same lateness minutes as the Employee Hub clock.
+   * The kiosk's own grace only flags the punch; it does not set the point.
+   */
+  async noteKioskLateClockIn(input: {
+    agencyId: string;
+    staffId: string;
+    siteId: string | null;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }) {
+    const member = this.store.db.memberships.some(
+      (row) => row.userId === input.staffId && row.agencyId === input.agencyId,
+    );
+    if (!member) return;
+    const rules = this.rulesForAgency(input.agencyId);
+    if (!clockInIsLate(input.scheduledStart, input.punchedAt, rules.lateClockInMinutes)) return;
+    const sourceKey = input.sourceKey.trim();
+    if (!sourceKey) return;
+    const posted = this.recordLateness({
+      agencyId: input.agencyId,
+      userId: input.staffId,
+      kind: "late_clock_in",
+      sourceKey,
+      siteId: input.siteId,
+      deepLink: "/hub",
+      entityId: sourceKey,
+    });
+    if (posted?.added) {
+      this.notifyRole({
+        agencyId: input.agencyId,
+        userId: input.staffId,
+        roleKey: null,
+        type: "accountability.warning",
+        title: "Late clock-in",
+        body: `Clocking in more than ${rules.lateClockInMinutes} minutes late costs ${posted.points} point. ${this.latenessBalanceSentence(posted, rules.resetAfterWriteup)}`,
+        deepLink: "/hub",
+        entityId: sourceKey,
+        dedupeKey: sourceKey,
+      });
+    }
+    await persistMeta(this.store);
+  }
+
+  async awardRecognitionPoints(input: {
+    recipientId: string;
+    points: number;
+    reason: string;
+  }): Promise<{ usedThisMonth: number; cap: number }> {
+    const session = assertSession(this.store);
+    if (
+      !hasPermission(session, "recognition.manage") &&
+      !hasPermission(session, "recognition.review_dsp")
+    ) {
+      throw new Error("You cannot award recognition points.");
+    }
+    if (input.recipientId === session.userId) {
+      throw new Error("You cannot award points to yourself.");
+    }
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Say why you are awarding the points.");
+    const recipient = this.store.db.profiles.find((row) => row.id === input.recipientId);
+    if (!recipient || recipient.homeAgencyId !== session.agencyId) {
+      throw new Error("Staff member not found.");
+    }
+    if (
+      !hasPermission(session, "recognition.manage") &&
+      !this.shareActiveSite(session.userId, input.recipientId)
+    ) {
+      throw new Error("Award points to someone at your home.");
+    }
+    const rules = this.agencyOperatingRules();
+    const month = new Date().toISOString().slice(0, 7);
+    const points = Math.trunc(input.points);
+    const used = recognitionUsedThisMonth(this.recognitionAwards(), session.agencyId, session.userId, month);
+    const problem = recognitionAwardProblem(used, points, rules.recognitionMonthlyCap);
+    if (problem) throw new Error(problem);
+    this.recognitionAwards().push({
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      managerId: session.userId,
+      recipientId: input.recipientId,
+      points,
+      reason: reason.slice(0, 240),
+      month,
+      createdAt: new Date().toISOString(),
+    });
+    log(
+      this.store,
+      session,
+      "recognition.award",
+      `${session.fullName} awarded ${points} recognition point${points === 1 ? "" : "s"} to ${recipient.fullName}: ${reason.slice(0, 240)}`,
+      "profile",
+      recipient.id,
+    );
+    this.notifyRole({
+      userId: recipient.id,
+      roleKey: null,
+      type: "recognition.awarded",
+      title: "Recognition points",
+      body: `${session.fullName} awarded you ${points} point${points === 1 ? "" : "s"}. ${reason.slice(0, 240)}`,
+      deepLink: "/recognition",
+      entityId: recipient.id,
+      dedupeKey: `recognition.award:${crypto.randomUUID()}`,
+      entityType: "profile",
+    });
+    await persistMeta(this.store);
+    return { usedThisMonth: used + points, cap: rules.recognitionMonthlyCap };
   }
 
   async signTrainingChecklist(
@@ -4665,6 +5150,7 @@ export class LocalApi implements ComplyraApi {
       this.store,
       session,
       this.store.db.individuals.find((p) => p.id === individualId)!,
+      this.agencyOperatingRules().orderReminderDays,
     );
     if (!stack.canSubmit) {
       throw new Error("Sign every required document before submitting.");
@@ -7590,6 +8076,30 @@ export class LocalApi implements ComplyraApi {
       "med_dose_exception",
       row.id,
     );
+    if (validated.kind === "refused") {
+      const rules = this.agencyOperatingRules();
+      const streak = consecutiveRefusals(this.p6doseExceptions(), med.id);
+      if (streak >= rules.refusalsBeforeRn) {
+        log(
+          this.store,
+          session,
+          "medication.refusal_review",
+          `Nurse review: ${med.name} has been refused ${streak} times in a row.`,
+          "medication",
+          med.id,
+        );
+        this.notifyRole({
+          userId: null,
+          roleKey: "nurse",
+          type: "med.refusal_review",
+          title: "Nurse review — refusals",
+          body: `${med.name} has been refused ${streak} times in a row.`,
+          deepLink: "/meds",
+          entityId: med.id,
+          dedupeKey: `med.refusal_review:${med.id}:${streak}`,
+        });
+      }
+    }
     await persistMeta(this.store);
   }
   // ===== LIFEPATH-P7 IMPL (mileage tracking) =====
@@ -8512,6 +9022,260 @@ export class LocalApi implements ComplyraApi {
     );
   }
 
+  private latenessEntries(): LatenessEntry[] {
+    const db = this.store.db as LocalDatabase & { latenessEntries?: LatenessEntry[] };
+    if (!db.latenessEntries) db.latenessEntries = [];
+    return db.latenessEntries;
+  }
+
+  private recognitionAwards(): RecognitionAward[] {
+    const db = this.store.db as LocalDatabase & { recognitionAwards?: RecognitionAward[] };
+    if (!db.recognitionAwards) db.recognitionAwards = [];
+    return db.recognitionAwards;
+  }
+
+  private siteIdFor(userId: string): string | null {
+    const today = new Date().toISOString().slice(0, 10);
+    const membership = this.store.db.memberships.find(
+      (row) =>
+        row.userId === userId &&
+        row.siteId &&
+        (!row.expiresOn || row.expiresOn >= today),
+    );
+    return membership?.siteId ?? null;
+  }
+
+  /** People at this home, plus agency-wide holders of the named roles. */
+  /**
+   * Filing a note for a shift ends that shift's missing-note reminder for
+   * everyone who was told. A note filed as Other does not cover a shift.
+   */
+  private clearMissingNoteNotices(input: {
+    individualId: string;
+    noteDate: string;
+    shift: string;
+  }) {
+    const block = blockForShiftLabel(input.shift);
+    if (!block) return;
+    const needle = `documentation.missing_note:sn:${input.noteDate.slice(0, 10)}:${input.individualId}:${block}:`;
+    const now = new Date().toISOString();
+    for (const row of this.store.db.notifications ?? []) {
+      if (row.type !== "documentation.missing_note" || row.readAt) continue;
+      if (!row.dedupeKey?.startsWith(needle)) continue;
+      row.readAt = now;
+    }
+  }
+
+  private reminderRecipientIds(siteId: string, roles: string[], agencyId?: string): string[] {
+    const agency = agencyId ?? assertSession(this.store).agencyId;
+    const today = dueItemClock().doseDate;
+    const ids = new Set<string>();
+    for (const membership of this.store.db.memberships) {
+      if (membership.agencyId !== agency) continue;
+      if (membership.expiresOn && membership.expiresOn < today) continue;
+      const role = membership.roleKey ?? membership.role;
+      if (!roles.includes(role)) continue;
+      if (membership.siteId && membership.siteId !== siteId) continue;
+      ids.add(membership.userId);
+    }
+    return [...ids];
+  }
+
+  private latenessBalanceSentence(
+    posted: LatenessPostResult,
+    resetAfterWriteup: boolean,
+  ): string {
+    if (!posted.writeupIssued) return `The balance is ${posted.balance}.`;
+    const reached = posted.previousBalance + posted.points;
+    return resetAfterWriteup
+      ? `The balance reached ${reached}. A write-up is due and the balance resets to 0.`
+      : `The balance reached ${reached}. A write-up is due.`;
+  }
+
+  /**
+   * Adds one lateness point unless this source was already counted.
+   * Warning and write-up notices go out when the saved levels are crossed.
+   */
+  private recordLateness(input: {
+    userId: string;
+    kind: LatenessKind;
+    sourceKey: string;
+    siteId: string | null;
+    deepLink: string;
+    entityId: string;
+    agencyId?: string;
+  }): LatenessPostResult | null {
+    const agencyId = input.agencyId ?? assertSession(this.store).agencyId;
+    const rules = this.rulesForAgency(agencyId);
+    const applied = applyLatenessPoint(
+      this.latenessEntries(),
+      {
+        id: crypto.randomUUID(),
+        agencyId,
+        userId: input.userId,
+        kind: input.kind,
+        occurredAt: new Date().toISOString(),
+        sourceKey: input.sourceKey,
+      },
+      rules,
+    );
+    (this.store.db as LocalDatabase & { latenessEntries?: LatenessEntry[] }).latenessEntries = applied.entries;
+    if (!applied.result.added) return applied.result;
+    if (applied.result.crossedWarning !== null) {
+      this.notifyRole({
+        agencyId,
+        userId: input.userId,
+        roleKey: null,
+        type: "accountability.warning",
+        title: "Lateness warning",
+        body: `Your lateness balance reached ${applied.result.crossedWarning}. A write-up is due at ${rules.writeupThreshold}. You can dispute this point until ${applied.result.disputeUntil}.`,
+        deepLink: input.deepLink,
+        entityId: input.entityId,
+        dedupeKey: `accountability.warning:${input.sourceKey}:${applied.result.crossedWarning}`,
+      });
+    }
+    if (applied.result.writeupIssued) {
+      const body = this.latenessBalanceSentence(applied.result, rules.resetAfterWriteup);
+      this.notifyRole({
+        agencyId,
+        userId: input.userId,
+        roleKey: null,
+        type: "accountability.writeup",
+        title: "Lateness write-up",
+        body,
+        deepLink: input.deepLink,
+        entityId: input.entityId,
+        dedupeKey: `accountability.writeup:${input.sourceKey}:${input.userId}`,
+      });
+      if (input.siteId) {
+        for (const managerId of this.reminderRecipientIds(input.siteId, ["house_manager", "administrator"], agencyId)) {
+          if (managerId === input.userId) continue;
+          this.notifyRole({
+            agencyId,
+            userId: managerId,
+            roleKey: null,
+            type: "accountability.writeup",
+            title: "Lateness write-up",
+            body,
+            deepLink: input.deepLink,
+            entityId: input.entityId,
+            dedupeKey: `accountability.writeup:${input.sourceKey}:${managerId}`,
+          });
+        }
+      }
+    }
+    return applied.result;
+  }
+
+  /**
+   * Opening notifications repeats an unmarked-dose reminder, an open PRN
+   * follow-up, and a missing Shift note. The same list is what the unattended
+   * sweep writes when nobody has the app open. Each interval sends one notice
+   * per person. A missing note is one notice per day.
+   */
+  private async sweepOperatingReminders() {
+    const session = assertSession(this.store);
+    const rules = this.agencyOperatingRules();
+    const now = new Date();
+    let added = false;
+    const sites = [];
+    for (const site of this.store.db.sites) {
+      if (site.agencyId !== session.agencyId || !canAccessSite(session, site.id)) continue;
+      try {
+        const due = await this.getSiteDueItems(site.id);
+        sites.push({
+          id: site.id,
+          name: site.name,
+          items: due.items,
+          medRecipients: this.reminderRecipientIds(site.id, ["dsp", "house_manager", "administrator", "nurse"]),
+          noteManagers: this.reminderRecipientIds(site.id, ["house_manager", "administrator"]),
+        });
+      } catch {
+        continue;
+      }
+    }
+    const latestPrn = new Map<string, { createdAt: string; actorId: string | null; medName: string; homeId: string | null }>();
+    for (const event of this.store.db.audit) {
+      if (event.agencyId !== session.agencyId || event.action !== "medication.prn" || !event.targetId) continue;
+      const prev = latestPrn.get(event.targetId);
+      if (!prev || event.createdAt > prev.createdAt) {
+        const med = this.store.db.medications.find((row) => row.id === event.targetId);
+        const homeId = med
+          ? this.store.db.individuals.find((row) => row.id === med.individualId)?.siteId ?? null
+          : null;
+        latestPrn.set(event.targetId, {
+          createdAt: event.createdAt,
+          actorId: event.actorId,
+          medName: med?.name ?? "a PRN medication",
+          homeId,
+        });
+      }
+    }
+    for (const notice of operatingReminderNotices({
+      now,
+      noteDay: dueItemClock(now).noteDay,
+      unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
+      prnReminderRepeatMinutes: rules.prnReminderRepeatMinutes,
+      prnFollowupMinutes: rules.prnFollowupMinutes,
+      sites,
+      prnFollowups: [...latestPrn].flatMap(([medicationId, given]) => {
+        if (!this.store.db.medications.some((row) => row.id === medicationId)) return [];
+        return [{
+          medicationId,
+          medName: given.medName,
+          createdAt: given.createdAt,
+          stillOpen: prnFollowupStillOpen(this.store.db.audit, medicationId, given.createdAt),
+          actorId: given.actorId,
+          homeRecipients: given.homeId
+            ? this.reminderRecipientIds(given.homeId, ["house_manager", "administrator", "nurse"])
+            : [],
+        }];
+      }),
+    })) {
+      if (!notice.userId || (this.store.db.notifications ?? []).some((row) => row.dedupeKey === notice.dedupeKey)) continue;
+      this.notifyRole({
+        userId: notice.userId,
+        roleKey: null,
+        type: notice.type,
+        title: notice.title,
+        body: notice.body,
+        deepLink: notice.deepLink,
+        entityId: notice.entityId,
+        entityType: notice.entityType,
+        dedupeKey: notice.dedupeKey,
+      });
+      added = true;
+    }
+    if (added) await persistMeta(this.store);
+  }
+
+  private notifyRole(input: {
+    userId: string | null;
+    roleKey: string | null;
+    type: string;
+    title: string;
+    body: string;
+    deepLink: string;
+    entityId: string;
+    dedupeKey: string;
+    entityType?: string;
+    agencyId?: string;
+  }) {
+    const agencyId = input.agencyId ?? assertSession(this.store).agencyId;
+    this.pushRecognitionNotification({
+      agencyId,
+      userId: input.userId,
+      roleKey: input.roleKey,
+      type: input.type,
+      title: input.title,
+      body: input.body,
+      deepLink: input.deepLink,
+      entityType: input.entityType ?? "medication",
+      entityId: input.entityId,
+      dedupeKey: input.dedupeKey,
+    });
+  }
+
   private pushRecognitionNotification(input: {
     agencyId: string;
     userId: string | null;
@@ -8525,6 +9289,7 @@ export class LocalApi implements ComplyraApi {
     dedupeKey: string;
   }) {
     const db = this.store.db;
+    db.notifications ??= [];
     // Idempotent: the same event never queues twice.
     if (db.notifications.some((n) => n.dedupeKey === input.dedupeKey)) return;
     db.notifications.push({
@@ -8866,13 +9631,18 @@ export class LocalApi implements ComplyraApi {
     Array<{ userId: string; fullName: string; roleKey: string }>
   > {
     const session = assertSession(this.store);
+    const awarding =
+      hasPermission(session, "recognition.manage") ||
+      hasPermission(session, "recognition.review_dsp");
     const counterpart =
       session.roleKey === "dsp"
         ? "house_manager"
-        : session.roleKey === "house_manager"
+        : session.roleKey === "house_manager" || awarding
           ? "dsp"
           : null;
     if (!counterpart) return [];
+    const agencyWideAward =
+      awarding && session.roleKey !== "dsp" && session.roleKey !== "house_manager";
     const db = this.store.db;
     const today = new Date().toISOString().slice(0, 10);
     const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
@@ -8888,7 +9658,7 @@ export class LocalApi implements ComplyraApi {
     const consider = (userId: string) => {
       if (userId === session.userId || partners.has(userId)) return;
       if (roleOf(userId) !== counterpart) return;
-      if (!this.shareActiveSite(session.userId, userId)) return;
+      if (!agencyWideAward && !this.shareActiveSite(session.userId, userId)) return;
       partners.set(userId, this.recognitionName(userId));
     };
     for (const m of db.memberships) {
@@ -11082,6 +11852,19 @@ function weekRangeLabel(weekStart: string): string {
   const em = end.getUTCMonth() + 1;
   const ed = end.getUTCDate();
   return `${MONTHS[m - 1]} ${d} – ${MONTHS[em - 1]} ${ed}`;
+}
+
+/** Sessionless local-demo path used by the site kiosk after a clock-in. */
+export async function recordKioskLateClockIn(input: {
+  agencyId: string;
+  staffId: string;
+  siteId: string | null;
+  scheduledStart: string;
+  punchedAt: string;
+  sourceKey: string;
+}): Promise<void> {
+  await hydrate();
+  await new LocalApi(browserStore).noteKioskLateClockIn(input);
 }
 
 export function createLocalApi(store?: MemoryStore) {
