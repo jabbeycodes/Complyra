@@ -263,6 +263,26 @@ function localIsoDate(when: Date): string {
   return `${when.getFullYear()}-${month}-${day}`;
 }
 
+/** The wall-clock day and minute-of-day in a named zone. */
+function zonedDayMinutes(when: Date, timeZone: string): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(when);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  let hour = Number(read("hour"));
+  if (hour === 24) hour = 0;
+  return {
+    date: `${read("year")}-${read("month")}-${read("day")}`,
+    minutes: hour * 60 + Number(read("minute")),
+  };
+}
+
 /**
  * Wall-clock instant in a named zone, as UTC milliseconds.
  * Minutes may pass midnight (an overnight block ends the next morning).
@@ -551,11 +571,21 @@ function writersForBlock(
   input: ShiftNoteDetectorInput,
   block: ShiftBlockDef,
 ): Array<{ userId: string; name: string; shiftId: string | null }> {
-  const scheduled = input.scheduledShifts ?? [];
+  const day = input.serviceDate.slice(0, 10);
+  const blocks = input.blocks ?? SHIFT_BLOCKS;
+  const dayStart = blocks.day.startMin;
+  const dayEnd = blocks.overnight.endMin;
+  // Only shifts that touch this service date count as "the house is on a schedule".
+  // The hosted query loads a 36-hour window, so a shift published for the next
+  // morning overlaps none of today's blocks and must not suppress the assigned-DSP
+  // fallback for an otherwise unscheduled day.
+  const scheduled = (input.scheduledShifts ?? []).filter((shift) => {
+    const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, day);
+    return span !== null && rangesOverlap(span.start, span.end, dayStart, dayEnd);
+  });
   if (scheduled.length === 0) {
     return input.requiredWriters.map((writer) => ({ userId: writer.userId, name: writer.name, shiftId: null }));
   }
-  const day = input.serviceDate.slice(0, 10);
   return scheduled.flatMap((shift) => {
     const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, day);
     if (!span || !rangesOverlap(span.start, span.end, block.startMin, block.endMin)) return [];
@@ -746,14 +776,22 @@ export function marRecordingProblem(input: {
   now: Date;
   windowBeforeMinutes: number;
   blockEarly: boolean;
+  /**
+   * Judge "now" in this zone so the gate matches the Central dose clock the
+   * Overview and Notifications use. Omitted keeps the device's local clock.
+   */
+  timeZone?: string;
 }): string | null {
   if (!input.blockEarly) return null;
   const doseDay = input.doseDate.slice(0, 10);
-  const nowDay = localIsoDate(input.now);
+  const nowClock = input.timeZone
+    ? zonedDayMinutes(input.now, input.timeZone)
+    : { date: localIsoDate(input.now), minutes: input.now.getHours() * 60 + input.now.getMinutes() };
+  const nowDay = nowClock.date;
   if (doseDay < nowDay) return null;
   if (doseDay > nowDay) return "That dose is not open yet.";
   const scheduled = hhmmToMinutes(input.doseTime);
-  const nowMinutes = input.now.getHours() * 60 + input.now.getMinutes();
+  const nowMinutes = nowClock.minutes;
   if (nowMinutes < scheduled - input.windowBeforeMinutes) {
     return `This dose opens ${input.windowBeforeMinutes} minutes before ${formatClock(scheduled)}.`;
   }

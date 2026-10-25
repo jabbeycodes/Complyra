@@ -1102,7 +1102,7 @@ export class HostedApi implements ComplyraApi {
           expiresOn: membership.expires_on
             ? String(membership.expires_on).slice(0, 10)
             : null,
-          hiredOn: null,
+          hiredOn: profile?.hiredOn ?? null,
         };
       }),
       requirements: requirements.map((row) => {
@@ -9034,12 +9034,14 @@ export class HostedApi implements ComplyraApi {
       throw new Error("Use an HH:MM dose time.");
     }
     const rules = await this.loadOperatingRules(session.agencyId);
+    const clock = dueItemClock();
     const early = marRecordingProblem({
       doseDate: input.doseDate,
       doseTime: input.doseTime,
-      now: new Date(),
+      now: clock.now,
       windowBeforeMinutes: rules.medWindowBeforeMinutes,
       blockEarly: rules.blockEarlyRecording,
+      timeZone: clock.timeZone,
     });
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
@@ -11010,6 +11012,7 @@ function mapProfile(row: Record<string, unknown>) {
     email: row.email as string,
     jobTitle: (row.job_title as string) ?? "DSP",
     username: (row.username as string) ?? "",
+    hiredOn: row.hired_on ? String(row.hired_on).slice(0, 10) : null,
   };
 }
 
