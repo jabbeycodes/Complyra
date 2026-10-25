@@ -177,6 +177,7 @@ function adaptStore(store: HrStore, site: KioskSite): KioskClient {
         attestation: input.attestation ?? null,
         note: input.note ?? null,
       }),
+    noteKioskLateClockIn: (token, input) => store.noteKioskLateClockIn(token, input),
     fetchKioskStatus: (staffId, siteId) =>
       fetchKioskStatus(store, staffId, siteId),
     fetchKioskIndividuals: (siteId) => fetchKioskIndividuals(store, siteId),

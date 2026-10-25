@@ -77,8 +77,9 @@ test("people with equipment get a current-month log; a new month starts blank", 
     current.some((item) => item.id === log.equipmentId && log.monthKey === thisMonth),
   );
   assert.equal(logs.length, current.length);
+  // The walkthrough seed checks the current month so the default print is filled.
   assert.equal(
-    logs.every((log) => !log.checkedOn),
+    logs.every((log) => Boolean(log.checkedOn)),
     true,
   );
 
@@ -209,7 +210,7 @@ test("a new month does not clear last month’s completed log", async () => {
     (row) => row.equipmentId === item.id && row.monthKey === "2026-08",
   );
   const october = next.monthly.equipmentLogs.find(
-    (row) => row.equipmentId === item.id && row.monthKey === "2026-10",
+    (row) => row.id === "00000000-0000-4000-8000-000000009901",
   );
   assert.equal(august?.checkedOn, "2026-08-03");
   assert.equal(october?.checkedOn, null);

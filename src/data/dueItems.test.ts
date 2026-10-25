@@ -4,9 +4,15 @@ import {
   buildSiteDueItems,
   computeMedDueItems,
   computeShiftNoteDueItems,
+  consecutiveRefusals,
   formatClock,
   formatRange,
+  marRecordingProblem,
   SHIFT_BLOCKS,
+  blockForShiftLabel,
+  shiftBlocksFromStarts,
+  shiftNoteShiftOptions,
+  shiftScheduleProblem,
   staffedRemainder,
   weekdayOf,
   type ShiftNoteDetectorInput,
@@ -102,6 +108,101 @@ describe("computeShiftNoteDueItems (#75)", () => {
     assert.equal(computeShiftNoteDueItems(shiftInput({})).length, 12);
   });
 
+  it("uses a site's own shift starts for the missing-note window", () => {
+    const blocks = shiftBlocksFromStarts({
+      dayStart: "07:00",
+      eveningStart: "15:00",
+      overnightStart: "23:00",
+    });
+    assert.equal(shiftScheduleProblem({ dayStart: "08:00", eveningStart: "07:00", overnightStart: "23:00" }), "Evening has to start after the day shift.");
+    const during = computeShiftNoteDueItems(
+      shiftInput({
+        now: new Date(2026, 8, 22, 6, 31),
+        graceMinutes: 30,
+        blocks,
+      }),
+    );
+    assert.ok(!during.some((row) => row.blockId === "overnight"));
+    assert.match(
+      during.find((row) => row.blockId === "day")?.rangeLabel ?? "",
+      /7:00 a.m.–3:00 p.m./,
+    );
+    const after = computeShiftNoteDueItems(
+      shiftInput({
+        now: new Date(2026, 8, 22, 7, 31),
+        graceMinutes: 30,
+        blocks,
+      }),
+    );
+    assert.ok(after.some((row) => row.blockId === "overnight"));
+    assert.equal(
+      shiftBlocksFromStarts({ dayStart: "nope", eveningStart: "15:00", overnightStart: "23:00" }).day.startMin,
+      SHIFT_BLOCKS.day.startMin,
+    );
+  });
+
+  it("allows overlapping shift windows and keeps each note on its own shift", () => {
+    const clock = {
+      dayStart: "06:30",
+      dayEnd: "15:00",
+      eveningStart: "14:00",
+      eveningEnd: "22:30",
+      overnightStart: "22:00",
+      overnightEnd: "07:00",
+    };
+    assert.equal(shiftScheduleProblem(clock), null);
+    const blocks = shiftBlocksFromStarts(clock);
+    assert.ok(blocks.day.endMin > blocks.evening.startMin);
+    assert.equal(
+      shiftScheduleProblem({ ...clock, dayEnd: "07:00" }),
+      "The day shift has to last at least an hour.",
+    );
+    assert.equal(
+      shiftScheduleProblem({ ...clock, dayEnd: "23:00" }),
+      "The day shift can run at most 16 hours.",
+    );
+    assert.deepEqual(shiftNoteShiftOptions(clock).slice(0, 2), [
+      "Day 6:30 a.m.–3:00 p.m.",
+      "Evening 2:00–10:30 p.m.",
+    ]);
+    assert.equal(blockForShiftLabel("Day 6:30 a.m.–3:00 p.m."), "day");
+    assert.equal(blockForShiftLabel("7a–3p"), "day");
+    assert.equal(blockForShiftLabel("Other"), null);
+    const notes = [
+      {
+        individualId: "ellis",
+        staffUserId: "alex",
+        blockId: "day" as const,
+        noteDate: "2026-09-21",
+      },
+    ];
+    const items = computeShiftNoteDueItems(shiftInput({ blocks, notes }));
+    assert.ok(
+      !items.some((row) => row.individualId === "ellis" && row.blockId === "day" && row.staffUserId === "alex"),
+    );
+    assert.ok(
+      items.some((row) => row.individualId === "ellis" && row.blockId === "evening" && row.staffUserId === "alex"),
+    );
+  });
+
+  it("keeps a block quiet until the note grace has passed", () => {
+    const duringGrace = computeShiftNoteDueItems(
+      shiftInput({
+        now: new Date(2026, 8, 22, 6, 10),
+        graceMinutes: 30,
+      }),
+    );
+    assert.equal(duringGrace.length, 8);
+    assert.ok(!duringGrace.some((row) => row.blockId === "overnight"));
+    const afterGrace = computeShiftNoteDueItems(
+      shiftInput({
+        now: new Date(2026, 8, 22, 6, 31),
+        graceMinutes: 30,
+      }),
+    );
+    assert.equal(afterGrace.length, 12);
+  });
+
   it("a note clears only its own author's requirement (co-documentation)", () => {
     const notes = [
       { individualId: "ellis", staffUserId: "alex", blockId: "day" as const, noteDate: "2026-09-21" },
@@ -186,6 +287,50 @@ describe("computeMedDueItems (#76)", () => {
     const items = computeMedDueItems(medInput({ nowMinutes: 7 * 60 + 30 }));
     const eight = items.find((i) => i.doseTime === "08:00");
     assert.equal(eight?.state, "due");
+  });
+
+  it("a shorter window stays closed until it opens", () => {
+    const items = computeMedDueItems(
+      medInput({ nowMinutes: 7 * 60 + 15, windowBeforeMinutes: 30, windowAfterMinutes: 30 }),
+    );
+    assert.ok(!items.some((row) => row.doseTime === "08:00"));
+  });
+
+  it("blocks a mark before the window and allows a late mark", () => {
+    const early = marRecordingProblem({
+      doseDate: "2026-10-13",
+      doseTime: "20:00",
+      now: new Date(2026, 9, 13, 18, 0),
+      windowBeforeMinutes: 60,
+      blockEarly: true,
+    });
+    assert.match(early ?? "", /opens 60 minutes before/);
+    const late = marRecordingProblem({
+      doseDate: "2026-10-12",
+      doseTime: "08:00",
+      now: new Date(2026, 9, 13, 18, 0),
+      windowBeforeMinutes: 60,
+      blockEarly: true,
+    });
+    assert.equal(late, null);
+    const open = marRecordingProblem({
+      doseDate: "2026-10-13",
+      doseTime: "20:00",
+      now: new Date(2026, 9, 13, 18, 0),
+      windowBeforeMinutes: 60,
+      blockEarly: false,
+    });
+    assert.equal(open, null);
+  });
+
+  it("counts a refusal streak until another exception breaks it", () => {
+    const rows = [
+      { medicationId: "med-lev", kind: "refused", createdAt: "2026-10-13T12:00:00.000Z" },
+      { medicationId: "med-lev", kind: "refused", createdAt: "2026-10-13T18:00:00.000Z" },
+      { medicationId: "med-lev", kind: "held", createdAt: "2026-10-12T18:00:00.000Z" },
+      { medicationId: "med-lev", kind: "refused", createdAt: "2026-10-11T18:00:00.000Z" },
+    ];
+    assert.equal(consecutiveRefusals(rows, "med-lev"), 2);
   });
 
   it("any status clears the dose (Given/Missed/LOA/On hold)", () => {

@@ -17,6 +17,7 @@
     "mobile:ios": "npx cap open ios",
     "mobile:android": "npx cap open android",
     "seed:local": "tsx scripts/seed-local.ts",
+    "demo:prints": "tsx scripts/export-demo-prints.ts",
     "test:db": "supabase test db",
     "test:hosted": "node --import tsx --import ./src/testSupport/cssStub.mts scripts/verify-local-hosted.ts",
     "seed:repair-site-addresses": "tsx scripts/repair-site-addresses.ts"

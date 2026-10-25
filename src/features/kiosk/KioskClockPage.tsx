@@ -36,6 +36,8 @@ import {
 import { createKioskClient } from "./kioskStoreAdapter";
 import { enqueuePunch } from "./kioskQueue";
 import { useKioskSync } from "./useKioskSync";
+import { isSupabaseConfigured } from "../../data";
+import { recordKioskLateClockIn } from "../../data/localApi";
 
 type Step =
   | "resolving"
@@ -403,6 +405,28 @@ export default function KioskClockPage({ token }: { token: string }) {
         // Queue unavailable too — the punch is still acknowledged on screen;
         // the failed submit is surfaced so staff can tell a manager.
         setError("Punch could not be sent or saved. Please tell your manager.");
+      }
+    }
+    // The 5-minute kiosk grace only flags the punch. The point uses the
+    // saved lateness minutes, and only after the punch itself is stored.
+    // A queued offline punch does not add a point.
+    if (nextIntent.kind === "in" && !offline && suggestion?.startsAt) {
+      const late = {
+        agencyId: site.agencyId,
+        staffId: session.staffId,
+        siteId: site.siteId,
+        scheduledStart: suggestion.startsAt,
+        punchedAt,
+        sourceKey: `late_clock_in:kiosk:${session.staffId}:${punchedAt}`,
+      };
+      try {
+        if (client.noteKioskLateClockIn) {
+          await client.noteKioskLateClockIn(token, late);
+        } else if (!isSupabaseConfigured()) {
+          await recordKioskLateClockIn(late);
+        }
+      } catch {
+        // The punch is already saved. A missed point must not undo it.
       }
     }
     setConfirmInfo({

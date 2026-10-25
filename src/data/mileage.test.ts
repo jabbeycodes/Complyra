@@ -226,6 +226,8 @@ test("LIFEPATH-P7: hasPermission honors mileage.manage from role templates", () 
 
 async function dspClient() {
   const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  // Mileage tests build their own odometer chain. Drop the walkthrough trips.
+  store.db.mileageTrips = [];
   const client = new LocalApi(store);
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -244,6 +246,8 @@ async function dspClient() {
 
 async function clientAs(username: string) {
   const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  // Mileage tests build their own odometer chain. Drop the walkthrough trips.
+  store.db.mileageTrips = [];
   const client = new LocalApi(store);
   const session = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,

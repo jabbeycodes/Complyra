@@ -381,8 +381,19 @@ export function nextAllergiesStamp(
   };
 }
 
-export function isObligationActive(item: ObligationItem, today = new Date().toISOString().slice(0, 10)) {
+export function isObligationActive(
+  item: ObligationItem,
+  today = new Date().toISOString().slice(0, 10),
+  options?: { delegationsExpire?: boolean },
+) {
   if (!item.enabled) return false;
+  // A delegation stays in effect until the nurse turns it off or rescinds it,
+  // unless the agency turned on delegations.expire. reviewDate is a reminder.
+  if (item.kind === "delegation") {
+    if (item.delegationForm?.rescindReason != null) return false;
+    if (options?.delegationsExpire && item.expiresOn && item.expiresOn < today) return false;
+    return true;
+  }
   if (item.expiresOn && item.expiresOn < today) return false;
   return true;
 }
@@ -578,11 +589,21 @@ export function addMonths(isoDate: string, months: number) {
 export function renewalStatus(
   nextDueOn: string,
   today = new Date().toISOString().slice(0, 10),
+  reminderDays?: number[],
 ): RenewalStatus {
   if (nextDueOn < today) return "overdue";
-  const horizon = addMonths(today, 1);
+  const horizon = reminderDays && reminderDays.length > 0
+    ? addDays(today, Math.max(...reminderDays))
+    : addMonths(today, 1);
   if (nextDueOn <= horizon) return "due_soon";
   return "current";
+}
+
+function addDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 export function defaultRenewals(

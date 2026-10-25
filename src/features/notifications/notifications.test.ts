@@ -56,7 +56,7 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 35);
+  assert.equal(NOTIFICATION_TYPES.length, 45);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -424,6 +424,20 @@ test("delegation payloads name template and individual and dedupe per (assignmen
 
   assert.notEqual(review.dedupe_key, published.dedupe_key, "different types differ");
   assert.notEqual(published.dedupe_key, overdue.dedupe_key, "different types differ");
+});
+
+test("a missing Shift note opens that person's notes", async () => {
+  const { notificationDestination, notificationPage, shiftNoteDeepLink } = await import("./notify");
+  const link = shiftNoteDeepLink("person-1");
+  assert.equal(link, "/plans/person-1#chart-shift-notes");
+  assert.equal(notificationPage(link), "Individuals");
+  assert.deepEqual(notificationDestination(link), {
+    page: "Individuals",
+    individualId: "person-1",
+    hash: "#chart-shift-notes",
+  });
+  assert.equal(notificationDestination("/plans")?.individualId, null);
+  assert.equal(notificationDestination("/plans/person-1#<bad>")?.hash, null);
 });
 
 test("open-shift notifications open the Employee Hub", async () => {

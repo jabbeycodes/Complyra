@@ -16,6 +16,7 @@
  * Entity types and pure logic (validateClockIn/validateClockOut, the punch
  * guards) come from ./hr, owned by the domain workstream.
  */
+import { scheduledStartIso } from "./lateness";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -199,6 +200,16 @@ export interface RemotePunchGrant {
  * Exported for unit tests: the RPC contract (argument names, server-stamped
  * verification_method='kiosk_pin') is pinned here, not in the impl.
  */
+/** Clock-in facts the kiosk already showed the staff member. The agency comes from the token. */
+export interface KioskLateClockInInput {
+  agencyId: string;
+  staffId: string;
+  siteId: string | null;
+  scheduledStart: string;
+  punchedAt: string;
+  sourceKey: string;
+}
+
 export function buildSubmitKioskPunchParams(
   token: string,
   input: KioskPunchInput,
@@ -239,6 +250,8 @@ export interface KioskShiftSuggestion {
   serviceType: string | null;
   individualId: string | null;
   individualName: string | null;
+  /** Scheduled start, when the house has a shift or staffing window today. */
+  startsAt?: string | null;
 }
 
 /**
@@ -362,6 +375,16 @@ export interface HrStore {
    * and remote derives false. Throws "Invalid kiosk token." otherwise.
    */
   submitKioskPunch(token: string, input: KioskPunchInput): Promise<HrPunch>;
+  /**
+   * Record a lateness point for a kiosk clock-in that is already stored.
+   * The hosted path has no signed-in session, so the database checks the
+   * kiosk token and the punch itself. Returns false when the clock-in is
+   * inside the saved minutes or the point was already recorded.
+   */
+  noteKioskLateClockIn(
+    token: string,
+    input: KioskLateClockInInput,
+  ): Promise<boolean>;
   suggestKioskShift(
     staffId: string,
     siteId: string,
@@ -2264,6 +2287,21 @@ class SupabaseHrStore implements HrStore {
     };
   }
 
+  async noteKioskLateClockIn(
+    token: string,
+    input: KioskLateClockInInput,
+  ): Promise<boolean> {
+    const { data, error } = await this.client.rpc("note_kiosk_late_clock_in", {
+      p_token: token,
+      p_staff_id: input.staffId,
+      p_scheduled_start: input.scheduledStart,
+      p_punched_at: input.punchedAt,
+      p_source_key: input.sourceKey,
+    });
+    throwIf(error, "Could not record the late clock-in");
+    return data === true;
+  }
+
   /* ----------------- hub.remote_punch grants (Worker 1) ------------------ */
   /*
    * Per-staff permission grants (hr_staff_permission_grants): the grant is
@@ -2387,6 +2425,7 @@ class SupabaseHrStore implements HrStore {
         serviceType: null,
         individualId: null,
         individualName: null,
+        startsAt: mine.startsAt,
       };
     }
     const patterns = await this.listStaffingPatterns({ staffId });
@@ -2405,6 +2444,7 @@ class SupabaseHrStore implements HrStore {
       serviceType: pattern.serviceTags[0] ?? null,
       individualId: pattern.individualId,
       individualName: pattern.individualName ?? null,
+      startsAt: pattern.windows[0] ? scheduledStartIso(stamp, pattern.windows[0].start) : null,
     };
   }
 
@@ -4039,6 +4079,15 @@ class LocalHrStore implements HrStore {
     });
   }
 
+  async noteKioskLateClockIn(
+    _token: string,
+    input: KioskLateClockInInput,
+  ): Promise<boolean> {
+    const { recordKioskLateClockIn } = await import("./localApi");
+    await recordKioskLateClockIn(input);
+    return true;
+  }
+
   /* ----------------- hub.remote_punch grants (local mirror) ---------------- */
   /*
    * In-memory (+localStorage-persisted) mirror of hr_staff_permission_grants.
@@ -4140,6 +4189,7 @@ class LocalHrStore implements HrStore {
         serviceType: null,
         individualId: null,
         individualName: null,
+        startsAt: mine.startsAt,
       };
     }
     const patterns = await this.listStaffingPatterns({ staffId });
@@ -4158,6 +4208,7 @@ class LocalHrStore implements HrStore {
       serviceType: pattern.serviceTags[0] ?? null,
       individualId: pattern.individualId,
       individualName: pattern.individualName ?? null,
+      startsAt: pattern.windows[0] ? scheduledStartIso(stamp, pattern.windows[0].start) : null,
     };
   }
 

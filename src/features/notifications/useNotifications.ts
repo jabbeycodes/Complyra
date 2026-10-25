@@ -34,6 +34,7 @@ import {
   certExpiryStatus,
   daysRemaining,
 } from "../../data/certificates";
+import { reminderBand } from "../../data/rules";
 
 export type { NotificationRow };
 
@@ -227,6 +228,8 @@ export interface ClientEvents {
   agencyId: string;
   certificates?: CertificateEventInput[];
   meds?: MedEventInput[];
+  /** When set, an unexpired certificate notifies only inside this reminder list. */
+  certificateReminderDays?: number[];
 }
 
 export interface QueueResult {
@@ -282,6 +285,29 @@ export async function queueClientNotifications(
   for (const cert of events.certificates ?? []) {
     const remaining = daysRemaining(cert.expiresOn, cert.today);
     const status = certExpiryStatus(remaining);
+    if (events.certificateReminderDays) {
+      if (remaining < 0) {
+        payloads.push(
+          certificateExpiredPayload({
+            agencyId: events.agencyId,
+            userId: cert.userId,
+            certificateId: cert.certificateId,
+            certName: cert.certName,
+          }),
+        );
+      } else if (reminderBand(remaining, events.certificateReminderDays) != null) {
+        payloads.push(
+          certificateExpiringPayload({
+            agencyId: events.agencyId,
+            userId: cert.userId,
+            certificateId: cert.certificateId,
+            certName: cert.certName,
+            daysRemaining: remaining,
+          }),
+        );
+      }
+      continue;
+    }
     if (status === "ok") continue;
     payloads.push(
       status === "expired"

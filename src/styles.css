@@ -7315,6 +7315,22 @@ button.qa-row:hover {
   margin: 0;
   font-size: 15px;
 }
+.clinician-note {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.clinician-note th,
+.clinician-note td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+.clinician-note th {
+  background: var(--paper, #f6f3ee);
+  width: 28%;
+}
 .isp-note-card {
   border: 1px solid var(--border);
   border-radius: 10px;

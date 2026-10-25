@@ -437,6 +437,7 @@ function makeStubStore(): HrStore {
       offline: input.offline,
       remote: false,
     }),
+    noteKioskLateClockIn: async () => false,
     hasRemotePunch: async () => false,
     grantRemotePunch: async (staffId, grantedBy) => ({
       staffId,

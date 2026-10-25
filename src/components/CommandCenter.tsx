@@ -51,6 +51,7 @@ import {
   DMH_SOURCE_CAVEAT,
 } from "../data/dmhRequirements";
 import { findMissing, missingBySite } from "../data/missingRequirements";
+import { useOperatingRules } from "../features/employeeHub/useOvertimeLines";
 import { WORKFLOW_TEMPLATES } from "../data/workflows";
 import {
   CORRECTIVE_ACTION_STATUS_META,
@@ -187,6 +188,8 @@ export interface CommandCenterViewProps {
   canManage: boolean;
   onAddAction: (input: AddActionInput) => Promise<void>;
   onResolveAction: (id: string) => Promise<void>;
+  /** Days after hire that CPI and PBS are due. Omitted leaves those certificates off this list. */
+  cpiPbsDueDays?: number;
 }
 
 /** Pure presentational command center — every section renders from props. */
@@ -195,6 +198,7 @@ export function CommandCenterView({
   canManage,
   onAddAction,
   onResolveAction,
+  cpiPbsDueDays,
 }: CommandCenterViewProps) {
   const { actions, certs, clearance, checklists, snapshots } = data;
 
@@ -373,7 +377,9 @@ export function CommandCenterView({
         userId: person.id,
         name: person.name,
         siteName: person.site,
+        hireOn: person.hiredOn,
       })),
+      cpiPbsDueDays: cpiPbsDueDays,
       requiredCertificateKinds: [],
       certificates: certs.map((cert) => ({
         userId: cert.userId,
@@ -397,7 +403,7 @@ export function CommandCenterView({
         submitted: list.status === "submitted",
       })),
     });
-  }, [certs, data.staff, data.individuals, checklists, siteNameById]);
+  }, [certs, data.staff, data.individuals, checklists, siteNameById, cpiPbsDueDays]);
   const missingRollup = useMemo(() => missingBySite(missing), [missing]);
 
   /* ---------------- corrective-action handlers ---------------- */
@@ -903,6 +909,7 @@ export function CommandCenterView({
 /** Data-loading wrapper: fetches from the API, then renders the view. */
 export default function CommandCenter() {
   const { api, session, workspace } = useData();
+  const operating = useOperatingRules(session);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<CommandCenterData | null>(null);
@@ -1040,6 +1047,7 @@ export default function CommandCenter() {
         canManage={canManage}
         onAddAction={handleAddAction}
         onResolveAction={handleResolveAction}
+        cpiPbsDueDays={operating.cpiPbsDueDays}
       />
     </>
   );

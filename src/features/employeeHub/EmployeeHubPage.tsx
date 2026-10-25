@@ -72,6 +72,7 @@ import {
   rollupCompliance,
   summarizeTimecard,
 } from "../../data/hr";
+import { useOperatingRules } from "./useOvertimeLines";
 import type {
   ComplianceEvidence,
   HrDocument,
@@ -136,6 +137,13 @@ interface EmployeeHubShellProps {
   initialTab?: string;
   /** Injected in tests; defaults to the hosted/local open-shift store. */
   openShiftStore?: OpenShiftStore;
+  /** Records a lateness point when a hub clock-in is past the saved minutes. */
+  onLateClockIn?: (input: {
+    staffId: string;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }) => Promise<void>;
 }
 
 /* --------------------------------- utils --------------------------------- */
@@ -386,8 +394,10 @@ export function EmployeeHubShell({
   sites,
   initialTab,
   openShiftStore,
+  onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
+  const operating = useOperatingRules(session);
   // HMs/PMs post for their sites; HR and administrators also post agency-wide.
   const canPostAgencyWide =
     can("hub.manage_staffing") && ["hr", "administrator"].includes(session.roleKey);
@@ -449,6 +459,7 @@ export function EmployeeHubShell({
             timecardApprovals: [],
             payPeriods: [],
             nowIso: new Date().toISOString(),
+            lateClockInMinutes: operating.lateClockInMinutes,
           }).length;
         }
         if (can("hub.review_timecards")) {
@@ -488,7 +499,7 @@ export function EmployeeHubShell({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, session.userId]);
+  }, [refreshKey, session.userId, operating.lateClockInMinutes]);
 
   const tabBadges: Record<string, number> = {
     attendance: badges.attendance,
@@ -542,7 +553,14 @@ export function EmployeeHubShell({
             canPostAgency={canPostAgencyWide}
           />
         )}
-        {tab === "timeclock" && <TimeClockTab session={session} store={store} onChanged={refresh} />}
+        {tab === "timeclock" && (
+          <TimeClockTab
+            session={session}
+            store={store}
+            onChanged={refresh}
+            onLateClockIn={onLateClockIn}
+          />
+        )}
         {tab === "timecard" && (
           <MyTimecardTab session={session} store={store} onChanged={refresh} />
         )}
@@ -1213,12 +1231,19 @@ export function TimeClockTab({
   store,
   onChanged,
   initialGrant,
+  onLateClockIn,
 }: {
   session: SessionUser;
   store: HrStore;
   onChanged: () => void;
   /** Test/SSR seed for the remote-punch grant check. */
   initialGrant?: "allowed" | "denied";
+  onLateClockIn?: (input: {
+    staffId: string;
+    scheduledStart: string;
+    punchedAt: string;
+    sourceKey: string;
+  }) => Promise<void>;
 }) {
   const [punches, setPunches] = useState<HrPunch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1280,8 +1305,31 @@ export function TimeClockTab({
     setBusy(true);
     setError("");
     try {
-      if (kind === "in") await store.clockIn();
-      else await store.clockOut();
+      if (kind === "in") {
+        const punch = await store.clockIn();
+        if (onLateClockIn) {
+          try {
+            const shifts = await store.listShifts(`${stamp}T00:00:00`, `${stamp}T23:59:59`);
+            const scheduled = shifts
+              .filter((shift) => shift.staffId === session.userId && shift.status !== "cancelled")
+              .sort(
+                (a, b) =>
+                  Math.abs(Date.parse(a.startsAt) - Date.parse(punch.punchedAt)) -
+                  Math.abs(Date.parse(b.startsAt) - Date.parse(punch.punchedAt)),
+              )[0];
+            if (scheduled) {
+              await onLateClockIn({
+                staffId: session.userId,
+                scheduledStart: scheduled.startsAt,
+                punchedAt: punch.punchedAt,
+                sourceKey: `late_clock_in:${punch.id}`,
+              });
+            }
+          } catch {
+            // The punch is already saved. A missing schedule must not undo it.
+          }
+        }
+      } else await store.clockOut();
       onChanged();
       load();
     } catch (err) {
@@ -3829,7 +3877,7 @@ function AccrualPoliciesCard({ store }: { store: HrStore }) {
 /* ------------------------------- page export ------------------------------ */
 
 export default function EmployeeHubPage() {
-  const { session, workspace } = useData();
+  const { api, session, workspace } = useData();
   const store = useMemo(
     () =>
       session
@@ -3861,5 +3909,13 @@ export default function EmployeeHubPage() {
       </div>
     );
   }
-  return <EmployeeHubShell session={session} store={store} staffList={staffList} sites={sites} />;
+  return (
+    <EmployeeHubShell
+      session={session}
+      store={store}
+      staffList={staffList}
+      sites={sites}
+      onLateClockIn={(input) => api.noteLateClockIn(input)}
+    />
+  );
 }

@@ -9,6 +9,7 @@ import {
   type SiteFacts,
   type SiteReview,
 } from "../data/siteReview";
+import { shiftClockFromFacts, shiftScheduleSummary } from "../data/dueItems";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 import {
   siteLocationFields,
@@ -186,6 +187,14 @@ export function buildPreSurveyPdf(input: {
   field(doc, "Service type", SERVICE_TYPE_LABELS[input.facts.serviceType], margin, y);
   y += 14;
   field(doc, "24-hour staff", yesNo(input.facts.staffed24h), margin, y);
+  y += 14;
+  field(
+    doc,
+    "Shift times",
+    shiftScheduleSummary(shiftClockFromFacts(input.facts)),
+    margin,
+    y,
+  );
   y += 14;
   field(doc, "Overnight sleep staff", yesNo(input.facts.overnightSleepStaff), margin, y);
   y += 14;

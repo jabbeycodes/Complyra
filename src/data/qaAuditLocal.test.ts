@@ -12,7 +12,13 @@ import {
 import { DEMO_PASSWORD } from "./types";
 
 function store() {
-  return new MemoryStore(structuredClone(createEvergreenSeed()));
+  const db = structuredClone(createEvergreenSeed());
+  // The walkthrough seed includes a finalized audit. These tests cover the
+  // create → score → finalize path, so they start from an empty audit list.
+  db.qaAudits = [];
+  db.qaAuditItems = [];
+  db.qaSchedules = [];
+  return new MemoryStore(db);
 }
 
 const login = (username: string) => ({

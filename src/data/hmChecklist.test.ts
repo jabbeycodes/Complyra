@@ -22,7 +22,10 @@ import {
 } from "./hmChecklist";
 
 function store() {
-  return new MemoryStore(structuredClone(createEvergreenSeed()));
+  const db = structuredClone(createEvergreenSeed());
+  // Checklist tests assign a blank week. The walkthrough seed is already filled.
+  db.weeklyChecklists = [];
+  return new MemoryStore(db);
 }
 
 function login(username: string) {

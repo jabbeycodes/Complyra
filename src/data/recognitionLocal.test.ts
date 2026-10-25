@@ -288,7 +288,9 @@ test("listRecognitionPartners returns only assigned counterparts", async () => {
   );
 
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  assert.deepEqual(await api.listRecognitionPartners(), []);
+  const adminPartners = await api.listRecognitionPartners();
+  assert.ok(adminPartners.length > 0, "an administrator can award DSPs");
+  assert.ok(adminPartners.every((partner) => partner.roleKey === "dsp"));
 });
 
 test("staff_assignments pair people across sites for ratings and partners", async () => {

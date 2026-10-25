@@ -14,6 +14,7 @@ public/legal.css
 !.env.example
 playwright-report
 test-results
+demo-prints
 .DS_Store
 *.tsbuildinfo
 ios/App/Pods

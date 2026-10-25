@@ -43,8 +43,8 @@ export default function ImprovedDelegationForm({
         </div>
       ) : (
         <div className="delegation-review-banner missing">
-          <strong>No review date set.</strong> Set one so this delegation gets
-          automatic renewal reminders.
+          <strong>No review date set.</strong> Set one so the nurse is reminded
+          to reassess. The delegation stays in effect until the nurse rescinds it.
         </div>
       )}
 

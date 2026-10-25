@@ -23,6 +23,16 @@ export type NotificationType =
   | "certificate.expiring"
   | "certificate.expired"
   | "med.low_stock"
+  | "med.refusal_review"
+  | "med.prn_followup"
+  | "med.prn_frequency"
+  | "med.late_recording"
+  | "med.unrecorded"
+  | "med.prn_repeat"
+  | "documentation.missing_note"
+  | "accountability.warning"
+  | "accountability.writeup"
+  | "recognition.awarded"
   | "checklist.assigned"
   | "checklist.late"
   | "checklist.missed"
@@ -60,6 +70,16 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "certificate.expiring",
   "certificate.expired",
   "med.low_stock",
+  "med.refusal_review",
+  "med.prn_followup",
+  "med.prn_frequency",
+  "med.late_recording",
+  "med.unrecorded",
+  "med.prn_repeat",
+  "documentation.missing_note",
+  "accountability.warning",
+  "accountability.writeup",
+  "recognition.awarded",
   "checklist.assigned",
   "checklist.late",
   "checklist.missed",
@@ -161,6 +181,11 @@ export function isWellFormedDeepLink(deepLink: string): boolean {
   return !deepLink.startsWith("//") && !/[\\\s\u0000-\u001f]/.test(deepLink) && !deepLink.includes("://");
 }
 
+/** A missing Shift note opens that person's chart at the notes. */
+export function shiftNoteDeepLink(individualId: string): string {
+  return `/plans/${encodeURIComponent(individualId)}#chart-shift-notes`;
+}
+
 export function notificationPage(link: string): string | null {
   if (!isWellFormedDeepLink(link)) return null;
   const path = link.split(/[?#]/)[0];
@@ -178,6 +203,34 @@ export function notificationPage(link: string): string | null {
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;
+}
+
+/**
+ * Page plus the person and anchor a link names. A hash is kept only when it
+ * is a simple element id, so it can be passed to querySelector.
+ */
+export function notificationDestination(link: string): {
+  page: string;
+  individualId: string | null;
+  hash: string | null;
+} | null {
+  const page = notificationPage(link);
+  if (!page) return null;
+  const hashIndex = link.indexOf("#");
+  const beforeHash = hashIndex === -1 ? link : link.slice(0, hashIndex);
+  const path = beforeHash.split("?")[0];
+  const plans = /^\/plans\/([^/]+)$/.exec(path);
+  let individualId: string | null = null;
+  if (plans) {
+    try {
+      individualId = decodeURIComponent(plans[1]);
+    } catch {
+      individualId = plans[1];
+    }
+  }
+  const rawHash = hashIndex === -1 ? "" : link.slice(hashIndex);
+  const hash = /^#[A-Za-z][\w-]*$/.test(rawHash) ? rawHash : null;
+  return { page, individualId, hash };
 }
 
 /** DB row as the client reads it. */
@@ -222,6 +275,16 @@ export const NOTIFICATION_META: Record<
   "certificate.expiring": { status: "expiring", label: "Certificate expiring" },
   "certificate.expired": { status: "expired", label: "Certificate expired" },
   "med.low_stock": { status: "expiring", label: "Medication low stock" },
+  "med.refusal_review": { status: "late", label: "Nurse review — refusals" },
+  "med.prn_followup": { status: "pending", label: "PRN follow-up" },
+  "med.prn_frequency": { status: "pending", label: "PRN frequency review" },
+  "med.late_recording": { status: "late", label: "Late medication recording" },
+  "med.unrecorded": { status: "missing", label: "Unmarked medication" },
+  "med.prn_repeat": { status: "pending", label: "PRN follow-up still open" },
+  "documentation.missing_note": { status: "missing", label: "Missing Shift note" },
+  "accountability.warning": { status: "late", label: "Lateness warning" },
+  "accountability.writeup": { status: "late", label: "Lateness write-up" },
+  "recognition.awarded": { status: "compliant", label: "Recognition points" },
   "checklist.assigned": { status: "pending", label: "Checklist assigned" },
   "checklist.late": { status: "late", label: "Checklist late" },
   "checklist.missed": { status: "missing", label: "Checklist missed" },
@@ -902,9 +965,9 @@ export function punchExceptionPayload(input: {
 }
 
 /**
- * A staff member is approaching overtime this week (36h+ of the 40-hour
- * limit). Sent to the staff member and to the scheduling managers; dedupe is
- * per staff member + week + recipient.
+ * A staff member is approaching overtime this week (the agency's approaching
+ * line, 36h by default). Sent to the staff member and to the scheduling
+ * managers; dedupe is per staff member + week + recipient.
  */
 export function overtimeApproachingPayload(input: {
   agencyId: string;
@@ -915,8 +978,14 @@ export function overtimeApproachingPayload(input: {
   hoursWorked: number;
   weekLabel: string;
   forStaffMember: boolean;
+  /** Flag line (weekly limit + tolerance). Defaults keep older callers on 41h. */
+  flagHours?: number;
+  /** "Sunday–Saturday" unless the agency starts the week on Monday. */
+  weekRange?: string;
 }): NotificationPayload {
   const hours = input.hoursWorked.toFixed(1);
+  const flag = input.flagHours ?? 41;
+  const week = input.weekRange ?? "Sunday–Saturday";
   return {
     agencyId: input.agencyId,
     userId: input.userId ?? null,
@@ -924,8 +993,8 @@ export function overtimeApproachingPayload(input: {
     type: "hr.overtime_approaching",
     title: "Approaching overtime",
     body: input.forStaffMember
-      ? `You're at ${hours}h this week (Sunday–Saturday). Past 41 hours needs your manager's approval.`
-      : `${input.staffName} is at ${hours}h this week. Past 41 hours is overtime; check their upcoming shifts.`,
+      ? `You're at ${hours}h this week (${week}). Past ${flag} hours needs your manager's approval.`
+      : `${input.staffName} is at ${hours}h this week. Past ${flag} hours is overtime; check their upcoming shifts.`,
     deepLink: "/hub",
     entityType: "hr_punch_exception",
     entityId: input.staffId,

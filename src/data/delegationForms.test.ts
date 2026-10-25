@@ -5,6 +5,7 @@ import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE, DEMO_NURSE_
 import { DEMO_PASSWORD, LOGIN_FAILED_MESSAGE } from "./types";
 import {
   blankDelegationForm,
+  DELEGATION_COMPETENCY_ITEMS,
   DELEGATION_NON_TRANSFERABILITY_CLAUSE,
   DELEGATION_RN_RESPONSIBILITY_CLAUSE,
   delegationFormStatus,
@@ -147,6 +148,66 @@ test("delegation PDF builds in the single Complyrer view", () => {
     delegationFileName("PRN Inhaler Self-Administration and Monitoring", "Andre Drummer"),
     "complyrer-delegation-prn-inhaler-self-administration-and-moni-andre-drummer.pdf",
   );
+});
+
+test("delegation roster text does not overlap the next row", async () => {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const form = blankDelegationForm("complyrer_improved");
+  form.procedures = "Wash hands.\nGive the bolus slowly.";
+  form.observeReportDo = "Watch for coughing. Call the nurse.";
+  form.roster[0] = {
+    ...form.roster[0],
+    printName: "Jordan Lee",
+    title: "DSP",
+    signatureName: "Jordan Lee",
+    signedAt: "2026-09-03T18:00:00.000Z",
+    initials: "JL",
+    competency: [...DELEGATION_COMPETENCY_ITEMS],
+  };
+  form.roster[1] = {
+    ...form.roster[1],
+    printName: "Casey Adams",
+    title: "DSP",
+    signatureName: "Casey Adams",
+    signedAt: "2026-09-03T18:00:00.000Z",
+    initials: "CA",
+    competency: [...DELEGATION_COMPETENCY_ITEMS],
+  };
+  const pdf = buildDelegationPdf({
+    agencyName: "Evergreen Care",
+    individualName: "Reese Lang",
+    dmhId: "",
+    individualLocation: "Willow House",
+    taskTitle: "Bolus enteral feeding via gastrostomy tube",
+    form,
+    documentId: "obl-showcase-reese-enteral",
+  });
+  const bytes = new Uint8Array(pdf.output("arraybuffer"));
+  const doc = await getDocument({ data: bytes }).promise;
+  const overlaps: string[] = [];
+  for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+    const page = await doc.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const boxes = content.items.flatMap((item) => {
+      if (!("str" in item) || !item.str.trim()) return [];
+      const x = item.transform[4];
+      const y = item.transform[5];
+      const height = Math.abs(item.transform[3]) || 8;
+      return [{ str: item.str, x, y, r: x + item.width, t: y + height }];
+    });
+    for (let a = 0; a < boxes.length; a += 1) {
+      for (let b = a + 1; b < boxes.length; b += 1) {
+        const left = boxes[a];
+        const right = boxes[b];
+        const overlapX = Math.min(left.r, right.r) - Math.max(left.x, right.x);
+        const overlapY = Math.min(left.t, right.t) - Math.max(left.y, right.y);
+        if (overlapX > 2 && overlapY > 2) {
+          overlaps.push(`${left.str} × ${right.str}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(overlaps, []);
 });
 
 test("createDelegation validates and stores the form", async () => {

@@ -69,6 +69,9 @@ import {
 } from "../delegation/delegation";
 import type { CorrectiveAction } from "./correctiveActions";
 import type { ScoreSnapshot } from "./complianceScore";
+import { applyAgencyDemo } from "./demoShowcase";
+import { dueItemClock } from "./operatingReminders";
+import type { HmWeeklyChecklist } from "./types";
 
 export const AGENCY_ID = "00000000-0000-4000-8000-000000000001";
 export const PLATFORM_AGENCY_ID = "00000000-0000-4000-8000-000000000090";
@@ -163,6 +166,10 @@ export interface LocalDatabase {
   // per-dose MAR check-off statuses that clear the unmarked-overdue due item.
   aloneTimeWindows: import("./types").AloneTimeWindow[];
   medDoseMarks: import("./types").MedDoseMark[];
+  /** Agency walkthrough checklists. Optional so older persisted demos still load. */
+  weeklyChecklists?: HmWeeklyChecklist[];
+  /** See SHOWCASE_REVISION. Missing on workspaces saved before the walkthrough seed. */
+  showcaseRevision?: number;
 }
 
 /** Local demo shape for one AI extraction (mirrors document_extractions). */
@@ -533,7 +540,7 @@ export function createEvergreenSeed(): LocalDatabase {
     },
   });
 
-  return {
+  const db: LocalDatabase = {
     agencies: [
       {
         id: AGENCY_ID,
@@ -859,6 +866,8 @@ export function createEvergreenSeed(): LocalDatabase {
     aloneTimeWindows: dueDemo.aloneTimeWindows,
     medDoseMarks: dueDemo.medDoseMarks,
   };
+  applyAgencyDemo(db);
+  return db;
 }
 
 /**
@@ -885,8 +894,9 @@ function buildDueItemsDemoSeed(args: {
 } {
   const { agencyId, profileByName, individualByName, programIdByIndividual, ellisMedIds } = args;
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const serviceDate = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const clock = dueItemClock(now);
+  const today = clock.doseDate;
+  const serviceDate = clock.serviceDate;
   const serviceWeekday = new Date(`${serviceDate}T12:00:00`).getDay();
   const stamp = `${serviceDate}T18:00:00.000Z`;
 
@@ -1184,6 +1194,12 @@ function buildSiteReviewSeed(sites: SiteRecord[]): SiteReview[] {
         city: site.city ?? "",
         county: site.county ?? "",
         zip: site.zip ?? "",
+        dayShiftStart: "06:00",
+        dayShiftEnd: "14:00",
+        eveningShiftStart: "14:00",
+        eveningShiftEnd: "22:00",
+        overnightShiftStart: "22:00",
+        overnightShiftEnd: "06:00",
       },
     );
     return complete;

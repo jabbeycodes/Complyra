@@ -23,6 +23,7 @@ import {
   type SiteReviewLineStatus,
   type SiteServiceType,
 } from "../data/siteReview";
+import { shiftClockFromFacts, shiftScheduleProblem, shiftScheduleSummary } from "../data/dueItems";
 import { useData } from "../data/DataProvider";
 
 const STATUS_OPTIONS: { value: SiteReviewLineStatus; label: string }[] = [
@@ -214,6 +215,64 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
           />
           24-hour staff
         </label>
+        <label>
+          Day shift starts
+          <input
+            type="time"
+            aria-label="Day shift starts"
+            value={facts.dayShiftStart}
+            onChange={(e) => setFactsDraft({ ...facts, dayShiftStart: e.target.value })}
+          />
+        </label>
+        <label>
+          Day shift ends
+          <input
+            type="time"
+            aria-label="Day shift ends"
+            value={facts.dayShiftEnd}
+            onChange={(e) => setFactsDraft({ ...facts, dayShiftEnd: e.target.value })}
+          />
+        </label>
+        <label>
+          Evening shift starts
+          <input
+            type="time"
+            aria-label="Evening shift starts"
+            value={facts.eveningShiftStart}
+            onChange={(e) => setFactsDraft({ ...facts, eveningShiftStart: e.target.value })}
+          />
+        </label>
+        <label>
+          Evening shift ends
+          <input
+            type="time"
+            aria-label="Evening shift ends"
+            value={facts.eveningShiftEnd}
+            onChange={(e) => setFactsDraft({ ...facts, eveningShiftEnd: e.target.value })}
+          />
+        </label>
+        <label>
+          Overnight shift starts
+          <input
+            type="time"
+            aria-label="Overnight shift starts"
+            value={facts.overnightShiftStart}
+            onChange={(e) => setFactsDraft({ ...facts, overnightShiftStart: e.target.value })}
+          />
+        </label>
+        <label>
+          Overnight shift ends
+          <input
+            type="time"
+            aria-label="Overnight shift ends"
+            value={facts.overnightShiftEnd}
+            onChange={(e) => setFactsDraft({ ...facts, overnightShiftEnd: e.target.value })}
+          />
+        </label>
+        <p>
+          {shiftScheduleSummary(shiftClockFromFacts(facts))}
+          . Shifts can overlap. A Shift note covers only the shift it is filed under.
+        </p>
         <label className="check-row">
           <input
             type="checkbox"
@@ -413,6 +472,8 @@ export default function SiteReviewPanel({ siteId }: { siteId: string }) {
             className="button primary"
             onClick={() =>
               run(async () => {
+                const scheduleProblem = shiftScheduleProblem(shiftClockFromFacts(facts));
+                if (scheduleProblem) throw new Error(scheduleProblem);
                 await api.saveSiteFacts(siteId, facts);
                 await api.saveSiteReview({
                   id: review.id,
