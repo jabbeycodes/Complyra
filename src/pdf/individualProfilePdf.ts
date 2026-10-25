@@ -207,7 +207,7 @@ export function buildIndividualProfilePdf(input: {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(95, 81, 69);
-  ensureSpace(24);
+  ensureSpace(44);
   doc.text("Agency contacts", margin, y);
   y += 16;
   if (input.agencyContacts.length === 0) {
@@ -235,7 +235,7 @@ export function buildIndividualProfilePdf(input: {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(95, 81, 69);
-  ensureSpace(24);
+  ensureSpace(44);
   doc.text("Personal contacts", margin, y);
   y += 16;
   if (input.guardians.length === 0) {
@@ -260,7 +260,7 @@ export function buildIndividualProfilePdf(input: {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(95, 81, 69);
-  ensureSpace(24);
+  ensureSpace(44);
   doc.text("Providers", margin, y);
   y += 16;
   if (input.providers.length === 0) {

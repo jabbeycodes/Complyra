@@ -97,11 +97,13 @@ test("Appointments calendar lists caseload days and opens that day's visits", as
   await expect(filters).toBeVisible();
   await expect(filters.getByLabel("Filter by status")).toContainText("Scheduled");
   await expect(filters.getByLabel("Filter by status")).not.toContainText("Upcoming");
+  await expect(filters.getByLabel("From date")).toBeVisible();
+  await expect(filters.getByLabel("To date")).toBeVisible();
+  // Secondary filters live in a collapsed "More filters" disclosure (#110 Cut C).
+  await filters.getByRole("button", { name: /More filters/ }).click();
   await expect(filters.getByLabel("Filter by program")).toContainText("Residential services");
   await expect(filters.getByLabel("Filter by individual")).toBeVisible();
   await expect(filters.getByLabel("Filter by site")).toBeVisible();
-  await expect(filters.getByLabel("From date")).toBeVisible();
-  await expect(filters.getByLabel("To date")).toBeVisible();
   await expect(filters.getByLabel("Filter by staff")).toContainText("Cameron Price");
   await expect(page.getByRole("heading", { name: "September 2026" })).toBeVisible();
   await page.getByRole("gridcell", { name: /September 22, 2026/ }).click();

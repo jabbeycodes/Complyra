@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { PageHeading } from "../../components";
+import Disclosure from "../../components/Disclosure";
 import { useData } from "../../data/DataProvider";
 import {
   APPOINTMENT_TIMEZONES,
@@ -121,6 +122,15 @@ export default function AppointmentsPage({
       .filter((row) => row.createdBy && row.createdByName)
       .map((row) => [row.createdBy, row.createdByName] as const),
   )].sort((a, b) => a[1].localeCompare(b[1]));
+  // Secondary filters live in a collapsed "More filters" disclosure so the
+  // toolbar shows Status + date range up front instead of a tall wall of
+  // controls (#110 Cut C). Surface a count so a collapsed active filter is
+  // never invisible.
+  const secondaryFilterCount =
+    (programName ? 1 : 0) +
+    (individualQuery ? 1 : 0) +
+    (siteId ? 1 : 0) +
+    (createdBy ? 1 : 0);
   const activeSession = session;
   const activeWorkspace = workspace;
 
@@ -165,106 +175,120 @@ export default function AppointmentsPage({
       {error && <p className="form-error">{error}</p>}
 
       <section className="panel appointments-filters" aria-label="Appointment filters">
-        <div className="appointments-filter-group">
-          <span>Status</span>
-          <div className="appointments-status-chips" role="group" aria-label="Filter by status">
-            <button
-              type="button"
-              className="appointments-status-chip"
-              aria-pressed={status === "scheduled"}
-              onClick={() => setStatus((current) => nextStatusChip(current, "scheduled"))}
-            >
-              Scheduled
-            </button>
-            <button
-              type="button"
-              className="appointments-status-chip"
-              aria-pressed={status === "completed"}
-              onClick={() => setStatus((current) => nextStatusChip(current, "completed"))}
-            >
-              Completed
-            </button>
+        <div className="appointments-filters-primary">
+          <div className="appointments-filter-group">
+            <span>Status</span>
+            <div className="appointments-status-chips" role="group" aria-label="Filter by status">
+              <button
+                type="button"
+                className="appointments-status-chip"
+                aria-pressed={status === "scheduled"}
+                onClick={() => setStatus((current) => nextStatusChip(current, "scheduled"))}
+              >
+                Scheduled
+              </button>
+              <button
+                type="button"
+                className="appointments-status-chip"
+                aria-pressed={status === "completed"}
+                onClick={() => setStatus((current) => nextStatusChip(current, "completed"))}
+              >
+                Completed
+              </button>
+            </div>
           </div>
+          <label>
+            From
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+          </label>
+          <label>
+            To
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+          </label>
+          {filtersActive ? (
+            <button className="button appointments-clear-filters" type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          ) : null}
         </div>
-        <label>
-          Program
-          <select
-            value={programName}
-            onChange={(e) => setProgramName(e.target.value)}
-            aria-label="Filter by program"
-          >
-            <option value="">All programs</option>
-            {programs.map((program) => (
-              <option key={program} value={program}>
-                {program}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Individual
-          <input
-            type="search"
-            value={individualQuery}
-            onChange={(e) => setIndividualQuery(e.target.value)}
-            placeholder="All Individuals"
-            aria-label="Filter by individual"
-            list="appointment-individual-options"
-            autoComplete="off"
-          />
-          <datalist id="appointment-individual-options">
-            {individuals.map((person) => (
-              <option key={person.id} value={person.name} />
-            ))}
-          </datalist>
-        </label>
-        {sites.length > 1 ? (
-          <label>
-            Site
-            <select
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-              aria-label="Filter by site"
-            >
-              <option value="">All sites</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <label>
-          From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-        </label>
-        <label>
-          To
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-        </label>
-        {staffOptions.length > 0 ? (
-          <label>
-            Staff
-            <select
-              value={createdBy}
-              onChange={(e) => setCreatedBy(e.target.value)}
-              aria-label="Filter by staff"
-            >
-              <option value="">All staff</option>
-              {staffOptions.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {filtersActive ? (
-          <button className="button appointments-clear-filters" type="button" onClick={clearFilters}>
-            Clear filters
-          </button>
-        ) : null}
+        <Disclosure
+          className="appointments-more-filters"
+          label="More filters"
+          summary={
+            secondaryFilterCount
+              ? `${secondaryFilterCount} active`
+              : "Program · Individual · Site · Staff"
+          }
+        >
+          <div className="appointments-filters-secondary">
+            <label>
+              Program
+              <select
+                value={programName}
+                onChange={(e) => setProgramName(e.target.value)}
+                aria-label="Filter by program"
+              >
+                <option value="">All programs</option>
+                {programs.map((program) => (
+                  <option key={program} value={program}>
+                    {program}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Individual
+              <input
+                type="search"
+                value={individualQuery}
+                onChange={(e) => setIndividualQuery(e.target.value)}
+                placeholder="All Individuals"
+                aria-label="Filter by individual"
+                list="appointment-individual-options"
+                autoComplete="off"
+              />
+              <datalist id="appointment-individual-options">
+                {individuals.map((person) => (
+                  <option key={person.id} value={person.name} />
+                ))}
+              </datalist>
+            </label>
+            {sites.length > 1 ? (
+              <label>
+                Site
+                <select
+                  value={siteId}
+                  onChange={(e) => setSiteId(e.target.value)}
+                  aria-label="Filter by site"
+                >
+                  <option value="">All sites</option>
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {staffOptions.length > 0 ? (
+              <label>
+                Staff
+                <select
+                  value={createdBy}
+                  onChange={(e) => setCreatedBy(e.target.value)}
+                  aria-label="Filter by staff"
+                >
+                  <option value="">All staff</option>
+                  {staffOptions.map(([id, name]) => (
+                    <option key={id} value={id}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        </Disclosure>
       </section>
 
       <section className="panel appointments-calendar" aria-label="Appointment calendar">

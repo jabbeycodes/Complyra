@@ -3,6 +3,7 @@ import type { HmWeeklyChecklist, ServiceLogEntry } from "../data/types";
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
 import { drawSiteLocationFields } from "./siteLocation";
 import type { SiteAddressParts } from "../data/siteAddress";
+import { reserve } from "./layout";
 
 function slug(value: string) {
   return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
@@ -61,11 +62,10 @@ export function buildHmChecklistsPdf(input: {
   line(doc, "Period", input.scopeLabel, margin, y);
   y += 28;
 
+  // Keep-with-next: reserve the block before drawing so headers never orphan
+  // and content never bleeds into the footer band.
   const pageBreak = (needed: number) => {
-    if (y + needed > 700) {
-      doc.addPage();
-      y = 64;
-    }
+    y = reserve(doc, y, needed);
   };
 
   if (!input.checklists.length) {
@@ -149,10 +149,7 @@ export function buildServiceLogsPdf(input: {
   y += 24;
 
   const pageBreak = (needed: number) => {
-    if (y + needed > 700) {
-      doc.addPage();
-      y = 64;
-    }
+    y = reserve(doc, y, needed);
   };
 
   if (!input.logs.length) {

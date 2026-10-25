@@ -72,31 +72,34 @@ export default function AddSiteForm({
           required
         />
       </label>
-      <label className="form-label">
-        Program
-        <select
-          value={programName}
-          onChange={(e) => setProgramName(e.target.value)}
-        >
-          {programs.map((program) => (
-            <option key={program}>{program}</option>
-          ))}
-        </select>
-      </label>
-      <label className="form-label">
-        House manager (optional)
-        <select
-          value={managerUserId}
-          onChange={(e) => setManagerUserId(e.target.value)}
-        >
-          <option value="">Assign later</option>
-          {managers.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* Two short selects belong side-by-side (#110 Cut A density). */}
+      <div className="form-two">
+        <label className="form-label">
+          Program
+          <select
+            value={programName}
+            onChange={(e) => setProgramName(e.target.value)}
+          >
+            {programs.map((program) => (
+              <option key={program}>{program}</option>
+            ))}
+          </select>
+        </label>
+        <label className="form-label">
+          House manager (optional)
+          <select
+            value={managerUserId}
+            onChange={(e) => setManagerUserId(e.target.value)}
+          >
+            <option value="">Assign later</option>
+            {managers.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {error && (
         <p className="inline-error" role="alert">
           {error}

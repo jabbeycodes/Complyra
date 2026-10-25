@@ -46,6 +46,27 @@ test("compliance report PDF includes scores, site mix, status sections, and regi
   );
 });
 
+test("requirement tables repeat their header on every continuation page", () => {
+  // A large register forces pagination; the header must recur per page so a
+  // wrapped table is never a headerless list of rows.
+  const many = Array.from({ length: 80 }, (_, i) => ({
+    ...seedRequirements[i % seedRequirements.length],
+    id: `req-${i}`,
+    title: `Item ${i + 1}`,
+  }));
+  const doc = buildComplianceReportPdf({ ...BASE, requirements: many });
+  const pages = doc.getNumberOfPages();
+  assert.ok(pages > 1, "large register paginates");
+  const text = doc.output() as string;
+  // "Requirement" is the first column header; row titles use "Item N" so the
+  // count reflects header repetition rather than row content.
+  const headerHits = (text.match(/Requirement/g) ?? []).length;
+  assert.ok(
+    headerHits >= pages,
+    `header should repeat per page (found ${headerHits} for ${pages} pages)`,
+  );
+});
+
 test("demo Mode stamps an illustrative watermark", () => {
   const doc = buildComplianceReportPdf({ ...BASE, demoMode: true });
   const text = doc.output() as string;

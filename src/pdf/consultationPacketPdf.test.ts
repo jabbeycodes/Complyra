@@ -4,6 +4,10 @@ import { emptyProfile } from "../data/planStack";
 import {
   buildConsultationPacketPdf,
   consultationPacketFileName,
+  consultationBlockFits,
+  consultationPlaceBlock,
+  CONSULTATION_PAGE_BOTTOM,
+  CONSULTATION_FOOTER_Y,
 } from "./consultationPacketPdf";
 
 const appointment = {
@@ -84,6 +88,99 @@ test("consultation packet names the Individual and leaves missing fields blank o
   );
   assert.ok(!text.includes("people"), "no people noun");
   assert.ok(!text.includes("client"), "no client noun");
+});
+
+test("consultation packet has writable Findings, Comments, and Follow-Up sections", () => {
+  const profile = {
+    ...emptyProfile({
+      id: "i1",
+      agencyId: "a1",
+      siteId: "s1",
+      fullName: "Ellis Hart",
+      dateOfBirth: "1984-03-12",
+    }),
+    dmhId: "110245",
+    medicaidStatus: "yes" as const,
+  };
+  const doc = buildConsultationPacketPdf({
+    agencyName: "Evergreen Care",
+    individualName: "Ellis Hart",
+    dateOfBirth: "1984-03-12",
+    siteName: "Cedar House",
+    programName: "Residential services",
+    profile,
+    appointment,
+    medications: [{ name: "Levetiracetam", strength: "500 mg" }],
+    generatedByName: "Sarah Mitchell",
+    generatedAt: "2026-09-12T18:00:00.000Z",
+  });
+  const text = doc.output() as string;
+  assert.ok(text.includes("Findings / Recommendations"), "findings section");
+  assert.ok(text.includes("Comments / Notes"), "comments section");
+  assert.ok(text.includes("Follow-Up Required?"), "follow-up prompt");
+  assert.ok(text.includes("Yes"), "follow-up yes checkbox label");
+  assert.ok(text.includes("No"), "follow-up no checkbox label");
+  assert.ok(text.includes("Follow-Up Date"), "follow-up date line");
+  assert.ok(text.includes("Appointment Details"), "appointment details line");
+  assert.ok(text.includes("Consultant signature"), "signature completion area");
+  // Identity locks: no full SSN ever appears on a consultation packet.
+  assert.ok(!text.includes("SSN"), "no SSN on consultation packet");
+});
+
+test("consultation packet keeps writable sections when meds overflow a page", () => {
+  const profile = emptyProfile({
+    id: "i1",
+    agencyId: "a1",
+    siteId: "s1",
+    fullName: "Ellis Hart",
+    dateOfBirth: "1984-03-12",
+  });
+  const medications = Array.from({ length: 45 }, (_, index) => ({
+    name: `Medication number ${index + 1}`,
+    strength: `${(index + 1) * 5} mg`,
+  }));
+  const doc = buildConsultationPacketPdf({
+    agencyName: "Evergreen Care",
+    individualName: "Ellis Hart",
+    dateOfBirth: "1984-03-12",
+    siteName: "Cedar House",
+    programName: "Residential services",
+    profile,
+    appointment,
+    medications,
+    generatedByName: "Sarah Mitchell",
+    generatedAt: "2026-09-12T18:00:00.000Z",
+  });
+  assert.ok(doc.getNumberOfPages() > 1, "long med list should paginate");
+  const text = doc.output() as string;
+  // Keep-with-next must still render every writable section after the overflow.
+  assert.ok(text.includes("Findings / Recommendations"), "findings survives overflow");
+  assert.ok(text.includes("Comments / Notes"), "comments survives overflow");
+  assert.ok(text.includes("Follow-Up Required?"), "follow-up survives overflow");
+  assert.ok(text.includes("Consultant signature"), "signature survives overflow");
+});
+
+test("consultation layout helpers never place content in the footer band", () => {
+  // The footer stamp sits below the content bottom, so nothing can collide.
+  assert.ok(
+    CONSULTATION_PAGE_BOTTOM < CONSULTATION_FOOTER_Y,
+    "content bottom stays above the footer stamp",
+  );
+
+  // A block that fits is drawn in place without a page break.
+  assert.equal(consultationBlockFits(400, 100), true);
+  const placedInPlace = consultationPlaceBlock(400, 100);
+  assert.deepEqual(placedInPlace, { y: 400, addedPage: false });
+
+  // A block that would cross the footer band is pushed to a fresh page top and
+  // still lands above the footer stamp (no orphan header, no footer collision).
+  assert.equal(consultationBlockFits(720, 120), false);
+  const placedNextPage = consultationPlaceBlock(720, 120);
+  assert.equal(placedNextPage.addedPage, true);
+  assert.ok(
+    placedNextPage.y + 120 <= CONSULTATION_PAGE_BOTTOM,
+    "relocated block clears the footer band",
+  );
 });
 
 test("consultation packet filename uses the Individual and date", () => {

@@ -1,4 +1,5 @@
 import { stampRecordMark, startBrandedDoc } from "./brandHeader";
+import { contentWidth, drawSectionHeader, drawSignatureRow } from "./layout";
 
 export function buildCarePlanPdf(input: {
   agencyName: string;
@@ -24,16 +25,30 @@ export function buildCarePlanPdf(input: {
     doc.setFont("helvetica", "bold");
     doc.text(`${label}:`, margin, y);
     doc.setFont("helvetica", "normal");
-    doc.text(value, margin + 140, y);
+    doc.text(value, margin + 140, y, { maxWidth: contentWidth(margin) - 140 });
     y += 18;
   }
   y += 16;
-  doc.text(
+  const note = doc.splitTextToSize(
     "This printable cover is generated from the chart when the original upload is not stored in this workspace.",
-    margin,
-    y,
-    { maxWidth: 500 },
+    contentWidth(margin),
   );
+  doc.text(note, margin, y);
+  y += note.length * 14 + 24;
+
+  // Completion area: who confirmed this cover against the source plan.
+  y = drawSectionHeader(doc, y, "Reviewed by", { margin, gapAfter: 12 });
+  const sigWidth = Math.round(contentWidth(margin) * 0.6);
+  drawSignatureRow(
+    doc,
+    y,
+    [
+      { label: "Signature", width: sigWidth },
+      { label: "Date", width: contentWidth(margin) - sigWidth - 16 },
+    ],
+    { margin },
+  );
+
   stampRecordMark(doc, { margin });
   return doc;
 }
