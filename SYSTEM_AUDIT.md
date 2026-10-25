@@ -1,6 +1,6 @@
 # Complyrer system audit
 
-Living record. Last updated 15 Oct 2026.
+Living record. Last updated 25 Oct 2026.
 
 **Readiness: NOT FULLY COMPLETE.**
 
@@ -68,16 +68,16 @@ A local kiosk clock-in past the saved lateness minutes adds the same point as th
 
 ## Release blockers
 
-1. The notice functions, rule settings, clinician-report columns, progress-note columns, and the kiosk lateness function are on the Complyra project as of 24 Oct 2026. A hosted sign-in was not used to open the bell, so the sweep is proven in code and in the database function, not through a hosted browser session.
-2. `sweep-operating-reminders` is deployed on Complyra. It uses the same notice list as the signed-in bell. Both judge yesterday and the dose clock in America/Chicago. Inserts go through `queue_system_notice`. Nothing schedules the function, so it does not run by itself. A failed insert is still swallowed. Nothing is pushed to a phone.
-3. Shift notes store a date and a shift label. They are not a foreign key to a scheduled shift, so an approved schedule change does not automatically clear the missing-note row.
+1. The notice functions, rule settings, clinician-report columns, progress-note columns, the kiosk lateness function, and `shift_notes.hr_shift_id` are on the Complyra project. Complyra has no EVERGREEN-MO agency, so the demo login cannot open the hosted bell. A direct call to the deployed reminder returned 200 for both hosted agencies. Those houses are not staffed 24 hours, so the call queued no notices.
+2. `sweep-operating-reminders` runs every 5 minutes on Complyra. The schedule reads the project URL and the service key from Vault and does not store the key in the job. The signed-in bell uses the same notice list and the same America/Chicago clock. Inserts go through `queue_system_notice`. A failed insert is still swallowed. Nothing is pushed to a phone.
+3. A Shift note stores `hr_shift_id` when the house has a published or scheduled staff shift that overlaps the note. That shift decides who owes the note. A house with no schedule still uses the assigned DSPs, so Morgan's Day gap stays on the demo. A note linked to a shift covers the block that shift currently overlaps. A schedule change marks yesterday's stale missing-note notices read for the people whose house was just checked.
 4. Backup, recovery, monitoring, and deployment rollback have not been exercised. HIPAA safeguards exist as access checks and an activity log. That is not a certification.
 5. Payroll export is a CSV. Nothing posts to a payroll vendor.
 6. A monthly individual progress narrative is not generated from shift notes.
 7. Medication count entry is still a typed quantity. A discrepancy is rejected; there is no separate discrepancy queue that was verified open.
 8. The main bundle is large. Phone layouts have a Playwright spec that was not run in this pass.
-9. origin/main and this branch both edit `src/App.tsx`. They have not been merged.
-10. Clinician-report columns, the progress-note columns (`waiver_service`, `signature_data_url`), `note_kiosk_late_clock_in`, and `queue_system_notice` are on the Complyra project as of 24 Oct 2026. The app code that sends those columns is still only in this working tree.
+9. This branch is the pull request that merges the audit work into main. `src/App.tsx`, the two PDF builders, and `src/styles.css` were edited on both sides and are resolved in that pull request.
+10. The app code that sends the clinician-report columns, the progress-note columns, and `hr_shift_id` is in this branch. It reaches production only when this pull request is merged and the web app is deployed. The database columns are already on Complyra.
 
 ## Assumptions
 
@@ -90,7 +90,7 @@ A local kiosk clock-in past the saved lateness minutes adds the same point as th
 
 ```bash
 node --import tsx --import ./src/testSupport/cssStub.mts --test src/data/dueItems.localApi.test.ts src/features/notifications/notifications.test.ts
-npx tsc -b --pretty false
+./node_modules/.bin/tsc -b --pretty false
 npm test
 ```
 
@@ -102,6 +102,6 @@ Verified by `src/data/dueItems.localApi.test.ts` ("saving the Shift note stops t
 
 Clicking a missing Shift note opens that person's chart at the Shift notes section. A notice stored before this change still does that from the person id on the row. A new notice also stores `/plans/{id}#chart-shift-notes`. On 15 Oct 2026, signed in as Sarah Mitchell, the Morgan · Day notice opened Morgan Pruitt's chart with Shift notes in view. That note was not written, and Morgan's ISP was not approved. Opening the notice marks that one row read.
 
-The closed-app reminder uses that same list. `noticesForAgency` names yesterday's missing note for the writer and the house managers, and an unmarked dose, on the Central day. The signed-in bell uses that same Central day. `queue_system_notice` passed 4 tests in `supabase/tests/system_notices.sql` on the local disposable database. A signed-in member cannot call it. `sweep-operating-reminders` was deployed to Complyra on 24 Oct 2026. Nothing schedules it. There is still no phone push.
+The closed-app reminder uses that same list. `noticesForAgency` names yesterday's missing note for the writer and the house managers, and an unmarked dose, on the Central day. The signed-in bell uses that same Central day. `queue_system_notice` passed 4 tests in `supabase/tests/system_notices.sql` on the local disposable database. A signed-in member cannot call it. `sweep-operating-reminders` was deployed to Complyra and, as of 25 Oct 2026, cron calls it every 5 minutes. A direct call returned 200. There is still no phone push.
 
 Do not unify timecard pay with the weekly overtime flag.

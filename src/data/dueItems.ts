@@ -469,7 +469,21 @@ export interface ShiftNoteDetectorInput {
     staffUserId: string;
     blockId: ShiftBlockId | null;
     noteDate: string;
+    /** Set when the note was filed against a staff shift. */
+    hrShiftId?: string | null;
   }[];
+  /**
+   * Published or scheduled staff shifts for this house and service date.
+   * When this list has any row, those shifts replace the assigned-DSP list.
+   * An empty list means the house has no schedule, so assigned DSPs still owe notes.
+   */
+  scheduledShifts?: Array<{
+    id: string;
+    staffUserId: string;
+    staffName: string;
+    startsAt: string;
+    endsAt: string;
+  }>;
   /** HM alone-time windows for this site's Individuals. */
   aloneTime: AloneTimeWindow[];
   /** This site's shift clock. Omitted houses use the 6 a.m. default. */
@@ -489,12 +503,107 @@ export interface ShiftNoteDueItem {
   serviceDate: string;
 }
 
+function chicagoDateMinutes(iso: string): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(iso));
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  let hour = Number(read("hour"));
+  if (hour === 24) hour = 0;
+  return {
+    date: `${read("year")}-${read("month")}-${read("day")}`,
+    minutes: hour * 60 + Number(read("minute")),
+  };
+}
+
+function minutesFromServiceDate(part: { date: string; minutes: number }, serviceDate: string): number {
+  const [year, month, day] = serviceDate.slice(0, 10).split("-").map(Number);
+  const [partYear, partMonth, partDay] = part.date.split("-").map(Number);
+  const dayDiff = Math.round(
+    (Date.UTC(partYear, (partMonth || 1) - 1, partDay || 1) - Date.UTC(year, (month || 1) - 1, day || 1)) / 86_400_000,
+  );
+  return dayDiff * 1440 + part.minutes;
+}
+
+/** The shift's start and end as minutes on the service-date timeline. */
+export function shiftSpanOnServiceDate(
+  startsAt: string,
+  endsAt: string,
+  serviceDate: string,
+): { start: number; end: number } | null {
+  const start = minutesFromServiceDate(chicagoDateMinutes(startsAt), serviceDate);
+  const end = minutesFromServiceDate(chicagoDateMinutes(endsAt), serviceDate);
+  if (!(end > start)) return null;
+  return { start, end };
+}
+
+function rangesOverlap(start: number, end: number, blockStart: number, blockEnd: number): boolean {
+  return start < blockEnd && blockStart < end;
+}
+
+function writersForBlock(
+  input: ShiftNoteDetectorInput,
+  block: ShiftBlockDef,
+): Array<{ userId: string; name: string; shiftId: string | null }> {
+  const scheduled = input.scheduledShifts ?? [];
+  if (scheduled.length === 0) {
+    return input.requiredWriters.map((writer) => ({ userId: writer.userId, name: writer.name, shiftId: null }));
+  }
+  const day = input.serviceDate.slice(0, 10);
+  return scheduled.flatMap((shift) => {
+    const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, day);
+    if (!span || !rangesOverlap(span.start, span.end, block.startMin, block.endMin)) return [];
+    return [{ userId: shift.staffUserId, name: shift.staffName, shiftId: shift.id }];
+  });
+}
+
+/**
+ * The staff shift this note documents, when the house published one.
+ * Clock times win. A note without clocks uses the block it was filed under.
+ */
+export function matchingShiftId(input: {
+  shifts: Array<{ id: string; staffUserId: string; startsAt: string; endsAt: string }>;
+  staffUserId: string;
+  noteDate: string;
+  beginTime?: string;
+  endTime?: string;
+  block: ShiftBlockDef | null;
+}): string | null {
+  let noteStart: number | null = null;
+  let noteEnd: number | null = null;
+  if (input.beginTime && input.endTime) {
+    noteStart = hhmmToMinutes(input.beginTime);
+    noteEnd = hhmmToMinutes(input.endTime);
+    if (noteEnd <= noteStart) noteEnd += 1440;
+  } else if (input.block) {
+    noteStart = input.block.startMin;
+    noteEnd = input.block.endMin;
+  }
+  if (noteStart === null || noteEnd === null) return null;
+  let best: { id: string; overlap: number } | null = null;
+  for (const shift of input.shifts) {
+    if (shift.staffUserId !== input.staffUserId) continue;
+    const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, input.noteDate);
+    if (!span) continue;
+    const overlap = Math.min(span.end, noteEnd) - Math.max(span.start, noteStart);
+    if (overlap <= 0) continue;
+    if (!best || overlap > best.overlap) best = { id: shift.id, overlap };
+  }
+  return best?.id ?? null;
+}
+
 /** One row per (Individual × block × required writer) with no covering note. */
 export function computeShiftNoteDueItems(
   input: ShiftNoteDetectorInput,
 ): ShiftNoteDueItem[] {
   if (!input.staffed24h) return [];
-  if (input.requiredWriters.length === 0) return [];
+  if ((input.scheduledShifts?.length ?? 0) === 0 && input.requiredWriters.length === 0) return [];
   const items: ShiftNoteDueItem[] = [];
   const day = input.serviceDate.slice(0, 10);
   const coStaffed = input.individuals.length > 1;
@@ -511,17 +620,22 @@ export function computeShiftNoteDueItems(
         .map(([s, e]) => formatRange(s, e))
         .join(", ");
       if (blockStillInGrace(day, def, input.now, input.graceMinutes ?? 0, input.timeZone)) continue;
-      for (const writer of input.requiredWriters) {
+      const writers = writersForBlock(input, def);
+      for (const writer of writers) {
         const covered = input.notes.some(
           (n) =>
             n.individualId === person.id &&
-            n.staffUserId === writer.userId &&
-            n.blockId === blockId &&
-            n.noteDate.slice(0, 10) === day,
+            n.noteDate.slice(0, 10) === day &&
+            (writer.shiftId
+              ? n.hrShiftId === writer.shiftId ||
+                (!n.hrShiftId && n.staffUserId === writer.userId && n.blockId === blockId)
+              : n.staffUserId === writer.userId && n.blockId === blockId),
         );
         if (covered) continue;
         items.push({
-          id: `sn:${day}:${person.id}:${blockId}:${writer.userId}`,
+          id: writer.shiftId
+            ? `sn:${day}:${person.id}:${blockId}:${writer.shiftId}`
+            : `sn:${day}:${person.id}:${blockId}:${writer.userId}`,
           individualId: person.id,
           individualName: person.name,
           blockId,

@@ -197,7 +197,9 @@ import {
   computeMedDueItems,
   computeShiftNoteDueItems,
   blockForShiftLabel,
+  matchingShiftId,
   shiftBlocksForSite,
+  zonedWallTimeMs,
   consecutiveRefusals,
   marRecordingProblem,
   recordingCostsAPoint,
@@ -1938,6 +1940,7 @@ export class HostedApi implements ComplyraApi {
           timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
           staffUserId: String(row.staff_user_id ?? ""),
           staffName: String(row.staff_name ?? ""),
+          hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
           createdAt: String(row.created_at ?? ""),
           updatedAt: String(row.updated_at ?? ""),
           deletedAt: row.deleted_at ? String(row.deleted_at) : null,
@@ -2164,6 +2167,54 @@ export class HostedApi implements ComplyraApi {
     return String((data as { id: string }).id);
   }
 
+  /** The published staff shift this note belongs to, or null when the house has no schedule. */
+  private async linkedHrShiftId(input: {
+    agencyId: string;
+    individualId: string;
+    staffUserId: string;
+    noteDate: string;
+    beginTime: string;
+    endTime: string;
+    shift: string;
+  }): Promise<string | null> {
+    const { data: person } = await this.client
+      .from("individuals")
+      .select("site_id")
+      .eq("id", input.individualId)
+      .eq("agency_id", input.agencyId)
+      .maybeSingle();
+    const siteId = person?.site_id ? String(person.site_id) : "";
+    if (!siteId) return null;
+    const clock = dueItemClock();
+    const dayStart = new Date(zonedWallTimeMs(input.noteDate, 0, clock.timeZone)).toISOString();
+    const dayEnd = new Date(zonedWallTimeMs(input.noteDate, 36 * 60, clock.timeZone)).toISOString();
+    const { data: shiftRows } = await this.client
+      .from("hr_shifts")
+      .select("id, staff_id, starts_at, ends_at")
+      .eq("agency_id", input.agencyId)
+      .eq("site_id", siteId)
+      .eq("staff_id", input.staffUserId)
+      .in("status", ["scheduled", "published"])
+      .lt("starts_at", dayEnd)
+      .gt("ends_at", dayStart);
+    if (!shiftRows?.length) return null;
+    const blocks = shiftBlocksForSite(await this.siteFacts(siteId));
+    const blockId = blockForShiftLabel(input.shift);
+    return matchingShiftId({
+      shifts: shiftRows.map((row) => ({
+        id: String(row.id),
+        staffUserId: String(row.staff_id),
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
+      })),
+      staffUserId: input.staffUserId,
+      noteDate: input.noteDate,
+      beginTime: input.beginTime,
+      endTime: input.endTime,
+      block: blockId ? blocks[blockId] : null,
+    });
+  }
+
   async saveShiftNote(input: Parameters<ComplyraApi["saveShiftNote"]>[0]) {
     const session = await this.requireSession();
     if (!canEnterShiftNotes(session.roleKey)) {
@@ -2274,11 +2325,21 @@ export class HostedApi implements ComplyraApi {
       if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: existingUserId })) {
         throw new Error("You can only edit your own shift notes.");
       }
+      const hrShiftId = await this.linkedHrShiftId({
+        agencyId: session.agencyId,
+        individualId: input.individualId,
+        staffUserId: existingUserId,
+        noteDate: input.noteDate,
+        beginTime,
+        endTime,
+        shift,
+      });
       const { error } = await this.client
         .from("shift_notes")
         .update({
           note_date: input.noteDate,
           shift,
+          hr_shift_id: hrShiftId,
           begin_time: beginTime,
           end_time: endTime,
           location,
@@ -2297,6 +2358,15 @@ export class HostedApi implements ComplyraApi {
         .eq("note_id", noteId);
       throwIf(scoreDeleteError, "Could not replace the note scores.");
     } else {
+      const hrShiftId = await this.linkedHrShiftId({
+        agencyId: session.agencyId,
+        individualId: input.individualId,
+        staffUserId: session.userId,
+        noteDate: input.noteDate,
+        beginTime,
+        endTime,
+        shift,
+      });
       const { data, error } = await this.client
         .from("shift_notes")
         .insert({
@@ -2305,6 +2375,7 @@ export class HostedApi implements ComplyraApi {
           program_id: program.id,
           note_date: input.noteDate,
           shift,
+          hr_shift_id: hrShiftId,
           begin_time: beginTime,
           end_time: endTime,
           location,
@@ -2439,6 +2510,7 @@ export class HostedApi implements ComplyraApi {
       timeSpentMinutes: row.time_spent_minutes === null ? null : Number(row.time_spent_minutes),
       staffUserId: String(row.staff_user_id ?? ""),
       staffName: String(row.staff_name ?? ""),
+      hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
       createdAt: String(row.created_at ?? ""),
       updatedAt: String(row.updated_at ?? ""),
       deletedAt: row.deleted_at ? String(row.deleted_at) : null,
@@ -8647,7 +8719,7 @@ export class HostedApi implements ComplyraApi {
     if (canSeeShiftNotes(session.roleKey) && peopleIds.length) {
       const { data: noteRows } = await this.client
         .from("shift_notes")
-        .select("individual_id, staff_user_id, shift, note_date")
+        .select("individual_id, staff_user_id, shift, note_date, hr_shift_id")
         .eq("agency_id", session.agencyId)
         .in("individual_id", peopleIds)
         .is("deleted_at", null)
@@ -8657,6 +8729,30 @@ export class HostedApi implements ComplyraApi {
         staffUserId: String(row.staff_user_id ?? ""),
         blockId: blockForShiftLabel(String(row.shift ?? "")) as ShiftBlockId | null,
         noteDate: String(row.note_date ?? "").slice(0, 10),
+        hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
+      }));
+      const dayStart = new Date(zonedWallTimeMs(serviceDate, 0, clock.timeZone)).toISOString();
+      const dayEnd = new Date(zonedWallTimeMs(serviceDate, 36 * 60, clock.timeZone)).toISOString();
+      const { data: shiftRows } = await this.client
+        .from("hr_shifts")
+        .select("id, staff_id, title, starts_at, ends_at, status")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .in("status", ["scheduled", "published"])
+        .not("staff_id", "is", null)
+        .lt("starts_at", dayEnd)
+        .gt("ends_at", dayStart);
+      const shiftStaffIds = [...new Set((shiftRows ?? []).map((row) => String(row.staff_id)))];
+      const { data: shiftProfiles } = shiftStaffIds.length
+        ? await this.client.from("profiles").select("id, full_name").in("id", shiftStaffIds)
+        : { data: [] };
+      const shiftNames = new Map((shiftProfiles ?? []).map((row) => [String(row.id), String(row.full_name ?? "Staff")]));
+      const scheduledShifts = (shiftRows ?? []).map((row) => ({
+        id: String(row.id),
+        staffUserId: String(row.staff_id),
+        staffName: shiftNames.get(String(row.staff_id)) ?? "Staff",
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
       }));
       const { data: aloneRows } = await this.client
         .from("alone_time_windows")
@@ -8674,6 +8770,7 @@ export class HostedApi implements ComplyraApi {
         individuals: people,
         requiredWriters,
         notes,
+        scheduledShifts,
         aloneTime: ((aloneRows ?? []) as Array<Record<string, unknown>>).map((r) =>
           this.mapAloneTimeWindow(r),
         ),
@@ -9113,6 +9210,23 @@ export class HostedApi implements ComplyraApi {
           deepLink: notice.deepLink,
           entityId: notice.entityId,
           dedupeKey: notice.dedupeKey,
+        });
+      }
+      const loadedSiteIds = sites.map((site) => site.id);
+      const liveIds = sites.flatMap((site) =>
+        site.items.filter((item) => item.kind === "shift_note").map((item) => item.id),
+      );
+      if (loadedSiteIds.length) {
+        const { data: loadedPeople } = await this.client
+          .from("individuals")
+          .select("id")
+          .eq("agency_id", session.agencyId)
+          .in("site_id", loadedSiteIds);
+        await this.client.rpc("retire_stale_missing_note_notices", {
+          p_agency_id: session.agencyId,
+          p_service_date: clock.serviceDate,
+          p_individual_ids: (loadedPeople ?? []).map((row) => String(row.id)),
+          p_live_ids: liveIds,
         });
       }
     } catch {

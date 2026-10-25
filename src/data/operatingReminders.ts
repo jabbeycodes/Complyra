@@ -207,7 +207,15 @@ export interface UnattendedAgencyInput {
   memberships: ReminderMembership[];
   profiles: Array<{ id: string; fullName: string }>;
   individuals: Array<{ id: string; name: string; siteId: string }>;
-  notes: Array<{ individualId: string; staffUserId: string; shift: string; noteDate: string }>;
+  notes: Array<{ individualId: string; staffUserId: string; shift: string; noteDate: string; hrShiftId?: string | null }>;
+  scheduledShifts?: Array<{
+    id: string;
+    siteId: string;
+    staffUserId: string;
+    staffName: string;
+    startsAt: string;
+    endsAt: string;
+  }>;
   aloneTime: AloneTimeWindow[];
   medications: Array<{ id: string; name: string; individualId: string; kind: string; strength: string }>;
   doseTimes: Array<{ medicationId: string; doseTimes: string[] }>;
@@ -259,7 +267,9 @@ export function noticesForAgency(input: UnattendedAgencyInput): OperatingNotice[
           staffUserId: note.staffUserId,
           blockId: blockForShiftLabel(note.shift),
           noteDate: note.noteDate.slice(0, 10),
+          hrShiftId: note.hrShiftId ?? null,
         })),
+      scheduledShifts: (input.scheduledShifts ?? []).filter((shift) => shift.siteId === site.id),
       aloneTime: input.aloneTime.filter((window) => peopleIds.has(window.individualId)),
     });
     const doses = input.medications

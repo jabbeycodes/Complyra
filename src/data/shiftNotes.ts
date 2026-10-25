@@ -105,6 +105,8 @@ export interface ShiftNote {
   timeSpentMinutes: number | null;
   staffUserId: string;
   staffName: string;
+  /** Staff shift this note was filed against, when the house had one published. */
+  hrShiftId?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;

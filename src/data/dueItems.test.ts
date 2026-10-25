@@ -5,6 +5,7 @@ import {
   computeMedDueItems,
   computeShiftNoteDueItems,
   consecutiveRefusals,
+  matchingShiftId,
   formatClock,
   formatRange,
   marRecordingProblem,
@@ -345,6 +346,85 @@ describe("computeMedDueItems (#76)", () => {
         `${status} should clear the 08:00 dose`,
       );
     }
+  });
+});
+
+describe("a published staff shift", () => {
+  const alexDay = {
+    id: "shift-day",
+    staffUserId: "alex",
+    staffName: "Alex Morgan",
+    startsAt: "2026-10-14T11:00:00.000Z",
+    endsAt: "2026-10-14T19:00:00.000Z",
+  };
+
+  it("owes a note only for the block the shift covers", () => {
+    const items = computeShiftNoteDueItems(
+      shiftInput({
+        serviceDate: "2026-10-14",
+        individuals: [{ id: "morgan", name: "Morgan Pruitt" }],
+        requiredWriters: [
+          { userId: "alex", name: "Alex Morgan" },
+          { userId: "taylor", name: "Taylor Reed" },
+        ],
+        scheduledShifts: [alexDay],
+        notes: [],
+        aloneTime: [],
+        now: new Date("2026-10-16T18:00:00.000Z"),
+        graceMinutes: 30,
+        timeZone: "America/Chicago",
+      }),
+    );
+    assert.deepEqual(
+      items.map((item) => item.blockId),
+      ["day"],
+    );
+    assert.equal(items[0]?.staffUserId, "alex");
+    assert.equal(items[0]?.id, "sn:2026-10-14:morgan:day:shift-day");
+  });
+
+  it("a note linked to the shift clears the block the shift now covers", () => {
+    const evening = {
+      ...alexDay,
+      startsAt: "2026-10-14T19:00:00.000Z",
+      endsAt: "2026-10-15T03:00:00.000Z",
+    };
+    const items = computeShiftNoteDueItems(
+      shiftInput({
+        serviceDate: "2026-10-14",
+        individuals: [{ id: "morgan", name: "Morgan Pruitt" }],
+        requiredWriters: [{ userId: "alex", name: "Alex Morgan" }],
+        scheduledShifts: [evening],
+        notes: [
+          {
+            individualId: "morgan",
+            staffUserId: "alex",
+            blockId: "day",
+            noteDate: "2026-10-14",
+            hrShiftId: "shift-day",
+          },
+        ],
+        aloneTime: [],
+        now: new Date("2026-10-16T18:00:00.000Z"),
+        graceMinutes: 30,
+        timeZone: "America/Chicago",
+      }),
+    );
+    assert.equal(items.length, 0);
+  });
+
+  it("picks the staff shift that overlaps the note", () => {
+    assert.equal(
+      matchingShiftId({
+        shifts: [alexDay],
+        staffUserId: "alex",
+        noteDate: "2026-10-14",
+        beginTime: "06:00",
+        endTime: "14:00",
+        block: SHIFT_BLOCKS.day,
+      }),
+      "shift-day",
+    );
   });
 });
 

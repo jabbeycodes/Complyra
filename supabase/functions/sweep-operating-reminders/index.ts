@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { agencyClock, noticesForAgency } from "../../../src/data/operatingReminders.ts";
+import { zonedWallTimeMs } from "../../../src/data/dueItems.ts";
+import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency } from "../../../src/data/operatingReminders.ts";
 import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.ts";
 
 /**
@@ -15,9 +16,9 @@ import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.
  * then the caller must present the service role key or be an active
  * administrator or compliance admin.
  *
- * Deployed to Complyra on 24 Oct 2026. Nothing schedules it. Do not add a
- * pg_cron job that calls a placeholder project URL. A real cron has to call
- * this function with the service role key. There is no phone push.
+ * Deployed to Complyra. A cron job calls it only when the project URL and
+ * service key are in Vault. The job command reads those secrets at run time
+ * and does not store the key in the schedule. There is no phone push.
  * Redeploy from a single bundle: Deno cannot follow the extensionless
  * imports in src/.
  *
@@ -40,6 +41,18 @@ function json(body: unknown, status = 200) {
 
 function fail(message: string, status: number) {
   return json({ error: message }, status);
+}
+
+function jwtRole(bearer: string): string | null {
+  const parts = bearer.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(padded)) as { role?: unknown };
+    return typeof payload.role === "string" ? payload.role : null;
+  } catch {
+    return null;
+  }
 }
 
 async function rulesFor(admin: SupabaseClient, agencyId: string) {
@@ -107,7 +120,7 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
   const { data: noteRows } = peopleIds.length
     ? await admin
         .from("shift_notes")
-        .select("individual_id, staff_user_id, shift, note_date")
+        .select("individual_id, staff_user_id, shift, note_date, hr_shift_id")
         .eq("agency_id", agencyId)
         .in("individual_id", peopleIds)
         .eq("note_date", clock.yesterday)
@@ -151,6 +164,35 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
     .in("action", ["medication.prn", "medication.prn_followup", "medication.prn_effectiveness"])
     .order("created_at", { ascending: false })
     .limit(500);
+  const dayStart = new Date(zonedWallTimeMs(clock.yesterday, 0, AGENCY_TIME_ZONE)).toISOString();
+  const dayEnd = new Date(zonedWallTimeMs(clock.yesterday, 36 * 60, AGENCY_TIME_ZONE)).toISOString();
+  const { data: shiftRows, error: shiftError } = await admin
+    .from("hr_shifts")
+    .select("id, site_id, staff_id, starts_at, ends_at")
+    .eq("agency_id", agencyId)
+    .in("site_id", siteIds)
+    .in("status", ["scheduled", "published"])
+    .not("staff_id", "is", null)
+    .lt("starts_at", dayEnd)
+    .gt("ends_at", dayStart);
+  const shiftStaffIds = [...new Set((shiftRows ?? []).map((row) => String(row.staff_id)))];
+  const missingStaff = shiftStaffIds.filter((id) => !(profileRows ?? []).some((row) => String(row.id) === id));
+  const { data: extraProfiles } = missingStaff.length
+    ? await admin.from("profiles").select("id, full_name").in("id", missingStaff)
+    : { data: [] };
+  const shiftNames = new Map(
+    [...(profileRows ?? []), ...(extraProfiles ?? [])].map((row) => [String(row.id), String(row.full_name ?? "Staff")]),
+  );
+  const scheduledShifts = shiftError
+    ? []
+    : (shiftRows ?? []).map((row) => ({
+        id: String(row.id),
+        siteId: String(row.site_id),
+        staffUserId: String(row.staff_id),
+        staffName: shiftNames.get(String(row.staff_id)) ?? "Staff",
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
+      }));
   const notices = noticesForAgency({
     now,
     rules,
@@ -170,7 +212,9 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
       staffUserId: String(row.staff_user_id ?? ""),
       shift: String(row.shift ?? ""),
       noteDate: String(row.note_date ?? ""),
+      hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
     })),
+    scheduledShifts,
     aloneTime: (aloneRows ?? []).map((row) => ({
       id: String(row.id),
       agencyId: String(row.agency_id),
@@ -227,6 +271,23 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
     });
     if (!error) queued += Number(data ?? 0);
   }
+  if (!shiftError) {
+    const liveIds = [...new Set(
+      notices
+        .filter((notice) => notice.type === "documentation.missing_note")
+        .map((notice) => {
+          const rest = notice.dedupeKey.slice("documentation.missing_note:".length);
+          const parts = rest.split(":");
+          return parts.slice(0, -2).join(":");
+        }),
+    )];
+    await admin.rpc("retire_stale_missing_note_notices", {
+      p_agency_id: agencyId,
+      p_service_date: clock.yesterday,
+      p_individual_ids: peopleIds,
+      p_live_ids: liveIds,
+    });
+  }
   return queued;
 }
 
@@ -246,7 +307,10 @@ Deno.serve(async (req) => {
   const admin = createClient(url, service);
   let authorized = false;
   let actor = "service_role";
-  if (bearer === service) {
+  // The gateway already checked the signature. Hosted functions now hold a
+  // secret key that is not the same string as the service-role JWT, so the
+  // cron sends the JWT and we accept it when its role claim is service_role.
+  if (bearer === service || jwtRole(bearer) === "service_role") {
     authorized = true;
   } else {
     const caller = createClient(url, anon, {
