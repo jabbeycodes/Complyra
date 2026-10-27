@@ -30,11 +30,20 @@
 -- RLS is enabled + forced on every new table, scoped to the agency and to the
 -- Individual the caller may read (private.can_read_individual: site for
 -- managers, worked-site for DSPs, agency-wide for PM / nurse / admin /
--- compliance / auditor). Writes are gated to the clinical roles that own this
--- workflow; field-level rules (who may activate, who may sign off) are layered
--- in the app (see src/data/permissions.ts). Direct support professionals are
--- deliberately excluded from reading orders / reconciliations — they continue
--- to see only the MAR (med_dose_marks), exactly as before.
+-- compliance / auditor). Direct support professionals are deliberately
+-- excluded from reading orders / reconciliations — they continue to see only
+-- the MAR (med_dose_marks), exactly as before.
+--
+-- Enforcement lives at the database layer, not only in the app (hardened
+-- after the PR #120 review): writes use per-command policies instead of one
+-- permissive `for all` policy, there is NO delete path for orders or
+-- reconciliations (the app exposes none), reconciliation items may only be
+-- deleted while their run is still in progress (the app's save flow replaces
+-- the checklist of an open run), and BEFORE triggers enforce the lifecycle
+-- itself — legal status transitions only, activation / discontinuation /
+-- sign-off recorded against the signed-in user, sign-off closed to house
+-- managers even by direct write, and completed reconciliations (with their
+-- items) immutable as signed history.
 
 begin;
 
@@ -191,10 +200,28 @@ using (
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager,auditor}'))
 );
 
--- Write: nurses and Program Managers own orders; administrators and compliance
--- administrators may act too. House managers and auditors cannot change orders.
-create policy medication_orders_write on public.medication_orders
-for all to authenticated
+-- Insert: only the caller's own fresh draft. Lifecycle state starts
+-- untouched, so no direct write can insert an order already active, forge
+-- an activator, or pre-link the MAR medication.
+create policy medication_orders_insert on public.medication_orders
+for insert to authenticated
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse}'))
+  and status = 'draft'
+  and created_by = (select auth.uid())
+  and medication_id is null
+  and activated_by is null
+  and activated_at is null
+  and discontinued_by is null
+  and discontinued_at is null
+);
+
+-- Update: the clinical roles that own orders. WHICH transitions and columns
+-- each write may use is enforced by the workflow trigger below — RLS is
+-- row-wide, so the policy only decides who may attempt an update at all.
+create policy medication_orders_update on public.medication_orders
+for update to authenticated
 using (
   (select private.can_read_individual(agency_id, individual_id))
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse}'))
@@ -203,6 +230,114 @@ with check (
   (select private.can_read_individual(agency_id, individual_id))
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse}'))
 );
+
+-- No DELETE policy and no DELETE grant: the app exposes no delete for
+-- orders, and an order is part of the chart's audit record.
+
+-- Workflow discipline for orders, at the database layer:
+--   * ownership (agency, Individual, author, creation time) never changes;
+--   * draft -> active is the only activation, recorded against the
+--     signed-in user, and the only write that may set the MAR medication
+--     link; the prescriber body cannot change in the same write;
+--   * active -> discontinued is the only discontinuation, recorded against
+--     the signed-in user with a reason; the activation record is history;
+--   * with no status change, only draft body fields may move — so an
+--     active or discontinued order cannot be edited in place, and the
+--     activation / discontinuation records cannot be rewritten directly.
+create or replace function private.medication_orders_workflow_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_body_changed boolean;
+  v_lifecycle_changed boolean;
+begin
+  if new.id is distinct from old.id
+     or new.agency_id is distinct from old.agency_id
+     or new.individual_id is distinct from old.individual_id
+     or new.created_by is distinct from old.created_by
+     or new.created_by_name is distinct from old.created_by_name
+     or new.created_at is distinct from old.created_at then
+    raise exception 'Medication order ownership cannot be changed.'
+      using errcode = 'check_violation';
+  end if;
+
+  v_body_changed := (
+    old.medication_name, old.dose, old.route, old.schedule,
+    old.schedule_times, old.is_prn, old.start_date, old.end_review_date,
+    old.prescriber_name, old.reason
+  ) is distinct from (
+    new.medication_name, new.dose, new.route, new.schedule,
+    new.schedule_times, new.is_prn, new.start_date, new.end_review_date,
+    new.prescriber_name, new.reason
+  );
+  v_lifecycle_changed := (
+    old.activated_by, old.activated_by_name, old.activated_at,
+    old.discontinued_by, old.discontinued_by_name, old.discontinued_at,
+    old.discontinue_reason
+  ) is distinct from (
+    new.activated_by, new.activated_by_name, new.activated_at,
+    new.discontinued_by, new.discontinued_by_name, new.discontinued_at,
+    new.discontinue_reason
+  );
+
+  if new.status is distinct from old.status then
+    if old.status = 'draft' and new.status = 'active' then
+      if new.activated_by is distinct from (select auth.uid())
+         or new.activated_at is null then
+        raise exception 'An order can only be activated by the signed-in user.'
+          using errcode = 'check_violation';
+      end if;
+      if new.discontinued_by is not null or new.discontinued_at is not null then
+        raise exception 'An order cannot be discontinued in the same write that activates it.'
+          using errcode = 'check_violation';
+      end if;
+      if v_body_changed then
+        raise exception 'Activating an order cannot change what the prescriber ordered.'
+          using errcode = 'check_violation';
+      end if;
+    elsif old.status = 'active' and new.status = 'discontinued' then
+      if new.discontinued_by is distinct from (select auth.uid())
+         or new.discontinued_at is null
+         or length(btrim(new.discontinue_reason)) = 0 then
+        raise exception 'An order can only be discontinued by the signed-in user, with a reason.'
+          using errcode = 'check_violation';
+      end if;
+      if (new.activated_by, new.activated_at, new.medication_id)
+         is distinct from (old.activated_by, old.activated_at, old.medication_id) then
+        raise exception 'The activation record of an order cannot be rewritten.'
+          using errcode = 'check_violation';
+      end if;
+      if v_body_changed then
+        raise exception 'Discontinuing an order cannot change what the prescriber ordered.'
+          using errcode = 'check_violation';
+      end if;
+    else
+      raise exception 'Invalid medication order status transition.'
+        using errcode = 'check_violation';
+    end if;
+  else
+    if v_lifecycle_changed then
+      raise exception 'Activation and discontinuation records cannot be edited directly.'
+        using errcode = 'check_violation';
+    end if;
+    if new.medication_id is distinct from old.medication_id then
+      raise exception 'The MAR medication link is only set when an order is activated.'
+        using errcode = 'check_violation';
+    end if;
+    if old.status <> 'draft' and v_body_changed then
+      raise exception 'Only a draft medication order can be edited.'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger medication_orders_workflow_guard before update on public.medication_orders
+for each row execute function private.medication_orders_workflow_guard();
 
 create policy medication_reconciliations_select on public.medication_reconciliations
 for select to authenticated
@@ -211,11 +346,26 @@ using (
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager,auditor}'))
 );
 
--- Write: nurses / PMs / admins manage and sign off. House managers may start
--- (insert) and update a reconciliation for their homes, but sign-off is gated
--- to nurses / PMs in the app layer.
-create policy medication_reconciliations_write on public.medication_reconciliations
-for all to authenticated
+-- Insert: only the caller's own fresh, unsigned run. Sign-off state starts
+-- untouched, so no direct write can insert a run already completed or
+-- already signed by someone else. House managers may start runs for their
+-- homes — starting is the only write the trigger below ever lets them
+-- complete toward sign-off (see the workflow guard).
+create policy medication_reconciliations_insert on public.medication_reconciliations
+for insert to authenticated
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
+  and status = 'in_progress'
+  and started_by = (select auth.uid())
+  and signed_off_by is null
+  and signed_off_at is null
+);
+
+-- Update: starters and signers alike pass this row gate; the workflow
+-- trigger below decides which of them may actually complete a run.
+create policy medication_reconciliations_update on public.medication_reconciliations
+for update to authenticated
 using (
   (select private.can_read_individual(agency_id, individual_id))
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
@@ -224,6 +374,76 @@ with check (
   (select private.can_read_individual(agency_id, individual_id))
   and (select private.role_key_in(agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
 );
+
+-- No DELETE policy and no DELETE grant: a reconciliation is auditable
+-- history and the app exposes no delete for it.
+
+-- Workflow discipline for reconciliations, at the database layer:
+--   * ownership (agency, Individual, trigger, who started it, when) never
+--     changes;
+--   * in_progress -> completed is the only transition, and completing a run
+--     is a clinical sign-off: the signer must hold a signing role
+--     (nurse / Program Manager / administrator / compliance administrator —
+--     the same set the app gates on; house managers are deliberately NOT
+--     signers, so a house manager cannot complete or sign a run even by
+--     direct write), the sign-off is recorded against the signed-in user,
+--     and a sign-off note is required;
+--   * while a run is in progress its sign-off fields stay untouched;
+--   * a completed run is signed history: no column may change at all.
+create or replace function private.medication_reconciliations_workflow_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.id is distinct from old.id
+     or new.agency_id is distinct from old.agency_id
+     or new.individual_id is distinct from old.individual_id
+     or new.trigger is distinct from old.trigger
+     or new.started_by is distinct from old.started_by
+     or new.started_by_name is distinct from old.started_by_name
+     or new.started_at is distinct from old.started_at
+     or new.created_at is distinct from old.created_at then
+    raise exception 'Reconciliation ownership cannot be changed.'
+      using errcode = 'check_violation';
+  end if;
+
+  if old.status = 'completed' then
+    raise exception 'A completed reconciliation is signed history and cannot be changed.'
+      using errcode = 'check_violation';
+  end if;
+
+  if new.status is distinct from old.status then
+    if old.status = 'in_progress' and new.status = 'completed' then
+      if not (select private.role_key_in(old.agency_id, '{administrator,compliance_admin,program_manager,nurse}')) then
+        raise exception 'Only a nurse or Program Manager can sign off a reconciliation.'
+          using errcode = 'check_violation';
+      end if;
+      if new.signed_off_by is distinct from (select auth.uid())
+         or new.signed_off_at is null
+         or length(btrim(new.sign_off_note)) = 0 then
+        raise exception 'A sign-off must be recorded against the signed-in user, with a note.'
+          using errcode = 'check_violation';
+      end if;
+    else
+      raise exception 'Invalid reconciliation status transition.'
+        using errcode = 'check_violation';
+    end if;
+  else
+    if (new.signed_off_by, new.signed_off_by_name, new.signed_off_at, new.sign_off_note)
+       is distinct from
+       (old.signed_off_by, old.signed_off_by_name, old.signed_off_at, old.sign_off_note) then
+      raise exception 'Sign-off fields can only be set by completing the reconciliation.'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger medication_reconciliations_workflow_guard before update on public.medication_reconciliations
+for each row execute function private.medication_reconciliations_workflow_guard();
 
 -- Items inherit their parent reconciliation's scope.
 create policy medication_reconciliation_items_select on public.medication_reconciliation_items
@@ -238,13 +458,32 @@ using (
   )
 );
 
-create policy medication_reconciliation_items_write on public.medication_reconciliation_items
-for all to authenticated
+-- Writes on items are scoped to an IN-PROGRESS parent run: the checklist of
+-- an open run may be seeded, edited, and replaced (the app's save flow
+-- deletes and re-inserts the decisions of an open run). Once the parent run
+-- is completed, its items are signed history — the policies below no longer
+-- match, and the guard trigger after them raises as a backstop.
+create policy medication_reconciliation_items_insert on public.medication_reconciliation_items
+for insert to authenticated
+with check (
+  exists (
+    select 1 from public.medication_reconciliations r
+    where r.id = medication_reconciliation_items.reconciliation_id
+      and r.agency_id = medication_reconciliation_items.agency_id
+      and r.status = 'in_progress'
+      and (select private.can_read_individual(r.agency_id, r.individual_id))
+      and (select private.role_key_in(r.agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
+  )
+);
+
+create policy medication_reconciliation_items_update on public.medication_reconciliation_items
+for update to authenticated
 using (
   exists (
     select 1 from public.medication_reconciliations r
     where r.id = medication_reconciliation_items.reconciliation_id
       and r.agency_id = medication_reconciliation_items.agency_id
+      and r.status = 'in_progress'
       and (select private.can_read_individual(r.agency_id, r.individual_id))
       and (select private.role_key_in(r.agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
   )
@@ -254,42 +493,83 @@ with check (
     select 1 from public.medication_reconciliations r
     where r.id = medication_reconciliation_items.reconciliation_id
       and r.agency_id = medication_reconciliation_items.agency_id
+      and r.status = 'in_progress'
       and (select private.can_read_individual(r.agency_id, r.individual_id))
       and (select private.role_key_in(r.agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
   )
 );
 
--- SQL privileges for `authenticated` (mirrors the policy-driven grant used by
--- tables created after 20260915025000; see 20260925120000). Each table gets
--- exactly the operations its authenticated policies allow.
-do $$
-declare p record; operation text;
+create policy medication_reconciliation_items_delete on public.medication_reconciliation_items
+for delete to authenticated
+using (
+  exists (
+    select 1 from public.medication_reconciliations r
+    where r.id = medication_reconciliation_items.reconciliation_id
+      and r.agency_id = medication_reconciliation_items.agency_id
+      and r.status = 'in_progress'
+      and (select private.can_read_individual(r.agency_id, r.individual_id))
+      and (select private.role_key_in(r.agency_id, '{administrator,compliance_admin,program_manager,nurse,house_manager}'))
+  )
+);
+
+-- Backstop for the item policies: an item may only be inserted into, moved
+-- between, edited within, or deleted from runs that are still in progress.
+-- This fires for every writer, so a completed run's checklist cannot be
+-- rewritten even if a future policy edit reopens a path.
+create or replace function private.medication_reconciliation_items_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_old_status text;
+  v_new_status text;
 begin
-  for p in
-    select pol.tablename, pol.cmd
-    from pg_policies pol
-    join pg_class c on c.relname = pol.tablename
-    join pg_namespace n on n.oid = c.relnamespace and n.nspname = pol.schemaname
-    where pol.schemaname = 'public'
-      and pol.tablename in (
-        'medication_orders',
-        'medication_reconciliations',
-        'medication_reconciliation_items'
-      )
-      and 'authenticated' = any(pol.roles)
-      and pol.permissive = 'PERMISSIVE'
-      and c.relrowsecurity
-  loop
-    foreach operation in array case when p.cmd = 'ALL'
-      then array['SELECT','INSERT','UPDATE','DELETE'] else array[p.cmd] end
-    loop
-      if not has_table_privilege('authenticated', 'public.' || quote_ident(p.tablename), operation)
-        and (operation = 'DELETE'
-             or not has_any_column_privilege('authenticated', 'public.' || quote_ident(p.tablename), operation)) then
-        execute format('grant %s on public.%I to authenticated', operation, p.tablename);
-      end if;
-    end loop;
-  end loop;
-end $$;
+  if tg_op in ('UPDATE', 'DELETE') then
+    select r.status into v_old_status
+    from public.medication_reconciliations r
+    where r.id = old.reconciliation_id and r.agency_id = old.agency_id;
+    if v_old_status is distinct from 'in_progress' then
+      raise exception 'The checklist of a completed reconciliation is signed history and cannot be changed.'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') then
+    select r.status into v_new_status
+    from public.medication_reconciliations r
+    where r.id = new.reconciliation_id and r.agency_id = new.agency_id;
+    if v_new_status is distinct from 'in_progress' then
+      raise exception 'Decisions can only be recorded on a reconciliation that is still in progress.'
+        using errcode = 'check_violation';
+    end if;
+    return new;
+  end if;
+  return old;
+end;
+$$;
+
+create trigger medication_reconciliation_items_guard
+before insert or update or delete on public.medication_reconciliation_items
+for each row execute function private.medication_reconciliation_items_guard();
+
+-- SQL privileges for `authenticated`: exactly the operations the policies
+-- above allow — no DELETE on orders or reconciliations (the app exposes
+-- none), item deletes only through the in-progress policy.
+revoke delete on public.medication_orders, public.medication_reconciliations
+  from authenticated, anon;
+grant select on public.medication_orders to authenticated;
+grant insert on public.medication_orders to authenticated;
+grant update on public.medication_orders to authenticated;
+grant all on public.medication_orders to service_role;
+grant select on public.medication_reconciliations to authenticated;
+grant insert on public.medication_reconciliations to authenticated;
+grant update on public.medication_reconciliations to authenticated;
+grant all on public.medication_reconciliations to service_role;
+grant select on public.medication_reconciliation_items to authenticated;
+grant insert on public.medication_reconciliation_items to authenticated;
+grant update on public.medication_reconciliation_items to authenticated;
+grant delete on public.medication_reconciliation_items to authenticated;
+grant all on public.medication_reconciliation_items to service_role;
 
 commit;
