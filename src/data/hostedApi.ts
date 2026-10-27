@@ -39,6 +39,15 @@ import type {
   LegacyLineSignoffInput,
   LoginInput,
   MedDoseException,
+  CreateMedicationOrderInput,
+  UpdateMedicationOrderInput,
+  MedicationOrder,
+  MedicationOrderView,
+  MedicationReconciliation,
+  MedicationReconciliationItem,
+  MedicationReconciliationView,
+  ReconciliationItemInput,
+  ReconciliationTrigger,
   PacketDetail,
   PendingAgency,
   RequestTrainingCorrectionInput,
@@ -130,7 +139,11 @@ import {
   canEnterShiftNotes,
   canRecordLifeEvents,
   canGrantRole,
+  canManageMedicationOrders,
   canSeeShiftNotes,
+  canSignReconciliation,
+  canStartReconciliation,
+  canViewMedicationOrders,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -377,6 +390,9 @@ import {
   mapEquipmentMonthLog,
   mapHomeSafetyReport,
   mapMedication,
+  mapMedicationOrder,
+  mapMedicationReconciliation,
+  mapMedicationReconciliationItem,
   mapObligation,
   mapObligationSignature,
   mapDelegationForm,
@@ -385,6 +401,17 @@ import {
   obligationPatch,
   profileFromRow,
 } from "./hostedMappers";
+import {
+  buildReconciliationChecklist,
+  compareOrderExpiry,
+  daysUntilReview,
+  isReconciliationTrigger,
+  medicationStaysOnMar,
+  orderExpiry,
+  projectOrderToMedication,
+  validateOrderInput,
+  validateReconciliationItems,
+} from "./medicationOrders";
 // LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
 import {
   TRAINING_TOPICS,
@@ -1344,6 +1371,23 @@ export class HostedApi implements ComplyraApi {
     const orderReminderDays = canViewPeople
       ? (await this.loadOperatingRules(session.agencyId)).orderReminderDays
       : undefined;
+    // The MAR medication list derives from active orders: a medication fed by a
+    // discontinued order drops off the board. Fetch the order statuses once.
+    const medOrderStatuses = canViewPeople
+      ? (
+          (
+            await this.client
+              .from("medication_orders")
+              .select("id,status")
+              .eq("agency_id", agencyId)
+          ).data ?? []
+        ).map((row) => ({
+          id: String((row as Record<string, unknown>).id),
+          status: String(
+            (row as Record<string, unknown>).status,
+          ) as MedicationOrder["status"],
+        }))
+      : [];
     const planStacks = canViewPeople
       ? individuals.map((person) =>
           this.hostedPlanStack(session, person, {
@@ -1360,7 +1404,9 @@ export class HostedApi implements ComplyraApi {
               submittedAt: (row.submitted_at as string | null) ?? null,
             })),
             renewals: (renewalsRes.data ?? []).map(mapClinicalRenewal),
-            medications: (medsRes.data ?? []).map(mapMedication),
+            medications: (medsRes.data ?? [])
+              .map(mapMedication)
+              .filter((med) => medicationStaysOnMar(med, medOrderStatuses)),
             appointments: appointmentRows.map(mapAppointment),
             checklists: (checklistsRes.data ?? []).map(mapTrainingChecklist),
             versionLabelById,
@@ -8622,7 +8668,20 @@ export class HostedApi implements ComplyraApi {
       .eq("agency_id", session.agencyId)
       .eq("individual_id", individualId);
     throwIf(medsRes.error, "Could not load medications.");
-    const meds = (medsRes.data ?? []).map(mapMedication);
+    const allMeds = (medsRes.data ?? []).map(mapMedication);
+    const ordersRes = await this.client
+      .from("medication_orders")
+      .select("id,status")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId);
+    throwIf(ordersRes.error, "Could not load medication orders.");
+    const orders = (ordersRes.data ?? []).map((row) => ({
+      id: String((row as Record<string, unknown>).id),
+      status: String(
+        (row as Record<string, unknown>).status,
+      ) as MedicationOrder["status"],
+    }));
+    const meds = allMeds.filter((med) => medicationStaysOnMar(med, orders));
     const medIds = meds.map((med) => med.id);
     const prnIds = meds.filter((med) => med.kind === "prn").map((med) => med.id);
     const [invRes, delRes, prnRes, excRes] = await Promise.all([
@@ -9473,6 +9532,588 @@ export class HostedApi implements ComplyraApi {
       "medication",
       med.id,
     );
+  }
+
+  // ===== MEDICATION ORDERS + RECONCILIATION (hosted) =====
+
+  private async medOrderOrThrow(orderId: string) {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .select("*")
+      .eq("id", orderId)
+      .maybeSingle();
+    throwIf(error, "Medication order not found.");
+    if (!data) throw new Error("Medication order not found.");
+    const order = mapMedicationOrder(data as Record<string, unknown>);
+    if (order.agencyId !== session.agencyId) {
+      throw new Error("Medication order not found.");
+    }
+    return { session, order };
+  }
+
+  private async reconciliationOrThrow(reconciliationId: string) {
+    const session = await this.requireSession();
+    const { data, error } = await this.client
+      .from("medication_reconciliations")
+      .select("*")
+      .eq("id", reconciliationId)
+      .maybeSingle();
+    throwIf(error, "Reconciliation not found.");
+    if (!data) throw new Error("Reconciliation not found.");
+    const recon = mapMedicationReconciliation(data as Record<string, unknown>);
+    if (recon.agencyId !== session.agencyId) {
+      throw new Error("Reconciliation not found.");
+    }
+    return { session, recon };
+  }
+
+  private async orderNameMaps(agencyId: string) {
+    const [indRes, siteRes] = await Promise.all([
+      this.client
+        .from("individuals")
+        .select("id,full_name,site_id")
+        .eq("agency_id", agencyId),
+      this.client.from("sites").select("id,name").eq("agency_id", agencyId),
+    ]);
+    const siteName = new Map(
+      ((siteRes.data ?? []) as Record<string, unknown>[]).map((row) => [
+        String(row.id),
+        String(row.name ?? ""),
+      ]),
+    );
+    const personName = new Map<string, string>();
+    const personSite = new Map<string, string>();
+    for (const row of (indRes.data ?? []) as Record<string, unknown>[]) {
+      personName.set(String(row.id), String(row.full_name ?? ""));
+      personSite.set(String(row.id), siteName.get(String(row.site_id)) ?? "");
+    }
+    return { personName, personSite };
+  }
+
+  private async reconciliationView(
+    recon: MedicationReconciliation,
+  ): Promise<MedicationReconciliationView> {
+    const [itemRes, personRes] = await Promise.all([
+      this.client
+        .from("medication_reconciliation_items")
+        .select("*")
+        .eq("agency_id", recon.agencyId)
+        .eq("reconciliation_id", recon.id),
+      this.client
+        .from("individuals")
+        .select("full_name")
+        .eq("id", recon.individualId)
+        .maybeSingle(),
+    ]);
+    throwIf(itemRes.error, "Could not load reconciliation items.");
+    const items = ((itemRes.data ?? []) as Record<string, unknown>[])
+      .map(mapMedicationReconciliationItem)
+      .sort((a, b) => a.medicationLabel.localeCompare(b.medicationLabel));
+    const individualName = personRes.data
+      ? String((personRes.data as Record<string, unknown>).full_name ?? "")
+      : "";
+    return { ...recon, items, individualName };
+  }
+
+  async listMedicationOrders(individualId: string): Promise<MedicationOrder[]> {
+    const session = await this.requireSession();
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication orders.");
+    }
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("created_at", { ascending: false });
+    throwIf(error, "Could not load medication orders.");
+    return ((data ?? []) as Record<string, unknown>[]).map(mapMedicationOrder);
+  }
+
+  async listMedicationOrderWorklist(): Promise<MedicationOrderView[]> {
+    const session = await this.requireSession();
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication orders.");
+    }
+    const today = todayIso();
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .in("status", ["draft", "active"]);
+    throwIf(error, "Could not load medication orders.");
+    const { personName, personSite } = await this.orderNameMaps(session.agencyId);
+    const views: MedicationOrderView[] = (
+      (data ?? []) as Record<string, unknown>[]
+    ).map((row) => {
+      const order = mapMedicationOrder(row);
+      return {
+        ...order,
+        expiry: orderExpiry(order, today),
+        daysUntilReview: daysUntilReview(order, today),
+        individualName: personName.get(order.individualId) ?? "",
+        siteName: personSite.get(order.individualId) ?? "",
+      };
+    });
+    // No cron: alert the nurse + Program Manager when a reviewer opens the
+    // worklist. The notice RPC dedupes per order + review date.
+    for (const view of views) {
+      if (view.expiry === "ok") continue;
+      const type =
+        view.expiry === "expired" ? "med.order_expired" : "med.order_expiring";
+      const when = view.endReviewDate ?? "";
+      const phrase =
+        view.expiry === "expired"
+          ? "has passed its review date"
+          : "is approaching its review date";
+      const title =
+        view.expiry === "expired"
+          ? "Medication order expired"
+          : "Medication order expiring";
+      const body = `${view.medicationName} for ${view.individualName} ${phrase} (${when}). Review or renew the order.`;
+      for (const roleKey of ["nurse", "program_manager"]) {
+        await this.queueOperatingNotice({
+          agencyId: session.agencyId,
+          userId: null,
+          roleKey,
+          type,
+          title,
+          body,
+          deepLink: "/medication-orders",
+          entityId: view.id,
+          dedupeKey: `${type}:${view.id}:${when}`,
+        });
+      }
+    }
+    return views.sort(
+      (a, b) =>
+        compareOrderExpiry(a, b) ||
+        a.individualName.localeCompare(b.individualName),
+    );
+  }
+
+  async createMedicationOrder(
+    input: CreateMedicationOrderInput,
+  ): Promise<MedicationOrder> {
+    const session = await this.requireSession();
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager creates medication orders.");
+    }
+    const draft = validateOrderInput(input);
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: input.individualId,
+        medication_name: draft.medicationName,
+        dose: draft.dose,
+        route: draft.route,
+        schedule: draft.schedule,
+        schedule_times: draft.scheduleTimes,
+        is_prn: draft.isPrn,
+        start_date: draft.startDate,
+        end_review_date: draft.endReviewDate,
+        prescriber_name: draft.prescriberName,
+        reason: draft.reason,
+        status: "draft",
+        created_by: session.userId,
+        created_by_name: session.fullName,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not create the medication order.");
+    const order = mapMedicationOrder(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "medication.order_created",
+      `${session.fullName} drafted an order for ${draft.medicationName}`,
+      "medication_order",
+      order.id,
+    );
+    return order;
+  }
+
+  async updateMedicationOrder(
+    orderId: string,
+    patch: UpdateMedicationOrderInput,
+  ): Promise<MedicationOrder> {
+    const { session, order } = await this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager edits medication orders.");
+    }
+    if (order.status !== "draft") {
+      throw new Error("Only a draft order can be edited. Discontinue and reorder instead.");
+    }
+    const draft = validateOrderInput({
+      individualId: order.individualId,
+      medicationName: patch.medicationName ?? order.medicationName,
+      dose: patch.dose ?? order.dose,
+      route: patch.route ?? order.route,
+      schedule: patch.schedule ?? order.schedule,
+      scheduleTimes: patch.scheduleTimes ?? order.scheduleTimes,
+      isPrn: patch.isPrn ?? order.isPrn,
+      startDate: patch.startDate ?? order.startDate,
+      endReviewDate:
+        patch.endReviewDate !== undefined ? patch.endReviewDate : order.endReviewDate,
+      prescriberName: patch.prescriberName ?? order.prescriberName,
+      reason: patch.reason ?? order.reason,
+    });
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .update({
+        medication_name: draft.medicationName,
+        dose: draft.dose,
+        route: draft.route,
+        schedule: draft.schedule,
+        schedule_times: draft.scheduleTimes,
+        is_prn: draft.isPrn,
+        start_date: draft.startDate,
+        end_review_date: draft.endReviewDate,
+        prescriber_name: draft.prescriberName,
+        reason: draft.reason,
+      })
+      .eq("id", orderId)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the medication order.");
+    return mapMedicationOrder(data as Record<string, unknown>);
+  }
+
+  async activateMedicationOrder(orderId: string): Promise<MedicationOrder> {
+    const { session, order } = await this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager activates medication orders.");
+    }
+    if (order.status !== "draft") {
+      throw new Error("Only a draft order can be activated.");
+    }
+    const fields = projectOrderToMedication(order);
+    const now = new Date().toISOString();
+    let medicationId = order.medicationId;
+    if (medicationId) {
+      const { error } = await this.client
+        .from("medications")
+        .update({
+          name: fields.name,
+          strength: fields.strength,
+          kind: fields.kind,
+          pills_per_day: fields.pillsPerDay,
+          source_order_id: order.id,
+        })
+        .eq("id", medicationId)
+        .eq("agency_id", session.agencyId);
+      throwIf(error, "Could not update the medication.");
+    } else {
+      const { data, error } = await this.client
+        .from("medications")
+        .insert({
+          agency_id: session.agencyId,
+          individual_id: order.individualId,
+          name: fields.name,
+          strength: fields.strength,
+          kind: fields.kind,
+          controlled: false,
+          pills_per_day: fields.pillsPerDay,
+          remaining_pills: 0,
+          source_order_id: order.id,
+        })
+        .select("id")
+        .single();
+      throwIf(error, "Could not create the medication.");
+      medicationId = String((data as Record<string, unknown>).id);
+    }
+    const { error: invError } = await this.client.from("med_inventory").upsert(
+      {
+        agency_id: session.agencyId,
+        individual_id: order.individualId,
+        medication_id: medicationId,
+        dose_times: fields.kind === "scheduled" ? fields.doseTimes : [],
+      },
+      { onConflict: "agency_id,medication_id" },
+    );
+    throwIf(invError, "Could not set the dose schedule.");
+    const { data: updated, error: upError } = await this.client
+      .from("medication_orders")
+      .update({
+        status: "active",
+        medication_id: medicationId,
+        activated_by: session.userId,
+        activated_by_name: session.fullName,
+        activated_at: now,
+      })
+      .eq("id", orderId)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(upError, "Could not activate the order.");
+    const activated = mapMedicationOrder(updated as Record<string, unknown>);
+    await this.audit(
+      session,
+      "medication.order_activated",
+      `${session.fullName} activated the order for ${activated.medicationName}`,
+      "medication_order",
+      activated.id,
+    );
+    return activated;
+  }
+
+  async discontinueMedicationOrder(
+    orderId: string,
+    reason: string,
+  ): Promise<MedicationOrder> {
+    const { session, order } = await this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager discontinues medication orders.");
+    }
+    if (order.status !== "active") {
+      throw new Error("Only an active order can be discontinued.");
+    }
+    const trimmed = reason.trim();
+    if (!trimmed) throw new Error("Enter a reason for discontinuing the order.");
+    const now = new Date().toISOString();
+    if (order.medicationId) {
+      // Clear the fed medication's MAR dose schedule so the dose leaves the MAR.
+      const { error: invError } = await this.client
+        .from("med_inventory")
+        .update({ dose_times: [] })
+        .eq("agency_id", session.agencyId)
+        .eq("medication_id", order.medicationId);
+      throwIf(invError, "Could not clear the MAR dose schedule.");
+    }
+    const { data, error } = await this.client
+      .from("medication_orders")
+      .update({
+        status: "discontinued",
+        discontinued_by: session.userId,
+        discontinued_by_name: session.fullName,
+        discontinued_at: now,
+        discontinue_reason: trimmed,
+      })
+      .eq("id", orderId)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not discontinue the order.");
+    const discontinued = mapMedicationOrder(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "medication.order_discontinued",
+      `${session.fullName} discontinued the order for ${discontinued.medicationName}: ${trimmed}`,
+      "medication_order",
+      discontinued.id,
+    );
+    return discontinued;
+  }
+
+  async listReconciliations(
+    individualId: string,
+  ): Promise<MedicationReconciliationView[]> {
+    const session = await this.requireSession();
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication reconciliations.");
+    }
+    const { data, error } = await this.client
+      .from("medication_reconciliations")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("started_at", { ascending: false });
+    throwIf(error, "Could not load reconciliations.");
+    const recons = ((data ?? []) as Record<string, unknown>[]).map(
+      mapMedicationReconciliation,
+    );
+    if (recons.length === 0) return [];
+    const [itemRes, personRes] = await Promise.all([
+      this.client
+        .from("medication_reconciliation_items")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .in(
+          "reconciliation_id",
+          recons.map((row) => row.id),
+        ),
+      this.client
+        .from("individuals")
+        .select("full_name")
+        .eq("id", individualId)
+        .maybeSingle(),
+    ]);
+    throwIf(itemRes.error, "Could not load reconciliation items.");
+    const items = ((itemRes.data ?? []) as Record<string, unknown>[]).map(
+      mapMedicationReconciliationItem,
+    );
+    const individualName = personRes.data
+      ? String((personRes.data as Record<string, unknown>).full_name ?? "")
+      : "";
+    return recons.map((recon) => ({
+      ...recon,
+      items: items
+        .filter((item) => item.reconciliationId === recon.id)
+        .sort((a, b) => a.medicationLabel.localeCompare(b.medicationLabel)),
+      individualName,
+    }));
+  }
+
+  async startReconciliation(input: {
+    individualId: string;
+    trigger: ReconciliationTrigger;
+  }): Promise<MedicationReconciliationView> {
+    const session = await this.requireSession();
+    if (!canStartReconciliation(session.roleKey)) {
+      throw new Error("Only a nurse, Program Manager, or house manager starts a reconciliation.");
+    }
+    if (!isReconciliationTrigger(input.trigger)) {
+      throw new Error("Choose a valid reconciliation trigger.");
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("medication_reconciliations")
+      .insert({
+        agency_id: session.agencyId,
+        individual_id: input.individualId,
+        trigger: input.trigger,
+        status: "in_progress",
+        started_by: session.userId,
+        started_by_name: session.fullName,
+        started_at: now,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not start the reconciliation.");
+    const recon = mapMedicationReconciliation(data as Record<string, unknown>);
+    const [ordersRes, medsRes] = await Promise.all([
+      this.client
+        .from("medication_orders")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .eq("individual_id", input.individualId),
+      this.client
+        .from("medications")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .eq("individual_id", input.individualId),
+    ]);
+    throwIf(ordersRes.error, "Could not load orders.");
+    throwIf(medsRes.error, "Could not load medications.");
+    const orders = ((ordersRes.data ?? []) as Record<string, unknown>[]).map(
+      mapMedicationOrder,
+    );
+    const allMeds = ((medsRes.data ?? []) as Record<string, unknown>[]).map(
+      mapMedication,
+    );
+    const suggested = buildReconciliationChecklist({
+      activeOrders: orders.filter((row) => row.status === "active"),
+      marMedications: allMeds.filter((med) => medicationStaysOnMar(med, orders)),
+    });
+    if (suggested.length) {
+      const { error: insError } = await this.client
+        .from("medication_reconciliation_items")
+        .insert(
+          suggested.map((item) => ({
+            agency_id: session.agencyId,
+            reconciliation_id: recon.id,
+            order_id: item.orderId ?? null,
+            medication_id: item.medicationId ?? null,
+            medication_label: item.medicationLabel,
+            decision: item.decision,
+            discrepancy: Boolean(item.discrepancy),
+            note: item.note ?? "",
+          })),
+        );
+      throwIf(insError, "Could not seed the reconciliation checklist.");
+    }
+    return this.reconciliationView(recon);
+  }
+
+  async saveReconciliationItems(
+    reconciliationId: string,
+    items: ReconciliationItemInput[],
+  ): Promise<MedicationReconciliationView> {
+    const { session, recon } = await this.reconciliationOrThrow(reconciliationId);
+    if (!canStartReconciliation(session.roleKey)) {
+      throw new Error("Only a nurse, Program Manager, or house manager edits a reconciliation.");
+    }
+    if (recon.status !== "in_progress") {
+      throw new Error("This reconciliation is already signed off.");
+    }
+    const validated = validateReconciliationItems(items);
+    const { error: delError } = await this.client
+      .from("medication_reconciliation_items")
+      .delete()
+      .eq("agency_id", session.agencyId)
+      .eq("reconciliation_id", recon.id);
+    throwIf(delError, "Could not update the reconciliation.");
+    const { error: insError } = await this.client
+      .from("medication_reconciliation_items")
+      .insert(
+        validated.map((item) => ({
+          agency_id: session.agencyId,
+          reconciliation_id: recon.id,
+          order_id: item.orderId ?? null,
+          medication_id: item.medicationId ?? null,
+          medication_label: item.medicationLabel,
+          decision: item.decision,
+          discrepancy: item.discrepancy,
+          note: item.note,
+        })),
+      );
+    throwIf(insError, "Could not save the reconciliation decisions.");
+    await this.client
+      .from("medication_reconciliations")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", recon.id)
+      .eq("agency_id", session.agencyId);
+    return this.reconciliationView(recon);
+  }
+
+  async signOffReconciliation(
+    reconciliationId: string,
+    input: { note: string; signatureName?: string },
+  ): Promise<MedicationReconciliationView> {
+    const { session, recon } = await this.reconciliationOrThrow(reconciliationId);
+    if (!canSignReconciliation(session.roleKey)) {
+      throw new Error("A nurse or Program Manager signs off a reconciliation.");
+    }
+    if (recon.status !== "in_progress") {
+      throw new Error("This reconciliation is already signed off.");
+    }
+    const trimmed = input.note.trim();
+    if (!trimmed) throw new Error("Add a sign-off note.");
+    const { data: itemRows, error: itemError } = await this.client
+      .from("medication_reconciliation_items")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("reconciliation_id", recon.id);
+    throwIf(itemError, "Could not load reconciliation items.");
+    if (((itemRows ?? []) as unknown[]).length === 0) {
+      throw new Error("Record the medication decisions before signing off.");
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("medication_reconciliations")
+      .update({
+        status: "completed",
+        signed_off_by: session.userId,
+        signed_off_by_name: input.signatureName?.trim() || session.fullName,
+        signed_off_at: now,
+        sign_off_note: trimmed,
+      })
+      .eq("id", recon.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not sign off the reconciliation.");
+    const completed = mapMedicationReconciliation(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "medication.reconciliation_signed",
+      `${completed.signedOffByName} signed off a medication reconciliation`,
+      "medication_reconciliation",
+      completed.id,
+    );
+    return this.reconciliationView(completed);
   }
 
   /**

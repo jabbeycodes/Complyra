@@ -498,6 +498,11 @@ test("a missing Shift note opens that person's notes", async () => {
   assert.equal(notificationDestination("/plans/person-1#<bad>")?.hash, null);
 });
 
+test("expiring medication-order notifications open the orders worklist", async () => {
+  const { notificationPage } = await import("./notify");
+  assert.equal(notificationPage("/medication-orders"), "Medication orders");
+});
+
 test("open-shift notifications open the Employee Hub", async () => {
   const { notificationPage } = await import("./notify");
   for (const t of ["hr.open_shift_posted", "hr.open_shift_bid", "hr.open_shift_picked_up", "hr.open_shift_approved", "hr.open_shift_denied"]) {

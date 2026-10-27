@@ -26,6 +26,12 @@ export interface Medication {
   remainingPills: number;
   lastDeliveryOn: string | null;
   lastCountdownOn: string | null;
+  /**
+   * The prescriber order this MAR medication derives from, when it was created
+   * by activating a medication order. Null for legacy / seed medications that
+   * predate the orders layer.
+   */
+  sourceOrderId?: string | null;
 }
 
 export interface MedicationDelivery {

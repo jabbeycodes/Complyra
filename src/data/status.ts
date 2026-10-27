@@ -4,6 +4,7 @@ import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
   canSeeShiftNotes,
+  canViewMedicationOrders,
   hasPermission,
   isRoleKey,
   type PermissionKey,
@@ -125,6 +126,8 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   // LIFEPATH-P6-PAGEVIS (med supply forecast)
   if (page === "Supply forecast") return can(session, "individuals.view");
+  // Medication orders worklist + expiring report (orders / reconciliation).
+  if (page === "Medication orders") return canViewMedicationOrders(session.roleKey);
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
   if (page === "Mileage") return can(session, "mileage.manage");
@@ -200,6 +203,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Weekly checklist",
   "Checklist assignments",
   "Supply forecast",
+  "Medication orders",
   "Mileage",
   "QA Review",
   "Report Library",

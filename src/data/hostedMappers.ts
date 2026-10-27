@@ -1,5 +1,11 @@
 import type { Appointment } from "./appointments";
-import type { DelegationForm, IndividualRecord } from "./types";
+import type {
+  DelegationForm,
+  IndividualRecord,
+  MedicationOrder,
+  MedicationReconciliation,
+  MedicationReconciliationItem,
+} from "./types";
 import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import type {
   IndividualProfile,
@@ -264,6 +270,75 @@ export function mapMedication(row: Row): Medication {
     remainingPills: num(row.remaining_pills),
     lastDeliveryOn: isoDate(row.last_delivery_on),
     lastCountdownOn: isoDate(row.last_countdown_on),
+    sourceOrderId: strOrNull(row.source_order_id),
+  };
+}
+
+export function mapMedicationOrder(row: Row): MedicationOrder {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    medicationName: str(row.medication_name),
+    dose: str(row.dose),
+    route: str(row.route),
+    schedule: str(row.schedule),
+    scheduleTimes: stringArray(row.schedule_times),
+    isPrn: bool(row.is_prn),
+    startDate: isoDate(row.start_date) ?? "",
+    endReviewDate: isoDate(row.end_review_date),
+    prescriberName: str(row.prescriber_name),
+    reason: str(row.reason),
+    status: (row.status as MedicationOrder["status"]) ?? "draft",
+    medicationId: strOrNull(row.medication_id),
+    createdBy: strOrNull(row.created_by),
+    createdByName: str(row.created_by_name),
+    activatedBy: strOrNull(row.activated_by),
+    activatedByName: str(row.activated_by_name),
+    activatedAt: isoDateTime(row.activated_at),
+    discontinuedBy: strOrNull(row.discontinued_by),
+    discontinuedByName: str(row.discontinued_by_name),
+    discontinuedAt: isoDateTime(row.discontinued_at),
+    discontinueReason: str(row.discontinue_reason),
+    createdAt: isoDateTime(row.created_at) ?? "",
+    updatedAt: isoDateTime(row.updated_at) ?? "",
+  };
+}
+
+export function mapMedicationReconciliation(row: Row): MedicationReconciliation {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    individualId: str(row.individual_id),
+    trigger: (row.trigger as MedicationReconciliation["trigger"]) ?? "admission",
+    status: (row.status as MedicationReconciliation["status"]) ?? "in_progress",
+    startedBy: strOrNull(row.started_by),
+    startedByName: str(row.started_by_name),
+    startedAt: isoDateTime(row.started_at) ?? "",
+    signedOffBy: strOrNull(row.signed_off_by),
+    signedOffByName: str(row.signed_off_by_name),
+    signedOffAt: isoDateTime(row.signed_off_at),
+    signOffNote: str(row.sign_off_note),
+    createdAt: isoDateTime(row.created_at) ?? "",
+    updatedAt: isoDateTime(row.updated_at) ?? "",
+  };
+}
+
+export function mapMedicationReconciliationItem(
+  row: Row,
+): MedicationReconciliationItem {
+  return {
+    id: str(row.id),
+    agencyId: str(row.agency_id),
+    reconciliationId: str(row.reconciliation_id),
+    orderId: strOrNull(row.order_id),
+    medicationId: strOrNull(row.medication_id),
+    medicationLabel: str(row.medication_label),
+    decision: (row.decision as MedicationReconciliationItem["decision"]) ?? "continue",
+    discrepancy: bool(row.discrepancy),
+    note: str(row.note),
+    createdAt: isoDateTime(row.created_at) ?? "",
+    updatedAt: isoDateTime(row.updated_at) ?? "",
   };
 }
 

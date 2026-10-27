@@ -109,7 +109,9 @@ import HmWeeklyChecklistPage from "./features/hmChecklist/HmWeeklyChecklistPage"
 import ChecklistAssigner from "./features/hmChecklist/ChecklistAssigner";
 // LIFEPATH-P6-IMPORT (med inventory)
 import { Pill as MedInventoryNavIcon } from "lucide-react";
+import { ClipboardPlus as MedOrdersNavIcon } from "lucide-react";
 import MedInventoryPage from "./features/medInventory/MedInventoryPage";
+import MedicationOrdersPage from "./features/medicationOrders/MedicationOrdersPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
@@ -704,6 +706,8 @@ export default function App() {
         ["Checklist assignments", ClipboardList],
         // LIFEPATH-P6-NAV (med supply forecast)
         ["Supply forecast", MedInventoryNavIcon],
+        // Medication orders worklist + expiring review report
+        ["Medication orders", MedOrdersNavIcon],
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
       ],
@@ -1761,6 +1765,9 @@ export default function App() {
               {page === "Checklist assignments" && <ChecklistAssigner />}
               {/* LIFEPATH-P6-PAGE (med supply forecast) */}
               {page === "Supply forecast" && <MedInventoryPage />}
+              {page === "Medication orders" && (
+                <MedicationOrdersPage onOpenPerson={openPersonChart} />
+              )}
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}

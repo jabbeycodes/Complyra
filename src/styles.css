@@ -5280,6 +5280,15 @@ th {
   gap: 8px;
   margin: 0;
 }
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stack-subhead {
+  margin: 12px 0 8px;
+  font-size: 1rem;
+}
 .alone-time-help,
 .mar-help {
   margin: 4px 0 8px;

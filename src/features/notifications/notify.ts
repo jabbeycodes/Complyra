@@ -36,6 +36,8 @@ export type NotificationType =
   | "med.late_recording"
   | "med.unrecorded"
   | "med.prn_repeat"
+  | "med.order_expiring"
+  | "med.order_expired"
   | "documentation.missing_note"
   | "accountability.warning"
   | "accountability.writeup"
@@ -88,6 +90,8 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "med.late_recording",
   "med.unrecorded",
   "med.prn_repeat",
+  "med.order_expiring",
+  "med.order_expired",
   "documentation.missing_note",
   "accountability.warning",
   "accountability.writeup",
@@ -208,6 +212,7 @@ export function notificationPage(link: string): string | null {
   if (/^\/certificates(?:\/|$)/.test(path)) return "Certificates";
   if (/^\/consents(?:\/|$)/.test(path)) return "Consents";
   if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
+  if (/^\/medication-orders(?:\/|$)/.test(path)) return "Medication orders";
   if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
   if (/^\/hub(?:\/|$)/.test(path)) return "Employee Hub";
   if (/^\/recognition(?:\/|$)/.test(path)) return "Recognition";
@@ -301,6 +306,8 @@ export const NOTIFICATION_META: Record<
   "med.late_recording": { status: "late", label: "Late medication recording" },
   "med.unrecorded": { status: "missing", label: "Unmarked medication" },
   "med.prn_repeat": { status: "pending", label: "PRN follow-up still open" },
+  "med.order_expiring": { status: "expiring", label: "Medication order expiring" },
+  "med.order_expired": { status: "expired", label: "Medication order expired" },
   "documentation.missing_note": { status: "missing", label: "Missing Shift note" },
   "accountability.warning": { status: "late", label: "Lateness warning" },
   "accountability.writeup": { status: "late", label: "Lateness write-up" },

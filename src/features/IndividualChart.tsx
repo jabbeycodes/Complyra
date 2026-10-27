@@ -52,6 +52,8 @@ import HealthCard from "./HealthCard";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import AloneTimeCard from "./AloneTimeCard";
 import MarCard from "./MarCard";
+import MedicationOrdersCard from "./medicationOrders/MedicationOrdersCard";
+import ReconciliationCard from "./medicationOrders/ReconciliationCard";
 import TrainingSignCard from "./TrainingSignCard";
 // LIFE EVENTS: per-Individual significant-events timeline (context
 // section — sits with the profile/context blocks, before the clinical
@@ -527,6 +529,13 @@ export default function IndividualChart({
             />
           </div>
         )}
+
+        <MedicationOrdersCard individualId={individualId} />
+        <ReconciliationCard
+          individualId={individualId}
+          individualName={person.name}
+          siteName={person.site}
+        />
 
         {showMeds && (
           <section className="chart-widget" id="chart-meds" aria-labelledby="meds-heading">
