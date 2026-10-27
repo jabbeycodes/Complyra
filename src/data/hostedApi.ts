@@ -8754,6 +8754,25 @@ export class HostedApi implements ComplyraApi {
         startsAt: String(row.starts_at),
         endsAt: String(row.ends_at),
       }));
+      const { data: openRows } = await this.client
+        .from("hr_open_shifts")
+        .select("id, starts_at, ends_at, status, kind")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .eq("kind", "temporary")
+        .eq("status", "open")
+        .lt("starts_at", dayEnd)
+        .gt("ends_at", dayStart);
+      for (const row of openRows ?? []) {
+        if (!row.starts_at || !row.ends_at) continue;
+        scheduledShifts.push({
+          id: String(row.id),
+          staffUserId: "",
+          staffName: "Open",
+          startsAt: String(row.starts_at),
+          endsAt: String(row.ends_at),
+        });
+      }
       const { data: aloneRows } = await this.client
         .from("alone_time_windows")
         .select("*")

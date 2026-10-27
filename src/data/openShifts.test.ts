@@ -8,6 +8,7 @@ import {
   type HrOpenShift,
 } from "./openShifts";
 import { LocalOpenShiftStore } from "./openShiftStore";
+import { createHrStore } from "./hrStore";
 import { rankBids, temporaryWindow } from "../features/employeeHub/OpenShiftsTab";
 
 const NOW = new Date("2026-09-25T12:00:00");
@@ -127,6 +128,12 @@ test("local store: post, pick up, the slot fills, and a second pickup is refused
   });
   const dsp = new LocalOpenShiftStore({ agencyId: "demo-a", userId: "dsp1", fullName: "Alex DSP", canManageSchedule: false, canPostAgencyWide: false }, clock);
   assert.equal(await dsp.respond(id, "pick_up"), "picked_up");
+  const onTheSchedule = await createHrStore({ agencyId: "demo-a", userId: "hm" }).listShifts(
+    temp().startsAt!,
+    temp().endsAt!,
+    "lawton",
+  );
+  assert.equal(onTheSchedule.some((shift) => shift.staffId === "dsp1"), true);
   const second = new LocalOpenShiftStore({ agencyId: "demo-a", userId: "dsp2", fullName: "Sam DSP", canManageSchedule: false, canPostAgencyWide: false }, clock);
   await assert.rejects(second.respond(id, "pick_up"), /no longer open/);
 });

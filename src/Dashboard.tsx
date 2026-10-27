@@ -26,6 +26,7 @@ import type { PersonalWorkItem } from "./data/dashboard";
 import type { SiteReview } from "./data/siteReview";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
+import SiteCoverageBoard from "./features/coverage/SiteCoverageBoard";
 
 interface SiteCard {
   id: string;
@@ -87,6 +88,7 @@ export default function Dashboard({
   onActivity,
 }: Props) {
   const [sitesOpen, setSitesOpen] = useState(true);
+  const focusedSite = sites.find((row) => row.name === site) ?? (sites.length === 1 ? sites[0] : null);
   const agency = scorecard ?? metrics(allItems);
   const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
 
@@ -146,6 +148,7 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
+      <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
       {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">

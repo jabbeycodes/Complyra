@@ -375,12 +375,59 @@ describe("a published staff shift", () => {
         timeZone: "America/Chicago",
       }),
     );
-    assert.deepEqual(
-      items.map((item) => item.blockId),
-      ["day"],
+    const day = items.filter((item) => item.blockId === "day");
+    assert.deepEqual(day.map((item) => item.staffUserId), ["alex"]);
+    assert.equal(day[0]?.id, "sn:2026-10-14:morgan:day:shift-day");
+    assert.ok(items.some((item) => item.blockId === "evening" && item.staffUserId === "taylor"));
+    assert.equal(items.filter((item) => item.blockId === "evening").length, 1);
+  });
+
+  it("a short shift does not clear the rest of the block", () => {
+    const items = computeShiftNoteDueItems(
+      shiftInput({
+        serviceDate: "2026-10-14",
+        individuals: [{ id: "morgan", name: "Morgan Pruitt" }],
+        requiredWriters: [
+          { userId: "alex", name: "Alex Morgan" },
+          { userId: "taylor", name: "Taylor Reed" },
+        ],
+        scheduledShifts: [{ ...alexDay, endsAt: "2026-10-14T17:00:00.000Z" }],
+        notes: [],
+        aloneTime: [],
+        now: new Date("2026-10-16T18:00:00.000Z"),
+        graceMinutes: 30,
+        timeZone: "America/Chicago",
+      }),
     );
-    assert.equal(items[0]?.staffUserId, "alex");
-    assert.equal(items[0]?.id, "sn:2026-10-14:morgan:day:shift-day");
+    const day = items.filter((item) => item.blockId === "day").map((item) => item.staffUserId);
+    assert.deepEqual(day.sort(), ["alex", "taylor"]);
+  });
+
+  it("an open posting names the usual DSP for that block", () => {
+    const items = computeShiftNoteDueItems(
+      shiftInput({
+        serviceDate: "2026-10-14",
+        individuals: [{ id: "morgan", name: "Morgan Pruitt" }],
+        requiredWriters: [
+          { userId: "alex", name: "Alex Morgan" },
+          { userId: "taylor", name: "Taylor Reed" },
+        ],
+        scheduledShifts: [{ ...alexDay, id: "open-evening", staffUserId: "", staffName: "Open", startsAt: "2026-10-14T19:00:00.000Z", endsAt: "2026-10-15T03:00:00.000Z" }],
+        notes: [],
+        aloneTime: [],
+        now: new Date("2026-10-16T18:00:00.000Z"),
+        graceMinutes: 30,
+        timeZone: "America/Chicago",
+      }),
+    );
+    assert.deepEqual(
+      items.filter((item) => item.blockId === "day").map((item) => item.staffUserId),
+      ["alex"],
+    );
+    assert.deepEqual(
+      items.filter((item) => item.blockId === "evening").map((item) => item.staffUserId),
+      ["taylor"],
+    );
   });
 
   it("a note linked to the shift clears the block the shift now covers", () => {
@@ -410,7 +457,32 @@ describe("a published staff shift", () => {
         timeZone: "America/Chicago",
       }),
     );
-    assert.equal(items.length, 0);
+    assert.equal(items.some((item) => item.blockId === "evening"), false);
+    assert.ok(items.some((item) => item.blockId === "day" && item.staffUserId === "alex"));
+  });
+
+  it("stays quiet until 5 minutes after that person's shift ends", () => {
+    const input = shiftInput({
+      serviceDate: "2026-10-14",
+      individuals: [{ id: "morgan", name: "Morgan Pruitt" }],
+      requiredWriters: [{ userId: "taylor", name: "Taylor Reed" }],
+      scheduledShifts: [alexDay],
+      notes: [],
+      aloneTime: [],
+      graceMinutes: 5,
+      timeZone: "America/Chicago",
+    });
+    const during = computeShiftNoteDueItems({
+      ...input,
+      now: new Date("2026-10-14T19:04:00.000Z"),
+    });
+    const after = computeShiftNoteDueItems({
+      ...input,
+      now: new Date("2026-10-14T19:06:00.000Z"),
+    });
+    assert.equal(during.length, 0);
+    assert.equal(after.length, 1);
+    assert.equal(after[0]?.staffName, "Alex Morgan");
   });
 
   it("picks the staff shift that overlaps the note", () => {

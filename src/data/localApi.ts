@@ -285,6 +285,7 @@ import {
   type ScheduledDose,
   type ShiftBlockId,
 } from "./dueItems";
+import { readLocalCoverage } from "./localSchedule";
 import {
   applyLatenessPoint,
   clockInIsLate,
@@ -4122,7 +4123,13 @@ export class LocalApi implements ComplyraApi {
           staffUserId: note.staffUserId,
           blockId: blockForShiftLabel(note.shift) as ShiftBlockId | null,
           noteDate: note.noteDate,
+          hrShiftId: note.hrShiftId ?? null,
         }));
+      const nameById = new Map(this.store.db.profiles.map((profile) => [profile.id, profile.fullName]));
+      const scheduledShifts = readLocalCoverage(session.agencyId, siteId, serviceDate).map((shift) => ({
+        ...shift,
+        staffName: shift.staffUserId ? nameById.get(shift.staffUserId) ?? shift.staffName : "Open",
+      }));
       shiftNoteItems = computeShiftNoteDueItems({
         serviceDate,
         now,
@@ -4132,6 +4139,7 @@ export class LocalApi implements ComplyraApi {
         staffed24h: site.staffed24h !== false,
         individuals: people.map((p) => ({ id: p.id, name: p.fullName })),
         requiredWriters,
+        scheduledShifts,
         notes,
         aloneTime: this.aloneTimeRows().filter(
           (w) => w.agencyId === session.agencyId,

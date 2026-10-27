@@ -295,6 +295,25 @@ export function zonedWallTimeMs(isoDate: string, minutesOfDay: number, timeZone:
   return utcGuess - (shown - utcGuess);
 }
 
+/** True until this person's shift has ended plus the note grace. */
+function shiftStillInGrace(
+  startsAt: string,
+  endsAt: string,
+  serviceDate: string,
+  now: Date | undefined,
+  graceMinutes: number,
+  timeZone?: string,
+): boolean {
+  if (!now || graceMinutes <= 0) return false;
+  const span = shiftSpanOnServiceDate(startsAt, endsAt, serviceDate);
+  if (!span) return false;
+  const endMinutes = span.end + graceMinutes;
+  const end = timeZone
+    ? zonedWallTimeMs(serviceDate, endMinutes, timeZone)
+    : localDayStart(serviceDate) + endMinutes * 60_000;
+  return now.getTime() < end;
+}
+
 /** True until the block has ended plus the agency's note grace. */
 function blockStillInGrace(
   serviceDate: string,
@@ -474,8 +493,10 @@ export interface ShiftNoteDetectorInput {
   }[];
   /**
    * Published or scheduled staff shifts for this house and service date.
-   * When this list has any row, those shifts replace the assigned-DSP list.
-   * An empty list means the house has no schedule, so assigned DSPs still owe notes.
+   * A shift with a person covers only the hours it actually spans. A row with
+   * an empty staff id is an open posting: it marks the day as scheduled and
+   * the usual DSP for that block still owes the note until someone takes it.
+   * An empty list means the house has no schedule, so every assigned DSP owes notes.
    */
   scheduledShifts?: Array<{
     id: string;
@@ -547,20 +568,75 @@ function rangesOverlap(start: number, end: number, blockStart: number, blockEnd:
   return start < blockEnd && blockStart < end;
 }
 
+/**
+ * The assigned DSP who owes an open block once the house has published a week.
+ * Day, evening, and overnight walk the roster in name order and wrap.
+ */
+export function usualOwnerForBlock(
+  writers: { userId: string; name: string }[],
+  blockId: ShiftBlockId,
+): { userId: string; name: string } | null {
+  if (writers.length === 0) return null;
+  const index = blockId === "day" ? 0 : blockId === "evening" ? 1 : 2;
+  return writers[index % writers.length] ?? writers[0];
+}
+
+/** True when the spans together cover the whole block. A partial shift does not. */
+export function blockFullyCovered(
+  spans: Array<{ start: number; end: number }>,
+  blockStart: number,
+  blockEnd: number,
+): boolean {
+  const pieces = spans
+    .filter((span) => span.end > blockStart && span.start < blockEnd)
+    .map((span) => [Math.max(span.start, blockStart), Math.min(span.end, blockEnd)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  let cursor = blockStart;
+  for (const [start, end] of pieces) {
+    if (start > cursor) return false;
+    cursor = Math.max(cursor, end);
+    if (cursor >= blockEnd) return true;
+  }
+  return cursor >= blockEnd;
+}
+
 function writersForBlock(
   input: ShiftNoteDetectorInput,
   block: ShiftBlockDef,
 ): Array<{ userId: string; name: string; shiftId: string | null }> {
   const scheduled = input.scheduledShifts ?? [];
-  if (scheduled.length === 0) {
-    return input.requiredWriters.map((writer) => ({ userId: writer.userId, name: writer.name, shiftId: null }));
-  }
   const day = input.serviceDate.slice(0, 10);
-  return scheduled.flatMap((shift) => {
+  const covering = scheduled.flatMap((shift) => {
+    if (!shift.staffUserId) return [];
     const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, day);
     if (!span || !rangesOverlap(span.start, span.end, block.startMin, block.endMin)) return [];
-    return [{ userId: shift.staffUserId, name: shift.staffName, shiftId: shift.id }];
+    return [{ userId: shift.staffUserId, name: shift.staffName, shiftId: shift.id, start: span.start, end: span.end }];
   });
+  const dayHasSchedule = scheduled.some((shift) => {
+    const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, day);
+    return Boolean(span && span.start < 1440 && span.end > 0);
+  });
+  const owner = usualOwnerForBlock(input.requiredWriters, block.id);
+  const unique = covering.filter((writer, index) => covering.findIndex((row) => row.userId === writer.userId) === index);
+  if (unique.length > 0 && blockFullyCovered(unique, block.startMin, block.endMin)) {
+    return unique.map(({ userId, name, shiftId }) => ({ userId, name, shiftId }));
+  }
+  if (unique.length > 0) {
+    const writers: Array<{ userId: string; name: string; shiftId: string | null }> = unique.map(
+      ({ userId, name, shiftId }) => ({ userId, name, shiftId }),
+    );
+    const gapOwner = owner && writers.some((writer) => writer.userId === owner.userId)
+      ? input.requiredWriters.find((writer) => writer.userId !== owner.userId) ?? null
+      : owner;
+    if (gapOwner && !writers.some((writer) => writer.userId === gapOwner.userId)) {
+      writers.push({ userId: gapOwner.userId, name: gapOwner.name, shiftId: null });
+    }
+    return writers;
+  }
+  // A published week names one person for the open block. An empty week stays
+  // with every assigned DSP, which is how the demo gap is still Alex's.
+  if (dayHasSchedule && owner) return [{ userId: owner.userId, name: owner.name, shiftId: null }];
+  return input.requiredWriters.map((writer) => ({ userId: writer.userId, name: writer.name, shiftId: null }));
 }
 
 /**
@@ -619,9 +695,27 @@ export function computeShiftNoteDueItems(
       const rangeLabel = remainder
         .map(([s, e]) => formatRange(s, e))
         .join(", ");
-      if (blockStillInGrace(day, def, input.now, input.graceMinutes ?? 0, input.timeZone)) continue;
+      const scheduled = input.scheduledShifts ?? [];
       const writers = writersForBlock(input, def);
+      const coveredBySchedule = writers.some((writer) => writer.shiftId);
+      if (!coveredBySchedule && blockStillInGrace(day, def, input.now, input.graceMinutes ?? 0, input.timeZone)) continue;
       for (const writer of writers) {
+        if (writer.shiftId) {
+          const shift = scheduled.find((row) => row.id === writer.shiftId);
+          if (
+            shift &&
+            shiftStillInGrace(
+              shift.startsAt,
+              shift.endsAt,
+              day,
+              input.now,
+              input.graceMinutes ?? 0,
+              input.timeZone,
+            )
+          ) {
+            continue;
+          }
+        }
         const covered = input.notes.some(
           (n) =>
             n.individualId === person.id &&
@@ -629,7 +723,7 @@ export function computeShiftNoteDueItems(
             (writer.shiftId
               ? n.hrShiftId === writer.shiftId ||
                 (!n.hrShiftId && n.staffUserId === writer.userId && n.blockId === blockId)
-              : n.staffUserId === writer.userId && n.blockId === blockId),
+              : !n.hrShiftId && n.staffUserId === writer.userId && n.blockId === blockId),
         );
         if (covered) continue;
         items.push({
