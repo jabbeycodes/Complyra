@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(32);
+select plan(41);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -122,6 +122,29 @@ select throws_ok($$insert into health_track_entries(agency_id,individual_id,kind
   '42501', null, 'A nurse cannot add health entries at a home they are not assigned to');
 select is((select count(*)::int from ger_reports where individual_id='e2700000-0000-0000-0000-000000000001'),1,
   'A nurse reads event reports agency-wide');
+
+-- ── Nurse cross-home scope, behavior + health entries (adjudication of the
+--    PR #117 re-review dispute): UPDATE is agency-wide for nurses, while
+--    INSERT and DELETE stay limited to Individuals at their own sites ──
+select lives_ok($$update behavior_entries set outcome='De-escalated after nurse review' where id='f2700000-0000-0000-0000-000000000002'$$,
+  'A nurse update of a behavior entry at another home runs');
+select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002' and outcome='De-escalated after nurse review'),1,
+  'A nurse can update a behavior entry at a home they are not assigned to');
+select lives_ok($$update health_track_entries set note='Reviewed by nurse' where id='f2700000-0000-0000-0000-000000000003'$$,
+  'A nurse update of a health entry at another home runs');
+select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003' and note='Reviewed by nurse'),1,
+  'A nurse can update a health entry at a home they are not assigned to');
+select throws_ok($$insert into behavior_entries(agency_id,individual_id,occurred_on,behavior,recorded_by_user_id)
+  values ('a2700000-0000-0000-0000-000000000001','e2700000-0000-0000-0000-000000000002','2026-10-26','Nurse entry','d2700000-0000-0000-0000-000000000004')$$,
+  '42501', null, 'A nurse cannot add behavior entries at a home they are not assigned to');
+select lives_ok($$delete from behavior_entries where id='f2700000-0000-0000-0000-000000000002'$$,
+  'A nurse delete of a behavior entry at another home runs but must touch no row');
+select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002'),1,
+  'A nurse cannot delete a behavior entry at a home they are not assigned to');
+select lives_ok($$delete from health_track_entries where id='f2700000-0000-0000-0000-000000000003'$$,
+  'A nurse delete of a health entry at another home runs but must touch no row');
+select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003'),1,
+  'A nurse cannot delete a health entry at a home they are not assigned to');
 
 -- ── Behavior plans are manager-owned; auditors are read-only ──
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2700000-0000-0000-0000-000000000001"}',true);
