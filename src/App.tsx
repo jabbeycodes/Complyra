@@ -1175,6 +1175,13 @@ export default function App() {
                       </div>
                       <span className="muted">{visibleStaff.length} team members</span>
                     </div>
+                    {visibleStaff.length === 0 ? (
+                      <Empty
+                        title="No matching staff"
+                        text="No team members match your search. Try a different name or clear the search."
+                        mark="quiet"
+                      />
+                    ) : (
                     <div className="table-scroll">
                       <table>
                         <thead>
@@ -1224,26 +1231,8 @@ export default function App() {
                                     ).length
                                   }
                                 </td>
-                                {canAssign && (
-                                  <td>
-                                    <AssignRoleControl
-                                      userId={s.id}
-                                      roleKey={s.roleKey}
-                                      siteId={s.siteId}
-                                      expiresOn={s.expiresOn}
-                                      onAssigned={notify}
-                                    />
-                                  </td>
-                                )}
-                                {canResetPassword && (
-                                  <td>
-                                    <ResetPasswordControl
-                                      userId={s.id}
-                                      name={s.name}
-                                      onReset={notify}
-                                    />
-                                  </td>
-                                )}
+                                {/* Body cells must follow the header order:
+                                    Certificates, Assign role, Password. */}
                                 {/* LIFEPATH-P4 (certificates) */}
                                 {canViewCerts && (
                                   <td>
@@ -1267,6 +1256,26 @@ export default function App() {
                                     )}
                                   </td>
                                 )}
+                                {canAssign && (
+                                  <td>
+                                    <AssignRoleControl
+                                      userId={s.id}
+                                      roleKey={s.roleKey}
+                                      siteId={s.siteId}
+                                      expiresOn={s.expiresOn}
+                                      onAssigned={notify}
+                                    />
+                                  </td>
+                                )}
+                                {canResetPassword && (
+                                  <td>
+                                    <ResetPasswordControl
+                                      userId={s.id}
+                                      name={s.name}
+                                      onReset={notify}
+                                    />
+                                  </td>
+                                )}
                                 <td>
                                   <button
                                     className="text-button"
@@ -1283,6 +1292,7 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+                    )}
                   </section>
                   {/* LIFEPATH-P4 (certificates): staff-profile certificates section */}
                   {certStaff && (
