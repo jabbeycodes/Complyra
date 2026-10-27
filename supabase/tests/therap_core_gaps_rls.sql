@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(41);
+select plan(66);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -158,6 +158,152 @@ select lives_ok($$update ger_reports set description='Auditor edit' where id='f2
   'Auditor update runs without error but must touch no row');
 select is((select count(*)::int from ger_reports where id='f2700000-0000-0000-0000-000000000001' and description='Auditor edit'),0,
   'An auditor cannot change an event report');
+
+-- ── PM permission backfill: the DPM merge must not strip the batch-1 keys ──
+-- The DPM-merge migration (20260916060000) runs after the permission seed
+-- and replaces the program_manager template/matrix rows with its frozen
+-- 2026-09-16 pack, which predates the six batch-1 keys. The follow-on
+-- backfill migration (20261027201000) must restore them at the template
+-- level so every agency provisioned from the templates carries them.
+reset role;
+
+select is((select permissions->'ger.create' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries ger.create after the full chain');
+select is((select permissions->'ger.review' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries ger.review after the full chain');
+select is((select permissions->'ger.resolve' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries ger.resolve after the full chain');
+select is((select permissions->'behavior.record' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries behavior.record after the full chain');
+select is((select permissions->'behavior.plan' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries behavior.plan after the full chain');
+select is((select permissions->'health.record' from public.role_templates where key='program_manager'),'true'::jsonb,
+  'Program Manager template carries health.record after the full chain');
+
+select is((select permissions->'ger.create' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries ger.create after the full chain');
+select is((select permissions->'ger.review' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries ger.review after the full chain');
+select is((select permissions->'ger.resolve' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries ger.resolve after the full chain');
+select is((select permissions->'behavior.record' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries behavior.record after the full chain');
+select is((select permissions->'behavior.plan' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries behavior.plan after the full chain');
+select is((select permissions->'health.record' from public.role_permission_matrix where role_key='program_manager'),'true'::jsonb,
+  'Program Manager permission matrix carries health.record after the full chain');
+
+select is((select (permissions->>'ger.create')::boolean and (permissions->>'ger.review')::boolean
+    and (permissions->>'ger.resolve')::boolean and (permissions->>'behavior.record')::boolean
+    and (permissions->>'behavior.plan')::boolean and (permissions->>'health.record')::boolean
+    from public.role_templates where key='house_manager'), true,
+  'House Manager template keeps all six batch-1 keys enabled');
+
+-- Provisioning: a fresh agency copies the cured templates.
+insert into agencies (id, name, agency_code, state_code, status) values
+ ('a2700000-0000-0000-0000-000000000099','Backfill agency','PMBK-MO','MO','active');
+select public.provision_agency_roles('a2700000-0000-0000-0000-000000000099');
+
+select is((select permissions->'ger.create' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries ger.create');
+select is((select permissions->'ger.review' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries ger.review');
+select is((select permissions->'ger.resolve' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries ger.resolve');
+select is((select permissions->'behavior.record' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries behavior.record');
+select is((select permissions->'behavior.plan' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries behavior.plan');
+select is((select permissions->'health.record' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'),'true'::jsonb,
+  'A newly provisioned agency''s Program Manager role carries health.record');
+
+select is((select (permissions->>'ger.create')::boolean and (permissions->>'ger.review')::boolean
+    and (permissions->>'ger.resolve')::boolean and (permissions->>'behavior.record')::boolean
+    and (permissions->>'behavior.plan')::boolean and (permissions->>'health.record')::boolean
+    from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='house_manager'), true,
+  'A newly provisioned agency''s House Manager role keeps all six keys enabled');
+select is((select (permissions->>'ger.create')::boolean and not (permissions->>'ger.review')::boolean
+    and not (permissions->>'ger.resolve')::boolean and (permissions->>'behavior.record')::boolean
+    and not (permissions->>'behavior.plan')::boolean and (permissions->>'health.record')::boolean
+    from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='dsp'), true,
+  'A newly provisioned agency''s DSP role carries the designed batch-1 values');
+select is((select count(*)::int from public.agency_roles
+    where agency_id='a2700000-0000-0000-0000-000000000099' and template_key in ('auditor','hr')
+      and ((permissions->>'ger.create')::boolean or (permissions->>'ger.review')::boolean
+        or (permissions->>'ger.resolve')::boolean or (permissions->>'behavior.record')::boolean
+        or (permissions->>'behavior.plan')::boolean or (permissions->>'health.record')::boolean)), 0,
+  'Auditor and HR roles hold none of the six batch-1 keys');
+
+-- Guard: recreate the pre-fix state on this agency's rows, with one
+-- explicit agency choice that must win, then re-apply the backfill's
+-- agency_roles updates verbatim — absent keys are filled with the
+-- canonical values, the explicit choice is left untouched.
+update public.agency_roles
+set permissions = permissions - 'ger.create' - 'ger.review' - 'ger.resolve'
+  - 'behavior.record' - 'behavior.plan' - 'health.record'
+where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager';
+update public.agency_roles
+set permissions = (permissions - 'ger.resolve') || '{"ger.review": true}'::jsonb
+where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='dsp';
+
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('ger.create', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', true), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'ger.create');
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('ger.review', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', false), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'ger.review');
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('ger.resolve', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', false), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'ger.resolve');
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('behavior.record', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', true), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'behavior.record');
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('behavior.plan', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', false), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'behavior.plan');
+update public.agency_roles a
+set permissions = a.permissions || jsonb_build_object('health.record', d.enabled)
+from (values
+  ('administrator', true), ('compliance_admin', true),
+  ('program_manager', true), ('house_manager', true), ('nurse', true),
+  ('dsp', true), ('hr', false), ('auditor', false)
+) as d(role_key, enabled)
+where a.template_key = d.role_key and not (a.permissions ? 'health.record');
+
+select is((select (permissions->>'ger.create')::boolean and (permissions->>'ger.review')::boolean
+    and (permissions->>'ger.resolve')::boolean and (permissions->>'behavior.record')::boolean
+    and (permissions->>'behavior.plan')::boolean and (permissions->>'health.record')::boolean
+    from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='program_manager'), true,
+  'Re-applying the backfill restores all six keys on a stripped Program Manager role row');
+select is((select permissions->'ger.review' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='dsp'),'true'::jsonb,
+  'An explicit agency choice (DSP ger.review enabled) survives the backfill');
+select is((select permissions->'ger.resolve' from public.agency_roles where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='dsp'),'false'::jsonb,
+  'An absent key (DSP ger.resolve) is filled with its canonical value');
 
 select * from finish();
 rollback;
