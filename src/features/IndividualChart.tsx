@@ -1,4 +1,5 @@
 import Consents from "./consents/Consents";
+import CareScreeningSection from "./CareScreeningSection";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -331,9 +332,10 @@ export default function IndividualChart({
       )}
 
       <div className="chart-grid">
+        <CareScreeningSection key={individualId} individualId={individualId} />
         {stack.carePlan && (
           <section className="chart-widget" aria-labelledby="care-plan-heading">
-            <h2 id="care-plan-heading">Care plan</h2>
+            <h2 id="care-plan-heading">Care plan document</h2>
             <p>{stack.carePlan.title}</p>
             <p>
               {stack.carePlan.versionLabel ? `${stack.carePlan.versionLabel} · ` : ""}

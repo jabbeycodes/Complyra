@@ -21,6 +21,9 @@ export type NotificationType =
   | "consent.packet_outstanding"
   | "consent.missing"
   | "consent.expiring"
+  | "care.review_overdue"
+  | "screening.due_soon"
+  | "screening.overdue"
   | "training.assigned"
   | "training.due_soon"
   | "training.overdue"
@@ -72,6 +75,7 @@ export type NotificationType =
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "consent.packet_signed", "consent.packet_outstanding", "consent.missing", "consent.expiring",
+  "care.review_overdue", "screening.due_soon", "screening.overdue",
   "training.assigned",
   "training.due_soon",
   "training.overdue",
@@ -329,6 +333,9 @@ export const NOTIFICATION_META: Record<
   "hr.open_shift_bid": { status: "pending", label: "Bid on an open shift" },
   "hr.open_shift_picked_up": { status: "compliant", label: "Open shift picked up" },
   "hr.open_shift_approved": { status: "compliant", label: "Open shift approved" },
+  "care.review_overdue": { status: "expired", label: "Care plan review overdue" },
+  "screening.due_soon": { status: "expiring", label: "Health screening due soon" },
+  "screening.overdue": { status: "expired", label: "Health screening overdue" },
   "hr.open_shift_denied": { status: "expired", label: "Open shift not approved" },
   "delegation.review_ready": { status: "pending", label: "Delegation ready for review" },
   "delegation.published": { status: "pending", label: "Delegation training published" },

@@ -95,6 +95,7 @@ export interface LocalDatabase {
   consentTypes?: Record<string, import("./consents").ConsentType[]>;
   consents?: import("./consents").ConsentRecord[];
   consentRevocations?: import("./consents").ConsentRevocation[];
+  careScreening?: import("./careScreening").CareScreeningData;
   agencies: Agency[];
   programs: Program[];
   sites: SiteRecord[];

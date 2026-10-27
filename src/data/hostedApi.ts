@@ -1,5 +1,6 @@
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
@@ -489,6 +490,22 @@ export function edgeErrorFromBody(
 }
 
 export class HostedApi implements ComplyraApi {
+  async getCareScreeningData(individualId?: string): Promise<CareScreeningData> {
+    const session = await this.requireSession();
+    const {data, error} = await this.client.rpc('get_care_screening_data', {p_agency_id: session.agencyId, p_individual_id: individualId ?? null});
+    throwIf(error, 'Could not load care records.');
+    return data as CareScreeningData;
+  }
+  async mutateCareScreening(input: CareAction) {
+    const session = await this.requireSession();
+    const {error} = await this.client.rpc('mutate_care_screening', {p_agency_id: session.agencyId, p_input: input});
+    throwIf(error, 'Could not save care records.');
+  }
+  async sweepCareScreening() {
+    const session = await this.requireSession();
+    const {error} = await this.client.rpc('sweep_care_screening', {p_agency_id: session.agencyId});
+    throwIf(error, 'Could not refresh care reminders.');
+  }
   constructor(private readonly client: SupabaseClient) {}
 
   // ── LIFE EVENTS — per-Individual timeline (hosted) ────────────────────
