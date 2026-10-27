@@ -10,10 +10,10 @@
 }
 
 .checklist-item {
-  border: 1px solid #e4ddd2;
+  border: 1px solid var(--color-h-e4ddd2);
   border-radius: 12px;
   padding: 12px 14px;
-  background: #fffdf9;
+  background: var(--color-h-fffdf9);
 }
 
 .checklist-item-row {
@@ -25,7 +25,7 @@
 .checklist-number {
   flex: 0 0 28px;
   font-weight: 700;
-  color: #5f5145;
+  color: var(--color-h-5f5145);
 }
 
 .checklist-prompt {
@@ -40,8 +40,8 @@
   margin-left: 8px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #eef3e6;
-  color: #2f462e;
+  background: var(--color-h-eef3e6);
+  color: var(--color-h-2f462e);
   font-size: 11px;
   font-weight: 700;
   vertical-align: middle;
@@ -49,7 +49,7 @@
 
 .answer-segment {
   display: inline-flex;
-  border: 1px solid #d8cfc0;
+  border: 1px solid var(--color-h-d8cfc0);
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
@@ -57,21 +57,21 @@
 
 .answer-option {
   border: 0;
-  background: #fff;
+  background: var(--color-h-fff);
   padding: 7px 14px;
   font-size: 13px;
   font-weight: 700;
-  color: #5f5145;
+  color: var(--color-h-5f5145);
   cursor: pointer;
 }
 
 .answer-option + .answer-option {
-  border-left: 1px solid #d8cfc0;
+  border-left: 1px solid var(--color-h-d8cfc0);
 }
 
 .answer-option.selected {
-  background: #2f462e;
-  color: #fff;
+  background: var(--color-h-2f462e);
+  color: var(--color-h-fff);
 }
 
 .answer-option:disabled {
@@ -88,14 +88,14 @@
   margin: 8px 0 0 38px;
   font-size: 13px;
   font-style: italic;
-  color: #5f5145;
+  color: var(--color-h-5f5145);
 }
 
 .service-log-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border: 1px dashed #d8cfc0;
+  border: 1px dashed var(--color-h-d8cfc0);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 16px;
@@ -114,7 +114,7 @@
   display: flex;
   align-items: baseline;
   gap: 10px;
-  border-bottom: 1px solid #efe9dd;
+  border-bottom: 1px solid var(--color-h-efe9dd);
   padding-bottom: 8px;
 }
 
@@ -125,7 +125,7 @@
 
 .attestation {
   font-style: italic;
-  border-left: 3px solid #2f462e;
+  border-left: 3px solid var(--color-h-2f462e);
   padding-left: 12px;
   margin: 0 0 16px;
 }
@@ -154,7 +154,7 @@
 }
 
 .muted {
-  color: #5f5145;
+  color: var(--color-h-5f5145);
   font-size: 13px;
 }
 
@@ -174,11 +174,11 @@
   min-height: 44px;
   padding: 12px 16px;
   margin: 0 0 16px;
-  background: #dafbe1;
-  border: 1px solid #9ed9a8;
-  border-left: 5px solid #1a7f37;
+  background: var(--color-h-dafbe1);
+  border: 1px solid var(--color-h-9ed9a8);
+  border-left: 5px solid var(--color-h-1a7f37);
   border-radius: 8px;
-  color: #1a5c28;
+  color: var(--color-h-1a5c28);
   font-size: 14px;
   font-weight: 500;
   line-height: 1.4;

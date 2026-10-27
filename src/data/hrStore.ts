@@ -17,6 +17,7 @@
  * guards) come from ./hr, owned by the domain workstream.
  */
 import { scheduledStartIso } from "./lateness";
+import { claimedCoverageShifts } from "./localSchedule";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -3077,9 +3078,32 @@ class LocalHrStore implements HrStore {
     return result;
   }
 
+  /** Every bucket for this agency, so a pickup saved by one person shows on the house board. */
+  private agencyShifts(): HrShift[] {
+    const own = this.load().shifts;
+    const byId = new Map<string, HrShift>();
+    if (this.storageAvailable()) {
+      try {
+        const raw = localStorage.getItem(LOCAL_KEY);
+        const root = (raw ? JSON.parse(raw) : {}) as LocalRoot;
+        for (const bucket of Object.values(root[this.agencyId] ?? {})) {
+          for (const shift of bucket.shifts ?? []) byId.set(shift.id, shift);
+        }
+      } catch {
+        // Keep the signed-in person's copy.
+      }
+    }
+    for (const shift of own) byId.set(shift.id, shift);
+    for (const shift of claimedCoverageShifts(this.agencyId)) {
+      if (!shift.id || !shift.startsAt || !shift.endsAt || byId.has(shift.id)) continue;
+      byId.set(shift.id, shift as HrShift);
+    }
+    return [...byId.values()];
+  }
+
   async listShifts(fromIso: string, toIso: string, siteId?: string): Promise<HrShift[]> {
-    return this.load()
-      .shifts.filter(
+    return this.agencyShifts()
+      .filter(
         (s) =>
           s.startsAt >= fromIso &&
           s.endsAt <= toIso &&

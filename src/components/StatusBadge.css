@@ -5,13 +5,13 @@
  * only — no gradients, no glow, modest 6px radius.
  *
  * WCAG AA contrast (normal text, >= 4.5:1), text on background:
- *  compliant  #1a7f37 on #dafbe1  (GitHub "done" pair,        ~4.6:1)
- *  expiring   #9a6700 on #fff8c5  (GitHub "attention" pair,    ~5.2:1)
- *  expired    #a40e26 on #ffebe9  (GitHub "danger" pair,       ~7.7:1)
- *  missing    #59636e on #f6f8fa  (GitHub neutral pair,        ~4.7:1)
- *  late       #8a3a00 on #ffe3c2  (dark red-orange on light,   ~6.3:1)
- *  pending    #0969da on #ddf4ff  (GitHub "accent" pair,       ~4.8:1)
- *  attention  #6d28d9 on #ede9fe  (dark violet on light,       ~6.0:1)
+ *  compliant  var(--color-h-1a7f37) on var(--color-h-dafbe1)  (GitHub "done" pair,        ~4.6:1)
+ *  expiring   var(--color-h-9a6700) on var(--color-h-fff8c5)  (GitHub "attention" pair,    ~5.2:1)
+ *  expired    var(--color-h-a40e26) on var(--color-h-ffebe9)  (GitHub "danger" pair,       ~7.7:1)
+ *  missing    var(--color-h-59636e) on var(--color-h-f6f8fa)  (GitHub neutral pair,        ~4.7:1)
+ *  late       var(--color-h-8a3a00) on var(--color-h-ffe3c2)  (dark red-orange on light,   ~6.3:1)
+ *  pending    var(--color-h-0969da) on var(--color-h-ddf4ff)  (GitHub "accent" pair,       ~4.8:1)
+ *  attention  var(--color-h-6d28d9) on var(--color-h-ede9fe)  (dark violet on light,       ~6.0:1)
  * Ratios are approximate, computed from relative luminance of the
  * 6-digit hex values; all are comfortably above the 4.5:1 floor.
  * Icon glyphs inherit the same text color, so they inherit the ratio.
@@ -48,53 +48,53 @@
 
 /* Compliant — green + check */
 .status-badge--compliant {
-  color: #1a7f37;
-  background-color: #dafbe1;
-  border-color: #9edcb0;
+  color: var(--color-h-1a7f37);
+  background-color: var(--color-h-dafbe1);
+  border-color: var(--color-h-9edcb0);
 }
 
 /* Expiring soon — amber + solid triangle */
 .status-badge--expiring {
-  color: #9a6700;
-  background-color: #fff8c5;
-  border-color: #e8cf7a;
+  color: var(--color-h-9a6700);
+  background-color: var(--color-h-fff8c5);
+  border-color: var(--color-h-e8cf7a);
 }
 
 /* Expired — dark red + X. Thicker border is an extra non-color cue
    (a dead/stopped item reads differently even in grayscale). */
 .status-badge--expired {
-  color: #a40e26;
-  background-color: #ffebe9;
-  border-color: #a40e26;
+  color: var(--color-h-a40e26);
+  background-color: var(--color-h-ffebe9);
+  border-color: var(--color-h-a40e26);
   border-width: 2px;
 }
 
 /* Missing — gray + question mark */
 .status-badge--missing {
-  color: #59636e;
-  background-color: #f6f8fa;
-  border-color: #c3cbd4;
+  color: var(--color-h-59636e);
+  background-color: var(--color-h-f6f8fa);
+  border-color: var(--color-h-c3cbd4);
 }
 
 /* Late — red-orange + clock */
 .status-badge--late {
-  color: #8a3a00;
-  background-color: #ffe3c2;
-  border-color: #e5a96f;
+  color: var(--color-h-8a3a00);
+  background-color: var(--color-h-ffe3c2);
+  border-color: var(--color-h-e5a96f);
 }
 
 /* Pending — blue + ellipsis (waiting) */
 .status-badge--pending {
-  color: #0969da;
-  background-color: #ddf4ff;
-  border-color: #9ecbff;
+  color: var(--color-h-0969da);
+  background-color: var(--color-h-ddf4ff);
+  border-color: var(--color-h-9ecbff);
 }
 
 /* Needs attention — violet + exclamation */
 .status-badge--attention {
-  color: #6d28d9;
-  background-color: #ede9fe;
-  border-color: #c4b5fd;
+  color: var(--color-h-6d28d9);
+  background-color: var(--color-h-ede9fe);
+  border-color: var(--color-h-c4b5fd);
 }
 
 @media (prefers-contrast: more) {

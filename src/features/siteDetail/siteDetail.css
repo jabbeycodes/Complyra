@@ -13,7 +13,7 @@
   gap: 6px;
   min-height: 44px;
   padding: 8px 2px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
   font-size: 14px;
 }
 
@@ -83,7 +83,7 @@
 .site-hero-stat strong {
   font-size: 26px;
   line-height: 1;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
 }
 
 .site-hero-score small {
@@ -93,7 +93,7 @@
 .site-hero-score span,
 .site-hero-stat span {
   font-size: 12px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .site-hero-people {
@@ -120,7 +120,7 @@
   width: 64px;
   height: 64px;
   font-size: 18px;
-  box-shadow: 0 0 0 3px #f4efe4;
+  box-shadow: 0 0 0 3px var(--color-h-f4efe4);
 }
 
 .site-hero-person span {
@@ -133,7 +133,7 @@
 
 .site-hero-empty {
   margin: 0;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
   font-size: 13px;
 }
 
@@ -155,7 +155,7 @@
   flex-wrap: wrap;
 }
 .site-hero-address {
-  color: #6b6156;
+  color: var(--color-h-6b6156);
   font-size: 14px;
   font-weight: 400;
   line-height: 1.4;
@@ -166,7 +166,7 @@
   overflow-wrap: anywhere;
 }
 .site-hero-phone {
-  color: #6b6156;
+  color: var(--color-h-6b6156);
   font-size: 14px;
 }
 
@@ -175,8 +175,8 @@
   top: 0;
   z-index: 8;
   padding: 8px 0;
-  background: #e8dcc8;
-  box-shadow: 0 1px 0 #d2c2a8;
+  background: var(--color-h-e8dcc8);
+  box-shadow: 0 1px 0 var(--color-h-d2c2a8);
 }
 
 .tabs.site-detail-tabs {
@@ -191,7 +191,7 @@
   border-bottom: 0;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  mask-image: linear-gradient(to right, #000 88%, transparent);
+  mask-image: linear-gradient(to right, var(--color-h-000) 88%, transparent);
 }
 
 .tabs.site-detail-tabs::-webkit-scrollbar {
@@ -208,7 +208,7 @@
   border-bottom: 0;
   border-radius: 10px;
   font-size: 14px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
   background: transparent;
   /* Global buttons fade background 160ms — that left the previous tab
      looking selected. Selected must snap moss immediately. */
@@ -216,25 +216,25 @@
 }
 
 .tabs.site-detail-tabs > button:hover:not([aria-selected="true"]) {
-  background: #f4efe4;
+  background: var(--color-h-f4efe4);
 }
 
 .tabs.site-detail-tabs > button.selected,
 .tabs.site-detail-tabs > button[aria-selected="true"] {
-  color: #f4efe4;
-  background: #3f5c3b;
+  color: var(--color-h-f4efe4);
+  background: var(--color-h-3f5c3b);
   border-bottom-color: transparent;
   font-weight: 650;
 }
 
 .tabs.site-detail-tabs > button:focus-visible {
-  outline: 2px solid #3f5c3b;
+  outline: 2px solid var(--color-h-3f5c3b);
   outline-offset: 2px;
 }
 
 .tabs.site-detail-tabs > button.selected:focus-visible,
 .tabs.site-detail-tabs > button[aria-selected="true"]:focus-visible {
-  outline-color: #2f4630;
+  outline-color: var(--color-h-2f4630);
 }
 
 /* Panel children already use --panel-inline. Do not pad the card again. */
@@ -260,12 +260,12 @@
 .site-kpi-grid strong {
   font-size: 26px;
   line-height: 1;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
 }
 
 .site-kpi-grid span {
   font-size: 13px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .site-detail-panel .person-card {
@@ -275,13 +275,13 @@
 
 .site-detail-panel .person-card h2 {
   margin-top: 12px;
-  color: #2f4630;
+  color: var(--color-h-2f4630);
 }
 
 .site-person-open {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #6b6156;
+  color: var(--color-h-6b6156);
 }
 
 .site-panel-actions {
@@ -328,12 +328,12 @@
 
 .stat-card strong {
   font-size: 26px;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
 }
 
 .stat-card span {
   font-size: 13px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .fact-list {
@@ -354,7 +354,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #8a7f72;
+  color: var(--color-h-8a7f72);
 }
 
 .fact-list dd {
@@ -383,7 +383,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid #eae8e4;
+  border-bottom: 1px solid var(--color-h-eae8e4);
 }
 
 .record-row:last-child {
@@ -432,7 +432,7 @@
 
 .score-figure {
   font-size: 20px;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
   white-space: nowrap;
 }
 
@@ -461,7 +461,7 @@
 }
 
 .site-detail-error {
-  border-left: 4px solid #8b5e3c;
+  border-left: 4px solid var(--color-h-8b5e3c);
 }
 
 .site-detail-panel .panel + .panel {
@@ -506,7 +506,7 @@
     -webkit-overflow-scrolling: touch;
     padding-bottom: 4px;
     scroll-padding-inline: 8px;
-    mask-image: linear-gradient(to right, #000 82%, transparent);
+    mask-image: linear-gradient(to right, var(--color-h-000) 82%, transparent);
   }
 
   .tabs.site-detail-tabs > button {
@@ -559,7 +559,7 @@
 
   .site-hero-people {
     gap: 14px;
-    mask-image: linear-gradient(to right, #000 88%, transparent);
+    mask-image: linear-gradient(to right, var(--color-h-000) 88%, transparent);
   }
 }
 
@@ -581,26 +581,26 @@
   font: inherit;
   color: inherit;
   cursor: pointer;
-  border: 1px solid #d9d2c7;
+  border: 1px solid var(--color-h-d9d2c7);
   border-radius: 10px;
-  background: #fffdf9;
+  background: var(--color-h-fffdf9);
   padding: 14px 14px 12px;
 }
 
 .individual-highlight-card:hover {
-  border-color: #b7ad9d;
-  background: #fffbf2;
+  border-color: var(--color-h-b7ad9d);
+  background: var(--color-h-fffbf2);
 }
 
 .individual-highlight-card:focus-visible {
-  outline: 2px solid #3f5c3b;
+  outline: 2px solid var(--color-h-3f5c3b);
   outline-offset: 2px;
 }
 
 .individual-highlight-open {
   font-size: 12px;
   font-weight: 600;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
   white-space: nowrap;
 }
 
@@ -608,7 +608,7 @@
   margin: 8px 0 0;
   font-size: 12px;
   font-weight: 600;
-  color: #3f5c3b;
+  color: var(--color-h-3f5c3b);
 }
 
 .individual-highlight-top {
@@ -621,7 +621,7 @@
 .individual-highlight-top h3 {
   margin: 0;
   font-size: 15px;
-  color: #2f4630;
+  color: var(--color-h-2f4630);
   flex: 1;
   min-width: 0;
 }
@@ -644,22 +644,22 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #8a7f72;
+  color: var(--color-h-8a7f72);
 }
 
 .individual-highlight-row dd {
   margin: 0;
   font-size: 14px;
-  color: #2e2a24;
+  color: var(--color-h-2e2a24);
 }
 
 /* Safety-critical rows (allergies) get a solid banner: bold text plus a
    left border and background so the signal is never color-only. */
 .individual-highlight-row.is-alert dd {
-  color: #8f1d1d;
+  color: var(--color-h-8f1d1d);
   font-weight: 700;
-  background: #fdecec;
-  border-left: 4px solid #8f1d1d;
+  background: var(--color-h-fdecec);
+  border-left: 4px solid var(--color-h-8f1d1d);
   padding: 6px 8px;
   border-radius: 4px;
 }
@@ -679,14 +679,14 @@
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #6b5f52;
+  color: var(--color-h-6b5f52);
 }
 
 .drill-toolbar select {
   min-height: 40px;
   border-radius: 8px;
-  border: 1px solid #d8cfc2;
-  background: #fffdf9;
+  border: 1px solid var(--color-h-d8cfc2);
+  background: var(--color-h-fffdf9);
   padding: 0 8px;
   font: inherit;
   color: inherit;

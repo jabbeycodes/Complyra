@@ -1,0 +1,81 @@
+.coverage-board {
+  margin-bottom: 22px;
+}
+
+.coverage-toolbar,
+.coverage-presets,
+.coverage-draft-actions,
+.coverage-shift-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.coverage-toolbar {
+  margin-bottom: 12px;
+}
+
+.coverage-hours,
+.coverage-empty,
+.coverage-regular p {
+  color: var(--color-h-4a4036);
+}
+
+.coverage-week {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 8px;
+}
+
+.coverage-day {
+  border: 1px solid var(--color-h-eae8e4);
+  border-radius: 8px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.coverage-day h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.coverage-day .button {
+  width: 100%;
+  white-space: normal;
+}
+
+.coverage-shift {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.coverage-owed {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--color-h-4a4036);
+}
+
+.coverage-draft,
+.coverage-hour-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.coverage-hour-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.coverage-regular {
+  margin-top: 18px;
+}
+
+@media (max-width: 900px) {
+  .coverage-week,
+  .coverage-hour-grid {
+    grid-template-columns: 1fr;
+  }
+}

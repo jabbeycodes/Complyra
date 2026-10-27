@@ -19,10 +19,9 @@ import {
 } from "./rules";
 import { LocalRulesStore, type LocalRulesActor } from "./rulesStore";
 
-const migration = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "../../supabase/migrations/20260926120000_rule_settings.sql"),
-  "utf8",
-);
+const migrationDir = join(dirname(fileURLToPath(import.meta.url)), "../../supabase/migrations");
+const migration = readFileSync(join(migrationDir, "20260926120000_rule_settings.sql"), "utf8");
+const graceMigration = readFileSync(join(migrationDir, "20261025130000_note_grace_five_minutes.sql"), "utf8");
 
 interface SeedRow {
   key: string;
@@ -88,7 +87,13 @@ function row(partial: Partial<RuleValueRow> & Pick<RuleValueRow, "key" | "value"
 }
 
 test("the TypeScript catalog matches the SQL seed", () => {
-  const seeded = seedRows();
+  const seeded = seedRows().map((row) => {
+    if (row.key !== "documentation.note_grace_minutes") return row;
+    const help = graceMigration.match(/help = '([^']*(?:''[^']*)*)'/)?.[1]?.replace(/''/g, "'");
+    const nextDefault = graceMigration.match(new RegExp("platform_default = '(-?\\d+(?:\\.\\d+)?)'::jsonb"));
+    assert.ok(help && nextDefault, "the later migration sets the 5-minute note grace");
+    return { ...row, help, platformDefault: Number(nextDefault[1]) };
+  });
   assert.equal(seeded.length, RULE_CATALOG.length, "every catalog row is in the migration");
   for (const definition of RULE_CATALOG) {
     const sql = seeded.find((s) => s.key === definition.key);
@@ -158,7 +163,7 @@ test("an agency administrator cannot change a locked setting", async () => {
 test("operating rules use catalog defaults until an agency saves a value", () => {
   const defaults = operatingRulesFrom(null);
   assert.equal(defaults.medWindowBeforeMinutes, 60);
-  assert.equal(defaults.noteGraceMinutes, 30);
+  assert.equal(defaults.noteGraceMinutes, 5);
   assert.equal(defaults.blockEarlyRecording, true);
   assert.equal(defaults.delegationsExpire, false);
   const saved = operatingRulesFrom([

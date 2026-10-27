@@ -56,7 +56,7 @@ const def = (d: Omit<RuleDefinition, "siteAdjustable"> & { siteAdjustable?: bool
 });
 
 export const RULE_CATALOG: RuleDefinition[] = [
-  def({ key: "documentation.note_grace_minutes", category: "documentation", label: "Note grace after shift end", help: "Notes are due before the shift ends; this much grace before a late deduction.", valueType: "number", unit: "minutes", platformDefault: 30, min: 0, max: 240, defaultLock: "operator", sortOrder: 10 }),
+  def({ key: "documentation.note_grace_minutes", category: "documentation", label: "Note grace after shift end", help: "A missing Shift note is counted this many minutes after that person's shift ends.", valueType: "number", unit: "minutes", platformDefault: 5, min: 0, max: 240, defaultLock: "operator", sortOrder: 10 }),
   def({ key: "medication.window_before_minutes", category: "medication", label: "MAR window before the dose time", help: "A dose may be given this early.", valueType: "number", unit: "minutes", platformDefault: 60, min: 0, max: 180, defaultLock: "operator", sortOrder: 10 }),
   def({ key: "medication.window_after_minutes", category: "medication", label: "MAR window after the dose time", help: "A dose given within this is on time.", valueType: "number", unit: "minutes", platformDefault: 60, min: 0, max: 180, defaultLock: "operator", sortOrder: 20 }),
   def({ key: "medication.block_early_recording", category: "medication", label: "Block recording before the window", help: "Recording a dose earlier than the window is blocked.", valueType: "boolean", unit: "", platformDefault: true, defaultLock: "operator", sortOrder: 30 }),
@@ -250,7 +250,7 @@ export interface OperatingRules {
 }
 
 export const DEFAULT_OPERATING_RULES: OperatingRules = {
-  noteGraceMinutes: 30,
+  noteGraceMinutes: 5,
   medWindowBeforeMinutes: 60,
   medWindowAfterMinutes: 60,
   blockEarlyRecording: true,

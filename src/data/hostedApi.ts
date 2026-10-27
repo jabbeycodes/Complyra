@@ -1102,7 +1102,7 @@ export class HostedApi implements ComplyraApi {
           expiresOn: membership.expires_on
             ? String(membership.expires_on).slice(0, 10)
             : null,
-          hiredOn: null,
+          hiredOn: profile?.hiredOn ?? null,
         };
       }),
       requirements: requirements.map((row) => {
@@ -8754,6 +8754,25 @@ export class HostedApi implements ComplyraApi {
         startsAt: String(row.starts_at),
         endsAt: String(row.ends_at),
       }));
+      const { data: openRows } = await this.client
+        .from("hr_open_shifts")
+        .select("id, starts_at, ends_at, status, kind")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .eq("kind", "temporary")
+        .eq("status", "open")
+        .lt("starts_at", dayEnd)
+        .gt("ends_at", dayStart);
+      for (const row of openRows ?? []) {
+        if (!row.starts_at || !row.ends_at) continue;
+        scheduledShifts.push({
+          id: String(row.id),
+          staffUserId: "",
+          staffName: "Open",
+          startsAt: String(row.starts_at),
+          endsAt: String(row.ends_at),
+        });
+      }
       const { data: aloneRows } = await this.client
         .from("alone_time_windows")
         .select("*")
@@ -9034,12 +9053,14 @@ export class HostedApi implements ComplyraApi {
       throw new Error("Use an HH:MM dose time.");
     }
     const rules = await this.loadOperatingRules(session.agencyId);
+    const clock = dueItemClock();
     const early = marRecordingProblem({
       doseDate: input.doseDate,
       doseTime: input.doseTime,
-      now: new Date(),
+      now: clock.now,
       windowBeforeMinutes: rules.medWindowBeforeMinutes,
       blockEarly: rules.blockEarlyRecording,
+      timeZone: clock.timeZone,
     });
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
@@ -11010,6 +11031,7 @@ function mapProfile(row: Record<string, unknown>) {
     email: row.email as string,
     jobTitle: (row.job_title as string) ?? "DSP",
     username: (row.username as string) ?? "",
+    hiredOn: row.hired_on ? String(row.hired_on).slice(0, 10) : null,
   };
 }
 

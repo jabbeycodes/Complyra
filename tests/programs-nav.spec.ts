@@ -40,14 +40,14 @@ function shotPath(name: string) {
   return `${process.env.WALKTHROUGH_DIR || "/opt/cursor/artifacts/screenshots"}/${name}`;
 }
 
-test("sidebar group is PROGRAMS and the header chip says Programs", async ({
+test("sidebar group is Programs and the header chip says Programs", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await signIn(page);
 
   const programsLabel = page.locator(".sidebar .nav-label").first();
-  await expect(programsLabel).toHaveText("PROGRAMS");
+  await expect(programsLabel).toHaveText("Programs");
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
   await expect(page.locator(".breadcrumb")).toContainText("Programs");
   await expect(page.locator(".breadcrumb")).not.toContainText("Workspace");
@@ -71,7 +71,7 @@ test("sidebar group is PROGRAMS and the header chip says Programs", async ({
   await page.screenshot({ path: shotPath("site_detail_after_1280.png"), fullPage: false });
 });
 
-test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
+test("phone drawer shows Programs, not WORKSPACE", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   await page.addStyleTag({
@@ -79,7 +79,7 @@ test("phone drawer shows PROGRAMS, not WORKSPACE", async ({ page }) => {
   });
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.locator(".sidebar.mobile-open .nav-label").first()).toHaveText(
-    "PROGRAMS",
+    "Programs",
   );
   await expect(page.locator(".nav-label", { hasText: "WORKSPACE" })).toHaveCount(0);
   await expect(

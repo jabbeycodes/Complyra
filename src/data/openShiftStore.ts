@@ -22,6 +22,8 @@ import {
   type HrOpenShiftResponse,
   type OpenShiftInput,
 } from "./openShifts";
+import { createHrStore } from "./hrStore";
+import { rememberClaimedShift } from "./localSchedule";
 import { DEFAULT_OVERTIME_LINES, overtimeLinesFrom, type OvertimeLines } from "./rules";
 import { LocalRulesStore } from "./rulesStore";
 
@@ -291,7 +293,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
     });
   }
 
-  private fill(bucket: LocalOpenShiftBucket, shift: HrOpenShift, staffId: string): void {
+  private async fill(bucket: LocalOpenShiftBucket, shift: HrOpenShift, staffId: string): Promise<void> {
     bucket.awards.push({
       staffId,
       startsAt: shift.startsAt ?? "",
@@ -301,6 +303,24 @@ export class LocalOpenShiftStore implements OpenShiftStore {
     });
     shift.filledCount += 1;
     if (shift.filledCount >= shift.slots) shift.status = "filled";
+    // The hosted database writes hr_shifts inside fill_open_shift_slot.
+    // The demo writes the same row so the house board can name who owes the note.
+    if (shift.kind !== "temporary" || !shift.startsAt || !shift.endsAt) return;
+    try {
+      const created = await createHrStore({ agencyId: shift.agencyId, userId: shift.postedBy }).createShift({
+        siteId: shift.siteId,
+        staffId,
+        title: shift.title || "Coverage",
+        startsAt: shift.startsAt,
+        endsAt: shift.endsAt,
+        status: "published",
+        notes: shift.notes || null,
+        createdBy: shift.postedBy,
+      });
+      rememberClaimedShift(shift.agencyId, created);
+    } catch {
+      // The open-shift slot is already filled. The house can still assign the person by hand.
+    }
   }
 
   async respond(openShiftId: string, response: "pick_up" | "decline"): Promise<OpenShiftRespondResult> {
@@ -339,7 +359,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
       this.save(bucket);
       return "requested";
     }
-    this.fill(bucket, shift, this.actor.userId);
+    await this.fill(bucket, shift, this.actor.userId);
     upsert({ response: "picked_up", weekHoursBefore: evaluation.weekHours });
     this.save(bucket);
     return "picked_up";
@@ -360,7 +380,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
     if (!isOpenForResponses(shift, this.now())) throw new Error("This shift is no longer open.");
     const evaluation = this.evaluate(bucket, shift, bid.staffId);
     if (evaluation.blocker) throw new Error(evaluation.blocker);
-    this.fill(bucket, shift, bid.staffId);
+    await this.fill(bucket, shift, bid.staffId);
     bid.decision = "approved";
     this.save(bucket);
     return "approved";
