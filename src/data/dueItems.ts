@@ -648,7 +648,9 @@ function writersForBlock(
   });
   const owner = usualOwnerForBlock(input.requiredWriters, block.id);
   const unique = covering.filter((writer, index) => covering.findIndex((row) => row.userId === writer.userId) === index);
-  if (unique.length > 0 && blockFullyCovered(unique, block.startMin, block.endMin)) {
+  // Coverage is judged from every span (a split day or overnight is two rows for
+  // one person), while the writer list is deduped to one row per person.
+  if (unique.length > 0 && blockFullyCovered(covering, block.startMin, block.endMin)) {
     return unique.map(({ userId, name, shiftId }) => ({ userId, name, shiftId }));
   }
   if (unique.length > 0) {
@@ -727,8 +729,6 @@ export function computeShiftNoteDueItems(
         .join(", ");
       const scheduled = input.scheduledShifts ?? [];
       const writers = writersForBlock(input, def);
-      const coveredBySchedule = writers.some((writer) => writer.shiftId);
-      if (!coveredBySchedule && blockStillInGrace(day, def, input.now, input.graceMinutes ?? 0, input.timeZone)) continue;
       for (const writer of writers) {
         if (writer.shiftId) {
           const shift = scheduled.find((row) => row.id === writer.shiftId);
@@ -745,6 +745,10 @@ export function computeShiftNoteDueItems(
           ) {
             continue;
           }
+        } else if (blockStillInGrace(day, def, input.now, input.graceMinutes ?? 0, input.timeZone)) {
+          // A gap writer with no published shift is still gated by block end plus
+          // grace, so a partly covered block doesn't notify them while it's open.
+          continue;
         }
         const covered = input.notes.some(
           (n) =>

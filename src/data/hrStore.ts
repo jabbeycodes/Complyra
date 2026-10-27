@@ -3126,12 +3126,32 @@ class LocalHrStore implements HrStore {
   }
 
   async updateShift(id: string, patch: Partial<HrShiftInput>): Promise<HrShift> {
-    return this.mutate((b) => {
-      const shift = b.shifts.find((s) => s.id === id);
-      if (!shift) throw new Error("Shift not found.");
-      Object.assign(shift, patch);
-      return shift;
-    });
+    // The house board lists shifts across every agency bucket (see agencyShifts),
+    // so Change / Take off can target a row another member saved. Apply the patch
+    // wherever the shift lives, not only in the signed-in user's bucket.
+    if (this.load().shifts.some((s) => s.id === id)) {
+      return this.mutate((b) => {
+        const shift = b.shifts.find((s) => s.id === id)!;
+        Object.assign(shift, patch);
+        return shift;
+      });
+    }
+    if (this.storageAvailable()) {
+      try {
+        const raw = localStorage.getItem(LOCAL_KEY);
+        const root = (raw ? JSON.parse(raw) : {}) as LocalRoot;
+        for (const bucket of Object.values(root[this.agencyId] ?? {})) {
+          const shift = (bucket.shifts ?? []).find((s) => s.id === id);
+          if (!shift) continue;
+          Object.assign(shift, patch);
+          localStorage.setItem(LOCAL_KEY, JSON.stringify(root));
+          return shift;
+        }
+      } catch {
+        // Fall through to the not-found error below.
+      }
+    }
+    throw new Error("Shift not found.");
   }
 
   async deleteShift(id: string): Promise<void> {
