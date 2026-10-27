@@ -17,6 +17,10 @@
  */
 
 export type NotificationType =
+  | "consent.packet_signed"
+  | "consent.packet_outstanding"
+  | "consent.missing"
+  | "consent.expiring"
   | "training.assigned"
   | "training.due_soon"
   | "training.overdue"
@@ -67,6 +71,7 @@ export type NotificationType =
   | "hr.open_shift_denied";
 
 export const NOTIFICATION_TYPES: NotificationType[] = [
+  "consent.packet_signed", "consent.packet_outstanding", "consent.missing", "consent.expiring",
   "training.assigned",
   "training.due_soon",
   "training.overdue",
@@ -197,6 +202,7 @@ export function notificationPage(link: string): string | null {
   const path = link.split(/[?#]/)[0];
   if (/^\/training(?:\/|$)/.test(path)) return "Training";
   if (/^\/certificates(?:\/|$)/.test(path)) return "Certificates";
+  if (/^\/consents(?:\/|$)/.test(path)) return "Consents";
   if (/^\/meds(?:\/|$)/.test(path)) return "Supply forecast";
   if (/^\/(?:checklists|weekly-checklist)(?:\/|$)/.test(path)) return "Weekly checklist";
   if (/^\/hub(?:\/|$)/.test(path)) return "Employee Hub";
@@ -275,6 +281,10 @@ export const NOTIFICATION_META: Record<
   NotificationType,
   { status: NotificationStatus; label: string }
 > = {
+  "consent.packet_signed": {status:"compliant",label:"Consent packet filed"},
+  "consent.packet_outstanding": {status:"missing",label:"Outstanding consent packet"},
+  "consent.missing": { status: "missing", label: "Consent needs attention" },
+  "consent.expiring": { status: "expiring", label: "Consent expiring soon" },
   "training.assigned": { status: "pending", label: "Training assigned" },
   "training.due_soon": { status: "expiring", label: "Training due soon" },
   "training.overdue": { status: "late", label: "Training overdue" },

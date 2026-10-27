@@ -1,3 +1,4 @@
+import Consents from "./features/consents/Consents";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -165,6 +166,7 @@ export default function Dashboard({
       {showCoverageBoard && (
         <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
       )}
+      <Consents attentionOnly siteId={focusedSite?.id ?? null} />
       {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">

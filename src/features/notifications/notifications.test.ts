@@ -59,7 +59,11 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 48);
+<<<<<<< HEAD
+  assert.equal(NOTIFICATION_TYPES.length, 49);
+=======
+  assert.equal(NOTIFICATION_TYPES.length, 49);
+>>>>>>> f5f16f1 (Add scoped consent register and secure intake packet signing)
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }

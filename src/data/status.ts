@@ -55,6 +55,7 @@ export function can(session: SessionUser, key: PermissionKey) {
 /** Nav and page gates. Care records stay hidden from HR even if they guess a URL. */
 export function pageVisible(session: SessionUser, page: string) {
   // QA-AUDIT (2026-09-14): DSPs get no Overview dashboard.
+  if (page === "Consents") return can(session, "individuals.view") && ["house_manager", "program_manager", "nurse", "auditor", "dsp"].includes(session.roleKey);
   if (page === "Overview") return session.roleKey !== "dsp";
   if (page === "Settings" || page === "Sites & programs" || page === "Help") {
     return true;

@@ -379,3 +379,7 @@ verify_jwt = true
 
 [functions.sweep-operating-reminders]
 verify_jwt = true
+
+# The capability token is the sole authority; the handler exposes only one packet.
+[functions.consent-signing]
+verify_jwt = false

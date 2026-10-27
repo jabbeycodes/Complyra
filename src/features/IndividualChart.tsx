@@ -1,3 +1,4 @@
+import Consents from "./consents/Consents";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -636,6 +637,7 @@ export default function IndividualChart({
           </section>
         )}
 
+        <Consents individualId={individualId} />
         <MonthlyEquipmentCard individualId={individualId} />
 
         {/* Issue #76: today's scheduled-med MAR check-off (clears Overview

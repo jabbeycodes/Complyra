@@ -1,3 +1,6 @@
+import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
+import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
+import { DEFAULT_CONSENT_TYPES, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
@@ -436,6 +439,19 @@ const META_KEY = "complyra-v2-meta";
 const FILE_PREFIX = "complyra-v2-file:";
 
 export interface ComplyraApi {
+  listConsentPackets(): Promise<ConsentPacket[]>;
+  createConsentPacket(input: PacketCreateInput): Promise<string>;
+  generateConsentPacket(id: string): Promise<void>;
+  sendConsentPacket(id: string, expiresInDays: number): Promise<string>;
+  filePaperConsentPacket(id: string, choices: PacketChoices, signer: PacketSignature, file: File): Promise<void>;
+  getConsentPacketEvidence(id: string): Promise<PacketEvidence>;
+  openConsentPacket(token: string): Promise<PacketPublicView>;
+  signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature): Promise<PacketEvidence>;
+  getConsents(): Promise<ConsentRegister>;
+  saveConsent(draft: ConsentDraft, id?: string): Promise<string>;
+  activateConsent(id: string): Promise<void>;
+  revokeConsent(id: string, revokedOn: string, reason: string): Promise<void>;
+  saveConsentTypes(types: ConsentType[]): Promise<void>;
   listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]>;
   markNotificationsRead(ids: string[]): Promise<void>;
   // LIFE EVENTS — per-Individual timeline (context, not compliance: no
@@ -2813,10 +2829,255 @@ export class LocalApi implements ComplyraApi {
     return this.lifeEventView(row);
   }
 
+    async listConsentPackets() {
+        const session = assertSession(this.store);
+        assertConsentRole(session);
+        if (session.roleKey === 'dsp')
+            return [];
+        return structuredClone((this.store.db.consentPackets ?? []).filter(p => p.agencyId === session.agencyId && canReadIndividual(session, this.store.db.individuals.find(i => i.id === p.individualId)!, this.store.db.assignments, this.store.db.individuals)).map(p => ({ ...p, audit: (this.store.db.consentPacketAudit ?? []).filter(a => a.packetId === p.id) })));
+    }
+    private packetForWrite(id: string) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        const packet = this.store.db.consentPackets?.find(p => p.id === id && p.agencyId === session.agencyId);
+        if (!packet)
+            throw new Error('Packet not found.');
+        accessibleIndividual(this.store, session, packet.individualId);
+        if (packet.signedAt)
+            throw new Error('Signed packets are immutable.');
+        return { packet, session };
+    }
+    private packetAudit(packetId: string, event: string, signer?: PacketSignature) {
+        this.store.db.consentPacketAudit ??= [];
+        this.store.db.consentPacketAudit.push({ packetId, event, at: new Date().toISOString(), signerName: signer?.printedName, authority: signer?.authority });
+    }
+    async createConsentPacket(input: PacketCreateInput) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        assertPacketDates(input);
+        const person = accessibleIndividual(this.store, session, input.individualId);
+        assertPacketTypes(this.store.db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES, PACKET_ITEMS);
+        const id = crypto.randomUUID();
+        this.store.db.consentPackets ??= [];
+        this.store.db.consentPackets.push({ id, agencyId: session.agencyId, individualId: person.id, createdBy: session.userId, createdAt: new Date().toISOString(),
+            snapshot: { individualName: person.fullName, agencyName: session.agencyName, signerName: input.signerName, effectiveOn: input.effectiveOn, reviewOn: input.reviewOn, copyVersion: PACKET_COPY_VERSION, items: structuredClone(PACKET_ITEMS), healthScope: [...HEALTH_SCOPE] },
+            status: 'draft', generatedAt: null, sentAt: null, openedAt: null, signedAt: null, filedAt: null, linkExpiresAt: null, outstandingAfterDays: input.outstandingAfterDays, choices: null, signer: null, evidenceName: null });
+        this.packetAudit(id, 'draft');
+        await persistMeta(this.store);
+        return id;
+    }
+    async generateConsentPacket(id: string) {
+        const { packet } = this.packetForWrite(id);
+        if (packet.status !== 'draft' && packet.status !== 'generated')
+            throw new Error('Packet already sent.');
+        packet.status = 'generated';
+        packet.generatedAt ??= new Date().toISOString();
+        this.packetAudit(id, 'generated');
+        await persistMeta(this.store);
+    }
+    async sendConsentPacket(id: string, expiresInDays: number) {
+        const { packet } = this.packetForWrite(id);
+        if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 30 || packet.status === 'draft')
+            throw new Error('Generate the packet, then choose a link expiry from 1 to 30 days.');
+        const token = newPacketToken();
+        const hash = await tokenHash(token);
+        if (packet.signedAt)
+            throw new Error('Signed packets are immutable.');
+        const expiresAt = new Date(Date.now() + expiresInDays * 86400000).toISOString();
+        this.store.db.consentPacketTokens ??= {};
+        this.store.db.consentPacketTokens[id] = { hash, expiresAt };
+        packet.status = 'sent';
+        packet.sentAt = new Date().toISOString();
+        packet.linkExpiresAt = expiresAt;
+        this.packetAudit(id, 'sent');
+        await persistMeta(this.store);
+        return token;
+    }
+    private async packetFromToken(token: string) {
+        await hydrate();
+        if (!/^[0-9a-f]{64}$/.test(token))
+            throw new Error('Signing link is unavailable or expired.');
+        const hash = await tokenHash(token);
+        const entry = Object.entries(this.store.db.consentPacketTokens ?? {}).find(([, v]) => v.hash === hash);
+        const packet = this.store.db.consentPackets?.find(p => p.id === entry?.[0]);
+        if (!packet || packet.signedAt || packet.status !== 'sent' || !entry || entry[1].expiresAt <= new Date().toISOString())
+            throw new Error('Signing link is unavailable or expired.');
+        return packet;
+    }
+    async openConsentPacket(token: string): Promise<PacketPublicView> {
+        const packet = await this.packetFromToken(token);
+        packet.openedAt ??= new Date().toISOString();
+        this.packetAudit(packet.id, 'opened');
+        await persistMeta(this.store);
+        return structuredClone({ id: packet.id, snapshot: packet.snapshot });
+    }
+    private completeLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, external: boolean) {
+        if (packet.signedAt)
+            throw new Error('Signed packets are immutable.');
+        validatePacketSubmission(choices, signer);
+        packetSignerDate(signer.signedOn);
+        if (signer.signedOn > packet.snapshot.reviewOn)
+            throw new Error('Signing date is after the packet review date.');
+        const db = this.store.db;
+        db.consents ??= [];
+        const actor = external ? null : assertSession(this.store).userId;
+        const now = new Date().toISOString();
+        for (const item of PACKET_ITEMS) {
+            const previous = [...db.consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !db.consents!.some(n => n.supersedesId === r.id && n.activatedAt));
+            db.consents.push({ id: crypto.randomUUID(), agencyId: packet.agencyId, individualId: packet.individualId, typeId: item.typeId, packetId: packet.id,
+                covers: item.text, outcome: choices[item.key], giver: signer.authority === 'Self' ? 'individual' : signer.authority === 'Guardian' ? 'guardian' : 'representative',
+                giverName: signer.printedName, relationship: signer.authority + (signer.authorityOther ? ': ' + signer.authorityOther : ''), signedOn: signer.signedOn,
+                effectiveOn: packet.snapshot.effectiveOn, reviewOn: packet.snapshot.reviewOn, supersedesId: previous?.id ?? null, createdBy: packet.createdBy, createdAt: now, activatedBy: actor, activatedAt: now });
+        }
+        packet.choices = structuredClone(choices);
+        packet.signer = structuredClone(signer);
+        packet.signedAt = now;
+        packet.filedAt = now;
+        packet.status = 'filed';
+        packet.evidenceName = evidence.name;
+        db.consentPacketEvidence ??= {};
+        db.consentPacketEvidence[packet.id] = structuredClone(evidence);
+        delete db.consentPacketTokens?.[packet.id];
+        this.packetAudit(packet.id, 'signed', signer);
+        this.packetAudit(packet.id, 'filed', signer);
+        if (db.memberships.some(m => m.agencyId === packet.agencyId && m.userId === packet.createdBy && canManageConsents(m.roleKey) && (!m.expiresOn || m.expiresOn >= todayIso())))
+            this.pushRecognitionNotification({ agencyId: packet.agencyId, userId: packet.createdBy, roleKey: null, type: 'consent.packet_signed', title: 'Consent packet filed', body: `${packet.snapshot.individualName}: signed consent packet filed.`, deepLink: '/consents', entityType: 'consent_packet', entityId: packet.id, dedupeKey: `consent.packet_signed:${packet.id}:${packet.createdBy}` });
+    }
+    async signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature) {
+        const packet = await this.packetFromToken(token);
+        validatePacketSubmission(choices, signer);
+        const pdf = buildConsentPacketPdf(packet.snapshot, choices, signer);
+        const base64 = pdf.output('datauristring').split(',')[1];
+        const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
+        this.completeLocalPacket(packet, choices, signer, evidence, true);
+        await persistMeta(this.store);
+        return evidence;
+    }
+    async filePaperConsentPacket(id: string, choices: PacketChoices, signer: PacketSignature, file: File) {
+        const evidence = await packetFile(file);
+        const { packet } = this.packetForWrite(id);
+        if (packet.status === 'draft')
+            throw new Error('Generate the packet before filing.');
+        this.completeLocalPacket(packet, choices, signer, evidence, false);
+        await persistMeta(this.store);
+    }
+    async getConsentPacketEvidence(id: string) {
+        if (!(await this.listConsentPackets()).some(p => p.id === id))
+            throw new Error('Packet not found.');
+        const evidence = this.store.db.consentPacketEvidence?.[id];
+        if (!evidence)
+            throw new Error('No signed evidence filed.');
+        return structuredClone(evidence);
+    }
+    async getConsents(): Promise<ConsentRegister> {
+        const session = assertSession(this.store);
+        assertConsentRole(session);
+        const db = this.store.db;
+        const individuals = db.individuals.filter(p => canReadIndividual(session, p, db.assignments, db.individuals));
+        const ids = new Set(individuals.map(p => p.id));
+        const allRecords = (db.consents ?? []).filter(r => r.agencyId === session.agencyId && ids.has(r.individualId));
+        const revocations = (db.consentRevocations ?? []).filter(r => allRecords.some(c => c.id === r.consentId));
+        const records = session.roleKey === 'dsp' ? allRecords.filter(r => ['Active', 'Expiring soon'].includes(consentStatus(r, allRecords, revocations))) : allRecords;
+        return structuredClone({ types: db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES, individuals, records,
+            revocations: session.roleKey === 'dsp' ? [] : revocations });
+    }
+    private consentForWrite(id: string) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        const row = this.store.db.consents?.find(r => r.id === id && r.agencyId === session.agencyId);
+        if (!row)
+            throw new Error('Consent not found.');
+        accessibleIndividual(this.store, session, row.individualId);
+        return { row, session };
+    }
+    async saveConsent(draft: ConsentDraft, id?: string) {
+        draft = consentDraftFields(draft);
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        accessibleIndividual(this.store, session, draft.individualId);
+        const db = this.store.db;
+        validateConsentDraft(draft, db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES);
+        db.consents ??= [];
+        if (id) {
+            const { row } = this.consentForWrite(id);
+            if (row.activatedAt || row.createdBy !== session.userId)
+                throw new Error('Only your own draft can be edited.');
+            if (draft.individualId !== row.individualId || draft.typeId !== row.typeId || draft.supersedesId !== row.supersedesId)
+                throw new Error('Consent identity cannot change.');
+            Object.assign(row, structuredClone(draft));
+        }
+        else {
+            if (draft.supersedesId) {
+                const { row: prior } = this.consentForWrite(draft.supersedesId);
+                if (!prior.activatedAt || prior.individualId !== draft.individualId || prior.typeId !== draft.typeId)
+                    throw new Error('Renew the same Individual and consent type.');
+            }
+            id = crypto.randomUUID();
+            db.consents.push({ ...structuredClone(draft), id, agencyId: session.agencyId, createdBy: session.userId, createdAt: new Date().toISOString(), activatedBy: null, activatedAt: null });
+        }
+        await persistMeta(this.store);
+        return id;
+    }
+    async activateConsent(id: string) {
+        const { row, session } = this.consentForWrite(id);
+        if (row.activatedAt || row.createdBy !== session.userId)
+            throw new Error('Only your own draft can be activated.');
+        validateConsentDraft(row, this.store.db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES, true);
+        if (row.supersedesId && this.store.db.consents?.some(r => r.id !== id && r.supersedesId === row.supersedesId && r.activatedAt))
+            throw new Error('This consent already has a renewal.');
+        row.activatedAt = new Date().toISOString();
+        row.activatedBy = session.userId;
+        await persistMeta(this.store);
+    }
+    async revokeConsent(id: string, revokedOn: string, reason: string) {
+        const { row, session } = this.consentForWrite(id);
+        assertCalendarDate(revokedOn);
+        if (!row.activatedAt || !reason.trim() || revokedOn < row.signedOn || revokedOn > todayIso())
+            throw new Error('Use a revocation date from signing through today and give a reason.');
+        this.store.db.consentRevocations ??= [];
+        if (this.store.db.consentRevocations.some(r => r.consentId === id))
+            throw new Error('This consent is already revoked.');
+        this.store.db.consentRevocations.push({ consentId: id, revokedOn, reason: reason.trim(), revokedBy: session.userId, revokedByName: session.fullName });
+        await persistMeta(this.store);
+    }
+    async saveConsentTypes(types: ConsentType[]) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        if (session.roleKey !== 'program_manager' || session.siteId)
+            throw new Error('An agency-wide Program Manager configures consent types.');
+        validateConsentTypes(types);
+        const old = this.store.db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES;
+        if (old.some(t => (this.store.db.consents ?? []).some(r => r.agencyId === session.agencyId && r.typeId === t.id) && !types.some(n => n.id === t.id && n.medication === t.medication)))
+            throw new Error('Keep types referenced by consent history and their medication classification.');
+        this.store.db.consentTypes ??= {};
+        this.store.db.consentTypes[session.agencyId] = structuredClone(types);
+        await persistMeta(this.store);
+    }
+    private async sweepConsentAlerts() {
+        const session = assertSession(this.store);
+        if (!canManageConsents(session.roleKey))
+            return;
+        const register = await this.getConsents();
+        for (const payload of consentAlerts(register, this.store.db.memberships))
+            this.pushRecognitionNotification(payload);
+        for (const packet of await this.listConsentPackets()) {
+            if (!packetOutstanding(packet))
+                continue;
+            const person = register.individuals.find(p => p.id === packet.individualId);
+            if (!person)
+                continue;
+            const pseudo: ConsentRegister = { ...register, individuals: [person], types: [{ id: 'packet', label: 'Outstanding consent packet', required: true, medication: true }], records: [], revocations: [] };
+            for (const alert of consentAlerts(pseudo, this.store.db.memberships))
+                this.pushRecognitionNotification({ ...alert, type: 'consent.packet_outstanding', entityType: 'consent_packet', entityId: packet.id, dedupeKey: `consent.packet_outstanding:${packet.id}:${alert.userId ?? alert.roleKey}` });
+        }
+        await persistMeta(this.store);
+    }
+
   async listNotifications() {
     const session = assertSession(this.store);
     await this.sweepOperatingReminders();
-    return (this.store.db.notifications ?? []).filter((row) => row.agencyId === session.agencyId &&
+    await this.sweepConsentAlerts();
+    return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey)).filter((row) => row.agencyId === session.agencyId &&
       (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
       .map((row) => ({
         id: row.id, agency_id: row.agencyId, user_id: row.userId, role_key: row.roleKey,
