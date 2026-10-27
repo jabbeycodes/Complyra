@@ -391,6 +391,20 @@ export default function App() {
     plans: workspace.plans,
     activity: workspace.activity,
   };
+  // Same single-collection pattern as visibleStaff: the Individuals grid and
+  // its empty state, and the Documents table and its empty state, each read
+  // one filtered list so the zero case can never render as a blank area.
+  const visibleIndividuals = individuals.filter(
+    (p) =>
+      (site === "All sites" || p.site === site) &&
+      p.name.toLowerCase().includes(query.toLowerCase()),
+  );
+  const visiblePlans = data.plans.filter(
+    (p) =>
+      (site === "All sites" || p.site === site) &&
+      (status === "All statuses" || p.status === status) &&
+      p.name.toLowerCase().includes(query.toLowerCase()),
+  );
   const selected = selectedId
     ? (data.requirements.find((r) => r.id === selectedId) ?? null)
     : null;
@@ -1014,13 +1028,27 @@ export default function App() {
                       ))}
                     </select>
                   </div>
+                  {visibleIndividuals.length === 0 ? (
+                    <Empty
+                      title="No individuals match your search"
+                      text="Try a different name, or clear the search and site filter to see everyone."
+                      mark="quiet"
+                      actions={
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => {
+                            setQuery("");
+                            setSite("All sites");
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      }
+                    />
+                  ) : (
                   <div className="people-grid">
-                    {individuals
-                      .filter(
-                        (p) =>
-                          (site === "All sites" || p.site === site) &&
-                          p.name.toLowerCase().includes(query.toLowerCase()),
-                      )
+                    {visibleIndividuals
                       .map((p) => {
                         const pm = metrics(
                           data.requirements.filter((r) => r.person === p.name),
@@ -1083,6 +1111,7 @@ export default function App() {
                         );
                       })}
                   </div>
+                  )}
                 </>
               )}
               {page === "Intake" && (
@@ -1337,6 +1366,26 @@ export default function App() {
                         Version history is always retained
                       </span>
                     </div>
+                    {visiblePlans.length === 0 ? (
+                      <Empty
+                        title="No documents match your search"
+                        text="Try a different search, or clear the search and status filter to see every document."
+                        mark="quiet"
+                        actions={
+                          <button
+                            type="button"
+                            className="button"
+                            onClick={() => {
+                              setQuery("");
+                              setStatus("All statuses");
+                              setSite("All sites");
+                            }}
+                          >
+                            Clear filters
+                          </button>
+                        }
+                      />
+                    ) : (
                     <div className="table-scroll">
                       <table>
                         <thead>
@@ -1350,16 +1399,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {data.plans
-                            .filter(
-                              (p) =>
-                                (site === "All sites" || p.site === site) &&
-                                (status === "All statuses" ||
-                                  p.status === status) &&
-                                p.name
-                                  .toLowerCase()
-                                  .includes(query.toLowerCase()),
-                            )
+                          {visiblePlans
                             .map((p) => (
                               <tr key={p.id}>
                                 <td>
@@ -1400,6 +1440,7 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
+                    )}
                   </section>
                 </>
               )}
