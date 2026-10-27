@@ -7429,3 +7429,64 @@ button.qa-row:hover {
 .disclosure-panel[hidden] {
   display: none;
 }
+
+/* ===== Audit D-07 (WCAG AA): legacy Badge contrast — FINAL override =====
+ * The legacy `.badge` component (src/components.tsx) is the dominant status
+ * indicator, but its variant color pairs failed WCAG AA (< 4.5:1) for its
+ * 10–11px text, and `.badge` was redefined 8+ times above, so rendering was
+ * cascade-dependent. This block is intentionally LAST in the file and uses
+ * `.badge` / `.badge.<variant>` selectors (equal-or-higher specificity than
+ * every earlier definition) so these pairs win regardless of the cascade
+ * above — including the 9px shrink contexts (.risk-end .badge etc.), which
+ * only change font-size/padding, never color.
+ * Visual language is unchanged: same soft tinted backgrounds, text darkened
+ * within the same hue family until each pair computes >= 4.5:1 (WCAG
+ * relative-luminance formula). Already-passing variants (archived,
+ * waiting-for-rn, current) are reaffirmed unchanged so this section is the
+ * single authoritative source for every badge variant. Any status string
+ * without a dedicated variant inherits the (now AA-passing) default pair.
+ *   default:                          #5f5145 on #f5f3f1 = 6.90:1
+ *   overdue / expired / needs-attention: #8a3d2b on #f8f1ee = 6.76:1
+ *   due-soon:                         #7a5a1e on #f7f2ea = 5.70:1
+ *   compliant / active / on-track:    #2f5d33 on #eff5ed = 6.93:1
+ *   pending-review:                   #3e583a on #f4f3f0 = 7.11:1
+ *   archived:                         #4a4036 on #f2f1ef = 8.95:1
+ *   waiting-for-rn:                   #6f3f2e on #f3e6dc = 7.07:1
+ *   current:                          #2f4630 on #d7e2cc = 7.67:1
+ */
+.badge {
+  background: var(--color-h-f5f3f1);
+  color: var(--color-h-5f5145);
+}
+.badge.overdue,
+.badge.expired,
+.badge.needs-attention {
+  background: var(--color-h-f8f1ee);
+  color: var(--color-h-8a3d2b);
+}
+.badge.due-soon {
+  background: var(--color-h-f7f2ea);
+  color: var(--color-h-7a5a1e);
+}
+.badge.compliant,
+.badge.active,
+.badge.on-track {
+  background: var(--color-h-eff5ed);
+  color: var(--color-h-2f5d33);
+}
+.badge.pending-review {
+  background: var(--color-h-f4f3f0);
+  color: var(--color-h-3e583a);
+}
+.badge.archived {
+  background: var(--color-h-f2f1ef);
+  color: var(--color-h-4a4036);
+}
+.badge.waiting-for-rn {
+  background: var(--color-h-f3e6dc);
+  color: var(--color-h-6f3f2e);
+}
+.badge.current {
+  background: var(--color-h-d7e2cc);
+  color: var(--color-h-2f4630);
+}
