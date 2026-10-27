@@ -8704,6 +8704,7 @@ export class HostedApi implements ComplyraApi {
     roleKey: string | null;
     title: string;
     body: string;
+    individualId: string;
     entityId: string;
     entityType: string;
     dedupeKey: string;
@@ -8717,7 +8718,7 @@ export class HostedApi implements ComplyraApi {
           type: "incident.followup",
           title: input.title,
           body: input.body,
-          deep_link: "/plans",
+          deep_link: `/plans/${input.individualId}`,
           entity_type: input.entityType,
           entity_id: input.entityId,
           dedupe_key: input.dedupeKey,
@@ -8825,6 +8826,7 @@ export class HostedApi implements ComplyraApi {
             roleKey: target.roleKey,
             title: `Event follow-up overdue — ${person?.fullName ?? "An Individual"}`,
             body: `Follow-up on the ${report.eventType} of ${report.eventDate} was due ${report.resolutionDueOn} and is still open.`,
+            individualId: report.individualId,
             entityType: "ger_report",
             entityId: report.id,
             dedupeKey: target.dedupeKey,
@@ -8945,6 +8947,7 @@ export class HostedApi implements ComplyraApi {
           roleKey: target.roleKey,
           title: `${submitted.severity} event report — ${person?.fullName ?? "An Individual"}`,
           body: `${submitted.eventType} on ${submitted.eventDate} was submitted and needs review and follow-up.`,
+          individualId: submitted.individualId,
           entityType: "ger_report",
           entityId: submitted.id,
           dedupeKey: target.dedupeKey,
@@ -9222,6 +9225,7 @@ export class HostedApi implements ComplyraApi {
             entry.kind === "immunization"
               ? `${entry.title} was due ${entry.details.nextDueOn ?? ""} and has not been recorded as given.`
               : `${entry.title} on ${entry.occurredOn} needs a manager's attention.`,
+          individualId: entry.individualId,
           entityType: "health_track_entry",
           entityId: entry.id,
           dedupeKey: target.dedupeKey,
@@ -9251,7 +9255,7 @@ export class HostedApi implements ComplyraApi {
       healthTrackEntryFromRow(row as Record<string, unknown>),
     );
     for (const row of rows) {
-      if (isImmunizationOverdue(row)) await this.emitHealthAlert(session, row);
+      if (isImmunizationOverdue(row, rows)) await this.emitHealthAlert(session, row);
     }
     return rows;
   }

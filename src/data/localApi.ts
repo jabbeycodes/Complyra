@@ -9570,7 +9570,7 @@ export class LocalApi implements ComplyraApi {
     );
     // Time-based alert: an overdue immunization alerts once (deduped).
     for (const row of rows) {
-      if (isImmunizationOverdue(row)) this.queueHealthAlert(session, row);
+      if (isImmunizationOverdue(row, rows)) this.queueHealthAlert(session, row);
     }
     return rows.sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
   }

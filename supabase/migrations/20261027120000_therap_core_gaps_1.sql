@@ -90,10 +90,19 @@ as restrictive for all to authenticated
 using ((select private.has_agency(agency_id)))
 with check ((select private.has_agency(agency_id)));
 
+-- Nurses are agency-wide clinical reviewers (they cover every home), so the
+-- individual-scope restriction must let them through even for individuals
+-- outside their assigned site, matching the hosted GER API's nurse widening.
 create policy ger_reports_audit_individual_scope on public.ger_reports
 as restrictive for all to authenticated
-using ((select private.can_read_individual(agency_id, individual_id)))
-with check ((select private.can_read_individual(agency_id, individual_id)));
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+)
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
 
 grant select, insert, update, delete on public.ger_reports to authenticated;
 grant all on public.ger_reports to service_role;

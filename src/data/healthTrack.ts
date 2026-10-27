@@ -203,13 +203,27 @@ export function healthEntryNeedsAlert(entry: {
 
 /** An immunization whose next due date has passed, with no newer dose logged. */
 export function isImmunizationOverdue(
-  entry: Pick<HealthTrackEntry, "kind" | "details">,
+  entry: Pick<HealthTrackEntry, "kind" | "details" | "occurredOn">,
+  siblings: ReadonlyArray<
+    Pick<HealthTrackEntry, "kind" | "details" | "occurredOn">
+  > = [],
   now: Date = new Date(),
 ): boolean {
   if (entry.kind !== "immunization") return false;
   const due = entry.details.nextDueOn;
   if (!due) return false;
-  return due < now.toISOString().slice(0, 10);
+  if (due >= now.toISOString().slice(0, 10)) return false;
+  // A later dose of the same vaccine supersedes this row's next-due date, so
+  // an older entry is no longer overdue once a newer dose has been recorded.
+  const vaccine = entry.details.vaccineName?.trim().toLowerCase();
+  const hasNewerDose = siblings.some(
+    (other) =>
+      other !== entry &&
+      other.kind === "immunization" &&
+      other.details.vaccineName?.trim().toLowerCase() === vaccine &&
+      other.occurredOn > entry.occurredOn,
+  );
+  return !hasNewerDose;
 }
 
 export interface HealthAlertTarget {

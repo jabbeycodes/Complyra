@@ -255,7 +255,7 @@ export default function HealthTrackSection({
       ) : (
         <ul className="record-list">
           {entries.map((entry) => {
-            const overdue = isImmunizationOverdue(entry);
+            const overdue = isImmunizationOverdue(entry, entries);
             const positive =
               entry.kind === "infection" && entry.details.confirmedPositive === "yes";
             return (

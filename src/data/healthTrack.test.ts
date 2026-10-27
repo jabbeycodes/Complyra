@@ -107,6 +107,7 @@ test("health: immunization overdue derives from the next due date", () => {
   assert.equal(
     isImmunizationOverdue(
       entry({ kind: "immunization", details: { vaccineName: "Flu", nextDueOn: "2026-10-01" } }),
+      [],
       now,
     ),
     true,
@@ -114,11 +115,28 @@ test("health: immunization overdue derives from the next due date", () => {
   assert.equal(
     isImmunizationOverdue(
       entry({ kind: "immunization", details: { vaccineName: "Flu", nextDueOn: "2027-10-01" } }),
+      [],
       now,
     ),
     false,
   );
-  assert.equal(isImmunizationOverdue(entry({}), now), false);
+  assert.equal(isImmunizationOverdue(entry({}), [], now), false);
+});
+
+test("health: immunization is not overdue once a newer dose is logged", () => {
+  const now = new Date("2026-10-27T12:00:00Z");
+  const older = entry({
+    kind: "immunization",
+    occurredOn: "2025-10-01",
+    details: { vaccineName: "Flu", nextDueOn: "2026-10-01" },
+  });
+  const newer = entry({
+    kind: "immunization",
+    occurredOn: "2026-10-05",
+    details: { vaccineName: "Flu", nextDueOn: "2027-10-05" },
+  });
+  assert.equal(isImmunizationOverdue(older, [older, newer], now), false);
+  assert.equal(isImmunizationOverdue(newer, [older, newer], now), false);
 });
 
 test("health: alert targets are HM direct plus PM/nurse broadcasts", () => {
