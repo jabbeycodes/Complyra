@@ -153,7 +153,7 @@ export default function CareScreeningSection({
           action: 'approve',
           id: plan.id
         })}>Approve and activate</button>}
-        {manage && <button className="button" disabled={busy} onClick={() => void save({
+        {manage && !(plan.status === 'active' && hasDraft) && <button className="button" disabled={busy} onClick={() => void save({
           action: 'retire',
           id: plan.id
         })}>Retire {plan.status} plan</button>}

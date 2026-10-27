@@ -163,6 +163,7 @@ begin
     update individual_care_plans set status='active',approved_by=auth.uid(),approved_at=now() where id=row_id;
   elsif action='retire' then
     if not nurse or plan.status not in ('active','draft') then raise exception 'Only nurses retire current plans'; end if;
+    if plan.status='active' and exists(select 1 from individual_care_plans where individual_id=person_id and status='draft') then raise exception 'Approve or retire the pending draft first'; end if;
     update individual_care_plans set status='retired',retired_at=now() where id=row_id;
   elsif action='acknowledge' then
     if plan.status<>'active' or not private.role_key_in(p_agency_id,array['nurse','program_manager','house_manager','dsp']) then raise exception 'Only supporting staff acknowledge active plans'; end if;

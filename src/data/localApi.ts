@@ -3169,6 +3169,7 @@ export class LocalApi implements ComplyraApi {
       } else if (input.action === 'retire') {
         manage();
         if (!['active', 'draft'].includes(plan.status)) throw new Error('This plan is already in history.');
+        if (plan.status === 'active' && data.plans.some(p => p.individual_id === plan.individual_id && p.status === 'draft')) throw new Error('Approve or retire the pending draft first.');
         plan.status = 'retired';
         plan.retired_at = now;
       } else {
