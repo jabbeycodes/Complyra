@@ -78,13 +78,14 @@ export default function MedicationOrdersPage({
       />
     );
   }
+  const viewer = session;
 
   async function printReport(mode: "download" | "print") {
     const generatedAt = new Date().toISOString();
     const doc = buildMedicationOrdersReportPdf({
-      agencyName: session.agencyName,
+      agencyName: viewer.agencyName,
       orders: expiring,
-      generatedByName: session.fullName,
+      generatedByName: viewer.fullName,
       generatedAt,
       logoDataUrl: workspace?.branding.logoUrl ?? null,
     });

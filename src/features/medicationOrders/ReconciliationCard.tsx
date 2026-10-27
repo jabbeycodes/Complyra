@@ -81,8 +81,9 @@ export default function ReconciliationCard({
   }, [api, individualId]);
 
   if (!session || !canViewMedicationOrders(session.roleKey)) return null;
-  const canStart = canStartReconciliation(session.roleKey);
-  const canSign = canSignReconciliation(session.roleKey);
+  const viewer = session;
+  const canStart = canStartReconciliation(viewer.roleKey);
+  const canSign = canSignReconciliation(viewer.roleKey);
 
   function loadDraft(recon: MedicationReconciliationView) {
     setActiveId(recon.id);
@@ -154,7 +155,7 @@ export default function ReconciliationCard({
   ) {
     const generatedAt = new Date().toISOString();
     const doc = buildReconciliationPdf({
-      agencyName: session.agencyName,
+      agencyName: viewer.agencyName,
       individualName,
       siteName,
       reconciliation: recon,
