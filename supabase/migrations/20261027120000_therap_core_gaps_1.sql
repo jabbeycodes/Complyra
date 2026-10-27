@@ -122,6 +122,47 @@ create policy ger_reports_audit_individual_scope_delete on public.ger_reports
 as restrictive for delete to authenticated
 using ((select private.can_read_individual(agency_id, individual_id)));
 
+-- RLS UPDATE is row-wide, so the nurse widening above would otherwise let an
+-- out-of-scope nurse rewrite any column — description, individual_id,
+-- signatures, even on approved/locked rows — not just review/resolve. Scope
+-- the widening to the review/resolution lifecycle: a caller who cannot read
+-- the individual (only reachable through the nurse widening) may change the
+-- review and follow-up columns but must leave the event body, signatures, and
+-- the individual the report belongs to untouched.
+create or replace function private.ger_reports_scope_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not (select private.can_read_individual(old.agency_id, old.individual_id))
+     and (
+       old.id, old.agency_id, old.site_id, old.individual_id,
+       old.linked_individual_ids, old.event_date, old.event_time, old.location,
+       old.event_type, old.severity, old.description, old.immediate_actions,
+       old.notifications_made, old.witnesses, old.reporter_name,
+       old.reporter_signature, old.reporter_date, old.created_by_user_id,
+       old.created_at
+     ) is distinct from (
+       new.id, new.agency_id, new.site_id, new.individual_id,
+       new.linked_individual_ids, new.event_date, new.event_time, new.location,
+       new.event_type, new.severity, new.description, new.immediate_actions,
+       new.notifications_made, new.witnesses, new.reporter_name,
+       new.reporter_signature, new.reporter_date, new.created_by_user_id,
+       new.created_at
+     ) then
+    raise exception
+      'A nurse may review or resolve, but not edit, event reports for individuals outside their assigned site.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger ger_reports_scope_update before update on public.ger_reports
+for each row execute function private.ger_reports_scope_update();
+
 grant select, insert, update, delete on public.ger_reports to authenticated;
 grant all on public.ger_reports to service_role;
 
