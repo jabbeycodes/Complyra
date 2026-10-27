@@ -46,7 +46,12 @@ test("Overview due items show missing Shift notes + unmarked meds with craft cop
   await expect(panel).toContainText("Morgan · Day · 6:00 a.m.–2:00 p.m.");
   await expect(panel).toContainText("Needed from Alex Morgan");
   await expect(panel).toContainText("Based on assigned house staff.");
-  // #76 — unmarked medication row.
+  // #76 — unmarked medication row. This row only renders in this form
+  // when the sample clock is read on the agency's Central clock: the
+  // fixtures pin now carries an explicit -05:00 offset, because a
+  // timezone-naive string is parsed in the host's local timezone and on
+  // a UTC host the 8:00 a.m. dose is still inside its window (rendering
+  // the in-window "Due now" row instead of the past-window one).
   await expect(panel).toContainText("Unmarked medication");
   await expect(panel).toContainText("Window ended 9:00 a.m. · still not marked");
   // Hero "Due items" count mirrors the list length (2 rows).

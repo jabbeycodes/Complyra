@@ -1,12 +1,11 @@
 import { test, expect, type Page } from "./fixtures";
 
-async function signIn(
+async function fillLoginForm(
   page: Page,
   username: string,
   password = "Evergreen!demo1",
   agencyCode = "EVERGREEN-MO",
 ) {
-  await page.goto("/");
   await page.getByLabel("Provider code").fill(agencyCode);
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -14,6 +13,33 @@ async function signIn(
   await expect(page.getByRole("banner").or(page.locator(".topbar"))).toBeVisible({
     timeout: 10_000,
   });
+}
+
+// First sign-in of a test: navigate to the app, then fill the login form —
+// the same pattern as the passing specs (e.g. tests/add-people.spec.ts).
+async function signIn(
+  page: Page,
+  username: string,
+  password = "Evergreen!demo1",
+  agencyCode = "EVERGREEN-MO",
+) {
+  await page.goto("/");
+  await fillLoginForm(page, username, password, agencyCode);
+}
+
+// Re-login after signOut: signOut already leaves the login form on screen
+// (and asserts "Provider code" is visible), so do NOT page.goto("/") again.
+// The old helper reloaded the app on every re-login; each reload re-boots
+// the demo workspace, and in this four-user flow the third sign-in's
+// "Provider code" fill starved against the test timeout while the app was
+// still booting (failures pointed at signIn from the cameron.price call).
+async function signInAgain(
+  page: Page,
+  username: string,
+  password = "Evergreen!demo1",
+  agencyCode = "EVERGREEN-MO",
+) {
+  await fillLoginForm(page, username, password, agencyCode);
 }
 
 async function signOut(page: Page) {
@@ -94,7 +120,7 @@ test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", asy
   await chart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
-  await signIn(page, "alex.morgan");
+  await signInAgain(page, "alex.morgan");
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await expect(page.getByRole("button", { name: /Ellis Hart/ }).first()).not.toContainText(
     "Annual physical",
@@ -109,7 +135,7 @@ test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", asy
   await dspChart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
-  await signIn(page, "cameron.price");
+  await signInAgain(page, "cameron.price");
   const rnChart = await openEllis(page);
   await expect(rnChart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
   const rnDelegation = rnChart.locator(".plan-stack .obligation-card:not(.training-card)").filter({
@@ -132,7 +158,7 @@ test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", asy
   await rnChart.getByRole("button", { name: "Back to individuals" }).click();
 
   await signOut(page);
-  await signIn(page, "alex.morgan");
+  await signInAgain(page, "alex.morgan");
   const after = await openEllis(page);
   const afterDelegation = after.locator(".plan-stack .obligation-card:not(.training-card)").filter({
     hasText: "RN delegation of specified nursing task",

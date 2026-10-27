@@ -1,7 +1,6 @@
 import { test, expect, type Page } from "./fixtures";
 
-async function signIn(page: Page) {
-  await page.goto("/");
+async function fillLoginForm(page: Page) {
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("sarah.mitchell");
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
@@ -21,6 +20,11 @@ async function signIn(page: Page) {
   await page.addStyleTag({
     content: ".sidebar,.mobile-backdrop{transition:none!important}",
   });
+}
+
+async function signIn(page: Page) {
+  await page.goto("/");
+  await fillLoginForm(page);
 }
 
 async function closeMobileNav(page: Page) {
@@ -122,7 +126,12 @@ test.describe("390 phone", () => {
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
     await assertNoHorizontalOverflow(page);
 
-    await signIn(page);
+    // Already navigated and on the login form — fill it directly instead of
+    // signIn()'s second goto("/"). The reload re-fetches the whole dev
+    // module graph and can starve the fill past the test timeout on a
+    // loaded machine (ERR_INSUFFICIENT_RESOURCES, blank page); the product
+    // login itself renders correctly at this width on first load.
+    await fillLoginForm(page);
     await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
     await expect(page.getByRole("heading", { name: /Needs attention/ })).toBeVisible();
     await assertNoHorizontalOverflow(page);
