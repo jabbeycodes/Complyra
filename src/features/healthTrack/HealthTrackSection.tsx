@@ -129,13 +129,15 @@ export default function HealthTrackSection({
       className="chart-widget health-track-widget"
       aria-labelledby="health-track-heading"
     >
-      <h2 id="health-track-heading">Health track</h2>
-      <div className="tabs health-tabs" role="tablist" aria-label="Health trackers">
+      <h2 id="health-track-heading">Trackers and logs</h2>
+      <div className="tabs health-track-tabs" role="tablist" aria-label="Health trackers">
         {HEALTH_TRACK_KINDS.map((k) => (
           <button
             key={k}
             role="tab"
             type="button"
+            id={`health-track-tab-${k}`}
+            aria-controls="health-track-panel"
             aria-selected={kind === k}
             className={kind === k ? "selected" : ""}
             onClick={() => {
@@ -150,6 +152,11 @@ export default function HealthTrackSection({
           </button>
         ))}
       </div>
+      <div
+        role="tabpanel"
+        id="health-track-panel"
+        aria-labelledby={`health-track-tab-${kind}`}
+      >
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -306,6 +313,7 @@ export default function HealthTrackSection({
           })}
         </ul>
       )}
+      </div>
     </section>
   );
 }

@@ -10,9 +10,29 @@
 --
 -- RLS follows the appointments pattern (20260915160000): agency membership
 -- as the base gate, private.can_read_individual as a restrictive scope so
--- site-scoped roles and auditors stay inside the individuals they may read,
--- and role-gated writes. Record-level rules (own drafts, own entries) are
--- enforced in the API layer, mirroring corrective actions.
+-- site-scoped roles and auditors stay inside the individuals they may read.
+--
+-- PR #117 re-review hardening (the PR-review agent's blockers): writes are
+-- NOT role-broad `for all` policies. Every table has operation-specific
+-- policies, and BEFORE triggers enforce the record-level rules RLS cannot
+-- express:
+--   * GER inserts start as the caller's own draft; review and resolution
+--     columns can only move through their lifecycle transitions, by the
+--     roles that hold ger.review / ger.resolve; an approved report's event
+--     body, review record, and signatures are immutable (follow-up columns
+--     may still move so an approved report can be resolved).
+--   * A GER's site is the home its Individual lives at: the site/individual
+--     integrity trigger rejects any insert or update whose site_id does
+--     not match the Individual's home, and any linked Individual who does
+--     not live at that same home — alerts and review queues can therefore
+--     never route to the wrong home's managers.
+--   * Behavior and health entries are editable/deletable only by their
+--     author or a manager/nurse role for that site; behavior plans only
+--     by the roles that hold behavior.plan.
+-- Table-level grants still list every operation the policies gate: without
+-- a grant, PostgREST fails with "permission denied" before RLS evaluates
+-- (see PR #103's hardening). All enforcement lives in the policies and
+-- triggers below.
 
 -- ───────────────────────────── Event reports ─────────────────────────────
 
@@ -80,10 +100,58 @@ create policy ger_reports_select on public.ger_reports
 for select to authenticated
 using ((select private.has_agency(agency_id)));
 
-create policy ger_reports_write on public.ger_reports
-for all to authenticated
-using ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')))
-with check ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')));
+-- INSERT: only the caller's own fresh draft. Review and resolution state
+-- starts untouched, so no direct write can forge a reviewer, pre-approve a
+-- report, or open a report already resolved.
+create policy ger_reports_insert on public.ger_reports
+for insert to authenticated
+with check (
+  created_by_user_id = (select auth.uid())
+  and status = 'draft'
+  and reviewed_by_user_id is null
+  and reviewed_at is null
+  and resolved_by_user_id is null
+  and resolved_at is null
+  and (select private.has_permission(agency_id, 'ger.create'))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse,dsp}'))
+);
+
+-- UPDATE: the author works their own draft/returned report; reviewers and
+-- resolvers (ger.review / ger.resolve holders) may update for the review
+-- and follow-up steps. WHICH columns and transitions each path may use is
+-- enforced by the workflow trigger below — RLS is row-wide.
+create policy ger_reports_update on public.ger_reports
+for update to authenticated
+using (
+  (
+    created_by_user_id = (select auth.uid())
+    and status in ('draft', 'returned')
+    and (select private.has_permission(agency_id, 'ger.create'))
+  )
+  or (select private.has_permission(agency_id, 'ger.review'))
+  or (select private.has_permission(agency_id, 'ger.resolve'))
+)
+with check (
+  -- Evaluated on the NEW row: a submit moves the row out of draft/returned,
+  -- so the status condition lives only in USING (old row). Allowed target
+  -- states and transitions are the workflow trigger's job.
+  (
+    created_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'ger.create'))
+  )
+  or (select private.has_permission(agency_id, 'ger.review'))
+  or (select private.has_permission(agency_id, 'ger.resolve'))
+);
+
+-- DELETE: only the author, and only while the report is still a draft —
+-- the same rule the API applies.
+create policy ger_reports_delete on public.ger_reports
+for delete to authenticated
+using (
+  created_by_user_id = (select auth.uid())
+  and status = 'draft'
+  and (select private.has_permission(agency_id, 'ger.create'))
+);
 
 create policy ger_reports_audit_membership on public.ger_reports
 as restrictive for all to authenticated
@@ -163,7 +231,184 @@ $$;
 create trigger ger_reports_scope_update before update on public.ger_reports
 for each row execute function private.ger_reports_scope_update();
 
-grant select, insert, update, delete on public.ger_reports to authenticated;
+-- Site/individual integrity: a report belongs to the home its Individual
+-- lives at, and every linked Individual must live at that same home. This
+-- fires for every writer (including service_role), so chart, dashboard,
+-- alerts, and review queues can never disagree about which home a report
+-- belongs to.
+create or replace function private.ger_reports_site_integrity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_home_site uuid;
+  v_linked uuid;
+  v_linked_site uuid;
+begin
+  select i.site_id into v_home_site
+  from public.individuals i
+  where i.id = new.individual_id and i.agency_id = new.agency_id;
+  if v_home_site is null then
+    raise exception 'The Individual on this event report is not in this agency.'
+      using errcode = 'foreign_key_violation';
+  end if;
+  if new.site_id is distinct from v_home_site then
+    raise exception
+      'An event report must be filed under the home its Individual lives at.'
+      using errcode = 'check_violation';
+  end if;
+  foreach v_linked in array coalesce(new.linked_individual_ids, '{}') loop
+    select i.site_id into v_linked_site
+    from public.individuals i
+    where i.id = v_linked and i.agency_id = new.agency_id;
+    if v_linked_site is null or v_linked_site is distinct from new.site_id then
+      raise exception
+        'A linked Individual must live at the same home as this event report.'
+        using errcode = 'check_violation';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+create trigger ger_reports_site_integrity
+before insert or update on public.ger_reports
+for each row execute function private.ger_reports_site_integrity();
+
+-- Workflow discipline at the database layer. RLS decides WHO may attempt an
+-- update; this trigger decides WHAT the update may do:
+--   * ownership (agency, author, creation time) never changes;
+--   * draft/returned -> submitted is the author (ger.create) or a reviewer;
+--     the event body may be finished in the same write, but review and
+--     resolution columns stay untouched;
+--   * submitted -> approved/returned is a ger.review decision, recorded
+--     against the signed-in reviewer, with body and resolution untouched;
+--   * with no status change: drafts/returned reports take body edits from
+--     the author or a reviewer; submitted and approved reports take ONLY
+--     follow-up (resolution) changes, and only from ger.resolve holders —
+--     so an approved report's body and review record are immutable while
+--     its follow-up can still be worked to resolution.
+create or replace function private.ger_reports_workflow_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_is_author boolean := old.created_by_user_id = auth.uid();
+  v_can_create boolean := private.has_permission(old.agency_id, 'ger.create');
+  v_can_review boolean := private.has_permission(old.agency_id, 'ger.review');
+  v_can_resolve boolean := private.has_permission(old.agency_id, 'ger.resolve');
+  v_body_changed boolean;
+  v_review_changed boolean;
+  v_resolution_changed boolean;
+begin
+  if new.agency_id is distinct from old.agency_id
+     or new.created_by_user_id is distinct from old.created_by_user_id
+     or new.created_at is distinct from old.created_at then
+    raise exception 'Event report ownership cannot be changed.'
+      using errcode = 'check_violation';
+  end if;
+
+  v_body_changed := (
+    old.site_id, old.individual_id, old.linked_individual_ids, old.event_date,
+    old.event_time, old.location, old.event_type, old.severity,
+    old.description, old.immediate_actions, old.notifications_made,
+    old.witnesses, old.reporter_name, old.reporter_signature, old.reporter_date
+  ) is distinct from (
+    new.site_id, new.individual_id, new.linked_individual_ids, new.event_date,
+    new.event_time, new.location, new.event_type, new.severity,
+    new.description, new.immediate_actions, new.notifications_made,
+    new.witnesses, new.reporter_name, new.reporter_signature, new.reporter_date
+  );
+  v_review_changed := (
+    old.review_note, old.reviewed_by_user_id, old.reviewed_at
+  ) is distinct from (
+    new.review_note, new.reviewed_by_user_id, new.reviewed_at
+  );
+  v_resolution_changed := (
+    old.resolution_status, old.investigation_required, old.investigation_notes,
+    old.assigned_manager_user_id, old.resolution_due_on, old.closure_note,
+    old.resolved_by_user_id, old.resolved_at
+  ) is distinct from (
+    new.resolution_status, new.investigation_required, new.investigation_notes,
+    new.assigned_manager_user_id, new.resolution_due_on, new.closure_note,
+    new.resolved_by_user_id, new.resolved_at
+  );
+
+  if new.status is distinct from old.status then
+    if old.status in ('draft', 'returned') and new.status = 'submitted' then
+      if not ((v_is_author and v_can_create) or v_can_review) then
+        raise exception 'Only the author or a reviewer can submit this event report.'
+          using errcode = 'check_violation';
+      end if;
+      if v_review_changed or v_resolution_changed then
+        raise exception 'Review and follow-up fields cannot change when a report is submitted.'
+          using errcode = 'check_violation';
+      end if;
+    elsif old.status = 'submitted' and new.status in ('approved', 'returned') then
+      if not v_can_review then
+        raise exception 'Only a reviewer can approve or return an event report.'
+          using errcode = 'check_violation';
+      end if;
+      if v_body_changed or v_resolution_changed then
+        raise exception 'A review decision cannot change the event report or its follow-up.'
+          using errcode = 'check_violation';
+      end if;
+      if new.reviewed_by_user_id is distinct from auth.uid() then
+        raise exception 'The reviewer must be the signed-in user.'
+          using errcode = 'check_violation';
+      end if;
+    else
+      raise exception 'Invalid event report workflow transition.'
+        using errcode = 'check_violation';
+    end if;
+  else
+    if v_review_changed then
+      raise exception 'Review fields may only change through a review decision.'
+        using errcode = 'check_violation';
+    end if;
+    if old.status in ('draft', 'returned') then
+      if v_resolution_changed then
+        raise exception 'Follow-up starts once a report is submitted.'
+          using errcode = 'check_violation';
+      end if;
+      if v_body_changed and not ((v_is_author and v_can_create) or v_can_review) then
+        raise exception 'Only the author or a reviewer can edit this event report.'
+          using errcode = 'check_violation';
+      end if;
+    else
+      -- submitted or approved: the event body is locked; only the follow-up
+      -- may move, and only by a ger.resolve holder.
+      if v_body_changed then
+        raise exception 'A submitted event report can no longer be edited.'
+          using errcode = 'check_violation';
+      end if;
+      if v_resolution_changed and not v_can_resolve then
+        raise exception 'Only a manager or nurse can work this follow-up.'
+          using errcode = 'check_violation';
+      end if;
+      if new.resolution_status = 'resolved'
+         and old.resolution_status is distinct from 'resolved'
+         and new.resolved_by_user_id is distinct from auth.uid() then
+        raise exception 'The resolver must be the signed-in user.'
+          using errcode = 'check_violation';
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger ger_reports_workflow_guard before update on public.ger_reports
+for each row execute function private.ger_reports_workflow_guard();
+
+grant select on public.ger_reports to authenticated;
+grant insert on public.ger_reports to authenticated;
+grant update on public.ger_reports to authenticated;
+grant delete on public.ger_reports to authenticated;
 grant all on public.ger_reports to service_role;
 
 -- ───────────────────────────── Behavior plans ─────────────────────────────
@@ -197,22 +442,63 @@ create policy behavior_plans_select on public.behavior_plans
 for select to authenticated
 using ((select private.has_agency(agency_id)));
 
-create policy behavior_plans_write on public.behavior_plans
-for all to authenticated
-using ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse}')))
-with check ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse}')));
+-- Plans are manager/nurse-owned (behavior.plan): DSPs and auditors cannot
+-- write them at any operation.
+create policy behavior_plans_insert on public.behavior_plans
+for insert to authenticated
+with check (
+  created_by_user_id = (select auth.uid())
+  and (select private.has_permission(agency_id, 'behavior.plan'))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+);
+
+create policy behavior_plans_update on public.behavior_plans
+for update to authenticated
+using ((select private.has_permission(agency_id, 'behavior.plan')))
+with check ((select private.has_permission(agency_id, 'behavior.plan')));
+
+create policy behavior_plans_delete on public.behavior_plans
+for delete to authenticated
+using ((select private.has_permission(agency_id, 'behavior.plan')));
 
 create policy behavior_plans_audit_membership on public.behavior_plans
 as restrictive for all to authenticated
 using ((select private.has_agency(agency_id)))
 with check ((select private.has_agency(agency_id)));
 
-create policy behavior_plans_audit_individual_scope on public.behavior_plans
-as restrictive for all to authenticated
-using ((select private.can_read_individual(agency_id, individual_id)))
+-- Nurse scope mirrors ger_reports: agency-wide READ and UPDATE (clinical
+-- oversight — the API lets nurses manage plans), while INSERT and DELETE
+-- stay limited to Individuals the nurse can read at their own sites.
+create policy behavior_plans_audit_individual_scope_read on public.behavior_plans
+as restrictive for select to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy behavior_plans_audit_individual_scope_update on public.behavior_plans
+as restrictive for update to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+)
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy behavior_plans_audit_individual_scope_insert on public.behavior_plans
+as restrictive for insert to authenticated
 with check ((select private.can_read_individual(agency_id, individual_id)));
 
-grant select, insert, update, delete on public.behavior_plans to authenticated;
+create policy behavior_plans_audit_individual_scope_delete on public.behavior_plans
+as restrictive for delete to authenticated
+using ((select private.can_read_individual(agency_id, individual_id)));
+
+grant select on public.behavior_plans to authenticated;
+grant insert on public.behavior_plans to authenticated;
+grant update on public.behavior_plans to authenticated;
+grant delete on public.behavior_plans to authenticated;
 grant all on public.behavior_plans to service_role;
 
 -- ───────────────────────────── Behavior data log ─────────────────────────────
@@ -250,22 +536,86 @@ create policy behavior_entries_select on public.behavior_entries
 for select to authenticated
 using ((select private.has_agency(agency_id)));
 
-create policy behavior_entries_write on public.behavior_entries
-for all to authenticated
-using ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')))
-with check ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')));
+-- Entries belong to their author: anyone with behavior.record may add their
+-- own entry; only the author — or a manager/nurse role for the site — may
+-- change or remove one.
+create policy behavior_entries_insert on public.behavior_entries
+for insert to authenticated
+with check (
+  recorded_by_user_id = (select auth.uid())
+  and (select private.has_permission(agency_id, 'behavior.record'))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse,dsp}'))
+);
+
+create policy behavior_entries_update on public.behavior_entries
+for update to authenticated
+using (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'behavior.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+)
+with check (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'behavior.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+);
+
+create policy behavior_entries_delete on public.behavior_entries
+for delete to authenticated
+using (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'behavior.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+);
 
 create policy behavior_entries_audit_membership on public.behavior_entries
 as restrictive for all to authenticated
 using ((select private.has_agency(agency_id)))
 with check ((select private.has_agency(agency_id)));
 
-create policy behavior_entries_audit_individual_scope on public.behavior_entries
-as restrictive for all to authenticated
-using ((select private.can_read_individual(agency_id, individual_id)))
+-- Nurse scope mirrors ger_reports: agency-wide READ (the API has no nurse
+-- behavior review; read is the oversight surface), INSERT/UPDATE/DELETE stay
+-- limited to Individuals the nurse can read at their own sites — except the
+-- author/manager UPDATE and DELETE paths above, which the restrictive
+-- INSERT/DELETE-style scope would otherwise block cross-site for entries a
+-- nurse recorded while covering another home. UPDATE therefore also carries
+-- the nurse widening, exactly as on ger_reports.
+create policy behavior_entries_audit_individual_scope_read on public.behavior_entries
+as restrictive for select to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy behavior_entries_audit_individual_scope_update on public.behavior_entries
+as restrictive for update to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+)
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy behavior_entries_audit_individual_scope_insert on public.behavior_entries
+as restrictive for insert to authenticated
 with check ((select private.can_read_individual(agency_id, individual_id)));
 
-grant select, insert, update, delete on public.behavior_entries to authenticated;
+create policy behavior_entries_audit_individual_scope_delete on public.behavior_entries
+as restrictive for delete to authenticated
+using ((select private.can_read_individual(agency_id, individual_id)));
+
+grant select on public.behavior_entries to authenticated;
+grant insert on public.behavior_entries to authenticated;
+grant update on public.behavior_entries to authenticated;
+grant delete on public.behavior_entries to authenticated;
 grant all on public.behavior_entries to service_role;
 
 -- ───────────────────────────── Health trackers ─────────────────────────────
@@ -299,20 +649,127 @@ create policy health_track_entries_select on public.health_track_entries
 for select to authenticated
 using ((select private.has_agency(agency_id)));
 
-create policy health_track_entries_write on public.health_track_entries
-for all to authenticated
-using ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')))
-with check ((select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,degreed_professional_manager,program_manager,nurse,dsp}')));
+-- Same author rule as behavior entries, with health.record: the author may
+-- change or remove their own entry; a manager/nurse role for the site may
+-- change or remove any entry at the site.
+create policy health_track_entries_insert on public.health_track_entries
+for insert to authenticated
+with check (
+  recorded_by_user_id = (select auth.uid())
+  and (select private.has_permission(agency_id, 'health.record'))
+  and (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse,dsp}'))
+);
+
+create policy health_track_entries_update on public.health_track_entries
+for update to authenticated
+using (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'health.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+)
+with check (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'health.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+);
+
+create policy health_track_entries_delete on public.health_track_entries
+for delete to authenticated
+using (
+  (
+    recorded_by_user_id = (select auth.uid())
+    and (select private.has_permission(agency_id, 'health.record'))
+  )
+  or (select private.role_key_in(agency_id, '{administrator,compliance_admin,house_manager,program_manager,nurse}'))
+);
 
 create policy health_track_entries_audit_membership on public.health_track_entries
 as restrictive for all to authenticated
 using ((select private.has_agency(agency_id)))
 with check ((select private.has_agency(agency_id)));
 
-create policy health_track_entries_audit_individual_scope on public.health_track_entries
-as restrictive for all to authenticated
-using ((select private.can_read_individual(agency_id, individual_id)))
+-- Nurse scope mirrors ger_reports: agency-wide READ and UPDATE (clinical
+-- oversight of flagged results), INSERT and DELETE site-scoped.
+create policy health_track_entries_audit_individual_scope_read on public.health_track_entries
+as restrictive for select to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy health_track_entries_audit_individual_scope_update on public.health_track_entries
+as restrictive for update to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+)
+with check (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy health_track_entries_audit_individual_scope_insert on public.health_track_entries
+as restrictive for insert to authenticated
 with check ((select private.can_read_individual(agency_id, individual_id)));
 
-grant select, insert, update, delete on public.health_track_entries to authenticated;
+create policy health_track_entries_audit_individual_scope_delete on public.health_track_entries
+as restrictive for delete to authenticated
+using ((select private.can_read_individual(agency_id, individual_id)));
+
+grant select on public.health_track_entries to authenticated;
+grant insert on public.health_track_entries to authenticated;
+grant update on public.health_track_entries to authenticated;
+grant delete on public.health_track_entries to authenticated;
 grant all on public.health_track_entries to service_role;
+
+-- Ownership immutability for the entry tables: a behavior or health entry
+-- can be edited in place, but it can never be moved to another Individual,
+-- another agency, or another author after the fact.
+create or replace function private.guard_entry_ownership()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.agency_id is distinct from old.agency_id
+     or new.individual_id is distinct from old.individual_id
+     or new.recorded_by_user_id is distinct from old.recorded_by_user_id
+     or new.created_at is distinct from old.created_at then
+    raise exception 'An entry cannot be moved to another Individual, agency, or author.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger behavior_entries_ownership_guard before update on public.behavior_entries
+for each row execute function private.guard_entry_ownership();
+
+create trigger health_track_entries_ownership_guard before update on public.health_track_entries
+for each row execute function private.guard_entry_ownership();
+
+create or replace function private.guard_behavior_plan_ownership()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.agency_id is distinct from old.agency_id
+     or new.individual_id is distinct from old.individual_id
+     or new.created_by_user_id is distinct from old.created_by_user_id
+     or new.created_at is distinct from old.created_at then
+    raise exception 'A behavior plan cannot be moved to another Individual, agency, or author.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger behavior_plans_ownership_guard before update on public.behavior_plans
+for each row execute function private.guard_behavior_plan_ownership();

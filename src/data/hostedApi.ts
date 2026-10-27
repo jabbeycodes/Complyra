@@ -8836,25 +8836,50 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
+  /**
+   * GER site integrity: a report belongs to the home its Individual lives
+   * at. Resolve every Individual on the draft to their home so validation
+   * can reject a report filed under the wrong home — and its alerts and
+   * review queue can never route to the wrong home's managers. The stored
+   * row's site always comes from the Individual, never from the caller.
+   */
+  private async gerSiteContext(session: SessionUser, draft: GerReportDraft) {
+    const person = await this.individualRecord(draft.individualId);
+    const linkedSiteIds: Record<string, string | null> = {};
+    for (const linkedId of draft.linkedIndividualIds ?? []) {
+      const linked = await this.individualRecord(linkedId);
+      linkedSiteIds[linkedId] =
+        linked && linked.agencyId === session.agencyId ? linked.siteId : null;
+    }
+    return {
+      person,
+      context: {
+        individualSiteId:
+          person && person.agencyId === session.agencyId ? person.siteId : null,
+        linkedSiteIds,
+      },
+    };
+  }
+
   async createGerReport(draft: GerReportDraft): Promise<GerReport> {
     const session = await this.requireSession();
     this.requirePermission(session, "ger.create");
-    if (!canAccessSite(session, draft.siteId) && session.roleKey !== "nurse") {
-      throw new Error("You do not have permission to do that.");
-    }
-    const person = await this.individualRecord(draft.individualId);
+    const { person, context } = await this.gerSiteContext(session, draft);
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found or outside your assigned access.");
     }
-    const errors = validateGerDraft(draft);
+    const errors = validateGerDraft(draft, context);
     if (errors.length > 0) throw new Error(errors[0]);
+    if (!canAccessSite(session, person.siteId) && session.roleKey !== "nurse") {
+      throw new Error("You do not have permission to do that.");
+    }
     const { data, error } = await this.client
       .from("ger_reports")
       .insert(
         buildGerReportRow({
           agencyId: session.agencyId,
           createdByUserId: session.userId,
-          draft,
+          draft: { ...draft, siteId: person.siteId },
           status: "draft",
         }),
       )
@@ -8879,16 +8904,26 @@ export class HostedApi implements ComplyraApi {
     if (!canEditGerReportBody(report, session)) {
       throw new Error("Only a draft or returned report can be edited.");
     }
-    const errors = validateGerDraft(draft);
+    // Changing the Individual re-derives the home in the same update: the
+    // report, its dashboard rows, and its alerts can never point at two
+    // different homes.
+    const { person, context } = await this.gerSiteContext(session, draft);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const effectiveDraft = { ...draft, siteId: person.siteId };
+    const errors = validateGerDraft(effectiveDraft, context);
     if (errors.length > 0) throw new Error(errors[0]);
+    if (!canAccessSite(session, person.siteId) && session.roleKey !== "nurse") {
+      throw new Error("You do not have permission to do that.");
+    }
     const row = buildGerReportRow({
       agencyId: session.agencyId,
       createdByUserId: report.createdByUserId,
-      draft,
+      draft: effectiveDraft,
       status: report.status,
     });
     delete row.agency_id;
-    delete row.site_id;
     delete row.status;
     delete row.created_by_user_id;
     const { data, error } = await this.client

@@ -64,6 +64,7 @@ export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
     "program_manager",
     "auditor",
     "house_manager",
+    "nurse",
   ].includes(session.roleKey);
 }
 

@@ -9183,20 +9183,41 @@ export class LocalApi implements ComplyraApi {
     return sortGerReports(rows);
   }
 
+  /**
+   * GER site integrity: a report belongs to the home its Individual lives
+   * at. Resolve every Individual on the draft to their home so validation
+   * can reject a report filed under the wrong home — and its alerts and
+   * review queue can never route to the wrong home's managers.
+   */
+  private gerSiteContext(session: SessionUser, draft: GerReportDraft) {
+    const person = accessibleIndividual(this.store, session, draft.individualId);
+    const linkedSiteIds: Record<string, string | null> = {};
+    for (const linkedId of draft.linkedIndividualIds ?? []) {
+      const linked = this.store.db.individuals.find(
+        (row) => row.id === linkedId && row.agencyId === session.agencyId,
+      );
+      linkedSiteIds[linkedId] = linked ? linked.siteId : null;
+    }
+    return {
+      person,
+      context: { individualSiteId: person.siteId, linkedSiteIds },
+    };
+  }
+
   async createGerReport(draft: GerReportDraft): Promise<GerReport> {
     const session = assertSession(this.store);
     assertCan(session, "ger.create");
-    if (!this.canAccessGerSite(session, draft.siteId)) {
+    const { person, context } = this.gerSiteContext(session, draft);
+    const errors = validateGerDraft(draft, context);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (!this.canAccessGerSite(session, person.siteId)) {
       throw new Error("You do not have permission to do that.");
     }
-    accessibleIndividual(this.store, session, draft.individualId);
-    const errors = validateGerDraft(draft);
-    if (errors.length > 0) throw new Error(errors[0]);
     const now = new Date().toISOString();
     const report: GerReport = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
-      siteId: draft.siteId,
+      siteId: person.siteId,
       individualId: draft.individualId,
       linkedIndividualIds: draft.linkedIndividualIds ?? [],
       eventDate: draft.eventDate,
@@ -9247,9 +9268,18 @@ export class LocalApi implements ComplyraApi {
     if (!canEditGerReportBody(report, session)) {
       throw new Error("Only a draft or returned report can be edited.");
     }
-    const errors = validateGerDraft(draft);
+    // Changing the Individual re-derives the home in the same edit: the
+    // report, its dashboard rows, and its alerts can never point at two
+    // different homes.
+    const { person, context } = this.gerSiteContext(session, draft);
+    const effectiveDraft = { ...draft, siteId: person.siteId };
+    const errors = validateGerDraft(effectiveDraft, context);
     if (errors.length > 0) throw new Error(errors[0]);
+    if (!this.canAccessGerSite(session, person.siteId)) {
+      throw new Error("You do not have permission to do that.");
+    }
     Object.assign(report, {
+      siteId: person.siteId,
       individualId: draft.individualId,
       linkedIndividualIds: draft.linkedIndividualIds ?? [],
       eventDate: draft.eventDate,

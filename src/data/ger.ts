@@ -158,9 +158,47 @@ export function canViewGerReports(session: SessionUser | null): boolean {
 
 // ───────────────────────────── Validation ─────────────────────────────
 
-export function validateGerDraft(draft: GerReportDraft): string[] {
+/**
+ * Where the report's Individuals actually live, resolved by the API layer
+ * (server-side in hosted mode). A report must be filed under the home its
+ * Individual lives at — otherwise the chart, the dashboard, and the alert
+ * fan-out disagree about which home's managers own the follow-up.
+ */
+export interface GerDraftSiteContext {
+  /** The home the primary Individual lives at; null when not found. */
+  individualSiteId: string | null;
+  /** Home per linked Individual id; null when not found. */
+  linkedSiteIds?: Record<string, string | null>;
+}
+
+export function validateGerDraft(
+  draft: GerReportDraft,
+  siteContext?: GerDraftSiteContext,
+): string[] {
   const errors: string[] = [];
   if (!draft.individualId) errors.push("Choose the Individual this report is about.");
+  if (siteContext) {
+    if (draft.individualId && siteContext.individualSiteId === null) {
+      errors.push("The Individual on this report could not be found.");
+    } else if (
+      draft.individualId &&
+      siteContext.individualSiteId !== draft.siteId
+    ) {
+      errors.push(
+        "This report must be filed under the home its Individual lives at.",
+      );
+    }
+    for (const linkedId of draft.linkedIndividualIds ?? []) {
+      const linkedSite = siteContext.linkedSiteIds?.[linkedId];
+      if (linkedSite === null || linkedSite === undefined) {
+        errors.push("A linked Individual on this report could not be found.");
+      } else if (linkedSite !== draft.siteId) {
+        errors.push(
+          "A linked Individual must live at the same home as this report.",
+        );
+      }
+    }
+  }
   if (!draft.eventDate) errors.push("The event date is required.");
   if (!draft.eventType || !GER_EVENT_TYPES.includes(draft.eventType)) {
     errors.push("Choose an event type.");

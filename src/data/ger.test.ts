@@ -188,3 +188,37 @@ test("ger: submit targets HM directly plus PM and nurse broadcasts, deduped", ()
   );
   assert.ok(!targets.some((t) => (t.roleKey as string) === "auditor"));
 });
+
+test("ger: site context rejects an Individual from a different home", () => {
+  // Without a context, presence/format validation is unchanged.
+  assert.deepEqual(validateGerDraft(draft), []);
+  // The Individual lives at site-2 but the draft claims site-1.
+  const errors = validateGerDraft(draft, { individualSiteId: "site-2" });
+  assert.ok(errors.some((e) => e.includes("must be filed under the home")));
+  // Matching home passes.
+  assert.deepEqual(validateGerDraft(draft, { individualSiteId: "site-1" }), []);
+  // A missing Individual is an error, not a silent pass.
+  const missing = validateGerDraft(draft, { individualSiteId: null });
+  assert.ok(missing.some((e) => e.includes("could not be found")));
+});
+
+test("ger: site context rejects linked Individuals from other homes", () => {
+  const linked = { ...draft, linkedIndividualIds: ["person-2", "person-3"] };
+  const errors = validateGerDraft(linked, {
+    individualSiteId: "site-1",
+    linkedSiteIds: { "person-2": "site-1", "person-3": "site-2" },
+  });
+  assert.ok(errors.some((e) => e.includes("linked Individual must live")));
+  const unknown = validateGerDraft(linked, {
+    individualSiteId: "site-1",
+    linkedSiteIds: { "person-2": "site-1", "person-3": null },
+  });
+  assert.ok(unknown.some((e) => e.includes("could not be found")));
+  assert.deepEqual(
+    validateGerDraft(linked, {
+      individualSiteId: "site-1",
+      linkedSiteIds: { "person-2": "site-1", "person-3": "site-1" },
+    }),
+    [],
+  );
+});

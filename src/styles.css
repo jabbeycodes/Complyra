@@ -7361,6 +7361,10 @@ button.qa-row:hover {
   margin: 4px 0 12px;
   padding-inline: 0;
 }
+.health-track-tabs {
+  margin: 4px 0 12px;
+  padding-inline: 0;
+}
 
 .appointments-filters {
   padding: 16px var(--panel-inline) 18px;

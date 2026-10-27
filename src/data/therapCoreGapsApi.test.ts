@@ -208,3 +208,113 @@ test("health api: flagged lab alerts managers; overdue immunization alerts once"
   ).length;
   assert.equal(secondCount, firstCount, "overdue alert is deduped");
 });
+
+test("ger api: a report filed under the wrong home is rejected", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const hm = await api.signIn(login(DEMO_HM_USERNAME));
+  const person = personAtHmSite(store, hm.siteId);
+  const otherSite = store.db.sites.find(
+    (row) => row.id !== person.siteId && row.agencyId === hm.agencyId,
+  );
+  assert.ok(otherSite, "seed has a second site");
+
+  // Claiming another home for this Individual must fail: the report, its
+  // dashboard rows, and its alerts belong to the Individual's home.
+  await assert.rejects(
+    () =>
+      api.createGerReport({
+        siteId: otherSite!.id,
+        individualId: person.id,
+        eventDate: "2026-10-26",
+        eventTime: "10:00",
+        location: "Kitchen",
+        immediateActions: "Checked on them.",
+        eventType: "Fall",
+        severity: "Low",
+        description: "Filed under the wrong home.",
+        reporterName: "House Manager",
+        reporterSignature: "House Manager",
+        reporterDate: "2026-10-26",
+      }),
+    /must be filed under the home/,
+  );
+});
+
+test("ger api: a linked Individual from another home is rejected", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const hm = await api.signIn(login(DEMO_HM_USERNAME));
+  const person = personAtHmSite(store, hm.siteId);
+  const elsewhere = store.db.individuals.find(
+    (row) => row.siteId !== person.siteId && row.agencyId === hm.agencyId,
+  );
+  assert.ok(elsewhere, "seed has an individual at another home");
+
+  await assert.rejects(
+    () =>
+      api.createGerReport({
+        siteId: person.siteId,
+        individualId: person.id,
+        linkedIndividualIds: [elsewhere!.id],
+        eventDate: "2026-10-26",
+        eventTime: "10:00",
+        location: "Kitchen",
+        immediateActions: "Checked on them.",
+        eventType: "Fall",
+        severity: "Low",
+        description: "Links an Individual from another home.",
+        reporterName: "House Manager",
+        reporterSignature: "House Manager",
+        reporterDate: "2026-10-26",
+      }),
+    /linked Individual must live/,
+  );
+});
+
+test("ger api: changing the Individual on a draft re-derives the home", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const first = store.db.individuals.find((row) => row.agencyId === admin.agencyId);
+  assert.ok(first);
+  const second = store.db.individuals.find(
+    (row) => row.agencyId === admin.agencyId && row.siteId !== first!.siteId,
+  );
+  assert.ok(second, "seed has an individual at a second home");
+
+  const created = await api.createGerReport({
+    siteId: first!.siteId,
+    individualId: first!.id,
+    eventDate: "2026-10-26",
+    eventTime: "10:00",
+    location: "Kitchen",
+    immediateActions: "Checked on them.",
+    eventType: "Fall",
+    severity: "Low",
+    description: "About the first Individual.",
+    reporterName: "Admin",
+    reporterSignature: "Admin",
+    reporterDate: "2026-10-26",
+  });
+  assert.equal(created.siteId, first!.siteId);
+
+  // The edit form still carries the OLD siteId; the stored report must
+  // follow the new Individual's home, not the stale form value.
+  const updated = await api.updateGerReport(created.id, {
+    siteId: first!.siteId,
+    individualId: second!.id,
+    eventDate: "2026-10-26",
+    eventTime: "10:00",
+    location: "Kitchen",
+    immediateActions: "Checked on them.",
+    eventType: "Fall",
+    severity: "Low",
+    description: "Corrected to the second Individual.",
+    reporterName: "Admin",
+    reporterSignature: "Admin",
+    reporterDate: "2026-10-26",
+  });
+  assert.equal(updated.individualId, second!.id);
+  assert.equal(updated.siteId, second!.siteId);
+});
