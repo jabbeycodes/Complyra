@@ -56,6 +56,7 @@ export type NotificationType =
   | "delegation.unacknowledged"
   | "isp.renewal_soon"
   | "incident.followup"
+  | "message.received"
   | "qa.dispute_raised"
   | "qa.dispute_resolved"
   | "qa.schedule_due"
@@ -110,6 +111,7 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "delegation.unacknowledged",
   "isp.renewal_soon",
   "incident.followup",
+  "message.received",
   "qa.dispute_raised",
   "qa.dispute_resolved",
   "qa.schedule_due",
@@ -222,6 +224,7 @@ export function notificationPage(link: string): string | null {
   if (/^\/audit(?:\/|$)/.test(path)) return "Audit Me";
   if (/^\/(?:qa|qa-audits)(?:\/|$)/.test(path)) return "QA Review";
   if (/^\/delegations(?:\/|$)/.test(path)) return "Delegations";
+  if (/^\/messages(?:\/|$)/.test(path)) return "Messages";
   if (/^\/documents\/extractions(?:\/|$)/.test(path)) return "Extraction review";
   return null;
 }
@@ -323,6 +326,7 @@ export const NOTIFICATION_META: Record<
   "delegation.unacknowledged": { status: "pending", label: "Delegation unacknowledged" },
   "isp.renewal_soon": { status: "expiring", label: "Plan renewal approaching" },
   "incident.followup": { status: "late", label: "Incident follow-up" },
+  "message.received": { status: "pending", label: "New message" },
   "qa.dispute_raised": { status: "pending", label: "QA finding disputed" },
   "qa.dispute_resolved": { status: "compliant", label: "QA dispute resolved" },
   "qa.schedule_due": { status: "expiring", label: "QA audit due" },

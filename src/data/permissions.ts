@@ -81,6 +81,10 @@ export const PERMISSION_KEYS = [
   "hub.manage_pay_settings",
   // KIOSK (remote punch is individually granted per staff, never role-default)
   "hub.remote_punch",
+  // MESSAGING (staff-to-staff internal messaging: operational roles only —
+  // the auditor template deliberately never receives this key, in the TS
+  // packs below and in the SQL gate private.can_use_messaging()).
+  "messages.use",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -188,6 +192,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.view_team",
       // HR-STAFFING (2026-09-16): recurring staffing patterns for their home.
       "hub.manage_staffing",
+      // MESSAGING: staff-to-staff internal messaging.
+      "messages.use",
     ]),
   },
   {
@@ -242,6 +248,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.manage_staffing",
       // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
       "hub.manage_pay_settings",
+      // MESSAGING: staff-to-staff internal messaging.
+      "messages.use",
     ]),
   },
   {
@@ -265,6 +273,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.acknowledge",
       // HR-EMPLOYEE-HUB: every employee opens their own hub.
       "hub.access",
+      // MESSAGING: staff-to-staff internal messaging.
+      "messages.use",
     ]),
   },
   {
@@ -297,6 +307,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.acknowledge",
       // HR-EMPLOYEE-HUB: every employee opens their own hub.
       "hub.access",
+      // MESSAGING: staff-to-staff internal messaging.
+      "messages.use",
     ]),
   },
   {
@@ -324,6 +336,9 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.manage_staffing",
       // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
       "hub.manage_pay_settings",
+      // MESSAGING: HR is an operational staff role for internal messaging
+      // (messaging is staff communication, not a care-record surface).
+      "messages.use",
     ]),
   },
   {
@@ -452,6 +467,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   // KIOSK — granted per staff member by admins (see hr_staff_permission_grants),
   // never enabled by default in any role pack.
   "hub.remote_punch": "Clock in/out from a personal device",
+  // MESSAGING — the auditor template never carries this key by design.
+  "messages.use": "Use staff messaging",
 };
 
 /**
@@ -695,43 +712,40 @@ export function canViewMedicationOrders(roleKey: string) {
 /**
  * Who may create, edit, activate, or discontinue orders. Mirrors the
  * medication_orders RLS write policy (nurse / PM / admin / compliance).
- */
 export function canManageMedicationOrders(roleKey: string) {
-  return [
-    "administrator",
-    "compliance_admin",
-    "program_manager",
-    "nurse",
-  ].includes(roleKey);
-}
-
-/**
  * Who may start a reconciliation + save its decisions. House managers may run
  * one for their homes; nurses / PMs / admins may too. Mirrors the
  * medication_reconciliations RLS write policy.
- */
 export function canStartReconciliation(roleKey: string) {
-  return [
-    "administrator",
-    "compliance_admin",
-    "program_manager",
-    "nurse",
-    "house_manager",
-  ].includes(roleKey);
-}
-
-/**
  * Who may sign off a reconciliation. A nurse sign-off is required; PMs and
  * administrators may also sign. House managers run the checklist but cannot
  * provide the clinical sign-off.
- */
 export function canSignReconciliation(roleKey: string) {
-  return [
-    "administrator",
-    "compliance_admin",
-    "program_manager",
-    "nurse",
-  ].includes(roleKey);
+ * MESSAGING — role keys whose default templates carry `messages.use`.
+ * Operational staff only; auditors are excluded by design (staff messaging
+ * is internal communication, not a compliance record surface). The API gate
+ * itself is the `messages.use` permission — this list is the DB/seed mirror
+ * used for recipient eligibility and the SQL helper private.can_use_messaging().
+export const MESSAGING_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "compliance_admin",
+  "program_manager",
+  "house_manager",
+  "nurse",
+  "dsp",
+  "hr",
+];
+ * The messaging gate used by both API layers: the `messages.use` permission
+ * AND not the auditor role. The role half is deliberate defense in depth —
+ * even if an agency admin mistakenly grants the permission to the auditor
+ * template, auditors stay out of staff messaging (the SQL helper
+ * private.can_use_messaging() mirrors this exactly).
+export function canUseMessaging(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
 }
 
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
