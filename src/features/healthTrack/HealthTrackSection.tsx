@@ -5,28 +5,51 @@ import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
 import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
 import {
+  BM_CONSISTENCIES,
+  CONTINENCE_STATES,
+  ELIMINATION_AMOUNTS,
+  GLUCOSE_CONTEXTS,
   HEALTH_TRACK_KINDS,
   HEALTH_TRACK_KIND_LABELS,
+  MEAL_PORTIONS,
+  MEAL_TYPES,
+  MENSES_FLOWS,
+  SKIN_BODY_LOCATIONS,
+  SKIN_CHANGES,
+  SKIN_OBSERVATIONS,
   SLEEP_QUALITIES,
   canCorrectHealthTrackEntry,
   canViewHealthTrack,
+  dailyIntakeTotals,
+  glucoseOutOfRange,
   isImmunizationOverdue,
+  isRefusedMeal,
+  vitalsConcerns,
   type HealthTrackEntry,
   type HealthTrackKind,
 } from "../../data/healthTrack";
 
 /**
  * Health trackers on the Individual chart: immunizations, lab results,
- * infection tracking, and sleep — quick-add forms and dated lists beside
- * the Health card's appointments. Overdue immunizations and flagged
- * results are labeled in text (never color alone); significant entries
- * alert the responsible managers when recorded. Auditors read-only.
+ * infection tracking, sleep, intake (meals & fluids with daily totals),
+ * elimination, vitals, seizures, menses, skin monitoring, blood glucose,
+ * and respiratory treatments — quick-add forms and dated lists beside
+ * the Health card's appointments. Overdue immunizations, out-of-range
+ * readings, and flagged results are labeled in text (never color alone);
+ * significant entries alert the responsible managers when recorded.
+ * Auditors read-only.
  */
 
-const KIND_FIELDS: Record<
-  HealthTrackKind,
-  Array<{ key: string; label: string; type?: "date" | "select" | "checkbox-text"; options?: readonly string[] }>
-> = {
+interface KindField {
+  key: string;
+  label: string;
+  type?: "date" | "time" | "select" | "checkbox-text";
+  options?: readonly string[];
+  /** Render only when the current detail values call for it. */
+  when?: (details: Record<string, string>) => boolean;
+}
+
+const KIND_FIELDS: Record<HealthTrackKind, KindField[]> = {
   immunization: [
     { key: "vaccineName", label: "Vaccine" },
     { key: "doseLabel", label: "Dose (e.g. Annual, Booster)" },
@@ -56,6 +79,152 @@ const KIND_FIELDS: Record<
     { key: "quality", label: "Quality", type: "select", options: SLEEP_QUALITIES },
     { key: "interruptions", label: "Interruptions" },
   ],
+  intake: [
+    {
+      key: "entryType",
+      label: "Meal or fluid",
+      type: "select",
+      options: ["meal", "fluid"],
+    },
+    {
+      key: "mealType",
+      label: "Meal",
+      type: "select",
+      options: MEAL_TYPES,
+      when: (d) => d.entryType !== "fluid",
+    },
+    {
+      key: "portion",
+      label: "Portion eaten",
+      type: "select",
+      options: MEAL_PORTIONS,
+      when: (d) => d.entryType !== "fluid",
+    },
+    {
+      key: "appetiteNote",
+      label: "Appetite note",
+      when: (d) => d.entryType !== "fluid",
+    },
+    {
+      key: "fluidType",
+      label: "Fluid",
+      when: (d) => d.entryType === "fluid",
+    },
+    {
+      key: "fluidOz",
+      label: "Ounces",
+      when: (d) => d.entryType === "fluid",
+    },
+  ],
+  elimination: [
+    {
+      key: "entryType",
+      label: "Type",
+      type: "select",
+      options: ["bowel", "urination", "emesis"],
+    },
+    { key: "timeOfDay", label: "Time", type: "time" },
+    {
+      key: "amount",
+      label: "Amount",
+      type: "select",
+      options: ELIMINATION_AMOUNTS,
+    },
+    {
+      key: "consistency",
+      label: "Consistency",
+      type: "select",
+      options: BM_CONSISTENCIES,
+      when: (d) => d.entryType !== "urination" && d.entryType !== "emesis",
+    },
+    {
+      key: "color",
+      label: "Color",
+      when: (d) => d.entryType !== "urination" && d.entryType !== "emesis",
+    },
+    {
+      key: "bloodPresent",
+      label: "Blood present",
+      type: "select",
+      options: ["no", "yes"],
+      when: (d) => d.entryType !== "urination" && d.entryType !== "emesis",
+    },
+    {
+      key: "painNoted",
+      label: "Pain noted",
+      type: "select",
+      options: ["no", "yes"],
+      when: (d) => d.entryType !== "urination" && d.entryType !== "emesis",
+    },
+    {
+      key: "continence",
+      label: "Continence",
+      type: "select",
+      options: CONTINENCE_STATES,
+      when: (d) => d.entryType === "urination",
+    },
+  ],
+  vitals: [
+    { key: "temperatureF", label: "Temperature (°F)" },
+    { key: "systolic", label: "Systolic" },
+    { key: "diastolic", label: "Diastolic" },
+    { key: "pulse", label: "Pulse" },
+    { key: "respirations", label: "Respirations" },
+    { key: "oxygenSaturation", label: "Oxygen saturation (%)" },
+    { key: "weightLb", label: "Weight (lb)" },
+    { key: "heightIn", label: "Height (in)" },
+  ],
+  seizure: [
+    { key: "timeOfDay", label: "Time", type: "time" },
+    { key: "seizureType", label: "Type / description" },
+    { key: "durationMinutes", label: "Duration (minutes)" },
+    { key: "triggers", label: "Possible triggers" },
+    { key: "postEventState", label: "After the event" },
+  ],
+  menses: [
+    { key: "endOn", label: "Ended on", type: "date" },
+    { key: "flow", label: "Flow", type: "select", options: MENSES_FLOWS },
+    { key: "symptoms", label: "Symptoms" },
+  ],
+  skin: [
+    {
+      key: "bodyLocation",
+      label: "Where on the body",
+      type: "select",
+      options: SKIN_BODY_LOCATIONS,
+    },
+    {
+      key: "observation",
+      label: "Observation",
+      type: "select",
+      options: SKIN_OBSERVATIONS,
+    },
+    {
+      key: "changeSinceLast",
+      label: "Change since last check",
+      type: "select",
+      options: SKIN_CHANGES,
+    },
+    { key: "sizeDescription", label: "Size" },
+    { key: "description", label: "Description" },
+    { key: "followUpOn", label: "Follow-up date", type: "date" },
+  ],
+  glucose: [
+    { key: "timeOfDay", label: "Time", type: "time" },
+    { key: "readingMgDl", label: "Reading (mg/dL)" },
+    {
+      key: "context",
+      label: "Context",
+      type: "select",
+      options: GLUCOSE_CONTEXTS,
+    },
+    { key: "symptoms", label: "Symptoms" },
+  ],
+  respiratory: [
+    { key: "timeOfDay", label: "Time", type: "time" },
+    { key: "treatmentType", label: "Treatment" },
+    { key: "response", label: "Response" },
+  ],
 };
 
 const DATE_LABELS: Record<HealthTrackKind, string> = {
@@ -63,6 +232,14 @@ const DATE_LABELS: Record<HealthTrackKind, string> = {
   lab: "Date collected",
   infection: "Started on",
   sleep: "Night of",
+  intake: "Date",
+  elimination: "Date",
+  vitals: "Date taken",
+  seizure: "Date",
+  menses: "Started on",
+  skin: "Date checked",
+  glucose: "Date",
+  respiratory: "Date",
 };
 
 export default function HealthTrackSection({
@@ -217,7 +394,9 @@ export default function HealthTrackSection({
                 required
               />
             </label>
-            {KIND_FIELDS[kind].map((field) =>
+            {KIND_FIELDS[kind]
+              .filter((field) => !field.when || field.when(details))
+              .map((field) =>
               field.type === "select" ? (
                 <label key={field.key}>
                   {field.label}
@@ -239,7 +418,13 @@ export default function HealthTrackSection({
                 <label key={field.key}>
                   {field.label}
                   <input
-                    type={field.type === "date" ? "date" : "text"}
+                    type={
+                      field.type === "date"
+                        ? "date"
+                        : field.type === "time"
+                          ? "time"
+                          : "text"
+                    }
                     value={details[field.key] ?? ""}
                     onChange={(e) =>
                       setDetails({ ...details, [field.key]: e.target.value })
@@ -253,14 +438,14 @@ export default function HealthTrackSection({
             Note
             <input value={note} onChange={(e) => setNote(e.target.value)} />
           </label>
-          {kind === "lab" && (
+          {(kind === "lab" || kind === "respiratory") && (
             <label className="checkbox-row">
               <input
                 type="checkbox"
                 checked={flaggedAbnormal}
                 onChange={(e) => setFlaggedAbnormal(e.target.checked)}
               />
-              Flag this result abnormal (alerts the home's managers)
+              Flag this record as concerning (alerts the home's managers)
             </label>
           )}
           <div className="form-actions">
@@ -278,7 +463,20 @@ export default function HealthTrackSection({
       ) : entries.length === 0 ? (
         <Empty title={`No ${HEALTH_TRACK_KIND_LABELS[kind].toLowerCase()} recorded yet.`} mark="quiet" />
       ) : (
-        <ul className="record-list">
+        <>
+          {kind === "intake" && (
+            <div className="health-daily-totals" aria-label="Daily intake totals">
+              <h3>Daily totals</h3>
+              {dailyIntakeTotals(entries).map((row) => (
+                <p key={row.date} className="muted">
+                  {formatDate(row.date)} — fluids {row.fluidOz} oz ·{" "}
+                  {row.mealCount} meal{row.mealCount === 1 ? "" : "s"}
+                  {row.refusedMeals > 0 && ` · ${row.refusedMeals} refused`}
+                </p>
+              ))}
+            </div>
+          )}
+          <ul className="record-list">
           {entries.map((entry) => {
             const overdue = isImmunizationOverdue(entry, entries);
             const positive =
@@ -300,11 +498,51 @@ export default function HealthTrackSection({
                       · resolved {formatDate(entry.details.resolvedOn)}
                     </span>
                   )}
+                  {entry.kind === "menses" && entry.details.endOn && (
+                    <span className="muted">
+                      {" "}
+                      · ended {formatDate(entry.details.endOn)}
+                    </span>
+                  )}
+                  {entry.kind === "skin" && entry.details.followUpOn && (
+                    <span className="muted">
+                      {" "}
+                      · follow-up {formatDate(entry.details.followUpOn)}
+                    </span>
+                  )}
+                  {entry.kind === "vitals" &&
+                    vitalsConcerns(entry.details).length > 0 && (
+                      <p className="muted">
+                        {vitalsConcerns(entry.details).join(" · ")}
+                      </p>
+                    )}
                   {entry.note && <p className="muted">{entry.note}</p>}
                 </div>
                 {overdue && <Badge status="Overdue" />}
                 {entry.flaggedAbnormal && <Badge status="Flagged abnormal" />}
                 {positive && <Badge status="Confirmed positive" />}
+                {entry.kind === "vitals" &&
+                  vitalsConcerns(entry.details).length > 0 && (
+                    <Badge status="Out of range" />
+                  )}
+                {entry.kind === "glucose" && glucoseOutOfRange(entry.details) && (
+                  <Badge status="Out of range" />
+                )}
+                {entry.kind === "skin" &&
+                  entry.details.observation === "Open area / breakdown" && (
+                    <Badge status="Skin breakdown" />
+                  )}
+                {entry.kind === "skin" &&
+                  entry.details.changeSinceLast === "Worse" && (
+                    <Badge status="Getting worse" />
+                  )}
+                {entry.kind === "intake" && isRefusedMeal(entry.details) && (
+                  <Badge status="Meal refused" />
+                )}
+                {entry.kind === "elimination" &&
+                  entry.details.bloodPresent === "yes" && (
+                    <Badge status="Blood noted" />
+                  )}
                 {canRecord && entry.recordedByUserId === session?.userId && (
                   <button
                     type="button"
@@ -339,7 +577,8 @@ export default function HealthTrackSection({
               </li>
             );
           })}
-        </ul>
+          </ul>
+        </>
       )}
       {correcting && (
         <form

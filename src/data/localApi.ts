@@ -402,6 +402,8 @@ import {
   healthTrackTitle,
   isImmunizationOverdue,
   validateHealthCorrection,
+  lowFluidAlertTargets,
+  lowFluidDays,
   validateHealthTrackDraft,
   type HealthTrackEntry,
   type HealthTrackEntryDraft,
@@ -9701,6 +9703,44 @@ export class LocalApi implements ComplyraApi {
     }
   }
 
+  /** Time-based alert: a finished day with very little fluid alerts once. */
+  private queueLowFluidAlerts(session: SessionUser, individualId: string) {
+    const intake = this.healthTrackEntriesOf().filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === individualId &&
+        row.kind === "intake",
+    );
+    const days = lowFluidDays(intake);
+    if (days.length === 0) return;
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId,
+    );
+    const siteId = person?.siteId ?? session.siteId ?? "";
+    const name = this.individualName(individualId);
+    const houseManagerUserIds = this.houseManagerIdsForSite(session, siteId);
+    for (const day of days) {
+      const targets = lowFluidAlertTargets({
+        individualId,
+        date: day.date,
+        houseManagerUserIds,
+      });
+      for (const target of targets) {
+        this.queueFollowupAlert({
+          agencyId: session.agencyId,
+          userId: target.userId,
+          roleKey: target.roleKey,
+          title: `Low fluid intake — ${name}`,
+          body: `Only ${day.fluidOz} oz of fluids were recorded on ${day.date}. Check in and encourage fluids.`,
+          deepLink: `/plans/${individualId}`,
+          entityType: "health_track_entry",
+          entityId: `low-fluid:${individualId}:${day.date}`,
+          dedupeKey: target.dedupeKey,
+        });
+      }
+    }
+  }
+
   async listHealthTrackEntries(input: {
     individualId: string;
     kind?: HealthTrackKind;
@@ -9718,6 +9758,8 @@ export class LocalApi implements ComplyraApi {
     for (const row of rows) {
       if (isImmunizationOverdue(row, rows)) this.queueHealthAlert(session, row);
     }
+    // Time-based alert: a finished day with very low fluids alerts once.
+    this.queueLowFluidAlerts(session, input.individualId);
     return rows.sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
   }
 
@@ -9748,6 +9790,10 @@ export class LocalApi implements ComplyraApi {
     };
     this.healthTrackEntriesOf().unshift(entry);
     if (healthEntryNeedsAlert(entry)) this.queueHealthAlert(session, entry);
+    // A backdated intake entry can complete a low-fluid day.
+    if (entry.kind === "intake") {
+      this.queueLowFluidAlerts(session, individualId);
+    }
     await persistMeta(this.store);
     return entry;
   }

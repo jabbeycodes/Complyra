@@ -4,6 +4,7 @@ import { test, expect, type Page } from "./fixtures";
  * Dedicated coverage for the Individual chart's health trackers section
  * ("Trackers and logs"): it must stay distinct from the Health
  * card's own heading and 2-tab list at desktop and mobile widths.
+ * Tab count follows the stacked tracker set (batch 1 + batch 2 kinds).
  */
 
 async function signIn(page: Page, username = "sarah.mitchell") {
@@ -44,11 +45,15 @@ test("health trackers section is distinct from the Health card and its tabs swit
   // The tracker section has its own heading and 4-tab list.
   const trackerTabs = chart.getByRole("tablist", { name: "Health trackers" });
   const tabs = trackerTabs.getByRole("tab");
-  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toHaveCount(12);
   await expect(tabs.nth(0)).toHaveText("Immunizations");
   await expect(tabs.nth(1)).toHaveText("Lab results");
   await expect(tabs.nth(2)).toHaveText("Infection tracking");
   await expect(tabs.nth(3)).toHaveText("Sleep");
+  await expect(tabs.nth(4)).toHaveText("Intake — meals & fluids");
+  await expect(tabs.nth(5)).toHaveText("Elimination");
+  await expect(tabs.nth(6)).toHaveText("Vitals");
+  await expect(tabs.nth(11)).toHaveText("Respiratory");
 
   // Switching tabs swaps the panel's record form to that tracker.
   const panel = chart.getByRole("tabpanel");
@@ -69,7 +74,7 @@ test("health trackers section renders at a mobile width", async ({ page }) => {
   const chart = await openEllisChart(page);
 
   const trackerTabs = chart.getByRole("tablist", { name: "Health trackers" });
-  await expect(trackerTabs.getByRole("tab")).toHaveCount(4);
+  await expect(trackerTabs.getByRole("tab")).toHaveCount(12);
   await trackerTabs.getByRole("tab", { name: "Lab results" }).click();
   const panel = chart.getByRole("tabpanel");
   await expect(panel.getByLabel("Test")).toBeVisible();
