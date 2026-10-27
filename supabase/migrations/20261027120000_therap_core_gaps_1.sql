@@ -91,10 +91,20 @@ using ((select private.has_agency(agency_id)))
 with check ((select private.has_agency(agency_id)));
 
 -- Nurses are agency-wide clinical reviewers (they cover every home), so the
--- individual-scope restriction must let them through even for individuals
--- outside their assigned site, matching the hosted GER API's nurse widening.
-create policy ger_reports_audit_individual_scope on public.ger_reports
-as restrictive for all to authenticated
+-- individual-scope restriction must let them read and review event reports for
+-- individuals outside their assigned site, matching the hosted GER API's nurse
+-- widening for listing (SELECT) and review/resolve (UPDATE). INSERT and DELETE
+-- stay strictly site-scoped so a nurse cannot author or destroy reports —
+-- including approved, locked records — for homes they are not assigned to.
+create policy ger_reports_audit_individual_scope_read on public.ger_reports
+as restrictive for select to authenticated
+using (
+  (select private.can_read_individual(agency_id, individual_id))
+  or (select private.role_key_in(agency_id, '{nurse}'))
+);
+
+create policy ger_reports_audit_individual_scope_update on public.ger_reports
+as restrictive for update to authenticated
 using (
   (select private.can_read_individual(agency_id, individual_id))
   or (select private.role_key_in(agency_id, '{nurse}'))
@@ -103,6 +113,14 @@ with check (
   (select private.can_read_individual(agency_id, individual_id))
   or (select private.role_key_in(agency_id, '{nurse}'))
 );
+
+create policy ger_reports_audit_individual_scope_insert on public.ger_reports
+as restrictive for insert to authenticated
+with check ((select private.can_read_individual(agency_id, individual_id)));
+
+create policy ger_reports_audit_individual_scope_delete on public.ger_reports
+as restrictive for delete to authenticated
+using ((select private.can_read_individual(agency_id, individual_id)));
 
 grant select, insert, update, delete on public.ger_reports to authenticated;
 grant all on public.ger_reports to service_role;
