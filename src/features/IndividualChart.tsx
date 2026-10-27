@@ -49,6 +49,8 @@ import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import ChartOverview from "./ChartOverview";
 import HealthCard from "./HealthCard";
+import HealthTrackSection from "./healthTrack/HealthTrackSection";
+import BehaviorSection from "./behavior/BehaviorSection";
 import MonthlyEquipmentCard from "./MonthlyEquipmentCard";
 import AloneTimeCard from "./AloneTimeCard";
 import MarCard from "./MarCard";
@@ -539,6 +541,10 @@ export default function IndividualChart({
           individualName={person.name}
           siteName={person.site}
         />
+        {/* THERAP-CORE-GAPS-1: health trackers + behavior supports. Both
+            sections self-gate on the session (auditors read-only, HR out). */}
+        <HealthTrackSection individualId={individualId} individualName={person.name} />
+        <BehaviorSection individualId={individualId} individualName={person.name} />
 
         {showMeds && (
           <section className="chart-widget" id="chart-meds" aria-labelledby="meds-heading">

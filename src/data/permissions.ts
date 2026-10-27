@@ -85,6 +85,13 @@ export const PERMISSION_KEYS = [
   // the auditor template deliberately never receives this key, in the TS
   // packs below and in the SQL gate private.can_use_messaging()).
   "messages.use",
+  // THERAP-CORE-GAPS-1 (event reports, behavior supports, health tracking)
+  "ger.create",
+  "ger.review",
+  "ger.resolve",
+  "behavior.record",
+  "behavior.plan",
+  "health.record",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -194,6 +201,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.manage_staffing",
       // MESSAGING: staff-to-staff internal messaging.
       "messages.use",
+      // THERAP-CORE-GAPS-1: event reports, behavior supports, health tracking.
+      "ger.create",
+      "ger.review",
+      "ger.resolve",
+      "behavior.record",
+      "behavior.plan",
+      "health.record",
     ]),
   },
   {
@@ -250,6 +264,13 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.manage_pay_settings",
       // MESSAGING: staff-to-staff internal messaging.
       "messages.use",
+      // THERAP-CORE-GAPS-1: event reports, behavior supports, health tracking.
+      "ger.create",
+      "ger.review",
+      "ger.resolve",
+      "behavior.record",
+      "behavior.plan",
+      "health.record",
     ]),
   },
   {
@@ -275,6 +296,11 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.access",
       // MESSAGING: staff-to-staff internal messaging.
       "messages.use",
+      // THERAP-CORE-GAPS-1: DSPs file event reports and record behavior
+      // and health data for the people they support.
+      "ger.create",
+      "behavior.record",
+      "health.record",
     ]),
   },
   {
@@ -309,6 +335,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "hub.access",
       // MESSAGING: staff-to-staff internal messaging.
       "messages.use",
+      // THERAP-CORE-GAPS-1: nurses review event reports, own behavior plans
+      // and health tracking for their sites.
+      "ger.create",
+      "ger.review",
+      "ger.resolve",
+      "behavior.record",
+      "behavior.plan",
+      "health.record",
     ]),
   },
   {
@@ -469,6 +503,13 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "hub.remote_punch": "Clock in/out from a personal device",
   // MESSAGING — the auditor template never carries this key by design.
   "messages.use": "Use staff messaging",
+  // THERAP-CORE-GAPS-1
+  "ger.create": "Create and submit event reports",
+  "ger.review": "Review event reports (approve or return)",
+  "ger.resolve": "Work event report follow-up to resolution",
+  "behavior.record": "Record behavior data",
+  "behavior.plan": "Manage behavior support plans",
+  "health.record": "Record health tracking entries",
 };
 
 /**

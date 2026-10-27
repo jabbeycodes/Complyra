@@ -30,6 +30,7 @@ import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import SiteCoverageBoard from "./features/coverage/SiteCoverageBoard";
 import HouseComplianceDonuts from "./features/overview/HouseComplianceDonuts";
+import GerDashboardSections from "./features/ger/GerDashboardSections";
 
 interface SiteCard {
   id: string;
@@ -545,6 +546,8 @@ export default function Dashboard({
           </div>
         </section>
       </div>
+      {/* THERAP-CORE-GAPS-1: event reports awaiting review + open follow-up. */}
+      <GerDashboardSections onOpenPerson={onOpenPerson} />
       <section className="panel activity-panel dashboard-activity">
         <div className="panel-heading">
           <div>

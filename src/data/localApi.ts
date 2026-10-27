@@ -367,6 +367,42 @@ import {
   type UpdateCorrectiveActionInput,
 } from "./correctiveActions";
 import {
+  canDecideGerReport,
+  canEditGerReportBody,
+  canViewGerReports,
+  gerNeedsFollowUp,
+  gerSubmitNotificationTargets,
+  sortGerReports,
+  validateGerDraft,
+  validateGerResolution,
+  type GerReport,
+  type GerReportDraft,
+  type GerResolutionPatch,
+} from "./ger";
+import {
+  canManageBehaviorPlan,
+  canRecordBehavior,
+  canViewBehavior,
+  validateBehaviorEntryDraft,
+  validateBehaviorPlanDraft,
+  type BehaviorEntry,
+  type BehaviorEntryDraft,
+  type BehaviorPlan,
+  type BehaviorPlanDraft,
+} from "./behavior";
+import {
+  canRecordHealthEntry,
+  canViewHealthTrack,
+  healthAlertTargets,
+  healthEntryNeedsAlert,
+  healthTrackTitle,
+  isImmunizationOverdue,
+  validateHealthTrackDraft,
+  type HealthTrackEntry,
+  type HealthTrackEntryDraft,
+  type HealthTrackKind,
+} from "./healthTrack";
+import {
   sortSnapshotsOldestFirst,
   type ComplianceScore,
   type ScoreSnapshot,
@@ -1085,6 +1121,43 @@ export interface ComplyraApi {
   ): Promise<CorrectiveAction>;
   /** Resolve an action: stamps resolved_at (correctiveActions.manage). */
   resolveCorrectiveAction(id: string): Promise<CorrectiveAction>;
+  // ===== THERAP-CORE-GAPS-1 API (event reports / GER) =====
+  /** Reports at one site the session may read (site scope enforced). */
+  listGerReports(input: { siteId: string }): Promise<GerReport[]>;
+  /** Submitted/approved reports across the session's sites (dashboard). */
+  listAgencyGerReports(): Promise<GerReport[]>;
+  createGerReport(draft: GerReportDraft): Promise<GerReport>;
+  updateGerReport(id: string, draft: GerReportDraft): Promise<GerReport>;
+  submitGerReport(id: string): Promise<GerReport>;
+  reviewGerReport(
+    id: string,
+    decision: "approved" | "returned",
+    note?: string,
+  ): Promise<GerReport>;
+  updateGerResolution(id: string, patch: GerResolutionPatch): Promise<GerReport>;
+  deleteGerReport(id: string): Promise<void>;
+  // ===== THERAP-CORE-GAPS-1 API (behavior supports) =====
+  getBehaviorPlan(individualId: string): Promise<BehaviorPlan | null>;
+  saveBehaviorPlan(
+    individualId: string,
+    draft: BehaviorPlanDraft,
+  ): Promise<BehaviorPlan>;
+  listBehaviorEntries(individualId: string): Promise<BehaviorEntry[]>;
+  addBehaviorEntry(
+    individualId: string,
+    draft: BehaviorEntryDraft,
+  ): Promise<BehaviorEntry>;
+  deleteBehaviorEntry(id: string): Promise<void>;
+  // ===== THERAP-CORE-GAPS-1 API (health trackers) =====
+  listHealthTrackEntries(input: {
+    individualId: string;
+    kind?: HealthTrackKind;
+  }): Promise<HealthTrackEntry[]>;
+  addHealthTrackEntry(
+    individualId: string,
+    draft: HealthTrackEntryDraft,
+  ): Promise<HealthTrackEntry>;
+  deleteHealthTrackEntry(id: string): Promise<void>;
   // ===== AUDIT-READINESS API (compliance score snapshots) =====
   /**
    * Record today's compliance score snapshot (agency-wide when siteId is
@@ -1839,6 +1912,11 @@ async function hydrate() {
       // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
       browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
       browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
+      // THERAP-CORE-GAPS-1: new collections for older stored DBs.
+      browserStore.db.gerReports = browserStore.db.gerReports ?? [];
+      browserStore.db.behaviorPlans = browserStore.db.behaviorPlans ?? [];
+      browserStore.db.behaviorEntries = browserStore.db.behaviorEntries ?? [];
+      browserStore.db.healthTrackEntries = browserStore.db.healthTrackEntries ?? [];
       seedDemoLogoPath(browserStore);
       for (const item of browserStore.db.obligations) {
         item.delegatingRnUserId = item.delegatingRnUserId ?? null;
@@ -8941,6 +9019,611 @@ export class LocalApi implements ComplyraApi {
 
   async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
     return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+
+  // ===== THERAP-CORE-GAPS-1 (event reports, behavior, health trackers) =====
+
+  private gerReportsOf() {
+    return (this.store.db.gerReports ??= []);
+  }
+
+  private behaviorPlansOf() {
+    return (this.store.db.behaviorPlans ??= []);
+  }
+
+  private behaviorEntriesOf() {
+    return (this.store.db.behaviorEntries ??= []);
+  }
+
+  private healthTrackEntriesOf() {
+    return (this.store.db.healthTrackEntries ??= []);
+  }
+
+  /** Active house-manager user ids assigned to a site (direct alert targets). */
+  private houseManagerIdsForSite(session: SessionUser, siteId: string): string[] {
+    return this.store.db.memberships
+      .filter(
+        (m) =>
+          m.agencyId === session.agencyId &&
+          m.roleKey === "house_manager" &&
+          m.siteId === siteId &&
+          (!m.expiresOn || m.expiresOn >= todayIso()),
+      )
+      .map((m) => m.userId);
+  }
+
+  /** Queue an incident.followup alert row (idempotent by dedupeKey). */
+  private queueFollowupAlert(input: {
+    agencyId: string;
+    userId: string | null;
+    roleKey: string | null;
+    title: string;
+    body: string;
+    deepLink: string;
+    entityType: string;
+    entityId: string;
+    dedupeKey: string;
+  }) {
+    const db = this.store.db;
+    db.notifications ??= [];
+    if (db.notifications.some((n) => n.dedupeKey === input.dedupeKey)) return;
+    db.notifications.push({
+      id: crypto.randomUUID(),
+      agencyId: input.agencyId,
+      userId: input.userId,
+      roleKey: input.roleKey,
+      type: "incident.followup",
+      title: input.title,
+      body: input.body,
+      deepLink: input.deepLink,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      dedupeKey: input.dedupeKey,
+      createdAt: new Date().toISOString(),
+      readAt: null,
+    });
+  }
+
+  private individualName(individualId: string): string {
+    return (
+      this.store.db.individuals.find((row) => row.id === individualId)
+        ?.fullName ?? "An Individual"
+    );
+  }
+
+  /**
+   * GER site access: the site scope, widened for nurses — clinical reviewers
+   * cover every home in the agency, not one house.
+   */
+  private canAccessGerSite(session: SessionUser, siteId: string): boolean {
+    return canAccessSite(session, siteId) || session.roleKey === "nurse";
+  }
+
+  private findGerReport(session: SessionUser, id: string): GerReport {
+    const report = this.gerReportsOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!report) throw new Error("Event report not found.");
+    if (!this.canAccessGerSite(session, report.siteId)) {
+      throw new Error("Event report not found.");
+    }
+    return report;
+  }
+
+  /** Fan a submitted report out to HM (direct) + PM/nurse (broadcasts). */
+  private queueGerSubmitNotifications(session: SessionUser, report: GerReport) {
+    const name = this.individualName(report.individualId);
+    const targets = gerSubmitNotificationTargets({
+      gerId: report.id,
+      houseManagerUserIds: this.houseManagerIdsForSite(session, report.siteId),
+    });
+    for (const target of targets) {
+      this.queueFollowupAlert({
+        agencyId: session.agencyId,
+        userId: target.userId,
+        roleKey: target.roleKey,
+        title: `${report.severity} event report — ${name}`,
+        body: `${report.eventType} on ${report.eventDate} was submitted and needs review and follow-up.`,
+        deepLink: `/plans/${report.individualId}`,
+        entityType: "ger_report",
+        entityId: report.id,
+        dedupeKey: target.dedupeKey,
+      });
+    }
+  }
+
+  /** Overdue follow-ups alert the assigned manager (or the HM/PM/nurse set). */
+  private queueGerOverdueNotifications(session: SessionUser, report: GerReport) {
+    if (!gerNeedsFollowUp(report)) return;
+    const display = report.resolutionDueOn && report.resolutionDueOn < todayIso();
+    if (!display) return;
+    const name = this.individualName(report.individualId);
+    const targets = gerSubmitNotificationTargets({
+      gerId: `${report.id}:overdue:${report.resolutionDueOn}`,
+      houseManagerUserIds: report.assignedManagerUserId
+        ? [report.assignedManagerUserId]
+        : this.houseManagerIdsForSite(session, report.siteId),
+    });
+    for (const target of targets) {
+      this.queueFollowupAlert({
+        agencyId: session.agencyId,
+        userId: target.userId,
+        roleKey: target.roleKey,
+        title: `Event follow-up overdue — ${name}`,
+        body: `Follow-up on the ${report.eventType} of ${report.eventDate} was due ${report.resolutionDueOn} and is still open.`,
+        deepLink: `/plans/${report.individualId}`,
+        entityType: "ger_report",
+        entityId: report.id,
+        dedupeKey: target.dedupeKey,
+      });
+    }
+  }
+
+  async listGerReports(input: { siteId: string }): Promise<GerReport[]> {
+    const session = assertSession(this.store);
+    if (!canViewGerReports(session)) return [];
+    if (!this.canAccessGerSite(session, input.siteId)) return [];
+    const rows = this.gerReportsOf().filter(
+      (row) => row.agencyId === session.agencyId && row.siteId === input.siteId,
+    );
+    for (const row of rows) this.queueGerOverdueNotifications(session, row);
+    return sortGerReports(rows);
+  }
+
+  async listAgencyGerReports(): Promise<GerReport[]> {
+    const session = assertSession(this.store);
+    if (!canViewGerReports(session)) return [];
+    const rows = this.gerReportsOf().filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        (row.status === "submitted" || row.status === "approved") &&
+        this.canAccessGerSite(session, row.siteId),
+    );
+    for (const row of rows) this.queueGerOverdueNotifications(session, row);
+    return sortGerReports(rows);
+  }
+
+  async createGerReport(draft: GerReportDraft): Promise<GerReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.create");
+    if (!this.canAccessGerSite(session, draft.siteId)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    accessibleIndividual(this.store, session, draft.individualId);
+    const errors = validateGerDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const now = new Date().toISOString();
+    const report: GerReport = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: draft.siteId,
+      individualId: draft.individualId,
+      linkedIndividualIds: draft.linkedIndividualIds ?? [],
+      eventDate: draft.eventDate,
+      eventTime: draft.eventTime,
+      location: draft.location ?? "",
+      eventType: draft.eventType,
+      severity: draft.severity,
+      description: draft.description.trim(),
+      immediateActions: draft.immediateActions ?? "",
+      notificationsMade: draft.notificationsMade ?? [],
+      witnesses: draft.witnesses ?? "",
+      reporterName: draft.reporterName.trim(),
+      reporterSignature: draft.reporterSignature.trim(),
+      reporterDate: draft.reporterDate,
+      status: "draft",
+      reviewNote: "",
+      reviewedByUserId: null,
+      reviewedAt: null,
+      resolutionStatus: "unaddressed",
+      investigationRequired: false,
+      investigationNotes: "",
+      assignedManagerUserId: null,
+      resolutionDueOn: null,
+      closureNote: "",
+      resolvedByUserId: null,
+      resolvedAt: null,
+      createdByUserId: session.userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.gerReportsOf().unshift(report);
+    log(
+      this.store,
+      session,
+      "ger.created",
+      `Event report (${report.eventType}) drafted for ${this.individualName(report.individualId)}`,
+      "ger_report",
+      report.id,
+    );
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async updateGerReport(id: string, draft: GerReportDraft): Promise<GerReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.create");
+    const report = this.findGerReport(session, id);
+    if (!canEditGerReportBody(report, session)) {
+      throw new Error("Only a draft or returned report can be edited.");
+    }
+    const errors = validateGerDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    Object.assign(report, {
+      individualId: draft.individualId,
+      linkedIndividualIds: draft.linkedIndividualIds ?? [],
+      eventDate: draft.eventDate,
+      eventTime: draft.eventTime,
+      location: draft.location ?? "",
+      eventType: draft.eventType,
+      severity: draft.severity,
+      description: draft.description.trim(),
+      immediateActions: draft.immediateActions ?? "",
+      notificationsMade: draft.notificationsMade ?? [],
+      witnesses: draft.witnesses ?? "",
+      reporterName: draft.reporterName.trim(),
+      reporterSignature: draft.reporterSignature.trim(),
+      reporterDate: draft.reporterDate,
+      updatedAt: new Date().toISOString(),
+    });
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async submitGerReport(id: string): Promise<GerReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.create");
+    const report = this.findGerReport(session, id);
+    if (report.status === "submitted" || report.status === "approved") {
+      throw new Error("This report has already been submitted.");
+    }
+    if (
+      report.createdByUserId !== session.userId &&
+      session.permissions["ger.review"] !== true
+    ) {
+      throw new Error("Only the author or a reviewer can submit this report.");
+    }
+    const errors = validateGerDraft(report);
+    if (errors.length > 0) throw new Error(errors[0]);
+    report.status = "submitted";
+    if (report.resolutionStatus === "resolved") {
+      report.resolutionStatus = "unaddressed";
+      report.resolvedAt = null;
+      report.resolvedByUserId = null;
+    }
+    report.updatedAt = new Date().toISOString();
+    this.queueGerSubmitNotifications(session, report);
+    log(
+      this.store,
+      session,
+      "ger.submitted",
+      `Event report (${report.eventType}, ${report.severity}) submitted for ${this.individualName(report.individualId)}`,
+      "ger_report",
+      report.id,
+    );
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async reviewGerReport(
+    id: string,
+    decision: "approved" | "returned",
+    note?: string,
+  ): Promise<GerReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.review");
+    const report = this.findGerReport(session, id);
+    if (!canDecideGerReport(report, session)) {
+      throw new Error("Only a submitted report can be reviewed.");
+    }
+    report.status = decision;
+    report.reviewNote = (note ?? "").trim();
+    report.reviewedByUserId = session.userId;
+    report.reviewedAt = new Date().toISOString();
+    report.updatedAt = report.reviewedAt;
+    log(
+      this.store,
+      session,
+      decision === "approved" ? "ger.approved" : "ger.returned",
+      `Event report (${report.eventType}) ${decision === "approved" ? "approved" : "returned for corrections"} for ${this.individualName(report.individualId)}`,
+      "ger_report",
+      report.id,
+    );
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async updateGerResolution(
+    id: string,
+    patch: GerResolutionPatch,
+  ): Promise<GerReport> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.resolve");
+    const report = this.findGerReport(session, id);
+    if (report.status !== "submitted" && report.status !== "approved") {
+      throw new Error("Follow-up starts once a report is submitted.");
+    }
+    const errors = validateGerResolution(patch, report);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (patch.assignedManagerUserId) {
+      this.requireAgencyProfile(session, patch.assignedManagerUserId);
+    }
+    if (patch.resolutionStatus !== undefined) {
+      report.resolutionStatus = patch.resolutionStatus;
+    }
+    if (patch.investigationRequired !== undefined) {
+      report.investigationRequired = patch.investigationRequired;
+    }
+    if (patch.investigationNotes !== undefined) {
+      report.investigationNotes = patch.investigationNotes;
+    }
+    if (patch.assignedManagerUserId !== undefined) {
+      report.assignedManagerUserId = patch.assignedManagerUserId;
+    }
+    if (patch.resolutionDueOn !== undefined) {
+      report.resolutionDueOn = patch.resolutionDueOn || null;
+    }
+    if (patch.closureNote !== undefined) {
+      report.closureNote = patch.closureNote;
+    }
+    if (report.resolutionStatus === "resolved") {
+      report.resolvedByUserId = session.userId;
+      report.resolvedAt = new Date().toISOString();
+    }
+    report.updatedAt = new Date().toISOString();
+    log(
+      this.store,
+      session,
+      "ger.resolution_updated",
+      `Event follow-up updated (${report.resolutionStatus.replace("_", " ")}) for ${this.individualName(report.individualId)}`,
+      "ger_report",
+      report.id,
+    );
+    await persistMeta(this.store);
+    return report;
+  }
+
+  async deleteGerReport(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "ger.create");
+    const report = this.findGerReport(session, id);
+    if (report.status !== "draft" || report.createdByUserId !== session.userId) {
+      throw new Error("Only your own draft reports can be deleted.");
+    }
+    this.store.db.gerReports = this.gerReportsOf().filter((row) => row.id !== id);
+    await persistMeta(this.store);
+  }
+
+  // ----- Behavior supports -----
+
+  async getBehaviorPlan(individualId: string): Promise<BehaviorPlan | null> {
+    const session = assertSession(this.store);
+    if (!canViewBehavior(session)) return null;
+    accessibleIndividual(this.store, session, individualId);
+    return (
+      this.behaviorPlansOf().find(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          row.active,
+      ) ?? null
+    );
+  }
+
+  async saveBehaviorPlan(
+    individualId: string,
+    draft: BehaviorPlanDraft,
+  ): Promise<BehaviorPlan> {
+    const session = assertSession(this.store);
+    assertCan(session, "behavior.plan");
+    if (!canManageBehaviorPlan(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const errors = validateBehaviorPlanDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const now = new Date().toISOString();
+    const existing = this.behaviorPlansOf().find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === individualId &&
+        row.active,
+    );
+    if (existing) {
+      existing.targetBehaviors = draft.targetBehaviors.trim();
+      existing.interventions = draft.interventions.trim();
+      existing.crisisSteps = draft.crisisSteps.trim();
+      existing.updatedAt = now;
+      await persistMeta(this.store);
+      return existing;
+    }
+    const plan: BehaviorPlan = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      targetBehaviors: draft.targetBehaviors.trim(),
+      interventions: draft.interventions.trim(),
+      crisisSteps: draft.crisisSteps.trim(),
+      active: true,
+      createdByUserId: session.userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.behaviorPlansOf().unshift(plan);
+    await persistMeta(this.store);
+    return plan;
+  }
+
+  async listBehaviorEntries(individualId: string): Promise<BehaviorEntry[]> {
+    const session = assertSession(this.store);
+    if (!canViewBehavior(session)) return [];
+    accessibleIndividual(this.store, session, individualId);
+    return this.behaviorEntriesOf()
+      .filter(
+        (row) => row.agencyId === session.agencyId && row.individualId === individualId,
+      )
+      .sort((a, b) =>
+        `${b.occurredOn} ${b.occurredAtTime}`.localeCompare(
+          `${a.occurredOn} ${a.occurredAtTime}`,
+        ),
+      );
+  }
+
+  async addBehaviorEntry(
+    individualId: string,
+    draft: BehaviorEntryDraft,
+  ): Promise<BehaviorEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "behavior.record");
+    if (!canRecordBehavior(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const errors = validateBehaviorEntryDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const entry: BehaviorEntry = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      occurredOn: draft.occurredOn,
+      occurredAtTime: draft.occurredAtTime ?? "",
+      behavior: draft.behavior.trim(),
+      antecedent: (draft.antecedent ?? "").trim(),
+      durationMinutes: draft.durationMinutes ?? null,
+      intensity: draft.intensity,
+      interventionUsed: (draft.interventionUsed ?? "").trim(),
+      outcome: (draft.outcome ?? "").trim(),
+      recordedByUserId: session.userId,
+      createdAt: new Date().toISOString(),
+    };
+    this.behaviorEntriesOf().unshift(entry);
+    await persistMeta(this.store);
+    return entry;
+  }
+
+  async deleteBehaviorEntry(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "behavior.record");
+    const entry = this.behaviorEntriesOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!entry) throw new Error("Behavior record not found.");
+    accessibleIndividual(this.store, session, entry.individualId);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      !canManageBehaviorPlan(session.roleKey)
+    ) {
+      throw new Error("You can only remove behavior records you recorded.");
+    }
+    this.store.db.behaviorEntries = this.behaviorEntriesOf().filter(
+      (row) => row.id !== id,
+    );
+    await persistMeta(this.store);
+  }
+
+  // ----- Health trackers -----
+
+  /** Fan a clinically significant entry out to HM + PM/nurse. */
+  private queueHealthAlert(session: SessionUser, entry: HealthTrackEntry) {
+    const person = this.store.db.individuals.find(
+      (row) => row.id === entry.individualId,
+    );
+    const siteId = person?.siteId ?? session.siteId ?? "";
+    const name = this.individualName(entry.individualId);
+    const targets = healthAlertTargets({
+      entryId: entry.id,
+      houseManagerUserIds: this.houseManagerIdsForSite(session, siteId),
+    });
+    for (const target of targets) {
+      this.queueFollowupAlert({
+        agencyId: session.agencyId,
+        userId: target.userId,
+        roleKey: target.roleKey,
+        title:
+          entry.kind === "immunization"
+            ? `Immunization overdue — ${name}`
+            : `Health alert — ${name}`,
+        body:
+          entry.kind === "immunization"
+            ? `${entry.title} was due ${entry.details.nextDueOn ?? ""} and has not been recorded as given.`
+            : `${entry.title} on ${entry.occurredOn} needs a manager's attention.`,
+        deepLink: `/plans/${entry.individualId}`,
+        entityType: "health_track_entry",
+        entityId: entry.id,
+        dedupeKey: target.dedupeKey,
+      });
+    }
+  }
+
+  async listHealthTrackEntries(input: {
+    individualId: string;
+    kind?: HealthTrackKind;
+  }): Promise<HealthTrackEntry[]> {
+    const session = assertSession(this.store);
+    if (!canViewHealthTrack(session)) return [];
+    accessibleIndividual(this.store, session, input.individualId);
+    const rows = this.healthTrackEntriesOf().filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === input.individualId &&
+        (!input.kind || row.kind === input.kind),
+    );
+    // Time-based alert: an overdue immunization alerts once (deduped).
+    for (const row of rows) {
+      if (isImmunizationOverdue(row)) this.queueHealthAlert(session, row);
+    }
+    return rows.sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
+  }
+
+  async addHealthTrackEntry(
+    individualId: string,
+    draft: HealthTrackEntryDraft,
+  ): Promise<HealthTrackEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    if (!canRecordHealthEntry(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const errors = validateHealthTrackDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const entry: HealthTrackEntry = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      individualId,
+      kind: draft.kind,
+      occurredOn: draft.occurredOn,
+      title: healthTrackTitle(draft.kind, draft.details ?? {}),
+      details: draft.details ?? {},
+      flaggedAbnormal: draft.flaggedAbnormal === true,
+      note: (draft.note ?? "").trim(),
+      recordedByUserId: session.userId,
+      createdAt: new Date().toISOString(),
+    };
+    this.healthTrackEntriesOf().unshift(entry);
+    if (healthEntryNeedsAlert(entry)) this.queueHealthAlert(session, entry);
+    await persistMeta(this.store);
+    return entry;
+  }
+
+  async deleteHealthTrackEntry(id: string): Promise<void> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    const entry = this.healthTrackEntriesOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!entry) throw new Error("Health record not found.");
+    accessibleIndividual(this.store, session, entry.individualId);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      session.permissions["ger.review"] !== true
+    ) {
+      throw new Error("You can only remove health records you recorded.");
+    }
+    this.store.db.healthTrackEntries = this.healthTrackEntriesOf().filter(
+      (row) => row.id !== id,
+    );
+    await persistMeta(this.store);
   }
 
   // ===== AUDIT-READINESS IMPL (score snapshots) =====

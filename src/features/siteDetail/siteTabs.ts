@@ -1,4 +1,5 @@
 import { pageVisible } from "../../data/status";
+import { canViewGerReports } from "../../data/ger";
 import type { SessionUser } from "../../data/types";
 
 export type SiteDetailTabId =
@@ -10,6 +11,7 @@ export type SiteDetailTabId =
   | "medications"
   | "mileage"
   | "shiftnotes"
+  | "reporting"
   | "staff";
 
 export interface SiteDetailTab {
@@ -98,6 +100,13 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "shiftnotes",
     label: "Shift notes",
     visible: (s) => !!s && pageVisible(s, "ShiftNotes"),
+  },
+  {
+    // THERAP-CORE-GAPS-1: event reports (GER) with follow-up/resolution.
+    // Auditors see everything (read-only); HR is excluded. Staff stays last.
+    id: "reporting",
+    label: "Reporting",
+    visible: (s) => canViewGerReports(s),
   },
   { id: "staff", label: "Staff", visible: (s) => !!s && pageVisible(s, "Staff") },
 ];

@@ -49,6 +49,24 @@ export function isAgencyWideViewer(session: SessionUser): boolean {
   return (AGENCY_WIDE_ROLE_KEYS as readonly string[]).includes(session.roleKey);
 }
 
+/**
+ * THERAP-CORE-GAPS-1: who sees event-report (GER) rows on the agency
+ * dashboard — agency leadership, house managers (their own homes, enforced
+ * by the API's site scope), and auditors (Joshua, 2026-09-19: auditors see
+ * everything, read-only). DSPs never get the agency dashboard; HR is out.
+ */
+export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
+  if (!session) return false;
+  if (session.platformAdmin) return true;
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "auditor",
+    "house_manager",
+  ].includes(session.roleKey);
+}
+
 export function assignedSiteIds(session: SessionUser, staff: StaffSiteRef[]): string[] {
   const ids = new Set<string>();
   if (session.siteId) ids.add(session.siteId);

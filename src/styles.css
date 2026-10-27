@@ -7759,4 +7759,120 @@ button.qa-row:hover {
   gap: 10px;
   margin-top: auto;
   padding-top: 4px;
+/* THERAP-CORE-GAPS-1: event reports, behavior supports, health trackers.
+   Solid high-contrast surfaces only — status is always carried by text. */
+.record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  border: 1px solid var(--line, #d4d4d4);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface, #fff);
+}
+.record-row-main {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  flex: 1;
+}
+.chip {
+  border: 1px solid var(--line, #b9b9b9);
+  background: var(--surface, #fff);
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.chip.selected {
+  background: var(--ink, #17352b);
+  color: #fff;
+  border-color: var(--ink, #17352b);
+}
+.ger-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.button.ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  text-decoration: underline;
+}
+.ger-form label,
+.ger-review label,
+.ger-resolution label,
+.behavior-plan-form label,
+.behavior-entry-form label,
+.health-track-form label {
+  display: block;
+  margin: 8px 0;
+  font-weight: 600;
+}
+.ger-form input,
+.ger-form select,
+.ger-form textarea,
+.ger-review input,
+.ger-resolution input,
+.ger-resolution select,
+.ger-resolution textarea,
+.behavior-plan-form textarea,
+.behavior-entry-form input,
+.behavior-entry-form select,
+.health-track-form input,
+.health-track-form select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--line, #b9b9b9);
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 400;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.ger-fields {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 14px;
+  margin: 12px 0;
+}
+.ger-fields dt {
+  font-weight: 700;
+}
+.ger-fields dd {
+  margin: 0;
+}
+.behavior-widget h3,
+.health-track-widget h3 {
+  margin-top: 16px;
 }
