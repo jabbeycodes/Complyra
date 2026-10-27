@@ -124,6 +124,8 @@ export function validateConsentTypes(types: ConsentType[]) {
     if (!types.some(t => t.id === 'medication' && t.medication))
         throw new Error('Keep the medication administration consent type.');
 }
+// Missing/expiring notices fire once per consent and target on entering the window.
+// Repeated sweeps dedupe permanently; there is no repeating alert cadence.
 export function consentAlerts(register: ConsentRegister, memberships: Membership[], today = todayStamp()) {
     return consentGaps(register, today).flatMap(gap => {
         const targets = new Map<string, {
@@ -155,4 +157,24 @@ export function consentDraftFields(input: ConsentDraft): ConsentDraft {
 }
 export function consentOutcomeLabel(outcome?: string) {
     return ({ yes: 'Yes - permission given', no: 'No - permission not given', full: 'Full media permission', group: 'Group photographs only', none: 'No media permission' } as Record<string, string>)[outcome ?? ''] ?? 'See consent details';
+}
+
+/** Enforce the same effective-period invariant as the database signing trigger. */
+export function assertSingleConsentActivation(row: ConsentRecord, records: ConsentRecord[], revocations: ConsentRevocation[]) {
+    const day = (value: string) => Date.parse(value + 'T00:00:00Z');
+    if (row.supersedesId) {
+        const prior = records.find(r => r.id === row.supersedesId);
+        if (!prior?.activatedAt || prior.agencyId !== row.agencyId || prior.individualId !== row.individualId || prior.typeId !== row.typeId || row.effectiveOn < prior.effectiveOn)
+            throw new Error('Renew the same Individual and consent type on or after the prior effective date.');
+        if (records.some(r => r.id !== row.id && r.supersedesId === prior.id && r.activatedAt))
+            throw new Error('This consent already has a renewal.');
+    }
+    const conflict = records.some(r => {
+        if (r.id === row.id || r.id === row.supersedesId || !r.activatedAt || r.agencyId !== row.agencyId || r.individualId !== row.individualId || r.typeId !== row.typeId) return false;
+        const end = Math.min(day(r.reviewOn) + 86400000,
+            ...revocations.filter(v => v.consentId === r.id).map(v => day(v.revokedOn)),
+            ...records.filter(n => n.supersedesId === r.id && n.activatedAt).map(n => day(n.effectiveOn)));
+        return day(r.effectiveOn) < end && day(r.effectiveOn) < day(row.reviewOn) + 86400000 && day(row.effectiveOn) < end;
+    });
+    if (conflict) throw new Error('Another consent covers this period. Renew the existing version or revoke it before the new effective date.');
 }

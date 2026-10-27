@@ -61,13 +61,19 @@ language sql stable security definer set search_path = public, pg_temp as $$
  and private.role_key_in(p_agency_id,'{house_manager,program_manager,nurse}');
 $$;
 -- Security definer prevents recursive SELECT policies when testing supersession.
-create function private.consent_current(p_id uuid) returns boolean
+create function private.consent_current_at(p_id uuid,p_on date) returns boolean
 language sql stable security definer set search_path = public, pg_temp as $$
  select exists(select 1 from public.individual_consents c where c.id=p_id
- and c.activated_at is not null and (c.details->>'effectiveOn')::date <= current_date
- and (c.details->>'reviewOn')::date >= current_date
- and not exists(select 1 from public.consent_revocations r where r.consent_id=c.id and r.revoked_on<=current_date)
- and not exists(select 1 from public.individual_consents n where n.supersedes_id=c.id and n.activated_at is not null and (n.details->>'effectiveOn')::date<=current_date));
+ and c.activated_at is not null and (c.details->>'effectiveOn')::date <= p_on
+ and (c.details->>'reviewOn')::date >= p_on
+ and not exists(select 1 from public.consent_revocations r where r.consent_id=c.id and r.revoked_on<=p_on)
+ and not exists(select 1 from public.individual_consents n where n.supersedes_id=c.id and n.activated_at is not null and (n.details->>'effectiveOn')::date<=p_on));
+$$;
+-- Policies always use the database day; the internal dated predicate also lets
+-- tests prove the scheduled handoff without editing immutable signed records.
+create function private.consent_current(p_id uuid) returns boolean
+language sql stable security definer set search_path=public,pg_temp as $$
+ select private.consent_current_at(p_id,current_date);
 $$;
 create policy consent_types_read on public.consent_type_settings for select to authenticated
 using (private.has_agency(agency_id) and private.role_key_in(agency_id,'{house_manager,program_manager,nurse,dsp,auditor}'));
@@ -80,6 +86,58 @@ using (private.can_read_individual(agency_id,individual_id) and private.role_key
 -- No direct write policies, grants, or DELETE capability. Only validated functions write.
 revoke all on public.individual_consents,public.consent_revocations,public.consent_type_settings from public,anon,authenticated;
 grant select on public.individual_consents,public.consent_revocations,public.consent_type_settings to authenticated;
+
+-- A real row revision serializes activation even for callers using a fixed
+-- transaction snapshot: competing repeatable-read writers must retry instead
+-- of both validating against a stale view after a plain row/advisory lock.
+create table private.consent_activation_locks (
+ individual_id uuid primary key references public.individuals(id),
+ revision bigint not null default 0
+);
+alter table private.consent_activation_locks enable row level security;
+alter table private.consent_activation_locks force row level security;
+revoke all on private.consent_activation_locks from public,anon,authenticated;
+
+-- Serialize all signing paths per Individual and reject overlapping effective
+-- decisions, including scheduled versions that would conflict on a future day.
+-- Supersession truncates the predecessor; revocation truncates its effective
+-- period without changing the signed record. Expiry/review dates are inclusive.
+create function private.assert_single_consent(p public.individual_consents) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare prior public.individual_consents;
+begin
+ perform 1 from public.individuals where id=p.individual_id and agency_id=p.agency_id for update;
+ insert into private.consent_activation_locks as guard(individual_id,revision)
+ values(p.individual_id,1) on conflict(individual_id)
+ do update set revision=guard.revision+1;
+ if p.supersedes_id is not null then
+  select * into prior from public.individual_consents where id=p.supersedes_id;
+  if prior.id is null or prior.activated_at is null or prior.agency_id<>p.agency_id
+    or prior.individual_id<>p.individual_id or prior.type_id<>p.type_id
+    or (p.details->>'effectiveOn')::date<(prior.details->>'effectiveOn')::date then
+   raise exception 'Renew the same Individual and consent type on or after the prior effective date.' using errcode='23514';
+  end if;
+  if exists(select 1 from public.individual_consents n where n.supersedes_id=p.supersedes_id and n.activated_at is not null and n.id<>p.id) then
+   raise exception 'This consent already has a renewal.' using errcode='23514';
+  end if;
+ end if;
+ if exists (
+  select 1 from public.individual_consents c
+  cross join lateral (select least(
+    (c.details->>'reviewOn')::date,
+    (select min(r.revoked_on)-1 from public.consent_revocations r where r.consent_id=c.id),
+    (select min((n.details->>'effectiveOn')::date)-1 from public.individual_consents n where n.supersedes_id=c.id and n.activated_at is not null)
+  ) ends_on) period
+  where c.agency_id=p.agency_id and c.individual_id=p.individual_id and c.type_id=p.type_id
+    and c.activated_at is not null and c.id<>p.id and c.id is distinct from p.supersedes_id
+    and period.ends_on>=(c.details->>'effectiveOn')::date
+    and (c.details->>'effectiveOn')::date<=(p.details->>'reviewOn')::date
+    and period.ends_on>=(p.details->>'effectiveOn')::date
+ ) then
+  raise exception 'Another consent covers this period. Renew the existing version or revoke it before the new effective date.' using errcode='23514';
+ end if;
+end;
+$$;
 
 create function private.consent_guard() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$
@@ -99,7 +157,10 @@ begin
    new.created_by:=auth.uid(); new.created_at:=now();
    new.activated_at:=null; new.activated_by:=null;
  end if;
- if new.activated_at is not null then new.activated_by:=auth.uid(); new.activated_at:=now(); end if;
+ if new.activated_at is not null then
+  perform private.assert_single_consent(new);
+  new.activated_by:=auth.uid(); new.activated_at:=now();
+ end if;
  return new;
 end;
 $$;
@@ -165,8 +226,12 @@ create function public.activate_consent(p_id uuid) returns void
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare c public.individual_consents;
 begin
- select * into c from public.individual_consents where id=p_id for update;
+ select * into c from public.individual_consents where id=p_id;
  if c.id is null or c.created_by<>auth.uid() or c.activated_at is not null or not private.can_manage_consent(c.agency_id,c.individual_id) then raise exception 'Only your own draft can be activated.' using errcode='42501'; end if;
+ -- Match packet completion's lock order: Individual first, then version.
+ perform 1 from public.individuals where id=c.individual_id and agency_id=c.agency_id for update;
+ select * into c from public.individual_consents where id=p_id for update;
+ if c.created_by<>auth.uid() or c.activated_at is not null then raise exception 'Only your own draft can be activated.' using errcode='42501'; end if;
  perform private.validate_consent(c.details,private.consent_types(c.agency_id),true);
  update public.individual_consents set activated_at=now(),activated_by=auth.uid() where id=p_id;
 end;
@@ -198,6 +263,8 @@ $$;
 create policy consent_notification_roles on public.notifications as restrictive for select to authenticated
 using (type not like 'consent.%' or private.role_key_in(agency_id,'{house_manager,program_manager,nurse}'));
 
+-- Each missing/expiring alert fires once per consent and target on entering
+-- its window; refresh and daily sweeps do not introduce a repeating cadence.
 -- Both signed-in refresh and the daily job use these targets and the same unique
 -- (agency_id,dedupe_key) index as existing notifications. No browser-authored alerts.
 create function private.sweep_consents(p_agency_id uuid,p_scoped boolean) returns void
@@ -272,7 +339,7 @@ do $$ begin
  end if;
 end $$;
 
-revoke all on function private.consent_types(uuid),private.can_manage_consent(uuid,uuid),private.consent_current(uuid),private.consent_guard(),private.consent_revocation_guard(),private.validate_consent(jsonb,jsonb,boolean),private.sweep_consents(uuid,boolean),private.sweep_all_consents() from public,anon,authenticated;
+revoke all on function private.consent_current_at(uuid,date),private.assert_single_consent(public.individual_consents),private.consent_types(uuid),private.can_manage_consent(uuid,uuid),private.consent_current(uuid),private.consent_guard(),private.consent_revocation_guard(),private.validate_consent(jsonb,jsonb,boolean),private.sweep_consents(uuid,boolean),private.sweep_all_consents() from public,anon,authenticated;
 -- Only the two helpers used by read policies need authenticated execution.
 grant execute on function private.consent_current(uuid) to authenticated;
 revoke all on function public.save_consent(uuid,jsonb),public.activate_consent(uuid),public.revoke_consent(uuid,date,text),public.save_consent_types(uuid,jsonb),public.sweep_consent_alerts(uuid) from public,anon,authenticated;

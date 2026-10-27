@@ -1,6 +1,6 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
-import { DEFAULT_CONSENT_TYPES, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
@@ -2922,13 +2922,16 @@ export class LocalApi implements ComplyraApi {
         db.consents ??= [];
         const actor = external ? null : assertSession(this.store).userId;
         const now = new Date().toISOString();
+        const versions: import("./consents").ConsentRecord[] = [];
         for (const item of PACKET_ITEMS) {
             const previous = [...db.consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !db.consents!.some(n => n.supersedesId === r.id && n.activatedAt));
-            db.consents.push({ id: crypto.randomUUID(), agencyId: packet.agencyId, individualId: packet.individualId, typeId: item.typeId, packetId: packet.id,
+            versions.push({ id: crypto.randomUUID(), agencyId: packet.agencyId, individualId: packet.individualId, typeId: item.typeId, packetId: packet.id,
                 covers: item.text, outcome: choices[item.key], giver: signer.authority === 'Self' ? 'individual' : signer.authority === 'Guardian' ? 'guardian' : 'representative',
                 giverName: signer.printedName, relationship: signer.authority + (signer.authorityOther ? ': ' + signer.authorityOther : ''), signedOn: signer.signedOn,
                 effectiveOn: packet.snapshot.effectiveOn, reviewOn: packet.snapshot.reviewOn, supersedesId: previous?.id ?? null, createdBy: packet.createdBy, createdAt: now, activatedBy: actor, activatedAt: now });
         }
+        for (const version of versions) assertSingleConsentActivation(version, [...db.consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
+        db.consents.push(...versions);
         packet.choices = structuredClone(choices);
         packet.signer = structuredClone(signer);
         packet.signedAt = now;
@@ -3023,8 +3026,7 @@ export class LocalApi implements ComplyraApi {
         if (row.activatedAt || row.createdBy !== session.userId)
             throw new Error('Only your own draft can be activated.');
         validateConsentDraft(row, this.store.db.consentTypes?.[session.agencyId] ?? DEFAULT_CONSENT_TYPES, true);
-        if (row.supersedesId && this.store.db.consents?.some(r => r.id !== id && r.supersedesId === row.supersedesId && r.activatedAt))
-            throw new Error('This consent already has a renewal.');
+        assertSingleConsentActivation(row, this.store.db.consents ?? [], this.store.db.consentRevocations ?? []);
         row.activatedAt = new Date().toISOString();
         row.activatedBy = session.userId;
         await persistMeta(this.store);

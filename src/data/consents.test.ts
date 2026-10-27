@@ -125,3 +125,26 @@ test('local notification sweep dedupes repeated refreshes', async () => {
     await f.api.listNotifications();
     assert.equal(f.db.notifications.filter(n => n.type.startsWith('consent.')).length, first);
 });
+
+test('local activation rejects contradictory standalone and future versions; renewals give DSPs one current decision', async () => {
+    const f = localFixture();
+    const first = await f.api.saveConsent({...f.draft, outcome: 'none'});
+    await f.api.activateConsent(first);
+    const duplicate = await f.api.saveConsent({...f.draft, outcome: 'full'});
+    await assert.rejects(() => f.api.activateConsent(duplicate), /Another consent covers this period/);
+    assert.equal(f.db.consents?.find(r => r.id === duplicate)?.activatedAt, null);
+    const renewed = await f.api.saveConsent({...f.draft, outcome:'full', supersedesId:first});
+    await f.api.activateConsent(renewed);
+    const dsp = f.db.memberships.find(m => m.roleKey === 'dsp' && m.siteId === f.person.siteId)!;
+    f.store.sessionUserId = dsp.userId;
+    assert.deepEqual((await f.api.getConsents()).records.map(r => r.id), [renewed]);
+    f.store.sessionUserId = f.hm.userId;
+    const scheduled = await f.api.saveConsent({...f.draft, supersedesId:renewed, effectiveOn:'2090-01-01'});
+    await f.api.activateConsent(scheduled);
+    const future = await f.api.saveConsent({...f.draft, effectiveOn:'2091-01-01'});
+    await assert.rejects(() => f.api.activateConsent(future), /Another consent covers this period/);
+    const all = await f.api.getConsents();
+    assert.equal(consentOnFile(all, f.person.id, 'media', '2089-12-31').row?.id, renewed);
+    assert.equal(consentOnFile(all, f.person.id, 'media', '2090-01-01').row?.id, scheduled);
+    assert.equal(all.records.filter(r => ['Active','Expiring soon'].includes(consentStatus(r,all.records,all.revocations,'2090-01-01'))).length, 1);
+});

@@ -76,7 +76,8 @@ begin
   if p.id is null or p.signed_at is null or p.agency_id<>new.agency_id or p.individual_id<>new.individual_id
    or not exists(select 1 from jsonb_array_elements(p.snapshot->'items') item where item->>'typeId'=new.type_id)
    or (auth.uid() is not null and not private.can_manage_consent(p.agency_id,p.individual_id)) then raise exception 'Invalid signed packet record.' using errcode='42501'; end if;
-  new.created_by:=p.created_by;new.created_at:=p.signed_at;new.activated_at:=p.signed_at;new.activated_by:=auth.uid();return new;
+  new.created_by:=p.created_by;new.created_at:=p.signed_at;new.activated_at:=p.signed_at;new.activated_by:=auth.uid();
+  perform private.assert_single_consent(new);return new;
  end if;
  if tg_op='UPDATE' then
   if old.activated_at is not null then raise exception 'Signed consent is immutable.' using errcode='42501'; end if;
@@ -87,7 +88,10 @@ begin
  end if;
  if not private.can_manage_consent(new.agency_id,new.individual_id) then raise exception 'Consent access denied.' using errcode='42501'; end if;
  if tg_op='INSERT' then new.created_by:=auth.uid();new.created_at:=now();new.activated_at:=null;new.activated_by:=null; end if;
- if new.activated_at is not null then new.activated_by:=auth.uid();new.activated_at:=now(); end if;
+ if new.activated_at is not null then
+  perform private.assert_single_consent(new);
+  new.activated_by:=auth.uid();new.activated_at:=now();
+ end if;
  return new;
 end;
 $$;
@@ -224,6 +228,8 @@ begin
  perform private.complete_consent_packet(p_id,p_choices,p_signer,p_evidence,true);
 end;
 $$;
+-- Outstanding alerts fire once per packet and target when the configured
+-- unsigned window is entered; subsequent sweeps are deduped, not a cadence.
 create function private.sweep_packet_alerts(p_agency_id uuid,p_scoped boolean) returns void
 language plpgsql security definer set search_path=public,pg_temp as $$
 declare p record;t record;
