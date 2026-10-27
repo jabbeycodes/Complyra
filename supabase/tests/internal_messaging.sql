@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(29);
+select plan(41);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -139,6 +139,68 @@ select throws_ok($$insert into message_participants(thread_id,agency_id,user_id,
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2800000-0000-0000-0000-000000000004"}',true);
 select is((select count(*)::int from message_threads),0,
   'An auditor sees no threads');
+
+-- ── Permission backfill: the DPM merge must not strip messages.use ──
+-- The canonical seed lands before 20260916060000, whose frozen pack
+-- replaced the program_manager template/matrix rows; the follow-on
+-- backfill migration restores the key wherever it is absent.
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is((select permissions ->> 'messages.use' from public.role_templates
+  where key = 'program_manager'), 'true',
+  'After the full chain, the program_manager template carries messages.use = true');
+select is((select permissions ->> 'messages.use' from public.role_permission_matrix
+  where role_key = 'program_manager'), 'true',
+  'After the full chain, the program_manager matrix row carries messages.use = true');
+select is((select permissions ->> 'messages.use' from public.role_templates
+  where key = 'auditor'), 'false',
+  'The auditor template carries messages.use = false explicitly, so the exclusion survives provisioning');
+select is((select permissions ->> 'messages.use' from public.role_permission_matrix
+  where role_key = 'auditor'), 'false',
+  'The auditor matrix row carries messages.use = false explicitly');
+
+-- ── Provisioning: a fresh agency inherits the fixed templates ──
+insert into agencies (id, name, agency_code, state_code, status) values
+ ('a2800000-0000-0000-0000-000000000002','Messaging PM agency','MSGPM-MO','MO','active');
+select lives_ok($$select public.provision_agency_roles('a2800000-0000-0000-0000-000000000002')$$,
+  'Provisioning roles for a fresh agency runs cleanly');
+select is((select permissions ->> 'messages.use' from public.agency_roles
+  where agency_id = 'a2800000-0000-0000-0000-000000000002' and template_key = 'program_manager'), 'true',
+  'A freshly provisioned agency gives its program_manager row messages.use = true');
+select is((select permissions ->> 'messages.use' from public.agency_roles
+  where agency_id = 'a2800000-0000-0000-0000-000000000002' and template_key = 'auditor'), 'false',
+  'A freshly provisioned agency gives its auditor row messages.use = false (explicit)');
+insert into auth.users(id,email) values
+ ('d2800000-0000-0000-0000-000000000005','msg-pm@example.invalid'),
+ ('d2800000-0000-0000-0000-000000000006','msg-dsp3@example.invalid');
+update profiles set must_change_password=false;
+update profiles set full_name='Pm One' where id='d2800000-0000-0000-0000-000000000005';
+update profiles set full_name='Dsp Three' where id='d2800000-0000-0000-0000-000000000006';
+insert into memberships(agency_id,user_id,role,role_key,site_id) values
+ ('a2800000-0000-0000-0000-000000000002','d2800000-0000-0000-0000-000000000005','manager','program_manager',null),
+ ('a2800000-0000-0000-0000-000000000002','d2800000-0000-0000-0000-000000000006','dsp','dsp',null);
+
+-- ── The previously broken path: a PM can be added to a thread ──
+-- Before the backfill, the participant policy's check of the added
+-- person's agency_roles row found no messages.use on the PM row and
+-- denied the insert, so no program manager could ever be added.
+set local role authenticated;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2800000-0000-0000-0000-000000000006"}',true);
+select lives_ok($$insert into message_threads(id,agency_id,subject,created_by)
+  values ('f2800000-0000-0000-0000-000000000002','a2800000-0000-0000-0000-000000000002','Coverage question','d2800000-0000-0000-0000-000000000006')$$,
+  'A DSP creates a thread in the freshly provisioned agency');
+select lives_ok($$insert into message_participants(thread_id,agency_id,user_id,added_by)
+  values ('f2800000-0000-0000-0000-000000000002','a2800000-0000-0000-0000-000000000002','d2800000-0000-0000-0000-000000000006',null)$$,
+  'The creator seeds their own participant row');
+select lives_ok($$insert into messages(thread_id,agency_id,sender_id,kind,body)
+  values ('f2800000-0000-0000-0000-000000000002','a2800000-0000-0000-0000-000000000002','d2800000-0000-0000-0000-000000000006','user','Can you cover the Saturday review?')$$,
+  'The creator posts the first message');
+select lives_ok($$insert into message_participants(thread_id,agency_id,user_id,added_by)
+  values ('f2800000-0000-0000-0000-000000000002','a2800000-0000-0000-0000-000000000002','d2800000-0000-0000-0000-000000000005','d2800000-0000-0000-0000-000000000006')$$,
+  'A program manager can be added as a thread participant');
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2800000-0000-0000-0000-000000000005"}',true);
+select is((select count(*)::int from message_threads),1,
+  'The added program manager reads the thread');
 
 select * from finish();
 rollback;
