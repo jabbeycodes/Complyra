@@ -24,7 +24,7 @@
 }
 
 .site-grid .location-card:focus-visible {
-  outline: 2px solid #3f5c3b;
+  outline: 2px solid var(--color-h-3f5c3b);
   outline-offset: 3px;
 }
 
@@ -42,7 +42,7 @@
   margin: 0;
   font-size: 18px;
   line-height: 1.25;
-  color: #2f4630;
+  color: var(--color-h-2f4630);
   overflow-wrap: anywhere;
 }
 
@@ -50,7 +50,7 @@
   margin: 0;
   font-size: 14px;
   line-height: 1.4;
-  color: #6b6156;
+  color: var(--color-h-6b6156);
   overflow-wrap: anywhere;
 }
 
@@ -61,7 +61,7 @@
   gap: 8px;
   margin: 4px 0 0;
   font-size: 13px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .capacity-full {
@@ -70,8 +70,8 @@
   min-height: 22px;
   padding: 0 8px;
   border-radius: 999px;
-  background: #e4d5b8;
-  color: #4a4036;
+  background: var(--color-h-e4d5b8);
+  color: var(--color-h-4a4036);
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.02em;
@@ -86,7 +86,7 @@
 
 .location-faces-more {
   font-size: 12px;
-  color: #6b6156;
+  color: var(--color-h-6b6156);
 }
 
 .location-glance {
@@ -102,7 +102,7 @@
   align-items: center;
   gap: 2px;
   font-size: 13px;
-  color: #5d8354;
+  color: var(--color-h-5d8354);
 }
 
 .site-grid .location-card .heading-actions {
@@ -136,7 +136,7 @@
   min-height: 38px;
   padding-block: 6px;
   font-size: 13px;
-  color: #6b6156;
+  color: var(--color-h-6b6156);
 }
 
 @media (min-width: 960px) {

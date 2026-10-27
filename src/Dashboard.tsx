@@ -373,7 +373,7 @@ export default function Dashboard({
               Your work{" "}
               <span className="count-pill">{personalItems.length}</span>
             </h2>
-            <p>What is waiting on you — not the whole agency.</p>
+            <p>What is waiting on you, not the whole agency.</p>
           </div>
         </div>
         {personalItems.length ? (
@@ -498,15 +498,14 @@ export default function Dashboard({
                   </div>
                   <div className="progress-track">
                     <span
-                      style={{
-                        width: `${cm.score}%`,
-                        background:
-                          i === 4
-                            ? "#c4a06a"
-                            : cm.score === 100
-                              ? "#5d7a52"
-                              : "#8b5e3c",
-                      }}
+                      className={
+                        i === 4
+                          ? "progress-fill sand"
+                          : cm.score === 100
+                            ? "progress-fill done"
+                            : "progress-fill clay"
+                      }
+                      style={{ width: `${cm.score}%` }}
                     />
                   </div>
                 </button>

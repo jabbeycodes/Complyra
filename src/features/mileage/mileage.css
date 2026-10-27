@@ -57,7 +57,7 @@
 .mileage-toolbar-stat {
   align-self: end;
   padding-bottom: 6px;
-  color: var(--muted, #4a4036);
+  color: var(--muted, var(--color-h-4a4036));
 }
 
 .mileage-form {
@@ -87,7 +87,7 @@
 .mileage-riders {
   grid-column: 1 / -1;
   min-width: 0;
-  border: 1px solid var(--border, #e2e2e2);
+  border: 1px solid var(--border, var(--color-h-e2e2e2));
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -121,7 +121,7 @@
 
 .mileage-table th,
 .mileage-table td {
-  border-bottom: 1px solid var(--border, #e8e8e8);
+  border-bottom: 1px solid var(--border, var(--color-h-e8e8e8));
   padding: 8px 10px;
   text-align: left;
   white-space: nowrap;
@@ -144,25 +144,25 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  background: #fffaf2;
+  background: var(--color-h-fffaf2);
 }
 
 .mileage-table th {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted, #666);
+  color: var(--muted, var(--color-h-666));
 }
 
 .mileage-totals-row td {
-  border-top: 2px solid var(--border-strong, #999);
+  border-top: 2px solid var(--border-strong, var(--color-h-999));
   border-bottom: none;
-  background: var(--row-highlight, #f7f7f7);
+  background: var(--row-highlight, var(--color-h-f7f7f7));
 }
 
 .mileage-site-row td {
-  background: var(--row-highlight, #f2efe9);
-  border-bottom: 1px solid var(--border-strong, #ccc);
+  background: var(--row-highlight, var(--color-h-f2efe9));
+  border-bottom: 1px solid var(--border-strong, var(--color-h-ccc));
   padding-top: 10px;
 }
 
@@ -205,9 +205,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--color-h-fef3c7);
+  color: var(--color-h-92400e);
+  border: 1px solid var(--color-h-fcd34d);
   vertical-align: middle;
 }
 
@@ -225,7 +225,7 @@
   .page-shell {
     margin-left: 0 !important;
     padding-inline: 0.4in !important;
-    background: #fff !important;
+    background: var(--color-h-fff) !important;
   }
 
   main {
@@ -236,7 +236,7 @@
 
   .mileage-page .panel {
     box-shadow: none;
-    border: 1px solid #222;
+    border: 1px solid var(--color-h-222);
     break-inside: avoid;
   }
 
@@ -297,6 +297,6 @@
   }
 
   .mileage-page .table-scroll {
-    mask-image: linear-gradient(to right, #000 86%, transparent);
+    mask-image: linear-gradient(to right, var(--color-h-000) 86%, transparent);
   }
 }

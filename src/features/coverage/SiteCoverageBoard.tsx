@@ -58,9 +58,23 @@ function staffChoices(staff: StaffChoice[], today: string): StaffChoice[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function compactOwed(
+  owed: Array<{ blockId: string; text: string }>,
+  hasRows: boolean,
+): string | null {
+  if (hasRows || owed.length < 2) return null;
+  const tails = owed.map((line) => {
+    const mark = line.text.indexOf(" · ");
+    return mark === -1 ? null : line.text.slice(mark + 3);
+  });
+  const tail = tails[0];
+  if (!tail || tails.some((item) => item !== tail || item.includes(" · "))) return null;
+  return `Open. ${tail}`;
+}
+
 function choiceLabel(person: StaffChoice, siteId: string): string {
-  const where = person.siteId === siteId ? "" : person.siteId ? " · other house" : " · agency";
-  return `${person.name} · ${person.role}${where}`;
+  const where = person.siteId === siteId ? "" : person.siteId ? ", other house" : ", agency";
+  return `${person.name}, ${person.role}${where}`;
 }
 
 export default function SiteCoverageBoard({ siteId }: { siteId: string | null }) {
@@ -184,12 +198,15 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         return {
           id: row.id,
           who: person?.name ?? "Staff",
-          when: `${start.hhmm}–${end.hhmm}`,
+          when: `${start.hhmm} to ${end.hhmm}`,
         };
       }),
     openings: openShifts.filter(
       (row) => row.startsAt && row.endsAt && shiftTouchesDate(row.startsAt, row.endsAt, date),
     ),
+  })).map((day) => ({
+    ...day,
+    summary: compactOwed(day.owed, day.shifts.length + day.openings.length > 0),
   }));
 
   function openDraft(date: string, shift?: HrShift) {
@@ -434,7 +451,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
             <button type="button" className="button" onClick={() => setWeekStart(addWeek(weekStart, 1))}>Next week</button>
             <button type="button" className="button" disabled={busy} onClick={() => void fillWeek()}>Fill open hours</button>
             <button type="button" className="button" disabled={busy} onClick={() => void copyLastWeek()}>Use last week</button>
-            <span>{dayHeading(dates[0])} – {dayHeading(dates[6])}</span>
+            <span>{dayHeading(dates[0])} to {dayHeading(dates[6])}</span>
           </div>
           <p className="coverage-hours">{shiftScheduleSummary(shiftClockFromFacts(facts))}</p>
           {live.length === 0 && (
@@ -448,10 +465,14 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
             {days.map((day) => (
               <div key={day.date} className="coverage-day">
                 <h3>{day.heading}</h3>
-                {day.owed.map((line) => (
-                  <p key={line.blockId} className="coverage-owed">{line.text}</p>
-                ))}
-                {day.shifts.length === 0 && day.openings.length === 0 && <p>Open</p>}
+                {day.summary ? (
+                  <p className="coverage-owed">{day.summary}</p>
+                ) : (
+                  day.owed.map((line) => (
+                    <p key={line.blockId} className="coverage-owed">{line.text}</p>
+                  ))
+                )}
+                {!day.summary && day.shifts.length === 0 && day.openings.length === 0 && <p>Open</p>}
                 {day.shifts.map((shift) => {
                   const row = shifts.find((item) => item.id === shift.id);
                   return (
@@ -472,7 +493,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
                     <strong>Open for a PRN</strong>
                     <span>
                       {opening.startsAt && opening.endsAt
-                        ? `${chicagoWallClock(opening.startsAt).hhmm}–${chicagoWallClock(opening.endsAt).hhmm}`
+                        ? `${chicagoWallClock(opening.startsAt).hhmm} to ${chicagoWallClock(opening.endsAt).hhmm}`
                         : opening.title}
                     </span>
                     <span className="coverage-shift-actions">
@@ -492,7 +513,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
                 void saveDraft();
               }}
             >
-              <h3>{draft.shiftId ? "Change this shift" : `Add coverage · ${dayHeading(draft.date)}`}</h3>
+              <h3>{draft.shiftId ? "Change this shift" : `Add coverage, ${dayHeading(draft.date)}`}</h3>
               <label>
                 Who is working
                 <select

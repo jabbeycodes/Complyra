@@ -19,17 +19,17 @@
 .coverage-hours,
 .coverage-empty,
 .coverage-regular p {
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .coverage-week {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 8px;
 }
 
 .coverage-day {
-  border: 1px solid #eae8e4;
+  border: 1px solid var(--color-h-eae8e4);
   border-radius: 8px;
   padding: 10px;
   min-width: 0;
@@ -38,6 +38,11 @@
 .coverage-day h3 {
   margin: 0 0 8px;
   font-size: 13px;
+}
+
+.coverage-day .button {
+  width: 100%;
+  white-space: normal;
 }
 
 .coverage-shift {
@@ -50,7 +55,7 @@
 .coverage-owed {
   margin: 0 0 6px;
   font-size: 12px;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .coverage-draft,

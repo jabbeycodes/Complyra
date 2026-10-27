@@ -634,7 +634,7 @@ export default function App() {
   }
   const navItems = [
     {
-      title: "PROGRAMS",
+      title: "Programs",
       items: [
         ["Overview", LayoutDashboard],
         ["Platform", ShieldCheck],
@@ -647,7 +647,7 @@ export default function App() {
       ],
     },
     {
-      title: "COMPLIANCE",
+      title: "Compliance",
       items: [
         ["Requirements", ListChecks],
         ["Documents", FolderOpen],
@@ -664,7 +664,7 @@ export default function App() {
     },
     {
       // Section header shows the current agency's display name — never a hardcoded name.
-      title: session.agencyName.toUpperCase(),
+      title: session.agencyName,
       items: [
         // LIFEPATH-P2-NAV (training engine)
         ["Training", BookOpen],
@@ -682,7 +682,7 @@ export default function App() {
       ],
     },
     {
-      title: "EMPLOYEE HUB",
+      title: "Employee hub",
       items: [
         ["Employee Hub", Briefcase],
         ["Recognition", Trophy],
@@ -843,7 +843,7 @@ export default function App() {
               <kbd>⌘ K</kbd>
               {globalQuery && (
                 <div className="search-results">
-                  <div className="search-heading">REQUIREMENTS & RECORDS</div>
+                  <div className="search-heading">Requirements and records</div>
                   {searchHits.map((r) => (
                       <button
                         key={r.id}
@@ -856,11 +856,10 @@ export default function App() {
                         <span>
                           <strong>{r.title}</strong>
                           <small>
-                            {r.person} · {r.site}
+                            {r.person}, {r.site}
                           </small>
                           <small className="search-meta">
-                            {r.category} · {r.status} · due {formatDate(r.due)} ·
-                            p.{r.page}
+                            {r.category}, {r.status}, due {formatDate(r.due)}, page {r.page}
                           </small>
                         </span>
                         <ChevronRight size={15} />
@@ -1699,8 +1698,8 @@ export default function App() {
                   <section className="panel settings-panel">
                     <h2>{session.agencyName}</h2>
                     <p>
-                      Provider code {session.agencyCode} · {sites.length} sites ·{" "}
-                      {individuals.length} individuals · {staff.length} staff ·{" "}
+                      Provider code {session.agencyCode}. {sites.length} sites.{" "}
+                      {individuals.length} individuals. {staff.length} staff.{" "}
                       {session.jobTitle}
                     </p>
                     <div className="settings-row">
@@ -1865,12 +1864,12 @@ export default function App() {
           </p>
           <div className="detail-grid">
             <div>
-              <small>RESPONSIBLE PERSON</small>
+              <small>Responsible person</small>
               <strong>{selected.owner}</strong>
               <span>{selected.role}</span>
             </div>
             <div>
-              <small>DUE DATE</small>
+              <small>Due date</small>
               <strong>{formatDateLong(selected.due)}</strong>
               <span>{selected.frequency}</span>
             </div>
@@ -2630,7 +2629,7 @@ function CreateForm({
           <label className="upload-zone">
             <Upload size={25} />
             <strong>{file ? file.name : "Choose a PDF"}</strong>
-            <span>Fictional documents only · PDF up to 10 MB · file is stored</span>
+            <span>Fictional documents only. PDF up to 10 MB. The file is stored.</span>
             <input
               aria-label="Choose sample PDF"
               type="file"

@@ -65,7 +65,7 @@
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--shift);
-  color: #ffffff;
+  color: var(--color-h-ffffff);
 }
 
 .dsv-band-text {
@@ -93,7 +93,7 @@
 
 .dsv-band-active .dsv-band-text strong,
 .dsv-band-active .dsv-band-sub {
-  color: #ffffff;
+  color: var(--color-h-ffffff);
 }
 
 .dsv-band-active .dsv-band-icon {
@@ -121,7 +121,7 @@
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--dsv-weekend-deep);
-  color: #ffffff;
+  color: var(--color-h-ffffff);
 }
 
 .dsv-due-title {
@@ -211,13 +211,13 @@
 }
 
 .dsv-current-tag {
-  color: #2f4630;
-  background: #e7eddf;
+  color: var(--color-h-2f4630);
+  background: var(--color-h-e7eddf);
 }
 
 .dsv-medical-pill {
-  color: #8b2e4e;
-  background: #f9ecef;
+  color: var(--color-h-8b2e4e);
+  background: var(--color-h-f9ecef);
 }
 
 .dsv-medical-footnote {
@@ -278,7 +278,7 @@
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--shift);
-  color: #ffffff;
+  color: var(--color-h-ffffff);
 }
 
 .dsv-drill-check {
@@ -292,7 +292,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--dsv-weekend-deep);
-  color: #ffffff;
+  color: var(--color-h-ffffff);
   border: 2px solid var(--dsv-row);
 }
 
@@ -315,7 +315,7 @@
 }
 
 .dsv-drill-late .dsv-drill-sub {
-  color: #9a5a2e;
+  color: var(--color-h-9a5a2e);
   font-weight: 600;
 }
 

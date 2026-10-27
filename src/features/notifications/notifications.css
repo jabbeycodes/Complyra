@@ -14,13 +14,13 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 8px;
-  background: #b56a4e;
-  color: #fff;
+  background: var(--color-h-b56a4e);
+  color: var(--color-h-fff);
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
   text-align: center;
-  border: 2px solid #fff;
+  border: 2px solid var(--color-h-fff);
   pointer-events: none;
 }
 
@@ -38,14 +38,14 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 4px;
-  border-bottom: 1px solid #f1f0ed;
+  border-bottom: 1px solid var(--color-h-f1f0ed);
 }
 
 .notif-panel-head h2 {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
-  color: #241e18;
+  color: var(--color-h-241e18);
 }
 
 .notif-panel-actions {
@@ -62,9 +62,9 @@
   min-height: 44px;
   padding: 0 12px;
   border-radius: 8px;
-  border: 1px solid #e0dcd6;
-  background: #fff;
-  color: #4a4036;
+  border: 1px solid var(--color-h-e0dcd6);
+  background: var(--color-h-fff);
+  color: var(--color-h-4a4036);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -72,13 +72,13 @@
 
 .notif-filter-toggle:hover,
 .notif-mark-all:hover {
-  background: #f4f2f0;
+  background: var(--color-h-f4f2f0);
 }
 
 .notif-filter-toggle[aria-pressed="true"] {
-  background: #3f5c3b;
-  border-color: #3f5c3b;
-  color: #fff;
+  background: var(--color-h-3f5c3b);
+  border-color: var(--color-h-3f5c3b);
+  color: var(--color-h-fff);
 }
 
 .notif-close {
@@ -90,12 +90,12 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
   cursor: pointer;
 }
 
 .notif-close:hover {
-  background: #f4f2f0;
+  background: var(--color-h-f4f2f0);
 }
 
 .notif-state {
@@ -105,14 +105,14 @@
   gap: 8px;
   padding: 48px 24px;
   text-align: center;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 .notif-state p {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #241e18;
+  color: var(--color-h-241e18);
 }
 
 .notif-state small {
@@ -122,7 +122,7 @@
 }
 
 .notif-error {
-  color: #8f5237;
+  color: var(--color-h-8f5237);
 }
 
 .notif-spin {
@@ -154,24 +154,24 @@
   padding: 12px;
   border: 1px solid transparent;
   border-radius: 12px;
-  background: #fff;
-  color: #241e18;
+  background: var(--color-h-fff);
+  color: var(--color-h-241e18);
   text-align: left;
   cursor: pointer;
 }
 
 .notif-row:hover {
-  background: #faf9f7;
-  border-color: #f1f0ed;
+  background: var(--color-h-faf9f7);
+  border-color: var(--color-h-f1f0ed);
 }
 
 .notif-row.unread {
-  background: #f6f8f4;
-  border-color: #e3e9dd;
+  background: var(--color-h-f6f8f4);
+  border-color: var(--color-h-e3e9dd);
 }
 
 .notif-row.unread:hover {
-  background: #eef2e9;
+  background: var(--color-h-eef2e9);
 }
 
 .notif-icon {
@@ -207,87 +207,87 @@
   text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 6px;
-  background: #f4f3f0;
-  color: #5d8353;
+  background: var(--color-h-f4f3f0);
+  color: var(--color-h-5d8353);
 }
 
 .notif-time {
   font-size: 12px;
-  color: #8a8178;
+  color: var(--color-h-8a8178);
   flex: none;
 }
 
 .notif-text strong {
   font-size: 14px;
   line-height: 1.35;
-  color: #241e18;
+  color: var(--color-h-241e18);
 }
 
 .notif-text small {
   font-size: 13px;
   line-height: 1.5;
-  color: #4a4036;
+  color: var(--color-h-4a4036);
 }
 
 /* Status tints — icon + text label always accompany the color. */
 .status-compliant .notif-icon,
 .notif-icon.status-compliant {
-  background: #eff5ed;
-  color: #4d6b42;
+  background: var(--color-h-eff5ed);
+  color: var(--color-h-4d6b42);
 }
 .notif-status.status-compliant {
-  background: #eff5ed;
-  color: #4d6b42;
+  background: var(--color-h-eff5ed);
+  color: var(--color-h-4d6b42);
 }
 
 .status-expiring .notif-icon,
 .notif-icon.status-expiring {
-  background: #f7f2ea;
-  color: #8f6b3f;
+  background: var(--color-h-f7f2ea);
+  color: var(--color-h-8f6b3f);
 }
 .notif-status.status-expiring {
-  background: #f7f2ea;
-  color: #8f6b3f;
+  background: var(--color-h-f7f2ea);
+  color: var(--color-h-8f6b3f);
 }
 
 .status-expired .notif-icon,
 .notif-icon.status-expired {
-  background: #f8f1ee;
-  color: #8f5237;
+  background: var(--color-h-f8f1ee);
+  color: var(--color-h-8f5237);
 }
 .notif-status.status-expired {
-  background: #f8f1ee;
-  color: #8f5237;
+  background: var(--color-h-f8f1ee);
+  color: var(--color-h-8f5237);
 }
 
 .status-missing .notif-icon,
 .notif-icon.status-missing {
-  background: #f2f1ef;
-  color: #4a4036;
+  background: var(--color-h-f2f1ef);
+  color: var(--color-h-4a4036);
 }
 .notif-status.status-missing {
-  background: #f2f1ef;
-  color: #4a4036;
+  background: var(--color-h-f2f1ef);
+  color: var(--color-h-4a4036);
 }
 
 .status-late .notif-icon,
 .notif-icon.status-late {
-  background: #f8f1ee;
-  color: #8f5237;
+  background: var(--color-h-f8f1ee);
+  color: var(--color-h-8f5237);
 }
 .notif-status.status-late {
-  background: #f8f1ee;
-  color: #8f5237;
+  background: var(--color-h-f8f1ee);
+  color: var(--color-h-8f5237);
 }
 
 .status-pending .notif-icon,
 .notif-icon.status-pending {
-  background: #f4f3f0;
-  color: #5d8353;
+  background: var(--color-h-f4f3f0);
+  color: var(--color-h-5d8353);
 }
 .notif-status.status-pending {
-  background: #f4f3f0;
-  color: #5d8353;
+  background: var(--color-h-f4f3f0);
+  color: var(--color-h-5d8353);
 }
 
 @media (max-width: 640px) {

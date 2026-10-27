@@ -4,8 +4,8 @@
 .kiosk {
   min-height: 100vh;
   min-height: 100dvh;
-  background: #201a14;
-  color: #fbf7ec;
+  background: var(--color-h-201a14);
+  color: var(--color-h-fbf7ec);
   font-size: 20px;
   line-height: 1.45;
   display: flex;
@@ -32,7 +32,7 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #cbbfa8;
+  color: var(--color-h-cbbfa8);
 }
 
 .kiosk-site {
@@ -40,12 +40,12 @@
   font-size: 2.4rem;
   line-height: 1.15;
   font-weight: 800;
-  color: #fbf7ec;
+  color: var(--color-h-fbf7ec);
 }
 
 .kiosk-panel {
-  background: #2c251c;
-  border: 1px solid #4a4036;
+  background: var(--color-h-2c251c);
+  border: 1px solid var(--color-h-4a4036);
   border-radius: 18px;
   padding: 32px 28px;
   display: flex;
@@ -62,7 +62,7 @@
 
 .kiosk-muted {
   margin: 0;
-  color: #cbbfa8;
+  color: var(--color-h-cbbfa8);
   font-size: 1.1rem;
   text-align: center;
 }
@@ -77,9 +77,9 @@
   box-sizing: border-box;
   min-height: 72px;
   border-radius: 12px;
-  border: 2px solid #6b5d4a;
-  background: #fbf7ec;
-  color: #241e18;
+  border: 2px solid var(--color-h-6b5d4a);
+  background: var(--color-h-fbf7ec);
+  color: var(--color-h-241e18);
   font-size: 1.75rem;
   font-weight: 600;
   padding: 12px 18px;
@@ -87,7 +87,7 @@
 }
 
 .kiosk-input::placeholder {
-  color: #8a7d66;
+  color: var(--color-h-8a7d66);
   font-weight: 400;
 }
 
@@ -99,7 +99,7 @@ select.kiosk-input {
 .kiosk-input:focus-visible,
 .kiosk-btn:focus-visible,
 .kiosk-key:focus-visible {
-  outline: 4px solid #e8dcc8;
+  outline: 4px solid var(--color-h-e8dcc8);
   outline-offset: 2px;
 }
 
@@ -114,9 +114,9 @@ select.kiosk-input {
 .kiosk-key {
   min-height: 88px;
   border-radius: 14px;
-  border: 2px solid #4a4036;
-  background: #383023;
-  color: #fbf7ec;
+  border: 2px solid var(--color-h-4a4036);
+  background: var(--color-h-383023);
+  color: var(--color-h-fbf7ec);
   font-size: 2rem;
   font-weight: 700;
   cursor: pointer;
@@ -124,13 +124,13 @@ select.kiosk-input {
 }
 
 .kiosk-key:active {
-  background: #4a4036;
+  background: var(--color-h-4a4036);
 }
 
 .kiosk-key-fn {
   font-size: 1.15rem;
-  background: #2c251c;
-  color: #cbbfa8;
+  background: var(--color-h-2c251c);
+  color: var(--color-h-cbbfa8);
 }
 
 /* PIN dots */
@@ -146,13 +146,13 @@ select.kiosk-input {
   width: 26px;
   height: 26px;
   border-radius: 999px;
-  border: 2px solid #6b5d4a;
+  border: 2px solid var(--color-h-6b5d4a);
   background: transparent;
 }
 
 .kiosk-pin-dots span.on {
-  background: #e8dcc8;
-  border-color: #e8dcc8;
+  background: var(--color-h-e8dcc8);
+  border-color: var(--color-h-e8dcc8);
 }
 
 /* buttons */
@@ -176,35 +176,35 @@ select.kiosk-input {
 }
 
 .kiosk-btn-primary {
-  background: #6f815c;
-  color: #fbf7ec;
+  background: var(--color-h-6f815c);
+  color: var(--color-h-fbf7ec);
 }
 
 .kiosk-btn-clockin {
-  background: #4d6b42;
-  color: #fbf7ec;
+  background: var(--color-h-4d6b42);
+  color: var(--color-h-fbf7ec);
   min-height: 96px;
   font-size: 1.9rem;
 }
 
 .kiosk-btn-clockout {
-  background: #8b5e3c;
-  color: #fbf7ec;
+  background: var(--color-h-8b5e3c);
+  color: var(--color-h-fbf7ec);
   min-height: 96px;
   font-size: 1.9rem;
 }
 
 .kiosk-btn-break {
-  background: #7a5a1e;
-  color: #fbf7ec;
+  background: var(--color-h-7a5a1e);
+  color: var(--color-h-fbf7ec);
   min-height: 96px;
   font-size: 1.9rem;
 }
 
 .kiosk-btn-ghost {
   background: transparent;
-  border-color: #6b5d4a;
-  color: #cbbfa8;
+  border-color: var(--color-h-6b5d4a);
+  color: var(--color-h-cbbfa8);
   min-height: 64px;
   font-size: 1.2rem;
   font-weight: 600;
@@ -228,8 +228,8 @@ select.kiosk-input {
 }
 
 .kiosk-suggest {
-  background: #383023;
-  border: 1px solid #6b5d4a;
+  background: var(--color-h-383023);
+  border: 1px solid var(--color-h-6b5d4a);
   border-radius: 12px;
   padding: 20px;
   display: flex;
@@ -257,8 +257,8 @@ select.kiosk-input {
 /* confirmation */
 
 .kiosk-error {
-  background: #b56a4e;
-  color: #fff;
+  background: var(--color-h-b56a4e);
+  color: var(--color-h-fff);
   border-radius: 12px;
   padding: 16px 20px;
   font-size: 1.2rem;
@@ -282,8 +282,8 @@ select.kiosk-input {
   width: 120px;
   height: 120px;
   border-radius: 999px;
-  background: #4d6b42;
-  color: #fbf7ec;
+  background: var(--color-h-4d6b42);
+  color: var(--color-h-fbf7ec);
   font-size: 4rem;
   font-weight: 800;
   display: flex;
@@ -299,7 +299,7 @@ select.kiosk-input {
 
 .kiosk-note {
   margin: 0;
-  color: #cbbfa8;
+  color: var(--color-h-cbbfa8);
   font-size: 1.05rem;
 }
 
@@ -310,9 +310,9 @@ select.kiosk-input {
 
 .kiosk-pending {
   display: inline-block;
-  background: #383023;
-  border: 1px solid #6b5d4a;
-  color: #f3e3c2;
+  background: var(--color-h-383023);
+  border: 1px solid var(--color-h-6b5d4a);
+  color: var(--color-h-f3e3c2);
   border-radius: 999px;
   padding: 8px 18px;
   font-size: 1rem;
