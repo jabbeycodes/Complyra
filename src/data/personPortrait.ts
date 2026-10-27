@@ -18,13 +18,7 @@ export function portraitDataUrl(name: string): string {
   const shirt = SHIRT[(h >> 5) % SHIRT.length];
   const hairH = 28 + (h % 10);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-    <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#efe4d4"/>
-        <stop offset="1" stop-color="#d7c4a6"/>
-      </linearGradient>
-    </defs>
-    <rect width="80" height="80" fill="url(#g)"/>
+    <rect width="80" height="80" fill="#e3d4bd"/>
     <ellipse cx="40" cy="86" rx="32" ry="22" fill="${shirt}"/>
     <ellipse cx="40" cy="44" rx="20" ry="23" fill="${skin}"/>
     <path d="M18 40 C20 ${hairH} 28 16 40 16 C52 16 60 ${hairH} 62 40 C54 28 26 28 18 40Z" fill="${hair}"/>
