@@ -4343,12 +4343,14 @@ export class LocalApi implements ComplyraApi {
     }
     const day = input.doseDate.slice(0, 10);
     const rules = this.agencyOperatingRules();
+    const clock = dueItemClock();
     const early = marRecordingProblem({
       doseDate: day,
       doseTime: input.doseTime,
-      now: new Date(),
+      now: clock.now,
       windowBeforeMinutes: rules.medWindowBeforeMinutes,
       blockEarly: rules.blockEarlyRecording,
+      timeZone: clock.timeZone,
     });
     if (early) throw new Error(early);
     const rows = this.medDoseMarkRows();
