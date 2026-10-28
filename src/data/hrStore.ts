@@ -2903,7 +2903,7 @@ function emptyBucket(): LocalBucket {
 
 /* ------------------------- demo staffing seed (local) ---------------------- */
 /* Fictional staffing patterns for the Evergreen demo agency, localStorage
- * only. Every row is clearly fictional (Demo Staff N, Demo Client A.., Demo
+ * only. Every row is clearly fictional (Demo Staff N, Demo Individual A.., Demo
  * House North/South, notes prefixed "DEMO — ") and never uses real names or
  * phone numbers. */
 
@@ -2926,14 +2926,14 @@ function seedDemoStaffingPatterns(): HrStaffingPattern[] {
     isd: boolean;
     onCall: boolean;
   }> = [
-    { staff: "Demo Staff 1", client: "Demo Client A", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: true, onCall: false },
-    { staff: "Demo Staff 2", client: "Demo Client B", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: false, onCall: true },
-    { staff: "Demo Staff 3", client: "Demo Client C", days: [1, 3, 5], tags: ["Community Networking"], isd: true, onCall: false },
-    { staff: "Demo Staff 4", client: "Demo Client D", days: [2, 4], tags: ["Community Networking", "In-Home Respite"], isd: false, onCall: false },
-    { staff: "Demo Staff 5", client: "Demo Client E", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: false, onCall: false },
-    { staff: "Demo Staff 6", client: "Demo Client F", days: [6, 0], tags: ["Community Networking"], isd: false, onCall: true },
-    { staff: "Demo Staff 7", client: "Demo Client G", days: [1, 3, 5], tags: ["In-Home Respite"], isd: false, onCall: false },
-    { staff: "Demo Staff 8", client: "Demo Client H", days: [2, 4], tags: ["In-Home Respite"], isd: true, onCall: false },
+    { staff: "Demo Staff 1", client: "Demo Individual A", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: true, onCall: false },
+    { staff: "Demo Staff 2", client: "Demo Individual B", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: false, onCall: true },
+    { staff: "Demo Staff 3", client: "Demo Individual C", days: [1, 3, 5], tags: ["Community Networking"], isd: true, onCall: false },
+    { staff: "Demo Staff 4", client: "Demo Individual D", days: [2, 4], tags: ["Community Networking", "In-Home Respite"], isd: false, onCall: false },
+    { staff: "Demo Staff 5", client: "Demo Individual E", days: [1, 2, 3, 4, 5], tags: ["In-Home Respite"], isd: false, onCall: false },
+    { staff: "Demo Staff 6", client: "Demo Individual F", days: [6, 0], tags: ["Community Networking"], isd: false, onCall: true },
+    { staff: "Demo Staff 7", client: "Demo Individual G", days: [1, 3, 5], tags: ["In-Home Respite"], isd: false, onCall: false },
+    { staff: "Demo Staff 8", client: "Demo Individual H", days: [2, 4], tags: ["In-Home Respite"], isd: true, onCall: false },
   ];
   cssRows.forEach((r) => {
     rows.push({

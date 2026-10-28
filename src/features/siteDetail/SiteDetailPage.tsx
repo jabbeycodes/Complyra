@@ -534,7 +534,7 @@ export default function SiteDetailPage({
             </div>
             <div className="site-hero-stat">
               <strong>{latestQaPct ?? "None"}</strong>
-              <span>{latestQa ? auditPeriodLabel(latestQa) : "QA review"}</span>
+              <span>{latestQa ? `QA score · ${auditPeriodLabel(latestQa)}` : "QA review"}</span>
             </div>
           </div>
         </div>
@@ -1203,8 +1203,12 @@ export default function SiteDetailPage({
                     <span>Running low</span>
                   </div>
                   <div>
-                    <strong>{medStatus.criticalCount + medStatus.outCount}</strong>
-                    <span>Critical / out</span>
+                    <strong>{medStatus.criticalCount}</strong>
+                    <span>Critical</span>
+                  </div>
+                  <div>
+                    <strong>{medStatus.outCount}</strong>
+                    <span>Out</span>
                   </div>
                 </div>
                 <p className="muted site-detail-note">

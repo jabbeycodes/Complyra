@@ -175,7 +175,12 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
       report.push({ width, label, ...metrics });
       expect(metrics.lastTab, `${label} @${width} Staff last`).toMatch(/Staff/);
       expect(metrics.peopleHits, `${label} @${width} People wording`).toBe(0);
-      expect(metrics.tabWrap, `${label} @${width} nowrap tabs`).toBe("nowrap");
+      // UI rectification 2026-10-28: at desktop widths the strip wraps so
+      // every tab label stays fully visible (no fade over the active pill);
+      // at phone widths it remains a single scrolling row.
+      expect(metrics.tabWrap, `${label} @${width} tab wrap mode`).toBe(
+        width >= 861 ? "wrap" : "nowrap",
+      );
       expect(metrics.bodyOverflow, `${label} @${width} page overflow`).toBeLessThanOrEqual(8);
     }
   }

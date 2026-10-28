@@ -5442,6 +5442,21 @@ th {
 .overview-form-span {
   grid-column: 1 / -1;
 }
+/* Labels placed directly in an editor (not inside the form grid) stack
+   their control at full width with the same treatment as grid labels —
+   the ISP plan editor's narrative textareas used to stop at ~2/3 width. */
+.overview-editor > label:not(.overview-diagnosis-label) {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.overview-editor > label > input,
+.overview-editor > label > select,
+.overview-editor > label > textarea {
+  width: 100%;
+}
 .overview-editor-actions {
   display: flex;
   justify-content: flex-end;
@@ -7328,6 +7343,7 @@ button.qa-row:hover {
 .isp-notes-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 .isp-notes-list h3 {
   margin: 0;
@@ -7337,6 +7353,13 @@ button.qa-row:hover {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  /* The global table rule sets white-space: nowrap for data tables. On this
+     prose record table the longest sentence (the progress note, colSpan 2)
+     became the table's min-content width and pushed the whole note card
+     past the chart column. Fixed layout + wrapping keeps every column —
+     including "Scoring comments" — inside the card at any width. */
+  table-layout: fixed;
+  white-space: normal;
 }
 .clinician-note th,
 .clinician-note td {
@@ -7344,10 +7367,19 @@ button.qa-row:hover {
   padding: 6px 8px;
   vertical-align: top;
   text-align: left;
+  overflow-wrap: break-word;
 }
 .clinician-note th {
   background: var(--paper, var(--color-h-f6f3ee));
-  width: 28%;
+}
+.clinician-note thead th:nth-child(1) {
+  width: 34%;
+}
+.clinician-note thead th:nth-child(2) {
+  width: 16%;
+}
+.clinician-note thead th:nth-child(3) {
+  width: 50%;
 }
 .isp-note-card {
   border: 1px solid var(--border);
@@ -7356,6 +7388,7 @@ button.qa-row:hover {
   display: grid;
   gap: 8px;
   background: var(--white);
+  min-width: 0;
 }
 .isp-note-scores {
   margin: 0;

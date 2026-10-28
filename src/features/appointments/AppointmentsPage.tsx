@@ -339,7 +339,7 @@ export default function AppointmentsPage({
                 }}
               >
                 <span>{Number(cell.date.slice(8))}</span>
-                <em>{count}</em>
+                {count > 0 && <em>{count}</em>}
               </button>
             );
           })}

@@ -192,7 +192,7 @@ function makeStubStore(): HrStore {
       staffId: "user-alex",
       staffName: "Alex Rivera",
       individualId: null,
-      individualName: "Demo Client A",
+      individualName: "Demo Individual A",
       siteName: null,
       shiftLabel: null,
       days: [1, 2, 3, 4, 5],
@@ -644,7 +644,7 @@ const BOARD_PATTERNS: HrStaffingPattern[] = [
     staffId: "user-alex",
     staffName: "Alex Rivera",
     individualId: null,
-    individualName: "Demo Client A",
+    individualName: "Demo Individual A",
     siteName: null,
     shiftLabel: null,
     days: [1, 2, 3, 4, 5],
@@ -707,7 +707,7 @@ describe("Staffing tab", () => {
     assert.ok(html.includes("7:30a"), "morning window pill");
     assert.ok(html.includes("4:30p"), "afternoon window pill");
     // Assignment lines.
-    assert.ok(html.includes("Demo Client A"), "individual assignment");
+    assert.ok(html.includes("Demo Individual A"), "individual assignment");
     assert.ok(html.includes("1st shift"), "shift label");
     // Service tag + flags.
     assert.ok(html.includes("In-Home Respite"), "service tag");

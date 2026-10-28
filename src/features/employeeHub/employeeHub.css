@@ -72,8 +72,15 @@
 
 .hub-card > p.hub-sub {
   margin: 0 0 16px;
+}
+
+/* Every descriptive paragraph on the hub reads at the app-standard 14px,
+   including the ones nested inside rows/cards — those used to miss the
+   size rule above (it only matched direct children of .hub-card) and
+   rendered at the 18px root size. */
+.hub-page p.hub-sub {
   color: var(--muted, var(--color-h-4a4036));
-  font-size: 0.95rem;
+  font-size: 14px;
 }
 
 .hub-row {
