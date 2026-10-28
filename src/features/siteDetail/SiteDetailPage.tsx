@@ -24,7 +24,11 @@ import { canEnterShiftNotes } from "../../data/permissions";
 import { DUE_ITEMS_EMPTY_COPY, shiftClockFromFacts, shiftScheduleSummary, type SiteDueItem, type SiteDueItemsResult } from "../../data/dueItems";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
-import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
+import {
+  SERVICE_TYPE_LABELS,
+  isSiteReviewInPlace,
+  normalizeSiteFacts,
+} from "../../data/siteReview";
 import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { openPrintable } from "../../data/openFile";
@@ -378,6 +382,15 @@ export default function SiteDetailPage({
     (r) => r.site === siteName,
   );
   const siteReqMetrics = metrics(siteRequirements);
+  // The same monthly site-review status the Overview site card summarizes as
+  // "Review in place / Review open", carried here inside the home itself.
+  const reviewInPlace = site
+    ? isSiteReviewInPlace(
+        workspace?.siteReviews.find((row) => row.siteId === site.id),
+        normalizeSiteFacts(site),
+        todayIso(),
+      )
+    : false;
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -531,6 +544,10 @@ export default function SiteDetailPage({
             <div className="site-hero-stat">
               <strong>{dueItems ? dueItems.items.length : "—"}</strong>
               <span>Due items</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{reviewInPlace ? "In place" : "Open"}</strong>
+              <span>Site review</span>
             </div>
             <div className="site-hero-stat">
               <strong>{latestQaPct ?? "None"}</strong>
