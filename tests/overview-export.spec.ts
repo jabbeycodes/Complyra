@@ -34,7 +34,11 @@ test("Overview keeps a 2x2 score grid on a phone and no hero Export", async ({
   expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y + 48);
   expect(boxes[1]!.x).toBeGreaterThan(boxes[0]!.x + 80);
 
-  const mix = page.getByRole("figure", { name: /status mix/i });
+  // The Overview now leads with per-house compliance donuts (same figure),
+  // so this targets the Status mix panel's own figure specifically.
+  const mix = page
+    .locator(".status-mix-panel")
+    .getByRole("figure", { name: /status mix/i });
   await expect(mix).toBeVisible();
   const mixBox = await mix.locator(".status-mix-chart").boundingBox();
   expect(mixBox).toBeTruthy();
