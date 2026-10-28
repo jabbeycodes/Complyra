@@ -124,6 +124,118 @@ test("a house manager resets the countdown with a refill count; the count is rec
   await expect(page.getByText(/recorded by/)).toBeVisible();
 });
 
+/**
+ * Force (or restore) a failure of the MAR's dose-range read by patching
+ * the live API instance the app is using. The demo runs the local
+ * backend in-page, so there is no network call to intercept — the
+ * instance is reached through React's fiber tree, the only handle the
+ * page exposes. Returns false when the instance cannot be found.
+ */
+async function stubRangeRead(page: Page, fail: boolean): Promise<boolean> {
+  return page.evaluate((shouldFail) => {
+    const rootEl = document.getElementById("root");
+    if (!rootEl) return false;
+    const key = Object.keys(rootEl).find(
+      (k) =>
+        k.startsWith("__reactContainer$") || k.startsWith("_reactRootContainer"),
+    );
+    if (!key) return false;
+    let start: unknown = (rootEl as unknown as Record<string, unknown>)[key];
+    if (
+      start &&
+      typeof start === "object" &&
+      "_internalRoot" in (start as Record<string, unknown>)
+    ) {
+      start = (start as Record<string, unknown>)._internalRoot;
+    }
+    if (
+      start &&
+      typeof start === "object" &&
+      "current" in (start as Record<string, unknown>)
+    ) {
+      start = (start as Record<string, unknown>).current;
+    }
+    const seen = new Set<unknown>();
+    const stack: unknown[] = [start];
+    let api: Record<string, unknown> | null = null;
+    while (stack.length > 0 && !api) {
+      const fiber = stack.pop() as Record<string, unknown> | null;
+      if (!fiber || typeof fiber !== "object" || seen.has(fiber)) continue;
+      seen.add(fiber);
+      const props = fiber.memoizedProps as Record<string, unknown> | null;
+      const candidates: unknown[] = [
+        props,
+        props?.value,
+        (props?.value as Record<string, unknown> | undefined)?.api,
+        props?.api,
+      ];
+      for (const candidate of candidates) {
+        if (
+          candidate &&
+          typeof (candidate as Record<string, unknown>)
+            .getMedDoseMarksInRange === "function"
+        ) {
+          api = candidate as Record<string, unknown>;
+          break;
+        }
+      }
+      if (!api) stack.push(fiber.child, fiber.sibling);
+    }
+    if (!api) return false;
+    const holder = api as Record<string, unknown> & {
+      __rangeOriginal?: unknown;
+    };
+    if (shouldFail) {
+      if (!holder.__rangeOriginal) {
+        holder.__rangeOriginal = holder.getMedDoseMarksInRange;
+      }
+      holder.getMedDoseMarksInRange = async () => {
+        throw new Error("Forced dose-range failure (test)");
+      };
+    } else if (holder.__rangeOriginal) {
+      holder.getMedDoseMarksInRange = holder.__rangeOriginal;
+      delete holder.__rangeOriginal;
+    }
+    return true;
+  }, fail);
+}
+
+test("a failed dose-range read shows the count unavailable; Retry restores it", async ({
+  page,
+}) => {
+  await signIn(page, "sarah.mitchell");
+  await toShellHome(page, "Cedar House");
+  await toPersonMar(page, "Ellis Hart");
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+
+  // The countdown renders normally first.
+  await expect(
+    page.getByRole("button", { name: /pills left/ }).first(),
+  ).toBeVisible();
+
+  // Force the dose-range read to fail, then reload via the day nav.
+  expect(await stubRangeRead(page, true)).toBe(true);
+  await page.getByRole("button", { name: "Next day" }).click();
+  await page.getByRole("button", { name: "Previous day" }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+
+  // No pills-left figure anywhere; the unavailable state shows instead.
+  await expect(
+    page.getByText(/Count unavailable — dose records couldn/),
+  ).toBeVisible();
+  await expect(page.getByText(/pills left/)).toHaveCount(0);
+
+  // Restore the read and retry: the real countdown comes back.
+  expect(await stubRangeRead(page, false)).toBe(true);
+  await page.getByRole("button", { name: "Retry" }).first().click();
+  await expect(
+    page.getByRole("button", { name: /pills left/ }).first(),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByText(/Count unavailable — dose records couldn/),
+  ).toHaveCount(0);
+});
+
 test("a DSP reads the countdown as text (no refill tap) and PRN shows no day projection", async ({
   page,
 }) => {

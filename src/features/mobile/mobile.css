@@ -829,6 +829,19 @@
   color: var(--muted);
 }
 
+/* The countdown's unavailable state (dose records failed to load):
+   text carries the state, with the retry as a plain chip button. */
+.msh-count-unavailable {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--sand);
+  border-radius: 12px;
+  color: var(--text);
+}
+
 .msh-form-history {
   display: flex;
   flex-direction: column;

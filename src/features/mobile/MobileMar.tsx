@@ -354,6 +354,24 @@ function CountdownLine({
   );
 }
 
+/**
+ * The countdown area's state when the dose records behind the
+ * countdowns could not be loaded: no pills-left figure is shown (any
+ * number would overstate supply), and Retry re-runs the load.
+ */
+function CountUnavailable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="msh-count-unavailable" role="alert">
+      <span className="msh-count-main">
+        Count unavailable — dose records couldn&rsquo;t load
+      </span>
+      <button type="button" className="msh-chip-button" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function RefillCountForm({
   api,
   med,
@@ -488,6 +506,11 @@ export default function MobileMar({
   const [inventory, setInventory] = useState<MedInventoryView[]>([]);
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
   const [marksRange, setMarksRange] = useState<MedDoseMark[]>([]);
+  // True when the dose-range read behind the countdowns failed: the
+  // countdowns must not render figures computed without the dose
+  // records (they would overstate supply), so they show an explicit
+  // unavailable state with a retry instead.
+  const [countsUnavailable, setCountsUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [prnBusy, setPrnBusy] = useState("");
@@ -519,8 +542,13 @@ export default function MobileMar({
         setMarksRange(
           await api.getMedDoseMarksInRange(personId, earliest, todayIso),
         );
+        setCountsUnavailable(false);
       } catch {
-        setMarksRange([]);
+        // Never substitute an empty range and render a countdown as if
+        // no doses had been given — that overstates supply. The
+        // countdown area shows its unavailable state until a retry
+        // loads the real dose records.
+        setCountsUnavailable(true);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -737,12 +765,16 @@ export default function MobileMar({
                       </span>
                     )}
                   </button>
-                  {countdown && (
-                    <CountdownLine
-                      countdown={countdown}
-                      canReset={canReset}
-                      onReset={() => setRefillMed(med.inventory)}
-                    />
+                  {countsUnavailable ? (
+                    <CountUnavailable onRetry={() => void reload()} />
+                  ) : (
+                    countdown && (
+                      <CountdownLine
+                        countdown={countdown}
+                        canReset={canReset}
+                        onReset={() => setRefillMed(med.inventory)}
+                      />
+                    )
                   )}
                 </div>
               );
@@ -832,12 +864,16 @@ export default function MobileMar({
                 </button>
               )}
               </div>
-              {countdowns.get(item.medicationId) && (
-                <CountdownLine
-                  countdown={countdowns.get(item.medicationId)!}
-                  canReset={canReset}
-                  onReset={() => setRefillMed(item)}
-                />
+              {countsUnavailable ? (
+                <CountUnavailable onRetry={() => void reload()} />
+              ) : (
+                countdowns.get(item.medicationId) && (
+                  <CountdownLine
+                    countdown={countdowns.get(item.medicationId)!}
+                    canReset={canReset}
+                    onReset={() => setRefillMed(item)}
+                  />
+                )
               )}
             </div>
           ))}
