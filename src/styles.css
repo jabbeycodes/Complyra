@@ -1425,6 +1425,117 @@ h1 {
   color: var(--color-h-8b5e3c);
   white-space: nowrap;
 }
+.right-now {
+  margin-bottom: 20px;
+}
+.right-now-head {
+  padding-bottom: 12px;
+}
+.right-now-scope {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-h-8b5e3c);
+  margin-left: 4px;
+}
+.right-now-asof {
+  font-size: 11px;
+  color: var(--color-h-4a4036);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+.right-now-note,
+.right-now-allclear {
+  padding: 4px var(--panel-inline) 20px;
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+}
+.right-now-allclear {
+  color: var(--color-h-2f4630);
+  font-weight: 550;
+}
+.right-now-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--color-h-f0ebe3);
+}
+.right-now-segment {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--color-h-f0ebe3);
+  padding: 14px 28px 14px var(--panel-inline);
+  cursor: pointer;
+  min-width: 0;
+}
+.right-now-segment:last-child {
+  border-right: 0;
+}
+.right-now-segment:hover {
+  background: var(--color-h-f7f1e6);
+}
+.right-now-seg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-h-8b5e3c);
+  margin-bottom: 9px;
+}
+.right-now-list {
+  display: block;
+}
+.right-now-row {
+  display: block;
+  margin-bottom: 7px;
+}
+.right-now-row strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-h-5f5145);
+  overflow-wrap: anywhere;
+}
+.right-now-row small {
+  display: block;
+  font-size: 12px;
+  color: var(--color-h-4a4036);
+}
+.right-now-empty {
+  display: block;
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+}
+.right-now-more {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--color-h-8b5e3c);
+}
+.right-now-chevron {
+  position: absolute;
+  top: 14px;
+  right: 10px;
+  color: var(--color-h-b89588);
+}
+@media (max-width: 720px) {
+  .right-now-grid {
+    grid-template-columns: 1fr;
+  }
+  .right-now-segment {
+    border-right: 0;
+    border-top: 1px solid var(--color-h-f0ebe3);
+  }
+  .right-now-segment:first-child {
+    border-top: 0;
+  }
+}
 .dashboard-activity {
   margin-bottom: 20px;
 }

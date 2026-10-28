@@ -27,6 +27,7 @@ import type { SiteReview } from "./data/siteReview";
 import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import SiteCoverageBoard from "./features/coverage/SiteCoverageBoard";
+import RightNowStrip from "./features/overview/RightNowStrip";
 
 interface SiteCard {
   id: string;
@@ -155,6 +156,7 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
+      <RightNowStrip focusSite={site} sites={sites} onNavigate={onNavigate} />
       {showCoverageBoard && (
         <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
       )}
