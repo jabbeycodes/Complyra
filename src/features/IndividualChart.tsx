@@ -81,7 +81,9 @@ import {
   canConfigureIspTasks,
   canEnterShiftNotes,
   canSeeShiftNotes,
+  canSeeMenuEntries,
 } from "../data/permissions";
+import MenuSection from "./MenuSection";
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
   { value: "doctor_notes", label: "Doctor's notes" },
@@ -766,6 +768,16 @@ export default function IndividualChart({
             <h2 id="shift-notes-heading">Shift notes</h2>
             <p className="form-error">{isp.error}</p>
           </section>
+        )}
+
+        {/* Menu records: what this Individual ate, per day and meal. Lives
+            with the person's other daily records, under the Individuals tab. */}
+        {canSeeMenuEntries(chartSession.roleKey) && (
+          <MenuSection
+            individualId={individualId}
+            individualName={person.name}
+            siteName={person.site}
+          />
         )}
       </div>
 

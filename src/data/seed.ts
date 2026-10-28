@@ -181,6 +181,9 @@ export interface LocalDatabase {
   ispProgramTasks: import("./shiftNotes").IspProgramTask[];
   shiftNotes: import("./shiftNotes").ShiftNote[];
   shiftNoteScores: import("./shiftNotes").ShiftNoteTaskScore[];
+  // MENU RECORDS: per-Individual food entries. Optional so workspaces saved
+  // before menu records existed still load (the API defaults it to []).
+  menuEntries?: import("./menuRecords").MenuEntry[];
   // ISSUE-75 (alone time) + #76 (MAR dose marks): HM-set unstaffed windows and
   // per-dose MAR check-off statuses that clear the unmarked-overdue due item.
   aloneTimeWindows: import("./types").AloneTimeWindow[];

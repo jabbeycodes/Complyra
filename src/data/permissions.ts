@@ -872,3 +872,26 @@ export function canRecordLifeEvents(session: {
     ) && hasPermission(session, "lifeEvents.record")
   );
 }
+
+/** Menu records — who may record what an Individual ate (daily-care staff). */
+export function canEnterMenuEntries(roleKey: string) {
+  return [
+    "administrator",
+    "program_manager",
+    "house_manager",
+    "nurse",
+    "dsp",
+  ].includes(roleKey);
+}
+
+/** Menu records — who may read them. Auditors see everything, enter nothing. */
+export function canSeeMenuEntries(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "house_manager",
+    "nurse",
+    "dsp",
+    "auditor",
+  ].includes(roleKey);
