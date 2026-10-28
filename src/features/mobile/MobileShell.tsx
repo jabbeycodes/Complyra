@@ -577,6 +577,7 @@ export default function MobileShell({
             api={api}
             session={session}
             people={people}
+            siteId={scopedSite.id}
             siteName={scopedSite.name}
             initialPersonId={ispPersonId}
             onOpenChart={nav.openPersonChart}

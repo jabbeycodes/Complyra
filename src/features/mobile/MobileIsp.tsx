@@ -10,10 +10,14 @@ import {
   type IspProgramView,
   type ShiftNoteView,
 } from "../../data/shiftNotes";
-import { canEnterShiftNotes } from "../../data/permissions";
+import {
+  canEnterShiftNotes,
+  canSeeShiftNotes,
+} from "../../data/permissions";
 import SignatureAdoption from "../signatures/SignatureAdoption";
 import { useIspData } from "../isp/useIspData";
 import MobilePeopleList from "./MobilePeopleList";
+import MobileSiteNotes from "./MobileSiteNotes";
 import { PersonHeader } from "./MobileMar";
 import type { WorkspaceIndividual } from "./types";
 import { centralTodayIso, formatDoseTime } from "./mar";
@@ -452,12 +456,13 @@ function EntryForm({
   );
 }
 
-type IspStep = "people" | "plans" | "entries" | "read" | "form";
+type IspStep = "people" | "plans" | "entries" | "read" | "form" | "history";
 
 export default function MobileIsp({
   api,
   session,
   people,
+  siteId,
   siteName,
   initialPersonId,
   onOpenChart,
@@ -466,6 +471,7 @@ export default function MobileIsp({
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
+  siteId: string;
   siteName: string;
   initialPersonId?: string | null;
   onOpenChart: (name: string) => void;
@@ -511,12 +517,50 @@ export default function MobileIsp({
     return levels.find((level) => level.id === levelId)?.caption ?? "Scored";
   };
 
+  if (step === "history") {
+    return (
+      <MobileSiteNotes
+        api={api}
+        session={session}
+        siteId={siteId}
+        siteName={siteName}
+        people={people}
+        onBack={() => setStep("people")}
+        onCreateEntry={(personId) => {
+          setPersonId(personId);
+          setProgramId(null);
+          setSelectedNote(null);
+          setStep("plans");
+        }}
+      />
+    );
+  }
+
   if (step === "people" || !person) {
     return (
       <div>
         <p className="msh-section-note">
           Pick the Individual whose plan data you are collecting.
         </p>
+        {canSeeShiftNotes(session.roleKey) && (
+          <div className="msh-list">
+            <button
+              type="button"
+              className="msh-row"
+              onClick={() => setStep("history")}
+            >
+              <span className="msh-row-main">
+                <strong>All entries at {siteName}</strong>
+                <small>
+                  Shift-note history for everyone at this home, newest first
+                </small>
+              </span>
+              <span className="msh-chevron" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </div>
+        )}
         <MobilePeopleList
           people={people}
           onPick={(row) => {
