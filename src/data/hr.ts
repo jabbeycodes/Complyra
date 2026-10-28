@@ -133,19 +133,55 @@ export interface HrDocumentAck {
   signatureName: string;
 }
 
+export type TimeOffStatus = "pending" | "approved" | "denied" | "cancelled";
+
+/** One day inside a time-off request, with the hours taken that day. */
+export interface HrTimeOffRequestDay {
+  /** YYYY-MM-DD, inside the request's [startsOn, endsOn] range. */
+  date: string;
+  hours: number;
+}
+
+/**
+ * A time-off request (TIME-OFF, built on the HR-PHASE2 leave machinery).
+ * `kind` is a LeaveType; `reason` is the employee's note to their
+ * supervisor (optional, capped at TIME_OFF_NOTE_MAX). `totalHours` is the
+ * sum of `days` — the stores and the database both derive it from the day
+ * rows, never from a client-supplied total. Status flow: pending →
+ * approved / denied / cancelled; an approved request may still be
+ * cancelled by a manager before its start date (cancelledBy/At/Reason).
+ */
 export interface HrTimeOffRequest {
   id: string;
   agencyId: string;
   siteId: string | null;
   staffId: string;
-  kind: "pto" | "sick" | "unpaid" | "other";
+  kind: LeaveType;
   startsOn: string;
   endsOn: string;
-  status: "pending" | "approved" | "denied";
+  status: TimeOffStatus;
   reason: string;
+  days: HrTimeOffRequestDay[];
+  totalHours: number;
   decidedBy: string | null;
   decidedAt: string | null;
   decisionNote: string | null;
+  cancelledBy: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One entry in a time-off request's status history (append-only). */
+export interface HrTimeOffEvent {
+  id: string;
+  agencyId: string;
+  requestId: string;
+  actorId: string;
+  event: "submitted" | "approved" | "denied" | "cancelled";
+  note: string | null;
+  createdAt: string;
 }
 
 export interface HrReadinessRequirement {
@@ -1207,7 +1243,37 @@ export const STAFFING_DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "S
 /* shifts through the store's shift-update path.                         */
 /* ------------------------------------------------------------------ */
 
-export type LeaveType = "vacation" | "pto" | "sick";
+/**
+ * Leave types (HR-PHASE2, extended by TIME-OFF): the accrual policies and
+ * the ledger are keyed by these values, and a time-off request's `kind` is
+ * one of them. "pto" is the Earned Time Off bank; "unpaid" never touches
+ * the ledger. Legacy request rows used kind "other" — normalizeLeaveKind
+ * maps it onto "unpaid" (it carried no balance either).
+ */
+export type LeaveType = "vacation" | "pto" | "sick" | "bereavement" | "unpaid";
+
+export const LEAVE_TYPES: readonly LeaveType[] = [
+  "vacation",
+  "pto",
+  "sick",
+  "bereavement",
+  "unpaid",
+];
+
+export function isLeaveType(value: unknown): value is LeaveType {
+  return typeof value === "string" && (LEAVE_TYPES as readonly string[]).includes(value);
+}
+
+/** Map a stored request kind onto a LeaveType (legacy "other" → "unpaid"). */
+export function normalizeLeaveKind(value: unknown): LeaveType {
+  if (isLeaveType(value)) return value;
+  return "unpaid";
+}
+
+/** True when approvals debit (and cancellations restore) the leave ledger. */
+export function leaveTypeDebitsBalance(leaveType: LeaveType): boolean {
+  return leaveType !== "unpaid";
+}
 
 export interface AccrualTenureBand {
   minYears: number;
@@ -1350,8 +1416,8 @@ export function yearsOfService(hireDate: string, asOf: string): number {
  */
 export function validateAccrualPolicy(input: AccrualPolicyInput): string[] {
   const errors: string[] = [];
-  if (!["vacation", "pto", "sick"].includes(input.leaveType)) {
-    errors.push("Choose a leave type (vacation, pto, or sick).");
+  if (!isLeaveType(input.leaveType)) {
+    errors.push("Choose a leave type.");
   }
   if (input.tenureBands.length === 0) {
     errors.push("Add at least one tenure band.");
@@ -1455,7 +1521,11 @@ export function currentLeaveBalance(
       latest === null ||
       entry.periodStart > latest.periodStart ||
       (entry.periodStart === latest.periodStart &&
-        entry.createdAt > latest.createdAt)
+        // >= : on an exact timestamp tie the later-fed entry wins — both
+        // stores feed the ledger in posting order, so a debit and its
+        // restoring adjustment posted in the same millisecond still
+        // resolve to the adjustment.
+        entry.createdAt >= latest.createdAt)
     ) {
       latest = entry;
     }
@@ -1509,6 +1579,208 @@ export function validateTimeOffBalance(
     }
   }
   return { ok: errors.length === 0, errors, warnings };
+}
+
+/* --------------------- time-off request lifecycle --------------------- */
+/* TIME-OFF: the full request workflow on top of the PHASE2 leave banks.  */
+/* Requests carry per-day hours; balances come from the accrual ledger    */
+/* (currentLeaveBalance) minus the hours already pending, so what the     */
+/* employee sees before submitting is what approval will debit.           */
+/* ---------------------------------------------------------------------- */
+
+/** The employee's note to their supervisor is capped at this length. */
+export const TIME_OFF_NOTE_MAX = 500;
+/** Default hours for one day off (the form pre-fills each day with this). */
+export const TIME_OFF_DEFAULT_DAY_HOURS = 8;
+
+const DATE_STAMP = /^\d{4}-\d{2}-\d{2}$/;
+
+function roundHours(hours: number): number {
+  return Math.round(hours * 100) / 100;
+}
+
+/** Every YYYY-MM-DD in the inclusive range; [] when invalid or inverted. */
+export function datesInRange(startsOn: string, endsOn: string): string[] {
+  if (!DATE_STAMP.test(startsOn) || !DATE_STAMP.test(endsOn)) return [];
+  const start = new Date(`${startsOn}T00:00:00Z`);
+  const end = new Date(`${endsOn}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  const out: string[] = [];
+  for (let t = start.getTime(); t <= end.getTime(); t += MS_PER_DAY) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * Day rows for a request form: every date in the range at `hoursPerDay`,
+ * with per-date overrides applied. Dates outside the range are ignored.
+ */
+export function buildRequestDays(
+  startsOn: string,
+  endsOn: string,
+  hoursPerDay: number = TIME_OFF_DEFAULT_DAY_HOURS,
+  overrides?: Readonly<Record<string, number>>,
+): HrTimeOffRequestDay[] {
+  return datesInRange(startsOn, endsOn).map((date) => ({
+    date,
+    hours: overrides?.[date] ?? hoursPerDay,
+  }));
+}
+
+/** Total hours of a request — always the sum of its day rows. */
+export function sumRequestDayHours(days: readonly HrTimeOffRequestDay[]): number {
+  return roundHours(days.reduce((sum, d) => sum + (Number.isFinite(d.hours) ? d.hours : 0), 0));
+}
+
+export interface TimeOffRequestDraft {
+  kind: LeaveType;
+  startsOn: string;
+  endsOn: string;
+  /** The employee's note to their supervisor (optional). */
+  reason: string;
+  days: HrTimeOffRequestDay[];
+}
+
+/**
+ * Validate a time-off request draft. Day rows must sit inside the range,
+ * appear at most once per date, and carry 0 < hours <= 24; at least one
+ * day is required. Returns user-facing problems; empty = valid.
+ */
+export function validateTimeOffRequest(draft: TimeOffRequestDraft): string[] {
+  const errors: string[] = [];
+  if (!isLeaveType(draft.kind)) errors.push("Choose a time-off type.");
+  const range = datesInRange(draft.startsOn, draft.endsOn);
+  if (range.length === 0) {
+    errors.push("Choose a start and end date, with the end on or after the start.");
+    return errors;
+  }
+  if ((draft.reason ?? "").length > TIME_OFF_NOTE_MAX) {
+    errors.push(`The note to your supervisor is limited to ${TIME_OFF_NOTE_MAX} characters.`);
+  }
+  const inRange = new Set(range);
+  const seen = new Set<string>();
+  for (const day of draft.days ?? []) {
+    if (!inRange.has(day.date)) {
+      errors.push(`The day ${day.date} is outside the requested dates.`);
+      continue;
+    }
+    if (seen.has(day.date)) {
+      errors.push(`The day ${day.date} is listed twice.`);
+      continue;
+    }
+    seen.add(day.date);
+    if (!Number.isFinite(day.hours) || day.hours <= 0 || day.hours > 24) {
+      errors.push(`Hours for ${day.date} must be more than 0 and no more than 24.`);
+    }
+  }
+  if ((draft.days ?? []).length === 0) {
+    errors.push("Add at least one day of time off.");
+  }
+  return errors;
+}
+
+/** Hours already pending approval for one staff member + leave type. */
+export function pendingTimeOffHours(
+  requests: readonly HrTimeOffRequest[],
+  staffId: string,
+  leaveType: LeaveType,
+  excludeRequestId?: string,
+): number {
+  return roundHours(
+    requests
+      .filter(
+        (r) =>
+          r.staffId === staffId &&
+          r.kind === leaveType &&
+          r.status === "pending" &&
+          r.id !== excludeRequestId,
+      )
+      .reduce((sum, r) => sum + r.totalHours, 0),
+  );
+}
+
+/** Hours already approved (and not cancelled) for one staff member + type. */
+export function approvedTimeOffHours(
+  requests: readonly HrTimeOffRequest[],
+  staffId: string,
+  leaveType: LeaveType,
+): number {
+  return roundHours(
+    requests
+      .filter((r) => r.staffId === staffId && r.kind === leaveType && r.status === "approved")
+      .reduce((sum, r) => sum + r.totalHours, 0),
+  );
+}
+
+export interface TimeOffBalanceView {
+  /** Ledger balance (accrued − used + adjustments) for the leave type. */
+  balance: number;
+  /** Hours in requests still pending a decision. */
+  pendingHours: number;
+  /** balance − pendingHours: what a new request can draw on right now. */
+  availableHours: number;
+  /** availableHours − this request's hours (the preview line). */
+  projectedHours: number;
+}
+
+/**
+ * The balance preview an employee sees before submitting: the ledger is
+ * the source of truth; pending requests reserve hours against it.
+ */
+export function timeOffBalanceView(
+  ledgerEntries: readonly HrAccrualLedgerEntry[],
+  requests: readonly HrTimeOffRequest[],
+  staffId: string,
+  leaveType: LeaveType,
+  thisRequestHours = 0,
+): TimeOffBalanceView {
+  const balance = currentLeaveBalance([...ledgerEntries], leaveType);
+  const pendingHours = pendingTimeOffHours(requests, staffId, leaveType);
+  const availableHours = roundHours(balance - pendingHours);
+  return {
+    balance,
+    pendingHours,
+    availableHours,
+    projectedHours: roundHours(availableHours - thisRequestHours),
+  };
+}
+
+/** Only a pending request can be decided; decisions are final. */
+export function assertCanDecideTimeOff(request: Pick<HrTimeOffRequest, "status">): void {
+  if (request.status !== "pending") {
+    throw new Error(
+      request.status === "cancelled"
+        ? "This request was cancelled and can no longer be decided."
+        : "This request has already been decided. Decisions are final — ask for a new request if plans change.",
+    );
+  }
+}
+
+/**
+ * Cancellation rules: the owner may cancel their own PENDING request; a
+ * manager may cancel a pending request, or an APPROVED one that has not
+ * started yet — with a reason, which lands on the request and in its
+ * history. Denied and cancelled requests can never change again.
+ */
+export function assertCanCancelTimeOff(
+  request: Pick<HrTimeOffRequest, "status" | "startsOn">,
+  opts: { byManager: boolean; today: string; reason?: string },
+): void {
+  if (request.status === "denied" || request.status === "cancelled") {
+    throw new Error("This request is already closed and cannot be cancelled.");
+  }
+  if (request.status === "pending") return;
+  // Approved from here on.
+  if (!opts.byManager) {
+    throw new Error("This request is approved — only a manager can cancel it.");
+  }
+  if (request.startsOn <= opts.today) {
+    throw new Error("This time off has already started, so it can no longer be cancelled.");
+  }
+  if (!opts.reason?.trim()) {
+    throw new Error("Add a short reason for cancelling this approved time off.");
+  }
 }
 
 /* ------------------------------ shift swaps ----------------------------- */

@@ -46,24 +46,40 @@ import { emitHrEvent } from "../notifications/useNotifications";
 import {
   swapDecidedPayload,
   swapRequestedPayload,
+  timeOffCancelledPayload,
+  timeOffDecidedPayload,
+  timeOffRequestedPayload,
+  type NotificationPayload,
 } from "../notifications/notify";
 import {
+  approvedTimeOffHours,
+  buildRequestDays,
   currentLeaveBalance,
   DEFAULT_OVERTIME_RULES,
-  timeOffRequestHours,
+  LEAVE_TYPES,
+  leaveTypeDebitsBalance,
+  pendingTimeOffHours,
+  TIME_OFF_NOTE_MAX,
+  timeOffBalanceView,
   validateAccrualPolicy,
   validateShiftSwap,
-  validateTimeOffBalance,
   type AccrualPolicyInput,
   type AccrualTenureBand,
   type HrAccrualLedgerEntry,
   type HrAccrualPolicy,
   type HrOvertimeRules,
   type HrShiftSwap,
+  type HrTimeOffEvent,
   type LeaveType,
   type OvertimeRulesInput,
   type ShiftSwapInput,
 } from "../../data/hr";
+import {
+  releaseShiftsForApprovedTimeOff,
+  restoreShiftsForCancelledTimeOff,
+  shiftsForTimeOffRequest,
+  type TimeOffCoverageOutcome,
+} from "../../data/timeOffCoverage";
 import {
   DUE_SOON_DAYS,
   buildPayrollCsvExport,
@@ -244,8 +260,17 @@ function describeShift(shift: HrShift | undefined): string {
 
 export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
   vacation: "Vacation",
-  pto: "PTO",
+  pto: "Earned Time Off",
   sick: "Sick",
+  bereavement: "Bereavement",
+  unpaid: "Unpaid",
+};
+
+const TIME_OFF_STATUS_LABELS: Record<HrTimeOffRequest["status"], string> = {
+  pending: "Pending",
+  approved: "Approved",
+  denied: "Denied",
+  cancelled: "Cancelled",
 };
 
 /**
@@ -416,7 +441,12 @@ export function EmployeeHubShell({
   );
   const tabs = useMemo(
     () => [
-      ...EMPLOYEE_TABS,
+      // Auditors are excluded from Time Off entirely: it is employment
+      // data, not an Individual's compliance record (same principle as
+      // Internal Messaging). RLS confines them as defense in depth.
+      ...(session.roleKey === "auditor"
+        ? EMPLOYEE_TABS.filter((t) => t.id !== "timeoff")
+        : EMPLOYEE_TABS),
       ...MANAGER_TABS.filter(
         (t) =>
           !t.perm || can(t.perm) || (t.permAny?.some((p) => can(p)) ?? false),
@@ -577,8 +607,11 @@ export function EmployeeHubShell({
           <TimeOffTab
             session={session}
             store={store}
+            shiftStore={shiftStore}
             staffList={staffList}
             canApprove={can("hub.approve_time_off")}
+            canViewTeam={can("hub.view_team") || session.roleKey === "hr"}
+            canAdjust={can("hub.manage_pay_settings")}
             onChanged={refresh}
           />
         )}
@@ -2008,42 +2041,70 @@ function EditorDialog(props: {
 function TimeOffTab({
   session,
   store,
+  shiftStore,
   staffList,
   canApprove,
+  canViewTeam,
+  canAdjust,
   onChanged,
 }: {
   session: SessionUser;
   store: HrStore;
+  shiftStore: OpenShiftStore;
   staffList: HubStaffEntry[];
   canApprove: boolean;
+  /** HR / team viewers: see the queue and who's out, without deciding. */
+  canViewTeam: boolean;
+  /** hub.manage_pay_settings: may post balance adjustments. */
+  canAdjust: boolean;
   onChanged: () => void;
 }) {
+  const notifyClient = useNotifyClient();
+  const notify = (payload: NotificationPayload) => {
+    if (notifyClient) void emitHrEvent(notifyClient, payload);
+  };
   const [mine, setMine] = useState<HrTimeOffRequest[]>([]);
   const [team, setTeam] = useState<HrTimeOffRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [kind, setKind] = useState<HrTimeOffRequest["kind"]>("pto");
+  // Request form.
+  const [kind, setKind] = useState<LeaveType>("pto");
   const [startsOn, setStartsOn] = useState(dayStamp(new Date()));
   const [endsOn, setEndsOn] = useState(dayStamp(new Date()));
+  const [dayHours, setDayHours] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
+  // Decide / cancel / history.
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
+  const [impact, setImpact] = useState<Record<string, HrShift[]>>({});
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [events, setEvents] = useState<Record<string, HrTimeOffEvent[]>>({});
+  // Balances.
   const [policies, setPolicies] = useState<HrAccrualPolicy[]>([]);
   const [ledger, setLedger] = useState<HrAccrualLedgerEntry[]>([]);
+  // Balance adjustment form (HR / pay settings).
+  const [adjStaffId, setAdjStaffId] = useState("");
+  const [adjType, setAdjType] = useState<LeaveType>("pto");
+  const [adjHours, setAdjHours] = useState("");
+  const [adjReason, setAdjReason] = useState("");
+
+  const canSeeTeam = canApprove || canViewTeam;
+  const today = dayStamp(new Date());
 
   const load = () => {
     setLoading(true);
     setError("");
     Promise.all([
       store.listTimeOffRequests({ staffId: session.userId }),
-      canApprove ? store.listTimeOffRequests({}) : Promise.resolve([] as HrTimeOffRequest[]),
-      Promise.all([
-        store.listAccrualPolicies().catch(() => [] as HrAccrualPolicy[]),
-        store.listLedgerEntries(session.userId).catch(() => [] as HrAccrualLedgerEntry[]),
-      ]),
+      canSeeTeam ? store.listTimeOffRequests({}) : Promise.resolve([] as HrTimeOffRequest[]),
+      store.listAccrualPolicies().catch(() => [] as HrAccrualPolicy[]),
+      store.listLedgerEntries(session.userId).catch(() => [] as HrAccrualLedgerEntry[]),
     ])
-      .then(([m, t, [pol, entries]]) => {
+      .then(([m, t, pol, entries]) => {
         setMine(m);
         setTeam(t);
         setPolicies(pol);
@@ -2056,24 +2117,59 @@ function TimeOffTab({
       });
   };
 
-  useEffect(load, [store, session.userId, canApprove]);
+  useEffect(load, [store, session.userId, canSeeTeam]);
 
+  /* ------------------------------ form math ------------------------------ */
+  const datesValid = startsOn !== "" && endsOn !== "" && endsOn >= startsOn;
+  const formDays = datesValid ? buildRequestDays(startsOn, endsOn, 8, dayHours) : [];
+  const chosenDays = formDays.filter((d) => d.hours > 0);
+  const chosenHours = chosenDays.reduce((sum, d) => sum + d.hours, 0);
+  const debits = leaveTypeDebitsBalance(kind);
+  const preview = debits
+    ? timeOffBalanceView(ledger, mine, session.userId, kind, chosenHours)
+    : null;
+  const myUsed = approvedTimeOffHours(mine, session.userId, kind);
+  const myPending = pendingTimeOffHours(mine, session.userId, kind);
+
+  const balanceCards = LEAVE_TYPES.filter((type) => {
+    const hasPolicy = policies.some((p) => p.leaveType === type && p.active);
+    const hasActivity =
+      ledger.some((e) => e.leaveType === type) || mine.some((r) => r.kind === type);
+    return hasPolicy || hasActivity;
+  }).map((type) => {
+    const view = timeOffBalanceView(ledger, mine, session.userId, type);
+    return { type, view, used: approvedTimeOffHours(mine, session.userId, type) };
+  });
+
+  /* ------------------------------- actions ------------------------------- */
   const submitRequest = async () => {
-    if (endsOn < startsOn) {
-      setError("The end date can't be before the start date.");
-      return;
-    }
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      if (!reason.trim()) {
-        setError("Please add a short reason for the request.");
-        return;
+      const created = await store.createTimeOffRequest({
+        kind,
+        startsOn,
+        endsOn,
+        reason: reason.trim(),
+        days: chosenDays,
+        siteId: session.siteId,
+      });
+      for (const roleKey of ["house_manager", "program_manager"]) {
+        notify(
+          timeOffRequestedPayload({
+            agencyId: session.agencyId,
+            roleKey,
+            requestId: created.id,
+            title: "Time off requested",
+            body: `${session.fullName} requested ${LEAVE_TYPE_LABELS[kind]} from ${fmtDate(created.startsOn)} to ${fmtDate(created.endsOn)} (${created.totalHours}h).`,
+          }),
+        );
       }
-      const input: HrTimeOffRequestInput = { kind, startsOn, endsOn, reason: reason.trim() };
-      const created = await store.createTimeOffRequest(input);
-      setMine((prev) => [created, ...prev]);
       setReason("");
+      setDayHours({});
+      setNotice("Request submitted — your manager has been notified.");
+      load();
       onChanged();
     } catch (err) {
       setError(errMessage(err, "Could not submit the request."));
@@ -2082,14 +2178,75 @@ function TimeOffTab({
     }
   };
 
-  const decide = async (id: string, approve: boolean) => {
+  const openDecide = async (request: HrTimeOffRequest) => {
+    setDecidingId(request.id);
+    setDecisionNote("");
+    if (!impact[request.id]) {
+      try {
+        const shifts = await store.listShifts(
+          `${request.startsOn}T00:00:00`,
+          `${request.endsOn}T23:59:59.999`,
+        );
+        setImpact((prev) => ({
+          ...prev,
+          [request.id]: shiftsForTimeOffRequest(shifts, request),
+        }));
+      } catch {
+        setImpact((prev) => ({ ...prev, [request.id]: [] }));
+      }
+    }
+  };
+
+  const coverageSummary = (outcome: TimeOffCoverageOutcome): string => {
+    const parts: string[] = [];
+    if (outcome.released > 0) {
+      parts.push(`${outcome.released} shift${outcome.released === 1 ? "" : "s"} released to the open-shift board`);
+    }
+    if (outcome.restored > 0) parts.push(`${outcome.restored} shift${outcome.restored === 1 ? "" : "s"} restored`);
+    if (outcome.postingsCancelled > 0) {
+      parts.push(`${outcome.postingsCancelled} coverage posting${outcome.postingsCancelled === 1 ? "" : "s"} cancelled`);
+    }
+    if (outcome.flagged > 0) {
+      parts.push(`${outcome.flagged} shift${outcome.flagged === 1 ? "" : "s"} flagged in the schedule notes — arrange coverage`);
+    }
+    if (outcome.postingsFilled > 0) {
+      parts.push(`${outcome.postingsFilled} coverage posting${outcome.postingsFilled === 1 ? " was" : "s were"} already picked up — check the schedule before reassigning`);
+    }
+    if (outcome.failures.length > 0) parts.push(outcome.failures.join(" "));
+    return parts.join(". ");
+  };
+
+  const decide = async (request: HrTimeOffRequest, approve: boolean) => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
-      const updated = await store.decideTimeOffRequest(id, approve, decisionNote);
-      setTeam((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      const updated = await store.decideTimeOffRequest(request.id, approve, decisionNote);
+      notify(
+        timeOffDecidedPayload({
+          agencyId: session.agencyId,
+          userId: updated.staffId,
+          requestId: updated.id,
+          approved: approve,
+          title: approve ? "Time off approved" : "Time off denied",
+          body: `Your ${LEAVE_TYPE_LABELS[updated.kind]} request for ${fmtDate(updated.startsOn)} – ${fmtDate(updated.endsOn)} was ${approve ? "approved" : "denied"}.${updated.decisionNote ? ` Note: ${updated.decisionNote}` : ""}`,
+        }),
+      );
+      let note = approve ? "Request approved." : "Request denied.";
+      if (approve) {
+        const outcome = await releaseShiftsForApprovedTimeOff({
+          hrStore: store,
+          openShiftStore: shiftStore,
+          request: updated,
+          staffName: staffName(staffList, updated.staffId),
+        });
+        const summary = coverageSummary(outcome);
+        if (summary) note = `Request approved. ${summary}.`;
+      }
+      setNotice(note);
       setDecidingId(null);
       setDecisionNote("");
+      load();
       onChanged();
     } catch (err) {
       setError(errMessage(err, "Could not decide the request."));
@@ -2098,51 +2255,243 @@ function TimeOffTab({
     }
   };
 
-  const pending = team.filter((r) => r.status === "pending");
+  const cancel = async (request: HrTimeOffRequest) => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const wasApproved = request.status === "approved";
+      const updated = await store.cancelTimeOffRequest(request.id, {
+        reason: cancelReason,
+      });
+      const name = staffName(staffList, updated.staffId);
+      if (updated.staffId === session.userId) {
+        for (const roleKey of ["house_manager", "program_manager"]) {
+          notify(
+            timeOffCancelledPayload({
+              agencyId: session.agencyId,
+              roleKey,
+              requestId: updated.id,
+              title: "Time off cancelled",
+              body: `${name} cancelled their ${LEAVE_TYPE_LABELS[updated.kind]} request for ${fmtDate(updated.startsOn)} – ${fmtDate(updated.endsOn)}.`,
+            }),
+          );
+        }
+      } else {
+        notify(
+          timeOffCancelledPayload({
+            agencyId: session.agencyId,
+            userId: updated.staffId,
+            requestId: updated.id,
+            title: "Time off cancelled",
+            body: `Your ${LEAVE_TYPE_LABELS[updated.kind]} for ${fmtDate(updated.startsOn)} – ${fmtDate(updated.endsOn)} was cancelled.${updated.cancelReason ? ` Reason: ${updated.cancelReason}` : ""}`,
+          }),
+        );
+      }
+      let note = "Request cancelled.";
+      if (wasApproved) {
+        const outcome = await restoreShiftsForCancelledTimeOff({
+          hrStore: store,
+          openShiftStore: shiftStore,
+          request: updated,
+        });
+        const summary = coverageSummary(outcome);
+        if (summary) note = `Request cancelled. ${summary}.`;
+      }
+      setNotice(note);
+      setCancelId(null);
+      setCancelReason("");
+      load();
+      onChanged();
+    } catch (err) {
+      setError(errMessage(err, "Could not cancel the request."));
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  const activePolicies = policies.filter((p) => p.active);
-  const balances = new Map<LeaveType, number>(
-    activePolicies.map((p) => [p.leaveType, currentLeaveBalance(ledger, p.leaveType)]),
-  );
-  // Time-off kind → leave type for balance checks (unpaid/other have none).
-  const requestLeaveType: LeaveType | null =
-    kind === "pto" ? "pto" : kind === "sick" ? "sick" : null;
-  const datesValid = startsOn !== "" && endsOn !== "" && endsOn >= startsOn;
-  const requestedHours = requestLeaveType && datesValid ? timeOffRequestHours(startsOn, endsOn, 8) : 0;
-  const availableHours = requestLeaveType ? (balances.get(requestLeaveType) ?? 0) : null;
-  // Domain validation: blocks when the request exceeds the balance, warns
-  // when fewer than 8h would remain. The store re-validates on submit and
-  // throws — caught and shown inline by submitRequest.
-  const balanceCheck =
-    requestLeaveType && datesValid
-      ? validateTimeOffBalance(requestedHours, availableHours ?? 0, requestLeaveType)
-      : null;
+  const toggleHistory = async (request: HrTimeOffRequest) => {
+    if (historyId === request.id) {
+      setHistoryId(null);
+      return;
+    }
+    setHistoryId(request.id);
+    if (!events[request.id]) {
+      try {
+        const rows = await store.listTimeOffEvents(request.id);
+        setEvents((prev) => ({ ...prev, [request.id]: rows }));
+      } catch {
+        setEvents((prev) => ({ ...prev, [request.id]: [] }));
+      }
+    }
+  };
+
+  const postAdjustment = async () => {
+    const hours = Number(adjHours);
+    if (!adjStaffId) {
+      setError("Choose the employee whose balance you're adjusting.");
+      return;
+    }
+    if (!Number.isFinite(hours) || hours === 0) {
+      setError("Enter the adjustment in hours (use a negative number to take hours away).");
+      return;
+    }
+    if (!adjReason.trim()) {
+      setError("Adjustments always need a reason — it's recorded on the ledger entry.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await store.postLedgerEntry({
+        staffId: adjStaffId,
+        leaveType: adjType,
+        adjustment: hours,
+        note: adjReason.trim(),
+      });
+      setNotice(
+        `Adjustment posted: ${hours > 0 ? "+" : ""}${hours}h of ${LEAVE_TYPE_LABELS[adjType]} for ${staffName(staffList, adjStaffId)}.`,
+      );
+      setAdjHours("");
+      setAdjReason("");
+      load();
+    } catch (err) {
+      setError(errMessage(err, "Could not post the adjustment."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* ------------------------------ who's out ------------------------------ */
+  const horizon = dayStamp(addDays(new Date(), 30));
+  const whosOut = new Map<string, { name: string; type: string }[]>();
+  if (canSeeTeam) {
+    for (const r of team) {
+      if (r.status !== "approved") continue;
+      if (r.endsOn < today || r.startsOn > horizon) continue;
+      if (session.roleKey === "house_manager" && session.siteId && r.siteId !== session.siteId) {
+        continue;
+      }
+      for (const d of r.days) {
+        if (d.date < today || d.date > horizon) continue;
+        const list = whosOut.get(d.date) ?? [];
+        list.push({ name: staffName(staffList, r.staffId), type: LEAVE_TYPE_LABELS[r.kind] });
+        whosOut.set(d.date, list);
+      }
+    }
+  }
+  const whosOutDays = [...whosOut.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+
+  const teamPending = team.filter((r) => r.status === "pending");
+  const teamDecided = team
+    .filter((r) => r.status !== "pending")
+    .sort((a, b) => (a.startsOn < b.startsOn ? 1 : -1));
+
+  const renderHistory = (request: HrTimeOffRequest) =>
+    historyId === request.id ? (
+      <div className="hub-inline-form" style={{ marginTop: 8 }}>
+        <h4>History</h4>
+        {(events[request.id] ?? []).length === 0 ? (
+          <p className="hub-sub">No history entries yet.</p>
+        ) : (
+          <ul className="hub-list">
+            {(events[request.id] ?? []).map((e) => (
+              <li className="hub-list-item" key={e.id}>
+                <div className="hub-item-main">
+                  <span className="hub-item-title">
+                    {e.event === "submitted"
+                      ? "Submitted"
+                      : e.event === "approved"
+                        ? "Approved"
+                        : e.event === "denied"
+                          ? "Denied"
+                          : "Cancelled"}{" "}
+                    by {staffName(staffList, e.actorId)}
+                  </span>
+                  <span className="hub-item-sub">
+                    {fmtDateTime(e.createdAt)}
+                    {e.note ? ` · ${e.note}` : ""}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    ) : null;
+
+  const renderCancelForm = (request: HrTimeOffRequest) =>
+    cancelId === request.id ? (
+      <div className="hub-inline-form" style={{ marginTop: 8 }}>
+        <label>
+          Reason {request.status === "approved" ? "(required)" : "(optional)"}
+          <input
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Why is this time off being cancelled?"
+          />
+        </label>
+        <div className="hub-form-actions">
+          <button className="hub-btn danger" disabled={busy} onClick={() => cancel(request)}>
+            <X size={16} /> Confirm cancellation
+          </button>
+          <button className="hub-btn" onClick={() => setCancelId(null)}>
+            Keep request
+          </button>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <section className="hub-card" aria-label="Time off">
       <h2>Time Off</h2>
-      <p className="hub-sub">Request time off and track your requests.</p>
-      {error && <div className="hub-error" role="alert">{error}</div>}
-      {activePolicies.length > 0 && (
+      <p className="hub-sub">
+        Request time off, see exactly what it does to your balance, and track every decision.
+      </p>
+      {error && (
+        <div className="hub-error" role="alert">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="hub-success" role="status">
+          {notice}
+        </div>
+      )}
+
+      {balanceCards.length > 0 && (
         <div className="hub-balance-cards" aria-label="Leave balances">
-          {activePolicies.map((p) => (
-            <div className="hub-balance-card" key={p.id}>
-              <span className="hub-balance-label">{LEAVE_TYPE_LABELS[p.leaveType]} available</span>
-              <span className="hub-balance-value">{balances.get(p.leaveType) ?? 0}h</span>
+          {balanceCards.map(({ type, view, used }) => (
+            <div className="hub-balance-card" key={type}>
+              <span className="hub-balance-label">
+                {LEAVE_TYPE_LABELS[type]}
+                {leaveTypeDebitsBalance(type) ? " available" : ""}
+              </span>
+              <span className="hub-balance-value">
+                {leaveTypeDebitsBalance(type) ? `${view.availableHours}h` : `${used}h used`}
+              </span>
+              <span className="hub-item-sub">
+                {leaveTypeDebitsBalance(type)
+                  ? `Balance ${view.balance}h · Pending ${view.pendingHours}h`
+                  : `Pending ${view.pendingHours}h`}
+              </span>
             </div>
           ))}
         </div>
       )}
+
       <div className="hub-inline-form" style={{ marginBottom: 20 }}>
         <h3>New request</h3>
         <div className="hub-form">
           <label>
             Type
-            <select value={kind} onChange={(e) => setKind(e.target.value as HrTimeOffRequest["kind"])}>
-              <option value="pto">PTO</option>
-              <option value="sick">Sick</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="other">Other</option>
+            <select value={kind} onChange={(e) => setKind(e.target.value as LeaveType)}>
+              {LEAVE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {LEAVE_TYPE_LABELS[type]}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -2154,34 +2503,71 @@ function TimeOffTab({
             <input type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)} />
           </label>
           <label className="hub-form-wide">
-            Reason
-            <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+            Note to your supervisor (optional, {TIME_OFF_NOTE_MAX} characters max)
+            <textarea
+              rows={2}
+              value={reason}
+              maxLength={TIME_OFF_NOTE_MAX}
+              onChange={(e) => setReason(e.target.value)}
+            />
           </label>
-          {requestLeaveType && datesValid && balanceCheck && (
-            <div className="hub-form-wide">
-              <p className="hub-balance-line">
-                Requesting <strong>{requestedHours}h</strong> of {availableHours}h available{" "}
-                {LEAVE_TYPE_LABELS[requestLeaveType]} (8h per day).
-              </p>
-              {balanceCheck.errors.map((message) => (
-                <p className="hub-balance-line" key={message}>
-                  <span className="hub-balance-warn">{message}</span>
-                </p>
-              ))}
-              {balanceCheck.warnings.map((message) => (
-                <p className="hub-balance-line hub-sub" key={message}>
-                  {message}
-                </p>
-              ))}
-            </div>
-          )}
         </div>
+        {datesValid && formDays.length > 0 && (
+          <div className="hub-form" style={{ marginTop: 8 }}>
+            {formDays.map((d) => (
+              <label key={d.date}>
+                {fmtDate(d.date)} hours
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  step={0.5}
+                  value={dayHours[d.date] ?? 8}
+                  onChange={(e) =>
+                    setDayHours((prev) => ({ ...prev, [d.date]: Number(e.target.value) }))
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        {datesValid && (
+          <p className="hub-balance-line" style={{ marginTop: 8 }}>
+            {preview ? (
+              <>
+                This request uses <strong>{chosenHours}h</strong> of {LEAVE_TYPE_LABELS[kind]}. You
+                have <strong>{preview.availableHours}h</strong> available ({preview.balance}h
+                balance − {preview.pendingHours}h already pending), leaving{" "}
+                <strong>{preview.projectedHours}h</strong> if approved.
+              </>
+            ) : (
+              <>
+                This request uses <strong>{chosenHours}h</strong> of unpaid time. Unpaid time
+                doesn&apos;t draw on a balance — you have {myUsed}h approved and {myPending}h
+                pending so far.
+              </>
+            )}
+          </p>
+        )}
+        {preview && preview.projectedHours < 0 && (
+          <p className="hub-balance-line">
+            <span className="hub-balance-warn">
+              This is more than your available {LEAVE_TYPE_LABELS[kind]} — submitting will be
+              blocked unless a manager adjusts your balance first.
+            </span>
+          </p>
+        )}
         <div className="hub-form-actions">
-          <button className="hub-btn primary" disabled={busy} onClick={submitRequest}>
+          <button
+            className="hub-btn primary"
+            disabled={busy || !datesValid || chosenDays.length === 0}
+            onClick={submitRequest}
+          >
             <Send size={16} /> Submit request
           </button>
         </div>
       </div>
+
       <h3>My requests</h3>
       {loading ? (
         <p>Loading…</p>
@@ -2193,57 +2579,198 @@ function TimeOffTab({
             <li className="hub-list-item" key={r.id}>
               <div className="hub-item-main">
                 <span className="hub-item-title">
-                  {r.kind} · {fmtDate(r.startsOn)} – {fmtDate(r.endsOn)}
+                  {LEAVE_TYPE_LABELS[r.kind]} · {fmtDate(r.startsOn)} – {fmtDate(r.endsOn)} ·{" "}
+                  {r.totalHours}h
                 </span>
                 <span className="hub-item-sub">
-                  {r.reason ?? "No reason given"}
+                  {r.reason ? r.reason : "No note"}
                   {r.decisionNote ? ` · Manager: ${r.decisionNote}` : ""}
+                  {r.status === "cancelled" && r.cancelReason
+                    ? ` · Cancelled: ${r.cancelReason}`
+                    : ""}
                 </span>
+                <div className="hub-form-actions">
+                  {r.status === "pending" && cancelId !== r.id && (
+                    <button className="hub-btn" onClick={() => setCancelId(r.id)}>
+                      Cancel request
+                    </button>
+                  )}
+                  <button className="hub-btn" onClick={() => toggleHistory(r)}>
+                    {historyId === r.id ? "Hide history" : "History"}
+                  </button>
+                </div>
+                {renderCancelForm(r)}
+                {renderHistory(r)}
               </div>
-              <span className={statusClass(r.status)}>{r.status}</span>
+              <span className={statusClass(r.status)}>{TIME_OFF_STATUS_LABELS[r.status]}</span>
             </li>
           ))}
         </ul>
       )}
-      {canApprove && (
+
+      {canAdjust && (
+        <div className="hub-inline-form" style={{ marginTop: 24 }}>
+          <h3>Balance adjustment</h3>
+          <p className="hub-sub">
+            Adjustments are ledger entries with a reason — balances are never edited silently.
+          </p>
+          <div className="hub-form">
+            <label>
+              Employee
+              <select value={adjStaffId} onChange={(e) => setAdjStaffId(e.target.value)}>
+                <option value="">Choose an employee…</option>
+                {staffList.map((s) => (
+                  <option key={s.userId} value={s.userId}>
+                    {s.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Type
+              <select value={adjType} onChange={(e) => setAdjType(e.target.value as LeaveType)}>
+                {LEAVE_TYPES.filter((t) => leaveTypeDebitsBalance(t)).map((type) => (
+                  <option key={type} value={type}>
+                    {LEAVE_TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Hours (+ adds, − removes)
+              <input
+                type="number"
+                step={0.5}
+                value={adjHours}
+                onChange={(e) => setAdjHours(e.target.value)}
+                placeholder="e.g. 16 or -8"
+              />
+            </label>
+            <label className="hub-form-wide">
+              Reason (required, recorded on the ledger)
+              <input
+                value={adjReason}
+                onChange={(e) => setAdjReason(e.target.value)}
+                placeholder="e.g. Annual allowance correction"
+              />
+            </label>
+          </div>
+          <div className="hub-form-actions">
+            <button className="hub-btn primary" disabled={busy} onClick={postAdjustment}>
+              <Check size={16} /> Post adjustment
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canSeeTeam && (
         <>
-          <h3 style={{ marginTop: 24 }}>Team requests needing a decision</h3>
-          {pending.length === 0 ? (
-            <Empty title="Nothing pending" text="All team requests have been decided." mark="check" />
+          <h3 style={{ marginTop: 24 }}>Who&apos;s out — next 30 days</h3>
+          {whosOutDays.length === 0 ? (
+            <Empty
+              title="Nobody out"
+              text="No approved time off in the next 30 days."
+              mark="check"
+            />
           ) : (
             <ul className="hub-list">
-              {pending.map((r) => (
+              {whosOutDays.map(([date, people]) => (
+                <li className="hub-list-item" key={date}>
+                  <div className="hub-item-main">
+                    <span className="hub-item-title">{fmtDate(date)}</span>
+                    <span className="hub-item-sub">
+                      {people.map((p) => `${p.name} (${p.type})`).join(" · ")}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h3 style={{ marginTop: 24 }}>
+            Team requests{canApprove ? " needing a decision" : ""}
+          </h3>
+          {teamPending.length === 0 && teamDecided.length === 0 ? (
+            <Empty title="No team requests" text="Team time-off requests will appear here." mark="quiet" />
+          ) : (
+            <ul className="hub-list">
+              {[...teamPending, ...teamDecided].map((r) => (
                 <li className="hub-list-item" key={r.id}>
                   <div className="hub-item-main">
                     <span className="hub-item-title">
-                      {staffName(staffList, r.staffId)} · {r.kind} · {fmtDate(r.startsOn)} – {fmtDate(r.endsOn)}
+                      {staffName(staffList, r.staffId)} · {LEAVE_TYPE_LABELS[r.kind]} ·{" "}
+                      {fmtDate(r.startsOn)} – {fmtDate(r.endsOn)} · {r.totalHours}h
                     </span>
-                    <span className="hub-item-sub">{r.reason}</span>
-                    {decidingId === r.id ? (
+                    <span className="hub-item-sub">
+                      {r.reason ? r.reason : "No note"}
+                      {r.decisionNote ? ` · Decision note: ${r.decisionNote}` : ""}
+                      {r.status === "cancelled" && r.cancelReason
+                        ? ` · Cancelled: ${r.cancelReason}`
+                        : ""}
+                    </span>
+                    {canApprove && r.status === "pending" && decidingId === r.id && (
                       <div className="hub-inline-form" style={{ marginTop: 8 }}>
+                        <p className="hub-sub">
+                          {(impact[r.id] ?? []).length === 0
+                            ? "No scheduled shifts fall on these days — approving uncovers nothing."
+                            : `Approving releases ${(impact[r.id] ?? []).length} scheduled shift${(impact[r.id] ?? []).length === 1 ? "" : "s"} to the open-shift board:`}
+                        </p>
+                        {(impact[r.id] ?? []).length > 0 && (
+                          <ul className="hub-list">
+                            {(impact[r.id] ?? []).map((s) => (
+                              <li className="hub-list-item" key={s.id}>
+                                <div className="hub-item-main">
+                                  <span className="hub-item-title">
+                                    {s.title} · {fmtDateTime(s.startsAt)} – {fmtDateTime(s.endsAt)}
+                                  </span>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                         <label>
                           Note (optional)
-                          <input value={decisionNote} onChange={(e) => setDecisionNote(e.target.value)} placeholder="Coverage arranged" />
+                          <input
+                            value={decisionNote}
+                            onChange={(e) => setDecisionNote(e.target.value)}
+                            placeholder="Coverage arranged"
+                          />
                         </label>
                         <div className="hub-form-actions">
-                          <button className="hub-btn primary" disabled={busy} onClick={() => decide(r.id, true)}>
+                          <button className="hub-btn primary" disabled={busy} onClick={() => decide(r, true)}>
                             <Check size={16} /> Approve
                           </button>
-                          <button className="hub-btn danger" disabled={busy} onClick={() => decide(r.id, false)}>
+                          <button className="hub-btn danger" disabled={busy} onClick={() => decide(r, false)}>
                             <X size={16} /> Deny
                           </button>
-                          <button className="hub-btn" onClick={() => setDecidingId(null)}>Cancel</button>
+                          <button className="hub-btn" onClick={() => setDecidingId(null)}>
+                            Back
+                          </button>
                         </div>
                       </div>
-                    ) : (
-                      <div>
-                        <button className="hub-btn" onClick={() => setDecidingId(r.id)}>
+                    )}
+                    <div className="hub-form-actions">
+                      {canApprove && r.status === "pending" && decidingId !== r.id && (
+                        <button className="hub-btn" onClick={() => openDecide(r)}>
                           Decide
                         </button>
-                      </div>
-                    )}
+                      )}
+                      {canApprove &&
+                        (r.status === "pending" ||
+                          (r.status === "approved" && r.startsOn > today)) &&
+                        cancelId !== r.id && (
+                          <button className="hub-btn" onClick={() => setCancelId(r.id)}>
+                            Cancel {r.status === "approved" ? "approved time off" : "request"}
+                          </button>
+                        )}
+                      <button className="hub-btn" onClick={() => toggleHistory(r)}>
+                        {historyId === r.id ? "Hide history" : "History"}
+                      </button>
+                    </div>
+                    {renderCancelForm(r)}
+                    {renderHistory(r)}
                   </div>
-                  <span className={statusClass(r.status)}>{r.status}</span>
+                  <span className={statusClass(r.status)}>{TIME_OFF_STATUS_LABELS[r.status]}</span>
                 </li>
               ))}
             </ul>
@@ -3590,8 +4117,6 @@ function OvertimeRulesCard({ store }: { store: HrStore }) {
     </section>
   );
 }
-
-const LEAVE_TYPES: LeaveType[] = ["vacation", "pto", "sick"];
 
 function AccrualPoliciesCard({ store }: { store: HrStore }) {
   const [policies, setPolicies] = useState<HrAccrualPolicy[]>([]);
