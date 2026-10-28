@@ -44,6 +44,8 @@ type Step =
   | "invalid"
   | "id"
   | "pin"
+  | "home"
+  | "today"
   | "action"
   | "clockin"
   | "attest"
@@ -235,6 +237,16 @@ export default function KioskClockPage({ token }: { token: string }) {
     return () => window.clearTimeout(timer);
   }, [step, resetToId]);
 
+  /* ---- kiosk home idle reset ----
+   * The home/today steps hold an identified staff member on a shared device,
+   * so they time out back to the staff picker. Any touch bumps the timer. */
+  const [idleBump, setIdleBump] = useState(0);
+  useEffect(() => {
+    if (step !== "home" && step !== "today") return;
+    const timer = window.setTimeout(() => resetToId(), 90_000);
+    return () => window.clearTimeout(timer);
+  }, [step, idleBump, resetToId]);
+
   const loadStatus = useCallback(
     async (activeClient: KioskClient, staffId: string, siteId: string) => {
       const next = await activeClient.fetchKioskStatus(staffId, siteId);
@@ -298,7 +310,11 @@ export default function KioskClockPage({ token }: { token: string }) {
         setStatus(nextStatus);
         setSuggestion(nextSuggestion);
         void loadIndividuals(client, site.siteId, nextSuggestion);
-        setStep("action");
+        // Post-identity landing: the kiosk home (Time Clock + a read-only
+        // today view). The kiosk token is punch-scoped by design — it has no
+        // role and no app session — so clinical tiles (MAR, ISP, notes) are
+        // NOT offered here; those live in the signed-in mobile shell.
+        setStep("home");
       } else if (result.reason === "locked") {
         setLockedUntil(result.lockedUntil ?? null);
         setError(
@@ -450,7 +466,7 @@ export default function KioskClockPage({ token }: { token: string }) {
   const siteName = site?.siteName ?? "Time clock";
 
   return (
-    <div className="kiosk">
+    <div className="kiosk" onPointerDown={() => setIdleBump((value) => value + 1)}>
       <div className="kiosk-wrap">
         <header className="kiosk-header">
           <div className="kiosk-brand">ComplyRer Time Clock</div>
@@ -565,6 +581,119 @@ export default function KioskClockPage({ token }: { token: string }) {
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {step === "home" && session && (
+          <div className="kiosk-panel">
+            <p className="kiosk-big">Welcome, {session.displayName}</p>
+            <p className="kiosk-muted">
+              {siteName} ·{" "}
+              {new Intl.DateTimeFormat("en-US", {
+                timeZone: "America/Chicago",
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              }).format(new Date())}{" "}
+              Central
+            </p>
+            <div className="kiosk-tiles">
+              <button
+                type="button"
+                className="kiosk-tile"
+                onClick={() => setStep("action")}
+              >
+                <strong>Time Clock</strong>
+                <span>Clock in, clock out, breaks and transfers</span>
+              </button>
+              <button
+                type="button"
+                className="kiosk-tile"
+                onClick={() => setStep("today")}
+              >
+                <strong>Today at this home</strong>
+                <span>Your shift status and who lives here</span>
+              </button>
+            </div>
+            <p className="kiosk-muted">
+              Medication passes, ISP data and shift notes live in the ComplyRer
+              mobile view — sign in on your phone or this tablet's browser for
+              those.
+            </p>
+            <button
+              type="button"
+              className="kiosk-btn kiosk-btn-ghost"
+              onClick={resetToId}
+            >
+              Done / switch user
+            </button>
+          </div>
+        )}
+
+        {step === "today" && session && (
+          <div className="kiosk-panel">
+            <p className="kiosk-big">Today at {siteName}</p>
+            <p className="kiosk-muted">
+              {new Intl.DateTimeFormat("en-US", {
+                timeZone: "America/Chicago",
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              }).format(new Date())}{" "}
+              Central
+            </p>
+            <div className="kiosk-status">
+              <p>
+                <strong>{session.displayName}</strong>
+              </p>
+              {status?.clockedIn ? (
+                <p>
+                  Clocked in since{" "}
+                  <strong>{status.sinceIso ? formatClockTime(status.sinceIso) : "—"}</strong>
+                  {status.onBreak && status.breakSinceIso && (
+                    <> · on break since {formatClockTime(status.breakSinceIso)}</>
+                  )}
+                </p>
+              ) : (
+                <p>Not clocked in.</p>
+              )}
+              {status?.scheduledShiftLabel ? (
+                <p className="kiosk-muted">Today’s shift: {status.scheduledShiftLabel}</p>
+              ) : (
+                <p className="kiosk-muted">No published shift for today.</p>
+              )}
+            </div>
+            <div className="kiosk-today-people">
+              <p className="kiosk-label">Individuals at this home</p>
+              {individuals.length === 0 && (
+                <p className="kiosk-muted">No Individuals listed for this home.</p>
+              )}
+              {individuals.map((person) => (
+                <p key={person.id} className="kiosk-today-person">
+                  {person.name}
+                </p>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="kiosk-btn kiosk-btn-ghost"
+              onClick={() => setStep("home")}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className="kiosk-btn kiosk-btn-ghost"
+              onClick={resetToId}
+            >
+              Done / switch user
+            </button>
           </div>
         )}
 

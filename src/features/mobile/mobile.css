@@ -1,0 +1,814 @@
+/*
+ * Mobile / kiosk shell — phone-first layout inside the existing app.
+ * ComplyRer's own palette tokens only; solid colors, no gradients, status
+ * always carried by text as well as position.
+ */
+
+.msh-shell {
+  min-height: 100dvh;
+  background: var(--sand);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+
+.msh-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--white);
+  border-bottom: 2px solid var(--purple);
+}
+
+.msh-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.msh-header-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--white);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.msh-subheader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 0;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.msh-subheader strong {
+  font-size: 19px;
+}
+
+.msh-main {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 14px 16px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.msh-welcome {
+  background: var(--purple);
+  color: var(--white);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.msh-welcome h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+}
+
+.msh-welcome p {
+  margin: 2px 0;
+  font-size: 15px;
+}
+
+.msh-welcome-agency {
+  opacity: 0.85;
+}
+
+.msh-site-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.msh-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.msh-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 104px;
+  padding: 14px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msh-tile svg {
+  color: var(--purple);
+}
+
+.msh-tile strong {
+  font-size: 17px;
+}
+
+.msh-tile small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.msh-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  background: var(--red);
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.msh-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 12px;
+  margin-bottom: 12px;
+}
+
+.msh-search input {
+  flex: 1;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.msh-search input:focus {
+  outline: none;
+}
+
+.msh-search:focus-within {
+  outline: 2px solid var(--purple-dark);
+  outline-offset: 1px;
+}
+
+.msh-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msh-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 68px;
+  padding: 10px 14px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msh-row.static {
+  cursor: default;
+}
+
+.msh-row:disabled {
+  cursor: default;
+  color: var(--text);
+}
+
+.msh-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.msh-row-main strong {
+  font-size: 16px;
+}
+
+.msh-row-main small {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.msh-row-main small.msh-status-text {
+  color: var(--purple-dark);
+  font-weight: 600;
+}
+
+.msh-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.msh-chevron {
+  font-size: 24px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.msh-current {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--purple-dark);
+}
+
+.msh-avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
+.msh-avatar-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--white);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.msh-empty {
+  background: var(--white);
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.msh-section-note {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.msh-text-button {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 600;
+  color: var(--purple-dark);
+  cursor: pointer;
+}
+
+.msh-chip-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--purple);
+  background: var(--white);
+  color: var(--purple-dark);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: none;
+}
+
+.msh-chip-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.msh-icon-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.msh-button {
+  min-height: 52px;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--purple);
+}
+
+.msh-button.primary {
+  background: var(--purple);
+  color: var(--white);
+}
+
+.msh-button.secondary {
+  background: var(--white);
+  color: var(--purple-dark);
+}
+
+.msh-button.block {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.msh-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.msh-person-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.msh-person-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.msh-person-id {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.msh-person-id strong {
+  font-size: 19px;
+}
+
+.msh-person-id small {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.msh-facts-toggle {
+  width: 100%;
+  margin-top: 12px;
+  min-height: 48px;
+  border-radius: 10px;
+  border: 1px solid var(--purple);
+  background: var(--white);
+  color: var(--purple-dark);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.msh-facts {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.msh-facts h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--purple-dark);
+}
+
+.msh-facts p {
+  margin: 2px 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.msh-medcount-row {
+  margin-bottom: 12px;
+}
+
+.msh-daynav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.msh-daynav-label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.msh-daynav-label strong {
+  font-size: 17px;
+}
+
+.msh-daynav-label small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.msh-pass-time {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--purple-dark);
+  flex: none;
+}
+
+.msh-pass-title {
+  margin: 6px 0 12px;
+  font-size: 18px;
+}
+
+.msh-med-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--sand);
+  color: var(--purple-dark);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.msh-status-text {
+  color: var(--purple-dark);
+  font-weight: 600;
+}
+
+.msh-form {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.msh-form-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.msh-form-sub {
+  margin: -10px 0 0;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+.msh-form-section h4 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--purple-dark);
+}
+
+.msh-dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msh-dl > div {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.msh-dl dt {
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+.msh-dl dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: 14.5px;
+  text-align: right;
+}
+
+.msh-confirm {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--sand);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 15px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.msh-confirm input {
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  accent-color: var(--purple);
+  flex: none;
+}
+
+.msh-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.msh-fieldset legend {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.msh-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.msh-segmented button {
+  min-height: 48px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--purple);
+  background: var(--white);
+  color: var(--purple-dark);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.msh-segmented button.active {
+  background: var(--purple);
+  color: var(--white);
+}
+
+.msh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.msh-field input,
+.msh-field select,
+.msh-field textarea {
+  min-height: 50px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--white);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.msh-field textarea {
+  min-height: 0;
+}
+
+.msh-field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.msh-duration {
+  margin: -4px 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--purple-dark);
+}
+
+.msh-alert {
+  background: #f9e9e2;
+  border: 1px solid var(--red);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+
+.msh-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.msh-form-actions .msh-button {
+  flex: 1;
+}
+
+.msh-tabbar {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.msh-tabbar button {
+  min-height: 56px;
+  border: 0;
+  background: var(--white);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-top: 4px solid transparent;
+}
+
+.msh-tabbar button.active {
+  color: var(--purple-dark);
+  border-top-color: var(--purple);
+}
+
+.msh-day-group {
+  margin-bottom: 16px;
+}
+
+.msh-day-heading {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--purple-dark);
+}
+
+.msh-read {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.msh-read-section {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.msh-read-section h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--purple-dark);
+}
+
+.msh-read-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 0;
+  font-size: 15px;
+}
+
+.msh-read-row.stack {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.msh-read-row span {
+  color: var(--muted);
+}
+
+.msh-read-row strong {
+  text-align: right;
+}
+
+.msh-read-row.stack strong {
+  text-align: left;
+}
+
+.msh-read-summary {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.msh-task {
+  border-top: 1px solid var(--border);
+  padding: 12px 0 2px;
+  margin-bottom: 8px;
+}
+
+.msh-task-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.msh-task-instructions {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.msh-task .msh-segmented {
+  margin-bottom: 10px;
+}
+
+.msh-signature-ok {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--purple-dark);
+}
+
+.msh-shell :focus-visible,
+.mobile-return-bar:focus-visible {
+  outline: 2px solid var(--purple-dark);
+  outline-offset: 2px;
+}
+
+/* Slim return bar shown above the desktop layout when a tile deep-linked
+ * into a full page from the mobile shell. */
+.mobile-return-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 16px;
+  background: var(--purple);
+  color: var(--white);
+  border: 0;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
