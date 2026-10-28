@@ -4,7 +4,10 @@ import { test, expect, type Page } from "./fixtures";
 // regular (desktop-layout) pages in mobile view. The mobile shell has its
 // own pill for its own screens (mobile-shell.spec.ts); this spec covers
 // the desktop layout showing in a mobile context — reached here by
-// picking "Desktop view" from the shell on a phone-width viewport.
+// deep-linking from the shell (a tile tap) under the mobile pick, which
+// is how those pages actually occur. An explicit "Desktop view" pick is
+// the opposite case — a true desktop layout with no mobile context —
+// and is covered as such in the last test.
 //
 // Founder rules under test:
 // - the sidebar starts collapsed in mobile view; the existing menu
@@ -44,15 +47,27 @@ async function toShellHome(page: Page) {
   ).toBeVisible({ timeout: 30_000 });
 }
 
-async function toDesktopOverview(page: Page) {
-  await page.getByRole("button", { name: /Account menu/ }).click();
-  await page.getByRole("menuitem", { name: /Desktop view/ }).click();
-  // The desktop layout at phone width: breadcrumb names the page. (The
-  // "‹ Mobile home" return bar only exists for deep-linked pages under
-  // the mobile pick, not for an explicit Desktop view pick.)
-  await expect(page.locator(".breadcrumb strong")).toHaveText("Overview", {
-    timeout: 30_000,
-  });
+async function toDeepLinkedPage(page: Page) {
+  // A tile tap deep-links from the shell into the regular page under the
+  // mobile pick: the desktop layout in a mobile context — "‹ Mobile
+  // home" return bar on top, .mobile-context on the shell, the platform
+  // pill at the bottom.
+  await page.getByRole("button", { name: /Appointments/ }).first().click();
+  await expect(page.locator(".breadcrumb strong")).toHaveText(
+    "Appointments",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator(".mobile-return-bar")).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveClass(/mobile-context/);
+}
+
+async function drawerTo(page: Page, name: string) {
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name, exact: true })
+    .click();
+  await expect(page.locator(".breadcrumb strong")).toHaveText(name);
 }
 
 test("DSP shell: ISP Data tile present, no Shift Notes tile", async ({
@@ -91,7 +106,8 @@ test("platform nav: Overview — sidebar starts collapsed, scroll-collapse cycle
 }) => {
   await signIn(page, "sarah.mitchell");
   await toShellHome(page);
-  await toDesktopOverview(page);
+  await toDeepLinkedPage(page);
+  await drawerTo(page, "Overview");
 
   // Sidebar starts collapsed in mobile view: its box sits off the left
   // edge of the viewport. The existing menu control opens it; the
@@ -154,41 +170,28 @@ test("platform nav: present on Individuals and Appointments, absent where the bo
 }) => {
   await signIn(page, "sarah.mitchell");
   await toShellHome(page);
-  await toDesktopOverview(page);
+  await toDeepLinkedPage(page);
   const nav = page.getByRole("navigation", { name: "Mobile" });
   await expect(nav).toBeVisible();
 
   // Between regular pages the pill stays. Pages are reached through the
   // (collapsed) sidebar drawer, which is how a phone user gets there.
-  const drawerTo = async (name: string) => {
-    await page.getByRole("button", { name: "Open navigation" }).click();
-    await page
-      .locator(".sidebar")
-      .getByRole("button", { name, exact: true })
-      .click();
-    await expect(page.locator(".breadcrumb strong")).toHaveText(name);
-  };
-
-  await drawerTo("Individuals");
+  await drawerTo(page, "Individuals");
   await expect(nav).toBeVisible();
 
-  await drawerTo("Appointments");
+  await drawerTo(page, "Appointments");
   await expect(nav).toBeVisible();
 
   // The Weekly checklist's sticky sign-&-submit bar owns the bottom on
   // that screen — the pill stays away entirely.
-  await drawerTo("Weekly checklist");
+  await drawerTo(page, "Weekly checklist");
   await expect(page.locator(".checklist-sticky-bar")).toBeVisible();
   await expect(nav).toHaveCount(0);
 
-  // Back in the shell (the sidebar's Mobile view pick — an explicit
-  // Desktop view pick has no return bar), the MAR flow and the ISP entry
-  // form own their bottoms too — no pill there either.
-  await page.getByRole("button", { name: "Open navigation" }).click();
-  await page
-    .locator(".sidebar")
-    .getByRole("button", { name: "Mobile view", exact: true })
-    .click();
+  // Back in the shell (the deep link's "‹ Mobile home" return bar), the
+  // MAR flow and the ISP entry form own their bottoms too — no pill
+  // there either.
+  await page.locator(".mobile-return-bar").click();
   await expect(
     page.getByRole("heading", { name: "Today at Cedar House" }),
   ).toBeVisible({ timeout: 30_000 });
@@ -215,7 +218,7 @@ test("platform nav destinations land in the shell at the right view", async ({
 }) => {
   await signIn(page, "sarah.mitchell");
   await toShellHome(page);
-  await toDesktopOverview(page);
+  await toDeepLinkedPage(page);
   const nav = page.getByRole("navigation", { name: "Mobile" });
   await expect(nav).toBeVisible();
 
@@ -235,12 +238,29 @@ test("platform nav destinations land in the shell at the right view", async ({
   ).toBeVisible();
 });
 
-test("desktop width: sidebar docked as before, no bottom navigation", async ({
+test("explicit Desktop pick and desktop width: true desktop layout, no platform pill", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1280, height: 1050 });
+  // At phone width, an explicit "Desktop view" pick is an escape hatch:
+  // the user gets the true desktop layout — no .mobile-context (so no
+  // collapsed-by-context sidebar, no 112px nav padding), no platform
+  // pill, no return bar. The desktop layout's own phone-width rules are
+  // what apply.
   await signIn(page, "sarah.mitchell");
-  // At desktop width in auto mode the app lands in the desktop layout.
+  await toShellHome(page);
+  await page.getByRole("button", { name: /Account menu/ }).click();
+  await page.getByRole("menuitem", { name: /Desktop view/ }).click();
+  await expect(page.locator(".breadcrumb strong")).toHaveText("Overview", {
+    timeout: 30_000,
+  });
+  await expect(page.locator(".app-shell")).not.toHaveClass(/mobile-context/);
+  await expect(
+    page.getByRole("navigation", { name: "Mobile" }),
+  ).toHaveCount(0);
+  await expect(page.locator(".mobile-return-bar")).toHaveCount(0);
+
+  // At desktop width the same layout is simply docked, as before.
+  await page.setViewportSize({ width: 1280, height: 1050 });
   await expect(page.locator(".breadcrumb strong")).toHaveText("Overview", {
     timeout: 60_000,
   });
