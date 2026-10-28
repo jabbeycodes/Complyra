@@ -73,6 +73,8 @@ interface SiteDetailPageProps {
   onOpenIndividual: (name: string) => void;
   /** Open the matching full page so site tabs stay a summary, not a gutted copy. */
   onOpenPage?: (page: string) => void;
+  /** Open the Report Library scoped to this home. */
+  onOpenReports?: (siteId: string) => void;
 }
 
 /** Defensive read of the finalized score snapshot (shape owned by the audit workflow). */
@@ -148,6 +150,7 @@ export default function SiteDetailPage({
   onBack,
   onOpenIndividual,
   onOpenPage,
+  onOpenReports,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
@@ -670,6 +673,27 @@ export default function SiteDetailPage({
                 </ul>
               )}
             </div>
+            {onOpenReports && pageVisible(session, "Report Library") && (
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Reports</h2>
+                </div>
+                <p className="muted site-detail-note">
+                  Every printable report for this home — checklists, drills,
+                  mileage, QA audits, and Individual records — lives in the
+                  Report Library.
+                </p>
+                <div className="site-panel-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => onOpenReports(siteId)}
+                  >
+                    Open reports for this home
+                  </button>
+                </div>
+              </div>
+            )}
             {openRequirements.length > 0 && (
               <div className="panel">
                 <h2>Needs attention</h2>

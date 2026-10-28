@@ -20,7 +20,8 @@
     "demo:prints": "tsx scripts/export-demo-prints.ts",
     "test:db": "supabase test db",
     "test:hosted": "node --import tsx --import ./src/testSupport/cssStub.mts scripts/verify-local-hosted.ts",
-    "seed:repair-site-addresses": "tsx scripts/repair-site-addresses.ts"
+    "seed:repair-site-addresses": "tsx scripts/repair-site-addresses.ts",
+    "verify:report-library": "tsx scripts/verify-report-library.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

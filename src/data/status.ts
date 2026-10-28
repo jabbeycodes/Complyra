@@ -146,6 +146,18 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "qa.schedule") ||
       can(session, "audit.read")
     );
+  // Report Library: the catalog is a management/audit surface. Keep this
+  // list in sync with REPORT_LIBRARY_ROLES in features/reports/reportLibrary
+  // (reportLibrary.test.ts asserts they agree for every role).
+  if (page === "Report Library")
+    return [
+      "administrator",
+      "compliance_admin",
+      "program_manager",
+      "house_manager",
+      "nurse",
+      "auditor",
+    ].includes(session.roleKey);
   return ["PCSP acknowledgments", "Nursing delegations", "Equipment checks", "Behavior plan training", "Emergency drills", "Required forms"].includes(page) && can(session, "individuals.view");
 }
 
@@ -180,6 +192,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Supply forecast",
   "Mileage",
   "QA Review",
+  "Report Library",
   "Recognition",
   "Settings",
   "Employee Hub",

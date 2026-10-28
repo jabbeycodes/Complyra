@@ -7489,4 +7489,82 @@ button.qa-row:hover {
 .badge.current {
   background: var(--color-h-d7e2cc);
   color: var(--color-h-2f4630);
+/* ===== Report Library ===== */
+.report-library-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.report-library-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--color-paper-3);
+  min-width: 280px;
+}
+.report-library-search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font: inherit;
+  width: 100%;
+}
+.report-library-tools .tabs {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+.report-library-group > h2 {
+  font-size: 18px;
+  margin: 26px 0 12px;
+}
+.report-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+.report-card {
+  padding: 18px var(--panel-inline);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.report-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.report-card > p {
+  margin: 0;
+}
+.report-card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.report-card-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1 1 140px;
+}
+.report-card-controls label.report-card-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  align-self: flex-end;
+  padding-bottom: 9px;
+}
+.report-card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 4px;
 }
