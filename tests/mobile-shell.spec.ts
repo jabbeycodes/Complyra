@@ -316,16 +316,76 @@ async function readHomeTracking(
 }
 
 /**
- * Go back to the shell home and wait out the tracking refetch the return
- * triggers: the donut card cycles through its loading state, then settles
- * on fresh numbers. Waiting for the cycle proves the numbers below were
- * re-read, not left over from session start.
+ * The home tracking surface as one comparable string: the donut card
+ * (legend fractions + center percent) plus the greeting's doses-left
+ * line. `null` while the card is not on screen (e.g. mid-navigation).
+ */
+async function sampleHomeTrackingText(page: Page): Promise<string | null> {
+  const cardText = await page
+    .locator(".msh-donut-card")
+    .textContent({ timeout: 1_000 })
+    .catch(() => null);
+  if (cardText === null) return null;
+  const medsLeftText = await page
+    .getByText(/med doses? left to record|All med doses recorded/)
+    .first()
+    .textContent({ timeout: 1_000 })
+    .catch(() => null);
+  if (medsLeftText === null) return null;
+  return `${cardText}\n${medsLeftText}`;
+}
+
+/**
+ * Go back to the shell home and wait until the tracking numbers the
+ * return-triggered refetch produces have SETTLED.
+ *
+ * The previous version waited for the "Loading today’s tracking…"
+ * indicator to paint and then clear. That flakes: on the exception path
+ * the refetch often settles before the indicator ever paints, so the
+ * wait failed even though the numbers were already fresh and correct.
+ * Waiting on the paint tests the spinner, not the data.
+ *
+ * Instead, poll the tracking surface itself and require BOTH:
+ *  - a minimum wait after the click (MIN_WAIT_MS), so at least one full
+ *    refetch cycle has had its chance to land — the values asserted
+ *    afterwards can never be the pre-return, session-start numbers; and
+ *  - a stability window (STABLE_FOR_MS) in which the text does not
+ *    change at all — any in-flight refetch that lands mid-window resets
+ *    the clock, so we only return once the displayed values have stopped
+ *    moving. Absent/unreadable samples also reset the clock.
  */
 async function returnHomeRefreshed(page: Page) {
+  const MIN_WAIT_MS = 2_500;
+  const STABLE_FOR_MS = 1_250;
+  const POLL_MS = 200;
+  const TIMEOUT_MS = 30_000;
+
   await page.getByRole("button", { name: "‹ Home" }).click();
-  const loading = page.getByText("Loading today’s tracking…");
-  await expect(loading).toBeVisible({ timeout: 15_000 });
-  await expect(loading).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator(".msh-donut-card")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  const startedAt = Date.now();
+  let lastText = await sampleHomeTrackingText(page);
+  let stableSince = Date.now();
+  for (;;) {
+    await page.waitForTimeout(POLL_MS);
+    const text = await sampleHomeTrackingText(page);
+    const now = Date.now();
+    if (text === null || text !== lastText) {
+      lastText = text;
+      stableSince = now;
+    }
+    const elapsed = now - startedAt;
+    if (elapsed >= MIN_WAIT_MS && now - stableSince >= STABLE_FOR_MS) {
+      return;
+    }
+    if (elapsed > TIMEOUT_MS) {
+      throw new Error(
+        `Home tracking never settled within ${TIMEOUT_MS}ms. Last text: ${lastText}`,
+      );
+    }
+  }
 }
 
 test("mobile home: a Refused exception does NOT move the donut, and home refreshes on return", async ({
