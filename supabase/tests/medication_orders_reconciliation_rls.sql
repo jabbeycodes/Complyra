@@ -3,11 +3,14 @@
 -- for hosted proof that direct database writes cannot do what the API
 -- forbids: flip an order's status or forge its activation record, let a
 -- house manager sign off a reconciliation, or rewrite the items of a
--- completed (signed) reconciliation.
+-- completed (signed) reconciliation. The re-review added the activation
+-- link itself: a self-attributed activation must still be rejected when
+-- the MAR medication link is missing, belongs to another Individual,
+-- does not point back at the order, or has no dose schedule projected.
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(38);
+select plan(45);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -33,12 +36,31 @@ insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a2710000-0000-0000-0000-000000000001','d2710000-0000-0000-0000-000000000004','auditor','auditor',null),
  ('a2710000-0000-0000-0000-000000000001','d2710000-0000-0000-0000-000000000005','dsp','dsp','c2710000-0000-0000-0000-000000000001');
 insert into individuals(id,agency_id,site_id,full_name,date_of_birth) values
- ('e2710000-0000-0000-0000-000000000001','a2710000-0000-0000-0000-000000000001','c2710000-0000-0000-0000-000000000001','Person A','1980-01-01');
+ ('e2710000-0000-0000-0000-000000000001','a2710000-0000-0000-0000-000000000001','c2710000-0000-0000-0000-000000000001','Person A','1980-01-01'),
+ ('e2710000-0000-0000-0000-000000000002','a2710000-0000-0000-0000-000000000001','c2710000-0000-0000-0000-000000000001','Person B','1990-01-01');
 insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
  ('a2710000-0000-0000-0000-000000000001','d2710000-0000-0000-0000-000000000005','e2710000-0000-0000-0000-000000000001','c2710000-0000-0000-0000-000000000001');
+-- Fixture drafts used only by the activation-link cases below: one per
+-- bad-link attempt (so the cases stay independent even against a guard
+-- that wrongly lets one through), plus one that exists so a medication
+-- can point back at the WRONG order.
+insert into medication_orders(id,agency_id,individual_id,medication_name,dose,route,schedule,prescriber_name,created_by,created_by_name) values
+ ('f2710000-0000-0000-0000-000000000011','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin','500 mg','Oral','BID','Dr. Rao','d2710000-0000-0000-0000-000000000001','Nurse One'),
+ ('f2710000-0000-0000-0000-000000000012','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Lisinopril','10 mg','Oral','Daily','Dr. Rao','d2710000-0000-0000-0000-000000000001','Nurse One'),
+ ('f2710000-0000-0000-0000-000000000015','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin','500 mg','Oral','BID','Dr. Rao','d2710000-0000-0000-0000-000000000001','Nurse One'),
+ ('f2710000-0000-0000-0000-000000000016','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin','500 mg','Oral','BID','Dr. Rao','d2710000-0000-0000-0000-000000000001','Nurse One'),
+ ('f2710000-0000-0000-0000-000000000017','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin','500 mg','Oral','BID','Dr. Rao','d2710000-0000-0000-0000-000000000001','Nurse One');
 -- The MAR medication the order will feed when activated.
 insert into medications(id,agency_id,individual_id,name) values
  ('f2710000-0000-0000-0000-000000000001','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin');
+-- Link fixtures for the activation cases, each isolating one violation:
+-- another Individual's medication (back-link correct), a same-Individual
+-- medication whose back-link names a different order, and a
+-- same-Individual medication with no back-link at all.
+insert into medications(id,agency_id,individual_id,name,source_order_id) values
+ ('f2710000-0000-0000-0000-000000000010','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000002','Insulin Glargine','f2710000-0000-0000-0000-000000000015'),
+ ('f2710000-0000-0000-0000-000000000013','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin ER','f2710000-0000-0000-0000-000000000012'),
+ ('f2710000-0000-0000-0000-000000000014','a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','Metformin XR',null);
 
 -- ── Orders: inserts start as the caller's own untouched draft ──
 set local role authenticated;
@@ -77,6 +99,27 @@ select throws_ok($$update medication_orders set status='active', activated_by='d
   '23514', null, 'Activation cannot be forged in another user''s name');
 select throws_ok($$update medication_orders set status='discontinued', discontinued_by='d2710000-0000-0000-0000-000000000001', discontinued_at=now(), discontinue_reason='Skip' where id='f2710000-0000-0000-0000-000000000002'$$,
   '23514', null, 'A draft cannot jump straight to discontinued');
+
+-- ── Orders: activation must record a REAL MAR link (PR #120 re-review) ──
+-- Each attempt is self-attributed by the nurse; only the link is wrong.
+select throws_ok($$update medication_orders set status='active', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000011'$$,
+  '23514', null, 'Activation with no MAR medication linked is rejected');
+select throws_ok($$update medication_orders set status='active', medication_id='f2710000-0000-0000-0000-000000000010', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000015'$$,
+  '23514', null, 'Activation cannot link a medication belonging to another Individual');
+select throws_ok($$update medication_orders set status='active', medication_id='f2710000-0000-0000-0000-000000000013', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000016'$$,
+  '23514', null, 'Activation cannot link a medication whose back-link names a different order');
+select throws_ok($$update medication_orders set status='active', medication_id='f2710000-0000-0000-0000-000000000014', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000017'$$,
+  '23514', null, 'Activation cannot link a medication with no back-link to the order');
+-- The path the application takes: project the medication (back-link),
+-- project the dose schedule, then activate. Until the schedule exists,
+-- even a correctly linked activation is rejected.
+select lives_ok($$update medications set source_order_id='f2710000-0000-0000-0000-000000000002' where id='f2710000-0000-0000-0000-000000000001'$$,
+  'The nurse projects the order onto its MAR medication (back-link)');
+select throws_ok($$update medication_orders set status='active', medication_id='f2710000-0000-0000-0000-000000000001', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000002'$$,
+  '23514', null, 'Activation is rejected until the dose schedule is projected to the MAR');
+select lives_ok($$insert into med_inventory(agency_id,individual_id,medication_id,dose_times)
+  values ('a2710000-0000-0000-0000-000000000001','e2710000-0000-0000-0000-000000000001','f2710000-0000-0000-0000-000000000001',ARRAY['08:00','20:00'])$$,
+  'The nurse projects the dose schedule to the MAR');
 select lives_ok($$update medication_orders set status='active', medication_id='f2710000-0000-0000-0000-000000000001', activated_by='d2710000-0000-0000-0000-000000000001', activated_by_name='Nurse One', activated_at=now() where id='f2710000-0000-0000-0000-000000000002'$$,
   'The nurse activates the order as themselves, linking the MAR medication');
 select throws_ok($$update medication_orders set dose='250 mg' where id='f2710000-0000-0000-0000-000000000002'$$,
@@ -142,7 +185,7 @@ select throws_ok($$delete from medication_reconciliations where id='f2710000-000
 
 -- ── Auditors see everything and change nothing ──
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2710000-0000-0000-0000-000000000004"}',true);
-select is((select count(*)::int from medication_orders),1,
+select is((select count(*)::int from medication_orders),6,
   'An auditor reads medication orders (see everything, read-only)');
 select is((select count(*)::int from medication_reconciliations),1,
   'An auditor reads reconciliations');

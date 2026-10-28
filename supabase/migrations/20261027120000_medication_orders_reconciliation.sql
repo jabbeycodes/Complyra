@@ -238,7 +238,12 @@ with check (
 --   * ownership (agency, Individual, author, creation time) never changes;
 --   * draft -> active is the only activation, recorded against the
 --     signed-in user, and the only write that may set the MAR medication
---     link; the prescriber body cannot change in the same write;
+--     link; the prescriber body cannot change in the same write. The link
+--     itself is validated, not trusted: the medication must exist in the
+--     same agency, belong to the same Individual, point back at this
+--     order (medications.source_order_id), and carry its MAR dose-schedule
+--     projection (med_inventory) — the application writes all three before
+--     it flips the status, so an active order always feeds the MAR;
 --   * active -> discontinued is the only discontinuation, recorded against
 --     the signed-in user with a reason; the activation record is history;
 --   * with no status change, only draft body fields may move — so an
@@ -296,6 +301,38 @@ begin
       end if;
       if v_body_changed then
         raise exception 'Activating an order cannot change what the prescriber ordered.'
+          using errcode = 'check_violation';
+      end if;
+      -- Activation is what feeds the MAR, so the recorded link must be
+      -- real in the database, not merely claimed by the write: a MAR
+      -- medication in the same agency, belonging to the same Individual,
+      -- whose back-link names this order, with the dose schedule already
+      -- projected to med_inventory. A managing-role user therefore cannot
+      -- activate an order that is absent from, or mis-linked on, the MAR
+      -- by writing the orders table directly.
+      if new.medication_id is null then
+        raise exception 'An order can only be activated once it is linked to the MAR medication it feeds.'
+          using errcode = 'check_violation';
+      end if;
+      if not exists (
+        select 1
+        from public.medications m
+        where m.id = new.medication_id
+          and m.agency_id = new.agency_id
+          and m.individual_id = new.individual_id
+          and m.source_order_id = new.id
+      ) then
+        raise exception 'The MAR medication linked at activation must belong to the same agency and Individual and point back to this order.'
+          using errcode = 'check_violation';
+      end if;
+      if not exists (
+        select 1
+        from public.med_inventory i
+        where i.medication_id = new.medication_id
+          and i.agency_id = new.agency_id
+          and i.individual_id = new.individual_id
+      ) then
+        raise exception 'An order can only be activated once its dose schedule has been projected to the MAR.'
           using errcode = 'check_violation';
       end if;
     elsif old.status = 'active' and new.status = 'discontinued' then
