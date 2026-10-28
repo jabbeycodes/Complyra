@@ -31,6 +31,13 @@
 --   deleted_at + voided_by + void_reason through an update, so the voided
 --   entry and its reason stay on the record. A hard-delete policy remains
 --   only as an administrator backstop; the app never calls it.
+-- - A void is FINAL and the audit fields are server-owned: the guard
+--   trigger rejects every update to an already-voided row (no un-voiding,
+--   no rewriting the reason or the voider), stamps deleted_at / voided_by
+--   itself on the void transition, requires a non-blank reason for it, and
+--   overwrites updated_at with the database clock on every write — a
+--   client-supplied timestamp is never stored, so the history table's
+--   version_saved_at (copied from the row's updated_at) is server time.
 
 begin;
 
@@ -157,6 +164,9 @@ declare
   v_uid uuid := auth.uid();
 begin
   if tg_op = 'INSERT' then
+    -- Timestamps are server-owned from the first write.
+    new.created_at := now();
+    new.updated_at := now();
     if v_uid is not null then
       new.recorded_by := v_uid;
       new.recorded_by_name := coalesce(
@@ -169,6 +179,10 @@ begin
           limit 1),
         new.recorded_by_role
       );
+      -- A new entry is always live: voiding is an update, never an insert.
+      new.deleted_at := null;
+      new.voided_by := null;
+      new.void_reason := '';
     end if;
     -- The entry's home is the Individual's home, never a client-supplied one.
     new.site_id := coalesce(
@@ -177,6 +191,14 @@ begin
       new.site_id
     );
     return new;
+  end if;
+
+  -- A void is final: once voided, the row is immutable. Un-voiding it,
+  -- rewriting its reason, or naming a different voider all fail here, at
+  -- the database layer, whoever asks and whatever the client sends.
+  if old.deleted_at is not null then
+    raise exception 'A voided menu entry cannot be changed.'
+      using errcode = 'P0001';
   end if;
 
   if new.agency_id is distinct from old.agency_id
@@ -190,9 +212,26 @@ begin
       using errcode = 'P0001';
   end if;
 
-  -- A void stamps who voided it (the reason rides on the row itself).
-  if new.deleted_at is not null and old.deleted_at is null then
+  -- The save time is the database clock, never a client-supplied value.
+  -- (History rows copy version_saved_at from this field, so preserved
+  -- versions carry server time too.)
+  new.updated_at := now();
+
+  if new.deleted_at is not null then
+    -- The void transition (old.deleted_at is null here — a voided row was
+    -- rejected above): a reason is mandatory, and the stamp is ours.
+    if length(btrim(coalesce(new.void_reason, ''))) = 0 then
+      raise exception 'A reason is required to void a menu entry.'
+        using errcode = 'P0001';
+    end if;
+    new.deleted_at := now();
     new.voided_by := v_uid;
+  else
+    -- Not a void: the void fields stay exactly as they were (empty on a
+    -- live row), so a correction cannot smuggle void metadata in.
+    new.deleted_at := old.deleted_at;
+    new.voided_by := old.voided_by;
+    new.void_reason := old.void_reason;
   end if;
   return new;
 end;

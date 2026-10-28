@@ -188,6 +188,7 @@ import {
   canEditMenuEntryRow,
   MEAL_SLOTS,
   AMOUNT_EATEN_OPTIONS,
+  type MenuEntryHistory,
   type MenuEntryView,
 } from "./menuRecords";
 import { isValidRating } from "../recognition/scoring";
@@ -3702,6 +3703,67 @@ export class HostedApi implements ComplyraApi {
       .eq("agency_id", session.agencyId);
     throwIf(updateError, "Could not void the menu entry.");
     await this.audit(session, "menu_entry.voided", `${session.fullName} voided a menu entry`, "menu_entry", entryId);
+  }
+
+  async getMenuEntryHistory(individualId: string): Promise<MenuEntryHistory> {
+    const session = await this.requireSession();
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    // Both reads ride the same can_read_individual scope as the entries
+    // themselves (menu_entry_history's select policy is identical), so a
+    // reader sees exactly the history of the Individuals they can read —
+    // auditors included — and nobody else's.
+    const { data: versionRows, error } = await this.client
+      .from("menu_entry_history")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("replaced_at", { ascending: false });
+    throwIf(error, "Could not load menu record history.");
+    const { data: voidedRows, error: voidedError } = await this.client
+      .from("menu_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    throwIf(voidedError, "Could not load menu record history.");
+    const versionsRaw = (versionRows ?? []) as Array<Record<string, unknown>>;
+    const voidedRaw = (voidedRows ?? []) as Array<Record<string, unknown>>;
+    const names = await this.profileNames([
+      ...versionsRaw
+        .map((row) => String(row.replaced_by ?? ""))
+        .filter(Boolean),
+      ...voidedRaw.map((row) => String(row.voided_by ?? "")).filter(Boolean),
+    ]);
+    return {
+      versions: versionsRaw.map((row) => {
+        const replacedBy = row.replaced_by ? String(row.replaced_by) : null;
+        return {
+          id: String(row.id),
+          entryId: String(row.entry_id),
+          entryDate: String(row.entry_date ?? "").slice(0, 10),
+          mealSlot: (row.meal_slot as MenuEntryView["mealSlot"]) ?? "snack",
+          foodText: String(row.food_text ?? ""),
+          amountEaten:
+            (row.amount_eaten as MenuEntryView["amountEaten"]) ?? "all",
+          note: String(row.note ?? ""),
+          versionSavedAt: String(row.version_saved_at ?? ""),
+          replacedBy,
+          replacedByName:
+            (replacedBy && names.get(replacedBy)) || "Staff member",
+          replacedAt: String(row.replaced_at ?? ""),
+        };
+      }),
+      voided: voidedRaw.map((row) => {
+        const voidedBy = row.voided_by ? String(row.voided_by) : null;
+        return {
+          ...this.mapMenuEntry(row),
+          voidedByName: (voidedBy && names.get(voidedBy)) || "Staff member",
+        };
+      }),
+    };
   }
 
   async getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]> {

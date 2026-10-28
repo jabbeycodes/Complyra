@@ -279,6 +279,102 @@ test("voiding needs a reason and removes the entry from the week view", async ()
   assert.equal(rows.length, 0);
 });
 
+test("history: a correction preserves the replaced version, readable by its entry", async () => {
+  const impl = api();
+  const dsp = await signInAs(impl, DEMO_DSP_USERNAME);
+  const ellis = await individualId(impl, dsp, "Ellis Hart");
+  const id = await impl.saveMenuEntry({
+    individualId: ellis,
+    entryDate: "2026-09-12",
+    mealSlot: "breakfast",
+    foodText: "Oatmeal",
+    amountEaten: "some",
+    note: "First serving",
+  });
+  let history = await impl.getMenuEntryHistory(ellis);
+  assert.equal(history.versions.length, 0);
+  assert.equal(history.voided.length, 0);
+
+  await impl.saveMenuEntry({
+    entryId: id,
+    individualId: ellis,
+    entryDate: "2026-09-12",
+    mealSlot: "breakfast",
+    foodText: "Oatmeal with berries",
+    amountEaten: "most",
+    note: "First serving",
+  });
+  history = await impl.getMenuEntryHistory(ellis);
+  assert.equal(history.versions.length, 1);
+  const version = history.versions[0];
+  assert.equal(version.entryId, id);
+  assert.equal(version.foodText, "Oatmeal");
+  assert.equal(version.amountEaten, "some");
+  assert.equal(version.note, "First serving");
+  assert.equal(version.replacedBy, dsp.userId);
+  assert.equal(version.replacedByName, "Alex Morgan");
+  assert.ok(version.versionSavedAt);
+  assert.ok(version.replacedAt);
+});
+
+test("history: a void lands in the voided list with its reason and voider, and keeps the pre-void version", async () => {
+  const impl = api();
+  const dsp = await signInAs(impl, DEMO_DSP_USERNAME);
+  const ellis = await individualId(impl, dsp, "Ellis Hart");
+  const id = await impl.saveMenuEntry({
+    individualId: ellis,
+    entryDate: "2026-09-12",
+    mealSlot: "snack",
+    foodText: "Yogurt cup",
+    amountEaten: "all",
+  });
+  await impl.voidMenuEntry(id, "Recorded against the wrong day");
+  const history = await impl.getMenuEntryHistory(ellis);
+  assert.equal(history.voided.length, 1);
+  assert.equal(history.voided[0].id, id);
+  assert.equal(history.voided[0].foodText, "Yogurt cup");
+  assert.equal(history.voided[0].voidReason, "Recorded against the wrong day");
+  assert.equal(history.voided[0].voidedByName, "Alex Morgan");
+  assert.ok(history.voided[0].deletedAt);
+  // The pre-void version is preserved as a version row too.
+  assert.equal(history.versions.length, 1);
+  assert.equal(history.versions[0].entryId, id);
+  assert.equal(history.versions[0].foodText, "Yogurt cup");
+});
+
+test("history: the read is scope-gated like the entries themselves", async () => {
+  const impl = api();
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const harper = await individualId(impl, admin, "Harper Soto");
+  const ellis = await individualId(impl, admin, "Ellis Hart");
+  const id = await impl.saveMenuEntry({
+    individualId: ellis,
+    entryDate: "2026-09-12",
+    mealSlot: "lunch",
+    foodText: "Tomato soup",
+    amountEaten: "all",
+  });
+  await impl.saveMenuEntry({
+    entryId: id,
+    individualId: ellis,
+    entryDate: "2026-09-12",
+    mealSlot: "lunch",
+    foodText: "Tomato soup with basil",
+    amountEaten: "all",
+  });
+  // The Cedar House DSP cannot read Willow House history.
+  await signInAs(impl, DEMO_DSP_USERNAME);
+  await assert.rejects(
+    impl.getMenuEntryHistory(harper),
+    /outside your assigned access/,
+  );
+  // …but reads Ellis's history (their own home) with the preserved version.
+  const history = await impl.getMenuEntryHistory(ellis);
+  assert.equal(history.versions.length, 1);
+  assert.equal(history.versions[0].foodText, "Tomato soup");
+  assert.equal(history.versions[0].replacedByName, admin.fullName);
+});
+
 test("food text is required and the meal and amount must be real choices", async () => {
   const impl = api();
   const dsp = await signInAs(impl, DEMO_DSP_USERNAME);

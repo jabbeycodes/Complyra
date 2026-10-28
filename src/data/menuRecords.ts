@@ -67,6 +67,47 @@ export interface MenuEntry {
 
 export type MenuEntryView = MenuEntry;
 
+/**
+ * One preserved earlier version of a menu entry, written when the entry
+ * was corrected or voided (the database keeps these in
+ * menu_entry_history; the local store mirrors the same rule). The version
+ * shows the values as they stood BEFORE the change that replaced them.
+ */
+export interface MenuEntryVersion {
+  id: string;
+  entryId: string;
+  entryDate: string;
+  mealSlot: MealSlot;
+  foodText: string;
+  amountEaten: AmountEaten;
+  note: string;
+  /**
+   * When this version stopped being current — the entry's server-stamped
+   * save time at the moment it was replaced.
+   */
+  versionSavedAt: string;
+  /** Who made the change that replaced this version (id + display name). */
+  replacedBy: string | null;
+  replacedByName: string;
+  /** When the replacing change was written. */
+  replacedAt: string;
+}
+
+/** A voided entry as it stays on the record: the entry plus the voider's name. */
+export interface MenuVoidedEntry extends MenuEntry {
+  voidedByName: string;
+}
+
+/**
+ * The audit read for one Individual's menu record: every preserved prior
+ * version, and every voided entry with its reason and voider. Read-gated
+ * exactly like the entries themselves (auditors included, read-only).
+ */
+export interface MenuEntryHistory {
+  versions: MenuEntryVersion[];
+  voided: MenuVoidedEntry[];
+}
+
 export function mealSlotLabel(slot: string): string {
   return MEAL_SLOT_LABELS[slot as MealSlot] ?? slot;
 }

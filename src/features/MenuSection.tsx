@@ -10,13 +10,17 @@
  * Corrections follow the chart's rule: the author can correct or void their
  * own entry; house managers / PMs / administrators can correct any entry in
  * their scope; a void always needs a reason and keeps the entry on the
- * record. Auditors read everything here and write nothing.
+ * record. The audit trail is readable here too: each corrected entry has a
+ * History expansion with its earlier versions, and the week's voided
+ * entries are listed with their reasons and voiders. Auditors read
+ * everything here and write nothing.
  */
 import { useEffect, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   Download,
+  History,
   Pencil,
   Plus,
   UtensilsCrossed,
@@ -36,6 +40,7 @@ import {
   addDaysIso,
   type AmountEaten,
   type MealSlot,
+  type MenuEntryHistory,
   type MenuEntryView,
 } from "../data/menuRecords";
 import { canEnterMenuEntries } from "../data/permissions";
@@ -51,6 +56,28 @@ interface Draft {
   note: string;
 }
 
+/** "Sep 12, 2026, 1:45 PM" for an ISO timestamp; "" when unparseable. */
+function formatStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** "Sat, Sep 12" for an ISO calendar day (noon-anchored, timezone-safe). */
+function formatDay(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function MenuSection({
   individualId,
   individualName,
@@ -64,6 +91,9 @@ export default function MenuSection({
   const today = centralTodayIso();
   const [weekStart, setWeekStart] = useState(() => weekStartMondayIso(today));
   const [entries, setEntries] = useState<MenuEntryView[] | null>(null);
+  const [history, setHistory] = useState<MenuEntryHistory | null>(null);
+  const [historyOpenFor, setHistoryOpenFor] = useState<string | null>(null);
+  const [voidedOpen, setVoidedOpen] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -73,6 +103,7 @@ export default function MenuSection({
   async function reload(start: string) {
     try {
       setEntries(await api.getMenuEntries(individualId, start, addDaysIso(start, 6)));
+      setHistory(await api.getMenuEntryHistory(individualId));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -81,10 +112,16 @@ export default function MenuSection({
   useEffect(() => {
     let live = true;
     setEntries(null);
+    setHistory(null);
+    setHistoryOpenFor(null);
     api
       .getMenuEntries(individualId, weekStart, addDaysIso(weekStart, 6))
       .then((rows) => live && setEntries(rows))
       .catch((err) => live && setError((err as Error).message));
+    api
+      .getMenuEntryHistory(individualId)
+      .then((rows) => live && setHistory(rows))
+      .catch(() => live && setHistory(null));
     return () => {
       live = false;
     };
@@ -95,6 +132,16 @@ export default function MenuSection({
   const canEnter = canEnterMenuEntries(session.roleKey);
   const grid = entries ? buildMenuWeekGrid(entries, weekStart, today) : [];
   const isCurrentWeek = weekStart === weekStartMondayIso(today);
+  const weekEnd = addDaysIso(weekStart, 6);
+  const versionsByEntry = new Map<string, MenuEntryHistory["versions"]>();
+  for (const version of history?.versions ?? []) {
+    const list = versionsByEntry.get(version.entryId) ?? [];
+    list.push(version);
+    versionsByEntry.set(version.entryId, list);
+  }
+  const voidedThisWeek = (history?.voided ?? []).filter(
+    (row) => row.entryDate >= weekStart && row.entryDate <= weekEnd,
+  );
 
   function openNew(date: string, slot: MealSlot) {
     setError("");
@@ -436,6 +483,38 @@ export default function MenuSection({
                             </button>
                           </span>
                         )}
+                      {(versionsByEntry.get(entry.id) ?? []).length > 0 && (
+                        <div className="menu-entry-history-wrap">
+                          <button
+                            type="button"
+                            className="text-button"
+                            aria-expanded={historyOpenFor === entry.id}
+                            onClick={() =>
+                              setHistoryOpenFor(
+                                historyOpenFor === entry.id ? null : entry.id,
+                              )
+                            }
+                          >
+                            <History size={14} /> History (
+                            {(versionsByEntry.get(entry.id) ?? []).length})
+                          </button>
+                          {historyOpenFor === entry.id &&
+                            (versionsByEntry.get(entry.id) ?? []).map(
+                              (version) => (
+                                <p
+                                  className="menu-history-line"
+                                  key={version.id}
+                                >
+                                  Earlier version: {version.foodText} (
+                                  {amountEatenLabel(version.amountEaten)})
+                                  {version.note ? ` — ${version.note}` : ""} ·
+                                  Saved {formatStamp(version.versionSavedAt)} ·
+                                  Replaced by {version.replacedByName}
+                                </p>
+                              ),
+                            )}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {canEnter && (
@@ -451,6 +530,31 @@ export default function MenuSection({
               ))}
             </div>
           ))}
+        </div>
+      )}
+
+      {entries && history && voidedThisWeek.length > 0 && (
+        <div className="menu-voided">
+          <button
+            type="button"
+            className="text-button"
+            aria-expanded={voidedOpen}
+            onClick={() => setVoidedOpen(!voidedOpen)}
+          >
+            <XCircle size={14} /> Voided this week ({voidedThisWeek.length})
+          </button>
+          {voidedOpen && (
+            <ul className="menu-voided-list">
+              {voidedThisWeek.map((row) => (
+                <li key={row.id}>
+                  <strong>{row.foodText}</strong> (
+                  {amountEatenLabel(row.amountEaten)}) ·{" "}
+                  {mealSlotLabel(row.mealSlot)}, {formatDay(row.entryDate)} ·
+                  Voided by {row.voidedByName}: {row.voidReason}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </section>

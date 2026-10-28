@@ -184,6 +184,9 @@ export interface LocalDatabase {
   // MENU RECORDS: per-Individual food entries. Optional so workspaces saved
   // before menu records existed still load (the API defaults it to []).
   menuEntries?: import("./menuRecords").MenuEntry[];
+  // MENU RECORDS: preserved prior versions, written on each correction or
+  // void (mirrors the hosted menu_entry_history table). Same optionality.
+  menuEntryHistory?: import("./menuRecords").MenuEntryVersion[];
   // ISSUE-75 (alone time) + #76 (MAR dose marks): HM-set unstaffed windows and
   // per-dose MAR check-off statuses that clear the unmarked-overdue due item.
   aloneTimeWindows: import("./types").AloneTimeWindow[];

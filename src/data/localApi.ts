@@ -124,6 +124,8 @@ import {
   MEAL_SLOTS,
   AMOUNT_EATEN_OPTIONS,
   type MenuEntry,
+  type MenuEntryHistory,
+  type MenuEntryVersion,
 } from "./menuRecords";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
@@ -790,6 +792,15 @@ export interface ComplyraApi {
    * saveMenuEntry.
    */
   voidMenuEntry(entryId: string, reason: string): Promise<void>;
+  /**
+   * Menu records — the audit read for one Individual: every preserved
+   * prior version of their entries (written on each correction and void),
+   * plus the voided entries themselves with their reason and voider.
+   * Read-gated exactly like getMenuEntries (auditors included, read-only).
+   */
+  getMenuEntryHistory(
+    individualId: string,
+  ): Promise<import("./menuRecords").MenuEntryHistory>;
   /**
    * Issue #75 + #76 — the site Overview due-items list: typed rows for missing
    * Shift notes and unmarked scheduled meds, plus the counts the hero mirrors.
@@ -5278,6 +5289,40 @@ export class LocalApi implements ComplyraApi {
     return db.menuEntries;
   }
 
+  private menuEntryHistoryRows(): MenuEntryVersion[] {
+    const db = this.store.db as LocalDatabase & {
+      menuEntryHistory?: MenuEntryVersion[];
+    };
+    if (!db.menuEntryHistory) db.menuEntryHistory = [];
+    return db.menuEntryHistory;
+  }
+
+  /**
+   * Preserve the version of an entry that a correction or void is about
+   * to replace — the local mirror of the hosted keep-history trigger,
+   * which fires when any of the content fields or the void state change.
+   * versionSavedAt is the entry's save time BEFORE this change.
+   */
+  private snapshotMenuEntryVersion(
+    existing: MenuEntry,
+    session: SessionUser,
+    replacedAt: string,
+  ) {
+    this.menuEntryHistoryRows().push({
+      id: crypto.randomUUID(),
+      entryId: existing.id,
+      entryDate: existing.entryDate,
+      mealSlot: existing.mealSlot,
+      foodText: existing.foodText,
+      amountEaten: existing.amountEaten,
+      note: existing.note,
+      versionSavedAt: existing.updatedAt,
+      replacedBy: session.userId,
+      replacedByName: session.fullName,
+      replacedAt,
+    });
+  }
+
   async getMenuEntries(individualId: string, from: string, to: string) {
     const session = assertSession(this.store);
     if (!canSeeMenuEntries(session.roleKey)) {
@@ -5331,6 +5376,17 @@ export class LocalApi implements ComplyraApi {
       if (!canEditMenuEntryRow(session.roleKey, session.userId, existing)) {
         throw new Error("You can only edit your own menu entries.");
       }
+      // A correction keeps the version it replaces (the hosted trigger's
+      // rule: snapshot when any content field actually changes).
+      if (
+        existing.entryDate !== input.entryDate ||
+        existing.mealSlot !== input.mealSlot ||
+        existing.foodText !== foodText ||
+        existing.amountEaten !== input.amountEaten ||
+        existing.note !== note
+      ) {
+        this.snapshotMenuEntryVersion(existing, session, now);
+      }
       existing.entryDate = input.entryDate;
       existing.mealSlot = input.mealSlot;
       existing.foodText = foodText;
@@ -5380,11 +5436,49 @@ export class LocalApi implements ComplyraApi {
     const cleanReason = reason.trim().slice(0, 500);
     if (!cleanReason) throw new Error("Give a reason for voiding this entry.");
     const now = new Date().toISOString();
+    // Voiding also preserves the pre-void version, like the hosted trigger.
+    this.snapshotMenuEntryVersion(entry, session, now);
     entry.deletedAt = now;
     entry.voidedBy = session.userId;
     entry.voidReason = cleanReason;
     entry.updatedAt = now;
     await persistMeta(this.store);
+  }
+
+  async getMenuEntryHistory(individualId: string) {
+    const session = assertSession(this.store);
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const versions = this.menuEntryHistoryRows()
+      .filter((row) => {
+        const entry = this.menuEntryRows().find((e) => e.id === row.entryId);
+        return (
+          entry &&
+          entry.agencyId === session.agencyId &&
+          entry.individualId === individualId
+        );
+      })
+      .sort((a, b) => b.replacedAt.localeCompare(a.replacedAt))
+      .map((row) => ({ ...row }));
+    const voided = this.menuEntryRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          row.deletedAt,
+      )
+      .sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? ""))
+      .map((row) => ({
+        ...row,
+        voidedByName: row.voidedBy
+          ? (this.store.db.profiles.find((p) => p.id === row.voidedBy)
+              ?.fullName ?? "Staff member")
+          : "Staff member",
+      }));
+    const history: MenuEntryHistory = { versions, voided };
+    return history;
   }
 
   // ─────────── Issue #75 alone time + #76 MAR marks + due items ───────────

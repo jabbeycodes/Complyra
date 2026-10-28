@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(45);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -149,6 +149,44 @@ select throws_ok($$insert into menu_entries(agency_id,site_id,individual_id,entr
 select throws_ok($$insert into menu_entries(agency_id,site_id,individual_id,entry_date,meal_slot,food_text,amount_eaten,recorded_by)
   values ('a2000000-0000-0000-0000-000000000001','c2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001',current_date,'snack','   ','all','d2000000-0000-0000-0000-000000000002')$$,
   '23514',null,'Blank food text is rejected');
+
+-- ---------------- A void is final; audit fields are server-owned -----------
+-- (Still the DSP. Entry f2000000-…-001 was voided by the DSP above with the
+-- reason 'Recorded twice'; 'Scrambled eggs' is the DSP's live entry.)
+select throws_ok($$update menu_entries set deleted_at=null where id='f2000000-0000-0000-0000-000000000001'$$,
+  'P0001',null,'The author cannot un-void a voided entry');
+select ok((select deleted_at from menu_entries where id='f2000000-0000-0000-0000-000000000001') is not null,
+  'The entry stays voided after the un-void attempt');
+select throws_ok($$update menu_entries set void_reason='Forged reason' where id='f2000000-0000-0000-0000-000000000001'$$,
+  'P0001',null,'The void reason on a voided entry cannot be rewritten');
+select is((select void_reason from menu_entries where id='f2000000-0000-0000-0000-000000000001'),'Recorded twice',
+  'The original void reason survives the rewrite attempt');
+select throws_ok($$update menu_entries set voided_by='d2000000-0000-0000-0000-000000000001' where id='f2000000-0000-0000-0000-000000000001'$$,
+  'P0001',null,'The voider on a voided entry cannot be reassigned');
+select is((select voided_by::text from menu_entries where id='f2000000-0000-0000-0000-000000000001'),'d2000000-0000-0000-0000-000000000002',
+  'The original voider survives the reassignment attempt');
+
+select lives_ok($$update menu_entries set updated_at='2001-01-01 00:00:00+00' where food_text='Scrambled eggs'$$,
+  'A client attempt to backdate updated_at runs');
+select ok((select updated_at from menu_entries where food_text='Scrambled eggs') > timestamptz '2001-01-02 00:00:00+00',
+  'The forged updated_at is never stored — the database clock wins');
+select ok((select version_saved_at from menu_entry_history
+            where entry_id='f2000000-0000-0000-0000-000000000001' and amount_eaten='most')
+          > now() - interval '1 day',
+  'History version_saved_at derives from the server-stamped updated_at');
+
+select throws_ok($$update menu_entries set deleted_at=now(), void_reason='   ' where food_text='Scrambled eggs'$$,
+  'P0001',null,'Voiding without a reason is rejected at the database layer');
+select ok((select deleted_at from menu_entries where food_text='Scrambled eggs') is null,
+  'The entry stays live after the rejected void');
+
+select lives_ok($$insert into menu_entries(agency_id,site_id,individual_id,entry_date,meal_slot,food_text,amount_eaten,recorded_by)
+  values ('a2000000-0000-0000-0000-000000000001','c2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001',current_date,'snack','Void stamp check','all','d2000000-0000-0000-0000-000000000002')$$,
+  'The DSP records an entry for the void-stamp check');
+select lives_ok($$update menu_entries set deleted_at=now(), void_reason='Entered on the wrong chart', voided_by='d2000000-0000-0000-0000-000000000001' where food_text='Void stamp check'$$,
+  'Voiding while naming someone else as the voider runs');
+select is((select voided_by::text from menu_entries where food_text='Void stamp check'),'d2000000-0000-0000-0000-000000000002',
+  'The void is stamped with the actual voider, not the client-named one');
 
 select * from finish();
 rollback;

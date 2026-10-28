@@ -5452,6 +5452,27 @@ th {
   min-height: 32px;
   margin-top: 4px;
 }
+.menu-entry-history-wrap {
+  margin-top: 4px;
+}
+.menu-history-line {
+  font-size: 12px;
+  margin: 4px 0 0;
+  padding-top: 4px;
+  border-top: 1px dashed var(--color-h-e2ded7);
+  overflow-wrap: anywhere;
+}
+.menu-voided {
+  margin-top: 12px;
+}
+.menu-voided-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.menu-voided-list li + li {
+  margin-top: 4px;
+}
 @media (max-width: 720px) {
   .menu-grid-head {
     display: none;
