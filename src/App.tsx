@@ -249,10 +249,14 @@ export default function App() {
     !forceDesktop &&
     (viewMode === "mobile" || (viewMode === "auto" && narrowViewport));
   // The desktop layout is showing in a mobile context when it deep-links
-  // under the mobile pick (forceDesktop) or the viewport is phone-width:
+  // under the mobile pick (forceDesktop), under the mobile pick at desktop
+  // width, or at a phone-width viewport with no explicit pick ("auto"):
   // there the sidebar starts collapsed and the platform bottom navigation
-  // renders (see the app-shell branch below).
-  const inMobileContext = viewMode === "mobile" || narrowViewport;
+  // renders (see the app-shell branch below). An explicit "desktop" pick
+  // is an escape hatch and always wins — at phone width it gets the true
+  // desktop layout, with no mobile context, exactly as picked.
+  const inMobileContext =
+    viewMode === "mobile" || (viewMode === "auto" && narrowViewport);
   // Where the platform bottom navigation should land the shell when the
   // user taps a destination on a desktop-layout page. The shell reads
   // this once at mount; it remounts on every return from a deep link.
