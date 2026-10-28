@@ -127,15 +127,6 @@ test("deep-linked pages lay out at phone width", async ({ page }) => {
   });
   await backHome(page);
 
-  // Supply forecast (Med Count tile).
-  await openTile(page, /Med Count/);
-  await expectNoOverflow(page, "supply forecast");
-  await page.screenshot({
-    path: shot("after-supply-forecast.png"),
-    fullPage: true,
-  });
-  await backHome(page);
-
   // Individuals tile -> person -> desktop chart; the shift-note score
   // table must fit the screen (it was clipped at ~1280px before the pass).
   await page.getByRole("button", { name: /Individuals/ }).first().click();

@@ -9,7 +9,6 @@ import {
   ListTodo,
   LogOut,
   Monitor,
-  Package,
   Pill,
   Search,
   Users,
@@ -54,7 +53,6 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   individuals: Users,
   appointments: CalendarDays,
   checklists: ListChecks,
-  medCount: Package,
 };
 
 const VIEW_TITLES: Partial<Record<ShellView, string>> = {
@@ -259,9 +257,6 @@ export default function MobileShell({
         break;
       case "checklists":
         nav.openPage("Weekly checklist");
-        break;
-      case "medCount":
-        nav.openPage("Supply forecast");
         break;
     }
   };
