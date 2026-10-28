@@ -7888,4 +7888,110 @@ button.qa-row:hover {
 }
 .health-daily-totals p {
   margin: 4px 0;
+/* ===== Phone-width responsive pass (stacked on the mobile shell) =====
+   Layout only, for the desktop pages the mobile tiles deep-link into.
+   Everything below lives inside max-width: 860px, so the desktop
+   experience at 861px and up is unchanged. The MAR and ISP tiles keep
+   their dedicated mobile flows (features/mobile) — this pass covers the
+   pages that open in the desktop layout with the "‹ Mobile home" bar:
+   the Individual chart, the Individuals list controls, and the
+   medication supply forecast page. Feature-owned pages (Appointments,
+   Employee Hub, Weekly checklist) carry their rules in their own CSS. */
+@media (max-width: 860px) {
+  /* --- Individual chart ---------------------------------------------
+     The global `table { white-space: nowrap }` rule makes the shift-note
+     score table size to its longest line; off a scroll container it
+     stretched the whole notes widget past the phone screen and the shell
+     clipped it. Let chart tables wrap, and pin the clinician-note table
+     to fixed columns so task / score / comments stay readable. */
+  .individual-chart table {
+    white-space: normal;
+  }
+  .individual-chart .clinician-note {
+    table-layout: fixed;
+    font-size: 14px;
+  }
+  .individual-chart .clinician-note th,
+  .individual-chart .clinician-note td {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  .individual-chart .clinician-note thead th:nth-child(1) {
+    width: 40%;
+  }
+  .individual-chart .clinician-note thead th:nth-child(2) {
+    width: 18%;
+  }
+  .individual-chart .clinician-note thead th:nth-child(3) {
+    width: 42%;
+  }
+  .individual-chart .isp-notes-list > *,
+  .individual-chart .isp-note-card {
+    min-width: 0;
+  }
+  /* Card titles get their own row instead of being squeezed between the
+     kind pill and the status badge. */
+  .individual-chart .obligation-card > header h3 {
+    flex: 1 1 100%;
+    order: 3;
+  }
+  /* The PRN follow-up block uses a `stack` class that has no desktop
+     definition, so its labels and inputs ran together inline. Stack it. */
+  .individual-chart .stack {
+    display: grid;
+    gap: 10px;
+  }
+  .individual-chart .stack label {
+    display: grid;
+    gap: 4px;
+  }
+  /* Form controls: full-size text (16px stops iOS focus zoom) and
+     44px-class tap targets. */
+  .individual-chart input,
+  .individual-chart select,
+  .individual-chart textarea {
+    font-size: 16px;
+  }
+  .individual-chart .button,
+  .individual-chart .mar-actions button {
+    min-height: 44px;
+  }
+  .individual-chart .overview-form-grid input,
+  .individual-chart .overview-form-grid textarea {
+    font-size: 16px;
+  }
+  /* The shift-note editor's save row stays reachable at the bottom of
+     the long form instead of scrolling away. */
+  .individual-chart .overview-editor-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--sand);
+    padding: 10px 0 2px;
+  }
+  .individual-chart .chart-actions {
+    flex-wrap: wrap;
+  }
+
+  /* --- Individuals list ----------------------------------------------
+     The list controls sit directly above the people grid; give the
+     search field and site picker phone-size text and targets. */
+  .list-controls .input-search input,
+  .list-controls select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  /* --- Medication supply forecast (Med Count tile target) ------------ */
+  [data-tour="med-inventory"] select,
+  [data-tour="med-inventory"] input,
+  [data-tour="med-inventory"] textarea {
+    font-size: 16px;
+  }
+  [data-tour="med-inventory"] select {
+    min-height: 44px;
+  }
+  [data-tour="med-inventory"] .button {
+    min-height: 44px;
+  }
 }

@@ -868,3 +868,39 @@
   color: var(--color-h-7a5a1e);
   font-weight: 700;
 }
+
+/* Phone width (mobile-shell deep link via the Time Clock tile). The
+   global `table { white-space: nowrap }` rule sizes hub tables to their
+   longest line; tables that sit outside a .hub-table-scroll (the payroll
+   settings editors are the visible case) stretched their card past the
+   phone screen and the shell clipped the overflow. Let hub tables wrap
+   and keep cards/forms shrinkable; tables inside .hub-table-scroll stay
+   in their containers. Form text is 16px so iOS does not focus-zoom.
+   Desktop above 860px is untouched. */
+@media (max-width: 860px) {
+  .hub-page table {
+    white-space: normal;
+  }
+  .hub-page .hub-table th,
+  .hub-page .hub-table td {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  .hub-page .hub-card,
+  .hub-page .hub-inline-form,
+  .hub-page .hub-form {
+    min-width: 0;
+  }
+  .hub-page input,
+  .hub-page select,
+  .hub-page textarea {
+    font-size: 16px;
+  }
+  /* A select sizes to its longest option unless capped; one in the pay
+     settings editors ran ~100px past its card. */
+  .hub-page select,
+  .hub-page input {
+    max-width: 100%;
+    min-width: 0;
+  }
+}

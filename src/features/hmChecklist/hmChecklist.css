@@ -167,6 +167,140 @@
   }
 }
 
+/* Phone width (mobile-shell deep link). The item row is a flex row whose
+   prompt has a zero flex basis, so at phone width the Y/N/N-A segment sat
+   beside the prompt and squeezed it into a narrow column; the prompt now
+   takes the first row and the segment drops below it. The service-log
+   rows stack, and the past-weeks table becomes label/value rows instead
+   of a wide table in a scroll box. Desktop above 860px is untouched. */
+@media (max-width: 860px) {
+  .checklist-item-row {
+    flex-wrap: wrap;
+  }
+  .checklist-prompt {
+    flex: 1 1 calc(100% - 38px);
+  }
+  .answer-segment {
+    margin-left: 38px;
+  }
+  .answer-option {
+    min-height: 44px;
+    padding: 10px 18px;
+    font-size: 14px;
+  }
+  .checklist-note {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .service-log-form .input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .service-log-form .form-row > label {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .service-log-list li {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .service-log-list .cell-sub {
+    margin-left: 0;
+    white-space: normal;
+  }
+  [data-tour="hm-checklist"] .button {
+    min-height: 44px;
+  }
+  [data-tour="hm-checklist"] input,
+  [data-tour="hm-checklist"] select,
+  [data-tour="hm-checklist"] textarea {
+    font-size: 16px;
+  }
+  /* Past weeks: stacked label/value rows (labels mirror the headers). */
+  [data-tour="hm-checklist"] .table-scroll {
+    overflow-x: visible;
+  }
+  [data-tour="hm-checklist"] .table-scroll table {
+    white-space: normal;
+  }
+  [data-tour="hm-checklist"] .table-scroll thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody tr {
+    display: block;
+    border: 1px solid var(--color-h-e4ddd2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--color-h-fffdf9);
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    padding: 4px 0;
+    text-align: right;
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td::before {
+    font-weight: 600;
+    color: var(--color-h-5f5145);
+    text-align: left;
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(1)::before {
+    content: "Week";
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(2)::before {
+    content: "Status";
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(3)::before {
+    content: "Due";
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(4)::before {
+    content: "Submitted";
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(5) {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  [data-tour="hm-checklist"] .table-scroll tbody td:nth-child(5)::before {
+    content: none;
+  }
+  /* Sticky sign-and-submit shortcut: the real signature block stays at
+     the foot of the form; this bar (rendered only when the signed-in
+     user can sign an unsubmitted checklist) scrolls it into view. */
+  [data-tour="hm-checklist"] {
+    padding-bottom: 84px;
+  }
+  .checklist-sticky-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: var(--color-h-fffdf9);
+    border-top: 1px solid var(--color-h-e4ddd2);
+  }
+  .checklist-sticky-bar .button {
+    width: 100%;
+    min-height: 48px;
+  }
+}
+
+/* The sticky bar never appears on desktop widths. */
+@media (min-width: 861px) {
+  .checklist-sticky-bar {
+    display: none;
+  }
+}
+
 /* Weekly rollover success banner — solid colors, no gradients. */
 .rollover-notice {
   display: flex;
