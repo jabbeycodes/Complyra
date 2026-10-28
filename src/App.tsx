@@ -46,7 +46,9 @@ import {
   Trophy,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
-import MobileShell from "./features/mobile/MobileShell";
+import MobileShell, { type ShellView } from "./features/mobile/MobileShell";
+import PlatformBottomNav from "./features/mobile/PlatformBottomNav";
+import type { BottomNavId } from "./features/mobile/bottomNav";
 import "./features/mobile/mobile.css";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
@@ -246,6 +248,33 @@ export default function App() {
   const mobileActive =
     !forceDesktop &&
     (viewMode === "mobile" || (viewMode === "auto" && narrowViewport));
+  // The desktop layout is showing in a mobile context when it deep-links
+  // under the mobile pick (forceDesktop) or the viewport is phone-width:
+  // there the sidebar starts collapsed and the platform bottom navigation
+  // renders (see the app-shell branch below).
+  const inMobileContext = viewMode === "mobile" || narrowViewport;
+  // Where the platform bottom navigation should land the shell when the
+  // user taps a destination on a desktop-layout page. The shell reads
+  // this once at mount; it remounts on every return from a deep link.
+  const [shellStart, setShellStart] = useState<{
+    view: ShellView;
+    sheet: boolean;
+  }>({ view: "home", sheet: false });
+  const goShellDestination = (id: BottomNavId) => {
+    setShellStart({
+      view:
+        id === "tasks"
+          ? "tasks"
+          : id === "meds"
+            ? "mar"
+            : id === "people"
+              ? "people"
+              : "home",
+      sheet: id === "more",
+    });
+    if (viewMode === "desktop") pickViewMode("mobile");
+    else setForceDesktop(false);
+  };
   const [tourOpen, setTourOpen] = useState(false);
   const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -779,6 +808,8 @@ export default function App() {
           queueItems={personalItems}
           onSignOut={() => void signOut()}
           onDesktopView={() => pickViewMode("desktop")}
+          startView={shellStart.view}
+          startSheetOpen={shellStart.sheet}
           nav={{
             openPage: (next) => {
               setForceDesktop(true);
@@ -799,7 +830,7 @@ export default function App() {
   }
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
-    <div className="app-shell">
+    <div className={`app-shell${inMobileContext ? " mobile-context" : ""}`}>
       {mobileOpen && (
         <button
           className="mobile-backdrop"
@@ -931,7 +962,10 @@ export default function App() {
         {forceDesktop && (viewMode === "mobile" || narrowViewport) && (
           <button
             className="mobile-return-bar"
-            onClick={() => setForceDesktop(false)}
+            onClick={() => {
+              setShellStart({ view: "home", sheet: false });
+              setForceDesktop(false);
+            }}
           >
             ‹ Mobile home
           </button>
@@ -2716,6 +2750,33 @@ export default function App() {
           />
         </Modal>
       )}
+      {/* Platform bottom navigation (mobile context only): the same
+          role-gated pill the shell carries, across the regular pages.
+          Hidden on the Weekly checklist — its own sticky sign-&-submit
+          bar owns the bottom there — and whenever a dialog is open, so
+          it can never cover a save action. */}
+      {inMobileContext &&
+        page !== "Weekly checklist" &&
+        modal === null &&
+        confirm === null &&
+        editDraft === null &&
+        plan === null &&
+        packet === null &&
+        certStaff === null &&
+        !tourOpen && (
+          <PlatformBottomNav
+            session={session}
+            queueCount={personalItems.length}
+            activeId={
+              page === "Individuals" || page === "Individual chart"
+                ? "people"
+                : page === "Overview"
+                  ? "home"
+                  : null
+            }
+            onDestination={goShellDestination}
+          />
+        )}
     </div>
     </InactivityGuard>
   );

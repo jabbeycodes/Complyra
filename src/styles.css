@@ -7995,3 +7995,55 @@ button.qa-row:hover {
     min-height: 44px;
   }
 }
+
+/* ===== Mobile context: collapsed sidebar + room for the bottom nav =====
+   The app shell carries .mobile-context when the desktop layout shows in
+   a mobile context (phone-width viewport, or a deep-linked page under
+   the persisted mobile-view pick). The sidebar then starts COLLAPSED as
+   an overlay drawer at any width — the topbar menu button opens it, the
+   backdrop or its close button dismisses it — and the main column takes
+   the full width. Outside .mobile-context nothing here applies, so the
+   desktop default (sidebar docked at --sidebar wide) is untouched. The
+   drawer's open state is session-only React state and is never
+   persisted, so this default cannot overwrite a desktop preference. */
+.app-shell.mobile-context {
+  --sidebar: 0px;
+}
+.app-shell.mobile-context .sidebar {
+  width: min(320px, 88vw);
+  transform: translateX(-100%);
+  transition: transform 0.2s;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left));
+}
+.app-shell.mobile-context .sidebar.mobile-open {
+  transform: translateX(0);
+}
+.app-shell.mobile-context .sidebar .brand {
+  padding-right: 48px;
+}
+.app-shell.mobile-context .sidebar-close {
+  display: inline-flex;
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 10px;
+  min-width: 44px;
+  min-height: 44px;
+  z-index: 1;
+}
+.app-shell.mobile-context .mobile-menu {
+  display: inline-flex;
+}
+.app-shell.mobile-context .mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-h-5f514540);
+  z-index: 34;
+  backdrop-filter: blur(2px);
+}
+.app-shell.mobile-context .main-shell {
+  margin-left: 0;
+  /* Room for the floating bottom navigation: content never sits under it. */
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+}
