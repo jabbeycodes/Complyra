@@ -140,12 +140,25 @@ test("mapMedication and mapMedicationDelivery", () => {
     id: "d-1",
     medication_id: "m-1",
     counted_on: "2026-09-01",
+    created_at: "2026-09-01T13:00:00.000Z",
     remaining_pills: 28,
     pills_per_day: 1,
     recorded_by: "u-1",
   });
   assert.equal(delivery.countedOn, "2026-09-01");
+  // The row's created_at becomes the count's recorded timestamp.
+  assert.equal(delivery.countedAt, "2026-09-01T13:00:00.000Z");
   assert.equal(delivery.recordedBy, "u-1");
+  // A row without created_at maps to a legacy (timestamp-less) count.
+  const legacy = mapMedicationDelivery({
+    id: "d-2",
+    medication_id: "m-1",
+    counted_on: "2026-08-01",
+    remaining_pills: 10,
+    pills_per_day: 1,
+    recorded_by: "u-1",
+  });
+  assert.equal(legacy.countedAt, null);
 });
 
 test("mapTrainingChecklist parses jsonb items", () => {

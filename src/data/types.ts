@@ -873,6 +873,8 @@ export interface MedInventoryProjection {
 export interface MedDeliverySummary {
   id: string;
   countedOn: string;
+  /** ISO timestamp the count was recorded; null on legacy (pre-timestamp) rows. */
+  countedAt: string | null;
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;

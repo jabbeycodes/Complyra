@@ -200,6 +200,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
       .map((row) => ({
         id: row.id,
         countedOn: row.countedOn,
+        countedAt: row.countedAt ?? null,
         remainingPills: row.remainingPills,
         pillsPerDay: row.pillsPerDay,
         recordedBy: row.recordedBy,

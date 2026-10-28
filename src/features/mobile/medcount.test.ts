@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { MedDoseMark, MedInventoryView } from "../../data/types";
-import { computeMedCountdown, medCountdown } from "./medcount";
+import {
+  centralWallTimeMs,
+  computeMedCountdown,
+  medCountdown,
+} from "./medcount";
 
 const TODAY = "2026-09-12";
 
@@ -10,16 +14,42 @@ function scheduled(
 ): Parameters<typeof computeMedCountdown>[0] {
   return {
     kind: "scheduled",
-    baseline: { countedOn: "2026-09-01", pills: 28 },
+    // Counted at the very start of Sep 1 Central (05:00Z = 00:00 CDT):
+    // every dose later that day is after the baseline moment.
+    baseline: {
+      countedOn: "2026-09-01",
+      countedAt: "2026-09-01T05:00:00.000Z",
+      pills: 28,
+    },
     dosesPerDay: 2,
     doseTimesCount: 2,
-    givenDoseDates: [],
+    givenDoses: [],
     wasted: [],
     prnCurrentCount: null,
     today: TODAY,
     ...partial,
   };
 }
+
+function given(date: string, time = "08:00") {
+  return { date, time };
+}
+
+test("centralWallTimeMs reads wall time in Central across DST", () => {
+  // September is CDT (UTC-5); January is CST (UTC-6).
+  assert.equal(
+    new Date(centralWallTimeMs("2026-09-12", "08:00")).toISOString(),
+    "2026-09-12T13:00:00.000Z",
+  );
+  assert.equal(
+    new Date(centralWallTimeMs("2026-09-12", "20:00")).toISOString(),
+    "2026-09-13T01:00:00.000Z",
+  );
+  assert.equal(
+    new Date(centralWallTimeMs("2026-01-15", "08:00")).toISOString(),
+    "2026-01-15T14:00:00.000Z",
+  );
+});
 
 test("no baseline: the countdown invents no number", () => {
   const result = computeMedCountdown(scheduled({ baseline: null }));
@@ -41,7 +71,12 @@ test("baseline with no use since: full count, days floored at the daily rate", (
 test("given doses after the baseline burn one dose's pills each", () => {
   const result = computeMedCountdown(
     scheduled({
-      givenDoseDates: ["2026-09-02", "2026-09-02", "2026-09-05", "2026-09-12"],
+      givenDoses: [
+        given("2026-09-02"),
+        given("2026-09-02", "20:00"),
+        given("2026-09-05"),
+        given("2026-09-12"),
+      ],
     }),
   );
   // 4 given × (2 per day ÷ 2 dose times) = 4 pills.
@@ -50,33 +85,112 @@ test("given doses after the baseline burn one dose's pills each", () => {
   assert.equal(result.label, "24 pills left · about 12 days at 2 per day");
 });
 
-test("the baseline day itself never burns, and future dates never count", () => {
+test("the reviewer's case: a morning count burns that evening's dose, not the dose already given", () => {
+  // Refill counted at 08:00 Central (13:00Z). The 08:00 dose's moment is
+  // the count moment itself — not strictly after — so it does not burn;
+  // the 20:00 dose that evening does.
   const result = computeMedCountdown(
     scheduled({
-      givenDoseDates: ["2026-09-01", "2026-09-01", "2026-09-13"],
-      wasted: [{ occurredOn: "2026-09-01", pills: 3 }],
+      baseline: {
+        countedOn: "2026-09-12",
+        countedAt: "2026-09-12T13:00:00.000Z",
+        pills: 28,
+      },
+      givenDoses: [given("2026-09-12", "08:00"), given("2026-09-12", "20:00")],
+    }),
+  );
+  assert.equal(result.pillsLeft, 27);
+  assert.equal(result.daysLeft, 13);
+});
+
+test("a midday count does not burn the morning's dose; the next day burns as before", () => {
+  const baseline = {
+    countedOn: "2026-09-12",
+    countedAt: "2026-09-12T17:00:00.000Z", // 12:00 CDT
+    pills: 28,
+  };
+  const sameDay = computeMedCountdown(
+    scheduled({ baseline, givenDoses: [given("2026-09-12", "08:00")] }),
+  );
+  assert.equal(sameDay.pillsLeft, 28);
+  const nextDay = computeMedCountdown(
+    scheduled({
+      baseline,
+      today: "2026-09-13",
+      givenDoses: [given("2026-09-12", "08:00"), given("2026-09-13", "08:00")],
+    }),
+  );
+  assert.equal(nextDay.pillsLeft, 27);
+});
+
+test("legacy baselines (no count timestamp) keep the old rule: the counted day never burns", () => {
+  const baseline = { countedOn: "2026-09-01", countedAt: null, pills: 28 };
+  const result = computeMedCountdown(
+    scheduled({
+      baseline,
+      givenDoses: [given("2026-09-01", "08:00"), given("2026-09-01", "20:00")],
+      wasted: [{ recordedAt: "2026-09-01T18:00:00.000Z", pills: 3 }],
     }),
   );
   assert.equal(result.pillsLeft, 28);
+  // …but the day after a legacy count burns exactly as it always did.
+  const nextDay = computeMedCountdown(
+    scheduled({ baseline, givenDoses: [given("2026-09-02", "08:00")] }),
+  );
+  assert.equal(nextDay.pillsLeft, 27);
+});
+
+test("future-dated doses never burn", () => {
+  const result = computeMedCountdown(
+    scheduled({ givenDoses: [given("2026-09-13", "08:00")] }),
+  );
+  assert.equal(result.pillsLeft, 28);
+});
+
+test("wasted burns only when recorded after the count moment", () => {
+  const result = computeMedCountdown(
+    scheduled({
+      baseline: {
+        countedOn: "2026-09-12",
+        countedAt: "2026-09-12T17:00:00.000Z", // counted at noon Central
+        pills: 28,
+      },
+      wasted: [
+        // Recorded 09:00 Central — before the count: already reflected.
+        { recordedAt: "2026-09-12T14:00:00.000Z", pills: 2 },
+        // Recorded 14:00 Central — after the count: burns.
+        { recordedAt: "2026-09-12T19:00:00.000Z", pills: 3 },
+      ],
+    }),
+  );
+  assert.equal(result.pillsLeft, 25);
 });
 
 test("marks before the baseline are excluded (a newer count restarts)", () => {
   const result = computeMedCountdown(
     scheduled({
-      baseline: { countedOn: "2026-09-10", pills: 40 },
-      givenDoseDates: ["2026-09-02", "2026-09-09", "2026-09-11"],
+      baseline: {
+        countedOn: "2026-09-10",
+        countedAt: "2026-09-10T05:00:00.000Z",
+        pills: 40,
+      },
+      givenDoses: [
+        given("2026-09-02"),
+        given("2026-09-09"),
+        given("2026-09-11"),
+      ],
     }),
   );
   assert.equal(result.pillsLeft, 39);
   assert.equal(result.daysLeft, 19);
 });
 
-test("wasted exceptions subtract their pills; the window applies to them too", () => {
+test("wasted exceptions subtract their pills; the moment rule applies to them too", () => {
   const result = computeMedCountdown(
     scheduled({
       wasted: [
-        { occurredOn: "2026-09-03", pills: 2 },
-        { occurredOn: "2026-08-30", pills: 5 },
+        { recordedAt: "2026-09-03T13:00:00.000Z", pills: 2 },
+        { recordedAt: "2026-08-30T13:00:00.000Z", pills: 5 },
       ],
     }),
   );
@@ -86,10 +200,14 @@ test("wasted exceptions subtract their pills; the window applies to them too", (
 test("multi-pill doses: pills per dose = daily pills ÷ dose times", () => {
   const result = computeMedCountdown(
     scheduled({
-      baseline: { countedOn: "2026-09-10", pills: 30 },
+      baseline: {
+        countedOn: "2026-09-10",
+        countedAt: "2026-09-10T05:00:00.000Z",
+        pills: 30,
+      },
       dosesPerDay: 4,
       doseTimesCount: 2,
-      givenDoseDates: ["2026-09-11"],
+      givenDoses: [given("2026-09-11")],
     }),
   );
   // One given dose at 2 pills per dose.
@@ -101,10 +219,14 @@ test("multi-pill doses: pills per dose = daily pills ÷ dose times", () => {
 test("fractional doses (half tablets) stay exact", () => {
   const result = computeMedCountdown(
     scheduled({
-      baseline: { countedOn: "2026-09-10", pills: 10 },
+      baseline: {
+        countedOn: "2026-09-10",
+        countedAt: "2026-09-10T05:00:00.000Z",
+        pills: 10,
+      },
       dosesPerDay: 3,
       doseTimesCount: 2,
-      givenDoseDates: ["2026-09-11"],
+      givenDoses: [given("2026-09-11")],
     }),
   );
   assert.equal(result.pillsLeft, 8.5);
@@ -114,7 +236,13 @@ test("fractional doses (half tablets) stay exact", () => {
 
 test("day projection floors, never rounds up", () => {
   const result = computeMedCountdown(
-    scheduled({ baseline: { countedOn: "2026-09-10", pills: 23 } }),
+    scheduled({
+      baseline: {
+        countedOn: "2026-09-10",
+        countedAt: "2026-09-10T05:00:00.000Z",
+        pills: 23,
+      },
+    }),
   );
   assert.equal(result.daysLeft, 11);
   assert.equal(result.label, "23 pills left · about 11 days at 2 per day");
@@ -123,8 +251,17 @@ test("day projection floors, never rounds up", () => {
 test("the count floors at zero and says so", () => {
   const result = computeMedCountdown(
     scheduled({
-      baseline: { countedOn: "2026-09-01", pills: 2 },
-      givenDoseDates: ["2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"],
+      baseline: {
+        countedOn: "2026-09-01",
+        countedAt: "2026-09-01T05:00:00.000Z",
+        pills: 2,
+      },
+      givenDoses: [
+        given("2026-09-02"),
+        given("2026-09-03"),
+        given("2026-09-04"),
+        given("2026-09-05"),
+      ],
     }),
   );
   assert.equal(result.pillsLeft, 0);
@@ -135,13 +272,23 @@ test("the count floors at zero and says so", () => {
 test("singular wording for one pill and one day", () => {
   const result = computeMedCountdown(
     scheduled({
-      baseline: { countedOn: "2026-09-11", pills: 3 },
-      givenDoseDates: ["2026-09-12", "2026-09-12"],
+      baseline: {
+        countedOn: "2026-09-11",
+        countedAt: "2026-09-11T05:00:00.000Z",
+        pills: 3,
+      },
+      givenDoses: [given("2026-09-12", "08:00"), given("2026-09-12", "20:00")],
     }),
   );
   assert.equal(result.label, "1 pill left · about 0 days at 2 per day");
   const oneDay = computeMedCountdown(
-    scheduled({ baseline: { countedOn: "2026-09-11", pills: 2 } }),
+    scheduled({
+      baseline: {
+        countedOn: "2026-09-11",
+        countedAt: "2026-09-11T05:00:00.000Z",
+        pills: 2,
+      },
+    }),
   );
   assert.equal(oneDay.label, "2 pills left · about 1 day at 2 per day");
 });
@@ -149,10 +296,14 @@ test("singular wording for one pill and one day", () => {
 test("PRN: pills from the projection count, no day projection, no rate", () => {
   const result = computeMedCountdown({
     kind: "prn",
-    baseline: { countedOn: "2026-09-08", pills: 12 },
+    baseline: {
+      countedOn: "2026-09-08",
+      countedAt: "2026-09-08T05:00:00.000Z",
+      pills: 12,
+    },
     dosesPerDay: 0,
     doseTimesCount: 0,
-    givenDoseDates: [],
+    givenDoses: [],
     wasted: [],
     prnCurrentCount: 11,
     today: TODAY,
@@ -166,11 +317,15 @@ test("PRN: pills from the projection count, no day projection, no rate", () => {
 test("PRN without a projection count falls back to baseline minus wasted", () => {
   const result = computeMedCountdown({
     kind: "prn",
-    baseline: { countedOn: "2026-09-08", pills: 12 },
+    baseline: {
+      countedOn: "2026-09-08",
+      countedAt: "2026-09-08T05:00:00.000Z",
+      pills: 12,
+    },
     dosesPerDay: 0,
     doseTimesCount: 0,
-    givenDoseDates: [],
-    wasted: [{ occurredOn: "2026-09-09", pills: 2 }],
+    givenDoses: [],
+    wasted: [{ recordedAt: "2026-09-09T13:00:00.000Z", pills: 2 }],
     prnCurrentCount: null,
     today: TODAY,
   });
@@ -235,8 +390,8 @@ test("compute: a maintained count never burns, whatever the window holds", () =>
   const result = computeMedCountdown(
     scheduled({
       maintainedCount: true,
-      givenDoseDates: ["2026-09-05", "2026-09-12"],
-      wasted: [{ occurredOn: "2026-09-06", pills: 4 }],
+      givenDoses: [given("2026-09-05"), given("2026-09-12")],
+      wasted: [{ recordedAt: "2026-09-06T13:00:00.000Z", pills: 4 }],
     }),
   );
   assert.equal(result.pillsLeft, 28);
@@ -252,6 +407,7 @@ test("adapter: the newest delivery row is the baseline when one exists", () => {
       {
         id: "del-1",
         countedOn: "2026-09-10",
+        countedAt: "2026-09-10T13:00:00.000Z",
         remainingPills: 40,
         pillsPerDay: 2,
         recordedBy: "Sarah Mitchell",
@@ -265,12 +421,39 @@ test("adapter: the newest delivery row is the baseline when one exists", () => {
   assert.equal(burned.pillsLeft, 39);
 });
 
+test("adapter: of two counts on one day, the later-recorded is the baseline", () => {
+  const view = inventory({
+    deliveries: [
+      {
+        id: "del-early",
+        countedOn: "2026-09-12",
+        countedAt: "2026-09-12T13:00:00.000Z",
+        remainingPills: 28,
+        pillsPerDay: 2,
+        recordedBy: "Sarah Mitchell",
+      },
+      {
+        id: "del-late",
+        countedOn: "2026-09-12",
+        countedAt: "2026-09-12T22:00:00.000Z",
+        remainingPills: 30,
+        pillsPerDay: 2,
+        recordedBy: "Sarah Mitchell",
+      },
+    ],
+  });
+  const result = medCountdown(view, [], TODAY);
+  assert.equal(result.pillsLeft, 30);
+});
+
 const DELIVERY_BASELINE = {
   lastCountedOn: "2026-09-01",
   deliveries: [
     {
       id: "del-1",
       countedOn: "2026-09-01",
+      // Legacy row: no count timestamp, so the counted day never burns.
+      countedAt: null,
       remainingPills: 28,
       pillsPerDay: 2,
       recordedBy: "Sarah Mitchell",

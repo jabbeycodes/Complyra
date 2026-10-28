@@ -38,6 +38,14 @@ export interface MedicationDelivery {
   id: string;
   medicationId: string;
   countedOn: string;
+  /**
+   * ISO timestamp of the moment the count was recorded — the countdown
+   * baseline's effective moment (doses after it burn; see medcount.ts).
+   * Hosted rows carry the table's created_at; local rows are stamped at
+   * write time. Absent/null on rows written before count timestamps
+   * existed (legacy rows — the countdown treats them as end-of-day).
+   */
+  countedAt?: string | null;
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;
