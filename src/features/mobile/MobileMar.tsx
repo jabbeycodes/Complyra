@@ -8,7 +8,12 @@ import type {
   MedInventoryView,
   SessionUser,
 } from "../../data/types";
-import { canLogDoseException, canLogPrnDose } from "../../data/chart";
+import {
+  canLogDoseException,
+  canLogPrnDose,
+  canRecordDelivery,
+} from "../../data/chart";
+import { medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
 import {
@@ -308,6 +313,160 @@ function AdministerForm({
   );
 }
 
+/**
+ * The per-medication supply countdown line. Roles that may record counts
+ * (canRecordDelivery) get it as a button — tapping it opens the refill
+ * count form; everyone else sees the same text read-only, with no
+ * disabled fake button.
+ */
+function CountdownLine({
+  countdown,
+  canReset,
+  onReset,
+}: {
+  countdown: MedCountdown;
+  canReset: boolean;
+  onReset: () => void;
+}) {
+  if (canReset) {
+    return (
+      <button
+        type="button"
+        className="msh-count-button"
+        onClick={onReset}
+        aria-label={`${countdown.label}. Record a refill count`}
+      >
+        <span className="msh-count-main">{countdown.label}</span>
+        <span className="msh-count-sub">
+          {countdown.countedLabel ? `${countdown.countedLabel} · ` : ""}
+          Tap to record a refill count
+        </span>
+      </button>
+    );
+  }
+  return (
+    <p className="msh-count-text">
+      <span className="msh-count-main">{countdown.label}</span>
+      {countdown.countedLabel && (
+        <span className="msh-count-sub">{countdown.countedLabel}</span>
+      )}
+    </p>
+  );
+}
+
+function RefillCountForm({
+  api,
+  med,
+  countdown,
+  onDone,
+  onCancel,
+}: {
+  api: ComplyraApi;
+  med: MedInventoryView;
+  countdown: MedCountdown;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [pillsText, setPillsText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const pills = Number(pillsText);
+  const valid =
+    pillsText.trim() !== "" &&
+    Number.isInteger(pills) &&
+    pills >= 0 &&
+    !busy;
+
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      // A refill reset IS a delivery/count record: today's counted pills
+      // become the new countdown baseline, audited with the recorder.
+      await api.recordMedDelivery({
+        medicationId: med.medicationId,
+        remainingPills: pills,
+        pillsPerDay: med.kind === "prn" ? 0 : med.dosesPerDay,
+        countedOn: centralTodayIso(),
+      });
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      className="msh-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) void submit();
+      }}
+    >
+      <h3 className="msh-form-title">
+        {med.medicationName} {med.strength}
+      </h3>
+      <p className="msh-form-sub">Refill count · supply restarts from today</p>
+
+      <dl className="msh-dl">
+        <div>
+          <dt>Countdown now</dt>
+          <dd>{countdown.label}</dd>
+        </div>
+        <div>
+          <dt>Last count</dt>
+          <dd>{countdown.countedLabel ?? "No count recorded yet"}</dd>
+        </div>
+      </dl>
+
+      <label className="msh-field">
+        <span>Pills now on hand</span>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={pillsText}
+          onChange={(event) => setPillsText(event.target.value)}
+          placeholder="Count the bottle"
+          autoFocus
+        />
+      </label>
+      <p className="msh-section-note">
+        Saving records this count with your name and today's date (Central)
+        and restarts the countdown from it.
+      </p>
+
+      {med.deliveries.length > 0 && (
+        <div className="msh-form-history">
+          <h4>Recent counts</h4>
+          {med.deliveries.slice(0, 3).map((delivery) => (
+            <p key={delivery.id}>
+              {delivery.countedOn} — {delivery.remainingPills} pills counted ·
+              recorded by {delivery.recordedBy}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <p className="msh-alert" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="msh-form-actions">
+        <button type="button" className="msh-button secondary" onClick={onCancel}>
+          Back
+        </button>
+        <button type="submit" className="msh-button primary" disabled={!valid}>
+          {busy ? "Saving…" : "Save count"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function MobileMar({
   api,
   session,
@@ -325,8 +484,10 @@ export default function MobileMar({
   const [tab, setTab] = useState<MarTab>("scheduled");
   const [passTime, setPassTime] = useState<string | null>(null);
   const [administer, setAdminister] = useState<MarPassMed | null>(null);
+  const [refillMed, setRefillMed] = useState<MedInventoryView | null>(null);
   const [inventory, setInventory] = useState<MedInventoryView[]>([]);
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
+  const [marksRange, setMarksRange] = useState<MedDoseMark[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [prnBusy, setPrnBusy] = useState("");
@@ -334,6 +495,7 @@ export default function MobileMar({
   const person = people.find((row) => row.id === personId) ?? null;
   const canMark = canLogDoseException(session.roleKey);
   const canPrn = canLogPrnDose(session.roleKey);
+  const canReset = canRecordDelivery(session.roleKey);
 
   const reload = useCallback(async () => {
     if (!personId) return;
@@ -346,16 +508,40 @@ export default function MobileMar({
       ]);
       setInventory(nextInventory);
       setMarks(nextMarks);
+      // The countdown burns down from each med's count baseline, so it
+      // needs Given marks from the earliest baseline through Central
+      // today — one range read, not a call per day.
+      const baselines = nextInventory
+        .map((view) => (view.lastCountedOn ?? view.deliveredOn ?? todayIso).slice(0, 10))
+        .sort();
+      const earliest = baselines[0] ?? todayIso;
+      try {
+        setMarksRange(
+          await api.getMedDoseMarksInRange(personId, earliest, todayIso),
+        );
+      } catch {
+        setMarksRange([]);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [api, personId, dateIso]);
+  }, [api, personId, dateIso, todayIso]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Countdowns are always "as of Central today", whatever day the MAR is
+  // browsing — supply is a now-fact, not a per-day one.
+  const countdowns = useMemo(() => {
+    const map = new Map<string, MedCountdown>();
+    for (const view of inventory) {
+      map.set(view.medicationId, medCountdown(view, marksRange, todayIso));
+    }
+    return map;
+  }, [inventory, marksRange, todayIso]);
 
   const passes = useMemo(
     () => groupPasses(inventory, marks),
@@ -388,6 +574,7 @@ export default function MobileMar({
             setPersonId(row.id);
             setPassTime(null);
             setAdminister(null);
+            setRefillMed(null);
           }}
         />
       </div>
@@ -403,6 +590,7 @@ export default function MobileMar({
           setPersonId(null);
           setPassTime(null);
           setAdminister(null);
+          setRefillMed(null);
         }}
       >
         ‹ All Individuals
@@ -431,6 +619,7 @@ export default function MobileMar({
             setDateIso((value) => shiftIsoDate(value, -1));
             setPassTime(null);
             setAdminister(null);
+            setRefillMed(null);
           }}
         >
           <ChevronLeft size={22} />
@@ -447,6 +636,7 @@ export default function MobileMar({
             setDateIso((value) => shiftIsoDate(value, 1));
             setPassTime(null);
             setAdminister(null);
+            setRefillMed(null);
           }}
         >
           <ChevronRight size={22} />
@@ -459,6 +649,7 @@ export default function MobileMar({
               setDateIso(todayIso);
               setPassTime(null);
               setAdminister(null);
+              setRefillMed(null);
             }}
           >
             Today
@@ -473,7 +664,7 @@ export default function MobileMar({
       )}
       {loading && <p className="msh-empty">Loading medications…</p>}
 
-      {!administer && !activePass && tab === "scheduled" && !loading && (
+      {!administer && !refillMed && !activePass && tab === "scheduled" && !loading && (
         <div className="msh-list">
           {passes.length === 0 && (
             <p className="msh-empty">No scheduled medications this day.</p>
@@ -500,7 +691,7 @@ export default function MobileMar({
         </div>
       )}
 
-      {!administer && activePass && tab === "scheduled" && (
+      {!administer && !refillMed && activePass && tab === "scheduled" && (
         <div>
           <button
             type="button"
@@ -516,32 +707,44 @@ export default function MobileMar({
           <div className="msh-list">
             {activePass.meds.map((med) => {
               const tappable = !med.mark && canMark;
+              const countdown = countdowns.get(med.inventory.medicationId);
               return (
-                <button
+                <div
                   key={`${med.inventory.medicationId}-${activePass.doseTime}`}
-                  type="button"
-                  className="msh-row"
-                  disabled={!tappable}
-                  onClick={() => tappable && setAdminister(med)}
+                  className="msh-row msh-med-row"
                 >
-                  <span className="msh-med-thumb" aria-hidden="true">
-                    <Pill size={22} />
-                  </span>
-                  <span className="msh-row-main">
-                    <strong>
-                      {med.inventory.medicationName} {med.inventory.strength}
-                    </strong>
-                    <small>{frequencyText(med.inventory.doseTimes)}</small>
-                    <small className="msh-status-text">
-                      {doseStatusText(med.mark)}
-                    </small>
-                  </span>
-                  {tappable && (
-                    <span className="msh-chevron" aria-hidden="true">
-                      ›
+                  <button
+                    type="button"
+                    className="msh-med-main"
+                    disabled={!tappable}
+                    onClick={() => tappable && setAdminister(med)}
+                  >
+                    <span className="msh-med-thumb" aria-hidden="true">
+                      <Pill size={22} />
                     </span>
+                    <span className="msh-row-main">
+                      <strong>
+                        {med.inventory.medicationName} {med.inventory.strength}
+                      </strong>
+                      <small>{frequencyText(med.inventory.doseTimes)}</small>
+                      <small className="msh-status-text">
+                        {doseStatusText(med.mark)}
+                      </small>
+                    </span>
+                    {tappable && (
+                      <span className="msh-chevron" aria-hidden="true">
+                        ›
+                      </span>
+                    )}
+                  </button>
+                  {countdown && (
+                    <CountdownLine
+                      countdown={countdown}
+                      canReset={canReset}
+                      onReset={() => setRefillMed(med.inventory)}
+                    />
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -569,27 +772,44 @@ export default function MobileMar({
         />
       )}
 
-      {!administer && tab === "prn" && (
+      {refillMed && (
+        <RefillCountForm
+          api={api}
+          med={refillMed}
+          countdown={
+            countdowns.get(refillMed.medicationId) ??
+            medCountdown(refillMed, marksRange, todayIso)
+          }
+          onCancel={() => setRefillMed(null)}
+          onDone={() => {
+            setRefillMed(null);
+            void reload();
+          }}
+        />
+      )}
+
+      {!administer && !refillMed && tab === "prn" && (
         <div className="msh-list">
           {prnMeds.length === 0 && (
             <p className="msh-empty">No PRN medications for {person.name}.</p>
           )}
           {prnMeds.map((item) => (
-            <div key={item.medicationId} className="msh-row static">
-              <span className="msh-med-thumb" aria-hidden="true">
-                <Pill size={22} />
-              </span>
-              <span className="msh-row-main">
-                <strong>
-                  {item.medicationName} {item.strength}
-                </strong>
-                <small>As needed (PRN)</small>
-                <small>
-                  {item.prnDosesSinceDelivery} dose
-                  {item.prnDosesSinceDelivery === 1 ? "" : "s"} logged since the
-                  last delivery count · {item.currentCount} on hand
-                </small>
-              </span>
+            <div key={item.medicationId} className="msh-row static msh-med-row">
+              <div className="msh-med-line">
+                <span className="msh-med-thumb" aria-hidden="true">
+                  <Pill size={22} />
+                </span>
+                <span className="msh-row-main">
+                  <strong>
+                    {item.medicationName} {item.strength}
+                  </strong>
+                  <small>As needed (PRN)</small>
+                  <small>
+                    {item.prnDosesSinceDelivery} dose
+                    {item.prnDosesSinceDelivery === 1 ? "" : "s"} logged since
+                    the last delivery count
+                  </small>
+                </span>
               {canPrn && (
                 <button
                   type="button"
@@ -611,12 +831,20 @@ export default function MobileMar({
                   {prnBusy === item.medicationId ? "Logging…" : "Log dose"}
                 </button>
               )}
+              </div>
+              {countdowns.get(item.medicationId) && (
+                <CountdownLine
+                  countdown={countdowns.get(item.medicationId)!}
+                  canReset={canReset}
+                  onReset={() => setRefillMed(item)}
+                />
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {!administer && tab === "other" && (
+      {!administer && !refillMed && tab === "other" && (
         <div className="msh-list">
           {otherMarks.length === 0 && otherExceptions.length === 0 && (
             <p className="msh-empty">
@@ -672,6 +900,7 @@ export default function MobileMar({
             onClick={() => {
               setTab(value);
               setAdminister(null);
+              setRefillMed(null);
             }}
           >
             {label}

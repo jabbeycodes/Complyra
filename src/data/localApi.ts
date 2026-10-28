@@ -790,6 +790,14 @@ export interface ComplyraApi {
     individualId: string,
     doseDate: string,
   ): Promise<import("./types").MedDoseMark[]>;
+  /** MAR check-off marks for one Individual across an inclusive date range
+   * (used by the mobile med-count countdown to burn down from a count
+   * baseline). Sorted by date, then dose time. */
+  getMedDoseMarksInRange(
+    individualId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<import("./types").MedDoseMark[]>;
   /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold. */
   markMedDose(input: {
     medicationId: string;
@@ -5549,6 +5557,35 @@ export class LocalApi implements ComplyraApi {
           m.doseDate.slice(0, 10) === day,
       )
       .sort((a, b) => a.doseTime.localeCompare(b.doseTime));
+  }
+
+  async getMedDoseMarksInRange(
+    individualId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<import("./types").MedDoseMark[]> {
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const from = fromDate.slice(0, 10);
+    const to = toDate.slice(0, 10);
+    return this.medDoseMarkRows()
+      .filter((m) => {
+        const day = m.doseDate.slice(0, 10);
+        return (
+          m.agencyId === session.agencyId &&
+          m.individualId === individualId &&
+          day >= from &&
+          day <= to
+        );
+      })
+      .sort(
+        (a, b) =>
+          a.doseDate.localeCompare(b.doseDate) ||
+          a.doseTime.localeCompare(b.doseTime),
+      );
   }
 
   async markMedDose(

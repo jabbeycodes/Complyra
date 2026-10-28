@@ -894,6 +894,13 @@ export interface MedInventoryView extends MedInventory, MedInventoryProjection {
   deliveries: MedDeliverySummary[];
   /** Logged refused/held/wasted dose exceptions, newest first (combined into supply history). */
   doseExceptions: MedDoseException[];
+  /**
+   * ISO date of the most recent recorded count for this med (the newest
+   * delivery/count row, else the medication row's last-delivery date);
+   * null when the med has never been counted. Always set by
+   * projectMedInventory; optional so hand-built views in tests may omit it.
+   */
+  lastCountedOn?: string | null;
 }
 
 /** Aggregate supply picture for one home — read by the HM weekly checklist. */
