@@ -24,7 +24,11 @@ async function signInToShell(page: Page) {
 
 async function pickCedarHouse(page: Page) {
   await page.getByRole("button", { name: /Cedar House/ }).click();
-  await expect(page.getByText("Welcome, Sarah")).toBeVisible();
+  // The clean home: Central-time greeting + "Today at <Home>" heading.
+  await expect(page.getByText("Morning, Sarah")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Today at Cedar House" }),
+  ).toBeVisible();
 }
 
 test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
@@ -228,8 +232,12 @@ test("mobile ISP data: plan select, entries, and creating an entry", async ({
   }
 
   await page.getByRole("button", { name: "Save entry" }).click();
-  // The saved entry appears in the list under its author.
-  const mine = page.getByRole("button", { name: /Sarah Mitchell/ }).first();
+  // The saved entry appears in the list under its author. (Filtered to the
+  // scored row: the header avatar button also carries her name now.)
+  const mine = page
+    .getByRole("button", { name: /Sarah Mitchell/ })
+    .filter({ hasText: "tasks scored" })
+    .first();
   await expect(mine).toBeVisible({ timeout: 10_000 });
   await expect(mine).toContainText("1 of 6 tasks scored");
 });
@@ -269,4 +277,80 @@ test("mobile shift notes: the home's notes list and read view", async ({
   await noteRow.click();
   await expect(page.getByText("Collection details")).toBeVisible();
   await expect(page.getByText("Task scores")).toBeVisible();
+});
+
+test("mobile home: donut math, up next, and the bottom navigation", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+
+  // Donut card: the legend's fractions are the record; the center percent
+  // must equal their sum — parse the texts and check the math, don't trust
+  // the ring.
+  const card = page.locator(".msh-donut-card");
+  await expect(card).toBeVisible();
+  await expect(
+    card.getByRole("heading", { name: "Today’s tracking" }),
+  ).toBeVisible();
+  const legendRows = card.locator(".msh-legend-row");
+  await expect(legendRows.first()).toBeVisible({ timeout: 30_000 });
+  const rowTexts = await legendRows.allTextContents();
+  let completed = 0;
+  let total = 0;
+  let fractionRows = 0;
+  for (const text of rowTexts) {
+    const match = text.match(/(\d+) of (\d+)/);
+    if (match) {
+      completed += Number(match[1]);
+      total += Number(match[2]);
+      fractionRows += 1;
+    }
+  }
+  expect(fractionRows).toBeGreaterThan(0);
+  expect(total).toBeGreaterThan(0);
+  await expect(page.locator(".msh-donut-center strong")).toHaveText(
+    `${Math.round((completed / total) * 100)}%`,
+  );
+  await card.screenshot({ path: shot("home-donut.png") });
+  await page.locator(".msh-upnext").screenshot({ path: shot("up-next.png") });
+  await page.screenshot({ path: shot("home-clean.png"), fullPage: true });
+
+  // Bottom navigation: Tasks and People are shell views, Meds opens the
+  // MAR — where the pill steps aside for the MAR's own tab bar.
+  const navBar = page.getByRole("navigation", { name: "Mobile" });
+  await expect(navBar).toBeVisible();
+  await navBar.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByText("Your due and priority work")).toBeVisible();
+  await navBar.getByRole("button", { name: "Home", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Today at Cedar House" }),
+  ).toBeVisible();
+  await navBar.getByRole("button", { name: "Meds", exact: true }).click();
+  await expect(
+    page.getByText("Pick the person whose medications"),
+  ).toBeVisible();
+  await expect(navBar).toHaveCount(0);
+  await page.getByRole("button", { name: "‹ Home" }).click();
+  await expect(navBar).toBeVisible();
+  await navBar.getByRole("button", { name: "People", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /Ellis Hart/ }).first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "‹ Home" }).click();
+
+  // More opens the sheet with the tiles the pill does not carry.
+  await navBar.getByRole("button", { name: "More", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /Med Count/ })).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: /Switch home/ }),
+  ).toBeVisible();
+  await page.screenshot({ path: shot("more-sheet.png") });
+  // Tap the dimmed backdrop above the sheet (its center is under the sheet).
+  await page
+    .getByRole("button", { name: "Close more menu" })
+    .click({ position: { x: 20, y: 20 } });
+  await expect(sheet).toHaveCount(0);
 });
