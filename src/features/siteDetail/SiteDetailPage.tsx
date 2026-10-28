@@ -63,6 +63,7 @@ import {
 } from "./individualHighlights";
 import SiteDrillsSchedule from "./SiteDrillsSchedule";
 import SiteQaReview from "../qa/SiteQaReview";
+import SiteCoverageBoard from "../coverage/SiteCoverageBoard";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
 
@@ -818,6 +819,15 @@ export default function SiteDetailPage({
                 </div>
               </div>
             )}
+            {/* Founder directive + PR #139 review: the weekly coverage board
+                lives inside the home, not on the Overview — a house manager's
+                Overview no longer carries it, so this is where they (and any
+                other coverage editor) run weekly staffing, post open shifts,
+                and edit the regular house hours. The board keeps its own
+                permission gate (canEditSiteReview / hub.manage_schedule) and
+                renders nothing for roles that cannot edit coverage, so the
+                gate here is exactly the Overview board's gate. */}
+            <SiteCoverageBoard siteId={site.id} />
             <div className="panel">
               <h2>Site facts</h2>
               <dl className="fact-list">

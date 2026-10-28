@@ -5,6 +5,11 @@ import { test, expect, type Page } from "./fixtures";
 // Overview opens already focused on that home, with no coverage board, and
 // the coverage summary (incl. the monthly site review status) lives inside
 // the home's own page. Agency-wide roles keep the board exactly as before.
+//
+// PR #139 review fix: hiding the board from the HM Overview must not strand
+// the capability — the same SiteCoverageBoard is mounted inside the home's
+// own page (SiteDetailPage Overview tab, behind the board's own permission
+// gate), so a house manager runs weekly coverage from the home itself.
 
 async function signIn(page: Page, username: string) {
   await page.goto("/");
@@ -75,6 +80,56 @@ test("administrator Overview keeps the coverage board and home picking still foc
   await expect(
     page.locator(".site-score-card.selected"),
   ).toContainText("Cedar House");
+});
+
+test("house manager runs weekly coverage from inside their home's page", async ({
+  page,
+}) => {
+  await signIn(page, "james.wilson");
+
+  // The Overview stays board-free (the fix must not resurrect it there).
+  await expect(coverageBoard(page)).toHaveCount(0);
+
+  // Into the home itself.
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name: "Sites & programs", exact: true })
+    .click();
+  await page.locator(".location-card", { hasText: "Willow" }).first().click();
+  await expect(page.locator(".site-hero")).toBeVisible();
+
+  // The full board lives here now: week grid, fill/copy actions, and the
+  // regular house hours editor — behind the same permission gate as before.
+  const board = coverageBoard(page);
+  await expect(board).toHaveCount(1);
+  await expect(
+    board.getByRole("heading", { name: "Willow House coverage", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    board.getByRole("button", { name: "Fill open hours" }),
+  ).toBeVisible();
+  await expect(
+    board.getByRole("heading", { name: "Regular house hours" }),
+  ).toBeVisible();
+
+  // An authorized coverage action from this page: post an open shift for a
+  // PRN and see it land on the board. Done on next week's first day — the
+  // demo clock pins "today" to the seed day, and a temporary shift must
+  // start in the future, so this week's remaining slots can already be past.
+  const range = board.locator(".coverage-toolbar span");
+  const rangeBefore = await range.textContent();
+  await board.getByRole("button", { name: "Next week" }).click();
+  await expect(range).not.toHaveText(rangeBefore ?? "");
+  const firstDay = board.locator(".coverage-day").first();
+  await firstDay.getByRole("button", { name: "Add someone" }).click();
+  await board.getByLabel("Who is working").selectOption("__open__");
+  await board.getByRole("button", { name: "Save coverage" }).click();
+  await expect(
+    board.getByText("Posted. A PRN takes it from Open Shifts"),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    firstDay.getByText("Open for a PRN", { exact: true }),
+  ).toBeVisible();
 });
 
 test("the home's own page carries the site review status from the Overview card", async ({
