@@ -3,18 +3,17 @@
  * aggregation for the "Today's tracking" card.
  *
  * The aggregation is pure: callers fetch raw counts from the existing APIs
- * and hand them in; this module decides what becomes a donut segment, what
- * stays a count-only legend row, and what the overall percentage is. The
- * donut's meaning is always carried by the legend's fraction text — the
- * ring is a picture of those numbers, never the only record of them.
+ * and hand them in; this module decides what becomes a donut segment and
+ * what the overall percentage is. The donut's meaning is always carried
+ * by the legend's fraction text — the ring is a picture of those numbers,
+ * never the only record of them. Every category carries a real
+ * denominator: shift notes have no expected daily count, so they are not
+ * a tracking category at all — the notes written today are counted inside
+ * the ISP Data segment, whose entries are those same shift notes.
  */
 import { MAR_TIME_ZONE } from "./mar";
 
-export type TrackingCategoryId =
-  | "medications"
-  | "ispData"
-  | "checklists"
-  | "shiftNotes";
+export type TrackingCategoryId = "medications" | "ispData" | "checklists";
 
 /** A tracked category with a real denominator (can be a donut segment). */
 export interface TrackingCategory {
@@ -24,14 +23,6 @@ export interface TrackingCategory {
   color: string;
   completed: number;
   total: number;
-}
-
-/** A tracked category with no defensible denominator (legend only). */
-export interface CountOnlyCategory {
-  id: TrackingCategoryId;
-  label: string;
-  /** Pre-formatted text, e.g. "3 written today". */
-  text: string;
 }
 
 export interface TrackingArc {

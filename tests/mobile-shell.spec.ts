@@ -43,7 +43,6 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   // main (Messages, Event Reports, Time Off) render no tile at all.
   for (const label of [
     "Medications",
-    "Shift Notes",
     "ISP Data",
     "Time Clock",
     "My Tasks",
@@ -55,6 +54,11 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
       page.getByRole("button", { name: new RegExp(label) }).first(),
     ).toBeVisible();
   }
+  // No separate Shift Notes tile: a shift note is an ISP data entry, so
+  // ISP Data is the single door for the home's notes.
+  await expect(page.getByRole("button", { name: /Shift Notes/ })).toHaveCount(
+    0,
+  );
   await expect(page.getByRole("button", { name: /Messages/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Time Off/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Event Reports/ })).toHaveCount(
@@ -260,19 +264,29 @@ test("mobile ISP data: a draft plan is visible but not offered for entry", async
   ).toHaveCount(0);
 });
 
-test("mobile shift notes: the home's notes list and read view", async ({
+test("mobile ISP data: the entries list is the shift-notes record", async ({
   page,
 }) => {
   await signInToShell(page);
   await pickCedarHouse(page);
 
-  await page.getByRole("button", { name: /Shift Notes/ }).first().click();
+  // There is no separate Shift Notes destination on mobile anymore: a
+  // shift note is an ISP data entry, so the home's notes are read in the
+  // ISP flow, under the Individual's plan.
+  await expect(page.getByRole("button", { name: /Shift Notes/ })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: /ISP Data/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page
+    .getByRole("button", { name: /2026 ISP — Daily living supports/ })
+    .click();
   await expect(
-    page.getByRole("button", { name: "Create shift note" }),
+    page.getByRole("button", { name: "Create entry" }),
   ).toBeVisible();
-  const noteRow = page
-    .getByRole("button", { name: /Ellis Hart/ })
-    .first();
+  // Seeded entries (this plan's shift notes) list under day headings with
+  // their authors named; opening one shows the note's read view.
+  const noteRow = page.locator(".msh-day-group .msh-row").first();
   await expect(noteRow).toBeVisible();
   await noteRow.click();
   await expect(page.getByText("Collection details")).toBeVisible();
@@ -505,6 +519,12 @@ test("mobile home: donut math, up next, and the bottom navigation", async ({
   await expect(page.locator(".msh-donut-center strong")).toHaveText(
     `${Math.round((completed / total) * 100)}%`,
   );
+  // Unification: the legend carries no Shift Notes row — ISP Data is the
+  // notes' only row — and for this pinned day the center percent is the
+  // value it had before the count-only row was dropped (28 of 32 = 88%:
+  // the count-only row never entered the math).
+  expect(rowTexts.some((text) => text.includes("Shift Notes"))).toBe(false);
+  await expect(page.locator(".msh-donut-center strong")).toHaveText("88%");
   await card.screenshot({ path: shot("home-donut.png") });
   await page.locator(".msh-upnext").screenshot({ path: shot("up-next.png") });
   await page.screenshot({ path: shot("home-clean.png"), fullPage: true });

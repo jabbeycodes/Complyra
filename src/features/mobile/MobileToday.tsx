@@ -102,7 +102,7 @@ export default function MobileToday({
   onOpenQueueItem: (item: PersonalWorkItem) => void;
 }) {
   const [filter, setFilter] = useState<UpFilter>("all");
-  const { summary, countOnly } = tracking;
+  const { summary } = tracking;
 
   const items = useMemo<UpItem[]>(() => {
     const passItems: UpItem[] = tracking.passes.map((pass) => {
@@ -168,24 +168,7 @@ export default function MobileToday({
                   </span>
                 </button>
               ))}
-              {countOnly.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  className="msh-legend-row"
-                  onClick={() => onOpenCategory(row.id)}
-                >
-                  <span
-                    className="msh-legend-dot count-only"
-                    aria-hidden="true"
-                  />
-                  <span className="msh-legend-main">
-                    <span className="msh-legend-label">{row.label}</span>
-                    <span className="msh-legend-value">{row.text}</span>
-                  </span>
-                </button>
-              ))}
-              {!summary.hasData && countOnly.length === 0 && (
+              {!summary.hasData && (
                 <p className="msh-section-note">
                   Nothing scheduled today. When meds, plan data, or checklists
                   are due at this home, they are tracked here.

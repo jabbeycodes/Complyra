@@ -6,13 +6,17 @@
  * can never offer a door the API would refuse. Tiles whose module does not
  * exist on main (Messages, Event Reports, Time Off) are deliberately absent
  * rather than dead links.
+ *
+ * There is deliberately no separate "Shift Notes" tile: in ComplyRer's
+ * model a shift note IS an ISP data entry (the ISP flow saves through
+ * saveShiftNote), so ISP Data is the single door for both reading and
+ * writing a home's shift notes on mobile.
  */
 import { canSeeMeds } from "../../data/chart";
 import { canSeeShiftNotes } from "../../data/permissions";
 
 export type MobileTileId =
   | "medications"
-  | "shiftNotes"
   | "ispData"
   | "timeClock"
   | "myTasks"
@@ -45,12 +49,6 @@ const TILE_DEFS: {
     label: "Medications",
     hint: "Pass meds and record doses",
     visible: (ctx) => canSeeMeds(ctx.roleKey),
-  },
-  {
-    id: "shiftNotes",
-    label: "Shift Notes",
-    hint: "Today's notes for this home",
-    visible: (ctx) => canSeeShiftNotes(ctx.roleKey),
   },
   {
     id: "ispData",

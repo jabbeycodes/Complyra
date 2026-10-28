@@ -17,9 +17,10 @@
  *   count as recorded here. They remain visible on the MAR's Other tab.
  * - ISP Data: Individuals with an entry recorded today over Individuals
  *   with an active (selectable) plan at this home — one entry per person
- *   per day is the collection expectation, so people are the unit.
- * - Shift Notes: count only (notes written today). There is no expected
- *   number of notes in a day, so it never enters the percentage math.
+ *   per day is the collection expectation, so people are the unit. The
+ *   entries counted here are the home's shift notes; there is no separate
+ *   shift-notes category (a note has no expected daily count, so it could
+ *   never carry a denominator anyway).
  * - Checklists: items answered on this week's checklist for the home
  *   over its total items, when a checklist covers the current week.
  */
@@ -33,7 +34,6 @@ import { planStatus } from "./isp";
 import {
   buildTrackingSummary,
   summarizeMedicationDay,
-  type CountOnlyCategory,
   type MedicationDayPerson,
   type TrackingCategory,
   type TrackingSummary,
@@ -52,7 +52,6 @@ export interface TodayPass {
 export interface TodayTracking {
   loading: boolean;
   summary: TrackingSummary;
-  countOnly: CountOnlyCategory[];
   passes: TodayPass[];
   /** Scheduled doses still unrecorded today; null when meds are not tracked. */
   medsLeft: number | null;
@@ -61,7 +60,6 @@ export interface TodayTracking {
 const EMPTY: TodayTracking = {
   loading: true,
   summary: buildTrackingSummary([]),
-  countOnly: [],
   passes: [],
   medsLeft: null,
 };
@@ -107,11 +105,10 @@ export function useTodayTracking({
 
     void (async () => {
       const categories: TrackingCategory[] = [];
-      const countOnly: CountOnlyCategory[] = [];
       let passes: TodayPass[] = [];
       let medsLeft: number | null = null;
 
-      // Site notes feed both the ISP fraction and the notes count.
+      // Site notes feed the ISP fraction (entries are shift notes).
       let siteNotes: Awaited<ReturnType<ComplyraApi["getSiteShiftNotes"]>> = [];
       if (canNotes) {
         siteNotes = await api.getSiteShiftNotes(siteId).catch(() => []);
@@ -204,11 +201,6 @@ export function useTodayTracking({
             total: withActivePlan,
           });
         }
-        countOnly.push({
-          id: "shiftNotes",
-          label: "Shift Notes",
-          text: `${notesToday.length} written today`,
-        });
       }
 
       if (canChecklist) {
@@ -244,7 +236,6 @@ export function useTodayTracking({
         setTracking({
           loading: false,
           summary: buildTrackingSummary(categories),
-          countOnly,
           passes,
           medsLeft,
         });
