@@ -82,10 +82,14 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   ).toContainText("Not yet given");
   await page.screenshot({ path: shot("mar-pass.png"), fullPage: true });
 
-  // Administer: the confirm-time control gates the save.
+  // Administer: record type is one dropdown (marks + exceptions grouped),
+  // defaulting to Given; the confirm-time control gates the save.
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
   await expect(page.getByText("Scheduled time")).toBeVisible();
   await expect(page.getByText("Administered by")).toBeVisible();
+  const recordType = page.getByLabel("Record type");
+  await expect(recordType).toHaveValue("given");
+  await expect(recordType.locator("option")).toHaveCount(7);
   const save = page.getByRole("button", { name: "Save record" });
   await expect(save).toBeDisabled();
   await page
@@ -98,6 +102,44 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await expect(page.getByText(/Given by Sarah Mitchell/)).toBeVisible({
     timeout: 10_000,
   });
+});
+
+test("mobile MAR: a Refused record needs a reason and lands on the Other tab", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+  await page.getByRole("button", { name: /Levetiracetam/ }).click();
+
+  // Picking the Refused exception from the Record type dropdown reveals the
+  // required reason; confirming the time alone does not enable the save.
+  const recordType = page.getByLabel("Record type");
+  await expect(recordType).toHaveValue("given");
+  await recordType.selectOption("refused");
+  const save = page.getByRole("button", { name: "Save record" });
+  const reason = page.getByLabel(/Reason \(required\)/);
+  await expect(reason).toBeVisible();
+  await page.getByLabel(/I confirm the administered time/).check();
+  await expect(save).toBeDisabled();
+  await reason.fill("Refused the morning dose and spat out the tablet.");
+  await expect(save).toBeEnabled();
+  await page.screenshot({
+    path: shot("mar-administer-dropdown.png"),
+    fullPage: true,
+  });
+  await save.click();
+
+  // The dose itself stays unmarked; the exception is listed on the Other tab
+  // with its reason.
+  await page.getByRole("button", { name: "Other", exact: true }).click();
+  await expect(page.getByText(/Levetiracetam · Refused/)).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.getByText(/Refused the morning dose/)).toBeVisible();
 });
 
 test("mobile ISP data: plan select, entries, and creating an entry", async ({

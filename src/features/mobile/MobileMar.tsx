@@ -28,14 +28,27 @@ import {
 type MarTab = "scheduled" | "prn" | "other";
 type RecordChoice = MedDoseMarkStatus | DoseExceptionKind;
 
-const RECORD_CHOICES: { value: RecordChoice; label: string }[] = [
-  { value: "given", label: "Given" },
-  { value: "missed", label: "Missed" },
-  { value: "refused", label: "Refused" },
-  { value: "held", label: "Held" },
-  { value: "wasted", label: "Wasted" },
-  { value: "loa", label: "LOA" },
-  { value: "on_hold", label: "On hold" },
+const RECORD_GROUPS: {
+  legend: string;
+  choices: { value: RecordChoice; label: string }[];
+}[] = [
+  {
+    legend: "Dose marks",
+    choices: [
+      { value: "given", label: "Given" },
+      { value: "missed", label: "Missed" },
+      { value: "loa", label: "LOA" },
+      { value: "on_hold", label: "On hold" },
+    ],
+  },
+  {
+    legend: "Exceptions",
+    choices: [
+      { value: "refused", label: "Refused" },
+      { value: "held", label: "Held" },
+      { value: "wasted", label: "Wasted" },
+    ],
+  },
 ];
 
 const MARK_CHOICES: MedDoseMarkStatus[] = ["given", "missed", "loa", "on_hold"];
@@ -223,33 +236,25 @@ function AdministerForm({
         </div>
       </dl>
 
-      <label className="msh-confirm">
-        <input
-          type="checkbox"
-          checked={confirmTime}
-          onChange={(event) => setConfirmTime(event.target.checked)}
-        />
-        <span>
-          I confirm the administered time above is correct (Central time).
-        </span>
-      </label>
-
-      <fieldset className="msh-fieldset">
-        <legend>Record type</legend>
-        <div className="msh-segmented">
-          {RECORD_CHOICES.map((choice) => (
-            <button
-              key={choice.value}
-              type="button"
-              className={recordType === choice.value ? "active" : ""}
-              aria-pressed={recordType === choice.value}
-              onClick={() => setRecordType(choice.value)}
-            >
-              {choice.label}
-            </button>
+      <label className="msh-field">
+        <span>Record type</span>
+        <select
+          value={recordType}
+          onChange={(event) =>
+            setRecordType(event.target.value as RecordChoice)
+          }
+        >
+          {RECORD_GROUPS.map((group) => (
+            <optgroup key={group.legend} label={group.legend}>
+              {group.choices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
-        </div>
-      </fieldset>
+        </select>
+      </label>
 
       {isException && (
         <>
@@ -274,6 +279,17 @@ function AdministerForm({
           </label>
         </>
       )}
+
+      <label className="msh-confirm">
+        <input
+          type="checkbox"
+          checked={confirmTime}
+          onChange={(event) => setConfirmTime(event.target.checked)}
+        />
+        <span>
+          I confirm the administered time above is correct (Central time).
+        </span>
+      </label>
 
       {error && (
         <p className="msh-alert" role="alert">
