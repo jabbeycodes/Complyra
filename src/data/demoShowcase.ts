@@ -52,7 +52,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 2;
+export const SHOWCASE_REVISION = 3;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -362,6 +362,31 @@ function addMedications(db: LocalDatabase) {
   }
 }
 
+/**
+ * Showcase appointments are upserted into the hosted `appointments` table,
+ * whose id column is a uuid — slug-style ids (`appt-showcase-…-next`) are
+ * rejected by Postgres and break `seed:local`. These fixed UUIDs keep the
+ * seeded rows stable across re-seeds (upsert on id) like every other seed id.
+ */
+const SHOWCASE_APPOINTMENT_IDS: Record<string, { next: string; last: string }> = {
+  "Morgan Pruitt": {
+    next: "ca508f08-16f7-454f-a255-565f5ad29dde",
+    last: "c02072cc-4d85-4ed4-a6bd-8e31e5ae2362",
+  },
+  "Reese Lang": {
+    next: "9fd0021e-7a22-4349-9111-df07992cc51f",
+    last: "af69fea1-dee2-452b-9c1a-99aca57649a9",
+  },
+  "Harper Soto": {
+    next: "b187d019-f4d9-4e69-b374-481d86b526f8",
+    last: "2925495a-1f54-4803-ac99-9762615cd1b9",
+  },
+  "Ellis Hart": {
+    next: "0e5ea2a6-6cf2-4d54-9027-e2c6bfcf406a",
+    last: "cf5ae731-8e6f-4e9e-97b5-f03e1c1c0ac5",
+  },
+};
+
 function addAppointments(db: LocalDatabase) {
   const today = todayIso();
   const nurse = userId(db, "Cameron Price");
@@ -404,7 +429,7 @@ function addAppointments(db: LocalDatabase) {
     if (!hasUpcoming) {
       db.appointments.push(
         appointment(db, individualId, nurse, {
-          id: `appt-showcase-${slug(name)}-next`,
+          id: SHOWCASE_APPOINTMENT_IDS[name].next,
           startsOn: addDaysIso(today, 10),
           consultant: spec.consultant,
           specialty: spec.specialty,
@@ -424,7 +449,7 @@ function addAppointments(db: LocalDatabase) {
     if (!hasCommented) {
       db.appointments.push(
         appointment(db, individualId, nurse, {
-          id: `appt-showcase-${slug(name)}-last`,
+          id: SHOWCASE_APPOINTMENT_IDS[name].last,
           startsOn: addDaysIso(today, -6),
           consultant: spec.consultant,
           specialty: spec.specialty,
