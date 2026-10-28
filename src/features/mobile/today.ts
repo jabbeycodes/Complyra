@@ -132,6 +132,48 @@ export function buildTrackingSummary(
   };
 }
 
+/** One person's medication day, as raw counts for the donut. */
+export interface MedicationDayPerson {
+  /** Scheduled doses for this person today (the denominator). */
+  scheduledTotal: number;
+  /** Doses with a recorded dose mark today — the ONLY numerator input. */
+  markedTotal: number;
+}
+
+export interface MedicationDayTotals {
+  total: number;
+  completed: number;
+  /** Scheduled doses with no mark yet: total − completed. */
+  left: number;
+}
+
+/**
+ * Aggregate the Medications category from per-person counts.
+ *
+ * The numerator is marks-only by product rule: a dose counts as recorded
+ * when it carries a dose mark (Given / Missed / LOA / On hold — what the
+ * MAR pass view itself treats as recorded). Dose exceptions are NOT
+ * counted: an exception carries no dose-time/mark linkage and can be
+ * written from the supply side while the dose still shows "Not yet
+ * given", so counting one would overstate completion. Exceptions stay
+ * visible on the MAR's Other tab; they never move this number.
+ *
+ * Each person's marked count is capped at their own scheduled total, so
+ * one person's extra marks can never cover another person's doses.
+ */
+export function summarizeMedicationDay(
+  people: MedicationDayPerson[],
+): MedicationDayTotals {
+  let total = 0;
+  let completed = 0;
+  for (const person of people) {
+    const personTotal = Math.max(0, Math.round(person.scheduledTotal));
+    total += personTotal;
+    completed += clampCount(person.markedTotal, personTotal);
+  }
+  return { total, completed, left: total - completed };
+}
+
 const centralHourFormat = new Intl.DateTimeFormat("en-US", {
   timeZone: MAR_TIME_ZONE,
   hour: "numeric",

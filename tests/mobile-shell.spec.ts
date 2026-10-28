@@ -279,6 +279,139 @@ test("mobile shift notes: the home's notes list and read view", async ({
   await expect(page.getByText("Task scores")).toBeVisible();
 });
 
+interface HomeTrackingSnapshot {
+  /** Medications legend fraction, e.g. "2 of 5". */
+  medFraction: string;
+  medCompleted: number;
+  medTotal: number;
+  /** Donut center percent text, e.g. "88%". */
+  centerPercent: string;
+  /** Greeting summary's med line, e.g. "3 med doses left to record". */
+  medsLeftText: string;
+}
+
+async function readHomeTracking(
+  page: Page,
+): Promise<HomeTrackingSnapshot> {
+  const card = page.locator(".msh-donut-card");
+  const medRow = card.locator(".msh-legend-row", { hasText: "Medications" });
+  await expect(medRow).toBeVisible({ timeout: 30_000 });
+  const medText = (await medRow.textContent()) ?? "";
+  const fraction = medText.match(/(\d+) of (\d+)/);
+  if (!fraction) throw new Error(`No fraction in legend row: ${medText}`);
+  const centerPercent =
+    (await page.locator(".msh-donut-center strong").textContent()) ?? "";
+  const medsLeftText =
+    (await page
+      .getByText(/med doses? left to record|All med doses recorded/)
+      .first()
+      .textContent()) ?? "";
+  return {
+    medFraction: `${fraction[1]} of ${fraction[2]}`,
+    medCompleted: Number(fraction[1]),
+    medTotal: Number(fraction[2]),
+    centerPercent: centerPercent.trim(),
+    medsLeftText: medsLeftText.trim(),
+  };
+}
+
+/**
+ * Go back to the shell home and wait out the tracking refetch the return
+ * triggers: the donut card cycles through its loading state, then settles
+ * on fresh numbers. Waiting for the cycle proves the numbers below were
+ * re-read, not left over from session start.
+ */
+async function returnHomeRefreshed(page: Page) {
+  await page.getByRole("button", { name: "‹ Home" }).click();
+  const loading = page.getByText("Loading today’s tracking…");
+  await expect(loading).toBeVisible({ timeout: 15_000 });
+  await expect(loading).toBeHidden({ timeout: 30_000 });
+}
+
+test("mobile home: a Refused exception does NOT move the donut, and home refreshes on return", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+  const before = await readHomeTracking(page);
+
+  // Record a Refused exception on Ellis Hart's 8:00 AM dose — an exception
+  // with no dose mark. The dose itself stays "Not yet given".
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+  await page.getByRole("button", { name: /Levetiracetam/ }).click();
+  await page.getByLabel("Record type").selectOption("refused");
+  await page
+    .getByLabel(/Reason \(required\)/)
+    .fill("Refused the morning dose and spat out the tablet.");
+  await page.getByLabel(/I confirm the administered time/).check();
+  await page.getByRole("button", { name: "Save record" }).click();
+  await page.getByRole("button", { name: "Other", exact: true }).click();
+  await expect(page.getByText(/Levetiracetam · Refused/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Back home (no reload): the refetch runs, and because exceptions never
+  // complete a dose, the Medications fraction, the center percent, and
+  // the greeting's doses-left line are all exactly as before.
+  await returnHomeRefreshed(page);
+  const after = await readHomeTracking(page);
+  expect(after.medFraction).toBe(before.medFraction);
+  expect(after.centerPercent).toBe(before.centerPercent);
+  expect(after.medsLeftText).toBe(before.medsLeftText);
+});
+
+test("mobile home: a Given mark moves the donut on return, without a reload", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+  const before = await readHomeTracking(page);
+
+  // Record the 8:00 AM Levetiracetam as Given (a real dose mark).
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+  await page.getByRole("button", { name: /Levetiracetam/ }).click();
+  await page.getByLabel(/I confirm the administered time/).check();
+  await page.getByRole("button", { name: "Save record" }).click();
+  await expect(page.getByText(/Given by Sarah Mitchell/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Back home (no reload): the refetch picks the mark up — Medications
+  // gains exactly one completed dose, the center percent is the legend's
+  // new sum, and the greeting's doses-left drops by one.
+  await returnHomeRefreshed(page);
+  const card = page.locator(".msh-donut-card");
+  const medRow = card.locator(".msh-legend-row", { hasText: "Medications" });
+  await expect(medRow).toContainText(
+    `${before.medCompleted + 1} of ${before.medTotal}`,
+    { timeout: 30_000 },
+  );
+  const after = await readHomeTracking(page);
+  expect(after.medCompleted).toBe(before.medCompleted + 1);
+  expect(after.medTotal).toBe(before.medTotal);
+  const rowTexts = await card.locator(".msh-legend-row").allTextContents();
+  let completed = 0;
+  let total = 0;
+  for (const text of rowTexts) {
+    const match = text.match(/(\d+) of (\d+)/);
+    if (match) {
+      completed += Number(match[1]);
+      total += Number(match[2]);
+    }
+  }
+  expect(after.centerPercent).toBe(
+    `${Math.round((completed / total) * 100)}%`,
+  );
+  expect(after.centerPercent).not.toBe(before.centerPercent);
+  const leftBefore = Number(before.medsLeftText.match(/\d+/)?.[0]);
+  const leftAfter = Number(after.medsLeftText.match(/\d+/)?.[0]);
+  expect(leftAfter).toBe(leftBefore - 1);
+});
+
 test("mobile home: donut math, up next, and the bottom navigation", async ({
   page,
 }) => {

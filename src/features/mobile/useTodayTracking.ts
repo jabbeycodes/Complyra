@@ -9,10 +9,12 @@
  * pictures numbers that were actually read.
  *
  * Denominators (chosen for defensibility, documented in the PR body):
- * - Medications: doses recorded today (marks, plus dose exceptions
- *   recorded today, capped per person at that person's scheduled total)
- *   over total scheduled doses today, from the MAR getters the mobile
- *   MAR itself uses.
+ * - Medications: doses with a recorded dose mark today (capped per
+ *   person at that person's scheduled total) over total scheduled doses
+ *   today, from the MAR getters the mobile MAR itself uses. Dose
+ *   exceptions are deliberately excluded — they carry no dose-time/mark
+ *   linkage, so a dose the MAR still shows "Not yet given" must not
+ *   count as recorded here. They remain visible on the MAR's Other tab.
  * - ISP Data: Individuals with an entry recorded today over Individuals
  *   with an active (selectable) plan at this home — one entry per person
  *   per day is the collection expectation, so people are the unit.
@@ -30,7 +32,9 @@ import { centralTodayIso, groupPasses, shiftIsoDate } from "./mar";
 import { planStatus } from "./isp";
 import {
   buildTrackingSummary,
+  summarizeMedicationDay,
   type CountOnlyCategory,
+  type MedicationDayPerson,
   type TrackingCategory,
   type TrackingSummary,
 } from "./today";
@@ -72,12 +76,19 @@ export function useTodayTracking({
   siteId,
   people,
   canChecklist,
+  refreshKey = 0,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   siteId: string | null;
   people: WorkspaceIndividual[];
   canChecklist: boolean;
+  /**
+   * Bumped by the shell each time the user returns to the home view, so
+   * work recorded in the MAR/ISP flows shows up without a page reload.
+   * One bump = one refetch; there is no polling.
+   */
+  refreshKey?: number;
 }): TodayTracking {
   const [tracking, setTracking] = useState<TodayTracking>(EMPTY);
   const peopleKey = people.map((person) => person.id).join(",");
@@ -110,8 +121,7 @@ export function useTodayTracking({
       );
 
       if (canMeds && people.length > 0) {
-        let total = 0;
-        let completed = 0;
+        const personDays: MedicationDayPerson[] = [];
         const allPasses: TodayPass[] = [];
         await Promise.all(
           people.map(async (person) => {
@@ -121,24 +131,19 @@ export function useTodayTracking({
                 api.getMedDoseMarks(person.id, todayIso),
               ]);
               const personPasses = groupPasses(inventory, marks);
-              const personTotal = personPasses.reduce(
-                (sum, pass) => sum + pass.total,
-                0,
-              );
-              const recorded = personPasses.reduce(
-                (sum, pass) => sum + pass.recorded,
-                0,
-              );
-              const exceptions = inventory.reduce(
-                (sum, item) =>
-                  sum +
-                  item.doseExceptions.filter(
-                    (exception) => exception.occurredOn === todayIso,
-                  ).length,
-                0,
-              );
-              total += personTotal;
-              completed += Math.min(recorded + exceptions, personTotal);
+              // Marks only: pass.recorded counts doses carrying a dose
+              // mark. Dose exceptions on the inventory are not read here
+              // at all — they never complete a scheduled dose.
+              personDays.push({
+                scheduledTotal: personPasses.reduce(
+                  (sum, pass) => sum + pass.total,
+                  0,
+                ),
+                markedTotal: personPasses.reduce(
+                  (sum, pass) => sum + pass.recorded,
+                  0,
+                ),
+              });
               for (const pass of personPasses) {
                 allPasses.push({
                   personId: person.id,
@@ -154,15 +159,16 @@ export function useTodayTracking({
             }
           }),
         );
-        if (total > 0) {
+        const medDay = summarizeMedicationDay(personDays);
+        if (medDay.total > 0) {
           categories.push({
             id: "medications",
             label: "Medications",
             color: MEDICATIONS_COLOR,
-            completed,
-            total,
+            completed: medDay.completed,
+            total: medDay.total,
           });
-          medsLeft = total - completed;
+          medsLeft = medDay.left;
         }
         passes = allPasses.sort((a, b) => a.doseTime.localeCompare(b.doseTime));
       }
@@ -249,7 +255,7 @@ export function useTodayTracking({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, siteId, peopleKey, roleKey, canChecklist]);
+  }, [api, siteId, peopleKey, roleKey, canChecklist, refreshKey]);
 
   return tracking;
 }

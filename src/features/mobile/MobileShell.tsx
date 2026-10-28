@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CalendarDays,
@@ -163,12 +163,26 @@ export default function MobileShell({
     [workspace.individuals, scopedSite],
   );
 
+  // Returning to the home view bumps the tracking refresh key exactly
+  // once per return, so doses and entries recorded in the MAR/ISP flows
+  // are reflected on the donut, Up next, and the greeting summary
+  // without a page reload. No polling — a return is the only trigger.
+  const [homeRefreshKey, setHomeRefreshKey] = useState(0);
+  const previousView = useRef(view);
+  useEffect(() => {
+    if (previousView.current !== "home" && view === "home") {
+      setHomeRefreshKey((key) => key + 1);
+    }
+    previousView.current = view;
+  }, [view]);
+
   const tracking = useTodayTracking({
     api,
     session,
     siteId: scopedSite?.id ?? null,
     people,
     canChecklist: pageVisible(session, "Weekly checklist"),
+    refreshKey: homeRefreshKey,
   });
 
   const refreshNotifications = useCallback(async () => {

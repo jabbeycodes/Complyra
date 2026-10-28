@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildTrackingSummary,
   greetingForHour,
+  summarizeMedicationDay,
   TRACK_COLOR,
   type TrackingCategory,
 } from "./today";
@@ -86,6 +87,35 @@ test("completed is clamped so a fraction never exceeds its denominator", () => {
   assert.equal(summary.segments[0].completed, 10);
   assert.equal(summary.segments[0].fractionText, "10 of 10");
   assert.equal(summary.overallPercent, 100);
+});
+
+test("medication day: completed is the marked doses, left is the rest", () => {
+  const totals = summarizeMedicationDay([
+    { scheduledTotal: 5, markedTotal: 2 },
+    { scheduledTotal: 3, markedTotal: 3 },
+  ]);
+  assert.deepEqual(totals, { total: 8, completed: 5, left: 3 });
+});
+
+test("medication day: each person is capped at their own scheduled total", () => {
+  // One person's surplus marks must never cover another person's doses.
+  const totals = summarizeMedicationDay([
+    { scheduledTotal: 2, markedTotal: 5 },
+    { scheduledTotal: 4, markedTotal: 0 },
+  ]);
+  assert.deepEqual(totals, { total: 6, completed: 2, left: 4 });
+});
+
+test("medication day: nothing scheduled or marked is all zeroes", () => {
+  assert.deepEqual(summarizeMedicationDay([]), {
+    total: 0,
+    completed: 0,
+    left: 0,
+  });
+  assert.deepEqual(
+    summarizeMedicationDay([{ scheduledTotal: 0, markedTotal: 0 }]),
+    { total: 0, completed: 0, left: 0 },
+  );
 });
 
 test("greeting follows the Central day parts", () => {
