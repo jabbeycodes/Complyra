@@ -318,3 +318,131 @@ test("ger api: changing the Individual on a draft re-derives the home", async ()
   assert.equal(updated.individualId, second!.id);
   assert.equal(updated.siteId, second!.siteId);
 });
+
+test("behavior api: a correction needs a rationale and preserves the original", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const person = store.db.individuals[0];
+
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const entry = await api.addBehaviorEntry(person.id, {
+    occurredOn: "2026-10-26",
+    occurredAtTime: "18:20",
+    behavior: "Verbal outbursts",
+    antecedent: "Dinner ran late",
+    durationMinutes: 8,
+    intensity: "Moderate",
+    interventionUsed: "Offered a break",
+    outcome: "Calmed",
+  });
+
+  // The nurse may correct another recorder's entry — but never without
+  // stating the reason.
+  await api.signOut();
+  await api.signIn(login(DEMO_NURSE_USERNAME));
+  await assert.rejects(
+    () =>
+      api.correctBehaviorEntry(
+        entry.id,
+        {
+          occurredOn: "2026-10-26",
+          occurredAtTime: "18:20",
+          behavior: "Verbal outbursts",
+          antecedent: "Dinner ran late",
+          durationMinutes: 8,
+          intensity: "Moderate",
+          interventionUsed: "Offered a break",
+          outcome: "De-escalated",
+        },
+        "   ",
+      ),
+    /reason for the correction/,
+  );
+
+  const corrected = await api.correctBehaviorEntry(
+    entry.id,
+    {
+      occurredOn: "2026-10-26",
+      occurredAtTime: "18:20",
+      behavior: "Verbal outbursts",
+      antecedent: "Dinner ran late",
+      durationMinutes: 8,
+      intensity: "Moderate",
+      interventionUsed: "Offered a break",
+      outcome: "De-escalated",
+    },
+    "Outcome confirmed with the home team by phone.",
+  );
+  assert.equal(corrected.outcome, "De-escalated");
+  assert.equal(corrected.recordedByUserId, entry.recordedByUserId);
+
+  const history = store.db.behaviorEntryHistory.filter(
+    (row) => row.entryId === entry.id,
+  );
+  assert.equal(history.length, 1);
+  assert.equal(history[0].outcome, "Calmed");
+  assert.equal(history[0].isCorrection, true);
+  assert.equal(
+    history[0].correctionRationale,
+    "Outcome confirmed with the home team by phone.",
+  );
+  assert.ok(history[0].replacedByUserId);
+});
+
+test("health api: a correction needs a rationale and preserves the original", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const hm = await api.signIn(login(DEMO_HM_USERNAME));
+  const person = personAtHmSite(store, hm.siteId);
+
+  const lab = await api.addHealthTrackEntry(person.id, {
+    kind: "lab",
+    occurredOn: "2026-10-26",
+    details: { testName: "A1C", resultValue: "9.4", unit: "%" },
+    flaggedAbnormal: true,
+    note: "Result phoned in",
+  });
+
+  await api.signOut();
+  await api.signIn(login(DEMO_NURSE_USERNAME));
+  await assert.rejects(
+    () =>
+      api.correctHealthTrackEntry(
+        lab.id,
+        {
+          kind: "lab",
+          occurredOn: "2026-10-26",
+          details: { testName: "A1C", resultValue: "7.9", unit: "%" },
+          flaggedAbnormal: true,
+          note: "Result phoned in",
+        },
+        "",
+      ),
+    /reason for the correction/,
+  );
+
+  const corrected = await api.correctHealthTrackEntry(
+    lab.id,
+    {
+      kind: "lab",
+      occurredOn: "2026-10-26",
+      details: { testName: "A1C", resultValue: "7.9", unit: "%" },
+      flaggedAbnormal: true,
+      note: "Result phoned in",
+    },
+    "Result value verified against the lab portal.",
+  );
+  assert.equal(corrected.details.resultValue, "7.9");
+  assert.equal(corrected.recordedByUserId, lab.recordedByUserId);
+
+  const history = store.db.healthTrackEntryHistory.filter(
+    (row) => row.entryId === lab.id,
+  );
+  assert.equal(history.length, 1);
+  assert.equal(history[0].details.resultValue, "9.4");
+  assert.equal(history[0].isCorrection, true);
+  assert.equal(
+    history[0].correctionRationale,
+    "Result value verified against the lab portal.",
+  );
+});

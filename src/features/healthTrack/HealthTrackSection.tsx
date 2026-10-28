@@ -8,6 +8,7 @@ import {
   HEALTH_TRACK_KINDS,
   HEALTH_TRACK_KIND_LABELS,
   SLEEP_QUALITIES,
+  canCorrectHealthTrackEntry,
   canViewHealthTrack,
   isImmunizationOverdue,
   type HealthTrackEntry,
@@ -83,8 +84,25 @@ export default function HealthTrackSection({
   const [flaggedAbnormal, setFlaggedAbnormal] = useState(false);
   const [note, setNote] = useState("");
 
+  const [correcting, setCorrecting] = useState<HealthTrackEntry | null>(null);
+  const [corrOccurredOn, setCorrOccurredOn] = useState(today);
+  const [corrDetails, setCorrDetails] = useState<Record<string, string>>({});
+  const [corrFlaggedAbnormal, setCorrFlaggedAbnormal] = useState(false);
+  const [corrNote, setCorrNote] = useState("");
+  const [rationale, setRationale] = useState("");
+
   const visible = canViewHealthTrack(session);
   const canRecord = session?.permissions["health.record"] === true;
+  const canCorrect = canRecord && canCorrectHealthTrackEntry(session?.roleKey);
+
+  const startCorrection = (entry: HealthTrackEntry) => {
+    setCorrecting(entry);
+    setCorrOccurredOn(entry.occurredOn);
+    setCorrDetails({ ...entry.details });
+    setCorrFlaggedAbnormal(entry.flaggedAbnormal);
+    setCorrNote(entry.note);
+    setRationale("");
+  };
 
   const load = useCallback(async () => {
     if (!visible) return;
@@ -308,10 +326,135 @@ export default function HealthTrackSection({
                     Remove
                   </button>
                 )}
+                {canCorrect && (
+                  <button
+                    type="button"
+                    className="button ghost"
+                    disabled={busy}
+                    onClick={() => startCorrection(entry)}
+                  >
+                    Record correction
+                  </button>
+                )}
               </li>
             );
           })}
         </ul>
+      )}
+      {correcting && (
+        <form
+          className="health-track-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setBusy(true);
+            setError("");
+            api
+              .correctHealthTrackEntry(
+                correcting.id,
+                {
+                  kind: correcting.kind,
+                  occurredOn: corrOccurredOn,
+                  details: corrDetails,
+                  flaggedAbnormal: corrFlaggedAbnormal,
+                  note: corrNote,
+                },
+                rationale,
+              )
+              .then(() => {
+                setCorrecting(null);
+                return load();
+              })
+              .catch((err) =>
+                setError(err instanceof Error ? err.message : "Could not save."),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          <h4>Record a correction</h4>
+          <p className="muted">
+            Correcting “{correcting.title}” from{" "}
+            {formatDate(correcting.occurredOn)}. The original version and your
+            reason stay on the record — a correction never erases what was
+            first written.
+          </p>
+          <div className="form-grid">
+            <label>
+              {DATE_LABELS[correcting.kind]}
+              <input
+                type="date"
+                value={corrOccurredOn}
+                onChange={(e) => setCorrOccurredOn(e.target.value)}
+                required
+              />
+            </label>
+            {KIND_FIELDS[correcting.kind].map((field) =>
+              field.type === "select" ? (
+                <label key={field.key}>
+                  {field.label}
+                  <select
+                    value={corrDetails[field.key] ?? ""}
+                    onChange={(e) =>
+                      setCorrDetails({ ...corrDetails, [field.key]: e.target.value })
+                    }
+                  >
+                    <option value="">—</option>
+                    {(field.options ?? []).map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label key={field.key}>
+                  {field.label}
+                  <input
+                    type={field.type === "date" ? "date" : "text"}
+                    value={corrDetails[field.key] ?? ""}
+                    onChange={(e) =>
+                      setCorrDetails({ ...corrDetails, [field.key]: e.target.value })
+                    }
+                  />
+                </label>
+              ),
+            )}
+          </div>
+          <label>
+            Note
+            <input value={corrNote} onChange={(e) => setCorrNote(e.target.value)} />
+          </label>
+          {correcting.kind === "lab" && (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={corrFlaggedAbnormal}
+                onChange={(e) => setCorrFlaggedAbnormal(e.target.checked)}
+              />
+              Flag this result abnormal (alerts the home's managers)
+            </label>
+          )}
+          <label>
+            Reason for the correction
+            <textarea
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+              rows={2}
+              required
+            />
+          </label>
+          <div className="form-actions">
+            <button type="submit" className="button primary" disabled={busy}>
+              Save correction
+            </button>
+            <button
+              type="button"
+              className="button ghost"
+              onClick={() => setCorrecting(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
       </div>
     </section>

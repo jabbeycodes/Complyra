@@ -380,26 +380,32 @@ import {
   type GerResolutionPatch,
 } from "./ger";
 import {
+  canCorrectBehaviorEntry,
   canManageBehaviorPlan,
   canRecordBehavior,
   canViewBehavior,
+  validateBehaviorCorrection,
   validateBehaviorEntryDraft,
   validateBehaviorPlanDraft,
   type BehaviorEntry,
   type BehaviorEntryDraft,
+  type BehaviorEntryHistory,
   type BehaviorPlan,
   type BehaviorPlanDraft,
 } from "./behavior";
 import {
+  canCorrectHealthTrackEntry,
   canRecordHealthEntry,
   canViewHealthTrack,
   healthAlertTargets,
   healthEntryNeedsAlert,
   healthTrackTitle,
   isImmunizationOverdue,
+  validateHealthCorrection,
   validateHealthTrackDraft,
   type HealthTrackEntry,
   type HealthTrackEntryDraft,
+  type HealthTrackEntryHistory,
   type HealthTrackKind,
 } from "./healthTrack";
 import {
@@ -1148,6 +1154,16 @@ export interface ComplyraApi {
     draft: BehaviorEntryDraft,
   ): Promise<BehaviorEntry>;
   deleteBehaviorEntry(id: string): Promise<void>;
+  /**
+   * Correct an entry with a stated reason. The replaced version is kept
+   * in the entry history with the rationale — the only way an entry's
+   * recorded values change after the fact.
+   */
+  correctBehaviorEntry(
+    id: string,
+    draft: BehaviorEntryDraft,
+    rationale: string,
+  ): Promise<BehaviorEntry>;
   // ===== THERAP-CORE-GAPS-1 API (health trackers) =====
   listHealthTrackEntries(input: {
     individualId: string;
@@ -1158,6 +1174,12 @@ export interface ComplyraApi {
     draft: HealthTrackEntryDraft,
   ): Promise<HealthTrackEntry>;
   deleteHealthTrackEntry(id: string): Promise<void>;
+  /** Correct an entry with a stated reason; the replaced version is kept. */
+  correctHealthTrackEntry(
+    id: string,
+    draft: HealthTrackEntryDraft,
+    rationale: string,
+  ): Promise<HealthTrackEntry>;
   // ===== AUDIT-READINESS API (compliance score snapshots) =====
   /**
    * Record today's compliance score snapshot (agency-wide when siteId is
@@ -2030,6 +2052,24 @@ function delegationSiteScope(session: SessionUser): string[] | null {
 function accessibleIndividual(store: MemoryStore, session: SessionUser, id: string) {
   const person = store.db.individuals.find((row) => row.id === id);
   if (!person || !canReadIndividual(session, person, store.db.assignments, store.db.individuals)) {
+    throw new Error("Individual not found or outside your assigned access.");
+  }
+  return person;
+}
+
+/**
+ * Correction-path access, mirroring the database RPCs
+ * (correct_behavior_entry / correct_health_track_entry): the caller must be
+ * able to read the Individual at their own sites OR hold the nurse role,
+ * whose agency-wide read is what makes a cross-home correction possible.
+ */
+function accessibleIndividualForCorrection(store: MemoryStore, session: SessionUser, id: string) {
+  const person = store.db.individuals.find((row) => row.id === id);
+  if (!person) throw new Error("Individual not found or outside your assigned access.");
+  if (
+    !canReadIndividual(session, person, store.db.assignments, store.db.individuals) &&
+    session.roleKey !== "nurse"
+  ) {
     throw new Error("Individual not found or outside your assigned access.");
   }
   return person;
@@ -9039,6 +9079,14 @@ export class LocalApi implements ComplyraApi {
     return (this.store.db.healthTrackEntries ??= []);
   }
 
+  private behaviorEntryHistoryOf() {
+    return (this.store.db.behaviorEntryHistory ??= []);
+  }
+
+  private healthTrackEntryHistoryOf() {
+    return (this.store.db.healthTrackEntryHistory ??= []);
+  }
+
   /** Active house-manager user ids assigned to a site (direct alert targets). */
   private houseManagerIdsForSite(session: SessionUser, siteId: string): string[] {
     return this.store.db.memberships
@@ -9551,6 +9599,74 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
+  async correctBehaviorEntry(
+    id: string,
+    draft: BehaviorEntryDraft,
+    rationale: string,
+  ): Promise<BehaviorEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "behavior.record");
+    const entry = this.behaviorEntriesOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!entry) throw new Error("Behavior record not found.");
+    accessibleIndividualForCorrection(this.store, session, entry.individualId);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      !canCorrectBehaviorEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct behavior records you recorded.");
+    }
+    const errors = validateBehaviorCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const corrected = {
+      occurredOn: draft.occurredOn,
+      occurredAtTime: draft.occurredAtTime ?? "",
+      behavior: draft.behavior.trim(),
+      antecedent: (draft.antecedent ?? "").trim(),
+      durationMinutes: draft.durationMinutes ?? null,
+      intensity: draft.intensity,
+      interventionUsed: (draft.interventionUsed ?? "").trim(),
+      outcome: (draft.outcome ?? "").trim(),
+    };
+    if (
+      corrected.occurredOn === entry.occurredOn &&
+      corrected.occurredAtTime === entry.occurredAtTime &&
+      corrected.behavior === entry.behavior &&
+      corrected.antecedent === entry.antecedent &&
+      corrected.durationMinutes === entry.durationMinutes &&
+      corrected.intensity === entry.intensity &&
+      corrected.interventionUsed === entry.interventionUsed &&
+      corrected.outcome === entry.outcome
+    ) {
+      throw new Error("The correction does not change the record.");
+    }
+    const history: BehaviorEntryHistory = {
+      id: crypto.randomUUID(),
+      entryId: entry.id,
+      agencyId: entry.agencyId,
+      individualId: entry.individualId,
+      occurredOn: entry.occurredOn,
+      occurredAtTime: entry.occurredAtTime,
+      behavior: entry.behavior,
+      antecedent: entry.antecedent,
+      durationMinutes: entry.durationMinutes,
+      intensity: entry.intensity,
+      interventionUsed: entry.interventionUsed,
+      outcome: entry.outcome,
+      recordedByUserId: entry.recordedByUserId,
+      entryCreatedAt: entry.createdAt,
+      replacedByUserId: session.userId,
+      replacedAt: new Date().toISOString(),
+      isCorrection: true,
+      correctionRationale: rationale.trim(),
+    };
+    this.behaviorEntryHistoryOf().unshift(history);
+    Object.assign(entry, corrected);
+    await persistMeta(this.store);
+    return entry;
+  }
+
   // ----- Health trackers -----
 
   /** Fan a clinically significant entry out to HM + PM/nurse. */
@@ -9654,6 +9770,69 @@ export class LocalApi implements ComplyraApi {
       (row) => row.id !== id,
     );
     await persistMeta(this.store);
+  }
+
+  async correctHealthTrackEntry(
+    id: string,
+    draft: HealthTrackEntryDraft,
+    rationale: string,
+  ): Promise<HealthTrackEntry> {
+    const session = assertSession(this.store);
+    assertCan(session, "health.record");
+    const entry = this.healthTrackEntriesOf().find(
+      (row) => row.id === id && row.agencyId === session.agencyId,
+    );
+    if (!entry) throw new Error("Health record not found.");
+    accessibleIndividualForCorrection(this.store, session, entry.individualId);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      !canCorrectHealthTrackEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct health records you recorded.");
+    }
+    const errors = validateHealthCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const corrected = {
+      kind: draft.kind,
+      occurredOn: draft.occurredOn,
+      title: healthTrackTitle(draft.kind, draft.details ?? {}),
+      details: draft.details ?? {},
+      flaggedAbnormal: draft.flaggedAbnormal === true,
+      note: (draft.note ?? "").trim(),
+    };
+    if (
+      corrected.kind === entry.kind &&
+      corrected.occurredOn === entry.occurredOn &&
+      corrected.title === entry.title &&
+      JSON.stringify(corrected.details) === JSON.stringify(entry.details) &&
+      corrected.flaggedAbnormal === entry.flaggedAbnormal &&
+      corrected.note === entry.note
+    ) {
+      throw new Error("The correction does not change the record.");
+    }
+    const history: HealthTrackEntryHistory = {
+      id: crypto.randomUUID(),
+      entryId: entry.id,
+      agencyId: entry.agencyId,
+      individualId: entry.individualId,
+      kind: entry.kind,
+      occurredOn: entry.occurredOn,
+      title: entry.title,
+      details: entry.details,
+      flaggedAbnormal: entry.flaggedAbnormal,
+      note: entry.note,
+      recordedByUserId: entry.recordedByUserId,
+      entryCreatedAt: entry.createdAt,
+      replacedByUserId: session.userId,
+      replacedAt: new Date().toISOString(),
+      isCorrection: true,
+      correctionRationale: rationale.trim(),
+    };
+    this.healthTrackEntryHistoryOf().unshift(history);
+    Object.assign(entry, corrected);
+    if (healthEntryNeedsAlert(entry)) this.queueHealthAlert(session, entry);
+    await persistMeta(this.store);
+    return entry;
   }
 
   // ===== AUDIT-READINESS IMPL (score snapshots) =====

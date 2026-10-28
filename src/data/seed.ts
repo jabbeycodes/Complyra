@@ -69,8 +69,8 @@ import {
 } from "../delegation/delegation";
 import type { CorrectiveAction } from "./correctiveActions";
 import type { GerReport } from "./ger";
-import type { BehaviorEntry, BehaviorPlan } from "./behavior";
-import type { HealthTrackEntry } from "./healthTrack";
+import type { BehaviorEntry, BehaviorEntryHistory, BehaviorPlan } from "./behavior";
+import type { HealthTrackEntry, HealthTrackEntryHistory } from "./healthTrack";
 import type { ScoreSnapshot } from "./complianceScore";
 import { applyAgencyDemo } from "./demoShowcase";
 import { dueItemClock } from "./operatingReminders";
@@ -140,7 +140,9 @@ export interface LocalDatabase {
   gerReports: GerReport[];
   behaviorPlans: BehaviorPlan[];
   behaviorEntries: BehaviorEntry[];
+  behaviorEntryHistory: BehaviorEntryHistory[];
   healthTrackEntries: HealthTrackEntry[];
+  healthTrackEntryHistory: HealthTrackEntryHistory[];
   // AUDIT-READINESS: compliance score snapshots for the trend chart.
   complianceSnapshots: ScoreSnapshot[];
   // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
@@ -741,7 +743,9 @@ export function createEvergreenSeed(): LocalDatabase {
     gerReports: [],
     behaviorPlans: [],
     behaviorEntries: [],
+    behaviorEntryHistory: [],
     healthTrackEntries: [],
+    healthTrackEntryHistory: [],
     // AUDIT-READINESS: score snapshots accumulate as the command center runs.
     complianceSnapshots: [],
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.

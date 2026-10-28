@@ -69,12 +69,50 @@ export interface BehaviorEntryDraft {
   outcome?: string;
 }
 
+/**
+ * A preserved earlier version of a behavior entry. Every change keeps the
+ * version it replaced; a correction (the cross-home path, or any change
+ * made through the correction form) also carries the rationale, which
+ * stays on the record permanently.
+ */
+export interface BehaviorEntryHistory {
+  id: string;
+  entryId: string;
+  agencyId: string;
+  individualId: string;
+  occurredOn: string;
+  occurredAtTime: string;
+  behavior: string;
+  antecedent: string;
+  durationMinutes: number | null;
+  intensity: BehaviorIntensity;
+  interventionUsed: string;
+  outcome: string;
+  recordedByUserId: string;
+  entryCreatedAt: string;
+  replacedByUserId: string | null;
+  replacedAt: string;
+  isCorrection: boolean;
+  correctionRationale: string | null;
+}
+
 // ───────────────────────────── Permission gates ─────────────────────────────
 
 /** DSP/HM/PM/nurse record behavior data. */
 export function canRecordBehavior(roleKey: string | null | undefined): boolean {
   return (
     roleKey === "dsp" ||
+    roleKey === "house_manager" ||
+    roleKey === "program_manager" ||
+    roleKey === "nurse" ||
+    roleKey === "administrator" ||
+    roleKey === "compliance_admin"
+  );
+}
+
+/** Oversight roles may correct another recorder's entry (with a rationale). */
+export function canCorrectBehaviorEntry(roleKey: string | null | undefined): boolean {
+  return (
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
@@ -131,6 +169,18 @@ export function validateBehaviorEntryDraft(draft: BehaviorEntryDraft): string[] 
     (Number.isNaN(draft.durationMinutes) || draft.durationMinutes < 0)
   ) {
     errors.push("Duration must be zero or more minutes.");
+  }
+  return errors;
+}
+
+/** A correction is a full corrected draft plus the reason it was made. */
+export function validateBehaviorCorrection(
+  draft: BehaviorEntryDraft,
+  rationale: string,
+): string[] {
+  const errors = validateBehaviorEntryDraft(draft);
+  if (!rationale?.trim()) {
+    errors.push("State the reason for the correction — it stays on the record.");
   }
   return errors;
 }

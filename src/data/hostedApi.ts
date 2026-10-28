@@ -312,9 +312,11 @@ import {
   behaviorPlanFromRow,
   buildBehaviorEntryRow,
   buildBehaviorPlanRow,
+  canCorrectBehaviorEntry,
   canManageBehaviorPlan,
   canRecordBehavior,
   canViewBehavior,
+  validateBehaviorCorrection,
   validateBehaviorEntryDraft,
   validateBehaviorPlanDraft,
   type BehaviorEntry,
@@ -324,12 +326,15 @@ import {
 } from "./behavior";
 import {
   buildHealthTrackRow,
+  canCorrectHealthTrackEntry,
   canRecordHealthEntry,
   canViewHealthTrack,
   healthAlertTargets,
   healthEntryNeedsAlert,
   healthTrackEntryFromRow,
+  healthTrackTitle,
   isImmunizationOverdue,
+  validateHealthCorrection,
   validateHealthTrackDraft,
   type HealthTrackEntry,
   type HealthTrackEntryDraft,
@@ -9236,6 +9241,56 @@ export class HostedApi implements ComplyraApi {
     throwIf(deleteError, "Could not delete the behavior record.");
   }
 
+  async correctBehaviorEntry(
+    id: string,
+    draft: BehaviorEntryDraft,
+    rationale: string,
+  ): Promise<BehaviorEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "behavior.record");
+    const { data, error } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the behavior record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Behavior record not found.");
+    }
+    const existing = behaviorEntryFromRow(data as Record<string, unknown>);
+    if (
+      existing.recordedByUserId !== session.userId &&
+      !canCorrectBehaviorEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct behavior records you recorded.");
+    }
+    const errors = validateBehaviorCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    // The database correction path is the enforcement point: it re-checks
+    // the caller's scope, requires the rationale, preserves the replaced
+    // version, and writes the immutable history record.
+    const { error: rpcError } = await this.client.rpc("correct_behavior_entry", {
+      p_entry_id: id,
+      p_rationale: rationale.trim(),
+      p_occurred_on: draft.occurredOn,
+      p_occurred_at_time: draft.occurredAtTime ?? "",
+      p_behavior: draft.behavior,
+      p_antecedent: draft.antecedent ?? "",
+      p_duration_minutes: draft.durationMinutes ?? null,
+      p_intensity: draft.intensity,
+      p_intervention_used: draft.interventionUsed ?? "",
+      p_outcome: draft.outcome ?? "",
+    });
+    throwIf(rpcError, "Could not save the correction.");
+    const { data: updated, error: reloadError } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+    throwIf(reloadError, "Could not load the corrected record.");
+    return behaviorEntryFromRow(updated as Record<string, unknown>);
+  }
+
   // ----- Health trackers (hosted) -----
 
   private async emitHealthAlert(session: SessionUser, entry: HealthTrackEntry) {
@@ -9349,6 +9404,59 @@ export class HostedApi implements ComplyraApi {
       .delete()
       .eq("id", id);
     throwIf(deleteError, "Could not delete the health record.");
+  }
+
+  async correctHealthTrackEntry(
+    id: string,
+    draft: HealthTrackEntryDraft,
+    rationale: string,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the health record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Health record not found.");
+    }
+    const existing = healthTrackEntryFromRow(data as Record<string, unknown>);
+    if (
+      existing.recordedByUserId !== session.userId &&
+      !canCorrectHealthTrackEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct health records you recorded.");
+    }
+    const errors = validateHealthCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    // The database correction path is the enforcement point: it re-checks
+    // the caller's scope, requires the rationale, preserves the replaced
+    // version, and writes the immutable history record.
+    const { error: rpcError } = await this.client.rpc(
+      "correct_health_track_entry",
+      {
+        p_entry_id: id,
+        p_rationale: rationale.trim(),
+        p_kind: draft.kind,
+        p_occurred_on: draft.occurredOn,
+        p_title: healthTrackTitle(draft.kind, draft.details ?? {}),
+        p_details: draft.details ?? {},
+        p_flagged_abnormal: draft.flaggedAbnormal === true,
+        p_note: draft.note ?? "",
+      },
+    );
+    throwIf(rpcError, "Could not save the correction.");
+    const { data: updated, error: reloadError } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+    throwIf(reloadError, "Could not load the corrected record.");
+    const entry = healthTrackEntryFromRow(updated as Record<string, unknown>);
+    if (healthEntryNeedsAlert(entry)) await this.emitHealthAlert(session, entry);
+    return entry;
   }
   // ===== AUDIT-READINESS HOSTED (score snapshots) =====
   // Table: public.compliance_score_snapshots

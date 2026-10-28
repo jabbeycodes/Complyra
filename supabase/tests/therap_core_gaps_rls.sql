@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(66);
+select plan(83);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -123,17 +123,18 @@ select throws_ok($$insert into health_track_entries(agency_id,individual_id,kind
 select is((select count(*)::int from ger_reports where individual_id='e2700000-0000-0000-0000-000000000001'),1,
   'A nurse reads event reports agency-wide');
 
--- ── Nurse cross-home scope, behavior + health entries (adjudication of the
---    PR #117 re-review dispute): UPDATE is agency-wide for nurses, while
---    INSERT and DELETE stay limited to Individuals at their own sites ──
+-- ── Nurse cross-home scope, behavior + health entries (clinical-integrity
+--    fix): nurses keep agency-wide READ, but in-place UPDATE is limited to
+--    the caller's own home scope like INSERT and DELETE. Cross-home changes
+--    go through the correction RPCs below ──
 select lives_ok($$update behavior_entries set outcome='De-escalated after nurse review' where id='f2700000-0000-0000-0000-000000000002'$$,
-  'A nurse update of a behavior entry at another home runs');
-select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002' and outcome='De-escalated after nurse review'),1,
-  'A nurse can update a behavior entry at a home they are not assigned to');
+  'A nurse direct update of a behavior entry at another home runs but must touch no row');
+select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002' and outcome='De-escalated after nurse review'),0,
+  'A nurse can no longer overwrite a behavior entry at another home in place');
 select lives_ok($$update health_track_entries set note='Reviewed by nurse' where id='f2700000-0000-0000-0000-000000000003'$$,
-  'A nurse update of a health entry at another home runs');
-select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003' and note='Reviewed by nurse'),1,
-  'A nurse can update a health entry at a home they are not assigned to');
+  'A nurse direct update of a health entry at another home runs but must touch no row');
+select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003' and note='Reviewed by nurse'),0,
+  'A nurse can no longer overwrite a health entry at another home in place');
 select throws_ok($$insert into behavior_entries(agency_id,individual_id,occurred_on,behavior,recorded_by_user_id)
   values ('a2700000-0000-0000-0000-000000000001','e2700000-0000-0000-0000-000000000002','2026-10-26','Nurse entry','d2700000-0000-0000-0000-000000000004')$$,
   '42501', null, 'A nurse cannot add behavior entries at a home they are not assigned to');
@@ -145,6 +146,56 @@ select lives_ok($$delete from health_track_entries where id='f2700000-0000-0000-
   'A nurse delete of a health entry at another home runs but must touch no row');
 select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003'),1,
   'A nurse cannot delete a health entry at a home they are not assigned to');
+
+-- ── The correction path: cross-home changes need a rationale, preserve the
+--    original version, and land in an immutable history record ──
+select throws_ok($$select public.correct_behavior_entry('f2700000-0000-0000-0000-000000000002','  ','2026-10-26','','Verbal outbursts','',null,'Moderate','','De-escalated after nurse review')$$,
+  'P0001', null, 'A behavior correction without a rationale is rejected');
+select lives_ok($$select public.correct_behavior_entry('f2700000-0000-0000-0000-000000000002','Outcome confirmed with the home team by phone.','2026-10-26','','Verbal outbursts','',null,'Moderate','','De-escalated after nurse review')$$,
+  'A nurse corrects a behavior entry at another home through the correction path');
+select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002' and outcome='De-escalated after nurse review'),1,
+  'The correction applies the corrected values to the entry');
+select is((select count(*)::int from behavior_entry_history where entry_id='f2700000-0000-0000-0000-000000000002'
+  and behavior='Verbal outbursts' and outcome='' and is_correction
+  and correction_rationale='Outcome confirmed with the home team by phone.'
+  and replaced_by='d2700000-0000-0000-0000-000000000004'),1,
+  'The correction preserves the original behavior version with its rationale and author');
+select throws_ok($$select public.correct_health_track_entry('f2700000-0000-0000-0000-000000000003','','lab','2026-10-26','A1C','{}'::jsonb,false,'Reviewed by nurse')$$,
+  'P0001', null, 'A health correction without a rationale is rejected');
+select lives_ok($$select public.correct_health_track_entry('f2700000-0000-0000-0000-000000000003','Result verified against the lab portal.','lab','2026-10-26','A1C','{}'::jsonb,false,'Reviewed by nurse')$$,
+  'A nurse corrects a health entry at another home through the correction path');
+select is((select count(*)::int from health_track_entries where id='f2700000-0000-0000-0000-000000000003' and note='Reviewed by nurse'),1,
+  'The correction applies the corrected values to the health entry');
+select is((select count(*)::int from health_track_entry_history where entry_id='f2700000-0000-0000-0000-000000000003'
+  and note='' and is_correction
+  and correction_rationale='Result verified against the lab portal.'
+  and replaced_by='d2700000-0000-0000-0000-000000000004'),1,
+  'The correction preserves the original health version with its rationale and author');
+
+-- ── History is immutable for callers: no rewrite, no delete, no forge ──
+select throws_ok($$update behavior_entry_history set correction_rationale='Forged' where entry_id='f2700000-0000-0000-0000-000000000002'$$,
+  '42501', null, 'A preserved version cannot be rewritten');
+select is((select count(*)::int from behavior_entry_history where correction_rationale='Forged'),0,
+  'No history row carries a forged rationale');
+select throws_ok($$delete from behavior_entry_history where entry_id='f2700000-0000-0000-0000-000000000002'$$,
+  '42501', null, 'A preserved version cannot be deleted');
+select is((select count(*)::int from behavior_entry_history where entry_id='f2700000-0000-0000-0000-000000000002'),1,
+  'The preserved behavior version is still there');
+select throws_ok($$insert into behavior_entry_history(entry_id,agency_id,individual_id,occurred_on,occurred_at_time,behavior,antecedent,intensity,intervention_used,outcome,entry_created_at)
+  values ('f2700000-0000-0000-0000-000000000002','a2700000-0000-0000-0000-000000000001','e2700000-0000-0000-0000-000000000001','2026-10-26','','Forged','','Moderate','','',now())$$,
+  '42501', null, 'A preserved version cannot be forged by a direct insert');
+
+-- ── Same-home in-place editing is unchanged, and it preserves versions too ──
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2700000-0000-0000-0000-000000000003"}',true);
+select lives_ok($$update behavior_entries set outcome='Manager follow-up noted' where id='f2700000-0000-0000-0000-000000000002'$$,
+  'A house manager still edits an entry at their own home in place');
+select is((select count(*)::int from behavior_entries where id='f2700000-0000-0000-0000-000000000002' and outcome='Manager follow-up noted'),1,
+  'The house manager in-place edit applies');
+select is((select count(*)::int from behavior_entry_history where entry_id='f2700000-0000-0000-0000-000000000002'),2,
+  'The in-place edit also preserves the version it replaced');
+select is((select count(*)::int from behavior_entry_history where entry_id='f2700000-0000-0000-0000-000000000002'
+  and not is_correction and correction_rationale is null and outcome='De-escalated after nurse review'),1,
+  'A direct in-place edit is preserved without a correction rationale');
 
 -- ── Behavior plans are manager-owned; auditors are read-only ──
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d2700000-0000-0000-0000-000000000001"}',true);

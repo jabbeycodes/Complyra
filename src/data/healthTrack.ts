@@ -90,12 +90,48 @@ export interface HealthTrackEntryDraft {
   note?: string;
 }
 
+/**
+ * A preserved earlier version of a health tracker entry. Every change
+ * keeps the version it replaced; a correction (the cross-home path, or
+ * any change made through the correction form) also carries the
+ * rationale, which stays on the record permanently.
+ */
+export interface HealthTrackEntryHistory {
+  id: string;
+  entryId: string;
+  agencyId: string;
+  individualId: string;
+  kind: HealthTrackKind;
+  occurredOn: string;
+  title: string;
+  details: Record<string, string>;
+  flaggedAbnormal: boolean;
+  note: string;
+  recordedByUserId: string;
+  entryCreatedAt: string;
+  replacedByUserId: string | null;
+  replacedAt: string;
+  isCorrection: boolean;
+  correctionRationale: string | null;
+}
+
 // ───────────────────────────── Permission gates ─────────────────────────────
 
 /** DSP/HM/PM/nurse record health entries. */
 export function canRecordHealthEntry(roleKey: string | null | undefined): boolean {
   return (
     roleKey === "dsp" ||
+    roleKey === "house_manager" ||
+    roleKey === "program_manager" ||
+    roleKey === "nurse" ||
+    roleKey === "administrator" ||
+    roleKey === "compliance_admin"
+  );
+}
+
+/** Oversight roles may correct another recorder's entry (with a rationale). */
+export function canCorrectHealthTrackEntry(roleKey: string | null | undefined): boolean {
+  return (
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
@@ -178,6 +214,18 @@ export function validateHealthTrackDraft(draft: HealthTrackEntryDraft): string[]
     if (d.quality && !SLEEP_QUALITIES.includes(d.quality as SleepQuality)) {
       errors.push("Choose a sleep quality (Good, Fair, or Poor).");
     }
+  }
+  return errors;
+}
+
+/** A correction is a full corrected draft plus the reason it was made. */
+export function validateHealthCorrection(
+  draft: HealthTrackEntryDraft,
+  rationale: string,
+): string[] {
+  const errors = validateHealthTrackDraft(draft);
+  if (!rationale?.trim()) {
+    errors.push("State the reason for the correction — it stays on the record.");
   }
   return errors;
 }

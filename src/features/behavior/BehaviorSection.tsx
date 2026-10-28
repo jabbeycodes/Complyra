@@ -6,6 +6,7 @@ import { openPrintable } from "../../data/openFile";
 import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
 import {
   BEHAVIOR_INTENSITIES,
+  canCorrectBehaviorEntry,
   canViewBehavior,
   summarizeBehaviorEntries,
   targetBehaviorList,
@@ -51,9 +52,38 @@ export default function BehaviorSection({
     outcome: "",
   });
 
+  const [correcting, setCorrecting] = useState<BehaviorEntry | null>(null);
+  const [correctionDraft, setCorrectionDraft] = useState<BehaviorEntryDraft>({
+    occurredOn: today,
+    occurredAtTime: "",
+    behavior: "",
+    antecedent: "",
+    durationMinutes: null,
+    intensity: "Moderate",
+    interventionUsed: "",
+    outcome: "",
+  });
+  const [rationale, setRationale] = useState("");
+
   const visible = canViewBehavior(session);
   const canRecord = session?.permissions["behavior.record"] === true;
   const canPlan = session?.permissions["behavior.plan"] === true;
+  const canCorrect = canRecord && canCorrectBehaviorEntry(session?.roleKey);
+
+  const startCorrection = (entry: BehaviorEntry) => {
+    setCorrecting(entry);
+    setCorrectionDraft({
+      occurredOn: entry.occurredOn,
+      occurredAtTime: entry.occurredAtTime,
+      behavior: entry.behavior,
+      antecedent: entry.antecedent,
+      durationMinutes: entry.durationMinutes,
+      intensity: entry.intensity,
+      interventionUsed: entry.interventionUsed,
+      outcome: entry.outcome,
+    });
+    setRationale("");
+  };
 
   const load = useCallback(async () => {
     if (!visible) return;
@@ -361,6 +391,162 @@ export default function BehaviorSection({
               </div>
             </form>
           )}
+          {correcting && (
+            <form
+              className="behavior-entry-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  await api.correctBehaviorEntry(
+                    correcting.id,
+                    correctionDraft,
+                    rationale,
+                  );
+                  setCorrecting(null);
+                });
+              }}
+            >
+              <h4>Record a correction</h4>
+              <p className="muted">
+                Correcting “{correcting.behavior}” from{" "}
+                {formatDate(correcting.occurredOn)}. The original version and
+                your reason stay on the record — a correction never erases
+                what was first written.
+              </p>
+              <div className="form-grid">
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    value={correctionDraft.occurredOn}
+                    onChange={(e) =>
+                      setCorrectionDraft({
+                        ...correctionDraft,
+                        occurredOn: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Time
+                  <input
+                    type="time"
+                    value={correctionDraft.occurredAtTime}
+                    onChange={(e) =>
+                      setCorrectionDraft({
+                        ...correctionDraft,
+                        occurredAtTime: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Behavior
+                  <input
+                    value={correctionDraft.behavior}
+                    onChange={(e) =>
+                      setCorrectionDraft({
+                        ...correctionDraft,
+                        behavior: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Intensity
+                  <select
+                    value={correctionDraft.intensity}
+                    onChange={(e) =>
+                      setCorrectionDraft({
+                        ...correctionDraft,
+                        intensity: e.target.value as BehaviorIntensity,
+                      })
+                    }
+                  >
+                    {BEHAVIOR_INTENSITIES.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Duration (minutes)
+                  <input
+                    type="number"
+                    min={0}
+                    value={correctionDraft.durationMinutes ?? ""}
+                    onChange={(e) =>
+                      setCorrectionDraft({
+                        ...correctionDraft,
+                        durationMinutes:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <label>
+                Antecedent (what happened just before)
+                <input
+                  value={correctionDraft.antecedent}
+                  onChange={(e) =>
+                    setCorrectionDraft({
+                      ...correctionDraft,
+                      antecedent: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Intervention used
+                <input
+                  value={correctionDraft.interventionUsed}
+                  onChange={(e) =>
+                    setCorrectionDraft({
+                      ...correctionDraft,
+                      interventionUsed: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Outcome
+                <input
+                  value={correctionDraft.outcome}
+                  onChange={(e) =>
+                    setCorrectionDraft({
+                      ...correctionDraft,
+                      outcome: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Reason for the correction
+                <textarea
+                  value={rationale}
+                  onChange={(e) => setRationale(e.target.value)}
+                  rows={2}
+                  required
+                />
+              </label>
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={busy}>
+                  Save correction
+                </button>
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => setCorrecting(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
           {entries.length === 0 ? (
             <Empty title="No behaviors recorded yet." mark="quiet" />
           ) : (
@@ -400,6 +586,16 @@ export default function BehaviorSection({
                       }
                     >
                       Remove
+                    </button>
+                  )}
+                  {canCorrect && (
+                    <button
+                      type="button"
+                      className="button ghost"
+                      disabled={busy}
+                      onClick={() => startCorrection(entry)}
+                    >
+                      Record correction
                     </button>
                   )}
                 </li>
