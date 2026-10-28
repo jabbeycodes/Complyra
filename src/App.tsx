@@ -115,6 +115,9 @@ import ReportLibraryPage from "./features/reports/ReportLibraryPage";
 // HR-EMPLOYEE-HUB (2026-09-16)
 import { Briefcase } from "lucide-react";
 import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
+// SCHEDULING-TAB (2026-10-28): manager Scheduling page — Right Now + coverage.
+import { CalendarClock } from "lucide-react";
+import SchedulingPage from "./features/scheduling/SchedulingPage";
 import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
 import SitesList from "./features/sites/SitesList";
 import InactivityGuard from "./security/InactivityGuard";
@@ -654,6 +657,7 @@ export default function App() {
       title: "Programs",
       items: [
         ["Overview", LayoutDashboard],
+        ["Scheduling", CalendarClock],
         ["Platform", ShieldCheck],
         ["Individuals", Users],
         ["Appointments", CalendarDays],
@@ -1754,6 +1758,7 @@ export default function App() {
               {/* LIFEPATH-P7-PAGE (mileage tracking) */}
               {page === "Mileage" && <MileagePage />}
               {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}
+              {page === "Scheduling" && <SchedulingPage onNavigate={navigate} />}
               {page === "Employee Hub" && <EmployeeHubPage />}
               {page === "Recognition" && <RecognitionPage />}
               {page === "AI settings" && <AiSettingsPage />}

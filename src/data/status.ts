@@ -127,6 +127,14 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
   if (page === "Mileage") return can(session, "mileage.manage");
+  // SCHEDULING-TAB (2026-10-28): the Scheduling tab carries the Right Now
+  // strip and the house coverage board — the strip's own audience: house
+  // managers, program managers, agency administrators. No one else gains it.
+  if (page === "Scheduling") {
+    return ["house_manager", "program_manager", "administrator"].includes(
+      session.roleKey,
+    );
+  }
   // HR-EMPLOYEE-HUB-PAGEVIS (2026-09-16): the Employee Hub is reachable by
   // everyone with hub.access; each tab is permission-gated in-app.
   if (page === "Employee Hub") return can(session, "hub.access");
@@ -169,6 +177,7 @@ export function pageVisible(session: SessionUser, page: string) {
  */
 export const CANONICAL_PAGE_ORDER = [
   "Overview",
+  "Scheduling",
   "Platform",
   "Individuals",
   "Appointments",

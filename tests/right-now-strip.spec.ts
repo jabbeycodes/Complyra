@@ -260,9 +260,21 @@ function strip(page: Page) {
   return page.locator("section.right-now");
 }
 
+/** The strip moved from the Overview to the Scheduling tab (2026-10-28). */
+async function openScheduling(page: Page) {
+  await page.getByRole("button", { name: "Scheduling" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Scheduling" }),
+  ).toBeVisible({ timeout: 15_000 });
+}
+
 test("house manager sees the strip scoped to their home", async ({ page }) => {
   await seedStores(page);
   await signIn(page, "james.wilson");
+
+  // The Overview is compliance-first now — the strip no longer lives there.
+  await expect(strip(page)).toHaveCount(0);
+  await openScheduling(page);
 
   const el = strip(page);
   await expect(el).toBeVisible({ timeout: 15_000 });
@@ -304,16 +316,19 @@ test("DSP does not see the strip", async ({ page }) => {
   await seedStores(page);
   await signIn(page, "alex.morgan");
   // A DSP has no Overview in their navigation — they land on Individuals.
-  // The strip is manager-only, so it must not exist anywhere in their app.
+  // The strip is manager-only, so it must not exist anywhere in their app,
+  // and neither must the Scheduling tab that now carries it.
   await expect(page.getByRole("heading", { name: "Individuals" })).toBeVisible({
     timeout: 15_000,
   });
   await expect(strip(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Scheduling" })).toHaveCount(0);
 });
 
 test("administrator focus change re-scopes the strip", async ({ page }) => {
   await seedStores(page);
   await signIn(page, "sarah.mitchell");
+  await openScheduling(page);
 
   const el = strip(page);
   await expect(el).toBeVisible({ timeout: 15_000 });
@@ -323,7 +338,7 @@ test("administrator focus change re-scopes the strip", async ({ page }) => {
   await expect(out.getByText("Taylor Reed")).toBeVisible();
   await expect(out.getByText("Vacation")).toBeVisible();
 
-  await page.getByLabel("Filter by site").selectOption({ label: "Willow House" });
+  await page.getByLabel("Filter by program site").selectOption({ label: "Willow House" });
   await expect(el.getByText("Jordan Lee")).toBeVisible();
   await expect(el.getByText("Alex Morgan")).toHaveCount(0);
   await expect(el.getByText("Taylor Reed")).toHaveCount(0);
@@ -333,6 +348,8 @@ test("strip does not overflow a phone-width viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await seedStores(page);
   await signIn(page, "james.wilson");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await openScheduling(page);
   const el = strip(page);
   await expect(el).toBeVisible({ timeout: 15_000 });
   await expect(el.getByText("Jordan Lee")).toBeVisible();
