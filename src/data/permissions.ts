@@ -895,3 +895,4 @@ export function canSeeMenuEntries(roleKey: string) {
     "dsp",
     "auditor",
   ].includes(roleKey);
+}
