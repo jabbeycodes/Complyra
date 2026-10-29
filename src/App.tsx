@@ -32,6 +32,7 @@ import {
   CheckCheck,
   BookOpen,
   BadgeCheck,
+  LibraryBig,
   CircleAlert,
   ChevronRight,
   RotateCcw,
@@ -110,6 +111,7 @@ import MedInventoryPage from "./features/medInventory/MedInventoryPage";
 // LIFEPATH-P7-IMPORT (mileage tracking)
 import { CarFront as MileageNavIcon } from "lucide-react";
 import MileagePage from "./features/mileage/MileagePage";
+import ReportLibraryPage from "./features/reports/ReportLibraryPage";
 // HR-EMPLOYEE-HUB (2026-09-16)
 import { Briefcase } from "lucide-react";
 import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
@@ -183,6 +185,7 @@ export default function App() {
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
   const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
+  const [reportSitePreset, setReportSitePreset] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
@@ -671,6 +674,7 @@ export default function App() {
         // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
         // system-verified items, auditor scoring, and photo disputes.
         ["QA Review", BadgeCheck],
+        ["Report Library", LibraryBig],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
         ["AI settings", ServerCog],
@@ -748,7 +752,10 @@ export default function App() {
               {items.map(([name, Icon]) => (
                 <button
                   key={name}
-                  onClick={() => navigate(name)}
+                  onClick={() => {
+                    if (name === "Report Library") setReportSitePreset(null);
+                    navigate(name);
+                  }}
                   aria-current={page === name ? "page" : undefined}
                   className={`nav-item ${page === name || (name === "Requirements" && isCategory) ? "active" : ""}`}
                 >
@@ -1152,6 +1159,10 @@ export default function App() {
                   onBack={() => navigate("Sites & programs")}
                   onOpenIndividual={(name) => openPersonChart(name)}
                   onOpenPage={(next) => navigate(next)}
+                  onOpenReports={(siteId) => {
+                    setReportSitePreset(siteId);
+                    navigate("Report Library");
+                  }}
                 />
               )}
               {page === "Sites & programs" && (
@@ -1748,6 +1759,9 @@ export default function App() {
               {page === "AI settings" && <AiSettingsPage />}
               {/* QA-AUDIT-PAGE (2026-09-14) */}
               {page === "QA Review" && <QaAuditsPage />}
+              {page === "Report Library" && (
+                <ReportLibraryPage presetSiteId={reportSitePreset} />
+              )}
               {page === "Settings" && (
                 <>
                   <PageHeading title="Settings" />
