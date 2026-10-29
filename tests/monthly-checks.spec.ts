@@ -18,19 +18,27 @@ test("monthly equipment, drills, and safety are due by the 7th and downloadable 
   await expect(
     page.getByRole("heading", { name: /Your work/ }),
   ).toBeVisible();
+  // The demo showcase completes the current month's equipment checks,
+  // drills, and safety report for every site, and the personal queue
+  // correctly omits completed work — so none of this month's monthly
+  // tasks are offered. (The flows below still exercise the equipment log
+  // and the drill/safety downloads against August data.)
   await expect(
-    page.getByRole("button", { name: /Check adaptive equipment/ }).first(),
-  ).toBeVisible();
+    page.getByRole("button", { name: /Check adaptive equipment/ }),
+  ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: /emergency drills/ }).first(),
-  ).toBeVisible();
+    page.getByRole("button", { name: /emergency drills/ }),
+  ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: /home safety report/ }).first(),
-  ).toBeVisible();
+    page.getByRole("button", { name: /home safety report/ }),
+  ).toHaveCount(0);
 
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("heading", { name: "Ellis Hart" }).click();
   await expect(page.getByRole("heading", { name: "Adaptive equipment log" })).toBeVisible();
+  // The due-by-the-7th cadence itself is stated on the equipment log
+  // (default monthly due day), even though this month's check is done.
+  await expect(page.getByText(/checked by the 7th of each month/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Wheelchair" })).toBeVisible();
   await page.getByLabel("Equipment log month").selectOption("2026-08");
   const equipmentDownload = page.waitForEvent("download");

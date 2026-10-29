@@ -51,7 +51,9 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await expect(chart.getByRole("heading", { name: "ISP / PCSP tasks" })).toBeVisible();
   await expect(chart.getByRole("button", { name: "New shift note" })).toBeVisible();
   await chart.getByRole("button", { name: "New shift note" }).click();
-  await expect(chart.getByLabel("Other summary")).toBeVisible();
+  // ddbe630 (2026-10-24) renamed the note field "Other summary" to
+  // "Progress note" in the clinician-report terminology alignment.
+  await expect(chart.getByLabel("Progress note")).toBeVisible();
   await expect(chart.getByRole("button", { name: "Save note" })).toBeVisible();
   // Each ISP task renders a labeled score radio group.
   await expect(chart.getByRole("radiogroup").first()).toBeVisible();
@@ -111,7 +113,10 @@ test("Appointments calendar lists caseload days and opens that day's visits", as
   await expect(page.getByRole("button", { name: "Ellis Hart" })).toBeVisible();
   await expect(page.locator(".appointments-page")).toContainText("Dr. Priya Shah");
   await expect(page.locator(".appointments-page")).toContainText("Scheduled");
-  await expect(page.getByRole("button", { name: "Generate consultation packet" })).toBeVisible();
+  // Sep 22 legitimately holds several caseload visits (the showcase gives
+  // every caseload person an upcoming appointment), each with its own
+  // packet button — assert the first rather than a page-wide unique match.
+  await expect(page.getByRole("button", { name: "Generate consultation packet" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "New appointment" })).toHaveCount(0);
 
   const cedarOption = await filters

@@ -31,6 +31,12 @@ test('Quarterly QA creates, scores, reloads and exports a site audit', async ({ 
   await login(page);
   await page.getByRole('button', { name: 'QA Review', exact: true }).click();
   await page.locator('.qa-new-audit').getByRole('combobox').first().selectOption({ label: 'Cedar House' });
+  // The demo showcase pre-finalizes the current quarter's audit for every
+  // site, and createQaAudit is idempotent per (site, year, quarter), so
+  // starting a review for the current period returns that locked audit.
+  // Pick an unoccupied period (2027, same quarter) to exercise the real
+  // create → score flow.
+  await page.locator('.qa-new-audit').getByLabel('Year').fill('2027');
   await page.getByRole('button', { name: 'Start review', exact: true }).click();
   await page.getByRole('button', { name: /Home environment/ }).click();
   const item = page.locator('.qa-item:not(.qa-item--locked)').first();

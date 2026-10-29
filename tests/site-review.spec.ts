@@ -11,20 +11,25 @@ async function signIn(page: Page, username = "sarah.mitchell") {
   });
 }
 
-test("PM sees an open site review and can download Cedar working copies", async ({
+test("PM sees site reviews in place and can download Cedar working copies", async ({
   page,
 }) => {
   await signIn(page);
+  // The demo showcase completes every site's review, and the personal
+  // queue correctly suppresses the confirm task when a review is already
+  // in place — so no "Confirm site-review checks" task is offered. Open
+  // Willow's pack from Sites & programs instead (the route the DSP test
+  // below uses) and assert the in-place state.
   await expect(
     page.getByRole("button", { name: /Confirm site-review checks are in place/ }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: /Confirm site-review checks are in place/ })
-    .click();
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
+  await page.getByLabel("Select site").selectOption("Willow House");
+  await page.getByRole("button", { name: "Site review pack" }).first().click();
   await expect(
     page.getByRole("heading", { name: /Site review pack · Willow House/ }),
   ).toBeVisible();
-  await expect(page.getByText("Site review open")).toBeVisible();
+  await expect(page.getByText("Site review in place")).toBeVisible();
 
   await page.getByLabel("Select site").selectOption("All sites");
   await page.getByRole("button", { name: "Site review pack" }).first().click();
