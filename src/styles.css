@@ -7877,6 +7877,7 @@ button.qa-row:hover {
 .badge.current {
   background: var(--color-h-d7e2cc);
   color: var(--color-h-2f4630);
+}
 /* ===== Report Library ===== */
 .report-library-tools {
   display: flex;
@@ -7955,6 +7956,7 @@ button.qa-row:hover {
   gap: 10px;
   margin-top: auto;
   padding-top: 4px;
+}
 /* THERAP-CORE-GAPS-1: event reports, behavior supports, health trackers.
    Solid high-contrast surfaces only — status is always carried by text. */
 .record-list {
@@ -8080,6 +8082,7 @@ button.qa-row:hover {
 }
 .health-daily-totals p {
   margin: 4px 0;
+}
 /* ===== Phone-width responsive pass (stacked on the mobile shell) =====
    Layout only, for the desktop pages the mobile tiles deep-link into.
    Everything below lives inside max-width: 860px, so the desktop
