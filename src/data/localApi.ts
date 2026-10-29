@@ -84,6 +84,8 @@ import {
   canStartReconciliation,
   canViewMedicationOrders,
   canUseMessaging,
+  canEnterMenuEntries,
+  canSeeMenuEntries,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -117,6 +119,14 @@ import {
   type ShiftNoteView,
   type SiteShiftNoteView,
 } from "./shiftNotes";
+import {
+  canEditMenuEntryRow,
+  MEAL_SLOTS,
+  AMOUNT_EATEN_OPTIONS,
+  type MenuEntry,
+  type MenuEntryHistory,
+  type MenuEntryVersion,
+} from "./menuRecords";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
@@ -752,6 +762,45 @@ export interface ComplyraApi {
   }): Promise<string>;
   /** Issue #80 — soft-delete a shift note. Same edit gate as saveShiftNote. */
   deleteShiftNote(noteId: string): Promise<void>;
+  /**
+   * Menu records — one Individual's food entries between two dates
+   * (inclusive). Live entries only: voided entries stay in the record's
+   * history, not in the week view.
+   */
+  getMenuEntries(
+    individualId: string,
+    from: string,
+    to: string,
+  ): Promise<import("./menuRecords").MenuEntryView[]>;
+  /**
+   * Menu records — create or update a food entry (entryId set = update).
+   * Updates are limited by canEditMenuEntryRow: the author always; house
+   * managers / PMs / administrators within their scope.
+   */
+  saveMenuEntry(input: {
+    entryId?: string;
+    individualId: string;
+    entryDate: string;
+    mealSlot: import("./menuRecords").MealSlot;
+    foodText: string;
+    amountEaten: import("./menuRecords").AmountEaten;
+    note?: string;
+  }): Promise<string>;
+  /**
+   * Menu records — void an entry with a reason. A void keeps the entry and
+   * its reason on the record; nothing is hard-deleted. Same edit gate as
+   * saveMenuEntry.
+   */
+  voidMenuEntry(entryId: string, reason: string): Promise<void>;
+  /**
+   * Menu records — the audit read for one Individual: every preserved
+   * prior version of their entries (written on each correction and void),
+   * plus the voided entries themselves with their reason and voider.
+   * Read-gated exactly like getMenuEntries (auditors included, read-only).
+   */
+  getMenuEntryHistory(
+    individualId: string,
+  ): Promise<import("./menuRecords").MenuEntryHistory>;
   /**
    * Issue #75 + #76 — the site Overview due-items list: typed rows for missing
    * Shift notes and unmarked scheduled meds, plus the counts the hero mirrors.
@@ -5230,6 +5279,206 @@ export class LocalApi implements ComplyraApi {
     note.deletedAt = new Date().toISOString();
     note.updatedAt = note.deletedAt;
     await persistMeta(this.store);
+  }
+
+  // ─────────── Menu records (per-Individual food record) ───────────
+
+  private menuEntryRows(): MenuEntry[] {
+    const db = this.store.db as LocalDatabase & { menuEntries?: MenuEntry[] };
+    if (!db.menuEntries) db.menuEntries = [];
+    return db.menuEntries;
+  }
+
+  private menuEntryHistoryRows(): MenuEntryVersion[] {
+    const db = this.store.db as LocalDatabase & {
+      menuEntryHistory?: MenuEntryVersion[];
+    };
+    if (!db.menuEntryHistory) db.menuEntryHistory = [];
+    return db.menuEntryHistory;
+  }
+
+  /**
+   * Preserve the version of an entry that a correction or void is about
+   * to replace — the local mirror of the hosted keep-history trigger,
+   * which fires when any of the content fields or the void state change.
+   * versionSavedAt is the entry's save time BEFORE this change.
+   */
+  private snapshotMenuEntryVersion(
+    existing: MenuEntry,
+    session: SessionUser,
+    replacedAt: string,
+  ) {
+    this.menuEntryHistoryRows().push({
+      id: crypto.randomUUID(),
+      entryId: existing.id,
+      entryDate: existing.entryDate,
+      mealSlot: existing.mealSlot,
+      foodText: existing.foodText,
+      amountEaten: existing.amountEaten,
+      note: existing.note,
+      versionSavedAt: existing.updatedAt,
+      replacedBy: session.userId,
+      replacedByName: session.fullName,
+      replacedAt,
+    });
+  }
+
+  async getMenuEntries(individualId: string, from: string, to: string) {
+    const session = assertSession(this.store);
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.menuEntryRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          !row.deletedAt &&
+          row.entryDate >= from &&
+          row.entryDate <= to,
+      )
+      .sort((a, b) =>
+        a.entryDate === b.entryDate
+          ? a.createdAt.localeCompare(b.createdAt)
+          : a.entryDate.localeCompare(b.entryDate),
+      )
+      .map((row) => ({ ...row }));
+  }
+
+  async saveMenuEntry(input: Parameters<ComplyraApi["saveMenuEntry"]>[0]) {
+    const session = assertSession(this.store);
+    if (!canEnterMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot record menu entries.");
+    }
+    const person = accessibleIndividual(this.store, session, input.individualId);
+    assertCalendarDate(input.entryDate, "Use a valid date.");
+    if (!MEAL_SLOTS.includes(input.mealSlot)) {
+      throw new Error("Choose the meal.");
+    }
+    if (!AMOUNT_EATEN_OPTIONS.includes(input.amountEaten)) {
+      throw new Error("Choose how much was eaten.");
+    }
+    const foodText = input.foodText.trim().slice(0, 500);
+    if (!foodText) throw new Error("Record what was eaten.");
+    const note = (input.note ?? "").trim().slice(0, 1000);
+    const now = new Date().toISOString();
+    if (input.entryId) {
+      const existing = this.menuEntryRows().find(
+        (row) =>
+          row.id === input.entryId &&
+          row.agencyId === session.agencyId &&
+          !row.deletedAt,
+      );
+      if (!existing || existing.individualId !== input.individualId) {
+        throw new Error("Menu entry not found.");
+      }
+      if (!canEditMenuEntryRow(session.roleKey, session.userId, existing)) {
+        throw new Error("You can only edit your own menu entries.");
+      }
+      // A correction keeps the version it replaces (the hosted trigger's
+      // rule: snapshot when any content field actually changes).
+      if (
+        existing.entryDate !== input.entryDate ||
+        existing.mealSlot !== input.mealSlot ||
+        existing.foodText !== foodText ||
+        existing.amountEaten !== input.amountEaten ||
+        existing.note !== note
+      ) {
+        this.snapshotMenuEntryVersion(existing, session, now);
+      }
+      existing.entryDate = input.entryDate;
+      existing.mealSlot = input.mealSlot;
+      existing.foodText = foodText;
+      existing.amountEaten = input.amountEaten;
+      existing.note = note;
+      existing.updatedAt = now;
+      await persistMeta(this.store);
+      return existing.id;
+    }
+    const entry: MenuEntry = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: person.siteId,
+      individualId: input.individualId,
+      entryDate: input.entryDate,
+      mealSlot: input.mealSlot,
+      foodText,
+      amountEaten: input.amountEaten,
+      note,
+      recordedBy: session.userId,
+      recordedByName: session.fullName,
+      recordedByRole: session.roleKey,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      voidedBy: null,
+      voidReason: "",
+    };
+    this.menuEntryRows().push(entry);
+    await persistMeta(this.store);
+    return entry.id;
+  }
+
+  async voidMenuEntry(entryId: string, reason: string) {
+    const session = assertSession(this.store);
+    if (!canEnterMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot record menu entries.");
+    }
+    const entry = this.menuEntryRows().find(
+      (row) => row.id === entryId && row.agencyId === session.agencyId && !row.deletedAt,
+    );
+    if (!entry) throw new Error("Menu entry not found.");
+    accessibleIndividual(this.store, session, entry.individualId);
+    if (!canEditMenuEntryRow(session.roleKey, session.userId, entry)) {
+      throw new Error("You can only void your own menu entries.");
+    }
+    const cleanReason = reason.trim().slice(0, 500);
+    if (!cleanReason) throw new Error("Give a reason for voiding this entry.");
+    const now = new Date().toISOString();
+    // Voiding also preserves the pre-void version, like the hosted trigger.
+    this.snapshotMenuEntryVersion(entry, session, now);
+    entry.deletedAt = now;
+    entry.voidedBy = session.userId;
+    entry.voidReason = cleanReason;
+    entry.updatedAt = now;
+    await persistMeta(this.store);
+  }
+
+  async getMenuEntryHistory(individualId: string) {
+    const session = assertSession(this.store);
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    const versions = this.menuEntryHistoryRows()
+      .filter((row) => {
+        const entry = this.menuEntryRows().find((e) => e.id === row.entryId);
+        return (
+          entry &&
+          entry.agencyId === session.agencyId &&
+          entry.individualId === individualId
+        );
+      })
+      .sort((a, b) => b.replacedAt.localeCompare(a.replacedAt))
+      .map((row) => ({ ...row }));
+    const voided = this.menuEntryRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          row.deletedAt,
+      )
+      .sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? ""))
+      .map((row) => ({
+        ...row,
+        voidedByName: row.voidedBy
+          ? (this.store.db.profiles.find((p) => p.id === row.voidedBy)
+              ?.fullName ?? "Staff member")
+          : "Staff member",
+      }));
+    const history: MenuEntryHistory = { versions, voided };
+    return history;
   }
 
   // ─────────── Issue #75 alone time + #76 MAR marks + due items ───────────

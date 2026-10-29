@@ -161,6 +161,8 @@ import {
   canStartReconciliation,
   canViewMedicationOrders,
   canUseMessaging,
+  canEnterMenuEntries,
+  canSeeMenuEntries,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -182,6 +184,13 @@ import {
   type ShiftNoteView,
   type SiteShiftNoteView,
 } from "./shiftNotes";
+import {
+  canEditMenuEntryRow,
+  MEAL_SLOTS,
+  AMOUNT_EATEN_OPTIONS,
+  type MenuEntryHistory,
+  type MenuEntryView,
+} from "./menuRecords";
 import { isValidRating } from "../recognition/scoring";
 import {
   allergiesChangeDetail,
@@ -3527,6 +3536,234 @@ export class HostedApi implements ComplyraApi {
       .update({ deleted_at: now, updated_at: now })
       .eq("id", noteId);
     throwIf(updateError, "Could not delete the shift note.");
+  }
+
+  // ─────────── Menu records (per-Individual food record) ───────────
+
+  private mapMenuEntry(row: Record<string, unknown>): MenuEntryView {
+    return {
+      id: String(row.id),
+      agencyId: String(row.agency_id),
+      siteId: String(row.site_id ?? ""),
+      individualId: String(row.individual_id),
+      entryDate: String(row.entry_date ?? "").slice(0, 10),
+      mealSlot: (row.meal_slot as MenuEntryView["mealSlot"]) ?? "snack",
+      foodText: String(row.food_text ?? ""),
+      amountEaten: (row.amount_eaten as MenuEntryView["amountEaten"]) ?? "all",
+      note: String(row.note ?? ""),
+      recordedBy: String(row.recorded_by ?? ""),
+      recordedByName: String(row.recorded_by_name ?? ""),
+      recordedByRole: String(row.recorded_by_role ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      updatedAt: String(row.updated_at ?? ""),
+      deletedAt: row.deleted_at ? String(row.deleted_at) : null,
+      voidedBy: row.voided_by ? String(row.voided_by) : null,
+      voidReason: String(row.void_reason ?? ""),
+    };
+  }
+
+  async getMenuEntries(
+    individualId: string,
+    from: string,
+    to: string,
+  ): Promise<MenuEntryView[]> {
+    const session = await this.requireSession();
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    const { data, error } = await this.client
+      .from("menu_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .is("deleted_at", null)
+      .gte("entry_date", from)
+      .lte("entry_date", to)
+      .order("entry_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load menu records.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) =>
+      this.mapMenuEntry(row),
+    );
+  }
+
+  async saveMenuEntry(input: Parameters<ComplyraApi["saveMenuEntry"]>[0]) {
+    const session = await this.requireSession();
+    if (!canEnterMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot record menu entries.");
+    }
+    if (!MEAL_SLOTS.includes(input.mealSlot)) {
+      throw new Error("Choose the meal.");
+    }
+    if (!AMOUNT_EATEN_OPTIONS.includes(input.amountEaten)) {
+      throw new Error("Choose how much was eaten.");
+    }
+    const foodText = input.foodText.trim().slice(0, 500);
+    if (!foodText) throw new Error("Record what was eaten.");
+    const note = (input.note ?? "").trim().slice(0, 1000);
+    const now = new Date().toISOString();
+    if (input.entryId) {
+      const { data: existing, error: loadError } = await this.client
+        .from("menu_entries")
+        .select("recorded_by, individual_id")
+        .eq("id", input.entryId)
+        .eq("agency_id", session.agencyId)
+        .is("deleted_at", null)
+        .single();
+      throwIf(loadError, "Menu entry not found.");
+      const row = existing as Record<string, unknown>;
+      if (String(row.individual_id) !== input.individualId) {
+        throw new Error("Menu entry not found.");
+      }
+      if (
+        !canEditMenuEntryRow(session.roleKey, session.userId, {
+          recordedBy: String(row.recorded_by ?? ""),
+        })
+      ) {
+        throw new Error("You can only edit your own menu entries.");
+      }
+      const { error } = await this.client
+        .from("menu_entries")
+        .update({
+          entry_date: input.entryDate,
+          meal_slot: input.mealSlot,
+          food_text: foodText,
+          amount_eaten: input.amountEaten,
+          note,
+          updated_at: now,
+        })
+        .eq("id", input.entryId)
+        .eq("agency_id", session.agencyId);
+      throwIf(error, "Could not save the menu entry.");
+      await this.audit(session, "menu_entry.updated", `${session.fullName} corrected a menu entry`, "menu_entry", input.entryId);
+      return input.entryId;
+    }
+    // The Individual row is RLS-scoped: if the caller cannot read this
+    // person, the row simply does not come back.
+    const { data: person, error: personError } = await this.client
+      .from("individuals")
+      .select("id, site_id")
+      .eq("id", input.individualId)
+      .eq("agency_id", session.agencyId)
+      .single();
+    throwIf(personError, "Individual not found or outside your assigned access.");
+    const { data, error } = await this.client
+      .from("menu_entries")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: String((person as Record<string, unknown>).site_id ?? ""),
+        individual_id: input.individualId,
+        entry_date: input.entryDate,
+        meal_slot: input.mealSlot,
+        food_text: foodText,
+        amount_eaten: input.amountEaten,
+        note,
+        recorded_by: session.userId,
+        recorded_by_name: session.fullName,
+        recorded_by_role: session.roleKey,
+        created_at: now,
+        updated_at: now,
+      })
+      .select("id")
+      .single();
+    throwIf(error, "Could not save the menu entry.");
+    const id = String((data as { id: string } | null)?.id ?? "");
+    await this.audit(session, "menu_entry.created", `${session.fullName} recorded a menu entry`, "menu_entry", id);
+    return id;
+  }
+
+  async voidMenuEntry(entryId: string, reason: string) {
+    const session = await this.requireSession();
+    if (!canEnterMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot record menu entries.");
+    }
+    const cleanReason = reason.trim().slice(0, 500);
+    if (!cleanReason) throw new Error("Give a reason for voiding this entry.");
+    const { data, error } = await this.client
+      .from("menu_entries")
+      .select("recorded_by")
+      .eq("id", entryId)
+      .eq("agency_id", session.agencyId)
+      .is("deleted_at", null)
+      .single();
+    throwIf(error, "Menu entry not found.");
+    const recordedBy = String((data as Record<string, unknown>).recorded_by ?? "");
+    if (!canEditMenuEntryRow(session.roleKey, session.userId, { recordedBy })) {
+      throw new Error("You can only void your own menu entries.");
+    }
+    const now = new Date().toISOString();
+    const { error: updateError } = await this.client
+      .from("menu_entries")
+      .update({
+        deleted_at: now,
+        void_reason: cleanReason,
+        updated_at: now,
+      })
+      .eq("id", entryId)
+      .eq("agency_id", session.agencyId);
+    throwIf(updateError, "Could not void the menu entry.");
+    await this.audit(session, "menu_entry.voided", `${session.fullName} voided a menu entry`, "menu_entry", entryId);
+  }
+
+  async getMenuEntryHistory(individualId: string): Promise<MenuEntryHistory> {
+    const session = await this.requireSession();
+    if (!canSeeMenuEntries(session.roleKey)) {
+      throw new Error("Your role cannot view menu records.");
+    }
+    // Both reads ride the same can_read_individual scope as the entries
+    // themselves (menu_entry_history's select policy is identical), so a
+    // reader sees exactly the history of the Individuals they can read —
+    // auditors included — and nobody else's.
+    const { data: versionRows, error } = await this.client
+      .from("menu_entry_history")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("replaced_at", { ascending: false });
+    throwIf(error, "Could not load menu record history.");
+    const { data: voidedRows, error: voidedError } = await this.client
+      .from("menu_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    throwIf(voidedError, "Could not load menu record history.");
+    const versionsRaw = (versionRows ?? []) as Array<Record<string, unknown>>;
+    const voidedRaw = (voidedRows ?? []) as Array<Record<string, unknown>>;
+    const names = await this.profileNames([
+      ...versionsRaw
+        .map((row) => String(row.replaced_by ?? ""))
+        .filter(Boolean),
+      ...voidedRaw.map((row) => String(row.voided_by ?? "")).filter(Boolean),
+    ]);
+    return {
+      versions: versionsRaw.map((row) => {
+        const replacedBy = row.replaced_by ? String(row.replaced_by) : null;
+        return {
+          id: String(row.id),
+          entryId: String(row.entry_id),
+          entryDate: String(row.entry_date ?? "").slice(0, 10),
+          mealSlot: (row.meal_slot as MenuEntryView["mealSlot"]) ?? "snack",
+          foodText: String(row.food_text ?? ""),
+          amountEaten:
+            (row.amount_eaten as MenuEntryView["amountEaten"]) ?? "all",
+          note: String(row.note ?? ""),
+          versionSavedAt: String(row.version_saved_at ?? ""),
+          replacedBy,
+          replacedByName:
+            (replacedBy && names.get(replacedBy)) || "Staff member",
+          replacedAt: String(row.replaced_at ?? ""),
+        };
+      }),
+      voided: voidedRaw.map((row) => {
+        const voidedBy = row.voided_by ? String(row.voided_by) : null;
+        return {
+          ...this.mapMenuEntry(row),
+          voidedByName: (voidedBy && names.get(voidedBy)) || "Staff member",
+        };
+      }),
+    };
   }
 
   async getSiteShiftNotes(siteId: string): Promise<SiteShiftNoteView[]> {
