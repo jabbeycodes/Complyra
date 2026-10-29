@@ -10,7 +10,7 @@
  * is per participant.
  *
  * Integrity rules (enforced again at the DB layer in
- * supabase/migrations/20261027150000_internal_messaging.sql):
+ * supabase/migrations/20261027151000_internal_messaging.sql):
  *  - participants only: nobody can read or be silently added to a thread;
  *    adding a participant writes a visible system note into the thread;
  *  - messages are append-only: no edit, no delete, sender is always the

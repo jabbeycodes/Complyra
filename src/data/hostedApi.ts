@@ -908,7 +908,7 @@ export class HostedApi implements ComplyraApi {
 
   // ── MESSAGING — staff-to-staff internal messaging (hosted) ─────────────
   // Mirrors LocalApi semantics exactly. The DB layer backstops everything
-  // (supabase/migrations/20261027150000_internal_messaging.sql): RLS scopes
+  // (supabase/migrations/20261027151000_internal_messaging.sql): RLS scopes
   // reads to thread participants, messages are immutable, authorship is
   // bound to auth.uid(), and private.can_use_messaging() excludes auditors.
 
