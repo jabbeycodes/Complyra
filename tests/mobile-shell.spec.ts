@@ -43,7 +43,6 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   // main (Messages, Event Reports, Time Off) render no tile at all.
   for (const label of [
     "Medications",
-    "Shift Notes",
     "ISP Data",
     "Time Clock",
     "My Tasks",
@@ -55,6 +54,11 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
       page.getByRole("button", { name: new RegExp(label) }).first(),
     ).toBeVisible();
   }
+  // No separate Shift Notes tile: a shift note is an ISP data entry, so
+  // ISP Data is the single door for the home's notes.
+  await expect(page.getByRole("button", { name: /Shift Notes/ })).toHaveCount(
+    0,
+  );
   await expect(page.getByRole("button", { name: /Messages/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Time Off/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Event Reports/ })).toHaveCount(
@@ -260,23 +264,135 @@ test("mobile ISP data: a draft plan is visible but not offered for entry", async
   ).toHaveCount(0);
 });
 
-test("mobile shift notes: the home's notes list and read view", async ({
+test("mobile ISP data: the entries list is the shift-notes record", async ({
   page,
 }) => {
   await signInToShell(page);
   await pickCedarHouse(page);
 
-  await page.getByRole("button", { name: /Shift Notes/ }).first().click();
+  // There is no separate Shift Notes destination on mobile anymore: a
+  // shift note is an ISP data entry, so the home's notes are read in the
+  // ISP flow, under the Individual's plan.
+  await expect(page.getByRole("button", { name: /Shift Notes/ })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: /ISP Data/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page
+    .getByRole("button", { name: /2026 ISP — Daily living supports/ })
+    .click();
   await expect(
-    page.getByRole("button", { name: "Create shift note" }),
+    page.getByRole("button", { name: "Create entry" }),
   ).toBeVisible();
-  const noteRow = page
-    .getByRole("button", { name: /Ellis Hart/ })
-    .first();
+  // Seeded entries (this plan's shift notes) list under day headings with
+  // their authors named; opening one shows the note's read view.
+  const noteRow = page.locator(".msh-day-group .msh-row").first();
   await expect(noteRow).toBeVisible();
   await noteRow.click();
   await expect(page.getByText("Collection details")).toBeVisible();
   await expect(page.getByText("Task scores")).toBeVisible();
+  await page.getByRole("button", { name: "‹ All entries" }).click();
+  await page.getByRole("button", { name: "‹ All plans" }).click();
+  await page.getByRole("button", { name: "‹ All Individuals" }).click();
+
+  // The home-wide history inside the ISP door is the audit path the
+  // per-person list cannot be: it spans every Individual at the home,
+  // including notes on plans that are not visible to the entry flow, and
+  // it is not subject to the per-person 30-record read cap. Prove the
+  // cap part with a backlog written through the app's own persisted
+  // store: 31 extra notes for Ellis Hart across August 2026. His
+  // per-person read then holds only the newest 30 — the oldest backlog
+  // entries must still be reachable in the history.
+  await page.evaluate(() => {
+    const raw = localStorage.getItem("complyra-v2-meta");
+    if (!raw) throw new Error("demo store was not persisted");
+    const meta = JSON.parse(raw);
+    const db = meta.db;
+    const ellis = db.individuals.find(
+      (p: { fullName: string }) => p.fullName === "Ellis Hart",
+    );
+    const alex = db.profiles.find(
+      (p: { fullName: string }) => p.fullName === "Alex Morgan",
+    );
+    const plan = db.ispPrograms.find(
+      (pr: { individualId: string; status: string }) =>
+        pr.individualId === ellis.id && pr.status === "approved",
+    );
+    for (let day = 31; day >= 1; day -= 1) {
+      const date = `2026-08-${String(day).padStart(2, "0")}`;
+      db.shiftNotes.push({
+        id: `sn-backlog-${date}`,
+        agencyId: ellis.agencyId,
+        individualId: ellis.id,
+        programId: plan.id,
+        noteDate: date,
+        shift: "7a–3p",
+        summary: `Backlog entry for ${date}.`,
+        timeSpentMinutes: null,
+        staffUserId: alex.id,
+        staffName: "Alex Morgan",
+        createdAt: `${date}T15:00:00.000Z`,
+        updatedAt: `${date}T15:00:00.000Z`,
+        deletedAt: null,
+      });
+    }
+    localStorage.setItem("complyra-v2-meta", JSON.stringify(meta));
+  });
+  await page.reload();
+  const picker = page.getByText("Select your home");
+  try {
+    await picker.waitFor({ timeout: 15_000 });
+    await pickCedarHouse(page);
+  } catch {
+    await expect(
+      page.getByRole("heading", { name: "Today at Cedar House" }),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  // The per-person entries list is capped: 4 seeded + 31 backlog = 35
+  // records, exactly 30 rows shown.
+  await page.getByRole("button", { name: /ISP Data/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page
+    .getByRole("button", { name: /2026 ISP — Daily living supports/ })
+    .click();
+  await expect(page.locator(".msh-day-group .msh-row")).toHaveCount(30, {
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "‹ All plans" }).click();
+  await page.getByRole("button", { name: "‹ All Individuals" }).click();
+
+  // The history spans the home: entries for both Individuals at Cedar
+  // House (Morgan Pruitt's seeded notes sit on her draft plan — not
+  // visible to the entry flow — yet they are part of the home's record),
+  // newest first, and the beyond-cap backlog entry opens from here.
+  await page
+    .getByRole("button", { name: /All entries at Cedar House/ })
+    .click();
+  await expect(
+    page.getByText("Shift notes at Cedar House, newest first."),
+  ).toBeVisible({ timeout: 30_000 });
+  // Newest first: the seeded notes are dated the last completed day.
+  await expect(page.locator(".msh-day-heading").first()).toContainText(
+    "Sep 11",
+  );
+  await expect(
+    page.locator(".msh-row", { hasText: "Ellis Hart" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.locator(".msh-row", { hasText: "Morgan Pruitt" }).first(),
+  ).toBeVisible();
+  await page.screenshot({ path: shot("isp-history.png"), fullPage: true });
+  const beyondCap = page.locator(".msh-row", {
+    hasText: "Backlog entry for 2026-08-01.",
+  });
+  await beyondCap.scrollIntoViewIfNeeded();
+  await expect(beyondCap).toBeVisible();
+  await beyondCap.click();
+  await expect(page.getByText("Collection details")).toBeVisible();
+  await expect(
+    page.getByText("Backlog entry for 2026-08-01."),
+  ).toBeVisible();
 });
 
 interface HomeTrackingSnapshot {
@@ -505,6 +621,12 @@ test("mobile home: donut math, up next, and the bottom navigation", async ({
   await expect(page.locator(".msh-donut-center strong")).toHaveText(
     `${Math.round((completed / total) * 100)}%`,
   );
+  // Unification: the legend carries no Shift Notes row — ISP Data is the
+  // notes' only row — and for this pinned day the center percent is the
+  // value it had before the count-only row was dropped (28 of 32 = 88%:
+  // the count-only row never entered the math).
+  expect(rowTexts.some((text) => text.includes("Shift Notes"))).toBe(false);
+  await expect(page.locator(".msh-donut-center strong")).toHaveText("88%");
   await card.screenshot({ path: shot("home-donut.png") });
   await page.locator(".msh-upnext").screenshot({ path: shot("up-next.png") });
   await page.screenshot({ path: shot("home-clean.png"), fullPage: true });

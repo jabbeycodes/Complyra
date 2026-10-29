@@ -1,10 +1,31 @@
 import { test, expect, type Page } from "./fixtures";
 
+// Same allowance the other mobile specs carry: the first navigation
+// cold-starts the dev server, and these page tours are long.
+test.setTimeout(180_000);
+
 async function fillLoginForm(page: Page) {
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("sarah.mitchell");
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
+  // Phone width now lands in the mobile shell (home picker first for a
+  // multi-home user). This spec exercises the desktop layout at phone
+  // width, so pick the home, then take the shell's explicit Desktop view
+  // pick — an explicit pick yields the true desktop layout, which is
+  // what every assertion below targets.
+  const picker = page.getByText("Select your home");
+  try {
+    await picker.waitFor({ timeout: 20_000 });
+    await page.getByRole("button", { name: /Cedar House/ }).click();
+  } catch {
+    // Single-home landing: already in the shell home.
+  }
+  await expect(page.getByRole("heading", { name: /Today at/ })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: /Account menu/ }).click();
+  await page.getByRole("menuitem", { name: /Desktop view/ }).click();
   await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
   await page
     .getByRole("dialog", { name: "Interactive demo tour" })

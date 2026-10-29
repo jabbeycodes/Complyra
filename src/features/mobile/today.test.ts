@@ -40,6 +40,27 @@ test("overall percent is completed over total across segments only", () => {
   assert.equal(summary.hasData, true);
 });
 
+test("the pinned demo day: 88% from the denominator categories alone", () => {
+  // Cedar House on the seed day, administrator: Medications 2 of 5,
+  // ISP Data 0 of 1, Checklists 26 of 26. Before the ISP/shift-notes
+  // unification, a count-only "Shift Notes — N written today" row sat in
+  // the legend beside these; it never entered the math, so dropping it
+  // leaves the center percent exactly where it was: 28/32 = 88%. The
+  // summary now carries precisely the three denominator segments.
+  const summary = buildTrackingSummary([
+    cat({ id: "medications", completed: 2, total: 5 }),
+    cat({ id: "ispData", label: "ISP Data", color: "#8b5e3c", completed: 0, total: 1 }),
+    cat({ id: "checklists", label: "Checklists", color: "#6f815c", completed: 26, total: 26 }),
+  ]);
+  assert.deepEqual(
+    summary.segments.map((s) => s.id),
+    ["medications", "ispData", "checklists"],
+  );
+  assert.equal(summary.overallCompleted, 28);
+  assert.equal(summary.overallTotal, 32);
+  assert.equal(summary.overallPercent, 88);
+});
+
 test("arcs cover the whole ring: completed in color, the rest as track", () => {
   const summary = buildTrackingSummary([
     cat({ completed: 3, total: 5 }),

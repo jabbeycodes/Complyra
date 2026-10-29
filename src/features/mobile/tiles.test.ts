@@ -23,13 +23,15 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
   );
   assert.deepEqual(tiles, [
     "medications",
-    "shiftNotes",
     "ispData",
     "timeClock",
     "myTasks",
     "individuals",
     "checklists",
   ]);
+  // No separate Shift Notes tile: a shift note is an ISP data entry, so
+  // ISP Data is the one door for the home's notes.
+  assert.ok(!(tiles as string[]).includes("shiftNotes"));
 });
 
 test("tiles a role cannot use do not render at all", () => {
@@ -47,7 +49,7 @@ test("an auditor gets read surfaces but no time clock without hub access", () =>
     }),
   );
   assert.ok(tiles.includes("medications"));
-  assert.ok(tiles.includes("shiftNotes"));
+  assert.ok(!(tiles as string[]).includes("shiftNotes"));
   assert.ok(tiles.includes("ispData"));
   assert.ok(tiles.includes("appointments"));
   assert.ok(tiles.includes("medCount"));
@@ -80,7 +82,6 @@ test("tile order is daily-driver order, medications first", () => {
     tiles.map((t) => t.id),
     [
       "medications",
-      "shiftNotes",
       "ispData",
       "timeClock",
       "myTasks",

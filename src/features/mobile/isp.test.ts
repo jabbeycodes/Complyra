@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { IspProgramView, ShiftNoteView } from "../../data/shiftNotes";
-import { groupNotesByDay, orderPlans, planStatus } from "./isp";
+import {
+  groupNotesByDay,
+  orderPlans,
+  planStatus,
+  windowHistory,
+} from "./isp";
 
 function program(partial: Partial<IspProgramView>): IspProgramView {
   return {
@@ -113,4 +118,41 @@ test("groupNotesByDay groups newest first with Today/Yesterday/weekday labels", 
   assert.equal(groups[2].label, "Wednesday");
   assert.equal(groups[3].label, "");
   assert.match(groups[3].dateText, /Aug 30/);
+});
+
+test("windowHistory keeps the newest entries and reports the true total", () => {
+  const notes = Array.from({ length: 5 }, (_, i) =>
+    note({ id: `n-${i}` }),
+  );
+  const all = windowHistory(notes);
+  assert.equal(all.total, 5);
+  assert.equal(all.truncated, false);
+  assert.deepEqual(
+    all.visible.map((row) => row.id),
+    ["n-0", "n-1", "n-2", "n-3", "n-4"],
+  );
+  const cut = windowHistory(notes, 3);
+  assert.equal(cut.total, 5);
+  assert.equal(cut.truncated, true);
+  assert.deepEqual(
+    cut.visible.map((row) => row.id),
+    ["n-0", "n-1", "n-2"],
+  );
+});
+
+test("windowHistory reaches past one person's 30-cap inside the home window", () => {
+  // 35 notes for one Individual, newest first, plus 2 for another. The
+  // per-person entries read caps the first Individual at 30; the home
+  // history window (100) still contains their 31st-newest note.
+  const mine = Array.from({ length: 35 }, (_, i) =>
+    note({ id: `mine-${i}` }),
+  );
+  const theirs = Array.from({ length: 2 }, (_, i) =>
+    note({ id: `theirs-${i}`, individualId: "person-2" }),
+  );
+  const win = windowHistory([...mine, ...theirs]);
+  assert.equal(win.total, 37);
+  assert.equal(win.truncated, false);
+  assert.ok(win.visible.some((row) => row.id === "mine-30"));
+  assert.ok(win.visible.some((row) => row.id === "mine-34"));
 });

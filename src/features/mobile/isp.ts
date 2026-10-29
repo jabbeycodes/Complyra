@@ -108,6 +108,36 @@ export function groupNotesByDay<TNote extends Pick<ShiftNoteView, "noteDate">>(
     });
 }
 
+/**
+ * The home-wide shift-note history shows the most recent HISTORY_LIMIT
+ * entries across every Individual at the home. Unlike the per-person
+ * entries list — whose API read caps at 30 notes per Individual — this
+ * window is over the whole home's records, so a note beyond one person's
+ * 30-cap stays reachable here as long as it is within the home's recent
+ * window. The window is honest: callers label it whenever it truncates.
+ */
+export const HISTORY_LIMIT = 100;
+
+export interface HistoryWindow<TNote> {
+  /** The notes to render, in the order given (newest first). */
+  visible: TNote[];
+  /** Total notes the home has (before windowing). */
+  total: number;
+  /** True when the window cut older entries off. */
+  truncated: boolean;
+}
+
+export function windowHistory<TNote>(
+  notes: TNote[],
+  limit: number = HISTORY_LIMIT,
+): HistoryWindow<TNote> {
+  return {
+    visible: notes.slice(0, limit),
+    total: notes.length,
+    truncated: notes.length > limit,
+  };
+}
+
 /** "7a–3p · 7:00 AM – 3:00 PM · 480 minutes" style duration text for a note. */
 export function noteTimeText(
   note: Pick<ShiftNoteView, "shift" | "beginTime" | "endTime" | "timeSpentMinutes">,

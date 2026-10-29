@@ -11,20 +11,25 @@ import MobilePeopleList from "./MobilePeopleList";
 import { NoteReadView } from "./MobileIsp";
 import type { WorkspaceIndividual } from "./types";
 import { centralTodayIso, formatCentralTime, formatDoseTime } from "./mar";
-import { groupNotesByDay, noteTimeText } from "./isp";
+import { groupNotesByDay, noteTimeText, windowHistory } from "./isp";
 
 /**
- * Shift Notes route — a thin mobile list over the existing site shift-note
- * surface (getSiteShiftNotes). Creating a note hands off to the ISP entry
- * flow, because in ComplyRer's model a shift note is an ISP data entry
- * against an approved plan; there is no second note model to write to.
+ * Home-wide shift-note history — the audit/oversight view inside the ISP
+ * Data door (there is no separate Shift Notes destination: a shift note
+ * is an ISP data entry). Where the per-person entries list reads one
+ * Individual's notes through an API read capped at 30, this list reads
+ * the whole home's notes (getSiteShiftNotes), so notes tied to older or
+ * not-currently-visible plans, and notes beyond one person's cap, stay
+ * reachable. The list is windowed to the most recent entries and says
+ * so plainly whenever the window cuts older entries off.
  */
-export default function MobileShiftNotes({
+export default function MobileSiteNotes({
   api,
   session,
   siteId,
   siteName,
   people,
+  onBack,
   onCreateEntry,
 }: {
   api: ComplyraApi;
@@ -32,6 +37,7 @@ export default function MobileShiftNotes({
   siteId: string;
   siteName: string;
   people: WorkspaceIndividual[];
+  onBack: () => void;
   onCreateEntry: (personId: string) => void;
 }) {
   const todayIso = centralTodayIso();
@@ -61,13 +67,16 @@ export default function MobileShiftNotes({
     void reload();
   }, [reload]);
 
-  const groups = useMemo(
+  const windowed = useMemo(
     () =>
-      groupNotesByDay(
+      windowHistory(
         [...notes].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-        todayIso,
       ),
-    [notes, todayIso],
+    [notes],
+  );
+  const groups = useMemo(
+    () => groupNotesByDay(windowed.visible, todayIso),
+    [windowed, todayIso],
   );
 
   const openNote = async (note: SiteShiftNoteView) => {
@@ -96,7 +105,7 @@ export default function MobileShiftNotes({
           className="msh-text-button"
           onClick={() => setSelected(null)}
         >
-          ‹ All shift notes
+          ‹ All entries
         </button>
         <NoteReadView
           note={selected as ShiftNoteView}
@@ -115,7 +124,7 @@ export default function MobileShiftNotes({
           className="msh-text-button"
           onClick={() => setPicking(false)}
         >
-          ‹ All shift notes
+          ‹ All entries
         </button>
         <p className="msh-section-note">
           A shift note is collected against the Individual's active ISP plan.
@@ -131,6 +140,9 @@ export default function MobileShiftNotes({
 
   return (
     <div>
+      <button type="button" className="msh-text-button" onClick={onBack}>
+        ‹ ISP Data
+      </button>
       <p className="msh-section-note">
         Shift notes at {siteName}, newest first. Times are Central.
       </p>
@@ -151,6 +163,12 @@ export default function MobileShiftNotes({
       {loading && <p className="msh-empty">Loading shift notes…</p>}
       {!loading && notes.length === 0 && (
         <p className="msh-empty">No shift notes yet at this home.</p>
+      )}
+      {!loading && windowed.truncated && (
+        <p className="msh-section-note">
+          Showing the most recent {windowed.visible.length} of{" "}
+          {windowed.total} entries at this home.
+        </p>
       )}
       {groups.map((group) => (
         <div key={group.dateIso} className="msh-day-group">

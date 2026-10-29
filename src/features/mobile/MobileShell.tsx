@@ -5,9 +5,6 @@ import {
   ChevronDown,
   ClipboardList,
   Clock,
-  FileText,
-  Home,
-  LayoutGrid,
   ListChecks,
   ListTodo,
   LogOut,
@@ -29,6 +26,7 @@ import {
 } from "../notifications/notify";
 import { mobileTiles, type MobileTileId } from "./tiles";
 import { bottomNavItems, moreSheetTiles, type BottomNavId } from "./bottomNav";
+import BottomNavPill from "./BottomNavPill";
 import { centralHour, greetingForHour, type TrackingCategoryId } from "./today";
 import { formatCentralTime } from "./mar";
 import { useTodayTracking } from "./useTodayTracking";
@@ -36,23 +34,20 @@ import MobileToday from "./MobileToday";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileIsp from "./MobileIsp";
-import MobileShiftNotes from "./MobileShiftNotes";
 import MobilePeopleList from "./MobilePeopleList";
 import "./mobile.css";
 
-type ShellView =
+export type ShellView =
   | "home"
   | "sites"
   | "mar"
   | "isp"
-  | "notes"
   | "tasks"
   | "people"
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medications: Pill,
-  shiftNotes: FileText,
   ispData: ClipboardList,
   timeClock: Clock,
   myTasks: ListTodo,
@@ -62,19 +57,10 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medCount: Package,
 };
 
-const NAV_ICONS: Record<BottomNavId, LucideIcon> = {
-  home: Home,
-  tasks: ListTodo,
-  meds: Pill,
-  people: Users,
-  more: LayoutGrid,
-};
-
 const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   sites: "Select your home",
   mar: "Medications",
   isp: "ISP Data",
-  notes: "Shift Notes",
   tasks: "My Tasks",
   people: "Individuals",
   notifications: "Notifications",
@@ -105,6 +91,8 @@ export default function MobileShell({
   onSignOut,
   onDesktopView,
   nav,
+  startView,
+  startSheetOpen,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -113,6 +101,16 @@ export default function MobileShell({
   onSignOut: () => void;
   onDesktopView: () => void;
   nav: MobileNav;
+  /**
+   * Where the platform bottom navigation (on the desktop-layout pages)
+   * asked the shell to open. Read once at mount — the shell remounts on
+   * every return from a deep-linked page, so a fresh intent always lands
+   * on a fresh mount. The home picker still wins when a multi-home user
+   * has no remembered home: nothing is scoped until a home is picked.
+   */
+  startView?: ShellView;
+  /** Open the More sheet on arrival (the pill's More destination). */
+  startSheetOpen?: boolean;
 }) {
   const sites = workspace.sites;
   const [siteId, setSiteId] = useState<string | null>(() => {
@@ -130,15 +128,17 @@ export default function MobileShell({
     null;
   // Multi-home users with no remembered home pick one first (the shell's
   // home-first rule); single-home users skip straight in.
-  const [view, setView] = useState<ShellView>(
-    sites.length > 1 && !storedSite ? "sites" : "home",
+  const [view, setView] = useState<ShellView>(() =>
+    sites.length > 1 && !storedSite ? "sites" : (startView ?? "home"),
   );
   const [siteQuery, setSiteQuery] = useState("");
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
   const [ispKey, setIspKey] = useState(0);
   const [ispFormActive, setIspFormActive] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState<boolean>(
+    () => startSheetOpen ?? false,
+  );
   const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
 
   const tiles = useMemo(
@@ -240,9 +240,6 @@ export default function MobileShell({
       case "medications":
         setView("mar");
         break;
-      case "shiftNotes":
-        setView("notes");
-        break;
       case "ispData":
         setIspPersonId(null);
         setIspKey((value) => value + 1);
@@ -278,7 +275,6 @@ export default function MobileShell({
   const openCategory = (id: TrackingCategoryId) => {
     if (id === "medications") setView("mar");
     else if (id === "ispData") openTile("ispData");
-    else if (id === "shiftNotes") setView("notes");
     else if (id === "checklists") nav.openPage("Weekly checklist");
   };
 
@@ -315,7 +311,6 @@ export default function MobileShell({
     view === "home" ||
     view === "tasks" ||
     view === "people" ||
-    view === "notes" ||
     (view === "isp" && !ispFormActive);
 
   const greeting = greetingForHour(centralHour());
@@ -582,21 +577,11 @@ export default function MobileShell({
             api={api}
             session={session}
             people={people}
+            siteId={scopedSite.id}
             siteName={scopedSite.name}
             initialPersonId={ispPersonId}
             onOpenChart={nav.openPersonChart}
             onFormActiveChange={setIspFormActive}
-          />
-        )}
-
-        {view === "notes" && scopedSite && (
-          <MobileShiftNotes
-            api={api}
-            session={session}
-            siteId={scopedSite.id}
-            siteName={scopedSite.name}
-            people={people}
-            onCreateEntry={openIspForPerson}
           />
         )}
 
@@ -693,30 +678,12 @@ export default function MobileShell({
       </main>
 
       {showBottomNav && (
-        <nav className="msh-bottomnav" aria-label="Mobile">
-          {navItems.map((item) => {
-            const Icon = NAV_ICONS[item.id];
-            const isCenter = item.id === "meds";
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`msh-nav-item${isCenter ? " center" : ""}${activeNav === item.id ? " active" : ""}`}
-                aria-label={item.label}
-                aria-current={activeNav === item.id ? "page" : undefined}
-                onClick={() => goNav(item.id)}
-              >
-                <span className="msh-nav-icon">
-                  <Icon size={isCenter ? 26 : 22} aria-hidden="true" />
-                  {item.id === "tasks" && queueItems.length > 0 && (
-                    <span className="msh-nav-badge">{queueItems.length}</span>
-                  )}
-                </span>
-                <span className="msh-nav-label">{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <BottomNavPill
+          items={navItems}
+          activeId={activeNav}
+          taskCount={queueItems.length}
+          onSelect={goNav}
+        />
       )}
 
       {sheetOpen && (

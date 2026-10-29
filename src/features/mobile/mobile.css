@@ -336,11 +336,6 @@
   flex: none;
 }
 
-.msh-legend-dot.count-only {
-  background: transparent;
-  border: 2px solid var(--border);
-}
-
 .msh-legend-main {
   display: flex;
   flex-direction: column;
@@ -1208,6 +1203,32 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* The pill's collapsed remnant on the platform pages: scrolling down
+   shrinks the pill to this slim bar — never fully gone — and tapping it
+   (or scrolling back up) restores the full pill. */
+.msh-bottomnav-remnant {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  z-index: 35;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 24px rgba(36, 30, 24, 0.22);
+  cursor: pointer;
 }
 
 /* More sheet */
