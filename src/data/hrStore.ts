@@ -3013,6 +3013,10 @@ interface LocalBucket {
   staffingSeeded?: boolean;
   /** True once the Evergreen demo hub seed (time off, shifts, leave ledger) has been written into this bucket. */
   demoHubSeeded?: boolean;
+  /** Compliance evidence projections by staff id (local only; the hosted store reads the live tables instead). */
+  evidence: Record<string, ComplianceEvidence>;
+  /** True once the Evergreen demo readiness seed (requirements + evidence) has been written into this bucket. */
+  demoReadinessSeeded?: boolean;
   /* HR-PHASE2 */
   policies: HrAccrualPolicy[];
   ledger: HrAccrualLedgerEntry[];
@@ -3076,6 +3080,7 @@ function emptyBucket(): LocalBucket {
     missedReports: [],
     punchRules: null,
     remoteGrants: [],
+    evidence: {},
   };
 }
 
@@ -3376,6 +3381,189 @@ function seedDemoHubData(): Pick<
   return { policies, ledger, timeOff, timeOffEvents, shifts };
 }
 
+/* --------------------- demo readiness seed (local) ----------------------- */
+/* Fictional readiness requirements + per-staff compliance evidence for the
+ * Evergreen demo agency, localStorage only, so the personal-compliance
+ * surfaces (Overview strip/card, mobile home card, Hub → My Compliance,
+ * and the Overview's per-house team lines) show real roll-ups in the demo
+ * instead of "No requirements assigned". Dates are relative to today, so
+ * the designed statuses hold whenever the demo is visited:
+ *   - Sarah (administrator): everything current except her HIPAA training,
+ *     due in about two weeks — her strip reads 75% with 1 item coming up.
+ *   - James (house manager, Willow): fully current.
+ *   - Alex (DSP, Cedar): CPR certification expired about two weeks ago —
+ *     the one Cedar staff member who needs attention.
+ *   - Taylor (DSP, Cedar): fully current.
+ *   - Casey (DSP, Willow): abuse-prevention training due in about three
+ *     weeks — due soon only, so Willow's team line stays all-current.
+ *   - Jordan (DSP, Willow): fully current.
+ *   - Cameron (nurse, Cedar): handbook acknowledgment signed about a year
+ *     ago, renewal due in about two weeks — 1 attention item of his own,
+ *     but due-soon counts as current in the team rule, so Cedar's team
+ *     line shows only Alex needing attention.
+ * CPR is agency-wide (residential-care norm); TB screening and a valid
+ * driver's license are scoped to the direct-care roles. */
+
+const DIRECT_CARE_ROLE_KEYS = ["dsp", "house_manager", "nurse"];
+const ALL_DEMO_ROLE_KEYS = ["administrator", ...DIRECT_CARE_ROLE_KEYS];
+
+function seedDemoReadinessData(): {
+  requirements: HrReadinessRequirement[];
+  evidence: Record<string, ComplianceEvidence>;
+} {
+  const agencyId = EVERGREEN_DEMO_AGENCY_ID;
+  const requirements: HrReadinessRequirement[] = [
+    {
+      id: "req-demo-abuse-training",
+      agencyId,
+      key: "abuse",
+      label: "Abuse, neglect & exploitation training",
+      kind: "training",
+      dueEveryDays: 365,
+      requiredRoleKeys: ALL_DEMO_ROLE_KEYS,
+      active: true,
+    },
+    {
+      id: "req-demo-hipaa-training",
+      agencyId,
+      key: "hipaa",
+      label: "Annual HIPAA & confidentiality training",
+      kind: "training",
+      dueEveryDays: 365,
+      requiredRoleKeys: ALL_DEMO_ROLE_KEYS,
+      active: true,
+    },
+    {
+      id: "req-demo-cpr",
+      agencyId,
+      key: "cpr",
+      label: "CPR & First Aid certification",
+      kind: "certificate",
+      dueEveryDays: 730,
+      requiredRoleKeys: ALL_DEMO_ROLE_KEYS,
+      active: true,
+    },
+    {
+      id: "req-demo-handbook",
+      agencyId,
+      key: "handbook",
+      label: "Employee handbook acknowledgment",
+      kind: "acknowledgment",
+      dueEveryDays: 365,
+      requiredRoleKeys: ALL_DEMO_ROLE_KEYS,
+      active: true,
+    },
+    {
+      id: "req-demo-tb",
+      agencyId,
+      key: "tb",
+      label: "TB screening",
+      kind: "certificate",
+      dueEveryDays: 365,
+      requiredRoleKeys: DIRECT_CARE_ROLE_KEYS,
+      active: true,
+    },
+    {
+      id: "req-demo-license",
+      agencyId,
+      key: "driver",
+      label: "Valid driver's license",
+      kind: "certificate",
+      dueEveryDays: null,
+      requiredRoleKeys: DIRECT_CARE_ROLE_KEYS,
+      active: true,
+    },
+  ];
+
+  const cpr = (expiresInDays: number): ComplianceEvidence["certs"][number] => ({
+    key: "CPR & First Aid",
+    name: "CPR & First Aid Certification",
+    expiresOn: demoDayIso(expiresInDays),
+  });
+  const license = (): ComplianceEvidence["certs"][number] => ({
+    key: "Driver's License",
+    name: "Driver's License",
+    expiresOn: demoDayIso(400),
+  });
+  const tb = (): ComplianceEvidence["certs"][number] => ({
+    key: "TB Screening",
+    name: "TB Screening",
+    expiresOn: demoDayIso(200),
+  });
+  const hipaa = (
+    completedDaysAgo: number,
+    dueInDays: number,
+  ): ComplianceEvidence["trainings"][number] => ({
+    key: "hipaa",
+    label: "HIPAA & Confidentiality Training",
+    completedOn: demoDayIso(-completedDaysAgo),
+    nextDueOn: demoDayIso(dueInDays),
+  });
+  const abuse = (
+    completedDaysAgo: number,
+    dueInDays: number,
+  ): ComplianceEvidence["trainings"][number] => ({
+    key: "abuse",
+    label: "Abuse, Neglect & Exploitation Training",
+    completedOn: demoDayIso(-completedDaysAgo),
+    nextDueOn: demoDayIso(dueInDays),
+  });
+  const handbook = (
+    ackedDaysAgo: number,
+  ): ComplianceEvidence["docAcks"][number] => ({
+    docKey: "Employee Handbook",
+    ackedAt: `${demoDayIso(-ackedDaysAgo)}T15:00:00.000Z`,
+  });
+  /** Fully-current direct-care evidence; overrides create the stories above. */
+  const directCare = (
+    overrides: Partial<ComplianceEvidence> = {},
+  ): ComplianceEvidence => ({
+    certs: [cpr(300), license(), tb()],
+    trainings: [hipaa(90, 275), abuse(60, 305)],
+    delegations: [],
+    docAcks: [handbook(30)],
+    ...overrides,
+  });
+
+  const evidence: Record<string, ComplianceEvidence> = {
+    // Administrator: no TB/license requirements; HIPAA renewal is the one
+    // item coming up (due in ~15 days), everything else current.
+    [DEMO_STAFF_IDS.sarah]: {
+      certs: [cpr(300)],
+      trainings: [hipaa(350, 15), abuse(100, 265)],
+      delegations: [],
+      docAcks: [handbook(40)],
+    },
+    [DEMO_STAFF_IDS.james]: directCare({
+      trainings: [hipaa(80, 285), abuse(45, 320)],
+      docAcks: [handbook(25)],
+    }),
+    // Cedar's one needs-attention story: CPR lapsed ~12 days ago.
+    [DEMO_STAFF_IDS.alex]: directCare({
+      certs: [cpr(-12), license(), tb()],
+    }),
+    [DEMO_STAFF_IDS.taylor]: directCare({
+      certs: [cpr(240), license(), tb()],
+      trainings: [hipaa(120, 245), abuse(30, 335)],
+    }),
+    [DEMO_STAFF_IDS.jordan]: directCare({
+      trainings: [hipaa(70, 295), abuse(110, 255)],
+      docAcks: [handbook(35)],
+    }),
+    // Due-soon training only — counts as current in the team rule.
+    [DEMO_STAFF_IDS.casey]: directCare({
+      trainings: [hipaa(90, 275), abuse(345, 20)],
+    }),
+    // Handbook ack from ~350 days ago: renewal due in ~15 days, so the
+    // item is due soon on his own list but current for the team line.
+    [DEMO_STAFF_IDS.cameron]: directCare({
+      docAcks: [handbook(350)],
+    }),
+  };
+
+  return { requirements, evidence };
+}
+
 type LocalRoot = Record<string, Record<string, LocalBucket>>;
 
 class LocalHrStore implements HrStore {
@@ -3420,6 +3608,8 @@ class LocalHrStore implements HrStore {
         if (!Array.isArray(bucket.remoteGrants)) bucket.remoteGrants = [];
         // Buckets written before the time-off lifecycle existed have no events array.
         if (!Array.isArray(bucket.timeOffEvents)) bucket.timeOffEvents = [];
+        // Buckets written before compliance evidence existed have no evidence map.
+        if (!bucket.evidence || typeof bucket.evidence !== "object") bucket.evidence = {};
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -3451,6 +3641,22 @@ class LocalHrStore implements HrStore {
       this.memory.timeOffEvents.push(...demo.timeOffEvents);
       this.memory.shifts.push(...demo.shifts);
       this.memory.demoHubSeeded = true;
+      this.save(this.memory);
+    }
+    // One-time fictional readiness seed (requirements + per-staff evidence)
+    // for the Evergreen demo agency, so the personal-compliance surfaces
+    // show real roll-ups. Written into every demo bucket: requirements are
+    // read from the signed-in user's own bucket, and the evidence map
+    // carries every demo staff member because the team roll-up asks the
+    // signed-in user's store for each teammate's evidence.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoReadinessSeeded
+    ) {
+      const demo = seedDemoReadinessData();
+      this.memory.requirements.push(...demo.requirements);
+      this.memory.evidence = { ...this.memory.evidence, ...demo.evidence };
+      this.memory.demoReadinessSeeded = true;
       this.save(this.memory);
     }
     return this.memory;
@@ -4108,10 +4314,19 @@ class LocalHrStore implements HrStore {
     });
   }
 
-  async getComplianceEvidence(_staffId: string): Promise<ComplianceEvidence> {
-    // Local mode has no certificate/training/delegation/document tables, so
-    // there is no local evidence to roll up.
-    return { certs: [], trainings: [], delegations: [], docAcks: [] };
+  async getComplianceEvidence(staffId: string): Promise<ComplianceEvidence> {
+    // Local mode has no certificate/training/delegation/document tables;
+    // the only local evidence is what the bucket carries (the Evergreen
+    // demo seeds fictional projections for its staff). Anyone else has no
+    // local evidence to roll up.
+    return (
+      this.load().evidence[staffId] ?? {
+        certs: [],
+        trainings: [],
+        delegations: [],
+        docAcks: [],
+      }
+    );
   }
 
   async listStaffingPatterns(scope: { staffId?: string }): Promise<HrStaffingPattern[]> {
