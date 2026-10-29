@@ -174,6 +174,11 @@ export interface LocalDatabase {
   // per-dose MAR check-off statuses that clear the unmarked-overdue due item.
   aloneTimeWindows: import("./types").AloneTimeWindow[];
   medDoseMarks: import("./types").MedDoseMark[];
+  // MEDICATION ORDERS: prescriber orders feeding the MAR + reconciliation
+  // history. Optional so demos persisted before this feature still load.
+  medicationOrders?: import("./types").MedicationOrder[];
+  medicationReconciliations?: import("./types").MedicationReconciliation[];
+  medicationReconciliationItems?: import("./types").MedicationReconciliationItem[];
   /** Agency walkthrough checklists. Optional so older persisted demos still load. */
   weeklyChecklists?: HmWeeklyChecklist[];
   // LIFE EVENTS: per-Individual significant-events timeline. Optional so

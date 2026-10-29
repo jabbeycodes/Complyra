@@ -65,7 +65,11 @@ import {
   canCreateSite,
   canEnterShiftNotes,
   canRecordLifeEvents,
+  canManageMedicationOrders,
   canSeeShiftNotes,
+  canSignReconciliation,
+  canStartReconciliation,
+  canViewMedicationOrders,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -125,6 +129,15 @@ import type {
   LegacyLineSignoffInput,
   LoginInput,
   MedDoseException,
+  CreateMedicationOrderInput,
+  UpdateMedicationOrderInput,
+  MedicationOrder,
+  MedicationOrderView,
+  MedicationReconciliation,
+  MedicationReconciliationItem,
+  MedicationReconciliationView,
+  ReconciliationItemInput,
+  ReconciliationTrigger,
   PacketDetail,
   PendingAgency,
   RequestTrainingCorrectionInput,
@@ -248,6 +261,17 @@ import {
   type QaPhotoInput,
 } from "./qaAudit";
 import { expandAndVerifyQaItems } from "./qaAuditApi";
+import {
+  buildReconciliationChecklist,
+  compareOrderExpiry,
+  daysUntilReview,
+  isReconciliationTrigger,
+  medicationStaysOnMar,
+  orderExpiry,
+  projectOrderToMedication,
+  validateOrderInput,
+  validateReconciliationItems,
+} from "./medicationOrders";
 // LIFEPATH-P2: training engine seeds + pure gate logic (supporting import for the P2 markers).
 import {
   TRAINING_TOPICS,
@@ -284,6 +308,7 @@ import {
   trainingLinesFromObligations,
   trainingStatus,
   type ChartFileKind,
+  type Medication,
 } from "./chart";
 import {
   buildSiteDueItems,
@@ -692,6 +717,52 @@ export interface ComplyraApi {
     doseTime: string;
     status: import("./types").MedDoseMarkStatus;
   }): Promise<void>;
+  // ===== MEDICATION ORDERS + RECONCILIATION =====
+  /** Prescriber orders for one Individual, newest first. */
+  listMedicationOrders(
+    individualId: string,
+  ): Promise<import("./types").MedicationOrder[]>;
+  /** Draft + active orders across every Individual the caller may read (review worklist + expiring report). */
+  listMedicationOrderWorklist(): Promise<
+    import("./types").MedicationOrderView[]
+  >;
+  /** Create a draft order. Nurse / PM / admin only. */
+  createMedicationOrder(
+    input: import("./types").CreateMedicationOrderInput,
+  ): Promise<import("./types").MedicationOrder>;
+  /** Edit a draft order (active + discontinued orders are frozen). */
+  updateMedicationOrder(
+    orderId: string,
+    patch: import("./types").UpdateMedicationOrderInput,
+  ): Promise<import("./types").MedicationOrder>;
+  /** Activate a draft order: project it onto the MAR medication list. */
+  activateMedicationOrder(
+    orderId: string,
+  ): Promise<import("./types").MedicationOrder>;
+  /** Discontinue an active order and clear its dose from the MAR. */
+  discontinueMedicationOrder(
+    orderId: string,
+    reason: string,
+  ): Promise<import("./types").MedicationOrder>;
+  /** Completed + in-progress reconciliations for one Individual, newest first. */
+  listReconciliations(
+    individualId: string,
+  ): Promise<import("./types").MedicationReconciliationView[]>;
+  /** Start a reconciliation; seeds the checklist from active orders vs the MAR list. */
+  startReconciliation(input: {
+    individualId: string;
+    trigger: import("./types").ReconciliationTrigger;
+  }): Promise<import("./types").MedicationReconciliationView>;
+  /** Replace the checklist decisions on an in-progress reconciliation. */
+  saveReconciliationItems(
+    reconciliationId: string,
+    items: import("./types").ReconciliationItemInput[],
+  ): Promise<import("./types").MedicationReconciliationView>;
+  /** Nurse / PM sign-off: records the signature + note and completes the reconciliation. */
+  signOffReconciliation(
+    reconciliationId: string,
+    input: { note: string; signatureName?: string },
+  ): Promise<import("./types").MedicationReconciliationView>;
   updateObligation(
     obligationId: string,
     patch: Partial<
@@ -2365,6 +2436,7 @@ function mapPlanStack(
     medications: canSeeMeds(session.roleKey)
       ? store.db.medications
           .filter((row) => row.individualId === person.id)
+          .filter((row) => medicationStaysOnMar(row, store.db.medicationOrders))
           .map((row) => toMedicationView(row))
       : [],
     staffTraining: store.db.trainingChecklists
@@ -4993,6 +5065,487 @@ export class LocalApi implements ComplyraApi {
       });
     }
     await persistMeta(this.store);
+  }
+
+  // ─────────── Medication orders + reconciliation ───────────
+
+  private medOrderRows(): MedicationOrder[] {
+    const db = this.store.db as LocalDatabase & {
+      medicationOrders?: MedicationOrder[];
+    };
+    if (!db.medicationOrders) db.medicationOrders = [];
+    return db.medicationOrders;
+  }
+
+  private reconciliationRows(): MedicationReconciliation[] {
+    const db = this.store.db as LocalDatabase & {
+      medicationReconciliations?: MedicationReconciliation[];
+    };
+    if (!db.medicationReconciliations) db.medicationReconciliations = [];
+    return db.medicationReconciliations;
+  }
+
+  private reconciliationItemRows(): MedicationReconciliationItem[] {
+    const db = this.store.db as LocalDatabase & {
+      medicationReconciliationItems?: MedicationReconciliationItem[];
+    };
+    if (!db.medicationReconciliationItems) db.medicationReconciliationItems = [];
+    return db.medicationReconciliationItems;
+  }
+
+  private individualNameFor(individualId: string): string {
+    return (
+      this.store.db.individuals.find((row) => row.id === individualId)?.fullName ??
+      ""
+    );
+  }
+
+  private siteNameForIndividual(individualId: string): string {
+    const person = this.store.db.individuals.find((row) => row.id === individualId);
+    if (!person) return "";
+    return this.store.db.sites.find((site) => site.id === person.siteId)?.name ?? "";
+  }
+
+  private medOrderView(order: MedicationOrder, today = todayIso()): MedicationOrderView {
+    return {
+      ...order,
+      expiry: orderExpiry(order, today),
+      daysUntilReview: daysUntilReview(order, today),
+      individualName: this.individualNameFor(order.individualId),
+      siteName: this.siteNameForIndividual(order.individualId),
+    };
+  }
+
+  /**
+   * The MAR medication list for an Individual: every medication row except
+   * those fed by a discontinued order. Legacy / seed medications (no source
+   * order) always appear; order-fed medications appear only while their order
+   * is active, so the list derives from the active orders.
+   */
+  private marMedicationsFor(individualId: string, agencyId: string): Medication[] {
+    const orders = this.medOrderRows();
+    return this.store.db.medications.filter(
+      (med) =>
+        med.agencyId === agencyId &&
+        med.individualId === individualId &&
+        medicationStaysOnMar(med, orders),
+    );
+  }
+
+  private medOrderOrThrow(orderId: string) {
+    const session = assertSession(this.store);
+    const order = this.medOrderRows().find(
+      (row) => row.id === orderId && row.agencyId === session.agencyId,
+    );
+    if (!order) throw new Error("Medication order not found.");
+    accessibleIndividual(this.store, session, order.individualId);
+    return { session, order };
+  }
+
+  private reconciliationOrThrow(reconciliationId: string) {
+    const session = assertSession(this.store);
+    const recon = this.reconciliationRows().find(
+      (row) => row.id === reconciliationId && row.agencyId === session.agencyId,
+    );
+    if (!recon) throw new Error("Reconciliation not found.");
+    accessibleIndividual(this.store, session, recon.individualId);
+    return { session, recon };
+  }
+
+  private reconciliationView(
+    recon: MedicationReconciliation,
+  ): MedicationReconciliationView {
+    return {
+      ...recon,
+      items: this.reconciliationItemRows()
+        .filter((row) => row.reconciliationId === recon.id)
+        .map((row) => ({ ...row }))
+        .sort((a, b) => a.medicationLabel.localeCompare(b.medicationLabel)),
+      individualName: this.individualNameFor(recon.individualId),
+    };
+  }
+
+  private pushReconciliationItem(
+    reconciliationId: string,
+    agencyId: string,
+    item: ReconciliationItemInput,
+    now: string,
+  ): void {
+    this.reconciliationItemRows().push({
+      id: `mri-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId,
+      reconciliationId,
+      orderId: item.orderId ?? null,
+      medicationId: item.medicationId ?? null,
+      medicationLabel: item.medicationLabel,
+      decision: item.decision,
+      discrepancy: Boolean(item.discrepancy),
+      note: item.note ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  private notifyOrderReview(view: MedicationOrderView): void {
+    const type = view.expiry === "expired" ? "med.order_expired" : "med.order_expiring";
+    const when = view.endReviewDate ?? "";
+    const phrase =
+      view.expiry === "expired"
+        ? "has passed its review date"
+        : "is approaching its review date";
+    const title =
+      view.expiry === "expired"
+        ? "Medication order expired"
+        : "Medication order expiring";
+    const body = `${view.medicationName} for ${view.individualName} ${phrase} (${when}). Review or renew the order.`;
+    for (const roleKey of ["nurse", "program_manager"]) {
+      this.notifyRole({
+        userId: null,
+        roleKey,
+        type,
+        title,
+        body,
+        deepLink: "/medication-orders",
+        entityType: "medication_order",
+        entityId: view.id,
+        dedupeKey: `${type}:${view.id}:${when}`,
+        agencyId: view.agencyId,
+      });
+    }
+  }
+
+  async listMedicationOrders(individualId: string): Promise<MedicationOrder[]> {
+    const session = assertSession(this.store);
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication orders.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.medOrderRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId && row.individualId === individualId,
+      )
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((row) => ({ ...row }));
+  }
+
+  async listMedicationOrderWorklist(): Promise<MedicationOrderView[]> {
+    const session = assertSession(this.store);
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication orders.");
+    }
+    const today = todayIso();
+    const accessibleIds = new Set(
+      this.store.db.individuals
+        .filter(
+          (person) =>
+            person.agencyId === session.agencyId &&
+            canReadIndividual(
+              session,
+              person,
+              this.store.db.assignments,
+              this.store.db.individuals,
+            ),
+        )
+        .map((person) => person.id),
+    );
+    const views = this.medOrderRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          (row.status === "draft" || row.status === "active") &&
+          accessibleIds.has(row.individualId),
+      )
+      .map((row) => this.medOrderView(row, today));
+    // No cron: when a reviewer opens the worklist, raise the expiring / expired
+    // alert for the nurse and Program Manager. Deduped per order + review date.
+    for (const view of views) {
+      if (view.expiry !== "ok") this.notifyOrderReview(view);
+    }
+    await persistMeta(this.store);
+    return views.sort(
+      (a, b) =>
+        compareOrderExpiry(a, b) || a.individualName.localeCompare(b.individualName),
+    );
+  }
+
+  async createMedicationOrder(
+    input: CreateMedicationOrderInput,
+  ): Promise<MedicationOrder> {
+    const session = assertSession(this.store);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager creates medication orders.");
+    }
+    accessibleIndividual(this.store, session, input.individualId);
+    const draft = validateOrderInput(input);
+    const now = new Date().toISOString();
+    const order: MedicationOrder = {
+      id: `mo-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      individualId: input.individualId,
+      medicationName: draft.medicationName,
+      dose: draft.dose,
+      route: draft.route,
+      schedule: draft.schedule,
+      scheduleTimes: draft.scheduleTimes,
+      isPrn: draft.isPrn,
+      startDate: draft.startDate,
+      endReviewDate: draft.endReviewDate,
+      prescriberName: draft.prescriberName,
+      reason: draft.reason,
+      status: "draft",
+      medicationId: null,
+      createdBy: session.userId,
+      createdByName: session.fullName,
+      activatedBy: null,
+      activatedByName: "",
+      activatedAt: null,
+      discontinuedBy: null,
+      discontinuedByName: "",
+      discontinuedAt: null,
+      discontinueReason: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.medOrderRows().push(order);
+    await persistMeta(this.store);
+    return { ...order };
+  }
+
+  async updateMedicationOrder(
+    orderId: string,
+    patch: UpdateMedicationOrderInput,
+  ): Promise<MedicationOrder> {
+    const { session, order } = this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager edits medication orders.");
+    }
+    if (order.status !== "draft") {
+      throw new Error("Only a draft order can be edited. Discontinue and reorder instead.");
+    }
+    const draft = validateOrderInput({
+      individualId: order.individualId,
+      medicationName: patch.medicationName ?? order.medicationName,
+      dose: patch.dose ?? order.dose,
+      route: patch.route ?? order.route,
+      schedule: patch.schedule ?? order.schedule,
+      scheduleTimes: patch.scheduleTimes ?? order.scheduleTimes,
+      isPrn: patch.isPrn ?? order.isPrn,
+      startDate: patch.startDate ?? order.startDate,
+      endReviewDate:
+        patch.endReviewDate !== undefined ? patch.endReviewDate : order.endReviewDate,
+      prescriberName: patch.prescriberName ?? order.prescriberName,
+      reason: patch.reason ?? order.reason,
+    });
+    Object.assign(order, draft, { updatedAt: new Date().toISOString() });
+    await persistMeta(this.store);
+    return { ...order };
+  }
+
+  async activateMedicationOrder(orderId: string): Promise<MedicationOrder> {
+    const { session, order } = this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager activates medication orders.");
+    }
+    if (order.status !== "draft") {
+      throw new Error("Only a draft order can be activated.");
+    }
+    const fields = projectOrderToMedication(order);
+    const now = new Date().toISOString();
+    let medicationId = order.medicationId;
+    const existing = medicationId
+      ? this.store.db.medications.find((row) => row.id === medicationId)
+      : undefined;
+    if (existing) {
+      existing.name = fields.name;
+      existing.strength = fields.strength;
+      existing.kind = fields.kind;
+      existing.pillsPerDay = fields.pillsPerDay;
+      existing.sourceOrderId = order.id;
+    } else {
+      medicationId = `med-${crypto.randomUUID().slice(0, 8)}`;
+      this.store.db.medications.push({
+        id: medicationId,
+        agencyId: session.agencyId,
+        individualId: order.individualId,
+        name: fields.name,
+        strength: fields.strength,
+        kind: fields.kind,
+        controlled: false,
+        pillsPerDay: fields.pillsPerDay,
+        remainingPills: 0,
+        lastDeliveryOn: null,
+        lastCountdownOn: null,
+        sourceOrderId: order.id,
+      });
+    }
+    // Project the order's dose times onto the MAR schedule (med_inventory).
+    if (medicationId) {
+      this.p6upsertRow(
+        { agencyId: session.agencyId },
+        { id: medicationId, individualId: order.individualId },
+        { doseTimes: fields.kind === "scheduled" ? fields.doseTimes : [] },
+      );
+    }
+    order.status = "active";
+    order.medicationId = medicationId;
+    order.activatedBy = session.userId;
+    order.activatedByName = session.fullName;
+    order.activatedAt = now;
+    order.updatedAt = now;
+    await persistMeta(this.store);
+    return { ...order };
+  }
+
+  async discontinueMedicationOrder(
+    orderId: string,
+    reason: string,
+  ): Promise<MedicationOrder> {
+    const { session, order } = this.medOrderOrThrow(orderId);
+    if (!canManageMedicationOrders(session.roleKey)) {
+      throw new Error("Only a nurse or Program Manager discontinues medication orders.");
+    }
+    if (order.status !== "active") {
+      throw new Error("Only an active order can be discontinued.");
+    }
+    const trimmed = reason.trim();
+    if (!trimmed) throw new Error("Enter a reason for discontinuing the order.");
+    const now = new Date().toISOString();
+    order.status = "discontinued";
+    order.discontinuedBy = session.userId;
+    order.discontinuedByName = session.fullName;
+    order.discontinuedAt = now;
+    order.discontinueReason = trimmed;
+    order.updatedAt = now;
+    // Clear the fed medication's MAR dose schedule so the dose leaves the MAR.
+    if (order.medicationId) {
+      const inv = this.p6rows().find((row) => row.medicationId === order.medicationId);
+      if (inv) {
+        inv.doseTimes = [];
+        inv.updatedAt = now;
+      }
+    }
+    await persistMeta(this.store);
+    return { ...order };
+  }
+
+  async listReconciliations(
+    individualId: string,
+  ): Promise<MedicationReconciliationView[]> {
+    const session = assertSession(this.store);
+    if (!canViewMedicationOrders(session.roleKey)) {
+      throw new Error("You cannot view medication reconciliations.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.reconciliationRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId && row.individualId === individualId,
+      )
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
+      .map((row) => this.reconciliationView(row));
+  }
+
+  async startReconciliation(input: {
+    individualId: string;
+    trigger: ReconciliationTrigger;
+  }): Promise<MedicationReconciliationView> {
+    const session = assertSession(this.store);
+    if (!canStartReconciliation(session.roleKey)) {
+      throw new Error("Only a nurse, Program Manager, or house manager starts a reconciliation.");
+    }
+    accessibleIndividual(this.store, session, input.individualId);
+    if (!isReconciliationTrigger(input.trigger)) {
+      throw new Error("Choose a valid reconciliation trigger.");
+    }
+    const now = new Date().toISOString();
+    const recon: MedicationReconciliation = {
+      id: `mr-${crypto.randomUUID().slice(0, 8)}`,
+      agencyId: session.agencyId,
+      individualId: input.individualId,
+      trigger: input.trigger,
+      status: "in_progress",
+      startedBy: session.userId,
+      startedByName: session.fullName,
+      startedAt: now,
+      signedOffBy: null,
+      signedOffByName: "",
+      signedOffAt: null,
+      signOffNote: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.reconciliationRows().push(recon);
+    const activeOrders = this.medOrderRows().filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === input.individualId &&
+        row.status === "active",
+    );
+    const suggested = buildReconciliationChecklist({
+      activeOrders,
+      marMedications: this.marMedicationsFor(input.individualId, session.agencyId),
+    });
+    for (const item of suggested) {
+      this.pushReconciliationItem(recon.id, session.agencyId, item, now);
+    }
+    await persistMeta(this.store);
+    return this.reconciliationView(recon);
+  }
+
+  async saveReconciliationItems(
+    reconciliationId: string,
+    items: ReconciliationItemInput[],
+  ): Promise<MedicationReconciliationView> {
+    const { session, recon } = this.reconciliationOrThrow(reconciliationId);
+    if (!canStartReconciliation(session.roleKey)) {
+      throw new Error("Only a nurse, Program Manager, or house manager edits a reconciliation.");
+    }
+    if (recon.status !== "in_progress") {
+      throw new Error("This reconciliation is already signed off.");
+    }
+    const validated = validateReconciliationItems(items);
+    const now = new Date().toISOString();
+    const rows = this.reconciliationItemRows();
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].reconciliationId === recon.id) rows.splice(i, 1);
+    }
+    for (const item of validated) {
+      this.pushReconciliationItem(recon.id, session.agencyId, item, now);
+    }
+    recon.updatedAt = now;
+    await persistMeta(this.store);
+    return this.reconciliationView(recon);
+  }
+
+  async signOffReconciliation(
+    reconciliationId: string,
+    input: { note: string; signatureName?: string },
+  ): Promise<MedicationReconciliationView> {
+    const { session, recon } = this.reconciliationOrThrow(reconciliationId);
+    if (!canSignReconciliation(session.roleKey)) {
+      throw new Error("A nurse or Program Manager signs off a reconciliation.");
+    }
+    if (recon.status !== "in_progress") {
+      throw new Error("This reconciliation is already signed off.");
+    }
+    const items = this.reconciliationItemRows().filter(
+      (row) => row.reconciliationId === recon.id,
+    );
+    if (items.length === 0) {
+      throw new Error("Record the medication decisions before signing off.");
+    }
+    const trimmed = input.note.trim();
+    if (!trimmed) throw new Error("Add a sign-off note.");
+    const now = new Date().toISOString();
+    recon.status = "completed";
+    recon.signedOffBy = session.userId;
+    recon.signedOffByName = input.signatureName?.trim() || session.fullName;
+    recon.signedOffAt = now;
+    recon.signOffNote = trimmed;
+    recon.updatedAt = now;
+    await persistMeta(this.store);
+    return this.reconciliationView(recon);
   }
 
   async updateObligation(
@@ -8503,11 +9056,14 @@ export class LocalApi implements ComplyraApi {
     }
     accessibleIndividual(this.store, session, person.id);
     const rows = this.p6rows();
+    const orders = this.medOrderRows();
     const today = todayIso();
     return this.store.db.medications
       .filter(
         (med) =>
-          med.individualId === individualId && med.agencyId === session.agencyId,
+          med.individualId === individualId &&
+          med.agencyId === session.agencyId &&
+          medicationStaysOnMar(med, orders),
       )
       .map((med) =>
         projectMedInventory({

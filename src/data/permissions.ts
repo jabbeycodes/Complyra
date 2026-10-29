@@ -672,6 +672,68 @@ export function canEnterShiftNotes(roleKey: string) {
   ].includes(roleKey);
 }
 
+/**
+ * Medication Orders — who may open the orders + reconciliation surfaces.
+ *
+ * Nurses, Program Managers, administrators, and compliance administrators own
+ * the workflow. House managers may view (and start a reconciliation) for their
+ * homes. Auditors read everything, read-only. Direct support professionals are
+ * deliberately excluded here — they continue to see only the MAR check-off.
+ * Mirrors the medication_orders / medication_reconciliations RLS select policy.
+ */
+export function canViewMedicationOrders(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+    "house_manager",
+    "auditor",
+  ].includes(roleKey);
+}
+
+/**
+ * Who may create, edit, activate, or discontinue orders. Mirrors the
+ * medication_orders RLS write policy (nurse / PM / admin / compliance).
+ */
+export function canManageMedicationOrders(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+  ].includes(roleKey);
+}
+
+/**
+ * Who may start a reconciliation + save its decisions. House managers may run
+ * one for their homes; nurses / PMs / admins may too. Mirrors the
+ * medication_reconciliations RLS write policy.
+ */
+export function canStartReconciliation(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+    "house_manager",
+  ].includes(roleKey);
+}
+
+/**
+ * Who may sign off a reconciliation. A nurse sign-off is required; PMs and
+ * administrators may also sign. House managers run the checklist but cannot
+ * provide the clinical sign-off.
+ */
+export function canSignReconciliation(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+  ].includes(roleKey);
+}
+
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
 export function canSeeShiftNotes(roleKey: string) {
   return [

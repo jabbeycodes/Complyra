@@ -112,6 +112,39 @@ test("pageVisible Appointments follows Health access, not HR", () => {
   );
 });
 
+test("pageVisible Medication orders is nurses, PMs, house managers, auditors — not DSPs", () => {
+  assert.equal(
+    pageVisible(session({ roleKey: "nurse", role: "nurse" }), "Medication orders"),
+    true,
+  );
+  assert.equal(
+    pageVisible(
+      session({ roleKey: "program_manager", role: "manager" }),
+      "Medication orders",
+    ),
+    true,
+  );
+  assert.equal(
+    pageVisible(
+      session({ roleKey: "house_manager", role: "manager" }),
+      "Medication orders",
+    ),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "auditor", role: "auditor" }), "Medication orders"),
+    true,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "dsp", role: "dsp" }), "Medication orders"),
+    false,
+  );
+  assert.equal(
+    pageVisible(session({ roleKey: "hr", role: "hr" }), "Medication orders"),
+    false,
+  );
+});
+
 test("pageVisible AI settings is platformAdmin only", () => {
   assert.equal(
     pageVisible(session({ role: "administrator", platformAdmin: false }), "AI settings"),

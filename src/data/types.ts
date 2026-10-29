@@ -1089,3 +1089,143 @@ export interface MedDoseMark {
   markedByName: string;
   markedAt: string;
 }
+
+// ===== MEDICATION ORDERS + RECONCILIATION =====
+
+/**
+ * Lifecycle of a prescriber order. A draft is reviewed and activated by a
+ * nurse / Program Manager; activating a scheduled order projects it onto the
+ * MAR. Discontinuing it removes the dose from the MAR but keeps the order on
+ * the chart.
+ */
+export type MedicationOrderStatus = "draft" | "active" | "discontinued";
+
+/** Per-Individual prescriber order (source of truth for the MAR medication list). */
+export interface MedicationOrder {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  medicationName: string;
+  dose: string;
+  route: string;
+  /** Human-readable schedule as the prescriber wrote it (e.g. "BID"). */
+  schedule: string;
+  /** Scheduled "HH:MM" dose times projected onto the MAR; empty for PRN. */
+  scheduleTimes: string[];
+  isPrn: boolean;
+  startDate: string;
+  /** End / review date; null for an open-ended order. */
+  endReviewDate: string | null;
+  prescriberName: string;
+  reason: string;
+  status: MedicationOrderStatus;
+  /** The MAR medication this order feeds, set on activation. */
+  medicationId: string | null;
+  createdBy: string | null;
+  createdByName: string;
+  activatedBy: string | null;
+  activatedByName: string;
+  activatedAt: string | null;
+  discontinuedBy: string | null;
+  discontinuedByName: string;
+  discontinuedAt: string | null;
+  discontinueReason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Input for creating a draft order. */
+export interface CreateMedicationOrderInput {
+  individualId: string;
+  medicationName: string;
+  dose: string;
+  route: string;
+  schedule: string;
+  scheduleTimes?: string[];
+  isPrn?: boolean;
+  startDate?: string;
+  endReviewDate?: string | null;
+  prescriberName: string;
+  reason: string;
+}
+
+/** Narrow patch for editing a draft order (active/discontinued orders are frozen). */
+export interface UpdateMedicationOrderInput {
+  medicationName?: string;
+  dose?: string;
+  route?: string;
+  schedule?: string;
+  scheduleTimes?: string[];
+  isPrn?: boolean;
+  startDate?: string;
+  endReviewDate?: string | null;
+  prescriberName?: string;
+  reason?: string;
+}
+
+/** How close an active order is to its end / review date. */
+export type MedicationOrderExpiry = "ok" | "expiring" | "expired";
+
+/** An order plus its derived expiry state, for worklists and reports. */
+export interface MedicationOrderView extends MedicationOrder {
+  expiry: MedicationOrderExpiry;
+  /** Whole days until the end / review date (negative once passed); null when open-ended. */
+  daysUntilReview: number | null;
+  individualName: string;
+  siteName: string;
+}
+
+/** Why a reconciliation was started. */
+export type ReconciliationTrigger = "admission" | "hospital_return" | "order_change";
+
+export type ReconciliationStatus = "in_progress" | "completed";
+
+/** A continue / change / stop decision for one medication during reconciliation. */
+export type ReconciliationDecision = "continue" | "change" | "stop";
+
+export interface MedicationReconciliationItem {
+  id: string;
+  agencyId: string;
+  reconciliationId: string;
+  orderId: string | null;
+  medicationId: string | null;
+  medicationLabel: string;
+  decision: ReconciliationDecision;
+  discrepancy: boolean;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MedicationReconciliation {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  trigger: ReconciliationTrigger;
+  status: ReconciliationStatus;
+  startedBy: string | null;
+  startedByName: string;
+  startedAt: string;
+  signedOffBy: string | null;
+  signedOffByName: string;
+  signedOffAt: string | null;
+  signOffNote: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A reconciliation with its line items, for the chart history + detail view. */
+export interface MedicationReconciliationView extends MedicationReconciliation {
+  items: MedicationReconciliationItem[];
+  individualName: string;
+}
+
+/** Draft line a caller submits when saving reconciliation decisions. */
+export interface ReconciliationItemInput {
+  orderId?: string | null;
+  medicationId?: string | null;
+  medicationLabel: string;
+  decision: ReconciliationDecision;
+  discrepancy?: boolean;
+  note?: string;
+}

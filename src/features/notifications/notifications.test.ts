@@ -59,7 +59,7 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
 }
 
 test("all notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 55);
+  assert.equal(NOTIFICATION_TYPES.length, 57);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
@@ -496,6 +496,11 @@ test("a missing Shift note opens that person's notes", async () => {
   });
   assert.equal(notificationDestination("/plans")?.individualId, null);
   assert.equal(notificationDestination("/plans/person-1#<bad>")?.hash, null);
+});
+
+test("expiring medication-order notifications open the orders worklist", async () => {
+  const { notificationPage } = await import("./notify");
+  assert.equal(notificationPage("/medication-orders"), "Medication orders");
 });
 
 test("open-shift notifications open the Employee Hub", async () => {
