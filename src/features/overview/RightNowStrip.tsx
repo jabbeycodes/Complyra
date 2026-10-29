@@ -1,17 +1,21 @@
 /**
- * RightNowStrip — the manager "Right Now" strip on the Overview.
+ * RightNowStrip — the manager "Right Now" strip on the Scheduling tab.
  *
- * One card at the top of the Overview that answers, for the viewer's own
- * home(s): who is clocked in, who was expected and hasn't arrived, who is
- * out today, which of today's shifts are still uncovered, and what is
- * waiting on the viewer's decision. Every number comes from the existing
- * HR stores (punches, shifts, time-off from PR #133, corrections,
- * missed-punch reports, the open-shift board); the judgments live in the
- * pure helper (rightNow.ts).
+ * One card that answers, for the viewer's own home(s): who is clocked in,
+ * who was expected and hasn't arrived, who is out today, which of today's
+ * shifts are still uncovered, and what is waiting on the viewer's
+ * decision. Every number comes from the existing HR stores (punches,
+ * shifts, time-off from PR #133, corrections, missed-punch reports, the
+ * open-shift board); the judgments live in the pure helper (rightNow.ts).
+ *
+ * History: built for the Overview (PR #142); moved to the Scheduling tab
+ * on 2026-10-28 when the founder made the Overview compliance-first (the
+ * house-compliance donuts now lead it). The component is unchanged by the
+ * move — its host passes the Scheduling tab's site pick as `focusSite`.
  *
  * Audience: house managers (scoped to their own home), program managers
- * and agency administrators (scoped to the Overview's current home
- * focus). Everyone else never sees the strip.
+ * and agency administrators (scoped to the current home focus). Everyone
+ * else never sees the strip.
  *
  * Scoping: the strip only ever ASKS the stores about its scoped site ids
  * and hands the helper those same ids, and the helper drops any row that
@@ -21,9 +25,9 @@
  * The Employee Hub's tab badges reuse a broader legacy helper for the
  * hub's own pages; nothing here depends on that reach.
  *
- * Freshness: loads on mount and whenever the Overview's home focus (or
- * the viewer's scope) changes. No polling. An "as of" time (Central) is
- * shown on the card.
+ * Freshness: loads on mount and whenever the home focus (or the viewer's
+ * scope) changes. No polling. An "as of" time (Central) is shown on the
+ * card.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -53,7 +57,7 @@ const MANAGER_ROLES = new Set(["house_manager", "program_manager", "administrato
 const MAX_SHOWN = 4;
 
 interface Props {
-  /** The Overview's current home focus: "All sites" or a site name. */
+  /** The host page's current home focus: "All sites" or a site name. */
   focusSite: string;
   /** Sites visible on this Overview (id + name). */
   sites: { id: string; name: string }[];
