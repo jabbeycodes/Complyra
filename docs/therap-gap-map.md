@@ -89,8 +89,8 @@ functionality, and their evidence text says so.
 | Advance directives | Missing | No directive record |
 | Care plans (clinical) | Partial | Chart "Care plan" section is profile/obligations; no nurse-owned care plan with interventions and review dates on main — nurse-owned care plans are in review in PR #119 |
 | Comprehensive health assessment / health passport | Missing | No assessment instrument or portable summary |
-| Health screening (due / overdue tracking) | Partial | Clinical renewals tracker (`ClinicalRenewal` in `src/data/planStack.ts`) covers renewal due dates; no screening schedule per Individual on main — a per-Individual screening schedule is in review in PR #119 |
-| Health tracking — intake/elimination, vitals, seizures, menses, skin, glucose, height/weight, respiratory, sleep, labs, infection, immunization | **Partially present** — batch 1 merged in PR #117; batch 2 built in PR #118, in review (not yet released) | Health-tracker module on main (`src/data/healthTrack.ts`, `src/features/healthTrack/HealthTrackSection.tsx`, migration `20261027120000_therap_core_gaps_1.sql`) with batch 1: immunizations, lab results, infection, and sleep. PR #118 (batch 2, stacked on #117, in review) adds intake, elimination, vitals, seizures, menses, skin, blood glucose, and respiratory; height/weight ride the vitals tracker; the bowel tracking log delegation text promises is the elimination tracker's bowel log. Abnormal findings on the core trackers alert the home's HM + PM + nurse, deduped (batch 1 merged in PR #117) |
+| Health screening (due / overdue tracking) | Partial | Clinical renewals tracker (`ClinicalRenewal` in `src/data/planStack.ts`) covers renewal due dates; no screening schedule per Individual on main — a per-Individual screening schedule merged in PR #119 |
+| Health tracking — intake/elimination, vitals, seizures, menses, skin, glucose, height/weight, respiratory, sleep, labs, infection, immunization | Present | Health-tracker module on main (`src/data/healthTrack.ts`, `src/features/healthTrack/HealthTrackSection.tsx`, migration `20261027120000_therap_core_gaps_1.sql`) with batch 1: immunizations, lab results, infection, and sleep. Batch 2 adds intake, elimination, vitals, seizures, menses, skin, blood glucose, and respiratory (`20261027130000_therap_core_gaps_2.sql`); height/weight ride the vitals tracker; the bowel tracking log delegation text promises is the elimination tracker's bowel log. Abnormal findings on the core trackers alert the home's HM + PM + nurse, deduped (batch 1 merged in PR #117; batch 2 merged in PR #118) |
 | MAR (medication administration record) | Present | Medication board + dose marks + exceptions (`src/features/MarCard.tsx`, `src/data/types.ts`, `src/data/medInventory.ts`) |
 | Medication profile / history | Partial | Current medication list + deliveries exist; no discontinued-medication history view |
 | Medication orders (approval, expiration) | Missing — in review in PR #120 (not yet released) | No order workflow on main; medications are maintained as chart records. PR #120 (in review) adds draft → active → discontinued orders that feed the MAR |
@@ -150,15 +150,14 @@ functionality, and their evidence text says so.
 
 Not listed above because they were built after this list was drawn:
 general event reports + the resolution lifecycle, behavior plans, and the
-batch-1 health trackers merged in PR #117 — see sections 2, 3, and 8. The
-batch-2 health trackers (PR #118, stacked on #117) remain Missing on main
-until that PR merges.
+batch-1 health trackers merged in PR #117 and the batch-2 health
+trackers in PR #118 — see sections 2, 3, and 8.
 
 *Update (health tracking): batch 1 (immunizations, labs, infection,
-sleep) merged in PR #117; batch 2 (intake/elimination incl. the bowel log,
-vitals, seizures, menses, skin, glucose, height/weight, respiratory) is
-built in PR #118, stacked on #117, and still in review — on main those
-trackers are still Missing (see section 8).*
+sleep) merged in PR #117 and batch 2 (intake/elimination incl. the bowel
+log, vitals, seizures, menses, skin, glucose, height/weight, respiratory)
+merged in PR #118 — the full tracker set is Present on main (see
+section 8).*
 
 *Update (internal messaging): priority #5 above is built in PR #121 and in
 review — see the "Internal staff messaging" row in section 1. This file

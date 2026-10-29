@@ -335,6 +335,8 @@ import {
   healthTrackTitle,
   isImmunizationOverdue,
   validateHealthCorrection,
+  lowFluidAlertTargets,
+  lowFluidDays,
   validateHealthTrackDraft,
   type HealthTrackEntry,
   type HealthTrackEntryDraft,
@@ -9324,6 +9326,47 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+  /** Time-based alert: a finished day with very little fluid alerts once. */
+  private async emitLowFluidAlerts(session: SessionUser, individualId: string) {
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("kind", "intake");
+    if (error) return;
+    const entries = (data ?? []).map((row) =>
+      healthTrackEntryFromRow(row as Record<string, unknown>),
+    );
+    const days = lowFluidDays(entries);
+    if (days.length === 0) return;
+    const person = await this.individualRecord(individualId);
+    const houseManagerUserIds = person
+      ? await this.houseManagerIdsForSite(session, person.siteId)
+      : [];
+    await Promise.allSettled(
+      days.flatMap((day) =>
+        lowFluidAlertTargets({
+          individualId,
+          date: day.date,
+          houseManagerUserIds,
+        }).map((target) =>
+          this.emitFollowupAlert({
+            session,
+            userId: target.userId,
+            roleKey: target.roleKey,
+            title: `Low fluid intake — ${person?.fullName ?? "An Individual"}`,
+            body: `Only ${day.fluidOz} oz of fluids were recorded on ${day.date}. Check in and encourage fluids.`,
+            individualId,
+            entityType: "health_track_entry",
+            entityId: `low-fluid:${individualId}:${day.date}`,
+            dedupeKey: target.dedupeKey,
+          }),
+        ),
+      ),
+    );
+  }
+
   async listHealthTrackEntries(input: {
     individualId: string;
     kind?: HealthTrackKind;
@@ -9347,6 +9390,8 @@ export class HostedApi implements ComplyraApi {
     for (const row of rows) {
       if (isImmunizationOverdue(row, rows)) await this.emitHealthAlert(session, row);
     }
+    // Time-based alert: a finished day with very low fluids alerts once.
+    await this.emitLowFluidAlerts(session, input.individualId);
     return rows;
   }
 
@@ -9377,6 +9422,10 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Could not save the health record.");
     const entry = healthTrackEntryFromRow(data as Record<string, unknown>);
     if (healthEntryNeedsAlert(entry)) await this.emitHealthAlert(session, entry);
+    // A backdated intake entry can complete a low-fluid day.
+    if (entry.kind === "intake") {
+      await this.emitLowFluidAlerts(session, individualId);
+    }
     return entry;
   }
 

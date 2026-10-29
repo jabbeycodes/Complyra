@@ -164,6 +164,141 @@ test("behavior api: plan is manager-owned, log is open to DSP", async () => {
   assert.equal(entries.length, 1);
 });
 
+test("health api batch 2: core tracker alerts reach HM + PM + nurse only", async () => {
+  const store = makeStore();
+  const api = new LocalApi(store);
+  const hm = await api.signIn(login(DEMO_HM_USERNAME));
+  const person = personAtHmSite(store, hm.siteId);
+
+  const entryAlerts = (entryId: string) =>
+    store.db.notifications.filter((n) =>
+      n.dedupeKey.startsWith(`incident.followup:health:${entryId}:`),
+    );
+  const expectAlert = async (
+    draft: Parameters<typeof api.addHealthTrackEntry>[1],
+    shouldAlert: boolean,
+  ) => {
+    const entry = await api.addHealthTrackEntry(person.id, draft);
+    const alerts = entryAlerts(entry.id);
+    if (shouldAlert) {
+      assert.ok(alerts.some((n) => n.userId === hm.userId), "HM got a direct alert");
+      assert.ok(alerts.some((n) => n.roleKey === "program_manager"));
+      assert.ok(alerts.some((n) => n.roleKey === "nurse"));
+      assert.ok(
+        !alerts.some((n) => n.roleKey === "auditor"),
+        "auditors get no alerts",
+      );
+    } else {
+      assert.equal(alerts.length, 0, `no alert for ${entry.title}`);
+    }
+    return entry;
+  };
+
+  // Every seizure alerts.
+  await expectAlert(
+    {
+      kind: "seizure",
+      occurredOn: "2026-10-26",
+      details: { seizureType: "Tonic-clonic seizure", durationMinutes: "2" },
+    },
+    true,
+  );
+  // A refused meal alerts; a half-eaten meal does not.
+  await expectAlert(
+    {
+      kind: "intake",
+      occurredOn: "2026-10-26",
+      details: { entryType: "meal", mealType: "Lunch", portion: "Refused" },
+    },
+    true,
+  );
+  await expectAlert(
+    {
+      kind: "intake",
+      occurredOn: "2026-10-26",
+      details: { entryType: "meal", mealType: "Dinner", portion: "Half" },
+    },
+    false,
+  );
+  // Fever vitals alert; in-range vitals do not.
+  await expectAlert(
+    { kind: "vitals", occurredOn: "2026-10-26", details: { temperatureF: "101.2" } },
+    true,
+  );
+  await expectAlert(
+    {
+      kind: "vitals",
+      occurredOn: "2026-10-26",
+      details: { temperatureF: "98.6", systolic: "120", diastolic: "80", pulse: "72" },
+    },
+    false,
+  );
+  // Blood in the stool alerts.
+  await expectAlert(
+    {
+      kind: "elimination",
+      occurredOn: "2026-10-26",
+      details: {
+        entryType: "bowel",
+        consistency: "Loose",
+        bloodPresent: "yes",
+        painNoted: "no",
+      },
+    },
+    true,
+  );
+  // Out-of-range glucose alerts; in-range does not.
+  await expectAlert(
+    { kind: "glucose", occurredOn: "2026-10-26", details: { readingMgDl: "310" } },
+    true,
+  );
+  await expectAlert(
+    { kind: "glucose", occurredOn: "2026-10-26", details: { readingMgDl: "110" } },
+    false,
+  );
+  // Skin breakdown alerts.
+  await expectAlert(
+    {
+      kind: "skin",
+      occurredOn: "2026-10-26",
+      details: { bodyLocation: "Left foot", observation: "Open area / breakdown" },
+    },
+    true,
+  );
+  // Menses and an unflagged respiratory treatment alert nobody.
+  await expectAlert(
+    { kind: "menses", occurredOn: "2026-10-26", details: { flow: "Moderate" } },
+    false,
+  );
+  await expectAlert(
+    {
+      kind: "respiratory",
+      occurredOn: "2026-10-26",
+      details: { treatmentType: "Nebulizer treatment", response: "Breathing eased" },
+    },
+    false,
+  );
+
+  // Very-low fluid day: 8 oz recorded on a finished day alerts once.
+  await api.addHealthTrackEntry(person.id, {
+    kind: "intake",
+    occurredOn: "2026-10-20",
+    details: { entryType: "fluid", fluidType: "Water", fluidOz: "8" },
+  });
+  const lowFluidPrefix = `incident.followup:health:low-fluid:${person.id}:2026-10-20:`;
+  const first = store.db.notifications.filter((n) =>
+    n.dedupeKey.startsWith(lowFluidPrefix),
+  );
+  assert.ok(first.length >= 3, "low-fluid day alerted HM + PM + nurse");
+  assert.ok(first.some((n) => n.userId === hm.userId));
+  assert.ok(!first.some((n) => n.roleKey === "auditor"));
+  await api.listHealthTrackEntries({ individualId: person.id, kind: "intake" });
+  const second = store.db.notifications.filter((n) =>
+    n.dedupeKey.startsWith(lowFluidPrefix),
+  );
+  assert.equal(second.length, first.length, "low-fluid alert is deduped");
+});
+
 test("health api: flagged lab alerts managers; overdue immunization alerts once", async () => {
   const store = makeStore();
   const api = new LocalApi(store);

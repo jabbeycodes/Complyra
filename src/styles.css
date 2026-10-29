@@ -7880,3 +7880,12 @@ button.qa-row:hover {
 .health-track-widget h3 {
   margin-top: 16px;
 }
+.health-daily-totals {
+  border: 1px solid var(--line, #b9b9b9);
+  border-radius: 6px;
+  padding: 4px 12px 8px;
+  margin: 12px 0;
+}
+.health-daily-totals p {
+  margin: 4px 0;
+}
