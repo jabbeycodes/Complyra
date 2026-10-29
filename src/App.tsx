@@ -122,6 +122,10 @@ import EmployeeHubPage from "./features/employeeHub/EmployeeHubPage";
 // SCHEDULING-TAB (2026-10-28): manager Scheduling page — Right Now + coverage.
 import { CalendarClock } from "lucide-react";
 import SchedulingPage from "./features/scheduling/SchedulingPage";
+// MESSAGING: staff-to-staff internal messaging (auditors excluded by design).
+import { MessageSquare } from "lucide-react";
+import MessagesPage from "./features/messaging/MessagesPage";
+import { useMessageUnread } from "./features/messaging/useMessageUnread";
 import SiteDetailPage from "./features/siteDetail/SiteDetailPage";
 import SitesList from "./features/sites/SitesList";
 import InactivityGuard from "./security/InactivityGuard";
@@ -178,6 +182,9 @@ export default function App() {
   const operating = useOperatingRules(session);
   const [page, setPage] = useState("Overview");
   const notifications = useWorkspaceNotifications();
+  // MESSAGING: unread total for the nav badge + chart deep-link focus.
+  const messageUnread = useMessageUnread();
+  const [messageFocus, setMessageFocus] = useState<string | null>(null);
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -716,6 +723,7 @@ export default function App() {
       title: "Employee hub",
       items: [
         ["Employee Hub", Briefcase],
+        ["Messages", MessageSquare],
         ["Recognition", Trophy],
       ],
     },
@@ -780,6 +788,9 @@ export default function App() {
                         {metrics(data.requirements).review}
                       </span>
                     )}
+                  {name === "Messages" && messageUnread > 0 && (
+                    <span className="nav-count">{messageUnread}</span>
+                  )}
                   {name === "Acknowledgments" &&
                     workspace.packets.some((p) =>
                       p.rows.some((row) => !row.signedAt && p.packet.status === "open"),
@@ -1165,6 +1176,10 @@ export default function App() {
                     individuals.find((p) => p.name === person)?.id ?? ""
                   }
                   onBack={() => navigate("Individuals")}
+                  onOpenMessageThread={(threadId) => {
+                    setMessageFocus(threadId);
+                    navigate("Messages");
+                  }}
                 />
               )}
               {page === "Site detail" && detailSiteId && (
@@ -1773,6 +1788,19 @@ export default function App() {
               {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}
               {page === "Scheduling" && <SchedulingPage onNavigate={navigate} />}
               {page === "Employee Hub" && <EmployeeHubPage />}
+              {/* MESSAGING-PAGE: staff inbox (participants only). */}
+              {page === "Messages" && (
+                <MessagesPage
+                  focusThreadId={messageFocus}
+                  onFocusHandled={() => setMessageFocus(null)}
+                  onOpenIndividual={(individualId) => {
+                    const target = workspace.individuals.find(
+                      (item) => item.id === individualId,
+                    );
+                    if (target) openPersonChart(target.name);
+                  }}
+                />
+              )}
               {page === "Recognition" && <RecognitionPage />}
               {page === "AI settings" && <AiSettingsPage />}
               {/* QA-AUDIT-PAGE (2026-09-14) */}

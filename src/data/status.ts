@@ -5,6 +5,7 @@ import {
   canCreateIndividual,
   canSeeShiftNotes,
   canViewMedicationOrders,
+  canUseMessaging,
   hasPermission,
   isRoleKey,
   type PermissionKey,
@@ -142,6 +143,10 @@ export function pageVisible(session: SessionUser, page: string) {
   // HR-EMPLOYEE-HUB-PAGEVIS (2026-09-16): the Employee Hub is reachable by
   // everyone with hub.access; each tab is permission-gated in-app.
   if (page === "Employee Hub") return can(session, "hub.access");
+  // MESSAGING: staff-to-staff communication, not a compliance surface —
+  // auditors are excluded by design even if a role map is misconfigured
+  // (canUseMessaging enforces both the permission and the role).
+  if (page === "Messages") return canUseMessaging(session);
   // PCSP-DOCUMENTS-PAGEVIS (AI document ingestion). `documents.review` is
   // owned by the backend workstream — referenced by string until merged.
   if (page === "Document upload") return can(session, "documents.upload");
@@ -210,6 +215,7 @@ export const CANONICAL_PAGE_ORDER = [
   "Recognition",
   "Settings",
   "Employee Hub",
+  "Messages",
 ] as const;
 
 export function defaultLandingPage(session: SessionUser): string {

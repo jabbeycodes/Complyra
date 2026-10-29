@@ -54,6 +54,7 @@ import AloneTimeCard from "./AloneTimeCard";
 import MarCard from "./MarCard";
 import MedicationOrdersCard from "./medicationOrders/MedicationOrdersCard";
 import ReconciliationCard from "./medicationOrders/ReconciliationCard";
+import ChartMessagesCard from "./messaging/ChartMessagesCard";
 import TrainingSignCard from "./TrainingSignCard";
 // LIFE EVENTS: per-Individual significant-events timeline (context
 // section — sits with the profile/context blocks, before the clinical
@@ -89,9 +90,11 @@ const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
 export default function IndividualChart({
   individualId,
   onBack,
+  onOpenMessageThread,
 }: {
   individualId: string;
   onBack: () => void;
+  onOpenMessageThread?: (threadId: string) => void;
 }) {
   const { api, session, workspace, refresh } = useData();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
@@ -662,6 +665,13 @@ export default function IndividualChart({
         <AloneTimeCard
           individualId={individualId}
           individualName={person.name}
+        />
+
+        {/* MESSAGING: conversations linked to this Individual — visible
+            only to their participants (the card renders nothing otherwise). */}
+        <ChartMessagesCard
+          individualId={individualId}
+          onOpenThread={onOpenMessageThread}
         />
 
         <section className="chart-widget" aria-labelledby="staff-heading">

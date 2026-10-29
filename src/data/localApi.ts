@@ -51,6 +51,19 @@ import {
   type AppointmentDraft,
 } from "./appointments";
 import {
+  assembleMessageViews,
+  assembleThreadView,
+  firstUnreadMessageId,
+  messageDedupeKey,
+  messagePreview,
+  sortThreads,
+  systemAddedBody,
+  isMessagingRole,
+  validateMessageBody,
+  validateRecipientIds,
+  validateThreadSubject,
+} from "./messaging";
+import {
   computeRequirementStatus,
   isPrivileged,
   requirementStatusFromDb,
@@ -70,6 +83,7 @@ import {
   canSignReconciliation,
   canStartReconciliation,
   canViewMedicationOrders,
+  canUseMessaging,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -505,6 +519,28 @@ export interface ComplyraApi {
     lifeEventId: string,
     reason: string,
   ): Promise<import("./lifeEvents").LifeEventView>;
+  getSession(): Promise<SessionUser | null>;
+  signIn(input: LoginInput): Promise<SessionUser>;
+  signOut(): Promise<void>;
+  // MESSAGING — staff-to-staff internal messaging (participants only;
+  // auditors have no access — see src/data/messaging.ts).
+  listMessageThreads(): Promise<import("./messaging").MessageThreadView[]>;
+  getMessageThread(threadId: string): Promise<import("./messaging").MessageThreadDetail>;
+  createMessageThread(input: {
+    recipientUserIds: string[];
+    subject?: string;
+    body: string;
+    individualId?: string | null;
+  }): Promise<string>;
+  sendMessage(threadId: string, body: string): Promise<import("./messaging").MessageView>;
+  markThreadRead(threadId: string): Promise<void>;
+  addThreadParticipant(threadId: string, userId: string): Promise<void>;
+  hideMessageThread(threadId: string): Promise<void>;
+  listMessageContacts(): Promise<import("./messaging").MessageContact[]>;
+  listIndividualMessageThreads(
+    individualId: string,
+  ): Promise<import("./messaging").MessageThreadView[]>;
+  getMessageUnreadTotal(): Promise<number>;
   getSession(): Promise<SessionUser | null>;
   signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
@@ -1795,6 +1831,11 @@ async function hydrate() {
       browserStore.db.emergencyDrills = browserStore.db.emergencyDrills ?? [];
       browserStore.db.homeSafetyReports = browserStore.db.homeSafetyReports ?? [];
       browserStore.db.siteReviews = browserStore.db.siteReviews ?? [];
+      // MESSAGING: collections for workspaces saved before staff messaging.
+      browserStore.db.messageThreads = browserStore.db.messageThreads ?? [];
+      browserStore.db.messageParticipants =
+        browserStore.db.messageParticipants ?? [];
+      browserStore.db.messages = browserStore.db.messages ?? [];
       // AUDIT-READINESS (2026-09-14): new collections for older stored DBs.
       browserStore.db.correctiveActions = browserStore.db.correctiveActions ?? [];
       browserStore.db.complianceSnapshots = browserStore.db.complianceSnapshots ?? [];
@@ -1877,6 +1918,13 @@ function assertPrivileged(session: SessionUser) {
 
 function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/** MESSAGING gate: messages.use permission, auditors always excluded. */
+function assertMessaging(session: SessionUser) {
+  if (!canUseMessaging(session)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -2768,6 +2816,9 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   };
 }
 
+/** MESSAGING: monotonic clock backing LocalApi.messageNow(). */
+let messageClockMs = 0;
+
 export class LocalApi implements ComplyraApi {
   constructor(private store: MemoryStore = browserStore) {}
 
@@ -3323,6 +3374,408 @@ export class LocalApi implements ComplyraApi {
       else this.store.db.notificationReads[`${session.userId}:${row.id}`] ??= now;
     }
     await persistMeta(this.store);
+  }
+
+  // ── MESSAGING — staff-to-staff internal messaging (local store) ──────────
+  // Semantics mirror the hosted implementation exactly: participants only,
+  // append-only messages, per-participant read state, one deduped bell entry
+  // per unread burst. Domain rules live in src/data/messaging.ts.
+
+  private ensureMessaging() {
+    const db = this.store.db;
+    db.messageThreads ??= [];
+    db.messageParticipants ??= [];
+    db.messages ??= [];
+    return db;
+  }
+
+  /** Monotonic clock so same-millisecond writes still order correctly. */
+  private messageNow(): string {
+    const now = Date.now();
+    messageClockMs = Math.max(now, messageClockMs + 1);
+    return new Date(messageClockMs).toISOString();
+  }
+
+  private staffName(userId: string): string {
+    return (
+      this.store.db.profiles.find((row) => row.id === userId)?.fullName ??
+      "Staff member"
+    );
+  }
+
+  private staffRoleKey(userId: string, agencyId: string): string {
+    const membership = this.store.db.memberships.find(
+      (row) => row.agencyId === agencyId && row.userId === userId,
+    );
+    return membership?.roleKey ?? membership?.role ?? "";
+  }
+
+  /** Active agency member whose role can use messaging (auditors cannot). */
+  private messagingEligible(userId: string, agencyId: string): boolean {
+    const today = todayIso();
+    const membership = this.store.db.memberships.find(
+      (row) =>
+        row.agencyId === agencyId &&
+        row.userId === userId &&
+        (!row.expiresOn || row.expiresOn >= today),
+    );
+    if (!membership) return false;
+    if (!isMessagingRole(membership.roleKey ?? membership.role)) return false;
+    const permissions = permissionsFor(
+      this.store,
+      agencyId,
+      membership.roleKey ?? membership.role,
+    );
+    return Boolean(permissions["messages.use"]);
+  }
+
+  private threadParticipants(threadId: string) {
+    return (this.store.db.messageParticipants ?? []).filter(
+      (row) => row.threadId === threadId,
+    );
+  }
+
+  private threadMessages(threadId: string) {
+    return (this.store.db.messages ?? [])
+      .filter((row) => row.threadId === threadId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  private participantRow(threadId: string, userId: string) {
+    return (this.store.db.messageParticipants ?? []).find(
+      (row) => row.threadId === threadId && row.userId === userId,
+    );
+  }
+
+  private requireThread(threadId: string, agencyId: string) {
+    const thread = (this.store.db.messageThreads ?? []).find(
+      (row) => row.id === threadId && row.agencyId === agencyId,
+    );
+    if (!thread) throw new Error("Conversation not found.");
+    return thread;
+  }
+
+  private requireParticipant(threadId: string, session: SessionUser) {
+    const thread = this.requireThread(threadId, session.agencyId);
+    const participant = this.participantRow(threadId, session.userId);
+    if (!participant) throw new Error("Conversation not found.");
+    return { thread, participant };
+  }
+
+  private assembleLocalThread(
+    thread: import("./messaging").MessageThreadRow,
+    session: SessionUser,
+  ): import("./messaging").MessageThreadView {
+    const person = thread.individualId
+      ? this.store.db.individuals.find((row) => row.id === thread.individualId)
+      : undefined;
+    return assembleThreadView({
+      thread,
+      participants: this.threadParticipants(thread.id),
+      messages: this.threadMessages(thread.id),
+      nameFor: (userId) => this.staffName(userId),
+      roleFor: (userId) => this.staffRoleKey(userId, thread.agencyId),
+      individualName: person?.fullName ?? null,
+      selfUserId: session.userId,
+    });
+  }
+
+  /**
+   * Bell fan-out for a new message: one entry per recipient per unread
+   * burst. The dedupe key anchors to the recipient's first unread message,
+   * so a burst of follow-ups never stacks bell entries; once that entry is
+   * read, the next burst starts a fresh key.
+   */
+  private queueMessageNotifications(
+    session: SessionUser,
+    thread: import("./messaging").MessageThreadRow,
+    anchorMessage: import("./messaging").MessageRow,
+    recipientIds: string[],
+  ) {
+    const db = this.store.db;
+    db.notifications ??= [];
+    const messages = this.threadMessages(thread.id);
+    const view = this.assembleLocalThread(thread, session);
+    for (const userId of recipientIds) {
+      if (userId === session.userId) continue;
+      const participant = this.participantRow(thread.id, userId);
+      if (!participant) continue;
+      const firstUnread = firstUnreadMessageId(messages, participant) ?? anchorMessage.id;
+      const dedupeKey = messageDedupeKey(thread.id, userId, firstUnread);
+      const alreadyQueued = db.notifications.some(
+        (row) =>
+          row.agencyId === thread.agencyId &&
+          row.userId === userId &&
+          row.dedupeKey === dedupeKey &&
+          !row.readAt,
+      );
+      if (alreadyQueued) continue;
+      const isAdd = anchorMessage.kind === "system";
+      db.notifications.push({
+        id: crypto.randomUUID(),
+        agencyId: thread.agencyId,
+        userId,
+        roleKey: null,
+        type: "message.received",
+        title: isAdd
+          ? `${session.fullName} added you to a conversation`
+          : `New message from ${session.fullName}`,
+        body: `${view.title} — ${messagePreview(anchorMessage.body)}`,
+        deepLink: "/messages",
+        entityType: "message_thread",
+        entityId: thread.id,
+        dedupeKey,
+        createdAt: this.messageNow(),
+        readAt: null,
+      });
+    }
+  }
+
+  async listMessageContacts() {
+    const session = assertSession(this.store);
+    if (!canUseMessaging(session)) return [];
+    this.ensureMessaging();
+    const contacts = this.store.db.memberships
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId !== session.userId &&
+          this.messagingEligible(row.userId, session.agencyId),
+      )
+      .map((row) => ({
+        userId: row.userId,
+        fullName: this.staffName(row.userId),
+        roleKey: row.roleKey ?? row.role,
+        roleLabel: roleLabel(row.roleKey ?? row.role),
+      }));
+    const seen = new Set<string>();
+    return contacts
+      .filter((row) => (seen.has(row.userId) ? false : (seen.add(row.userId), true)))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+
+  async listMessageThreads() {
+    const session = assertSession(this.store);
+    if (!canUseMessaging(session)) return [];
+    this.ensureMessaging();
+    const mine = (this.store.db.messageParticipants ?? []).filter(
+      (row) => row.agencyId === session.agencyId && row.userId === session.userId,
+    );
+    const views = mine
+      .map((row) => {
+        const thread = (this.store.db.messageThreads ?? []).find(
+          (item) => item.id === row.threadId,
+        );
+        return thread ? this.assembleLocalThread(thread, session) : null;
+      })
+      .filter((view): view is import("./messaging").MessageThreadView => Boolean(view))
+      .filter((view) => !view.hidden);
+    return sortThreads(views);
+  }
+
+  async getMessageThread(threadId: string) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const { thread } = this.requireParticipant(threadId, session);
+    const view = this.assembleLocalThread(thread, session);
+    return {
+      ...view,
+      messages: assembleMessageViews(
+        this.threadMessages(thread.id),
+        (userId) => this.staffName(userId),
+      ),
+    };
+  }
+
+  async createMessageThread(input: {
+    recipientUserIds: string[];
+    subject?: string;
+    body: string;
+    individualId?: string | null;
+  }) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const db = this.store.db;
+    const recipientIds = validateRecipientIds(input.recipientUserIds, session.userId);
+    for (const userId of recipientIds) {
+      if (!this.messagingEligible(userId, session.agencyId)) {
+        throw new Error("Choose staff members in this agency who can use messaging.");
+      }
+    }
+    const subject = validateThreadSubject(input.subject);
+    const body = validateMessageBody(input.body);
+    let individualId: string | null = null;
+    if (input.individualId) {
+      individualId = accessibleIndividual(this.store, session, input.individualId).id;
+    }
+    const now = this.messageNow();
+    const thread: import("./messaging").MessageThreadRow = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      subject,
+      individualId,
+      createdBy: session.userId,
+      createdAt: now,
+      lastMessageAt: now,
+    };
+    db.messageThreads!.push(thread);
+    db.messageParticipants!.push({
+      threadId: thread.id,
+      agencyId: session.agencyId,
+      userId: session.userId,
+      addedBy: null,
+      addedAt: now,
+      lastReadAt: now,
+      hiddenAt: null,
+    });
+    for (const userId of recipientIds) {
+      db.messageParticipants!.push({
+        threadId: thread.id,
+        agencyId: session.agencyId,
+        userId,
+        addedBy: session.userId,
+        addedAt: now,
+        lastReadAt: null,
+        hiddenAt: null,
+      });
+    }
+    const message: import("./messaging").MessageRow = {
+      id: crypto.randomUUID(),
+      threadId: thread.id,
+      agencyId: session.agencyId,
+      senderId: session.userId,
+      kind: "user",
+      body,
+      createdAt: this.messageNow(),
+    };
+    db.messages!.push(message);
+    thread.lastMessageAt = message.createdAt;
+    this.queueMessageNotifications(session, thread, message, recipientIds);
+    await persistMeta(this.store);
+    return thread.id;
+  }
+
+  async sendMessage(threadId: string, body: string) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const db = this.store.db;
+    const { thread, participant } = this.requireParticipant(threadId, session);
+    const message: import("./messaging").MessageRow = {
+      id: crypto.randomUUID(),
+      threadId: thread.id,
+      agencyId: session.agencyId,
+      senderId: session.userId,
+      kind: "user",
+      body: validateMessageBody(body),
+      createdAt: this.messageNow(),
+    };
+    db.messages!.push(message);
+    thread.lastMessageAt = message.createdAt;
+    participant.lastReadAt = message.createdAt;
+    participant.hiddenAt = null;
+    const others = this.threadParticipants(thread.id).map((row) => row.userId);
+    this.queueMessageNotifications(session, thread, message, others);
+    await persistMeta(this.store);
+    return {
+      id: message.id,
+      threadId: message.threadId,
+      senderId: message.senderId,
+      senderName: session.fullName,
+      kind: message.kind,
+      body: message.body,
+      createdAt: message.createdAt,
+    };
+  }
+
+  async markThreadRead(threadId: string) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const { participant } = this.requireParticipant(threadId, session);
+    const messages = this.threadMessages(threadId);
+    if (messages.length) {
+      participant.lastReadAt = messages[messages.length - 1].createdAt;
+    }
+    await persistMeta(this.store);
+  }
+
+  async addThreadParticipant(threadId: string, userId: string) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const db = this.store.db;
+    const { thread } = this.requireParticipant(threadId, session);
+    if (userId === session.userId || this.participantRow(threadId, userId)) {
+      throw new Error("That staff member is already in this conversation.");
+    }
+    if (!this.messagingEligible(userId, session.agencyId)) {
+      throw new Error("Choose a staff member in this agency who can use messaging.");
+    }
+    const now = this.messageNow();
+    db.messageParticipants!.push({
+      threadId: thread.id,
+      agencyId: session.agencyId,
+      userId,
+      addedBy: session.userId,
+      addedAt: now,
+      lastReadAt: null,
+      hiddenAt: null,
+    });
+    const note: import("./messaging").MessageRow = {
+      id: crypto.randomUUID(),
+      threadId: thread.id,
+      agencyId: session.agencyId,
+      senderId: null,
+      kind: "system",
+      body: systemAddedBody(session.fullName, this.staffName(userId)),
+      createdAt: this.messageNow(),
+    };
+    db.messages!.push(note);
+    thread.lastMessageAt = note.createdAt;
+    this.queueMessageNotifications(session, thread, note, [userId]);
+    await persistMeta(this.store);
+  }
+
+  async hideMessageThread(threadId: string) {
+    const session = assertSession(this.store);
+    assertMessaging(session);
+    this.ensureMessaging();
+    const { participant } = this.requireParticipant(threadId, session);
+    participant.hiddenAt = this.messageNow();
+    await persistMeta(this.store);
+  }
+
+  async listIndividualMessageThreads(individualId: string) {
+    const session = assertSession(this.store);
+    if (!canUseMessaging(session)) return [];
+    this.ensureMessaging();
+    try {
+      accessibleIndividual(this.store, session, individualId);
+    } catch {
+      return [];
+    }
+    const mine = new Set(
+      (this.store.db.messageParticipants ?? [])
+        .filter((row) => row.userId === session.userId)
+        .map((row) => row.threadId),
+    );
+    const views = (this.store.db.messageThreads ?? [])
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId &&
+          mine.has(row.id),
+      )
+      .map((thread) => this.assembleLocalThread(thread, session));
+    return sortThreads(views);
+  }
+
+  async getMessageUnreadTotal() {
+    const threads = await this.listMessageThreads();
+    return threads.reduce((sum, thread) => sum + thread.unreadCount, 0);
   }
 
   async getSession() {

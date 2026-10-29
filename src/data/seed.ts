@@ -184,6 +184,11 @@ export interface LocalDatabase {
   // LIFE EVENTS: per-Individual significant-events timeline. Optional so
   // older persisted demos still load; the API lazily initializes it.
   lifeEvents?: import("./lifeEvents").LifeEventRow[];
+  // MESSAGING: staff-to-staff internal messaging. Optional so older
+  // persisted demos still load; the API lazily initializes all three.
+  messageThreads?: import("./messaging").MessageThreadRow[];
+  messageParticipants?: import("./messaging").MessageParticipantRow[];
+  messages?: import("./messaging").MessageRow[];
   /** See SHOWCASE_REVISION. Missing on workspaces saved before the walkthrough seed. */
   showcaseRevision?: number;
 }

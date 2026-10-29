@@ -67,6 +67,7 @@ const NOTIFICATION_TYPES = [
   "delegation.unacknowledged",
   "isp.renewal_soon",
   "incident.followup",
+  "message.received",
   "delegation.review_ready",
   "delegation.published",
   "delegation.ack_overdue",
