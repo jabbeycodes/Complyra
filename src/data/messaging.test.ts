@@ -63,13 +63,16 @@ async function messageNotifications(api: LocalApi) {
 
 test("a new thread notifies the recipient once per unread burst; read state is per participant", async () => {
   const { api, dspId } = await cast();
+  // The demo seed leaves the admin one unread message of her own; sending
+  // must not add to the sender's unread total.
+  const senderBaseline = await api.getMessageUnreadTotal();
   const threadId = await api.createMessageThread({
     recipientUserIds: [dspId],
     subject: "Morning meds",
     body: "First message",
   });
   await api.sendMessage(threadId, "Second message");
-  assert.equal(await api.getMessageUnreadTotal(), 0, "sender has no unread");
+  assert.equal(await api.getMessageUnreadTotal(), senderBaseline, "sender has no new unread");
 
   await api.signOut();
   await api.signIn(login(DEMO_DSP_USERNAME));
@@ -238,7 +241,10 @@ test("hiding a thread removes it for that user only, until a newer message arriv
 
   await api.signOut();
   await api.signIn(login(DEMO_ADMIN_USERNAME));
-  assert.equal((await api.listMessageThreads()).length, 1, "others still see it");
+  assert.ok(
+    (await api.listMessageThreads()).some((row) => row.id === threadId),
+    "others still see it",
+  );
   await api.sendMessage(threadId, "Any update?");
 
   await api.signOut();

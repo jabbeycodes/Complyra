@@ -68,8 +68,8 @@ function localFixture() {
 test('local lifecycle rejects cross-user draft tampering, forged metadata, signed edits and retains version history', async () => {
     const f = localFixture();
     const id = await f.api.saveConsent({ ...f.draft, createdBy: 'forged', activatedBy: 'forged', activatedAt: 'forged' } as ConsentDraft);
-    assert.equal(f.db.consents?.[0].createdBy, f.hm.userId);
-    assert.equal(f.db.consents?.[0].activatedAt, null);
+    assert.equal(f.db.consents?.find(r => r.id === id)?.createdBy, f.hm.userId);
+    assert.equal(f.db.consents?.find(r => r.id === id)?.activatedAt, null);
     const nurse = f.db.memberships.find(m => m.roleKey === 'nurse')!;
     nurse.siteId = f.hm.siteId;
     f.store.sessionUserId = nurse.userId;
@@ -84,10 +84,11 @@ test('local lifecycle rejects cross-user draft tampering, forged metadata, signe
     const renewed = await f.api.saveConsent({ ...f.draft, supersedesId: id });
     await f.api.activateConsent(renewed);
     const history = await f.api.getConsents();
-    assert.equal(history.records.length, 2);
+    // Scoped to this consent's version chain: the demo seed carries other consents.
+    assert.equal(history.records.filter(r => r.id === id || r.supersedesId === id).length, 2);
     assert.equal(history.revocations.length, 1);
-    history.records[0].covers = 'Mutating returned data';
-    assert.equal(f.db.consents?.[0].covers, f.draft.covers);
+    history.records.find(r => r.id === id)!.covers = 'Mutating returned data';
+    assert.equal(f.db.consents?.find(r => r.id === id)?.covers, f.draft.covers);
 });
 test('local scoped access, DSP active-only and auditor read-only, HR excluded', async () => {
     const f = localFixture();
@@ -97,12 +98,13 @@ test('local scoped access, DSP active-only and auditor read-only, HR excluded', 
     await assert.rejects(() => f.api.saveConsent({ ...f.draft, individualId: outside.id }), /outside/);
     const dsp = f.db.memberships.find(m => m.roleKey === 'dsp' && m.siteId === f.person.siteId)!;
     f.store.sessionUserId = dsp.userId;
-    assert.equal((await f.api.getConsents()).records.length, 1);
+    // Scoped to the record under test: the demo seed carries other consents.
+    assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 1);
     await assert.rejects(() => f.api.revokeConsent(id, todayStamp(), 'Forged'), /permission/);
     f.store.sessionUserId = f.hm.userId;
     await f.api.revokeConsent(id, todayStamp(), 'Withdrawn');
     f.store.sessionUserId = dsp.userId;
-    assert.equal((await f.api.getConsents()).records.length, 0);
+    assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 0);
     for (const role of ['auditor', 'hr'] as const) {
         const member = f.db.memberships.find(m => m.roleKey === 'nurse' || m.roleKey === 'auditor')!;
         member.roleKey = role;
@@ -112,7 +114,7 @@ test('local scoped access, DSP active-only and auditor read-only, HR excluded', 
         await assert.rejects(() => f.api.saveConsent(f.draft), /permission/);
         await assert.rejects(() => f.api.revokeConsent(id, todayStamp(), 'Forged'), /permission/);
         if (role === 'auditor')
-            assert.equal((await f.api.getConsents()).records.length, 1);
+            assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 1);
         else
             await assert.rejects(() => f.api.getConsents(), /permission/);
     }
@@ -137,7 +139,7 @@ test('local activation rejects contradictory standalone and future versions; ren
     await f.api.activateConsent(renewed);
     const dsp = f.db.memberships.find(m => m.roleKey === 'dsp' && m.siteId === f.person.siteId)!;
     f.store.sessionUserId = dsp.userId;
-    assert.deepEqual((await f.api.getConsents()).records.map(r => r.id), [renewed]);
+    assert.deepEqual((await f.api.getConsents()).records.filter(r => r.individualId === f.person.id && r.typeId === 'media').map(r => r.id), [renewed]);
     f.store.sessionUserId = f.hm.userId;
     const scheduled = await f.api.saveConsent({...f.draft, supersedesId:renewed, effectiveOn:'2090-01-01'});
     await f.api.activateConsent(scheduled);
@@ -146,5 +148,5 @@ test('local activation rejects contradictory standalone and future versions; ren
     const all = await f.api.getConsents();
     assert.equal(consentOnFile(all, f.person.id, 'media', '2089-12-31').row?.id, renewed);
     assert.equal(consentOnFile(all, f.person.id, 'media', '2090-01-01').row?.id, scheduled);
-    assert.equal(all.records.filter(r => ['Active','Expiring soon'].includes(consentStatus(r,all.records,all.revocations,'2090-01-01'))).length, 1);
+    assert.equal(all.records.filter(r => r.individualId === f.person.id && r.typeId === 'media' && ['Active','Expiring soon'].includes(consentStatus(r,all.records,all.revocations,'2090-01-01'))).length, 1);
 });
