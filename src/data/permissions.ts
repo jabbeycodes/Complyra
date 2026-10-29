@@ -712,20 +712,52 @@ export function canViewMedicationOrders(roleKey: string) {
 /**
  * Who may create, edit, activate, or discontinue orders. Mirrors the
  * medication_orders RLS write policy (nurse / PM / admin / compliance).
+ */
 export function canManageMedicationOrders(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+  ].includes(roleKey);
+}
+
+/**
  * Who may start a reconciliation + save its decisions. House managers may run
  * one for their homes; nurses / PMs / admins may too. Mirrors the
  * medication_reconciliations RLS write policy.
+ */
 export function canStartReconciliation(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+    "house_manager",
+  ].includes(roleKey);
+}
+
+/**
  * Who may sign off a reconciliation. A nurse sign-off is required; PMs and
  * administrators may also sign. House managers run the checklist but cannot
  * provide the clinical sign-off.
+ */
 export function canSignReconciliation(roleKey: string) {
+  return [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "nurse",
+  ].includes(roleKey);
+}
+
+/**
  * MESSAGING — role keys whose default templates carry `messages.use`.
  * Operational staff only; auditors are excluded by design (staff messaging
  * is internal communication, not a compliance record surface). The API gate
  * itself is the `messages.use` permission — this list is the DB/seed mirror
  * used for recipient eligibility and the SQL helper private.can_use_messaging().
+ */
 export const MESSAGING_ROLE_KEYS: RoleKey[] = [
   "administrator",
   "compliance_admin",
@@ -735,11 +767,14 @@ export const MESSAGING_ROLE_KEYS: RoleKey[] = [
   "dsp",
   "hr",
 ];
+
+/**
  * The messaging gate used by both API layers: the `messages.use` permission
  * AND not the auditor role. The role half is deliberate defense in depth —
  * even if an agency admin mistakenly grants the permission to the auditor
  * template, auditors stay out of staff messaging (the SQL helper
  * private.can_use_messaging() mirrors this exactly).
+ */
 export function canUseMessaging(session: {
   roleKey: string;
   role?: string;

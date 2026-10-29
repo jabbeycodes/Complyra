@@ -516,7 +516,12 @@ export interface ComplyraApi {
     patch: import("./lifeEvents").LifeEventDraft,
   ): Promise<import("./lifeEvents").LifeEventView>;
   voidLifeEvent(
+    lifeEventId: string,
     reason: string,
+  ): Promise<import("./lifeEvents").LifeEventView>;
+  getSession(): Promise<SessionUser | null>;
+  signIn(input: LoginInput): Promise<SessionUser>;
+  signOut(): Promise<void>;
   // MESSAGING — staff-to-staff internal messaging (participants only;
   // auditors have no access — see src/data/messaging.ts).
   listMessageThreads(): Promise<import("./messaging").MessageThreadView[]>;
@@ -533,6 +538,7 @@ export interface ComplyraApi {
   hideMessageThread(threadId: string): Promise<void>;
   listMessageContacts(): Promise<import("./messaging").MessageContact[]>;
   listIndividualMessageThreads(
+    individualId: string,
   ): Promise<import("./messaging").MessageThreadView[]>;
   getMessageUnreadTotal(): Promise<number>;
   getSession(): Promise<SessionUser | null>;
