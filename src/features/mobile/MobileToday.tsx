@@ -93,6 +93,7 @@ export default function MobileToday({
   onOpenTasks,
   onOpenMar,
   onOpenQueueItem,
+  complianceCard,
 }: {
   tracking: TodayTracking;
   queueItems: PersonalWorkItem[];
@@ -100,6 +101,12 @@ export default function MobileToday({
   onOpenTasks: () => void;
   onOpenMar: () => void;
   onOpenQueueItem: (item: PersonalWorkItem) => void;
+  /**
+   * The personal compliance card, rendered directly below the tracking
+   * card — a separate clock (credentials and acknowledgments) from the
+   * day's operations, never merged into the tracking donut.
+   */
+  complianceCard?: React.ReactNode;
 }) {
   const [filter, setFilter] = useState<UpFilter>("all");
   const { summary } = tracking;
@@ -178,6 +185,8 @@ export default function MobileToday({
           </div>
         )}
       </section>
+
+      {complianceCard}
 
       <section className="msh-upnext" aria-label="Up next">
         <div className="msh-upnext-head">

@@ -190,6 +190,13 @@ export default function App() {
   // MESSAGING: unread total for the nav badge + chart deep-link focus.
   const messageUnread = useMessageUnread();
   const [messageFocus, setMessageFocus] = useState<string | null>(null);
+  // PERSONAL-COMPLIANCE: deep-link into the Employee Hub's My Compliance
+  // tab from the dashboards' personal compliance card/strip.
+  const [hubFocusTab, setHubFocusTab] = useState<string | null>(null);
+  const openMyCompliance = () => {
+    setHubFocusTab("compliance");
+    navigate("Employee Hub");
+  };
   const [site, setSite] = useState("All sites");
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
@@ -819,6 +826,10 @@ export default function App() {
               setForceDesktop(true);
               navigate(next);
             },
+            openMyCompliance: () => {
+              setForceDesktop(true);
+              openMyCompliance();
+            },
             openPersonChart: (name) => {
               setForceDesktop(true);
               openPersonChart(name);
@@ -1064,6 +1075,7 @@ export default function App() {
               // the coverage board does not render here — it belongs inside
               // the home's own page. Agency-wide roles keep the board.
               showCoverageBoard={session.roleKey !== "house_manager"}
+              onOpenMyCompliance={openMyCompliance}
               onSite={setSite}
               onNavigate={navigate}
               onRequirement={selectRequirement}
@@ -1909,7 +1921,12 @@ export default function App() {
               {page === "Mileage" && <MileagePage />}
               {/* HR-EMPLOYEE-HUB-PAGE (2026-09-16) */}
               {page === "Scheduling" && <SchedulingPage onNavigate={navigate} />}
-              {page === "Employee Hub" && <EmployeeHubPage />}
+              {page === "Employee Hub" && (
+                <EmployeeHubPage
+                  focusTab={hubFocusTab}
+                  onFocusHandled={() => setHubFocusTab(null)}
+                />
+              )}
               {/* MESSAGING-PAGE: staff inbox (participants only). */}
               {page === "Messages" && (
                 <MessagesPage

@@ -251,6 +251,50 @@
   font-weight: 700;
 }
 
+/* Personal compliance card (below Today's tracking — a separate clock) */
+.msh-compliance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: var(--white);
+  border: 0;
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(36, 30, 24, 0.07);
+  padding: 16px 18px;
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+}
+.msh-compliance-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msh-compliance-head strong {
+  font-size: 16px;
+  font-weight: 700;
+}
+.msh-compliance-percent {
+  font-size: 20px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.msh-compliance-card small {
+  font-size: 13px;
+  line-height: 1.45;
+}
+.msh-compliance-next {
+  font-weight: 600;
+}
+.msh-compliance-card .msh-chevron {
+  margin-left: auto;
+  align-self: center;
+  font-size: 20px;
+  line-height: 1;
+}
+
 /* Donut card */
 .msh-donut-card {
   background: var(--white);
