@@ -25,8 +25,15 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
-  await expect(chart.getByRole("heading", { name: "Health" })).toBeVisible();
-  await expect(chart.locator(".health-tabs").getByRole("tab")).toHaveCount(2);
+  await expect(
+    chart.getByRole("heading", { name: "Health", exact: true }),
+  ).toBeVisible();
+  // Scoped to the Health card's own tab list: the chart also carries the
+  // separate "Health trackers" tab list (covered in health-track.spec.ts),
+  // and the two must never be conflated.
+  await expect(
+    chart.getByRole("tablist", { name: "Health sections" }).getByRole("tab"),
+  ).toHaveCount(2);
   await expect(chart.getByRole("tab", { name: "Overview" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Appointments" })).toBeVisible();
   await expect(chart.getByRole("tab", { name: "Overview" })).toHaveAttribute(

@@ -291,6 +291,55 @@ import {
   type CorrectiveAction,
   type UpdateCorrectiveActionInput,
 } from "./correctiveActions";
+// THERAP-CORE-GAPS-1: event reports, behavior supports, health trackers.
+import {
+  buildGerReportRow,
+  canDecideGerReport,
+  canEditGerReportBody,
+  canViewGerReports,
+  gerNeedsFollowUp,
+  gerReportFromRow,
+  gerSubmitNotificationTargets,
+  sortGerReports,
+  validateGerDraft,
+  validateGerResolution,
+  type GerReport,
+  type GerReportDraft,
+  type GerResolutionPatch,
+} from "./ger";
+import {
+  behaviorEntryFromRow,
+  behaviorPlanFromRow,
+  buildBehaviorEntryRow,
+  buildBehaviorPlanRow,
+  canCorrectBehaviorEntry,
+  canManageBehaviorPlan,
+  canRecordBehavior,
+  canViewBehavior,
+  validateBehaviorCorrection,
+  validateBehaviorEntryDraft,
+  validateBehaviorPlanDraft,
+  type BehaviorEntry,
+  type BehaviorEntryDraft,
+  type BehaviorPlan,
+  type BehaviorPlanDraft,
+} from "./behavior";
+import {
+  buildHealthTrackRow,
+  canCorrectHealthTrackEntry,
+  canRecordHealthEntry,
+  canViewHealthTrack,
+  healthAlertTargets,
+  healthEntryNeedsAlert,
+  healthTrackEntryFromRow,
+  healthTrackTitle,
+  isImmunizationOverdue,
+  validateHealthCorrection,
+  validateHealthTrackDraft,
+  type HealthTrackEntry,
+  type HealthTrackEntryDraft,
+  type HealthTrackKind,
+} from "./healthTrack";
 // AUDIT-READINESS: score snapshot rows for the trend chart.
 import {
   buildScoreSnapshotRow,
@@ -8647,6 +8696,767 @@ export class HostedApi implements ComplyraApi {
 
   async resolveCorrectiveAction(id: string): Promise<CorrectiveAction> {
     return this.updateCorrectiveAction(id, { storedStatus: "resolved" });
+  }
+
+  // ===== THERAP-CORE-GAPS-1 HOSTED (event reports, behavior, health) =====
+  // Tables: public.ger_reports, public.behavior_plans, public.behavior_entries,
+  // public.health_track_entries (migration 20261027120000_therap_core_gaps_1.sql).
+
+  /** Emit one incident.followup alert via notify-event; never breaks a mutation. */
+  private async emitFollowupAlert(input: {
+    session: SessionUser;
+    userId: string | null;
+    roleKey: string | null;
+    title: string;
+    body: string;
+    individualId: string;
+    entityId: string;
+    entityType: string;
+    dedupeKey: string;
+  }): Promise<void> {
+    try {
+      const { error } = await this.client.functions.invoke("notify-event", {
+        body: {
+          agency_id: input.session.agencyId,
+          user_id: input.userId,
+          role_key: input.roleKey,
+          type: "incident.followup",
+          title: input.title,
+          body: input.body,
+          deep_link: `/plans/${input.individualId}`,
+          entity_type: input.entityType,
+          entity_id: input.entityId,
+          dedupe_key: input.dedupeKey,
+        },
+      });
+      if (error) {
+        console.warn("[notifications] notify-event failed:", error.message);
+      }
+    } catch (err) {
+      console.warn("[notifications] notify-event threw:", err);
+    }
+  }
+
+  private async houseManagerIdsForSite(
+    session: SessionUser,
+    siteId: string,
+  ): Promise<string[]> {
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("user_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("role_key", "house_manager")
+      .eq("site_id", siteId);
+    if (error) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    return (data ?? [])
+      .filter((row) => {
+        const expires = (row as { expires_on?: string | null }).expires_on;
+        return !expires || expires >= today;
+      })
+      .map((row) => (row as { user_id: string }).user_id);
+  }
+
+  private async fetchGerReportRow(session: SessionUser, id: string) {
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the event report.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Event report not found.");
+    }
+    const report = gerReportFromRow(data as Record<string, unknown>);
+    // Nurses review across the agency's homes (clinical oversight).
+    if (!canAccessSite(session, report.siteId) && session.roleKey !== "nurse") {
+      throw new Error("Event report not found.");
+    }
+    return report;
+  }
+
+  async listGerReports(input: { siteId: string }): Promise<GerReport[]> {
+    const session = await this.requireSession();
+    if (!canViewGerReports(session)) return [];
+    if (!canAccessSite(session, input.siteId) && session.roleKey !== "nurse") return [];
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", input.siteId);
+    throwIf(error, "Could not load event reports.");
+    const rows = (data ?? []).map((row) =>
+      gerReportFromRow(row as Record<string, unknown>),
+    );
+    await this.queueGerOverdueAlerts(session, rows);
+    return sortGerReports(rows);
+  }
+
+  async listAgencyGerReports(): Promise<GerReport[]> {
+    const session = await this.requireSession();
+    if (!canViewGerReports(session)) return [];
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .in("status", ["submitted", "approved"]);
+    throwIf(error, "Could not load event reports.");
+    const rows = (data ?? [])
+      .map((row) => gerReportFromRow(row as Record<string, unknown>))
+      .filter(
+        (row) => canAccessSite(session, row.siteId) || session.roleKey === "nurse",
+      );
+    await this.queueGerOverdueAlerts(session, rows);
+    return sortGerReports(rows);
+  }
+
+  /** Overdue follow-ups alert the assigned manager (or HM/PM/nurse set). */
+  private async queueGerOverdueAlerts(session: SessionUser, rows: GerReport[]) {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const report of rows) {
+      if (!gerNeedsFollowUp(report)) continue;
+      if (!report.resolutionDueOn || report.resolutionDueOn >= today) continue;
+      const person = await this.individualRecord(report.individualId);
+      const targets = gerSubmitNotificationTargets({
+        gerId: `${report.id}:overdue:${report.resolutionDueOn}`,
+        houseManagerUserIds: report.assignedManagerUserId
+          ? [report.assignedManagerUserId]
+          : await this.houseManagerIdsForSite(session, report.siteId),
+      });
+      await Promise.allSettled(
+        targets.map((target) =>
+          this.emitFollowupAlert({
+            session,
+            userId: target.userId,
+            roleKey: target.roleKey,
+            title: `Event follow-up overdue — ${person?.fullName ?? "An Individual"}`,
+            body: `Follow-up on the ${report.eventType} of ${report.eventDate} was due ${report.resolutionDueOn} and is still open.`,
+            individualId: report.individualId,
+            entityType: "ger_report",
+            entityId: report.id,
+            dedupeKey: target.dedupeKey,
+          }),
+        ),
+      );
+    }
+  }
+
+  /**
+   * GER site integrity: a report belongs to the home its Individual lives
+   * at. Resolve every Individual on the draft to their home so validation
+   * can reject a report filed under the wrong home — and its alerts and
+   * review queue can never route to the wrong home's managers. The stored
+   * row's site always comes from the Individual, never from the caller.
+   */
+  private async gerSiteContext(session: SessionUser, draft: GerReportDraft) {
+    const person = await this.individualRecord(draft.individualId);
+    const linkedSiteIds: Record<string, string | null> = {};
+    for (const linkedId of draft.linkedIndividualIds ?? []) {
+      const linked = await this.individualRecord(linkedId);
+      linkedSiteIds[linkedId] =
+        linked && linked.agencyId === session.agencyId ? linked.siteId : null;
+    }
+    return {
+      person,
+      context: {
+        individualSiteId:
+          person && person.agencyId === session.agencyId ? person.siteId : null,
+        linkedSiteIds,
+      },
+    };
+  }
+
+  async createGerReport(draft: GerReportDraft): Promise<GerReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.create");
+    const { person, context } = await this.gerSiteContext(session, draft);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const errors = validateGerDraft(draft, context);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (!canAccessSite(session, person.siteId) && session.roleKey !== "nurse") {
+      throw new Error("You do not have permission to do that.");
+    }
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .insert(
+        buildGerReportRow({
+          agencyId: session.agencyId,
+          createdByUserId: session.userId,
+          draft: { ...draft, siteId: person.siteId },
+          status: "draft",
+        }),
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the event report.");
+    const report = gerReportFromRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "ger.created",
+      `Event report (${report.eventType}) drafted for ${person.fullName}`,
+      "ger_report",
+      report.id,
+    );
+    return report;
+  }
+
+  async updateGerReport(id: string, draft: GerReportDraft): Promise<GerReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.create");
+    const report = await this.fetchGerReportRow(session, id);
+    if (!canEditGerReportBody(report, session)) {
+      throw new Error("Only a draft or returned report can be edited.");
+    }
+    // Changing the Individual re-derives the home in the same update: the
+    // report, its dashboard rows, and its alerts can never point at two
+    // different homes.
+    const { person, context } = await this.gerSiteContext(session, draft);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const effectiveDraft = { ...draft, siteId: person.siteId };
+    const errors = validateGerDraft(effectiveDraft, context);
+    if (errors.length > 0) throw new Error(errors[0]);
+    if (!canAccessSite(session, person.siteId) && session.roleKey !== "nurse") {
+      throw new Error("You do not have permission to do that.");
+    }
+    const row = buildGerReportRow({
+      agencyId: session.agencyId,
+      createdByUserId: report.createdByUserId,
+      draft: effectiveDraft,
+      status: report.status,
+    });
+    delete row.agency_id;
+    delete row.status;
+    delete row.created_by_user_id;
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update(row)
+      .eq("id", id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the event report.");
+    return gerReportFromRow(data as Record<string, unknown>);
+  }
+
+  async submitGerReport(id: string): Promise<GerReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.create");
+    const report = await this.fetchGerReportRow(session, id);
+    if (report.status === "submitted" || report.status === "approved") {
+      throw new Error("This report has already been submitted.");
+    }
+    if (
+      report.createdByUserId !== session.userId &&
+      session.permissions["ger.review"] !== true
+    ) {
+      throw new Error("Only the author or a reviewer can submit this report.");
+    }
+    const errors = validateGerDraft(report);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const patch: Record<string, unknown> = { status: "submitted" };
+    if (report.resolutionStatus === "resolved") {
+      patch.resolution_status = "unaddressed";
+      patch.resolved_at = null;
+      patch.resolved_by_user_id = null;
+    }
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update(patch)
+      .eq("id", id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not submit the event report.");
+    const submitted = gerReportFromRow(data as Record<string, unknown>);
+    // Alert the home's HM directly + PM/nurse broadcasts (all severities).
+    const person = await this.individualRecord(submitted.individualId);
+    const targets = gerSubmitNotificationTargets({
+      gerId: submitted.id,
+      houseManagerUserIds: await this.houseManagerIdsForSite(
+        session,
+        submitted.siteId,
+      ),
+    });
+    await Promise.allSettled(
+      targets.map((target) =>
+        this.emitFollowupAlert({
+          session,
+          userId: target.userId,
+          roleKey: target.roleKey,
+          title: `${submitted.severity} event report — ${person?.fullName ?? "An Individual"}`,
+          body: `${submitted.eventType} on ${submitted.eventDate} was submitted and needs review and follow-up.`,
+          individualId: submitted.individualId,
+          entityType: "ger_report",
+          entityId: submitted.id,
+          dedupeKey: target.dedupeKey,
+        }),
+      ),
+    );
+    await this.audit(
+      session,
+      "ger.submitted",
+      `Event report (${submitted.eventType}, ${submitted.severity}) submitted for ${person?.fullName ?? "an Individual"}`,
+      "ger_report",
+      submitted.id,
+    );
+    return submitted;
+  }
+
+  async reviewGerReport(
+    id: string,
+    decision: "approved" | "returned",
+    note?: string,
+  ): Promise<GerReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.review");
+    const report = await this.fetchGerReportRow(session, id);
+    if (!canDecideGerReport(report, session)) {
+      throw new Error("Only a submitted report can be reviewed.");
+    }
+    const now = new Date().toISOString();
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update({
+        status: decision,
+        review_note: (note ?? "").trim(),
+        reviewed_by_user_id: session.userId,
+        reviewed_at: now,
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the review.");
+    const reviewed = gerReportFromRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      decision === "approved" ? "ger.approved" : "ger.returned",
+      `Event report (${reviewed.eventType}) ${decision === "approved" ? "approved" : "returned for corrections"}`,
+      "ger_report",
+      reviewed.id,
+    );
+    return reviewed;
+  }
+
+  async updateGerResolution(
+    id: string,
+    patch: GerResolutionPatch,
+  ): Promise<GerReport> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.resolve");
+    const report = await this.fetchGerReportRow(session, id);
+    if (report.status !== "submitted" && report.status !== "approved") {
+      throw new Error("Follow-up starts once a report is submitted.");
+    }
+    const errors = validateGerResolution(patch, report);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const dbPatch: Record<string, unknown> = {};
+    if (patch.resolutionStatus !== undefined) {
+      dbPatch.resolution_status = patch.resolutionStatus;
+    }
+    if (patch.investigationRequired !== undefined) {
+      dbPatch.investigation_required = patch.investigationRequired;
+    }
+    if (patch.investigationNotes !== undefined) {
+      dbPatch.investigation_notes = patch.investigationNotes;
+    }
+    if (patch.assignedManagerUserId !== undefined) {
+      dbPatch.assigned_manager_user_id = patch.assignedManagerUserId;
+    }
+    if (patch.resolutionDueOn !== undefined) {
+      dbPatch.resolution_due_on = patch.resolutionDueOn || null;
+    }
+    if (patch.closureNote !== undefined) dbPatch.closure_note = patch.closureNote;
+    const nextStatus = patch.resolutionStatus ?? report.resolutionStatus;
+    if (nextStatus === "resolved") {
+      dbPatch.resolved_by_user_id = session.userId;
+      dbPatch.resolved_at = new Date().toISOString();
+    }
+    const { data, error } = await this.client
+      .from("ger_reports")
+      .update(dbPatch)
+      .eq("id", id)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update the follow-up.");
+    const updated = gerReportFromRow(data as Record<string, unknown>);
+    await this.audit(
+      session,
+      "ger.resolution_updated",
+      `Event follow-up updated (${updated.resolutionStatus.replace("_", " ")})`,
+      "ger_report",
+      updated.id,
+    );
+    return updated;
+  }
+
+  async deleteGerReport(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "ger.create");
+    const report = await this.fetchGerReportRow(session, id);
+    if (report.status !== "draft" || report.createdByUserId !== session.userId) {
+      throw new Error("Only your own draft reports can be deleted.");
+    }
+    const { error } = await this.client.from("ger_reports").delete().eq("id", id);
+    throwIf(error, "Could not delete the event report.");
+  }
+
+  // ----- Behavior supports (hosted) -----
+
+  private async assertBehaviorIndividual(session: SessionUser, individualId: string) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    return person;
+  }
+
+  async getBehaviorPlan(individualId: string): Promise<BehaviorPlan | null> {
+    const session = await this.requireSession();
+    if (!canViewBehavior(session)) return null;
+    await this.assertBehaviorIndividual(session, individualId);
+    const { data, error } = await this.client
+      .from("behavior_plans")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("active", true)
+      .maybeSingle();
+    throwIf(error, "Could not load the behavior plan.");
+    return data ? behaviorPlanFromRow(data as Record<string, unknown>) : null;
+  }
+
+  async saveBehaviorPlan(
+    individualId: string,
+    draft: BehaviorPlanDraft,
+  ): Promise<BehaviorPlan> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "behavior.plan");
+    if (!canManageBehaviorPlan(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.assertBehaviorIndividual(session, individualId);
+    const errors = validateBehaviorPlanDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const existing = await this.getBehaviorPlan(individualId);
+    if (existing) {
+      const { data, error } = await this.client
+        .from("behavior_plans")
+        .update({
+          target_behaviors: draft.targetBehaviors.trim(),
+          interventions: draft.interventions.trim(),
+          crisis_steps: draft.crisisSteps.trim(),
+        })
+        .eq("id", existing.id)
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the behavior plan.");
+      return behaviorPlanFromRow(data as Record<string, unknown>);
+    }
+    const { data, error } = await this.client
+      .from("behavior_plans")
+      .insert(
+        buildBehaviorPlanRow({
+          agencyId: session.agencyId,
+          individualId,
+          createdByUserId: session.userId,
+          draft,
+        }),
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the behavior plan.");
+    return behaviorPlanFromRow(data as Record<string, unknown>);
+  }
+
+  async listBehaviorEntries(individualId: string): Promise<BehaviorEntry[]> {
+    const session = await this.requireSession();
+    if (!canViewBehavior(session)) return [];
+    await this.assertBehaviorIndividual(session, individualId);
+    const { data, error } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("occurred_on", { ascending: false })
+      .order("occurred_at_time", { ascending: false });
+    throwIf(error, "Could not load behavior records.");
+    return (data ?? []).map((row) =>
+      behaviorEntryFromRow(row as Record<string, unknown>),
+    );
+  }
+
+  async addBehaviorEntry(
+    individualId: string,
+    draft: BehaviorEntryDraft,
+  ): Promise<BehaviorEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "behavior.record");
+    if (!canRecordBehavior(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.assertBehaviorIndividual(session, individualId);
+    const errors = validateBehaviorEntryDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const { data, error } = await this.client
+      .from("behavior_entries")
+      .insert(
+        buildBehaviorEntryRow({
+          agencyId: session.agencyId,
+          individualId,
+          recordedByUserId: session.userId,
+          draft,
+        }),
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the behavior record.");
+    return behaviorEntryFromRow(data as Record<string, unknown>);
+  }
+
+  async deleteBehaviorEntry(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "behavior.record");
+    const { data, error } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the behavior record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Behavior record not found.");
+    }
+    const entry = behaviorEntryFromRow(data as Record<string, unknown>);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      !canManageBehaviorPlan(session.roleKey)
+    ) {
+      throw new Error("You can only remove behavior records you recorded.");
+    }
+    const { error: deleteError } = await this.client
+      .from("behavior_entries")
+      .delete()
+      .eq("id", id);
+    throwIf(deleteError, "Could not delete the behavior record.");
+  }
+
+  async correctBehaviorEntry(
+    id: string,
+    draft: BehaviorEntryDraft,
+    rationale: string,
+  ): Promise<BehaviorEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "behavior.record");
+    const { data, error } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the behavior record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Behavior record not found.");
+    }
+    const existing = behaviorEntryFromRow(data as Record<string, unknown>);
+    if (
+      existing.recordedByUserId !== session.userId &&
+      !canCorrectBehaviorEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct behavior records you recorded.");
+    }
+    const errors = validateBehaviorCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    // The database correction path is the enforcement point: it re-checks
+    // the caller's scope, requires the rationale, preserves the replaced
+    // version, and writes the immutable history record.
+    const { error: rpcError } = await this.client.rpc("correct_behavior_entry", {
+      p_entry_id: id,
+      p_rationale: rationale.trim(),
+      p_occurred_on: draft.occurredOn,
+      p_occurred_at_time: draft.occurredAtTime ?? "",
+      p_behavior: draft.behavior,
+      p_antecedent: draft.antecedent ?? "",
+      p_duration_minutes: draft.durationMinutes ?? null,
+      p_intensity: draft.intensity,
+      p_intervention_used: draft.interventionUsed ?? "",
+      p_outcome: draft.outcome ?? "",
+    });
+    throwIf(rpcError, "Could not save the correction.");
+    const { data: updated, error: reloadError } = await this.client
+      .from("behavior_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+    throwIf(reloadError, "Could not load the corrected record.");
+    return behaviorEntryFromRow(updated as Record<string, unknown>);
+  }
+
+  // ----- Health trackers (hosted) -----
+
+  private async emitHealthAlert(session: SessionUser, entry: HealthTrackEntry) {
+    const person = await this.individualRecord(entry.individualId);
+    const targets = healthAlertTargets({
+      entryId: entry.id,
+      houseManagerUserIds: person
+        ? await this.houseManagerIdsForSite(session, person.siteId)
+        : [],
+    });
+    await Promise.allSettled(
+      targets.map((target) =>
+        this.emitFollowupAlert({
+          session,
+          userId: target.userId,
+          roleKey: target.roleKey,
+          title:
+            entry.kind === "immunization"
+              ? `Immunization overdue — ${person?.fullName ?? "An Individual"}`
+              : `Health alert — ${person?.fullName ?? "An Individual"}`,
+          body:
+            entry.kind === "immunization"
+              ? `${entry.title} was due ${entry.details.nextDueOn ?? ""} and has not been recorded as given.`
+              : `${entry.title} on ${entry.occurredOn} needs a manager's attention.`,
+          individualId: entry.individualId,
+          entityType: "health_track_entry",
+          entityId: entry.id,
+          dedupeKey: target.dedupeKey,
+        }),
+      ),
+    );
+  }
+
+  async listHealthTrackEntries(input: {
+    individualId: string;
+    kind?: HealthTrackKind;
+  }): Promise<HealthTrackEntry[]> {
+    const session = await this.requireSession();
+    if (!canViewHealthTrack(session)) return [];
+    await this.assertBehaviorIndividual(session, input.individualId);
+    let query = this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", input.individualId);
+    if (input.kind) query = query.eq("kind", input.kind);
+    const { data, error } = await query.order("occurred_on", {
+      ascending: false,
+    });
+    throwIf(error, "Could not load health records.");
+    const rows = (data ?? []).map((row) =>
+      healthTrackEntryFromRow(row as Record<string, unknown>),
+    );
+    for (const row of rows) {
+      if (isImmunizationOverdue(row, rows)) await this.emitHealthAlert(session, row);
+    }
+    return rows;
+  }
+
+  async addHealthTrackEntry(
+    individualId: string,
+    draft: HealthTrackEntryDraft,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    if (!canRecordHealthEntry(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.assertBehaviorIndividual(session, individualId);
+    const errors = validateHealthTrackDraft(draft);
+    if (errors.length > 0) throw new Error(errors[0]);
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .insert(
+        buildHealthTrackRow({
+          agencyId: session.agencyId,
+          individualId,
+          recordedByUserId: session.userId,
+          draft,
+        }),
+      )
+      .select("*")
+      .single();
+    throwIf(error, "Could not save the health record.");
+    const entry = healthTrackEntryFromRow(data as Record<string, unknown>);
+    if (healthEntryNeedsAlert(entry)) await this.emitHealthAlert(session, entry);
+    return entry;
+  }
+
+  async deleteHealthTrackEntry(id: string): Promise<void> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the health record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Health record not found.");
+    }
+    const entry = healthTrackEntryFromRow(data as Record<string, unknown>);
+    if (
+      entry.recordedByUserId !== session.userId &&
+      session.permissions["ger.review"] !== true
+    ) {
+      throw new Error("You can only remove health records you recorded.");
+    }
+    const { error: deleteError } = await this.client
+      .from("health_track_entries")
+      .delete()
+      .eq("id", id);
+    throwIf(deleteError, "Could not delete the health record.");
+  }
+
+  async correctHealthTrackEntry(
+    id: string,
+    draft: HealthTrackEntryDraft,
+    rationale: string,
+  ): Promise<HealthTrackEntry> {
+    const session = await this.requireSession();
+    this.requirePermission(session, "health.record");
+    const { data, error } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    throwIf(error, "Could not load the health record.");
+    if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
+      throw new Error("Health record not found.");
+    }
+    const existing = healthTrackEntryFromRow(data as Record<string, unknown>);
+    if (
+      existing.recordedByUserId !== session.userId &&
+      !canCorrectHealthTrackEntry(session.roleKey)
+    ) {
+      throw new Error("You can only correct health records you recorded.");
+    }
+    const errors = validateHealthCorrection(draft, rationale);
+    if (errors.length > 0) throw new Error(errors[0]);
+    // The database correction path is the enforcement point: it re-checks
+    // the caller's scope, requires the rationale, preserves the replaced
+    // version, and writes the immutable history record.
+    const { error: rpcError } = await this.client.rpc(
+      "correct_health_track_entry",
+      {
+        p_entry_id: id,
+        p_rationale: rationale.trim(),
+        p_kind: draft.kind,
+        p_occurred_on: draft.occurredOn,
+        p_title: healthTrackTitle(draft.kind, draft.details ?? {}),
+        p_details: draft.details ?? {},
+        p_flagged_abnormal: draft.flaggedAbnormal === true,
+        p_note: draft.note ?? "",
+      },
+    );
+    throwIf(rpcError, "Could not save the correction.");
+    const { data: updated, error: reloadError } = await this.client
+      .from("health_track_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+    throwIf(reloadError, "Could not load the corrected record.");
+    const entry = healthTrackEntryFromRow(updated as Record<string, unknown>);
+    if (healthEntryNeedsAlert(entry)) await this.emitHealthAlert(session, entry);
+    return entry;
   }
   // ===== AUDIT-READINESS HOSTED (score snapshots) =====
   // Table: public.compliance_score_snapshots

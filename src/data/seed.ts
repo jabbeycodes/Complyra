@@ -68,6 +68,9 @@ import {
   type SiteDelegationActivation,
 } from "../delegation/delegation";
 import type { CorrectiveAction } from "./correctiveActions";
+import type { GerReport } from "./ger";
+import type { BehaviorEntry, BehaviorEntryHistory, BehaviorPlan } from "./behavior";
+import type { HealthTrackEntry, HealthTrackEntryHistory } from "./healthTrack";
 import type { ScoreSnapshot } from "./complianceScore";
 import { applyAgencyDemo } from "./demoShowcase";
 import { dueItemClock } from "./operatingReminders";
@@ -132,6 +135,14 @@ export interface LocalDatabase {
   certificates: StaffCertificate[];
   // AUDIT-READINESS: corrective actions are created by managers after go-live.
   correctiveActions: CorrectiveAction[];
+  // THERAP-CORE-GAPS-1: event reports, behavior supports, health trackers —
+  // all created through use after go-live.
+  gerReports: GerReport[];
+  behaviorPlans: BehaviorPlan[];
+  behaviorEntries: BehaviorEntry[];
+  behaviorEntryHistory: BehaviorEntryHistory[];
+  healthTrackEntries: HealthTrackEntry[];
+  healthTrackEntryHistory: HealthTrackEntryHistory[];
   // AUDIT-READINESS: compliance score snapshots for the trend chart.
   complianceSnapshots: ScoreSnapshot[];
   // LIFEPATH-P7 (mileage): vehicle mileage trip rows, one per house trip.
@@ -728,6 +739,13 @@ export function createEvergreenSeed(): LocalDatabase {
     // LIFEPATH-P4 (certificates): HR adds certificate records after go-live.
     // AUDIT-READINESS: managers create corrective actions after go-live.
     correctiveActions: [],
+    // THERAP-CORE-GAPS-1: filed and recorded through use after go-live.
+    gerReports: [],
+    behaviorPlans: [],
+    behaviorEntries: [],
+    behaviorEntryHistory: [],
+    healthTrackEntries: [],
+    healthTrackEntryHistory: [],
     // AUDIT-READINESS: score snapshots accumulate as the command center runs.
     complianceSnapshots: [],
     // LIFEPATH-P7 (mileage): staff log vehicle trips per house after go-live.

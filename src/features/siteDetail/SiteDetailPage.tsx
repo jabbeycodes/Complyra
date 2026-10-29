@@ -62,6 +62,7 @@ import {
   MAX_INDIVIDUAL_HIGHLIGHTS,
 } from "./individualHighlights";
 import SiteDrillsSchedule from "./SiteDrillsSchedule";
+import GerTab from "../ger/GerTab";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteCoverageBoard from "../coverage/SiteCoverageBoard";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
@@ -133,6 +134,7 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   medications: Pill,
   mileage: CarFront,
   shiftnotes: FileText,
+  reporting: FileText,
   staff: Users,
 };
 
@@ -900,6 +902,15 @@ export default function SiteDetailPage({
               <SiteQaReview siteId={siteId} siteName={site.name} />
             </div>
           </div>
+        )}
+
+        {activeTab === "reporting" && (
+          <GerTab
+            siteId={siteId}
+            siteName={site.name}
+            individuals={siteIndividuals}
+            staff={siteStaff}
+          />
         )}
 
         {activeTab === "checklists" && !loading.checklists && (

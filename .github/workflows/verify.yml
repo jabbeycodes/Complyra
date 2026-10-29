@@ -43,7 +43,22 @@ jobs:
         with:
           version: 2.107.0
       - run: npm ci
-      - run: supabase start
+      # Docker Hub intermittently rate-limits image pulls on shared runner
+      # egress ("toomanyrequests"), which failed `supabase start` on three
+      # consecutive heads on 2026-10-27 with no migration error at all.
+      # Retry the start with backoff before treating it as a real failure.
+      - name: Start local Supabase (retry on registry rate limits)
+        run: |
+          for attempt in 1 2 3; do
+            if supabase start; then
+              exit 0
+            fi
+            echo "supabase start failed (attempt $attempt); retrying after backoff…"
+            supabase stop --no-backup || true
+            sleep $((attempt * 30))
+          done
+          echo "supabase start failed after 3 attempts"
+          exit 1
       - run: npm run test:db
       - run: npm run seed:local
       - run: npm run test:hosted

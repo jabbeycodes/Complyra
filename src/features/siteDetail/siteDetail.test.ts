@@ -68,6 +68,8 @@ const EXPECTED_ORDER: SiteDetailTabId[] = [
   "medications",
   "mileage",
   "shiftnotes",
+  // THERAP-CORE-GAPS-1: event reports sit after Shift notes; Staff stays last.
+  "reporting",
   "staff",
 ];
 
@@ -96,8 +98,8 @@ describe("site detail tabs", () => {
     assert.ok(ids.includes("overview"), "DSP still sees overview");
     assert.equal(
       ids[ids.length - 1],
-      "shiftnotes",
-      "last visible tab for DSP is shiftnotes",
+      "reporting",
+      "last visible tab for DSP is reporting (DSPs file event reports)",
     );
     // Administrator sees everything, staff still last.
     const adminIds = getSiteDetailTabs(sessionFor("administrator")).map((t) => t.id);
