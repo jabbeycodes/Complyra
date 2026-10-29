@@ -1,3 +1,5 @@
+import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
+import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
@@ -708,9 +710,113 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+    async listConsentPackets(): Promise<ConsentPacket[]> {
+        const session = await this.requireSession();
+        assertConsentRole(session);
+        if (session.roleKey === 'dsp')
+            return [];
+        const { data, error } = await this.client.from('consent_packets').select('*,consent_packet_audit(*)').eq('agency_id', session.agencyId);
+        throwIf(error, 'Could not load packets.');
+        return (data ?? []).map(r => ({ id: r.id, agencyId: r.agency_id, individualId: r.individual_id, createdBy: r.created_by, createdAt: r.created_at, snapshot: r.snapshot, status: r.status, generatedAt: r.generated_at, sentAt: r.sent_at, openedAt: r.opened_at, signedAt: r.signed_at, filedAt: r.filed_at, linkExpiresAt: r.link_expires_at, outstandingAfterDays: r.outstanding_after_days, choices: r.choices, signer: r.signer, evidenceName: r.evidence_name, audit: (r.consent_packet_audit ?? []).map((a: Record<string, string>) => ({ event: a.event, at: a.at, signerName: a.signer_name, authority: a.authority })) }));
+    }
+    async createConsentPacket(input: PacketCreateInput): Promise<string> {
+        assertConsentRole(await this.requireSession(), true);
+        assertPacketDates(input);
+        const { data, error } = await this.client.rpc('create_consent_packet', { p_input: input });
+        throwIf(error, 'Could not create packet.');
+        return data;
+    }
+    async generateConsentPacket(id: string) {
+        assertConsentRole(await this.requireSession(), true);
+        const { error } = await this.client.rpc('generate_consent_packet', { p_id: id });
+        throwIf(error, 'Could not generate packet.');
+    }
+    async sendConsentPacket(id: string, expiresInDays: number): Promise<string> {
+        assertConsentRole(await this.requireSession(), true);
+        const { data, error } = await this.client.rpc('send_consent_packet', { p_id: id, p_days: expiresInDays });
+        throwIf(error, 'Could not create signing link.');
+        return data;
+    }
+    async filePaperConsentPacket(id: string, choices: PacketChoices, signer: PacketSignature, file: File) {
+        assertConsentRole(await this.requireSession(), true);
+        validatePacketSubmission(choices, signer);
+        const evidence = await packetFile(file);
+        const { error } = await this.client.rpc('file_paper_consent_packet', { p_id: id, p_choices: choices, p_signer: signer, p_evidence: evidence });
+        throwIf(error, 'Could not file packet.');
+    }
+    async getConsentPacketEvidence(id: string): Promise<PacketEvidence> {
+        assertConsentRole(await this.requireSession());
+        const { data, error } = await this.client.rpc('get_consent_packet_evidence', { p_id: id });
+        throwIf(error, 'Could not load packet evidence.');
+        return data;
+    }
+    private async publicPacketRequest(body: Record<string, unknown>) {
+        // Suppress any signed-in account JWT: the token is the sole authority here.
+        const url = import.meta.env.VITE_SUPABASE_URL;
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        if (!url || !anonKey)
+            throw new Error('Hosted signing is not configured.');
+        const response = await fetch(`${url}/functions/v1/consent-signing`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: anonKey }, body: JSON.stringify(body), referrerPolicy: 'no-referrer' });
+        const result = await response.json();
+        if (!response.ok)
+            throw new Error(result.error ?? 'Signing link is unavailable or expired.');
+        return result;
+    }
+    async openConsentPacket(token: string): Promise<PacketPublicView> { return this.publicPacketRequest({ action: 'open', token }); }
+    async signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature): Promise<PacketEvidence> {
+        validatePacketSubmission(choices, signer);
+        return this.publicPacketRequest({ action: 'sign', token, choices, signer });
+    }
+    async getConsents(): Promise<ConsentRegister> {
+        const session = await this.requireSession();
+        assertConsentRole(session);
+        const [people, config, consents, revoked] = await Promise.all([
+            this.client.from('individuals').select('id,agency_id,site_id,full_name').eq('agency_id', session.agencyId),
+            this.client.from('consent_type_settings').select('types').eq('agency_id', session.agencyId).maybeSingle(),
+            this.client.from('individual_consents').select('*').eq('agency_id', session.agencyId),
+            this.client.from('consent_revocations').select('*').eq('agency_id', session.agencyId),
+        ]);
+        for (const result of [people, config, consents, revoked])
+            throwIf(result.error, 'Could not load consents.');
+        return { types: config.data?.types ?? structuredClone(DEFAULT_CONSENT_TYPES),
+            individuals: (people.data ?? []).map(p => ({ id: p.id, agencyId: p.agency_id, siteId: p.site_id, fullName: p.full_name })),
+            records: (consents.data ?? []).map(r => ({ ...r.details, id: r.id, agencyId: r.agency_id, individualId: r.individual_id, typeId: r.type_id,
+                supersedesId: r.supersedes_id, createdBy: r.created_by, createdAt: r.created_at, activatedBy: r.activated_by, activatedAt: r.activated_at })),
+            revocations: (revoked.data ?? []).map(r => ({ consentId: r.consent_id, revokedOn: r.revoked_on, reason: r.reason, revokedBy: r.revoked_by, revokedByName: r.revoked_by_name })) };
+    }
+    async saveConsent(draft: ConsentDraft, id?: string): Promise<string> {
+        assertConsentRole(await this.requireSession(), true);
+        const { data, error } = await this.client.rpc('save_consent', { p_id: id ?? null, p_draft: draft });
+        throwIf(error, 'Could not save consent.');
+        return data as string;
+    }
+    async activateConsent(id: string) {
+        assertConsentRole(await this.requireSession(), true);
+        const { error } = await this.client.rpc('activate_consent', { p_id: id });
+        throwIf(error, 'Could not activate consent.');
+    }
+    async revokeConsent(id: string, revokedOn: string, reason: string) {
+        assertConsentRole(await this.requireSession(), true);
+        const { error } = await this.client.rpc('revoke_consent', { p_id: id, p_revoked_on: revokedOn, p_reason: reason });
+        throwIf(error, 'Could not revoke consent.');
+    }
+    async saveConsentTypes(types: ConsentType[]) {
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
+        validateConsentTypes(types);
+        if (session.roleKey !== 'program_manager' || session.siteId)
+            throw new Error('An agency-wide Program Manager configures consent types.');
+        const { error } = await this.client.rpc('save_consent_types', { p_agency_id: session.agencyId, p_types: types });
+        throwIf(error, 'Could not save consent types.');
+    }
+
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();
     await this.sweepOperatingReminders(session);
+    if (canManageConsents(session.roleKey)) {
+      const { error } = await this.client.rpc('sweep_consent_alerts', { p_agency_id: session.agencyId });
+      throwIf(error, 'Could not check consent alerts.');
+    }
     const { data, error } = await this.client.from("notifications")
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);

@@ -88,6 +88,13 @@ export function emailFor(name: string) {
 }
 
 export interface LocalDatabase {
+  consentPackets?: import('./consentPackets').ConsentPacket[];
+  consentPacketTokens?: Record<string, { hash:string; expiresAt:string }>;
+  consentPacketEvidence?: Record<string, import('./consentPackets').PacketEvidence>;
+  consentPacketAudit?: {packetId:string;event:string;at:string;signerName?:string;authority?:string}[];
+  consentTypes?: Record<string, import("./consents").ConsentType[]>;
+  consents?: import("./consents").ConsentRecord[];
+  consentRevocations?: import("./consents").ConsentRevocation[];
   agencies: Agency[];
   programs: Program[];
   sites: SiteRecord[];

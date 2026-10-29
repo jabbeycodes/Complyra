@@ -1,3 +1,5 @@
+import PublicConsentSigning from "./features/consents/PublicConsentSigning";
+import Consents from "./features/consents/Consents";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
@@ -344,6 +346,8 @@ export default function App() {
   if (kioskToken !== null) {
     return <KioskClockPage token={kioskToken} />;
   }
+  const consentToken = /^#\/consent-sign\/([0-9a-f]{64})$/.exec(kioskHash)?.[1];
+  if (consentToken) return <PublicConsentSigning token={consentToken} />;
   if (loading) {
     return <div className="login-shell">Loading workspace…</div>;
   }
@@ -661,6 +665,7 @@ export default function App() {
         ["Platform", ShieldCheck],
         ["Individuals", Users],
         ["Appointments", CalendarDays],
+        ["Consents", FileText],
         ["Sites & programs", Building2],
         ["Intake", UserPlus],
         ["Staff", Users],
@@ -1146,6 +1151,7 @@ export default function App() {
                   </section>
                 </>
               )}
+              {page === "Consents" && <Consents />}
               {page === "Appointments" && (
                 <AppointmentsPage onOpenPerson={openPersonChart} />
               )}
