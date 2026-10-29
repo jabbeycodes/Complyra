@@ -42,9 +42,12 @@ import {
   LogOut,
   KeyRound,
   ServerCog,
+  Smartphone,
   Trophy,
 } from "lucide-react";
 import Dashboard from "./Dashboard";
+import MobileShell from "./features/mobile/MobileShell";
+import "./features/mobile/mobile.css";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
@@ -205,6 +208,44 @@ export default function App() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Mobile shell view mode: "auto" follows the viewport width, "mobile" and
+  // "desktop" are the user's explicit picks (persisted). forceDesktop covers
+  // a single deep-link out of the shell into a full desktop page.
+  const [viewMode, setViewMode] = useState<"auto" | "mobile" | "desktop">(
+    () => {
+      try {
+        const stored = window.localStorage.getItem("complyrer.viewMode");
+        return stored === "mobile" || stored === "desktop" ? stored : "auto";
+      } catch {
+        return "auto";
+      }
+    },
+  );
+  const [narrowViewport, setNarrowViewport] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 860px)").matches,
+  );
+  const [forceDesktop, setForceDesktop] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 860px)");
+    const onChange = (event: MediaQueryListEvent) =>
+      setNarrowViewport(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  const pickViewMode = (mode: "mobile" | "desktop") => {
+    setViewMode(mode);
+    setForceDesktop(false);
+    try {
+      window.localStorage.setItem("complyrer.viewMode", mode);
+    } catch {
+      // Storage unavailable — the pick still applies for this session.
+    }
+  };
+  const mobileActive =
+    !forceDesktop &&
+    (viewMode === "mobile" || (viewMode === "auto" && narrowViewport));
   const [tourOpen, setTourOpen] = useState(false);
   const demoMode = isDemoSession(session);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -728,6 +769,34 @@ export default function App() {
       ],
     },
   ] as const;
+  if (mobileActive) {
+    return (
+      <InactivityGuard onSignOut={() => void signOut()}>
+        <MobileShell
+          api={api}
+          session={session}
+          workspace={workspace}
+          queueItems={personalItems}
+          onSignOut={() => void signOut()}
+          onDesktopView={() => pickViewMode("desktop")}
+          nav={{
+            openPage: (next) => {
+              setForceDesktop(true);
+              navigate(next);
+            },
+            openPersonChart: (name) => {
+              setForceDesktop(true);
+              openPersonChart(name);
+            },
+            openSite: (siteId) => {
+              setForceDesktop(true);
+              openSiteDetail(siteId);
+            },
+          }}
+        />
+      </InactivityGuard>
+    );
+  }
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
     <div className="app-shell">
@@ -823,6 +892,13 @@ export default function App() {
             </b>
           </button>
           <button
+            className="nav-item"
+            onClick={() => pickViewMode("mobile")}
+          >
+            <Smartphone size={18} />
+            <span>Mobile view</span>
+          </button>
+          <button
             className={`nav-item ${page === "Settings" ? "active" : ""}`}
             onClick={() => navigate("Settings")}
           >
@@ -852,6 +928,14 @@ export default function App() {
         </div>
       </aside>
       <div className="main-shell page-shell">
+        {forceDesktop && (viewMode === "mobile" || narrowViewport) && (
+          <button
+            className="mobile-return-bar"
+            onClick={() => setForceDesktop(false)}
+          >
+            ‹ Mobile home
+          </button>
+        )}
         {demoMode && (
           <DemoBanner
             onRestartTour={() => setTourOpen(true)}
