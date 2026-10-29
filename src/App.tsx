@@ -145,7 +145,7 @@ import { furthestReminderDay } from "./data/rules";
 import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
 import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
-import { can, defaultLandingPage, pageVisible } from "./data/status";
+import { can, defaultLandingPage, pageVisible, roleLabel } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
 import DemoBanner from "./demo/DemoBanner";
@@ -956,7 +956,7 @@ export default function App() {
             <Avatar name={session.fullName} color="peach" />
             <span>
               <strong>{session.fullName}</strong>
-              <small>{session.jobTitle}</small>
+              <small>{roleLabel(session.roleKey, session.jobTitle)}</small>
             </span>
             <ChevronDown size={14} />
           </button>

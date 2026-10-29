@@ -54,7 +54,7 @@ function siteDisplayName(
   return null;
 }
 
-/** "Demo Client A" or "Demo House North · 1st shift" style assignment line. */
+/** "Demo Individual A" or "Demo House North · 1st shift" style assignment line. */
 export function assignmentLine(
   pattern: HrStaffingPattern,
   sites: HubSite[],

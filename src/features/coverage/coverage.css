@@ -1,5 +1,18 @@
 .coverage-board {
   margin-bottom: 22px;
+  /* App-standard body size (14px). Without this the board's prose and
+     labels inherited the 18px root size and read a full step larger than
+     every panel around them. */
+  font-size: 14px;
+}
+
+/* Labels stack their control with a gap, like the rest of the app's form
+   grids — the hour labels used to sit flush against their time inputs. */
+.coverage-board label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .coverage-toolbar,
@@ -67,10 +80,20 @@
 
 .coverage-hour-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
 }
 
 .coverage-regular {
   margin-top: 18px;
+}
+
+.coverage-regular h3 {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.coverage-regular > .button {
+  margin-top: 12px;
 }
 
 @media (max-width: 900px) {

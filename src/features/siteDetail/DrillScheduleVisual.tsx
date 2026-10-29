@@ -99,6 +99,7 @@ export function ShiftResponsibilityBand({ currentMonth }: { currentMonth: number
               <span className="dsv-band-sub">
                 {period.quarterLabel} · {period.months}
               </span>
+              {active && <span className="dsv-band-current">Current quarter</span>}
             </span>
           </li>
         );

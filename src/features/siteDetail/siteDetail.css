@@ -35,7 +35,7 @@
 .site-hero-dash {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.75fr);
-  gap: 20px 40px;
+  gap: 16px 28px;
   align-items: center;
 }
 
@@ -187,7 +187,10 @@
   overflow-y: hidden;
   max-width: 100%;
   margin: 0;
-  padding: 0 0 2px;
+  /* End clearance so the last tab can scroll fully clear of the fade
+     instead of resting under it. */
+  padding: 0 40px 2px 0;
+  scroll-padding-right: 48px;
   border-bottom: 0;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -196,6 +199,18 @@
 
 .tabs.site-detail-tabs::-webkit-scrollbar {
   display: none;
+}
+
+/* On desktop widths the strip wraps instead of scrolling: every tab stays
+   visible with its full label, and the fade never washes over the active
+   pill. */
+@media (min-width: 861px) {
+  .tabs.site-detail-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    mask-image: none;
+    padding-right: 0;
+  }
 }
 
 .tabs.site-detail-tabs > button {

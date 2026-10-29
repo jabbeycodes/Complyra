@@ -144,7 +144,7 @@ export function operatingReminderNotices(input: {
     for (const item of site.items) {
       if (item.kind !== "shift_note" || !item.shift) continue;
       const writerId = item.shift.staffUserId;
-      const detail = `${item.line2}. ${item.line3}.`;
+      const detail = `${item.line2.replace(/\.\s*$/, "")}. ${item.line3}.`;
       notices.push({
         userId: writerId,
         type: "documentation.missing_note",
