@@ -168,6 +168,9 @@ export interface LocalDatabase {
   medDoseMarks: import("./types").MedDoseMark[];
   /** Agency walkthrough checklists. Optional so older persisted demos still load. */
   weeklyChecklists?: HmWeeklyChecklist[];
+  // LIFE EVENTS: per-Individual significant-events timeline. Optional so
+  // older persisted demos still load; the API lazily initializes it.
+  lifeEvents?: import("./lifeEvents").LifeEventRow[];
   /** See SHOWCASE_REVISION. Missing on workspaces saved before the walkthrough seed. */
   showcaseRevision?: number;
 }

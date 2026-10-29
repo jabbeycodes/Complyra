@@ -79,7 +79,15 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
-import { assertCalendarDate } from "./access";
+import { assertCalendarDate, canReadIndividual } from "./access";
+import {
+  sortLifeEvents,
+  toLifeEventView,
+  validateLifeEventDraft,
+  validateVoidReason,
+  type LifeEventDraft,
+  type LifeEventRow,
+} from "./lifeEvents";
 import { assertSiteHasCapacity } from "./siteCapacity";
 import {
   appointmentChangeDetail,
@@ -117,6 +125,7 @@ import {
   canConfigureIspTasks,
   canCreateIndividual,
   canEnterShiftNotes,
+  canRecordLifeEvents,
   canGrantRole,
   canSeeShiftNotes,
   defaultPermissions,
@@ -479,6 +488,225 @@ export function edgeErrorFromBody(
 
 export class HostedApi implements ComplyraApi {
   constructor(private readonly client: SupabaseClient) {}
+
+  // ── LIFE EVENTS — per-Individual timeline (hosted) ────────────────────
+  // Mirrors LocalApi semantics exactly. The DB layer backstops everything
+  // (supabase/migrations/20261027190000_life_events.sql): RLS scopes reads
+  // to Individual readers, writes to the editor roles in scope, voids are
+  // reasoned updates, and there is no delete path. No notifications are
+  // emitted here — life events are context, not compliance.
+
+  private lifeEventFromRow(row: Record<string, unknown>): LifeEventRow {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      individualId: row.individual_id as string,
+      eventDate: row.event_date as string,
+      category: row.category as string,
+      title: row.title as string,
+      note: (row.note as string) ?? "",
+      relatedGerId: (row.related_ger_id as string | null) ?? null,
+      recordedBy: row.recorded_by as string,
+      createdAt: row.created_at as string,
+      updatedBy: (row.updated_by as string | null) ?? null,
+      updatedAt: (row.updated_at as string | null) ?? null,
+      voidedBy: (row.voided_by as string | null) ?? null,
+      voidedAt: (row.voided_at as string | null) ?? null,
+      voidReason: (row.void_reason as string | null) ?? null,
+    };
+  }
+
+  private async lifeEventNames(userIds: string[]) {
+    const names = new Map<string, string>();
+    const unique = [...new Set(userIds.filter(Boolean))];
+    if (!unique.length) return names;
+    const { data } = await this.client
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", unique);
+    for (const row of data ?? []) {
+      const record = row as { id: string; full_name: string };
+      names.set(record.id, record.full_name);
+    }
+    return names;
+  }
+
+  private async lifeEventView(row: LifeEventRow) {
+    const names = await this.lifeEventNames(
+      [row.recordedBy, row.updatedBy, row.voidedBy].filter(
+        (id): id is string => Boolean(id),
+      ),
+    );
+    return toLifeEventView(row, (userId) => names.get(userId) ?? "Staff member");
+  }
+
+  private assertLifeEventEditor(session: SessionUser) {
+    if (!canRecordLifeEvents(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  /** The Individual, if this session may read them; otherwise throws. */
+  private async assertLifeEventReadable(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const { data } = await this.client
+      .from("staff_assignments")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    const assignments = (data ?? []).map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        id: record.id as string,
+        agencyId: record.agency_id as string,
+        userId: record.user_id as string,
+        individualId: (record.individual_id as string | null) ?? null,
+        siteId: (record.site_id as string | null) ?? null,
+        startsOn: record.starts_on as string,
+        endsOn: (record.ends_on as string | null) ?? null,
+      };
+    });
+    if (!canReadIndividual(session, person, assignments, [person])) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    return person;
+  }
+
+  private async requireLifeEventRow(session: SessionUser, lifeEventId: string) {
+    const { data, error } = await this.client
+      .from("life_events")
+      .select("*")
+      .eq("id", lifeEventId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not load that life event.");
+    if (!data) throw new Error("Life event not found.");
+    return this.lifeEventFromRow(data as Record<string, unknown>);
+  }
+
+  async listLifeEvents(individualId: string) {
+    const session = await this.requireSession();
+    try {
+      await this.assertLifeEventReadable(session, individualId);
+    } catch {
+      return [];
+    }
+    const { data, error } = await this.client
+      .from("life_events")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .is("voided_at", null)
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    throwIf(error, "Could not load life events.");
+    const rows = (data ?? []).map((row) =>
+      this.lifeEventFromRow(row as Record<string, unknown>),
+    );
+    const names = await this.lifeEventNames(
+      rows.flatMap((row) =>
+        [row.recordedBy, row.updatedBy, row.voidedBy].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    );
+    return sortLifeEvents(rows).map((row) =>
+      toLifeEventView(row, (userId) => names.get(userId) ?? "Staff member"),
+    );
+  }
+
+  async createLifeEvent(input: {
+    individualId: string;
+    eventDate: string;
+    category: string;
+    title: string;
+    note?: string;
+    relatedGerId?: string | null;
+  }) {
+    const session = await this.requireSession();
+    this.assertLifeEventEditor(session);
+    const person = await this.assertLifeEventReadable(session, input.individualId);
+    const draft = validateLifeEventDraft(input);
+    const { data, error } = await this.client
+      .from("life_events")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: person.siteId,
+        individual_id: person.id,
+        event_date: draft.eventDate,
+        category: draft.category,
+        title: draft.title,
+        note: draft.note,
+        related_ger_id: draft.relatedGerId,
+        recorded_by: session.userId,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save that life event.");
+    return this.lifeEventView(
+      this.lifeEventFromRow(data as Record<string, unknown>),
+    );
+  }
+
+  async updateLifeEvent(lifeEventId: string, patch: LifeEventDraft) {
+    const session = await this.requireSession();
+    this.assertLifeEventEditor(session);
+    const existing = await this.requireLifeEventRow(session, lifeEventId);
+    if (existing.voidedAt) {
+      throw new Error("A voided life event cannot be changed.");
+    }
+    await this.assertLifeEventReadable(session, existing.individualId);
+    const draft = validateLifeEventDraft(patch);
+    const { data, error } = await this.client
+      .from("life_events")
+      .update({
+        event_date: draft.eventDate,
+        category: draft.category,
+        title: draft.title,
+        note: draft.note,
+        related_ger_id: draft.relatedGerId,
+      })
+      .eq("id", existing.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not update that life event.");
+    return this.lifeEventView(
+      this.lifeEventFromRow(data as Record<string, unknown>),
+    );
+  }
+
+  async voidLifeEvent(lifeEventId: string, reason: string) {
+    const session = await this.requireSession();
+    this.assertLifeEventEditor(session);
+    const existing = await this.requireLifeEventRow(session, lifeEventId);
+    if (existing.voidedAt) {
+      throw new Error("That life event is already voided.");
+    }
+    await this.assertLifeEventReadable(session, existing.individualId);
+    const voidReason = validateVoidReason(reason);
+    const { data, error } = await this.client
+      .from("life_events")
+      .update({
+        voided_at: new Date().toISOString(),
+        voided_by: session.userId,
+        void_reason: voidReason,
+      })
+      .eq("id", existing.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not void that life event.");
+    return this.lifeEventView(
+      this.lifeEventFromRow(data as Record<string, unknown>),
+    );
+  }
 
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();

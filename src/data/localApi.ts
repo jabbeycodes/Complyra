@@ -60,6 +60,7 @@ import {
   canCreateIndividual,
   canCreateSite,
   canEnterShiftNotes,
+  canRecordLifeEvents,
   canSeeShiftNotes,
   capabilityForRoleKey,
   canGrantRole,
@@ -71,6 +72,14 @@ import {
   type PermissionKey,
   type PermissionMap,
 } from "./permissions";
+import {
+  sortLifeEvents,
+  toLifeEventView,
+  validateLifeEventDraft,
+  validateVoidReason,
+  type LifeEventDraft,
+  type LifeEventRow,
+} from "./lifeEvents";
 import {
   canEditShiftNoteRow,
   displayStaffTitle,
@@ -429,6 +438,28 @@ const FILE_PREFIX = "complyra-v2-file:";
 export interface ComplyraApi {
   listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]>;
   markNotificationsRead(ids: string[]): Promise<void>;
+  // LIFE EVENTS — per-Individual timeline (context, not compliance: no
+  // alerts; editors record/edit/void, everyone who can read the
+  // Individual can view — see src/data/lifeEvents.ts).
+  listLifeEvents(
+    individualId: string,
+  ): Promise<import("./lifeEvents").LifeEventView[]>;
+  createLifeEvent(input: {
+    individualId: string;
+    eventDate: string;
+    category: string;
+    title: string;
+    note?: string;
+    relatedGerId?: string | null;
+  }): Promise<import("./lifeEvents").LifeEventView>;
+  updateLifeEvent(
+    lifeEventId: string,
+    patch: import("./lifeEvents").LifeEventDraft,
+  ): Promise<import("./lifeEvents").LifeEventView>;
+  voidLifeEvent(
+    lifeEventId: string,
+    reason: string,
+  ): Promise<import("./lifeEvents").LifeEventView>;
   getSession(): Promise<SessionUser | null>;
   signIn(input: LoginInput): Promise<SessionUser>;
   signOut(): Promise<void>;
@@ -2647,6 +2678,140 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
 
 export class LocalApi implements ComplyraApi {
   constructor(private store: MemoryStore = browserStore) {}
+
+  // ── LIFE EVENTS — per-Individual timeline (local) ─────────────────────
+  // Context, not compliance: nothing here queues a notification or a due
+  // item, ever. Domain rules live in src/data/lifeEvents.ts; the hosted
+  // API mirrors these semantics and the DB backstops them
+  // (supabase/migrations/20261027190000_life_events.sql).
+
+  private ensureLifeEvents() {
+    const db = this.store.db;
+    db.lifeEvents ??= [];
+    return db;
+  }
+
+  private lifeEventStaffName(userId: string): string {
+    return (
+      this.store.db.profiles.find((row) => row.id === userId)?.fullName ??
+      "Staff member"
+    );
+  }
+
+  private lifeEventView(row: LifeEventRow) {
+    return toLifeEventView(row, (userId) => this.lifeEventStaffName(userId));
+  }
+
+  private assertLifeEventEditor(session: SessionUser) {
+    if (!canRecordLifeEvents(session)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private requireLifeEvent(
+    lifeEventId: string,
+    agencyId: string,
+  ): LifeEventRow {
+    const row = (this.store.db.lifeEvents ?? []).find(
+      (item) => item.id === lifeEventId && item.agencyId === agencyId,
+    );
+    if (!row) throw new Error("Life event not found.");
+    return row;
+  }
+
+  async listLifeEvents(individualId: string) {
+    const session = assertSession(this.store);
+    this.ensureLifeEvents();
+    try {
+      accessibleIndividual(this.store, session, individualId);
+    } catch {
+      return [];
+    }
+    const rows = (this.store.db.lifeEvents ?? []).filter(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === individualId &&
+        row.voidedAt === null,
+    );
+    return sortLifeEvents(rows).map((row) => this.lifeEventView(row));
+  }
+
+  async createLifeEvent(input: {
+    individualId: string;
+    eventDate: string;
+    category: string;
+    title: string;
+    note?: string;
+    relatedGerId?: string | null;
+  }) {
+    const session = assertSession(this.store);
+    this.assertLifeEventEditor(session);
+    this.ensureLifeEvents();
+    const person = accessibleIndividual(
+      this.store,
+      session,
+      input.individualId,
+    );
+    const draft = validateLifeEventDraft(input);
+    const row: LifeEventRow = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: person.siteId,
+      individualId: person.id,
+      eventDate: draft.eventDate,
+      category: draft.category,
+      title: draft.title,
+      note: draft.note,
+      relatedGerId: draft.relatedGerId,
+      recordedBy: session.userId,
+      createdAt: new Date().toISOString(),
+      updatedBy: null,
+      updatedAt: null,
+      voidedBy: null,
+      voidedAt: null,
+      voidReason: null,
+    };
+    this.store.db.lifeEvents!.push(row);
+    await persistMeta(this.store);
+    return this.lifeEventView(row);
+  }
+
+  async updateLifeEvent(lifeEventId: string, patch: LifeEventDraft) {
+    const session = assertSession(this.store);
+    this.assertLifeEventEditor(session);
+    this.ensureLifeEvents();
+    const row = this.requireLifeEvent(lifeEventId, session.agencyId);
+    if (row.voidedAt) {
+      throw new Error("A voided life event cannot be changed.");
+    }
+    accessibleIndividual(this.store, session, row.individualId);
+    const draft = validateLifeEventDraft(patch);
+    row.eventDate = draft.eventDate;
+    row.category = draft.category;
+    row.title = draft.title;
+    row.note = draft.note;
+    row.relatedGerId = draft.relatedGerId;
+    row.updatedBy = session.userId;
+    row.updatedAt = new Date().toISOString();
+    await persistMeta(this.store);
+    return this.lifeEventView(row);
+  }
+
+  async voidLifeEvent(lifeEventId: string, reason: string) {
+    const session = assertSession(this.store);
+    this.assertLifeEventEditor(session);
+    this.ensureLifeEvents();
+    const row = this.requireLifeEvent(lifeEventId, session.agencyId);
+    if (row.voidedAt) {
+      throw new Error("That life event is already voided.");
+    }
+    accessibleIndividual(this.store, session, row.individualId);
+    row.voidReason = validateVoidReason(reason);
+    row.voidedBy = session.userId;
+    row.voidedAt = new Date().toISOString();
+    await persistMeta(this.store);
+    return this.lifeEventView(row);
+  }
 
   async listNotifications() {
     const session = assertSession(this.store);

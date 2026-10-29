@@ -52,6 +52,13 @@ export function buildIndividualProfilePdf(input: {
   pcspTasks: { title: string; frequency: string; completed: boolean }[];
   diagnosis: string;
   medications: { name: string; strength: string; kind: string }[];
+  /** LIFE EVENTS timeline (non-voided, newest first). Optional: older callers omit it. */
+  lifeEvents?: {
+    eventDate: string;
+    categoryLabel: string;
+    title: string;
+    note: string;
+  }[];
   agencyContacts: { name: string; role: string }[];
   guardians: GuardianContact[];
   providers: ProviderContact[];
@@ -199,6 +206,29 @@ export function buildIndividualProfilePdf(input: {
       doc.setTextColor(36, 30, 24);
       doc.text(lines, margin, y);
       y += lines.length * 14 + 2;
+    }
+  }
+
+  // Life events (context timeline; voided entries never reach this list)
+  if (input.lifeEvents && input.lifeEvents.length > 0) {
+    sectionTitle("Life events");
+    for (const event of input.lifeEvents) {
+      const headline = `${event.eventDate} · ${event.categoryLabel} — ${event.title}`;
+      const headlineLines = doc.splitTextToSize(headline, contentWidth);
+      ensureSpace(headlineLines.length * 14 + 4);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(36, 30, 24);
+      doc.text(headlineLines, margin, y);
+      y += headlineLines.length * 14 + 2;
+      if (event.note.trim()) {
+        const noteLines = doc.splitTextToSize(event.note.trim(), contentWidth);
+        ensureSpace(noteLines.length * 14 + 4);
+        doc.setFontSize(10);
+        doc.setTextColor(95, 81, 69);
+        doc.text(noteLines, margin, y);
+        y += noteLines.length * 14 + 4;
+      }
     }
   }
 

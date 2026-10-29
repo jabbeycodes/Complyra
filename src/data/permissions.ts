@@ -49,6 +49,8 @@ export const PERMISSION_KEYS = [
   "sites.create",
   // AUDIT-READINESS (corrective actions)
   "correctiveActions.manage",
+  // LIFE-EVENTS (lifeEvents.record goes here)
+  "lifeEvents.record",
   // LIFEPATH-P4-PERM (certificates.manage goes here)
   "certificates.manage",
   // LIFEPATH-P7-PERM (mileage.manage goes here)
@@ -167,6 +169,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "audit.read",
+      // LIFE-EVENTS: record/edit/void timeline entries for their home.
+      "lifeEvents.record",
       "mileage.manage",
       "recognition.review_dsp",
       "recognition.view_winners",
@@ -208,6 +212,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "clinical.view",
       "audit.read",
       "audit.export",
+      // LIFE-EVENTS: record/edit/void timeline entries across their homes.
+      "lifeEvents.record",
       "sites.create",
       "correctiveActions.manage",
       "mileage.manage",
@@ -279,6 +285,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "audit.read",
+      // LIFE-EVENTS: record/edit/void timeline entries for their Individuals.
+      "lifeEvents.record",
       "mileage.manage",
       "recognition.view_winners",
       // DELEGATION: assign to individuals + review/approve training + sign own.
@@ -411,6 +419,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "sites.create": "Add program sites",
   // AUDIT-READINESS (corrective actions)
   "correctiveActions.manage": "Manage corrective actions",
+  // LIFE-EVENTS
+  "lifeEvents.record": "Record life events on Individual charts",
   // LIFEPATH-P4 (certificates)
   "certificates.manage": "Manage staff certificates",
   // LIFEPATH-P7 (mileage)
@@ -673,4 +683,40 @@ export function canSeeShiftNotes(roleKey: string) {
     "dsp",
     "auditor",
   ].includes(roleKey);
+}
+
+/**
+ * LIFE EVENTS — role keys that may add, edit, and void timeline entries on
+ * an Individual's chart. Viewing is NOT gated by this list: anyone who can
+ * read the Individual (DSPs on their Individuals, auditors read-only) sees
+ * the timeline, because life events are part of the person's record. HR is
+ * excluded entirely — the HR role carries no `individuals.view`, so HR has
+ * no chart access path. This list is the DB/seed mirror used by
+ * private.can_record_life_event() in
+ * supabase/migrations/20261027190000_life_events.sql.
+ */
+export const LIFE_EVENT_EDITOR_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "compliance_admin",
+  "program_manager",
+  "house_manager",
+  "nurse",
+];
+
+/**
+ * The life-event write gate used by both API layers: an editor role AND
+ * the `lifeEvents.record` permission. Both must agree — the role half is
+ * defense in depth so a mistaken template grant cannot turn a DSP or an
+ * auditor into a timeline editor (the SQL helper mirrors this exactly).
+ */
+export function canRecordLifeEvents(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return (
+    (LIFE_EVENT_EDITOR_ROLE_KEYS as readonly string[]).includes(
+      session.roleKey,
+    ) && hasPermission(session, "lifeEvents.record")
+  );
 }

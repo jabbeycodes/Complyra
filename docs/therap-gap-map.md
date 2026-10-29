@@ -1,0 +1,171 @@
+# Core-operations gap map — ComplyRer vs. the established EHR functional taxonomy
+
+Internal planning document. Written 2026-10-27 against `main` at `2d96fea`
+(merge of PR #116). Every status below is backed by code evidence in this
+repository; wording is ComplyRer's own throughout.
+
+Status key: **Present** = a working surface exists · **Partial** = some pieces
+exist but the workflow is incomplete · **Missing** = no surface exists.
+
+Priority is judged for residential-provider core operations (the homes, the
+people who live in them, and the staff who support them day to day).
+
+Reading rule for stacked PRs: a row may claim **Present** or "built in this
+batch" only for what is true of `main` plus the PR carrying this copy of the
+map. Features that exist only on other open PR branches are marked
+**Missing** with that PR noted as in review — they are not released
+functionality, and their evidence text says so.
+
+---
+
+## 1. Work queues, messaging, scheduling
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Priority work queue (personal to-do by urgency) | Present | Overview dashboard personal queue + priorities panel (`src/Dashboard.tsx`, `src/data/dashboard.ts`, `src/data/attentionFeed.ts`) |
+| Due/overdue item detection across modules | Present | `src/data/dueItems.ts` (shift-note and medication due detectors), `src/data/deadlineTimeline.ts` |
+| Internal staff messaging | **Missing** — built in PR #121, in review (not yet released) | No messaging surface on main. PR #121 (in review) adds a staff inbox with participant-only threads, per-participant read state, optional link to one Individual (chart card lists linked threads for participants only), visible "added" system notes, and a deduped `message.received` bell notification (`src/features/messaging/`, `src/data/messaging.ts`, on that branch). Auditors are excluded by design in that PR — messaging is staff communication, not a compliance record surface |
+| Appointments / scheduling (per Individual) | Present | `src/data/appointments.ts`, Health card appointments tab, agency Appointments page |
+
+## 2. Per-person record
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Daily / shift logs | Present | Shift notes (`src/features/isp/ShiftNoteSection.tsx`, `src/data/shiftNotes.ts`, migration `20260917120000_issue80_shift_notes.sql`) |
+| ISP data collection against plan objectives | Present | `src/features/isp/IspConfigSection.tsx`, `src/data/planStack.ts` obligations |
+| Behavior data + behavior plans | **Missing** — built in PR #117, in review (not yet released) | On main only a free-text `behaviorSupports` profile field (`src/data/planStack.ts`); no plan structure, no behavior log. PR #117 (in review) adds the behavior plan (targets / interventions / crisis steps) and the ABC behavior log |
+| Consents / authorizations | Partial | E-signature packets and acknowledgments exist (`src/data/types.ts` packets, `src/features/signatures/`); no per-person consent register with expiry on main — a register with expiry, revocation, and packet signing is in review in PR #122 |
+| Documents on the chart | Present | Assigned documents panel + document uploads/extractions (`src/features/AssignedDocsPanel.tsx`, `src/data/documents.ts`) |
+| Demographics / contacts / coverage | Present | `IndividualProfile` in `src/data/planStack.ts` (guardians, provider contacts, Medicaid status, waiver, language) |
+| Significant life events | **Missing → built in this batch** | Per-Individual timeline on the chart (`src/features/lifeEvents/LifeEventsCard.tsx`, `src/data/lifeEvents.ts`, migration `20261027190000_life_events.sql`): fixed category list, optional link to one event report, editor-recorded (HM/PM/nurse/admin/compliance), DSP + auditor read, void-with-reason instead of delete, no alerts by design |
+
+## 3. Events and incident reporting
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| General event reports (GER) | **Missing** — built in PR #117, in review (not yet released) | No GER module, tab, or table on main (an earlier GER build lived on an unmerged branch only). PR #117 (in review) adds the reporting tab with the draft → submitted → approved/returned workflow |
+| Resolution / investigation follow-up lifecycle | **Missing** — built in PR #117, in review (not yet released) | Corrective actions (`src/data/correctiveActions.ts`) track audit findings open → in progress → resolved, but nothing tracks an event report to resolution. PR #117 (in review) adds the event-report resolution lifecycle (unaddressed → in progress → resolved, assigned manager, due date, closure note required) |
+| Multi-individual events | **Missing** — built in PR #117, in review (not yet released) | n/a until GER exists; linked Individuals on a report arrive with PR #117 (in review) |
+| Event summaries / counts | **Missing** — built in PR #117, in review (not yet released) | n/a until GER exists; the dashboard review / follow-up sections arrive with PR #117 (in review) |
+
+## 4. Plans
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| ISP programs + data (objectives, scoring) | Present | `src/features/isp/`, plan stack obligations, monthly data-collection report |
+| Plan approval + acknowledgement | Present | Acknowledgment packets/rows with signatures (`src/data/types.ts`) |
+| Plan templates | Partial | Delegation templates exist (`src/delegation/`); ISP objective templates are per-plan configuration, not a reusable library |
+| Individual support plans (whole-plan document) | Partial | Care plan section on the chart (`src/features/IndividualChart.tsx`) renders profile + obligations; no versioned whole-plan document with review dates on main — a versioned clinical care plan is in review in PR #119 |
+
+## 5. Intake
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Intake creates the Individual + site placement | Present | Intake page (`src/App.tsx`), `AddIndividualForm` |
+| Priority / waiting list | Missing | Intake is a direct create-and-place form; no waitlist or priority ranking |
+| Admission pipeline (referral → review → admitted) | Missing | No pipeline states |
+
+## 6. Personal finance
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Individual accounts / transactions / reconciliation | Missing | No personal-finance module; `src/data/hr.ts` covers staff payroll/time only |
+
+## 7. Scheduling, time, attendance (staff)
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Staff scheduling + open shifts | Present | Employee Hub (`src/features/employeeHub/`), `src/data/openShifts.ts`, staffing board |
+| Time clock / attendance / timecards | Present | Kiosk punches, timecard approval, exceptions (`src/data/hr.ts`, `src/data/hrStore.ts`) |
+
+## 8. Health
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Health appointments | Present | `src/data/appointments.ts`, Health card (`src/features/HealthCard.tsx`) |
+| Allergies | Present | Structured allergy list on the profile (`src/data/planStack.ts`) |
+| Diagnoses | Partial | Single free-text `diagnosis` profile field; no coded diagnosis list |
+| Advance directives | Missing | No directive record |
+| Care plans (clinical) | Partial | Chart "Care plan" section is profile/obligations; no nurse-owned care plan with interventions and review dates on main — nurse-owned care plans are in review in PR #119 |
+| Comprehensive health assessment / health passport | Missing | No assessment instrument or portable summary |
+| Health screening (due / overdue tracking) | Partial | Clinical renewals tracker (`ClinicalRenewal` in `src/data/planStack.ts`) covers renewal due dates; no screening schedule per Individual on main — a per-Individual screening schedule is in review in PR #119 |
+| Health tracking — intake/elimination, vitals, seizures, menses, skin, glucose, height/weight, respiratory, sleep, labs, infection, immunization | **Missing** — built in PRs #117 + #118, in review (not yet released) | No health-tracker module on main (`src/data/healthTrack.ts` does not exist on main). PR #117 (batch 1, in review) adds immunizations, lab results, infection, and sleep; PR #118 (batch 2, stacked on #117, in review) adds intake, elimination, vitals, seizures, menses, skin, blood glucose, and respiratory — all on those branches (`src/data/healthTrack.ts`, `src/features/healthTrack/HealthTrackSection.tsx`); height/weight ride the vitals tracker; the bowel tracking log delegation text promises is the elimination tracker's bowel log. Abnormal findings on the core trackers alert the home's HM + PM + nurse, deduped, as designed in those PRs |
+| MAR (medication administration record) | Present | Medication board + dose marks + exceptions (`src/features/MarCard.tsx`, `src/data/types.ts`, `src/data/medInventory.ts`) |
+| Medication profile / history | Partial | Current medication list + deliveries exist; no discontinued-medication history view |
+| Medication orders (approval, expiration) | Missing — in review in PR #120 (not yet released) | No order workflow on main; medications are maintained as chart records. PR #120 (in review) adds draft → active → discontinued orders that feed the MAR |
+| Medication reconciliation | Missing — in review in PR #120 (not yet released) | No reconciliation workflow on main. PR #120 (in review) adds the orders-vs-MAR reconciliation pass with nurse sign-off |
+
+## 9. Employment (supported employment)
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Agency employer directory | Missing | No employer records |
+| Person employment plans / milestones | Missing | No employment plan surface |
+
+## 10. Reporting
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Agency dashboard + per-module dashboards | Present | Overview dashboard, QA Review, audit readiness (`src/data/auditReadiness.ts`), compliance scores |
+| Report library (saved/canned report catalog) | Missing | Reports are generated per surface (PDF/print); no catalog on main — a catalog over the existing builders is in review in PR #132 |
+| Event / health summary reports | Partial | Per-surface summaries exist on main; the dashboard event / health sections are in review in PRs #117 / #119, not yet released |
+
+## 11. Administration
+
+| Capability | Status | ComplyRer evidence |
+| --- | --- | --- |
+| Users / roles / privileges | Present | `src/data/permissions.ts` (source of truth), Roles & access page, memberships |
+| Caseloads / assignments | Present | Staff assignments + caseload appointment views (`src/data/chart.ts`, `src/data/appointments.ts`) |
+| Module configuration | Partial | Agency rules panel + operator rule settings (`src/features/AgencyRulesPanel.tsx`, PR #116); not a per-module config console |
+| Service directory (services, rates, waivers) | Partial | Waiver is a profile field; programs/sites exist; no rate table |
+
+---
+
+## Counts
+
+- Taxonomy rows assessed: 46
+- Present: 18 · Partial: 10 · Missing: 18
+- One of the Missing rows is this PR's own feature, marked "built in this
+  batch" in its row. Missing rows that name another PR are built on that
+  branch and in review — not released.
+
+## Top remaining gaps after this batch (residential-core priority order)
+
+1. **Medication orders + reconciliation** — order approval/expiration and a
+   reconciliation pass on admission/transfer. (In review, PR #120.)
+2. **Clinical care plans + health screening schedule** — nurse-owned care
+   plans and per-Individual screening due/overdue. (In review, PR #119.)
+3. **Personal finance** — Individual accounts, transactions, reconciliation.
+4. **Intake pipeline + waiting list** — referral states and priority ranking.
+5. **Internal messaging** — staff-to-staff messages tied to Individuals/sites.
+   (Built in PR #121, in review.)
+6. **Consents register** — per-person consents with expiry and renewal.
+   (In review, PR #122.)
+7. **Significant life events** log on the chart. (Built in this PR — see the
+   update below.)
+8. **Employment** — employer directory + person employment plans.
+9. **Report library** — a catalog over the existing per-surface reports.
+   (In review, PR #132.)
+
+Not listed above because they are already built and in review: general
+event reports + the resolution lifecycle, behavior plans, and the health
+trackers (PRs #117 / #118) — see sections 2, 3, and 8. They remain Missing
+on main until those PRs merge.
+
+*Update (health tracking): the health trackers are built on PR branches —
+batch 1 (immunizations, labs, infection, sleep) in PR #117 and batch 2
+(intake/elimination incl. the bowel log, vitals, seizures, menses, skin,
+glucose, height/weight, respiratory) in PR #118, stacked on #117. Both are
+in review; on main the trackers are still Missing (see section 8).*
+
+*Update (internal messaging): priority #5 above is built in PR #121 and in
+review — see the "Internal staff messaging" row in section 1. This file
+originates in PR #117 and is carried forward across the stacked PRs;
+under the reading rule at the top, each copy claims only main plus its
+own PR.*
+
+*Update (life events): priority #7 above is built — see the "Significant
+life events" row in section 2. Life events are chart context, not
+incident paperwork: they raise no alerts, editors record/correct/void
+them, and anyone who can read the Individual (DSPs, auditors included)
+can view the timeline.*
