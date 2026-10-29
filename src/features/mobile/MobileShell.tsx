@@ -30,6 +30,7 @@ import { centralHour, greetingForHour, type TrackingCategoryId } from "./today";
 import { formatCentralTime } from "./mar";
 import { useTodayTracking } from "./useTodayTracking";
 import MobileToday from "./MobileToday";
+import MobileComplianceCard from "./MobileComplianceCard";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileIsp from "./MobileIsp";
@@ -478,6 +479,16 @@ export default function MobileShell({
                 onOpenTasks={() => setView("tasks")}
                 onOpenMar={() => setView("mar")}
                 onOpenQueueItem={openQueueItem}
+                complianceCard={
+                  <MobileComplianceCard
+                    session={session}
+                    onOpen={() =>
+                      nav.openMyCompliance
+                        ? nav.openMyCompliance()
+                        : nav.openPage("Employee Hub")
+                    }
+                  />
+                }
               />
             )}
 

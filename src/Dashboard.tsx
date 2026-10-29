@@ -30,6 +30,9 @@ import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import SiteCoverageBoard from "./features/coverage/SiteCoverageBoard";
 import HouseComplianceDonuts from "./features/overview/HouseComplianceDonuts";
+import PersonalComplianceOverviewCard, {
+  PersonalComplianceStrip,
+} from "./features/personalCompliance/PersonalComplianceCard";
 import GerDashboardSections from "./features/ger/GerDashboardSections";
 
 interface SiteCard {
@@ -66,6 +69,8 @@ interface Props {
    * it lives with the home itself. Defaults to true (agency-wide roles).
    */
   showCoverageBoard?: boolean;
+  /** Opens the Employee Hub with the My Compliance tab selected. */
+  onOpenMyCompliance?: () => void;
   onSite: (s: string) => void;
   onNavigate: (page: string, status?: string) => void;
   onRequirement: (r: Requirement) => void;
@@ -91,6 +96,7 @@ export default function Dashboard({
   site,
   personalItems,
   showCoverageBoard = true,
+  onOpenMyCompliance,
   onSite,
   onNavigate,
   onRequirement,
@@ -159,6 +165,16 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
+      {/* Personal compliance (2026-10-29): manager roles get the slim strip
+          pinned above House compliance; every other role gets the full
+          card as the Overview's lead element. Each self-gates by role, and
+          both are site-independent — always the signed-in user's own. */}
+      <PersonalComplianceStrip
+        onView={onOpenMyCompliance ?? (() => onNavigate("Employee Hub"))}
+      />
+      <PersonalComplianceOverviewCard
+        onView={onOpenMyCompliance ?? (() => onNavigate("Employee Hub"))}
+      />
       <HouseComplianceDonuts
         sites={sites}
         allItems={allItems}

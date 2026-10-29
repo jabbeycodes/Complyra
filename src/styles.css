@@ -1608,6 +1608,134 @@ h1 {
     gap: 12px;
   }
 }
+.house-compliance-team {
+  margin: 0;
+  padding: 2px 0 12px;
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+  border-top: 1px solid var(--color-h-f0ebe3);
+  padding-top: 10px;
+}
+/* Personal compliance (2026-10-29): the same grammar as house compliance,
+   worn by the signed-in user's own readiness roll-up. */
+.personal-compliance {
+  margin-bottom: 20px;
+}
+.personal-compliance-score {
+  margin: 0 0 4px;
+  padding: 0 var(--panel-inline);
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+}
+.personal-compliance-score strong {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-h-241e18);
+  font-variant-numeric: tabular-nums;
+}
+.personal-compliance .status-mix {
+  padding: 4px var(--panel-inline) 14px;
+}
+.personal-compliance-note {
+  margin: 0;
+  padding: 0 var(--panel-inline) 18px;
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+}
+.personal-compliance-error {
+  margin: 0 var(--panel-inline) 18px;
+  font-size: 13px;
+  color: var(--color-h-8a3b26);
+}
+.personal-compliance-attention {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--panel-inline) 16px;
+  display: flex;
+  flex-direction: column;
+}
+.personal-compliance-attention li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--color-h-f0ebe3);
+}
+.personal-compliance-item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.personal-compliance-item-main strong {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--color-h-241e18);
+}
+.personal-compliance-item-main small {
+  font-size: 12px;
+  color: var(--color-h-6b6257);
+  text-transform: capitalize;
+}
+.personal-compliance-item-status {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--color-h-4a4036);
+}
+.personal-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 12px var(--panel-inline);
+}
+.personal-strip .status-mix {
+  padding: 0;
+  gap: 0;
+  flex: 0 0 auto;
+}
+.personal-strip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-h-f0ebe3);
+  color: var(--color-h-4d6b42);
+}
+.personal-strip-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-h-4a4036);
+}
+.personal-strip-copy > strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-h-241e18);
+}
+.personal-strip-copy strong {
+  font-variant-numeric: tabular-nums;
+}
+.personal-strip .text-button {
+  flex: 0 0 auto;
+}
+@media (max-width: 720px) {
+  .personal-strip {
+    flex-wrap: wrap;
+  }
+  .personal-compliance .status-mix {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
 .dashboard-activity {
   margin-bottom: 20px;
 }

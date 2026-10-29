@@ -16,6 +16,10 @@
  * managers and agency administrators (the homes they can see, narrowed by
  * the Overview's site filter). Other roles keep the Overview they had;
  * the panel renders nothing for them.
+ *
+ * Under each house's donut, a team compliance line rolls up the house
+ * staff's own readiness (teamCompliance.ts): how many are fully current
+ * and how many need attention — the manager lever beside the house score.
  */
 import { ShieldCheck } from "lucide-react";
 import { useData } from "../../data/DataProvider";
@@ -23,8 +27,8 @@ import type { Requirement } from "../../domain";
 import { Badge } from "../../components";
 import StatusMixDonut from "../../components/StatusMixDonut";
 import { houseComplianceRows } from "./houseCompliance";
-
-const MANAGER_ROLES = new Set(["house_manager", "program_manager", "administrator"]);
+import { useTeamComplianceBySite } from "./teamCompliance";
+import { HOUSE_DONUT_ROLES as MANAGER_ROLES } from "../personalCompliance/personalCompliance";
 
 interface Props {
   sites: { id: string; name: string }[];
@@ -40,11 +44,22 @@ export default function HouseComplianceDonuts({
   focusSite,
   onSite,
 }: Props) {
-  const { session } = useData();
-  if (!session || !MANAGER_ROLES.has(session.roleKey)) return null;
-
-  const rows = houseComplianceRows(sites, allItems, focusSite);
-  if (!rows.length) return null;
+  const { session, workspace } = useData();
+  const isManager = Boolean(session && MANAGER_ROLES.has(session.roleKey));
+  const rows = isManager ? houseComplianceRows(sites, allItems, focusSite) : [];
+  // Team compliance per house (the manager lever): each staff member's own
+  // readiness roll-up, counted for the houses on screen. Loaded for the
+  // same narrowed set of houses the donuts show.
+  const teamBySite = useTeamComplianceBySite(
+    isManager ? session : null,
+    (workspace?.staff ?? []).map((s) => ({
+      userId: s.id,
+      roleKey: s.roleKey,
+      siteId: s.siteId,
+    })),
+    rows.map((row) => ({ id: row.siteId, name: row.siteName })),
+  );
+  if (!isManager || !rows.length) return null;
 
   return (
     <section className="panel house-compliance" aria-label="House compliance">
@@ -90,6 +105,17 @@ export default function HouseComplianceDonuts({
                 No requirements are tracked for this house yet.
               </p>
             )}
+            {(() => {
+              const team = teamBySite.get(row.siteId);
+              if (!team || team.total === 0) return null;
+              return (
+                <p className="house-compliance-team">
+                  Team compliance: {team.fullyCurrent} of {team.total} staff
+                  fully current · {team.needAttention} need
+                  {team.needAttention === 1 ? "s" : ""} attention
+                </p>
+              );
+            })()}
           </div>
         ))}
       </div>

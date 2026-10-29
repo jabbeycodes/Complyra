@@ -9,6 +9,8 @@ export interface MobileNav {
   openPage: (page: string) => void;
   openPersonChart: (name: string) => void;
   openSite: (siteId: string) => void;
+  /** Opens the Employee Hub with the My Compliance tab selected. */
+  openMyCompliance?: () => void;
 }
 
 export type { SessionUser };

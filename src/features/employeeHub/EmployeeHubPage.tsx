@@ -4401,7 +4401,16 @@ function AccrualPoliciesCard({ store }: { store: HrStore }) {
 
 /* ------------------------------- page export ------------------------------ */
 
-export default function EmployeeHubPage() {
+export default function EmployeeHubPage({
+  focusTab,
+  onFocusHandled,
+}: {
+  /** Deep-link: open the Hub with this tab selected (e.g. "compliance"
+   * from the dashboards' "View my compliance"). Consumed on mount — the
+   * page remounts on every navigation here, so the tab lands fresh. */
+  focusTab?: string | null;
+  onFocusHandled?: () => void;
+} = {}) {
   const { api, session, workspace } = useData();
   const store = useMemo(
     () =>
@@ -4410,6 +4419,12 @@ export default function EmployeeHubPage() {
         : null,
     [session],
   );
+
+  useEffect(() => {
+    if (focusTab) onFocusHandled?.();
+    // Mount-only: the focus intent is consumed once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const staffList: HubStaffEntry[] = useMemo(
     () =>
       (workspace?.staff ?? []).map((s) => ({
@@ -4440,6 +4455,7 @@ export default function EmployeeHubPage() {
       store={store}
       staffList={staffList}
       sites={sites}
+      initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />
   );
