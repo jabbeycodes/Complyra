@@ -147,6 +147,7 @@ export type ClinicalRenewalKind =
   | "annual_physical"
   | "vision"
   | "dental"
+  | "flu_shot"
   | "physician_orders";
 
 export type ClinicalEvidenceKind =
@@ -615,6 +616,7 @@ export function defaultRenewals(
     ["annual_physical", "Annual physical", addMonths(today, 1)],
     ["vision", "Vision exam", addMonths(today, -6)],
     ["dental", "Dental exam", addMonths(today, 4)],
+    ["flu_shot", "Flu shot", addMonths(today, 2)],
     ["physician_orders", "Physician orders / equipment", addMonths(today, 0)],
   ];
   return specs.map(([kind, title, nextDueOn]) => ({
