@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const sql = readFileSync('supabase/migrations/20261027120000_care_plans_screening.sql', 'utf8');
+const sql = readFileSync('supabase/migrations/20261027121000_care_plans_screening.sql', 'utf8');
 test('care records have forced RLS and no direct authenticated writes', () => {
   for (const table of ['individual_care_plans', 'care_plan_acknowledgements', 'health_screening_types', 'individual_health_screenings']) {
     assert.ok(sql.includes(`alter table public.${table} enable row level security`));
