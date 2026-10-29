@@ -906,6 +906,11 @@ export default function App() {
               individuals={individuals}
               site={site}
               personalItems={personalItems}
+              // A house manager runs one home: their Overview opens already
+              // focused on it (their visible sites are just that home), and
+              // the coverage board does not render here — it belongs inside
+              // the home's own page. Agency-wide roles keep the board.
+              showCoverageBoard={session.roleKey !== "house_manager"}
               onSite={setSite}
               onNavigate={navigate}
               onRequirement={selectRequirement}

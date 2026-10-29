@@ -56,6 +56,12 @@ interface Props {
   individuals: { name: string; site: string }[];
   site: string;
   personalItems: PersonalWorkItem[];
+  /**
+   * Whether the weekly coverage board renders on the Overview. A house
+   * manager runs one home, so the board does not belong on their Overview —
+   * it lives with the home itself. Defaults to true (agency-wide roles).
+   */
+  showCoverageBoard?: boolean;
   onSite: (s: string) => void;
   onNavigate: (page: string, status?: string) => void;
   onRequirement: (r: Requirement) => void;
@@ -80,6 +86,7 @@ export default function Dashboard({
   individuals,
   site,
   personalItems,
+  showCoverageBoard = true,
   onSite,
   onNavigate,
   onRequirement,
@@ -148,7 +155,9 @@ export default function Dashboard({
           <span /> Sample agency snapshot
         </span>
       </div>
-      <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
+      {showCoverageBoard && (
+        <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
+      )}
       {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">

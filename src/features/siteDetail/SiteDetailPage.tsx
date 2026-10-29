@@ -24,7 +24,11 @@ import { canEnterShiftNotes } from "../../data/permissions";
 import { DUE_ITEMS_EMPTY_COPY, shiftClockFromFacts, shiftScheduleSummary, type SiteDueItem, type SiteDueItemsResult } from "../../data/dueItems";
 import { metrics } from "../../domain";
 import { QA_SECTIONS, type QaAudit } from "../../data/qaAudit";
-import { SERVICE_TYPE_LABELS } from "../../data/siteReview";
+import {
+  SERVICE_TYPE_LABELS,
+  isSiteReviewInPlace,
+  normalizeSiteFacts,
+} from "../../data/siteReview";
 import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { openPrintable } from "../../data/openFile";
@@ -59,6 +63,7 @@ import {
 } from "./individualHighlights";
 import SiteDrillsSchedule from "./SiteDrillsSchedule";
 import SiteQaReview from "../qa/SiteQaReview";
+import SiteCoverageBoard from "../coverage/SiteCoverageBoard";
 import SiteMonthlyChecks from "../SiteMonthlyChecks";
 import "./siteDetail.css";
 
@@ -378,6 +383,15 @@ export default function SiteDetailPage({
     (r) => r.site === siteName,
   );
   const siteReqMetrics = metrics(siteRequirements);
+  // The same monthly site-review status the Overview site card summarizes as
+  // "Review in place / Review open", carried here inside the home itself.
+  const reviewInPlace = site
+    ? isSiteReviewInPlace(
+        workspace?.siteReviews.find((row) => row.siteId === site.id),
+        normalizeSiteFacts(site),
+        todayIso(),
+      )
+    : false;
 
   const selectTab = (id: SiteDetailTabId) => {
     setTab(id);
@@ -531,6 +545,10 @@ export default function SiteDetailPage({
             <div className="site-hero-stat">
               <strong>{dueItems ? dueItems.items.length : "—"}</strong>
               <span>Due items</span>
+            </div>
+            <div className="site-hero-stat">
+              <strong>{reviewInPlace ? "In place" : "Open"}</strong>
+              <span>Site review</span>
             </div>
             <div className="site-hero-stat">
               <strong>{latestQaPct ?? "None"}</strong>
@@ -801,6 +819,15 @@ export default function SiteDetailPage({
                 </div>
               </div>
             )}
+            {/* Founder directive + PR #139 review: the weekly coverage board
+                lives inside the home, not on the Overview — a house manager's
+                Overview no longer carries it, so this is where they (and any
+                other coverage editor) run weekly staffing, post open shifts,
+                and edit the regular house hours. The board keeps its own
+                permission gate (canEditSiteReview / hub.manage_schedule) and
+                renders nothing for roles that cannot edit coverage, so the
+                gate here is exactly the Overview board's gate. */}
+            <SiteCoverageBoard siteId={site.id} />
             <div className="panel">
               <h2>Site facts</h2>
               <dl className="fact-list">
