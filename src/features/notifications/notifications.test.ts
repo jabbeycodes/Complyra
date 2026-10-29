@@ -20,6 +20,9 @@ import {
   medLowStockPayload,
   metaForType,
   sortNotifications,
+  timeOffCancelledPayload,
+  timeOffDecidedPayload,
+  timeOffRequestedPayload,
   trainingAssignedPayload,
   trainingDueSoonPayload,
   trainingOverduePayload,
@@ -55,13 +58,68 @@ function row(partial: Partial<NotificationRow>): NotificationRow {
   };
 }
 
-test("all seventeen notification types are known contract types", () => {
-  assert.equal(NOTIFICATION_TYPES.length, 45);
+test("all notification types are known contract types", () => {
+  assert.equal(NOTIFICATION_TYPES.length, 48);
   for (const t of NOTIFICATION_TYPES) {
     assert.ok(isNotificationType(t), t);
   }
   assert.ok(!isNotificationType("invoice.paid"));
   assert.ok(!isNotificationType(""));
+});
+
+test("time-off payloads map to snake_case DB rows with per-request dedupe", () => {
+  const REQUEST = "00000000-0000-4000-8000-000000000060";
+  const requested = buildNotificationRow(
+    timeOffRequestedPayload({
+      agencyId: AGENCY,
+      roleKey: "house_manager",
+      requestId: REQUEST,
+      title: "Time off requested",
+      body: "Alex requested Earned Time Off.",
+    }),
+  );
+  assert.equal(requested.type, "hr.time_off_requested");
+  assert.equal(requested.user_id, null);
+  assert.equal(requested.role_key, "house_manager");
+  assert.equal(requested.deep_link, "/hub");
+  assert.equal(requested.entity_type, "hr_time_off_request");
+  assert.equal(requested.entity_id, REQUEST);
+  // The same request broadcast to the other approver role dedupes apart.
+  const pmCopy = timeOffRequestedPayload({
+    agencyId: AGENCY,
+    roleKey: "program_manager",
+    requestId: REQUEST,
+    title: "Time off requested",
+    body: "Alex requested Earned Time Off.",
+  });
+  assert.notEqual(pmCopy.dedupeKey, requested.dedupe_key);
+
+  const decided = buildNotificationRow(
+    timeOffDecidedPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      requestId: REQUEST,
+      approved: true,
+      title: "Time off approved",
+      body: "Your request was approved.",
+    }),
+  );
+  assert.equal(decided.type, "hr.time_off_decided");
+  assert.equal(decided.user_id, USER);
+  assert.equal(decided.role_key, null);
+
+  const cancelled = buildNotificationRow(
+    timeOffCancelledPayload({
+      agencyId: AGENCY,
+      userId: USER,
+      requestId: REQUEST,
+      title: "Time off cancelled",
+      body: "Your time off was cancelled.",
+    }),
+  );
+  assert.equal(cancelled.type, "hr.time_off_cancelled");
+  assert.equal(cancelled.user_id, USER);
+  assert.ok(metaForType("hr.time_off_requested").label.length > 0);
 });
 
 test("training.assigned payload maps to a snake_case DB row", () => {

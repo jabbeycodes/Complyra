@@ -57,6 +57,9 @@ export type NotificationType =
   | "hr.punch_exception"
   | "hr.overtime_alert"
   | "hr.overtime_approaching"
+  | "hr.time_off_requested"
+  | "hr.time_off_decided"
+  | "hr.time_off_cancelled"
   | "hr.open_shift_posted"
   | "hr.open_shift_bid"
   | "hr.open_shift_picked_up"
@@ -104,6 +107,9 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "hr.punch_exception",
   "hr.overtime_alert",
   "hr.overtime_approaching",
+  "hr.time_off_requested",
+  "hr.time_off_decided",
+  "hr.time_off_cancelled",
   "hr.open_shift_posted",
   "hr.open_shift_bid",
   "hr.open_shift_picked_up",
@@ -306,6 +312,9 @@ export const NOTIFICATION_META: Record<
   "hr.punch_exception": { status: "pending", label: "Punch flagged for review" },
   "hr.overtime_alert": { status: "late", label: "Overtime" },
   "hr.overtime_approaching": { status: "expiring", label: "Approaching overtime" },
+  "hr.time_off_requested": { status: "pending", label: "Time off requested" },
+  "hr.time_off_decided": { status: "compliant", label: "Time off decided" },
+  "hr.time_off_cancelled": { status: "expired", label: "Time off cancelled" },
   "hr.open_shift_posted": { status: "pending", label: "Open shift posted" },
   "hr.open_shift_bid": { status: "pending", label: "Bid on an open shift" },
   "hr.open_shift_picked_up": { status: "compliant", label: "Open shift picked up" },
@@ -929,6 +938,90 @@ export function swapDecidedPayload(input: {
     entityType: "hr_shift_swap",
     entityId: input.swapId,
     dedupeKey: dedupeKeyFor(type, input.swapId),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* HR time-off payloads (request → decision / cancellation)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * An employee submitted a time-off request. Broadcast to the approver
+ * roles (house_manager / program_manager) — the dedupe key carries the
+ * role so each role's broadcast is its own row, once per request.
+ */
+export function timeOffRequestedPayload(input: {
+  agencyId: string;
+  roleKey: string;
+  requestId: string;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: null,
+    roleKey: input.roleKey,
+    type: "hr.time_off_requested",
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_time_off_request",
+    entityId: input.requestId,
+    dedupeKey: dedupeKeyFor("hr.time_off_requested", input.requestId, input.roleKey),
+  };
+}
+
+/** A manager decided a time-off request. Notifies the employee. */
+export function timeOffDecidedPayload(input: {
+  agencyId: string;
+  userId: string;
+  requestId: string;
+  approved: boolean;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId,
+    roleKey: null,
+    type: "hr.time_off_decided",
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_time_off_request",
+    entityId: input.requestId,
+    dedupeKey: dedupeKeyFor("hr.time_off_decided", input.requestId, input.approved ? "approved" : "denied"),
+  };
+}
+
+/**
+ * A time-off request was cancelled. When a manager cancels, the employee
+ * is notified (userId set); when the employee cancels their own pending
+ * request, the approver roles are notified instead (roleKey set).
+ */
+export function timeOffCancelledPayload(input: {
+  agencyId: string;
+  userId?: string | null;
+  roleKey?: string | null;
+  requestId: string;
+  title: string;
+  body: string;
+}): NotificationPayload {
+  return {
+    agencyId: input.agencyId,
+    userId: input.userId ?? null,
+    roleKey: input.roleKey ?? null,
+    type: "hr.time_off_cancelled",
+    title: input.title,
+    body: input.body,
+    deepLink: "/hub",
+    entityType: "hr_time_off_request",
+    entityId: input.requestId,
+    dedupeKey: dedupeKeyFor(
+      "hr.time_off_cancelled",
+      input.requestId,
+      input.userId ?? input.roleKey ?? "",
+    ),
   };
 }
 

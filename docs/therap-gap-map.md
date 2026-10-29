@@ -77,6 +77,7 @@ functionality, and their evidence text says so.
 | --- | --- | --- |
 | Staff scheduling + open shifts | Present | Employee Hub (`src/features/employeeHub/`), `src/data/openShifts.ts`, staffing board |
 | Time clock / attendance / timecards | Present | Kiosk punches, timecard approval, exceptions (`src/data/hr.ts`, `src/data/hrStore.ts`) |
+| Time-off requests | **Partial → built in this batch** | HR-PHASE2 had the banks (accrual policies + ledger) and a basic request row, but no per-day hours, no cancellation, no history, no balance preview and no shift impact. This batch completes the lifecycle on that foundation: request with per-day hours and a pre-submit balance preview (ledger balance − pending), HM/PM approve/deny with the uncovered shifts shown first, approval releases those shifts to the open-shift board as coverage postings (original assignment preserved in the shift notes), employee cancel of pending, manager cancel of approved before its start (reason required, ledger restored by adjustment), append-only status history, HR view + ledger adjustments without approve rights, auditors excluded by design (`src/data/hr.ts`, `src/data/hrStore.ts`, `src/data/timeOffCoverage.ts`, migration `20261027210000_time_off.sql`) |
 
 ## 8. Health
 
@@ -178,3 +179,9 @@ rest of the map has been corrected to the same standard — it claims only
 main plus this PR. The catalog covers only reports whose builders exist
 on main; in-review modules slot in through the registry's extension
 points when they merge.*
+
+*Update (time-off requests): the "Time-off requests" row in section 7 is
+built — the full request lifecycle now sits on the HR-PHASE2 accrual
+ledger rather than a parallel allowance system, and approved time off
+releases the employee's shifts to the open-shift board. Auditors are
+excluded by design (employment data, not a compliance record).*

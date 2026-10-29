@@ -22,15 +22,22 @@ import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import {
+  assertCanCancelTimeOff,
+  assertCanDecideTimeOff,
   buildPayrollCsvExport,
+  buildRequestDays,
   computePatternWeeklyHours,
   currentLeaveBalance,
-  timeOffRequestHours,
+  leaveTypeDebitsBalance,
+  normalizeLeaveKind,
+  pendingTimeOffHours,
+  sumRequestDayHours,
   validateAccrualPolicy,
   validateClockIn,
   validateClockOut,
   validateShiftSwap,
   validateTimeOffBalance,
+  validateTimeOffRequest,
   DEFAULT_OVERTIME_RULES,
 } from "./hr";
 import type {
@@ -53,7 +60,9 @@ import type {
   HrShiftSwap,
   HrStaffingPattern,
   HrTimecardApproval,
+  HrTimeOffEvent,
   HrTimeOffRequest,
+  HrTimeOffRequestDay,
   KioskVerifyResult,
   LedgerEntryInput,
   LeaveType,
@@ -74,7 +83,12 @@ export type HrDocumentInput = Omit<HrDocument, "id" | "agencyId">;
 export type HrTimeOffRequestInput = Pick<
   HrTimeOffRequest,
   "kind" | "startsOn" | "endsOn" | "reason"
->;
+> & {
+  /** Per-day hours; the store derives the total from these rows. */
+  days: HrTimeOffRequestDay[];
+  /** The requester's home site; stamped so house managers can be scoped. */
+  siteId?: string | null;
+};
 export type HrReadinessRequirementInput = Omit<
   HrReadinessRequirement,
   "id" | "agencyId"
@@ -314,6 +328,11 @@ export interface HrStore {
   listTimeOffRequests(scope: { staffId?: string }): Promise<HrTimeOffRequest[]>;
   createTimeOffRequest(input: HrTimeOffRequestInput): Promise<HrTimeOffRequest>;
   decideTimeOffRequest(id: string, approve: boolean, note?: string): Promise<HrTimeOffRequest>;
+  /** Owner cancels a pending request; a manager cancels pending, or an
+   * approved one before it starts (reason required) — restoring the ledger. */
+  cancelTimeOffRequest(id: string, opts?: { reason?: string }): Promise<HrTimeOffRequest>;
+  /** Append-only status history for one request, oldest first. */
+  listTimeOffEvents(requestId: string): Promise<HrTimeOffEvent[]>;
   /* Readiness requirements */
   listReadinessRequirements(): Promise<HrReadinessRequirement[]>;
   saveReadinessRequirement(input: HrReadinessRequirementInput): Promise<HrReadinessRequirement>;
@@ -655,20 +674,55 @@ function mapShiftSwap(r: Record<string, unknown>): HrShiftSwap {
   };
 }
 
-function mapTimeOff(r: Record<string, unknown>): HrTimeOffRequest {
+function mapTimeOffDay(r: Record<string, unknown>): HrTimeOffRequestDay {
+  return { date: String(r.day_date), hours: Number(r.hours) };
+}
+
+function mapTimeOff(
+  r: Record<string, unknown>,
+  days: HrTimeOffRequestDay[] = [],
+): HrTimeOffRequest {
+  const startsOn = String(r.starts_on);
+  const endsOn = String(r.ends_on);
+  // Rows written before per-day hours existed carry no day rows: rebuild
+  // them at the standard day so totals still reconcile.
+  const dayRows =
+    days.length > 0
+      ? [...days].sort((a, b) => (a.date < b.date ? -1 : 1))
+      : buildRequestDays(startsOn, endsOn);
   return {
     id: String(r.id),
     agencyId: String(r.agency_id),
     siteId: r.site_id == null ? null : String(r.site_id),
     staffId: String(r.staff_id),
-    kind: r.kind as HrTimeOffRequest["kind"],
-    startsOn: String(r.starts_on),
-    endsOn: String(r.ends_on),
+    kind: normalizeLeaveKind(r.kind),
+    startsOn,
+    endsOn,
     status: r.status as HrTimeOffRequest["status"],
     reason: String(r.reason ?? ""),
+    days: dayRows,
+    totalHours:
+      r.total_hours == null ? sumRequestDayHours(dayRows) : Number(r.total_hours),
     decidedBy: r.decided_by == null ? null : String(r.decided_by),
     decidedAt: r.decided_at == null ? null : String(r.decided_at),
     decisionNote: r.decision_note == null ? null : String(r.decision_note),
+    cancelledBy: r.cancelled_by == null ? null : String(r.cancelled_by),
+    cancelledAt: r.cancelled_at == null ? null : String(r.cancelled_at),
+    cancelReason: r.cancel_reason == null ? null : String(r.cancel_reason),
+    createdAt: String(r.created_at ?? r.decided_at ?? new Date(0).toISOString()),
+    updatedAt: String(r.updated_at ?? r.created_at ?? new Date(0).toISOString()),
+  };
+}
+
+function mapTimeOffEvent(r: Record<string, unknown>): HrTimeOffEvent {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    requestId: String(r.request_id),
+    actorId: String(r.actor_id),
+    event: r.event as HrTimeOffEvent["event"],
+    note: r.note == null ? null : String(r.note),
+    createdAt: String(r.created_at),
   };
 }
 
@@ -1387,6 +1441,71 @@ class SupabaseHrStore implements HrStore {
     return (data ?? []).map(mapAck);
   }
 
+  /** Day rows for a set of requests, grouped by request id. */
+  private async fetchTimeOffDays(
+    requestIds: string[],
+  ): Promise<Map<string, HrTimeOffRequestDay[]>> {
+    const byRequest = new Map<string, HrTimeOffRequestDay[]>();
+    if (requestIds.length === 0) return byRequest;
+    const { data, error } = await this.client
+      .from("hr_time_off_request_days")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .in("request_id", requestIds)
+      .order("day_date", { ascending: true });
+    throwIf(error, "Could not load the time-off days");
+    for (const row of data ?? []) {
+      const r = row as Record<string, unknown>;
+      const key = String(r.request_id);
+      const list = byRequest.get(key) ?? [];
+      list.push(mapTimeOffDay(r));
+      byRequest.set(key, list);
+    }
+    return byRequest;
+  }
+
+  /** One request with its day rows, or null when it cannot be read. */
+  private async fetchTimeOffRequest(id: string): Promise<HrTimeOffRequest | null> {
+    const { data, error } = await this.client
+      .from("hr_time_off_requests")
+      .select("*")
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const days = await this.fetchTimeOffDays([id]);
+    return mapTimeOff(data as Record<string, unknown>, days.get(id) ?? []);
+  }
+
+  private async appendTimeOffEvent(
+    request: HrTimeOffRequest,
+    event: HrTimeOffEvent["event"],
+    note: string | null,
+  ): Promise<void> {
+    const { error } = await this.client.from("hr_time_off_events").insert({
+      agency_id: this.agencyId,
+      request_id: request.id,
+      actor_id: this.userId,
+      event,
+      note,
+    });
+    throwIf(error, "Could not record the time-off history entry");
+  }
+
+  /** The signed-in member's home site in this agency (for request stamping). */
+  private async ownSiteId(): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("site_id")
+      .eq("agency_id", this.agencyId)
+      .eq("user_id", this.userId)
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const siteId = (data as Record<string, unknown>).site_id;
+    return siteId == null ? null : String(siteId);
+  }
+
   async listTimeOffRequests(scope: { staffId?: string }): Promise<HrTimeOffRequest[]> {
     let q = this.client
       .from("hr_time_off_requests")
@@ -1396,50 +1515,79 @@ class SupabaseHrStore implements HrStore {
     if (scope.staffId) q = q.eq("staff_id", scope.staffId);
     const { data, error } = await q;
     throwIf(error, "Could not load time-off requests");
-    return (data ?? []).map(mapTimeOff);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const days = await this.fetchTimeOffDays(rows.map((r) => String(r.id)));
+    return rows.map((r) => mapTimeOff(r, days.get(String(r.id)) ?? []));
+  }
+
+  async listTimeOffEvents(requestId: string): Promise<HrTimeOffEvent[]> {
+    const { data, error } = await this.client
+      .from("hr_time_off_events")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the time-off history");
+    return (data ?? []).map(mapTimeOffEvent);
   }
 
   /**
-   * Throws a user-facing error when a pto/sick request would exceed the
-   * staff member's current leave balance. Unpaid/other kinds skip the check;
-   * so does a leave type with no active accrual policy (nothing to check
-   * against).
+   * Throws a user-facing error when a paid request would exceed the staff
+   * member's available balance: the accrual ledger balance minus the hours
+   * already pending. Unpaid requests skip the check; so does a leave type
+   * with no active accrual policy (nothing to check against).
    */
   private async assertTimeOffBalance(
     kind: HrTimeOffRequest["kind"],
-    startsOn: string,
-    endsOn: string,
+    totalHours: number,
     staffId: string,
   ): Promise<void> {
-    if (kind !== "pto" && kind !== "sick") return;
+    if (!leaveTypeDebitsBalance(kind)) return;
     const policies = await this.listAccrualPolicies();
     const policy = policies.find((p) => p.leaveType === kind && p.active);
     if (!policy) return;
-    const hours = timeOffRequestHours(startsOn, endsOn);
     const ledger = await this.listLedgerEntries(staffId, { leaveType: kind });
     const balance = currentLeaveBalance(ledger, kind);
-    const check = validateTimeOffBalance(hours, balance, kind);
+    const mine = await this.listTimeOffRequests({ staffId });
+    const available = balance - pendingTimeOffHours(mine, staffId, kind);
+    const check = validateTimeOffBalance(totalHours, available, kind);
     if (!check.ok) throw new Error(check.errors.join(" "));
   }
 
   async createTimeOffRequest(input: HrTimeOffRequestInput): Promise<HrTimeOffRequest> {
-    await this.assertTimeOffBalance(input.kind, input.startsOn, input.endsOn, this.userId);
+    const problems = validateTimeOffRequest(input);
+    if (problems.length > 0) throw new Error(problems.join(" "));
+    const totalHours = sumRequestDayHours(input.days);
+    await this.assertTimeOffBalance(input.kind, totalHours, this.userId);
+    const siteId = input.siteId ?? (await this.ownSiteId());
     const { data, error } = await this.client
       .from("hr_time_off_requests")
       .insert({
         agency_id: this.agencyId,
-        site_id: null,
+        site_id: siteId,
         staff_id: this.userId,
         kind: input.kind,
         starts_on: input.startsOn,
         ends_on: input.endsOn,
         status: "pending",
         reason: input.reason,
+        total_hours: totalHours,
       })
       .select()
       .single();
     throwIf(error, "Could not create the time-off request");
-    return mapTimeOff(data as Record<string, unknown>);
+    const created = mapTimeOff(data as Record<string, unknown>, input.days);
+    const { error: dayError } = await this.client.from("hr_time_off_request_days").insert(
+      input.days.map((d) => ({
+        agency_id: this.agencyId,
+        request_id: created.id,
+        day_date: d.date,
+        hours: d.hours,
+      })),
+    );
+    throwIf(dayError, "Could not save the time-off days");
+    await this.appendTimeOffEvent(created, "submitted", null);
+    return (await this.fetchTimeOffRequest(created.id)) ?? created;
   }
 
   async decideTimeOffRequest(
@@ -1447,14 +1595,9 @@ class SupabaseHrStore implements HrStore {
     approve: boolean,
     note?: string,
   ): Promise<HrTimeOffRequest> {
-    const { data: existing, error: fetchError } = await this.client
-      .from("hr_time_off_requests")
-      .select("*")
-      .eq("id", id)
-      .eq("agency_id", this.agencyId)
-      .single();
-    throwIf(fetchError, "Time-off request not found");
-    const prev = mapTimeOff(existing as Record<string, unknown>);
+    const prev = await this.fetchTimeOffRequest(id);
+    if (!prev) throw new Error("Time-off request not found");
+    assertCanDecideTimeOff(prev);
     const { data, error } = await this.client
       .from("hr_time_off_requests")
       .update({
@@ -1468,29 +1611,59 @@ class SupabaseHrStore implements HrStore {
       .select()
       .single();
     throwIf(error, "Could not decide the time-off request");
-    const decided = mapTimeOff(data as Record<string, unknown>);
-    // Ledger integration: approving a pto/sick request debits the balance;
-    // reversing an approval posts a restoring adjustment. Guards on the
-    // previous status keep repeated decides from double-posting.
-    if (prev.kind === "pto" || prev.kind === "sick") {
-      const hours = timeOffRequestHours(prev.startsOn, prev.endsOn);
-      if (approve && prev.status !== "approved") {
-        await this.postLedgerEntry({
-          staffId: prev.staffId,
-          leaveType: prev.kind,
-          used: hours,
-          note: `time-off ${prev.id}`,
-        });
-      } else if (!approve && prev.status === "approved") {
-        await this.postLedgerEntry({
-          staffId: prev.staffId,
-          leaveType: prev.kind,
-          adjustment: hours,
-          note: `time-off restored ${prev.id}`,
-        });
-      }
+    const decided = mapTimeOff(data as Record<string, unknown>, prev.days);
+    await this.appendTimeOffEvent(decided, approve ? "approved" : "denied", decided.decisionNote);
+    // Ledger integration: approving a paid request debits the balance by
+    // the request's total hours. Decisions are final — a reversal goes
+    // through cancelTimeOffRequest, which posts the restoring adjustment.
+    if (approve && leaveTypeDebitsBalance(prev.kind)) {
+      await this.postLedgerEntry({
+        staffId: prev.staffId,
+        leaveType: prev.kind,
+        used: prev.totalHours,
+        note: `time-off ${prev.id}`,
+      });
     }
-    return decided;
+    return (await this.fetchTimeOffRequest(id)) ?? decided;
+  }
+
+  async cancelTimeOffRequest(
+    id: string,
+    opts?: { reason?: string },
+  ): Promise<HrTimeOffRequest> {
+    const prev = await this.fetchTimeOffRequest(id);
+    if (!prev) throw new Error("Time-off request not found");
+    assertCanCancelTimeOff(prev, {
+      byManager: prev.staffId !== this.userId,
+      today: todayStamp(),
+      reason: opts?.reason,
+    });
+    const reason = opts?.reason?.trim() ? opts.reason.trim() : null;
+    const { data, error } = await this.client
+      .from("hr_time_off_requests")
+      .update({
+        status: "cancelled",
+        cancelled_by: this.userId,
+        cancelled_at: nowIso(),
+        cancel_reason: reason,
+      })
+      .eq("id", id)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not cancel the time-off request");
+    const cancelled = mapTimeOff(data as Record<string, unknown>, prev.days);
+    await this.appendTimeOffEvent(cancelled, "cancelled", reason);
+    // Cancelling an approved paid request restores the debited hours.
+    if (prev.status === "approved" && leaveTypeDebitsBalance(prev.kind)) {
+      await this.postLedgerEntry({
+        staffId: prev.staffId,
+        leaveType: prev.kind,
+        adjustment: prev.totalHours,
+        note: `time-off restored ${prev.id}`,
+      });
+    }
+    return (await this.fetchTimeOffRequest(id)) ?? cancelled;
   }
 
   async listReadinessRequirements(): Promise<HrReadinessRequirement[]> {
@@ -2832,6 +3005,8 @@ interface LocalBucket {
   documents: HrDocument[];
   acks: HrDocumentAck[];
   timeOff: HrTimeOffRequest[];
+  /** TIME-OFF: append-only status history for time-off requests. */
+  timeOffEvents: HrTimeOffEvent[];
   requirements: HrReadinessRequirement[];
   patterns: HrStaffingPattern[];
   /** True once the Evergreen demo seed has been written (so a user who clears all patterns doesn't get them back). */
@@ -2887,6 +3062,7 @@ function emptyBucket(): LocalBucket {
     documents: [],
     acks: [],
     timeOff: [],
+    timeOffEvents: [],
     requirements: [],
     patterns: [],
     policies: [],
@@ -3039,6 +3215,8 @@ class LocalHrStore implements HrStore {
         if (bucket.punchRules === undefined) bucket.punchRules = null;
         // Buckets written before remote-punch grants existed have no grants array.
         if (!Array.isArray(bucket.remoteGrants)) bucket.remoteGrants = [];
+        // Buckets written before the time-off lifecycle existed have no events array.
+        if (!Array.isArray(bucket.timeOffEvents)) bucket.timeOffEvents = [];
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -3418,25 +3596,129 @@ class LocalHrStore implements HrStore {
       .sort((a, b) => (a.ackedAt < b.ackedAt ? 1 : -1));
   }
 
+  /** Fill the lifecycle fields onto a request row written before TIME-OFF. */
+  private normalizeLocalTimeOff(row: HrTimeOffRequest): HrTimeOffRequest {
+    const days =
+      Array.isArray(row.days) && row.days.length > 0
+        ? row.days
+        : buildRequestDays(row.startsOn, row.endsOn);
+    return {
+      ...row,
+      kind: normalizeLeaveKind(row.kind),
+      days,
+      totalHours:
+        typeof row.totalHours === "number" ? row.totalHours : sumRequestDayHours(days),
+      cancelledBy: row.cancelledBy ?? null,
+      cancelledAt: row.cancelledAt ?? null,
+      cancelReason: row.cancelReason ?? null,
+      createdAt: row.createdAt ?? row.decidedAt ?? new Date(0).toISOString(),
+      updatedAt: row.updatedAt ?? row.createdAt ?? new Date(0).toISOString(),
+    };
+  }
+
+  /** All buckets for this agency (local mode keeps one bucket per user). */
+  private loadAllBuckets(): Record<string, LocalBucket> {
+    const own = this.load();
+    if (!this.storageAvailable()) return { [this.userId]: own };
+    try {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      const root = (raw ? JSON.parse(raw) : {}) as LocalRoot;
+      const buckets = root[this.agencyId] ?? {};
+      for (const bucket of Object.values(buckets)) {
+        if (!Array.isArray(bucket.timeOff)) bucket.timeOff = [];
+        if (!Array.isArray(bucket.timeOffEvents)) bucket.timeOffEvents = [];
+        bucket.timeOff = bucket.timeOff.map((r) => this.normalizeLocalTimeOff(r));
+      }
+      if (buckets[this.userId]) {
+        // Another handle may have written our bucket since we loaded it
+        // (a manager deciding our request writes the requester's bucket):
+        // storage wins, so refresh the in-memory copy.
+        this.memory = buckets[this.userId];
+      } else {
+        buckets[this.userId] = own;
+      }
+      return buckets;
+    } catch {
+      return { [this.userId]: own };
+    }
+  }
+
+  private saveBucketFor(ownerKey: string, bucket: LocalBucket): void {
+    if (ownerKey === this.userId) {
+      this.save(bucket);
+      return;
+    }
+    if (!this.storageAvailable()) return;
+    try {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      const root = (raw ? JSON.parse(raw) : {}) as LocalRoot;
+      if (!root[this.agencyId]) root[this.agencyId] = {};
+      root[this.agencyId][ownerKey] = bucket;
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(root));
+    } catch {
+      // Storage full or unavailable: keep the in-memory copies.
+    }
+  }
+
+  /** Locate a request and the bucket that owns it (requests live with their requester). */
+  private findTimeOffBucket(
+    requestId: string,
+  ): { ownerKey: string; bucket: LocalBucket; request: HrTimeOffRequest } | null {
+    for (const [ownerKey, bucket] of Object.entries(this.loadAllBuckets())) {
+      const request = bucket.timeOff.find((t) => t.id === requestId);
+      if (request) return { ownerKey, bucket, request };
+    }
+    return null;
+  }
+
+  private appendTimeOffEventLocal(
+    b: LocalBucket,
+    request: HrTimeOffRequest,
+    event: HrTimeOffEvent["event"],
+    note: string | null,
+  ): void {
+    b.timeOffEvents.push({
+      id: newId(),
+      agencyId: this.agencyId,
+      requestId: request.id,
+      actorId: this.userId,
+      event,
+      note,
+      createdAt: nowIso(),
+    });
+  }
+
   async listTimeOffRequests(scope: { staffId?: string }): Promise<HrTimeOffRequest[]> {
-    return this.load()
-      .timeOff.filter((t) => !scope.staffId || t.staffId === scope.staffId)
+    const all = Object.values(this.loadAllBuckets()).flatMap((b) => b.timeOff);
+    const byId = new Map(all.map((r) => [r.id, r]));
+    return [...byId.values()]
+      .filter((t) => !scope.staffId || t.staffId === scope.staffId)
       .sort((a, b) => (a.startsOn < b.startsOn ? 1 : -1));
+  }
+
+  async listTimeOffEvents(requestId: string): Promise<HrTimeOffEvent[]> {
+    return Object.values(this.loadAllBuckets())
+      .flatMap((b) => b.timeOffEvents)
+      .filter((e) => e.requestId === requestId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
   }
 
   private assertTimeOffBalanceLocal(
     b: LocalBucket,
     kind: HrTimeOffRequest["kind"],
-    startsOn: string,
-    endsOn: string,
+    totalHours: number,
     staffId: string,
   ): void {
-    if (kind !== "pto" && kind !== "sick") return;
+    if (!leaveTypeDebitsBalance(kind)) return;
     const policy = b.policies.find((p) => p.leaveType === kind && p.active);
     if (!policy) return;
-    const hours = timeOffRequestHours(startsOn, endsOn);
     const balance = currentLeaveBalance(b.ledger.filter((e) => e.staffId === staffId), kind);
-    const check = validateTimeOffBalance(hours, balance, kind);
+    const pending = pendingTimeOffHours(
+      b.timeOff.map((r) => this.normalizeLocalTimeOff(r)),
+      staffId,
+      kind,
+    );
+    const check = validateTimeOffBalance(totalHours, balance - pending, kind);
     if (!check.ok) throw new Error(check.errors.join(" "));
   }
 
@@ -3471,20 +3753,35 @@ class LocalHrStore implements HrStore {
   }
 
   async createTimeOffRequest(input: HrTimeOffRequestInput): Promise<HrTimeOffRequest> {
+    const problems = validateTimeOffRequest(input);
+    if (problems.length > 0) throw new Error(problems.join(" "));
     return this.mutate((b) => {
-      this.assertTimeOffBalanceLocal(b, input.kind, input.startsOn, input.endsOn, this.userId);
+      const totalHours = sumRequestDayHours(input.days);
+      this.assertTimeOffBalanceLocal(b, input.kind, totalHours, this.userId);
+      const now = nowIso();
       const req: HrTimeOffRequest = {
-        ...input,
         id: newId(),
         agencyId: this.agencyId,
-        siteId: null,
+        siteId: input.siteId ?? null,
         staffId: this.userId,
+        kind: input.kind,
+        startsOn: input.startsOn,
+        endsOn: input.endsOn,
         status: "pending",
+        reason: input.reason,
+        days: [...input.days].sort((a, c) => (a.date < c.date ? -1 : 1)),
+        totalHours,
         decidedBy: null,
         decidedAt: null,
         decisionNote: null,
+        cancelledBy: null,
+        cancelledAt: null,
+        cancelReason: null,
+        createdAt: now,
+        updatedAt: now,
       };
       b.timeOff.push(req);
+      this.appendTimeOffEventLocal(b, req, "submitted", null);
       return req;
     });
   }
@@ -3494,37 +3791,62 @@ class LocalHrStore implements HrStore {
     approve: boolean,
     note?: string,
   ): Promise<HrTimeOffRequest> {
-    return this.mutate((b) => {
-      const req = b.timeOff.find((t) => t.id === id);
-      if (!req) throw new Error("Time-off request not found.");
-      const prevStatus = req.status;
-      req.status = approve ? "approved" : "denied";
-      req.decidedBy = this.userId;
-      req.decidedAt = nowIso();
-      req.decisionNote = note?.trim() ? note.trim() : null;
-      // Ledger integration mirrors the Supabase implementation: approving a
-      // pto/sick request debits the balance; reversing an approval posts a
-      // restoring adjustment. Guards keep repeated decides idempotent.
-      if (req.kind === "pto" || req.kind === "sick") {
-        const hours = timeOffRequestHours(req.startsOn, req.endsOn);
-        if (approve && prevStatus !== "approved") {
-          this.postLedgerEntryLocal(b, {
-            staffId: req.staffId,
-            leaveType: req.kind,
-            used: hours,
-            note: `time-off ${req.id}`,
-          });
-        } else if (!approve && prevStatus === "approved") {
-          this.postLedgerEntryLocal(b, {
-            staffId: req.staffId,
-            leaveType: req.kind,
-            adjustment: hours,
-            note: `time-off restored ${req.id}`,
-          });
-        }
-      }
-      return req;
+    const found = this.findTimeOffBucket(id);
+    if (!found) throw new Error("Time-off request not found.");
+    const { ownerKey, bucket, request } = found;
+    assertCanDecideTimeOff(request);
+    request.status = approve ? "approved" : "denied";
+    request.decidedBy = this.userId;
+    request.decidedAt = nowIso();
+    request.decisionNote = note?.trim() ? note.trim() : null;
+    request.updatedAt = nowIso();
+    this.appendTimeOffEventLocal(bucket, request, approve ? "approved" : "denied", request.decisionNote);
+    // Ledger integration mirrors the Supabase implementation: approving a
+    // paid request debits the balance by the request's total hours.
+    // Decisions are final — a reversal goes through cancelTimeOffRequest.
+    if (approve && leaveTypeDebitsBalance(request.kind)) {
+      this.postLedgerEntryLocal(bucket, {
+        staffId: request.staffId,
+        leaveType: request.kind,
+        used: request.totalHours,
+        note: `time-off ${request.id}`,
+      });
+    }
+    this.saveBucketFor(ownerKey, bucket);
+    return request;
+  }
+
+  async cancelTimeOffRequest(
+    id: string,
+    opts?: { reason?: string },
+  ): Promise<HrTimeOffRequest> {
+    const found = this.findTimeOffBucket(id);
+    if (!found) throw new Error("Time-off request not found.");
+    const { ownerKey, bucket, request } = found;
+    assertCanCancelTimeOff(request, {
+      byManager: request.staffId !== this.userId,
+      today: todayStamp(),
+      reason: opts?.reason,
     });
+    const wasApproved = request.status === "approved";
+    const reason = opts?.reason?.trim() ? opts.reason.trim() : null;
+    request.status = "cancelled";
+    request.cancelledBy = this.userId;
+    request.cancelledAt = nowIso();
+    request.cancelReason = reason;
+    request.updatedAt = nowIso();
+    this.appendTimeOffEventLocal(bucket, request, "cancelled", reason);
+    // Cancelling an approved paid request restores the debited hours.
+    if (wasApproved && leaveTypeDebitsBalance(request.kind)) {
+      this.postLedgerEntryLocal(bucket, {
+        staffId: request.staffId,
+        leaveType: request.kind,
+        adjustment: request.totalHours,
+        note: `time-off restored ${request.id}`,
+      });
+    }
+    this.saveBucketFor(ownerKey, bucket);
+    return request;
   }
 
   async listReadinessRequirements(): Promise<HrReadinessRequirement[]> {
