@@ -408,6 +408,26 @@ export default function HmWeeklyChecklistPage() {
         </section>
       )}
 
+      {/* Phone width only (see hmChecklist.css): the signature block sits
+          at the foot of a long form, so a sticky shortcut scrolls it into
+          view. Rendered only for the assignee of an unsubmitted list —
+          the same condition SignatureField acts on. */}
+      {openList && !openList.submittedAt && session?.userId === openList.assignedToUserId && (
+        <div className="checklist-sticky-bar">
+          <button
+            type="button"
+            className="button primary"
+            onClick={() =>
+              document
+                .querySelector('[data-tour="hm-checklist"] .sig-field')
+                ?.scrollIntoView({ behavior: "smooth", block: "center" })
+            }
+          >
+            Sign & submit
+          </button>
+        </div>
+      )}
+
       {past.length > 0 && (
         <section className="panel" aria-label="Past checklists">
           <h2>Past weeks</h2>

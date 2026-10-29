@@ -176,3 +176,41 @@
     font-size: 11px;
   }
 }
+
+/* Phone width (mobile-shell deep link): uniform tap-size calendar cells,
+   44px targets, and 16px form text so iOS does not focus-zoom. The
+   empty filler cells previously kept a 1/1 aspect ratio at a forced
+   width and stretched the first calendar row; a fixed cell height keeps
+   every row the same. Desktop above 860px is untouched. */
+@media (max-width: 860px) {
+  .appointments-cell {
+    aspect-ratio: auto;
+    height: 56px;
+    padding: 6px;
+  }
+  .appointments-filters label,
+  .appointments-filter-group {
+    flex: 1 1 150px;
+  }
+  .appointments-filters select,
+  .appointments-filters input[type="search"],
+  .appointments-filters input[type="date"] {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .appointments-status-chip {
+    min-height: 44px;
+  }
+  .appointments-calendar-nav .button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .appointments-page .button {
+    min-height: 44px;
+  }
+  .appointments-page input,
+  .appointments-page select,
+  .appointments-page textarea {
+    font-size: 16px;
+  }
+}
