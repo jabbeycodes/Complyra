@@ -759,6 +759,107 @@
   margin-bottom: 12px;
 }
 
+/* Medication rows carry their supply countdown under the med line. The
+   row becomes a column: med line on top, countdown line below. */
+.msh-med-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  cursor: default;
+}
+
+.msh-med-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.msh-med-main:disabled {
+  cursor: default;
+  color: var(--text);
+}
+
+.msh-med-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+/* The countdown as a tap target for roles that record counts. Solid
+   tint, no gradient; the text carries the numbers, never color alone. */
+.msh-count-button {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 12px;
+  background: var(--sand);
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.msh-count-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0 2px;
+}
+
+.msh-count-main {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.msh-count-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* The countdown's unavailable state (dose records failed to load):
+   text carries the state, with the retry as a plain chip button. */
+.msh-count-unavailable {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--sand);
+  border-radius: 12px;
+  color: var(--text);
+}
+
+.msh-form-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msh-form-history h4 {
+  margin: 4px 0 2px;
+  font-size: 14px;
+}
+
+.msh-form-history p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .msh-daynav {
   display: flex;
   align-items: center;

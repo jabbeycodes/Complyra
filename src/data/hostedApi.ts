@@ -10948,6 +10948,30 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
+  async getMedDoseMarksInRange(
+    individualId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<import("./types").MedDoseMark[]> {
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    const { data, error } = await this.client
+      .from("med_dose_marks")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .gte("dose_date", fromDate.slice(0, 10))
+      .lte("dose_date", toDate.slice(0, 10))
+      .order("dose_date", { ascending: true })
+      .order("dose_time", { ascending: true });
+    throwIf(error, "Could not load the medication record.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((row) =>
+      this.mapMedDoseMark(row),
+    );
+  }
+
   async markMedDose(
     input: Parameters<ComplyraApi["markMedDose"]>[0],
   ): Promise<void> {

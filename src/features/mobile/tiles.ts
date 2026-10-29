@@ -11,6 +11,10 @@
  * model a shift note IS an ISP data entry (the ISP flow saves through
  * saveShiftNote), so ISP Data is the single door for both reading and
  * writing a home's shift notes on mobile.
+ *
+ * There is likewise no separate "Med Count" tile: the count belongs
+ * under Medications — every medication row in the MAR carries its own
+ * supply countdown, and managers reset it there when a refill comes in.
  */
 import { canSeeMeds } from "../../data/chart";
 import { canSeeShiftNotes } from "../../data/permissions";
@@ -22,8 +26,7 @@ export type MobileTileId =
   | "myTasks"
   | "individuals"
   | "appointments"
-  | "checklists"
-  | "medCount";
+  | "checklists";
 
 export interface MobileTile {
   id: MobileTileId;
@@ -85,12 +88,6 @@ const TILE_DEFS: {
     label: "Checklists",
     hint: "Weekly house checklist",
     visible: (ctx) => ctx.canPage("Weekly checklist"),
-  },
-  {
-    id: "medCount",
-    label: "Med Count",
-    hint: "Counts and supply on hand",
-    visible: (ctx) => ctx.canPage("Supply forecast"),
   },
 ];
 

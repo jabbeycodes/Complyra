@@ -347,6 +347,9 @@ export function mapMedicationDelivery(row: Row): MedicationDelivery {
     id: str(row.id),
     medicationId: str(row.medication_id),
     countedOn: isoDate(row.counted_on) ?? "",
+    // The table's created_at is the auditable moment the count was
+    // recorded — the countdown baseline's effective timestamp.
+    countedAt: isoDateTime(row.created_at),
     remainingPills: num(row.remaining_pills),
     pillsPerDay: num(row.pills_per_day),
     recordedBy: str(row.recorded_by),

@@ -48,7 +48,6 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
     "My Tasks",
     "Individuals",
     "Checklists",
-    "Med Count",
   ]) {
     await expect(
       page.getByRole("button", { name: new RegExp(label) }).first(),
@@ -57,6 +56,11 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   // No separate Shift Notes tile: a shift note is an ISP data entry, so
   // ISP Data is the single door for the home's notes.
   await expect(page.getByRole("button", { name: /Shift Notes/ })).toHaveCount(
+    0,
+  );
+  // No separate Med Count tile either: the count lives under Medications,
+  // on each medication's own row in the MAR.
+  await expect(page.getByRole("button", { name: /Med Count/ })).toHaveCount(
     0,
   );
   await expect(page.getByRole("button", { name: /Messages/ })).toHaveCount(0);
@@ -658,7 +662,7 @@ test("mobile home: donut math, up next, and the bottom navigation", async ({
   await navBar.getByRole("button", { name: "More", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "More" });
   await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("button", { name: /Med Count/ })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /Med Count/ })).toHaveCount(0);
   await expect(
     sheet.getByRole("button", { name: /Switch home/ }),
   ).toBeVisible();

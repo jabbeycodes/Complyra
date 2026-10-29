@@ -52,7 +52,8 @@ test("an auditor gets read surfaces but no time clock without hub access", () =>
   assert.ok(!(tiles as string[]).includes("shiftNotes"));
   assert.ok(tiles.includes("ispData"));
   assert.ok(tiles.includes("appointments"));
-  assert.ok(tiles.includes("medCount"));
+  // No separate Med Count tile: the count lives under Medications.
+  assert.ok(!tiles.includes("medCount" as never));
   assert.ok(!tiles.includes("timeClock"));
 });
 
@@ -66,7 +67,7 @@ test("page-gated tiles follow the desktop page gate exactly", () => {
   });
   assert.ok(ids(withPages).includes("appointments"));
   assert.ok(ids(withPages).includes("checklists"));
-  assert.ok(ids(withPages).includes("medCount"));
+  assert.ok(!ids(withPages).includes("medCount" as never));
 });
 
 test("tile order is daily-driver order, medications first", () => {
@@ -88,7 +89,6 @@ test("tile order is daily-driver order, medications first", () => {
       "individuals",
       "appointments",
       "checklists",
-      "medCount",
     ],
   );
   for (const tile of tiles) {

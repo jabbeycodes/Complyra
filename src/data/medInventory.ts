@@ -182,6 +182,12 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
     doseTimes: input.inventory?.doseTimes ?? [],
     quantityOnDelivery: deliveryQty,
     deliveredOn: anchorDate.slice(0, 10),
+    // The countdown baseline's date: the newest delivery/count row wins;
+    // meds counted before delivery rows existed fall back to the
+    // medication row's last-delivery date. Null = never counted.
+    lastCountedOn: latest
+      ? latest.countedOn.slice(0, 10)
+      : (med.lastDeliveryOn ?? null),
     lowThresholdDays:
       input.inventory?.lowThresholdDays ?? DEFAULT_MED_LOW_THRESHOLD_DAYS,
     reorderAcknowledgedOn: input.inventory?.reorderAcknowledgedOn ?? null,
@@ -194,6 +200,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
       .map((row) => ({
         id: row.id,
         countedOn: row.countedOn,
+        countedAt: row.countedAt ?? null,
         remainingPills: row.remainingPills,
         pillsPerDay: row.pillsPerDay,
         recordedBy: row.recordedBy,
