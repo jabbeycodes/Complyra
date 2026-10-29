@@ -1,4 +1,5 @@
 import Consents from "./features/consents/Consents";
+import CareScreeningAttention from "./features/CareScreeningAttention";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -167,6 +168,7 @@ export default function Dashboard({
         <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
       )}
       <Consents attentionOnly siteId={focusedSite?.id ?? null} />
+      <CareScreeningAttention siteId={focusedSite?.id ?? null} onOpenPerson={onOpenPerson} />
       {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">

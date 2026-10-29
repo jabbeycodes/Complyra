@@ -1,6 +1,7 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
 import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
@@ -452,6 +453,9 @@ export interface ComplyraApi {
   activateConsent(id: string): Promise<void>;
   revokeConsent(id: string, revokedOn: string, reason: string): Promise<void>;
   saveConsentTypes(types: ConsentType[]): Promise<void>;
+  getCareScreeningData(individualId?: string): Promise<CareScreeningData>;
+  mutateCareScreening(input: CareAction): Promise<void>;
+  sweepCareScreening(): Promise<void>;
   listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]>;
   markNotificationsRead(ids: string[]): Promise<void>;
   // LIFE EVENTS — per-Individual timeline (context, not compliance: no
@@ -3075,10 +3079,156 @@ export class LocalApi implements ComplyraApi {
         await persistMeta(this.store);
     }
 
+  async getCareScreeningData(individualId?: string): Promise<CareScreeningData> {
+    const session = assertSession(this.store);
+    if (!canViewCare(session.roleKey)) throw new Error("Care records are outside your access.");
+    if (individualId) accessibleIndividual(this.store, session, individualId);
+    const data = this.store.db.careScreening ?? emptyCareData();
+    const visible = (id: string) => (!individualId || id === individualId) && this.store.db.individuals.some(p => p.id === id && canReadIndividual(session, p, this.store.db.assignments, this.store.db.individuals));
+    const plans = data.plans.filter(p => p.agency_id === session.agencyId && visible(p.individual_id) && (session.roleKey !== 'dsp' || p.status === 'active'));
+    return structuredClone({
+      plans,
+      acknowledgements: data.acknowledgements.filter(a => plans.some(p => p.id === a.plan_id)),
+      types: canViewScreening(session.roleKey) ? data.types.filter(t => t.agency_id === session.agencyId) : [],
+      screenings: canViewScreening(session.roleKey) ? data.screenings.filter(s => s.agency_id === session.agencyId && visible(s.individual_id)) : []
+    });
+  }
+  async mutateCareScreening(input: CareAction) {
+    const session = assertSession(this.store);
+    const data = this.store.db.careScreening ??= emptyCareData();
+    const now = new Date().toISOString();
+    const manage = () => {
+      if (!canManageCare(session.roleKey)) throw new Error('Only nurses manage care records.');
+    };
+    if (input.action === 'type') {
+      manage();
+      if (!input.name.trim() || !Number.isInteger(input.due_soon_days) || input.due_soon_days < 0 || input.due_soon_days > 365) throw new Error('Use a type name and a due-soon window from 0 to 365 days.');
+      if (data.types.some(t => t.agency_id === session.agencyId && t.id !== input.id && t.name.toLowerCase() === input.name.trim().toLowerCase())) throw new Error('That screening type already exists.');
+      const row = input.id ? data.types.find(t => t.id === input.id && t.agency_id === session.agencyId) : undefined;
+      if (input.id && !row) throw new Error('Screening type not found.');
+      if (row) Object.assign(row, {
+        name: input.name.trim(),
+        due_soon_days: input.due_soon_days,
+        enabled: input.enabled
+      });else data.types.push({
+        id: crypto.randomUUID(),
+        agency_id: session.agencyId,
+        name: input.name.trim(),
+        due_soon_days: input.due_soon_days,
+        enabled: input.enabled
+      });
+    } else if (input.action === 'draft') {
+      manage();
+      accessibleIndividual(this.store, session, input.individual_id);
+      validateCareDraft(input.draft);
+      if (data.plans.some(p => p.individual_id === input.individual_id && p.status === 'draft')) throw new Error('Approve or retire the existing draft first.');
+      const active = data.plans.find(p => p.individual_id === input.individual_id && p.status === 'active');
+      if ((active?.id ?? undefined) !== input.previous_id) throw new Error('Revise the current active plan.');
+      data.plans.push({
+        ...structuredClone(input.draft),
+        id: crypto.randomUUID(),
+        agency_id: session.agencyId,
+        individual_id: input.individual_id,
+        status: 'draft',
+        previous_id: input.previous_id ?? null,
+        created_by: session.userId,
+        created_at: now,
+        approved_by: null,
+        approved_at: null,
+        retired_at: null
+      });
+    } else if (input.action === 'screening') {
+      manage();
+      accessibleIndividual(this.store, session, input.individual_id);
+      validateScreening(input.draft);
+      const row = input.id ? data.screenings.find(s => s.id === input.id && s.agency_id === session.agencyId && s.individual_id === input.individual_id) : undefined;
+      if (input.id && !row) throw new Error('Screening not found.');
+      const type = data.types.find(t => t.id === input.draft.type_id && t.agency_id === session.agencyId && (t.enabled || row?.type_id === t.id));
+      if (!type) throw new Error('Choose an enabled screening type.');
+      if (row) Object.assign(row, structuredClone(input.draft));else data.screenings.push({
+        ...structuredClone(input.draft),
+        id: crypto.randomUUID(),
+        agency_id: session.agencyId,
+        individual_id: input.individual_id
+      });
+    } else {
+      const plan = data.plans.find(p => p.id === input.id && p.agency_id === session.agencyId);
+      if (!plan) throw new Error('Care plan not found.');
+      accessibleIndividual(this.store, session, plan.individual_id);
+      if (input.action === 'approve') {
+        if (!canApproveCare(session.roleKey) || plan.status !== 'draft') throw new Error('Only a nurse or Program Manager can approve a draft.');
+        const active = data.plans.find(p => p.individual_id === plan.individual_id && p.status === 'active');
+        if ((active?.id ?? null) !== plan.previous_id) throw new Error('The active plan changed. Create a new revision.');
+        if (active) {
+          active.status = 'revised';
+          active.retired_at = now;
+        }
+        plan.status = 'active';
+        plan.approved_by = session.userId;
+        plan.approved_at = now;
+      } else if (input.action === 'retire') {
+        manage();
+        if (!['active', 'draft'].includes(plan.status)) throw new Error('This plan is already in history.');
+        if (plan.status === 'active' && data.plans.some(p => p.individual_id === plan.individual_id && p.status === 'draft')) throw new Error('Approve or retire the pending draft first.');
+        plan.status = 'retired';
+        plan.retired_at = now;
+      } else {
+        if (!canAcknowledgeCare(session.roleKey) || plan.status !== 'active') throw new Error('Only supporting staff can acknowledge an active plan.');
+        if (!data.acknowledgements.some(a => a.plan_id === plan.id && a.user_id === session.userId)) data.acknowledgements.push({
+          plan_id: plan.id,
+          user_id: session.userId,
+          acknowledged_at: now
+        });
+      }
+    }
+    await persistMeta(this.store);
+  }
+  async sweepCareScreening() {
+    const session = assertSession(this.store);
+    const data = await this.getCareScreeningData();
+    const notices = [...data.plans.filter(p => overdueCare(p)).map(p => ({
+      id: p.id,
+      person: p.individual_id,
+      type: 'care.review_overdue',
+      title: 'Care plan review overdue',
+      date: p.items.map(i => i.review_on).sort()[0],
+      roles: ['nurse', 'house_manager']
+    })), ...data.screenings.flatMap(s => {
+      const status = screeningStatus(s, data.types.find(t => t.id === s.type_id)!);
+      return ['due soon', 'overdue'].includes(status) ? [{
+        id: s.id,
+        person: s.individual_id,
+        type: status === 'overdue' ? 'screening.overdue' : 'screening.due_soon',
+        title: `Health screening ${status}`,
+        date: s.due_on,
+        roles: ['nurse', 'program_manager', 'house_manager']
+      }] : [];
+    })];
+    for (const n of notices) {
+      const person = this.store.db.individuals.find(p => p.id === n.person)!;
+      for (const m of this.store.db.memberships.filter(m => m.agencyId === session.agencyId && n.roles.includes(m.roleKey) && this.store.db.profiles.some(p => p.id === m.userId && !p.mustChangePassword) && (!m.expiresOn || m.expiresOn >= todayIso()) && (m.roleKey === 'program_manager' || m.siteId === person.siteId))) {
+        this.pushRecognitionNotification({
+          agencyId: session.agencyId,
+          userId: m.userId,
+          roleKey: null,
+          type: n.type,
+          title: n.title,
+          body: `${person.fullName}: due ${n.date}`,
+          deepLink: `/plans/${person.id}#chart-care-plans`,
+          entityType: 'individual',
+          entityId: person.id,
+          dedupeKey: `${n.type}:${n.id}:${n.date}:${m.userId}`
+        });
+      }
+    }
+    await persistMeta(this.store);
+  }
+
   async listNotifications() {
     const session = assertSession(this.store);
     await this.sweepOperatingReminders();
     await this.sweepConsentAlerts();
+    if (canViewCare(session.roleKey)) await this.sweepCareScreening();
     return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey)).filter((row) => row.agencyId === session.agencyId &&
       (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
       .map((row) => ({

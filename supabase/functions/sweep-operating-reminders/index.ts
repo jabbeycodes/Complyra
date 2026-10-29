@@ -351,6 +351,9 @@ Deno.serve(async (req) => {
   let noticesQueued = 0;
   for (const agency of agencies) {
     noticesQueued += await sweepAgency(admin, String(agency.id));
+    const {data: careQueued, error: careError} = await admin.rpc("sweep_care_screening", {p_agency_id:String(agency.id)});
+    if (careError) return fail("Could not sweep care reviews and screenings", 500);
+    noticesQueued += Number(careQueued ?? 0);
   }
   return json({ notices_queued: noticesQueued, agencies: agencies.length, actor });
 });
