@@ -3011,6 +3011,8 @@ interface LocalBucket {
   patterns: HrStaffingPattern[];
   /** True once the Evergreen demo seed has been written (so a user who clears all patterns doesn't get them back). */
   staffingSeeded?: boolean;
+  /** True once the Evergreen demo hub seed (time off, shifts, leave ledger) has been written into this bucket. */
+  demoHubSeeded?: boolean;
   /* HR-PHASE2 */
   policies: HrAccrualPolicy[];
   ledger: HrAccrualLedgerEntry[];
@@ -3173,6 +3175,207 @@ function seedDemoStaffingPatterns(): HrStaffingPattern[] {
   }));
 }
 
+/* --------------------- demo hub seed (time off + shifts) ------------------ */
+/* Fictional hub data for the Evergreen demo agency, localStorage only: an
+ * Earned Time Off accrual policy, three months of ledger balances for the
+ * seven demo staff (padId 201–207 in seed.ts), one approved and one pending
+ * time-off request, and published shifts for the current week at both demo
+ * houses (padId 11/12). Dates are relative to today so the coverage board
+ * and Who's-out views open populated whenever the demo is visited. */
+
+const DEMO_STAFF_IDS = {
+  sarah: "00000000-0000-4000-8000-000000000201",
+  james: "00000000-0000-4000-8000-000000000202",
+  alex: "00000000-0000-4000-8000-000000000203",
+  taylor: "00000000-0000-4000-8000-000000000204",
+  jordan: "00000000-0000-4000-8000-000000000205",
+  casey: "00000000-0000-4000-8000-000000000206",
+  cameron: "00000000-0000-4000-8000-000000000207",
+} as const;
+const DEMO_CEDAR_ID = "00000000-0000-4000-8000-000000000011";
+const DEMO_WILLOW_ID = "00000000-0000-4000-8000-000000000012";
+
+function demoDayIso(offsetDays: number, from = new Date()): string {
+  const base = from.toISOString().slice(0, 10);
+  const ms = Date.parse(`${base}T12:00:00Z`) + offsetDays * 86_400_000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function demoMonthStartIso(monthsAgo: number): string {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, 1));
+  return first.toISOString().slice(0, 10);
+}
+
+function seedDemoHubData(): Pick<
+  LocalBucket,
+  "policies" | "ledger" | "timeOff" | "timeOffEvents" | "shifts"
+> {
+  const agencyId = EVERGREEN_DEMO_AGENCY_ID;
+  const today = demoDayIso(0);
+  const sunday = demoDayIso(-new Date(`${today}T12:00:00Z`).getUTCDay());
+
+  const policies: HrAccrualPolicy[] = [
+    {
+      id: "policy-demo-eto",
+      agencyId,
+      leaveType: "pto",
+      tenureBands: [
+        { minYears: 0, maxYears: 2, hoursPerPeriod: 3.08 },
+        { minYears: 2, maxYears: 5, hoursPerPeriod: 4.62 },
+        { minYears: 5, maxYears: null, hoursPerPeriod: 6.15 },
+      ],
+      carryoverCapHours: 80,
+      carryoverBasis: "calendar_year",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null,
+      active: true,
+      createdBy: DEMO_STAFF_IDS.sarah,
+      createdAt: "2026-01-02T15:00:00.000Z",
+      updatedAt: "2026-01-02T15:00:00.000Z",
+    },
+  ];
+
+  // Three monthly accruals per person. Jordan's current-month entry carries
+  // the 16 hours his approved request below uses, so his balance is lower.
+  const accruals: Array<{ staffId: string; slug: string; monthly: number; usedThisMonth: number }> = [
+    { staffId: DEMO_STAFF_IDS.sarah, slug: "sarah", monthly: 24, usedThisMonth: 0 },
+    { staffId: DEMO_STAFF_IDS.james, slug: "james", monthly: 24, usedThisMonth: 0 },
+    { staffId: DEMO_STAFF_IDS.alex, slug: "alex", monthly: 16, usedThisMonth: 0 },
+    { staffId: DEMO_STAFF_IDS.taylor, slug: "taylor", monthly: 16, usedThisMonth: 0 },
+    { staffId: DEMO_STAFF_IDS.jordan, slug: "jordan", monthly: 16, usedThisMonth: 16 },
+    { staffId: DEMO_STAFF_IDS.casey, slug: "casey", monthly: 16, usedThisMonth: 0 },
+    { staffId: DEMO_STAFF_IDS.cameron, slug: "cameron", monthly: 20, usedThisMonth: 0 },
+  ];
+  const ledger: HrAccrualLedgerEntry[] = [];
+  for (const person of accruals) {
+    let balance = 0;
+    for (let monthsAgo = 2; monthsAgo >= 0; monthsAgo -= 1) {
+      const used = monthsAgo === 0 ? person.usedThisMonth : 0;
+      balance += person.monthly - used;
+      ledger.push({
+        id: `ledger-demo-${person.slug}-${monthsAgo}`,
+        agencyId,
+        staffId: person.staffId,
+        payPeriodId: null,
+        periodStart: demoMonthStartIso(monthsAgo),
+        leaveType: "pto",
+        accrued: person.monthly,
+        used,
+        adjustment: 0,
+        balance,
+        note:
+          used > 0
+            ? "Monthly accrual; includes hours used for approved Earned Time Off."
+            : "Monthly accrual.",
+        createdAt: `${demoMonthStartIso(monthsAgo)}T06:00:00.000Z`,
+      });
+    }
+  }
+
+  const jordanCreated = `${demoDayIso(-5)}T14:00:00.000Z`;
+  const jordanDecided = `${demoDayIso(-2)}T15:00:00.000Z`;
+  const taylorCreated = `${demoDayIso(-1)}T16:00:00.000Z`;
+  const timeOff: HrTimeOffRequest[] = [
+    {
+      id: "timeoff-demo-jordan",
+      agencyId,
+      siteId: DEMO_WILLOW_ID,
+      staffId: DEMO_STAFF_IDS.jordan,
+      kind: "pto",
+      startsOn: demoDayIso(1),
+      endsOn: demoDayIso(4),
+      status: "approved",
+      reason: "Visiting family in Kansas City.",
+      days: [
+        { date: demoDayIso(1), hours: 8 },
+        { date: demoDayIso(4), hours: 8 },
+      ],
+      totalHours: 16,
+      decidedBy: DEMO_STAFF_IDS.james,
+      decidedAt: jordanDecided,
+      decisionNote: "Coverage confirmed with Casey.",
+      cancelledBy: null,
+      cancelledAt: null,
+      cancelReason: null,
+      createdAt: jordanCreated,
+      updatedAt: jordanDecided,
+    },
+    {
+      id: "timeoff-demo-taylor",
+      agencyId,
+      siteId: DEMO_CEDAR_ID,
+      staffId: DEMO_STAFF_IDS.taylor,
+      kind: "pto",
+      startsOn: demoDayIso(8),
+      endsOn: demoDayIso(8),
+      status: "pending",
+      reason: "Family appointment in St. Louis.",
+      days: [{ date: demoDayIso(8), hours: 8 }],
+      totalHours: 8,
+      decidedBy: null,
+      decidedAt: null,
+      decisionNote: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      cancelReason: null,
+      createdAt: taylorCreated,
+      updatedAt: taylorCreated,
+    },
+  ];
+  const timeOffEvents: HrTimeOffEvent[] = [
+    { id: "timeoff-event-demo-jordan-1", agencyId, requestId: "timeoff-demo-jordan", actorId: DEMO_STAFF_IDS.jordan, event: "submitted", note: null, createdAt: jordanCreated },
+    { id: "timeoff-event-demo-jordan-2", agencyId, requestId: "timeoff-demo-jordan", actorId: DEMO_STAFF_IDS.james, event: "approved", note: "Coverage confirmed with Casey.", createdAt: jordanDecided },
+    { id: "timeoff-event-demo-taylor-1", agencyId, requestId: "timeoff-demo-taylor", actorId: DEMO_STAFF_IDS.taylor, event: "submitted", note: null, createdAt: taylorCreated },
+  ];
+
+  // Published shifts for the current (Sunday-start) week. Cedar Sunday and
+  // Willow Saturday are deliberately left without shifts, so the coverage
+  // board still shows days to fill.
+  const sundayDate = new Date(`${sunday}T12:00:00Z`);
+  const shift = (
+    slug: string,
+    siteId: string,
+    staffId: string,
+    dayOffset: number,
+    start: string,
+    end: string,
+    title: string,
+    createdBy: string,
+    endDayOffset = dayOffset,
+  ): HrShift => ({
+    id: `shift-demo-${slug}`,
+    agencyId,
+    siteId,
+    staffId,
+    title,
+    startsAt: `${demoDayIso(dayOffset, sundayDate)}T${start}`,
+    endsAt: `${demoDayIso(endDayOffset, sundayDate)}T${end}`,
+    status: "published",
+    notes: null,
+    createdBy,
+  });
+  const day = ["13:00:00.000Z", "21:00:00.000Z"] as const; // 8a–4p Central
+  const shifts: HrShift[] = [
+    shift("cedar-alex-mon", DEMO_CEDAR_ID, DEMO_STAFF_IDS.alex, 1, day[0], day[1], "Day shift", DEMO_STAFF_IDS.sarah),
+    shift("cedar-alex-wed", DEMO_CEDAR_ID, DEMO_STAFF_IDS.alex, 3, day[0], day[1], "Day shift", DEMO_STAFF_IDS.sarah),
+    shift("cedar-alex-fri", DEMO_CEDAR_ID, DEMO_STAFF_IDS.alex, 5, day[0], day[1], "Day shift", DEMO_STAFF_IDS.sarah),
+    shift("cedar-alex-sat", DEMO_CEDAR_ID, DEMO_STAFF_IDS.alex, 6, "12:00:00.000Z", "20:00:00.000Z", "Day shift — community outing", DEMO_STAFF_IDS.sarah),
+    shift("cedar-taylor-tue", DEMO_CEDAR_ID, DEMO_STAFF_IDS.taylor, 2, day[0], day[1], "Day shift", DEMO_STAFF_IDS.sarah),
+    shift("cedar-taylor-thu", DEMO_CEDAR_ID, DEMO_STAFF_IDS.taylor, 4, day[0], day[1], "Day shift", DEMO_STAFF_IDS.sarah),
+    shift("cedar-taylor-sat", DEMO_CEDAR_ID, DEMO_STAFF_IDS.taylor, 6, "20:00:00.000Z", "04:00:00.000Z", "Evening shift", DEMO_STAFF_IDS.sarah, 7),
+    shift("cedar-cameron-wed", DEMO_CEDAR_ID, DEMO_STAFF_IDS.cameron, 3, "14:00:00.000Z", "18:00:00.000Z", "Nurse visit", DEMO_STAFF_IDS.sarah),
+    shift("willow-jordan-mon", DEMO_WILLOW_ID, DEMO_STAFF_IDS.jordan, 1, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+    shift("willow-jordan-wed", DEMO_WILLOW_ID, DEMO_STAFF_IDS.jordan, 3, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+    shift("willow-jordan-thu", DEMO_WILLOW_ID, DEMO_STAFF_IDS.jordan, 4, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+    shift("willow-casey-sun", DEMO_WILLOW_ID, DEMO_STAFF_IDS.casey, 0, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+    shift("willow-casey-tue", DEMO_WILLOW_ID, DEMO_STAFF_IDS.casey, 2, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+    shift("willow-casey-fri", DEMO_WILLOW_ID, DEMO_STAFF_IDS.casey, 5, day[0], day[1], "Day shift", DEMO_STAFF_IDS.james),
+  ];
+
+  return { policies, ledger, timeOff, timeOffEvents, shifts };
+}
+
 type LocalRoot = Record<string, Record<string, LocalBucket>>;
 
 class LocalHrStore implements HrStore {
@@ -3230,6 +3433,24 @@ class LocalHrStore implements HrStore {
     ) {
       this.memory.patterns = seedDemoStaffingPatterns();
       this.memory.staffingSeeded = true;
+      this.save(this.memory);
+    }
+    // One-time fictional hub seed (Earned Time Off policy + ledger, two
+    // time-off requests, this week's published shifts) for the Evergreen
+    // demo agency. Written into every demo bucket: the ledger is read
+    // from the signed-in user's own bucket, while requests and shifts
+    // merge across buckets, so identical ids dedupe cleanly.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoHubSeeded
+    ) {
+      const demo = seedDemoHubData();
+      this.memory.policies.push(...demo.policies);
+      this.memory.ledger.push(...demo.ledger);
+      this.memory.timeOff.push(...demo.timeOff);
+      this.memory.timeOffEvents.push(...demo.timeOffEvents);
+      this.memory.shifts.push(...demo.shifts);
+      this.memory.demoHubSeeded = true;
       this.save(this.memory);
     }
     return this.memory;

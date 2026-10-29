@@ -43,7 +43,25 @@ import {
   type MedInventoryRecord,
 } from "./types";
 import type { Appointment } from "./appointments";
-import type { Medication } from "./chart";
+import type { Medication, MedicationDelivery } from "./chart";
+import type { CarePlan, CareScreeningData, Screening, ScreeningType } from "./careScreening";
+import { emptyCareData } from "./careScreening";
+import type { ConsentRecord } from "./consents";
+import { HEALTH_SCOPE, PACKET_COPY_VERSION, PACKET_ITEMS, type ConsentPacket } from "./consentPackets";
+import type { LifeEventRow } from "./lifeEvents";
+import {
+  centralTodayIso,
+  weekDayIsos,
+  weekStartMondayIso,
+  type MenuEntry,
+} from "./menuRecords";
+import type { MessageParticipantRow, MessageRow, MessageThreadRow } from "./messaging";
+import type {
+  MedDoseException,
+  MedicationOrder,
+  MedicationReconciliation,
+  MedicationReconciliationItem,
+} from "./types";
 
 /** hmChecklist.test.ts assigns this Sunday as an open prior week. Don't occupy it. */
 const CHECKLIST_TEST_WEEK = "2026-09-06";
@@ -52,7 +70,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 3;
+export const SHOWCASE_REVISION = 4;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -71,6 +89,7 @@ export function applyAgencyDemo(db: LocalDatabase): void {
   signTrainingExample(db);
   addQaAudits(db);
   addReeseDelegation(db);
+  addDemoSurfaces(db);
 }
 
 function idOf(db: LocalDatabase, fullName: string): string {
@@ -1202,6 +1221,747 @@ function addReeseDelegation(db: LocalDatabase) {
     discontinueTitle: null,
     delegationForm: form,
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Demo surface data (2026-10-29): fills the newer feature surfaces the
+ * walkthrough above predates — menu records, medication orders and a
+ * reconciliation, med-count baselines, internal messaging, care plans
+ * and screenings, the consent register, and life events — with the same
+ * fictional Evergreen people. Dates are relative to the real "today"
+ * the screens use, so the default views (this week's menu, today's MAR
+ * countdown, recent messages) open populated. Deliberate gaps kept:
+ * Ellis's 8:00 levetiracetam stays unmarked, Morgan's ISP stays a draft
+ * with her one missing shift note, and Morgan's consent register stays
+ * empty — the in-progress packet below is how hers get collected.     */
+
+function addDemoSurfaces(db: LocalDatabase) {
+  addMenuWeeks(db);
+  addMedicationOrders(db);
+  addMessagingThreads(db);
+  addCarePlansAndScreenings(db);
+  addConsentRegister(db);
+  addLifeEvents(db);
+}
+
+function hoursAgo(hours: number): string {
+  return new Date(Date.now() - hours * 3_600_000).toISOString();
+}
+
+/* ------------------------------ Menu ------------------------------ */
+
+const MENU_SLOTS = [
+  { slot: "breakfast", at: "13:20:00.000Z" },
+  { slot: "lunch", at: "17:40:00.000Z" },
+  { slot: "dinner", at: "23:10:00.000Z" },
+  { slot: "snack", at: "20:30:00.000Z" },
+] as const;
+
+const ELLIS_MENU: Record<string, string[]> = {
+  breakfast: [
+    "Scrambled eggs, wheat toast, and orange juice",
+    "Oatmeal with brown sugar, a banana, and milk",
+    "Pancakes with syrup, turkey sausage, and milk",
+    "Cheese omelet, toast, and apple juice",
+    "French toast sticks, yogurt, and mixed fruit",
+    "Biscuits with gravy, scrambled eggs, and juice",
+    "Cold cereal, a boiled egg, toast, and milk",
+  ],
+  lunch: [
+    "Turkey sandwich, tomato soup, and a side salad",
+    "Grilled chicken, rice, and steamed broccoli",
+    "Beef stew with potatoes and carrots, and a roll",
+    "Tuna salad sandwich, chips, and a fruit cup",
+    "Spaghetti with meat sauce, green beans, and garlic bread",
+    "Chicken quesadilla, corn, and applesauce",
+    "Ham and cheese sandwich, vegetable soup, and crackers",
+  ],
+  dinner: [
+    "Baked chicken, mashed potatoes, and peas",
+    "Meatloaf, macaroni and cheese, and green beans",
+    "Salmon patty, rice pilaf, and mixed vegetables",
+    "Chicken Alfredo pasta, broccoli, and a roll",
+    "Beef tacos with lettuce and tomato, and Spanish rice",
+    "Pork chop, a baked potato, and corn",
+    "Chicken and vegetable stir fry with rice",
+  ],
+  snack: [
+    "Apple slices with peanut butter",
+    "A yogurt cup and graham crackers",
+    "A cheese stick and crackers",
+    "A banana and a granola bar",
+    "A mixed fruit cup",
+    "Popcorn and juice",
+    "Cottage cheese with peaches",
+  ],
+};
+
+/** Reese eats a texture-modified diet alongside her bolus feedings. */
+const REESE_MENU: Record<string, string[]> = {
+  breakfast: [
+    "Enteral formula bolus; pureed oatmeal with cinnamon",
+    "Enteral formula bolus; pureed scrambled egg and applesauce",
+    "Enteral formula bolus; cream of wheat and pureed peaches",
+  ],
+  lunch: [
+    "Enteral formula bolus; pureed chicken and sweet potato by mouth",
+    "Enteral formula bolus; texture-modified turkey and mashed potato",
+    "Enteral formula bolus; pureed beef stew, strained",
+  ],
+  dinner: [
+    "Enteral formula bolus; texture-modified meatloaf and mashed potato",
+    "Enteral formula bolus; pureed chicken, carrots, and gravy",
+    "Enteral formula bolus; texture-modified pasta with meat sauce",
+  ],
+  snack: [
+    "Enteral formula bolus; an applesauce pouch",
+    "Enteral formula bolus; pureed fruit cup",
+    "Enteral formula bolus; yogurt, thinned",
+  ],
+};
+
+function addMenuWeeks(db: LocalDatabase) {
+  db.menuEntries ??= [];
+  const today = centralTodayIso();
+  const monday = weekStartMondayIso(today);
+  // The full previous week, plus the current week through today — the two
+  // weeks the menu screen opens on, with no meals recorded in the future.
+  const dates = [
+    ...weekDayIsos(addDaysIso(monday, -7)),
+    ...weekDayIsos(monday).filter((date) => date <= today),
+  ];
+  const people: Array<{
+    name: string;
+    house: string;
+    staff: [string, string];
+    menu: Record<string, string[]>;
+  }> = [
+    { name: "Ellis Hart", house: "Cedar House", staff: ["Alex Morgan", "Taylor Reed"], menu: ELLIS_MENU },
+    { name: "Reese Lang", house: "Willow House", staff: ["Jordan Lee", "Casey Adams"], menu: REESE_MENU },
+  ];
+  for (const person of people) {
+    const individualId = idOf(db, person.name);
+    const site = siteId(db, person.house);
+    dates.forEach((entryDate, dayIndex) => {
+      const recorderName = person.staff[dayIndex % 2];
+      const recorder = userId(db, recorderName);
+      for (const { slot, at } of MENU_SLOTS) {
+        const id = `menu-showcase-${slug(person.name)}-${entryDate}-${slot}`;
+        if (db.menuEntries!.some((row) => row.id === id)) continue;
+        const choices = person.menu[slot];
+        let amountEaten: MenuEntry["amountEaten"] = "all";
+        let note = "";
+        if (person.name === "Reese Lang") {
+          amountEaten = dayIndex % 3 === 2 ? "some" : "most";
+          if (slot === "lunch" && dayIndex % 4 === 1) {
+            note = "Took the oral portion slowly; the bolus followed, per the feeding plan.";
+          }
+        } else if ((dayIndex * 4 + MENU_SLOTS.findIndex((s) => s.slot === slot)) % 9 === 4) {
+          amountEaten = "some";
+        }
+        if (person.name === "Ellis Hart" && slot === "dinner" && entryDate === addDaysIso(today, -2)) {
+          amountEaten = "none";
+          note = "Said he was not hungry at dinner. Offered a snack later and he ate half of it.";
+        }
+        const stamp = `${entryDate}T${at}`;
+        db.menuEntries!.push({
+          id,
+          agencyId: agencyId(db),
+          siteId: site,
+          individualId,
+          entryDate,
+          mealSlot: slot,
+          foodText: choices[dayIndex % choices.length],
+          amountEaten,
+          note,
+          recordedBy: recorder,
+          recordedByName: recorderName,
+          recordedByRole: "dsp",
+          createdAt: stamp,
+          updatedAt: stamp,
+          deletedAt: null,
+          voidedBy: null,
+          voidReason: "",
+        });
+      }
+    });
+  }
+}
+
+/* ------------------- Medication orders + counts ------------------- */
+
+function addMedicationOrders(db: LocalDatabase) {
+  const today = todayIso();
+  const yesterday = addDaysIso(today, -1);
+  const nurse = userId(db, "Cameron Price");
+  const ellis = idOf(db, "Ellis Hart");
+  const morgan = idOf(db, "Morgan Pruitt");
+  const reese = idOf(db, "Reese Lang");
+  const harper = idOf(db, "Harper Soto");
+  db.medicationOrders ??= [];
+  const specs: Array<{
+    slug: string;
+    individualId: string;
+    medicationId: string;
+    medicationName: string;
+    dose: string;
+    schedule: string;
+    scheduleTimes: string[];
+    prescriberName: string;
+    reason: string;
+    startDate: string;
+    reviewInDays: number;
+  }> = [
+    {
+      slug: "levetiracetam", individualId: ellis, medicationId: `${ellis}-med-keppra`,
+      medicationName: "Levetiracetam", dose: "500 mg", schedule: "BID",
+      scheduleTimes: ["08:00", "20:00"], prescriberName: "Dr. Priya Shah",
+      reason: "Seizure control", startDate: "2026-01-05", reviewInDays: 150,
+    },
+    {
+      slug: "sertraline", individualId: morgan, medicationId: `${morgan}-med-sertraline`,
+      medicationName: "Sertraline", dose: "50 mg", schedule: "Daily",
+      scheduleTimes: ["08:00"], prescriberName: "Dr. Helen Cho",
+      reason: "Mood and anxiety", startDate: "2026-02-15", reviewInDays: 120,
+    },
+    {
+      slug: "omeprazole", individualId: reese, medicationId: `${reese}-med-omeprazole`,
+      medicationName: "Omeprazole", dose: "20 mg", schedule: "Daily",
+      scheduleTimes: ["08:00"], prescriberName: "Dr. Omar Haddad",
+      reason: "Reflux protection with enteral feeding", startDate: "2026-01-20", reviewInDays: 90,
+    },
+    {
+      slug: "lisinopril", individualId: harper, medicationId: `${harper}-med-lisinopril`,
+      medicationName: "Lisinopril", dose: "10 mg", schedule: "Daily",
+      scheduleTimes: ["08:00"], prescriberName: "Dr. Grace Ibarra",
+      reason: "Blood pressure control", startDate: "2026-03-03", reviewInDays: 60,
+    },
+  ];
+  for (const spec of specs) {
+    const id = `order-showcase-${spec.slug}`;
+    if (db.medicationOrders.some((row) => row.id === id)) continue;
+    const order: MedicationOrder = {
+      id,
+      agencyId: agencyId(db),
+      individualId: spec.individualId,
+      medicationName: spec.medicationName,
+      dose: spec.dose,
+      route: "Oral",
+      schedule: spec.schedule,
+      scheduleTimes: spec.scheduleTimes,
+      isPrn: false,
+      startDate: spec.startDate,
+      endReviewDate: addDaysIso(today, spec.reviewInDays),
+      prescriberName: spec.prescriberName,
+      reason: spec.reason,
+      status: "active",
+      medicationId: spec.medicationId,
+      createdBy: nurse,
+      createdByName: "Cameron Price",
+      activatedBy: nurse,
+      activatedByName: "Cameron Price",
+      activatedAt: `${spec.startDate}T15:00:00.000Z`,
+      discontinuedBy: null,
+      discontinuedByName: "",
+      discontinuedAt: null,
+      discontinueReason: "",
+      createdAt: `${spec.startDate}T14:00:00.000Z`,
+      updatedAt: `${spec.startDate}T15:00:00.000Z`,
+    };
+    db.medicationOrders.push(order);
+  }
+
+  // One completed reconciliation: Morgan's list checked against the
+  // hospital discharge list after a prescriber change.
+  db.medicationReconciliations ??= [];
+  db.medicationReconciliationItems ??= [];
+  const recId = "rec-showcase-morgan";
+  if (!db.medicationReconciliations.some((row) => row.id === recId)) {
+    const day = addDaysIso(today, -5);
+    const reconciliation: MedicationReconciliation = {
+      id: recId,
+      agencyId: agencyId(db),
+      individualId: morgan,
+      trigger: "order_change",
+      status: "completed",
+      startedBy: nurse,
+      startedByName: "Cameron Price",
+      startedAt: `${day}T16:00:00.000Z`,
+      signedOffBy: nurse,
+      signedOffByName: "Cameron Price",
+      signedOffAt: `${day}T16:25:00.000Z`,
+      signOffNote: "Compared against the discharge list with Dr. Cho's office; one item clarified below.",
+      createdAt: `${day}T16:00:00.000Z`,
+      updatedAt: `${day}T16:25:00.000Z`,
+    };
+    db.medicationReconciliations.push(reconciliation);
+    const items: MedicationReconciliationItem[] = [
+      {
+        id: `${recId}-sertraline`, agencyId: agencyId(db), reconciliationId: recId,
+        orderId: "order-showcase-sertraline", medicationId: `${morgan}-med-sertraline`,
+        medicationLabel: "Sertraline 50 mg tablet — Daily", decision: "continue",
+        discrepancy: false, note: "",
+        createdAt: `${day}T16:05:00.000Z`, updatedAt: `${day}T16:05:00.000Z`,
+      },
+      {
+        id: `${recId}-melatonin`, agencyId: agencyId(db), reconciliationId: recId,
+        orderId: null, medicationId: `${morgan}-med-melatonin`,
+        medicationLabel: "Melatonin 3 mg tablet — PRN at bedtime", decision: "continue",
+        discrepancy: false, note: "Still used most nights.",
+        createdAt: `${day}T16:08:00.000Z`, updatedAt: `${day}T16:08:00.000Z`,
+      },
+      {
+        id: `${recId}-vitamin-d`, agencyId: agencyId(db), reconciliationId: recId,
+        orderId: null, medicationId: null,
+        medicationLabel: "Vitamin D3 1000 IU (hospital discharge list)", decision: "stop",
+        discrepancy: true,
+        note: "Appeared on the discharge list only; Dr. Cho's office confirmed it is not a home medication.",
+        createdAt: `${day}T16:12:00.000Z`, updatedAt: `${day}T16:12:00.000Z`,
+      },
+    ];
+    db.medicationReconciliationItems.push(...items);
+  }
+
+  // Med-count baselines: the newest count for each med anchors the MAR
+  // supply countdown. Pill counts are set so the doses already marked
+  // Given after each count land exactly on the chart's maintained count.
+  const deliveries: MedicationDelivery[] = [
+    {
+      id: "md-showcase-levetiracetam", medicationId: `${ellis}-med-keppra`,
+      countedOn: yesterday, countedAt: `${yesterday}T13:05:00.000Z`,
+      remainingPills: 28, pillsPerDay: 2, recordedBy: nurse,
+    },
+    {
+      id: "md-showcase-oxycodone", medicationId: `${ellis}-med-oxycodone`,
+      countedOn: today, countedAt: `${today}T13:30:00.000Z`,
+      remainingPills: 17, pillsPerDay: 2, recordedBy: userId(db, "Alex Morgan"),
+    },
+    {
+      id: "md-showcase-sertraline", medicationId: `${morgan}-med-sertraline`,
+      countedOn: addDaysIso(today, -2), countedAt: `${addDaysIso(today, -2)}T13:05:00.000Z`,
+      remainingPills: 29, pillsPerDay: 1, recordedBy: nurse,
+    },
+    {
+      id: "md-showcase-lisinopril", medicationId: `${harper}-med-lisinopril`,
+      countedOn: yesterday, countedAt: `${yesterday}T13:05:00.000Z`,
+      remainingPills: 31, pillsPerDay: 1, recordedBy: userId(db, "Jordan Lee"),
+    },
+  ];
+  for (const delivery of deliveries) {
+    if (!db.medicationDeliveries.some((row) => row.id === delivery.id)) {
+      db.medicationDeliveries.push(delivery);
+    }
+  }
+
+  // One held dose with its reason, on yesterday's MAR pass.
+  const exception: MedDoseException = {
+    id: "mde-showcase-lisinopril-held",
+    agencyId: agencyId(db),
+    individualId: harper,
+    medicationId: `${harper}-med-lisinopril`,
+    occurredOn: yesterday,
+    kind: "held",
+    pillsAffected: 1,
+    reason:
+      "Morning blood pressure was 98/62 before the dose, so it was held per prescriber guidance. Cameron Price (RN) was notified and a recheck was scheduled for the afternoon.",
+    createdBy: userId(db, "Jordan Lee"),
+    createdAt: `${yesterday}T13:20:00.000Z`,
+  };
+  if (!db.medDoseExceptions.some((row) => row.id === exception.id)) {
+    db.medDoseExceptions.push(exception);
+  }
+}
+
+/* ---------------------------- Messaging ---------------------------- */
+
+function addMessagingThreads(db: LocalDatabase) {
+  db.messageThreads ??= [];
+  db.messageParticipants ??= [];
+  db.messages ??= [];
+  const sarah = userId(db, "Sarah Mitchell");
+  const taylor = userId(db, "Taylor Reed");
+  const jordan = userId(db, "Jordan Lee");
+  const casey = userId(db, "Casey Adams");
+  const harper = idOf(db, "Harper Soto");
+  const agency = agencyId(db);
+
+  const threads: Array<{
+    thread: MessageThreadRow;
+    participants: Array<{ userId: string; lastReadAt: string | null }>;
+    messages: Array<{ senderId: string; body: string; at: string }>;
+  }> = [
+    {
+      thread: {
+        id: "thread-showcase-cedar-coverage", agencyId: agency, subject: "Saturday coverage at Cedar House",
+        individualId: null, createdBy: taylor, createdAt: hoursAgo(30), lastMessageAt: hoursAgo(26),
+      },
+      participants: [
+        { userId: taylor, lastReadAt: hoursAgo(25) },
+        { userId: sarah, lastReadAt: hoursAgo(25) },
+      ],
+      messages: [
+        { senderId: taylor, body: "Saturday — I can come in at 3 if that helps. I know Ellis has his community outing at 1.", at: hoursAgo(30) },
+        { senderId: sarah, body: "That helps, thank you. Alex stays with Ellis for the outing and finishes at 3, then you take 3 to 11. I put both on the coverage board.", at: hoursAgo(28) },
+        { senderId: taylor, body: "Works for me — see you Saturday.", at: hoursAgo(26) },
+      ],
+    },
+    {
+      thread: {
+        id: "thread-showcase-harper-bp", agencyId: agency, subject: "Harper Soto — morning blood pressure recheck",
+        individualId: harper, createdBy: jordan, createdAt: hoursAgo(5), lastMessageAt: hoursAgo(1),
+      },
+      participants: [
+        { userId: jordan, lastReadAt: hoursAgo(0.5) },
+        { userId: casey, lastReadAt: hoursAgo(0.5) },
+        // Sarah has read Jordan's report but not Casey's reply: one unread.
+        { userId: sarah, lastReadAt: hoursAgo(4.5) },
+      ],
+      messages: [
+        { senderId: jordan, body: "Harper's morning reading was 104/68 before her dose — better than yesterday. The recheck is on the chart for 2 p.m.", at: hoursAgo(5) },
+        { senderId: casey, body: "I will do the 2 p.m. recheck and put the reading in her chart. Sarah — flagging you here so you see the trend too.", at: hoursAgo(1) },
+      ],
+    },
+  ];
+  for (const spec of threads) {
+    if (!db.messageThreads.some((row) => row.id === spec.thread.id)) {
+      db.messageThreads.push(spec.thread);
+    }
+    for (const participant of spec.participants) {
+      if (db.messageParticipants.some((row) => row.threadId === spec.thread.id && row.userId === participant.userId)) continue;
+      const row: MessageParticipantRow = {
+        threadId: spec.thread.id,
+        agencyId: agency,
+        userId: participant.userId,
+        addedBy: sarah,
+        addedAt: spec.thread.createdAt,
+        lastReadAt: participant.lastReadAt,
+        hiddenAt: null,
+      };
+      db.messageParticipants.push(row);
+    }
+    spec.messages.forEach((message, index) => {
+      const id = `${spec.thread.id}-msg-${index + 1}`;
+      if (db.messages!.some((row) => row.id === id)) return;
+      const row: MessageRow = {
+        id,
+        threadId: spec.thread.id,
+        agencyId: agency,
+        senderId: message.senderId,
+        kind: "user",
+        body: message.body,
+        createdAt: message.at,
+      };
+      db.messages!.push(row);
+    });
+  }
+}
+
+/* --------------------- Care plans + screenings --------------------- */
+
+function addCarePlansAndScreenings(db: LocalDatabase) {
+  const today = todayIso();
+  const sarah = userId(db, "Sarah Mitchell");
+  const james = userId(db, "James Wilson");
+  const nurse = userId(db, "Cameron Price");
+  const jordan = userId(db, "Jordan Lee");
+  const casey = userId(db, "Casey Adams");
+  const reese = idOf(db, "Reese Lang");
+  const harper = idOf(db, "Harper Soto");
+  const agency = agencyId(db);
+  const data: CareScreeningData = db.careScreening ?? emptyCareData();
+  db.careScreening = data;
+
+  const types: ScreeningType[] = [
+    { id: "stype-showcase-fall", agency_id: agency, name: "Fall risk assessment", due_soon_days: 30, enabled: true },
+    { id: "stype-showcase-depression", agency_id: agency, name: "Depression screening (PHQ-2)", due_soon_days: 30, enabled: true },
+    { id: "stype-showcase-skin", agency_id: agency, name: "Skin integrity check", due_soon_days: 14, enabled: true },
+  ];
+  for (const type of types) {
+    if (!data.types.some((row) => row.id === type.id)) data.types.push(type);
+  }
+
+  const plans: CarePlan[] = [
+    {
+      id: "care-showcase-reese",
+      agency_id: agency,
+      individual_id: reese,
+      title: "Enteral feeding and reflux precautions",
+      items: [
+        {
+          need: "Gastrostomy tube feeding — bolus feeds must follow the prescribed volume and pace.",
+          goal: "Take every bolus comfortably with no signs of reflux or aspiration.",
+          interventions:
+            "Give bolus feedings at the prescribed volume over 20 minutes; keep Reese upright during the feed and for 30 minutes after; stop and call the nurse if coughing, wet breathing, or tube-site changes appear. Latex-free supplies only.",
+          roles: ["dsp", "nurse"],
+          review_on: addDaysIso(today, 60),
+        },
+        {
+          need: "Texture-modified diet for anything taken by mouth.",
+          goal: "Enjoy oral tastes safely alongside the bolus plan.",
+          interventions:
+            "Offer only the texture-modified foods on the menu record; stay within arm's reach while Reese eats; complete oral care after meals.",
+          roles: ["dsp"],
+          review_on: addDaysIso(today, 60),
+        },
+      ],
+      status: "active",
+      previous_id: null,
+      created_by: nurse,
+      created_at: "2026-02-02T15:00:00.000Z",
+      approved_by: sarah,
+      approved_at: "2026-02-03T15:00:00.000Z",
+      retired_at: null,
+    },
+    {
+      id: "care-showcase-harper",
+      agency_id: agency,
+      individual_id: harper,
+      title: "Blood pressure and safe mobility",
+      items: [
+        {
+          need: "Hypertension — a morning blood pressure check comes before medication.",
+          goal: "Keep morning readings in the range Dr. Ibarra set.",
+          interventions:
+            "Check blood pressure before the morning dose; hold the dose and call the nurse if the top number is under 100; record the reading in the chart.",
+          roles: ["dsp", "nurse"],
+          review_on: addDaysIso(today, 45),
+        },
+        {
+          need: "Uses a shower chair and standby help for transfers.",
+          goal: "Shower with standby help only.",
+          interventions:
+            "Set up the shower chair before every shower; stay within hearing; report any dizziness the same shift.",
+          roles: ["dsp"],
+          review_on: addDaysIso(today, 45),
+        },
+      ],
+      status: "active",
+      previous_id: null,
+      created_by: james,
+      created_at: "2026-03-04T15:00:00.000Z",
+      approved_by: sarah,
+      approved_at: "2026-03-05T15:00:00.000Z",
+      retired_at: null,
+    },
+  ];
+  for (const plan of plans) {
+    if (!data.plans.some((row) => row.id === plan.id)) data.plans.push(plan);
+  }
+  const acks = [
+    { plan_id: "care-showcase-reese", user_id: jordan, acknowledged_at: "2026-02-04T14:00:00.000Z" },
+    { plan_id: "care-showcase-reese", user_id: casey, acknowledged_at: "2026-02-04T14:30:00.000Z" },
+    { plan_id: "care-showcase-harper", user_id: jordan, acknowledged_at: "2026-03-06T14:00:00.000Z" },
+  ];
+  for (const ack of acks) {
+    if (!data.acknowledgements.some((row) => row.plan_id === ack.plan_id && row.user_id === ack.user_id)) {
+      data.acknowledgements.push(ack);
+    }
+  }
+
+  const screenings: Screening[] = [
+    {
+      id: "screen-showcase-reese-fall", agency_id: agency, individual_id: reese,
+      type_id: "stype-showcase-fall",
+      last_completed_on: addDaysIso(today, -12), due_on: addDaysIso(today, 353),
+      completed_on: addDaysIso(today, -12),
+      result_note: "Low risk — transfers are steady with standby help.",
+      follow_up: "",
+    },
+    {
+      id: "screen-showcase-reese-skin", agency_id: agency, individual_id: reese,
+      type_id: "stype-showcase-skin",
+      last_completed_on: addDaysIso(today, -3), due_on: addDaysIso(today, 11),
+      completed_on: addDaysIso(today, -3),
+      result_note: "Skin intact, including around the tube site; barrier cream in place.",
+      follow_up: "",
+    },
+    {
+      id: "screen-showcase-harper-depression", agency_id: agency, individual_id: harper,
+      type_id: "stype-showcase-depression",
+      last_completed_on: addDaysIso(today, -170), due_on: addDaysIso(today, 10),
+      completed_on: addDaysIso(today, -170),
+      result_note: "Score 0 — no concerns at the last screening.",
+      follow_up: "",
+    },
+    {
+      id: "screen-showcase-harper-fall", agency_id: agency, individual_id: harper,
+      type_id: "stype-showcase-fall",
+      last_completed_on: addDaysIso(today, -360), due_on: addDaysIso(today, 5),
+      completed_on: addDaysIso(today, -360),
+      result_note: "Moderate risk at the last assessment — shower chair and standby help in place.",
+      follow_up: "Reassess at the next nursing visit.",
+    },
+  ];
+  for (const screening of screenings) {
+    if (!data.screenings.some((row) => row.id === screening.id)) data.screenings.push(screening);
+  }
+}
+
+/* ----------------------------- Consents ----------------------------- */
+
+function addConsentRegister(db: LocalDatabase) {
+  const today = todayIso();
+  const sarah = userId(db, "Sarah Mitchell");
+  const ellis = idOf(db, "Ellis Hart");
+  const reese = idOf(db, "Reese Lang");
+  const harper = idOf(db, "Harper Soto");
+  const morgan = idOf(db, "Morgan Pruitt");
+  const agency = agencyId(db);
+  db.consents ??= [];
+  db.consentRevocations ??= [];
+
+  const make = (
+    individualId: string,
+    typeId: string,
+    covers: string,
+    giver: ConsentRecord["giver"],
+    giverName: string,
+    relationship: string,
+    signedOn: string,
+    reviewOn: string,
+    outcome?: string,
+  ): ConsentRecord => ({
+    id: `consent-showcase-${individualId.slice(-4)}-${typeId}`,
+    agencyId: agency,
+    individualId,
+    typeId,
+    covers,
+    giver,
+    giverName,
+    relationship,
+    ...(outcome ? { outcome } : {}),
+    signedOn,
+    effectiveOn: signedOn,
+    reviewOn,
+    supersedesId: null,
+    createdBy: sarah,
+    createdAt: `${signedOn}T15:00:00.000Z`,
+    activatedBy: sarah,
+    activatedAt: `${signedOn}T15:05:00.000Z`,
+  });
+
+  const records: ConsentRecord[] = [
+    // Ellis Hart — signed by his sister Dana at the January plan meeting.
+    make(ellis, "service", "Residential services at Cedar House", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    make(ellis, "medication", "All medications on the current MAR", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    make(ellis, "information", "Health information exchange with treating providers", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    make(ellis, "emergency", "Emergency medical care when the representative cannot be reached", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    make(ellis, "rights", "Individual rights and grievance process acknowledgement", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    make(ellis, "outings", "Supported community activities with staff", "representative", "Dana Hart", "Sibling", "2026-01-12", "2027-01-12"),
+    // Ellis's media release is the one consent in its review window.
+    make(ellis, "media", "Photographs and video for agency recreation and promotion", "representative", "Dana Hart", "Sibling", addDaysIso(today, -349), addDaysIso(today, 16), "group"),
+    // Harper Soto — signed by her brother Luis in March.
+    make(harper, "service", "Residential services at Willow House", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "medication", "All medications on the current MAR", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "information", "Health information exchange with treating providers", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "emergency", "Emergency medical care when the representative cannot be reached", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "rights", "Individual rights and grievance process acknowledgement", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "photograph", "Identification and recreation photographs", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "outings", "Supported community activities with staff", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02"),
+    make(harper, "media", "Photographs and video for agency recreation and promotion", "representative", "Luis Soto", "Sibling", "2026-03-02", "2027-03-02", "group"),
+    // Reese Lang — signed by her guardian Pat; the rest are still to collect.
+    make(reese, "service", "Residential services at Willow House", "guardian", "Pat Lang", "Guardian", "2026-01-19", "2027-01-19"),
+    make(reese, "medication", "All medications on the current MAR, including enteral feeding support", "guardian", "Pat Lang", "Guardian", "2026-01-19", "2027-01-19"),
+    make(reese, "emergency", "Emergency medical care when the guardian cannot be reached", "guardian", "Pat Lang", "Guardian", "2026-01-19", "2027-01-19"),
+  ];
+  for (const record of records) {
+    if (!db.consents.some((row) => row.id === record.id)) db.consents.push(record);
+  }
+
+  // One packet in progress: Morgan's annual packet, sent to her mother
+  // Robin two days ago and awaiting signature.
+  db.consentPackets ??= [];
+  db.consentPacketAudit ??= [];
+  const packetId = "packet-showcase-morgan";
+  if (!db.consentPackets.some((row) => row.id === packetId)) {
+    const packet: ConsentPacket = {
+      id: packetId,
+      agencyId: agency,
+      individualId: morgan,
+      createdBy: sarah,
+      createdAt: hoursAgo(52),
+      snapshot: {
+        individualName: "Morgan Pruitt",
+        agencyName: db.agencies[0]?.name ?? "Evergreen Care",
+        signerName: "Robin Pruitt",
+        effectiveOn: addDaysIso(today, 1),
+        reviewOn: addDaysIso(today, 366),
+        copyVersion: PACKET_COPY_VERSION,
+        items: structuredClone(PACKET_ITEMS),
+        healthScope: [...HEALTH_SCOPE],
+      },
+      status: "sent",
+      generatedAt: hoursAgo(51),
+      sentAt: hoursAgo(50),
+      openedAt: null,
+      signedAt: null,
+      filedAt: null,
+      linkExpiresAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+      outstandingAfterDays: 3,
+      choices: null,
+      signer: null,
+      evidenceName: null,
+    };
+    db.consentPackets.push(packet);
+    db.consentPacketAudit.push(
+      { packetId, event: "draft", at: hoursAgo(52) },
+      { packetId, event: "generated", at: hoursAgo(51) },
+      { packetId, event: "sent", at: hoursAgo(50) },
+    );
+  }
+}
+
+/* ---------------------------- Life events ---------------------------- */
+
+function addLifeEvents(db: LocalDatabase) {
+  const today = todayIso();
+  const james = userId(db, "James Wilson");
+  const jordan = userId(db, "Jordan Lee");
+  const willow = siteId(db, "Willow House");
+  const harper = idOf(db, "Harper Soto");
+  const reese = idOf(db, "Reese Lang");
+  db.lifeEvents ??= [];
+  const events: LifeEventRow[] = [
+    {
+      id: "life-showcase-harper-move-in", agencyId: agencyId(db), siteId: willow, individualId: harper,
+      eventDate: "2025-03-01", category: "admission_move_in",
+      title: "Moved into Willow House",
+      note: "Admitted from a family home setting. Her brother Luis Soto is the emergency contact.",
+      relatedGerId: null, recordedBy: james,
+      createdAt: "2025-03-01T20:00:00.000Z", updatedBy: null, updatedAt: null,
+      voidedBy: null, voidedAt: null, voidReason: null,
+    },
+    {
+      id: "life-showcase-harper-er", agencyId: agencyId(db), siteId: willow, individualId: harper,
+      eventDate: addDaysIso(today, -42), category: "hospital_er_stay",
+      title: "Emergency department visit for dizziness",
+      note: "Evaluated the same evening and discharged home. Her blood pressure medication was reviewed, and staff were told to log morning readings before the dose.",
+      relatedGerId: null, recordedBy: james,
+      createdAt: `${addDaysIso(today, -42)}T20:00:00.000Z`, updatedBy: null, updatedAt: null,
+      voidedBy: null, voidedAt: null, voidReason: null,
+    },
+    {
+      id: "life-showcase-harper-volunteer", agencyId: agencyId(db), siteId: willow, individualId: harper,
+      eventDate: addDaysIso(today, -13), category: "milestone",
+      title: "Started a Tuesday volunteer shift at the public library",
+      note: "Two hours each Tuesday, with job-coach support for the first month.",
+      relatedGerId: null, recordedBy: jordan,
+      createdAt: `${addDaysIso(today, -13)}T20:00:00.000Z`, updatedBy: null, updatedAt: null,
+      voidedBy: null, voidedAt: null, voidReason: null,
+    },
+    {
+      id: "life-showcase-reese-program", agencyId: agencyId(db), siteId: willow, individualId: reese,
+      eventDate: addDaysIso(today, -30), category: "day_program_change",
+      title: "Began a weekday program at the Columbia Activity Center",
+      note: "Attends Monday to Friday; the van pickup moved to 8:15 a.m.",
+      relatedGerId: null, recordedBy: jordan,
+      createdAt: `${addDaysIso(today, -30)}T20:00:00.000Z`, updatedBy: null, updatedAt: null,
+      voidedBy: null, voidedAt: null, voidReason: null,
+    },
+  ];
+  for (const event of events) {
+    if (!db.lifeEvents.some((row) => row.id === event.id)) db.lifeEvents.push(event);
+  }
 }
 
 function slug(value: string): string {
