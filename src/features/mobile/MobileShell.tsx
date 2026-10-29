@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bell,
   CalendarDays,
   ChevronDown,
   ClipboardList,
   Clock,
   FileText,
+  Home,
+  LayoutGrid,
   ListChecks,
   ListTodo,
   LogOut,
@@ -20,7 +23,16 @@ import type { ComplyraApi, WorkspaceView } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import type { PersonalWorkItem } from "../../data/dashboard";
 import { pageVisible, roleLabel } from "../../data/status";
+import {
+  isUnread,
+  type NotificationRow,
+} from "../notifications/notify";
 import { mobileTiles, type MobileTileId } from "./tiles";
+import { bottomNavItems, moreSheetTiles, type BottomNavId } from "./bottomNav";
+import { centralHour, greetingForHour, type TrackingCategoryId } from "./today";
+import { formatCentralTime } from "./mar";
+import { useTodayTracking } from "./useTodayTracking";
+import MobileToday from "./MobileToday";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileIsp from "./MobileIsp";
@@ -35,7 +47,8 @@ type ShellView =
   | "isp"
   | "notes"
   | "tasks"
-  | "people";
+  | "people"
+  | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medications: Pill,
@@ -49,6 +62,14 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medCount: Package,
 };
 
+const NAV_ICONS: Record<BottomNavId, LucideIcon> = {
+  home: Home,
+  tasks: ListTodo,
+  meds: Pill,
+  people: Users,
+  more: LayoutGrid,
+};
+
 const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   sites: "Select your home",
   mar: "Medications",
@@ -56,6 +77,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   notes: "Shift Notes",
   tasks: "My Tasks",
   people: "Individuals",
+  notifications: "Notifications",
 };
 
 const TONE_LABELS: Record<PersonalWorkItem["tone"], string> = {
@@ -66,6 +88,13 @@ const TONE_LABELS: Record<PersonalWorkItem["tone"], string> = {
 
 function siteStorageKey(userId: string) {
   return `complyrer.mobileSite.${userId}`;
+}
+
+function initialsOf(fullName: string) {
+  const parts = fullName.trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return `${first}${last}`.toUpperCase();
 }
 
 export default function MobileShell({
@@ -107,6 +136,10 @@ export default function MobileShell({
   const [siteQuery, setSiteQuery] = useState("");
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
   const [ispKey, setIspKey] = useState(0);
+  const [ispFormActive, setIspFormActive] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
 
   const tiles = useMemo(
     () =>
@@ -117,6 +150,8 @@ export default function MobileShell({
       }),
     [session],
   );
+  const navItems = useMemo(() => bottomNavItems(tiles), [tiles]);
+  const sheetTiles = useMemo(() => moreSheetTiles(tiles), [tiles]);
 
   const people = useMemo(
     () =>
@@ -127,6 +162,58 @@ export default function MobileShell({
         : [],
     [workspace.individuals, scopedSite],
   );
+
+  // Returning to the home view bumps the tracking refresh key exactly
+  // once per return, so doses and entries recorded in the MAR/ISP flows
+  // are reflected on the donut, Up next, and the greeting summary
+  // without a page reload. No polling — a return is the only trigger.
+  const [homeRefreshKey, setHomeRefreshKey] = useState(0);
+  const previousView = useRef(view);
+  useEffect(() => {
+    if (previousView.current !== "home" && view === "home") {
+      setHomeRefreshKey((key) => key + 1);
+    }
+    previousView.current = view;
+  }, [view]);
+
+  const tracking = useTodayTracking({
+    api,
+    session,
+    siteId: scopedSite?.id ?? null,
+    people,
+    canChecklist: pageVisible(session, "Weekly checklist"),
+    refreshKey: homeRefreshKey,
+  });
+
+  const refreshNotifications = useCallback(async () => {
+    try {
+      setNotifRows(await api.listNotifications());
+    } catch {
+      // The badge simply stays at its last known count.
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void refreshNotifications();
+  }, [refreshNotifications]);
+
+  const unreadCount = notifRows.filter(isUnread).length;
+
+  const markNotificationsRead = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setNotifRows((rows) =>
+      rows.map((row) =>
+        ids.includes(row.id) && isUnread(row)
+          ? { ...row, read_at: new Date().toISOString() }
+          : row,
+      ),
+    );
+    try {
+      await api.markNotificationsRead(ids);
+    } catch {
+      void refreshNotifications();
+    }
+  };
 
   const filteredSites = useMemo(() => {
     const q = siteQuery.trim().toLowerCase();
@@ -188,27 +275,155 @@ export default function MobileShell({
     setView("isp");
   };
 
+  const openCategory = (id: TrackingCategoryId) => {
+    if (id === "medications") setView("mar");
+    else if (id === "ispData") openTile("ispData");
+    else if (id === "shiftNotes") setView("notes");
+    else if (id === "checklists") nav.openPage("Weekly checklist");
+  };
+
+  const openQueueItem = (item: PersonalWorkItem) => {
+    if (item.personName) nav.openPersonChart(item.personName);
+    else nav.openPage("Overview");
+  };
+
+  const goNav = (id: BottomNavId) => {
+    if (id === "more") {
+      setSheetOpen(true);
+      return;
+    }
+    if (id === "home") setView("home");
+    else if (id === "tasks") setView("tasks");
+    else if (id === "meds") setView("mar");
+    else if (id === "people") setView("people");
+  };
+
+  const activeNav: BottomNavId | null =
+    view === "home"
+      ? "home"
+      : view === "tasks"
+        ? "tasks"
+        : view === "people"
+          ? "people"
+          : null;
+
+  // The pill shows on the home and list-level screens. It hides on the
+  // home picker, in the MAR flow (the MAR's own Scheduled/PRN/Other bar
+  // owns the bottom there), on the notifications surface, and while the
+  // ISP entry form is open — never two bars stacked.
+  const showBottomNav =
+    view === "home" ||
+    view === "tasks" ||
+    view === "people" ||
+    view === "notes" ||
+    (view === "isp" && !ispFormActive);
+
+  const greeting = greetingForHour(centralHour());
+  const firstName = session.fullName.split(" ")[0];
+  const summaryParts: string[] = [];
+  if (!tracking.loading && tracking.medsLeft !== null) {
+    summaryParts.push(
+      tracking.medsLeft > 0
+        ? `${tracking.medsLeft} med dose${tracking.medsLeft === 1 ? "" : "s"} left to record`
+        : "All med doses recorded",
+    );
+  }
+  if (queueItems.length > 0) {
+    summaryParts.push(
+      `${queueItems.length} task${queueItems.length === 1 ? "" : "s"} due for you`,
+    );
+  }
+
   return (
     <div className="msh-shell">
       <header className="msh-header">
-        <ComplyRerWordmark size={28} />
+        <div className="msh-brand">
+          <ComplyRerWordmark size={26} />
+          {scopedSite && (
+            <span className="msh-brand-home">• {scopedSite.name}</span>
+          )}
+        </div>
         <div className="msh-header-actions">
           <button
             type="button"
-            className="msh-header-button"
-            onClick={onDesktopView}
+            className="msh-bell"
+            aria-label={
+              unreadCount > 0
+                ? `Notifications, ${unreadCount} unread`
+                : "Notifications"
+            }
+            onClick={() => {
+              setMenuOpen(false);
+              setView("notifications");
+              void refreshNotifications();
+            }}
           >
-            <Monitor size={17} aria-hidden="true" />
-            <span>Desktop view</span>
+            <Bell size={21} aria-hidden="true" />
+            {unreadCount > 0 && (
+              <span className="msh-bell-badge">{unreadCount}</span>
+            )}
           </button>
-          <button
-            type="button"
-            className="msh-header-button"
-            onClick={onSignOut}
-          >
-            <LogOut size={17} aria-hidden="true" />
-            <span>Sign out</span>
-          </button>
+          <div className="msh-avatar-wrap">
+            <button
+              type="button"
+              className="msh-avatar-button"
+              aria-label={`Account menu for ${session.fullName}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              {initialsOf(session.fullName)}
+            </button>
+            {menuOpen && (
+              <>
+                <button
+                  type="button"
+                  className="msh-menu-backdrop"
+                  aria-label="Close account menu"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="msh-menu" role="menu">
+                  <p className="msh-menu-head">
+                    <strong>{session.fullName}</strong>
+                    <small>
+                      {roleLabel(session.roleKey, session.jobTitle)} ·{" "}
+                      {session.agencyName}
+                    </small>
+                  </p>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setView("sites");
+                    }}
+                  >
+                    Switch home
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDesktopView();
+                    }}
+                  >
+                    <Monitor size={17} aria-hidden="true" /> Desktop view
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onSignOut();
+                    }}
+                  >
+                    <LogOut size={17} aria-hidden="true" /> Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -225,15 +440,26 @@ export default function MobileShell({
         </div>
       )}
 
-      <main className="msh-main">
+      <main className={`msh-main${showBottomNav ? " with-nav" : ""}`}>
         {view === "home" && (
           <>
-            <section className="msh-welcome">
-              <h2>Welcome, {session.fullName.split(" ")[0]}</h2>
-              <p>
-                {session.fullName} · {roleLabel(session.roleKey, session.jobTitle)}
+            <section className="msh-greeting">
+              <p className="msh-greeting-eyebrow">
+                {greeting}, {firstName}
               </p>
-              <p className="msh-welcome-agency">{session.agencyName}</p>
+              <h1 className="msh-greeting-title">
+                {scopedSite ? `Today at ${scopedSite.name}` : "Your day today"}
+              </h1>
+              <p className="msh-greeting-summary">
+                {summaryParts.length > 0
+                  ? summaryParts.join(" · ")
+                  : "Nothing outstanding right now."}
+              </p>
+              <p className="msh-greeting-identity">
+                {session.fullName} ·{" "}
+                {roleLabel(session.roleKey, session.jobTitle)} ·{" "}
+                {session.agencyName}
+              </p>
             </section>
 
             {scopedSite && (
@@ -254,6 +480,17 @@ export default function MobileShell({
               </button>
             )}
 
+            {scopedSite && (
+              <MobileToday
+                tracking={tracking}
+                queueItems={queueItems}
+                onOpenCategory={openCategory}
+                onOpenTasks={() => setView("tasks")}
+                onOpenMar={() => setView("mar")}
+                onOpenQueueItem={openQueueItem}
+              />
+            )}
+
             <div className="msh-grid">
               {tiles.map((tile) => {
                 const Icon = TILE_ICONS[tile.id];
@@ -264,7 +501,9 @@ export default function MobileShell({
                     className="msh-tile"
                     onClick={() => openTile(tile.id)}
                   >
-                    <Icon size={30} aria-hidden="true" />
+                    <span className="msh-tile-icon" aria-hidden="true">
+                      <Icon size={26} />
+                    </span>
                     <strong>{tile.label}</strong>
                     <small>{tile.hint}</small>
                     {tile.id === "myTasks" && queueItems.length > 0 && (
@@ -346,6 +585,7 @@ export default function MobileShell({
             siteName={scopedSite.name}
             initialPersonId={ispPersonId}
             onOpenChart={nav.openPersonChart}
+            onFormActiveChange={setIspFormActive}
           />
         )}
 
@@ -374,10 +614,7 @@ export default function MobileShell({
                   key={item.id}
                   type="button"
                   className="msh-row"
-                  onClick={() => {
-                    if (item.personName) nav.openPersonChart(item.personName);
-                    else nav.openPage("Overview");
-                  }}
+                  onClick={() => openQueueItem(item)}
                 >
                   <span className="msh-row-main">
                     <strong>{item.title}</strong>
@@ -403,7 +640,157 @@ export default function MobileShell({
             emptyText="No Individuals at this home."
           />
         )}
+
+        {view === "notifications" && (
+          <div>
+            <div className="msh-notif-head">
+              <p className="msh-section-note">
+                Reminders and updates for you at {session.agencyName}.
+              </p>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  className="msh-chip-button"
+                  onClick={() =>
+                    void markNotificationsRead(
+                      notifRows.filter(isUnread).map((row) => row.id),
+                    )
+                  }
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <div className="msh-list">
+              {notifRows.length === 0 && (
+                <p className="msh-empty">No notifications yet.</p>
+              )}
+              {notifRows.map((row) => {
+                const unread = isUnread(row);
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="msh-row"
+                    onClick={() => {
+                      if (unread) void markNotificationsRead([row.id]);
+                    }}
+                  >
+                    <span className="msh-row-main">
+                      <strong>{row.title}</strong>
+                      <small>{row.body}</small>
+                      <small className="msh-status-text">
+                        {unread ? "Unread · " : ""}
+                        {formatCentralTime(row.created_at)} Central
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </main>
+
+      {showBottomNav && (
+        <nav className="msh-bottomnav" aria-label="Mobile">
+          {navItems.map((item) => {
+            const Icon = NAV_ICONS[item.id];
+            const isCenter = item.id === "meds";
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`msh-nav-item${isCenter ? " center" : ""}${activeNav === item.id ? " active" : ""}`}
+                aria-label={item.label}
+                aria-current={activeNav === item.id ? "page" : undefined}
+                onClick={() => goNav(item.id)}
+              >
+                <span className="msh-nav-icon">
+                  <Icon size={isCenter ? 26 : 22} aria-hidden="true" />
+                  {item.id === "tasks" && queueItems.length > 0 && (
+                    <span className="msh-nav-badge">{queueItems.length}</span>
+                  )}
+                </span>
+                <span className="msh-nav-label">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
+      {sheetOpen && (
+        <>
+          <button
+            type="button"
+            className="msh-sheet-backdrop"
+            aria-label="Close more menu"
+            onClick={() => setSheetOpen(false)}
+          />
+          <div className="msh-sheet" role="dialog" aria-label="More">
+            <h3 className="msh-sheet-title">More</h3>
+            <div className="msh-list">
+              {sheetTiles.map((tile) => {
+                const Icon = TILE_ICONS[tile.id];
+                return (
+                  <button
+                    key={tile.id}
+                    type="button"
+                    className="msh-row"
+                    onClick={() => {
+                      setSheetOpen(false);
+                      openTile(tile.id);
+                    }}
+                  >
+                    <span className="msh-tile-icon" aria-hidden="true">
+                      <Icon size={22} />
+                    </span>
+                    <span className="msh-row-main">
+                      <strong>{tile.label}</strong>
+                      <small>{tile.hint}</small>
+                    </span>
+                    <span className="msh-chevron" aria-hidden="true">
+                      ›
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => {
+                  setSheetOpen(false);
+                  setView("sites");
+                }}
+              >
+                <span className="msh-row-main">
+                  <strong>Switch home</strong>
+                  <small>Scope everything to another home</small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => {
+                  setSheetOpen(false);
+                  onDesktopView();
+                }}
+              >
+                <span className="msh-row-main">
+                  <strong>Desktop view</strong>
+                  <small>Use the full desktop layout</small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

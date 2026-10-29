@@ -75,7 +75,7 @@ async function signInToShell(page: Page) {
     timeout: 60_000,
   });
   await page.getByRole("button", { name: /Cedar House/ }).click();
-  await expect(page.getByText("Welcome, Sarah")).toBeVisible();
+  await expect(page.getByText("Today at Cedar House")).toBeVisible();
 }
 
 async function openTile(page: Page, label: RegExp) {
@@ -88,7 +88,7 @@ async function openTile(page: Page, label: RegExp) {
 
 async function backHome(page: Page) {
   await page.locator(".mobile-return-bar").click();
-  await expect(page.getByText("Welcome, Sarah")).toBeVisible({
+  await expect(page.getByText("Today at Cedar House")).toBeVisible({
     timeout: 30_000,
   });
 }

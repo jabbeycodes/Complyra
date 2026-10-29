@@ -461,6 +461,7 @@ export default function MobileIsp({
   siteName,
   initialPersonId,
   onOpenChart,
+  onFormActiveChange,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -468,6 +469,8 @@ export default function MobileIsp({
   siteName: string;
   initialPersonId?: string | null;
   onOpenChart: (name: string) => void;
+  /** Lets the shell hide its bottom navigation while the entry form is open. */
+  onFormActiveChange?: (active: boolean) => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(
@@ -477,6 +480,10 @@ export default function MobileIsp({
   const [programId, setProgramId] = useState<string | null>(null);
   const [selectedNote, setSelectedNote] = useState<ShiftNoteView | null>(null);
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    onFormActiveChange?.(step === "form");
+  }, [step, onFormActiveChange]);
 
   const person = people.find((row) => row.id === personId) ?? null;
   const { data, loading, error, reload } = useIspData(

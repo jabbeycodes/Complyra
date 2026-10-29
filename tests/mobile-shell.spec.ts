@@ -24,7 +24,11 @@ async function signInToShell(page: Page) {
 
 async function pickCedarHouse(page: Page) {
   await page.getByRole("button", { name: /Cedar House/ }).click();
-  await expect(page.getByText("Welcome, Sarah")).toBeVisible();
+  // The clean home: Central-time greeting + "Today at <Home>" heading.
+  await expect(page.getByText("Morning, Sarah")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Today at Cedar House" }),
+  ).toBeVisible();
 }
 
 test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
@@ -228,8 +232,12 @@ test("mobile ISP data: plan select, entries, and creating an entry", async ({
   }
 
   await page.getByRole("button", { name: "Save entry" }).click();
-  // The saved entry appears in the list under its author.
-  const mine = page.getByRole("button", { name: /Sarah Mitchell/ }).first();
+  // The saved entry appears in the list under its author. (Filtered to the
+  // scored row: the header avatar button also carries her name now.)
+  const mine = page
+    .getByRole("button", { name: /Sarah Mitchell/ })
+    .filter({ hasText: "tasks scored" })
+    .first();
   await expect(mine).toBeVisible({ timeout: 10_000 });
   await expect(mine).toContainText("1 of 6 tasks scored");
 });
@@ -269,4 +277,273 @@ test("mobile shift notes: the home's notes list and read view", async ({
   await noteRow.click();
   await expect(page.getByText("Collection details")).toBeVisible();
   await expect(page.getByText("Task scores")).toBeVisible();
+});
+
+interface HomeTrackingSnapshot {
+  /** Medications legend fraction, e.g. "2 of 5". */
+  medFraction: string;
+  medCompleted: number;
+  medTotal: number;
+  /** Donut center percent text, e.g. "88%". */
+  centerPercent: string;
+  /** Greeting summary's med line, e.g. "3 med doses left to record". */
+  medsLeftText: string;
+}
+
+async function readHomeTracking(
+  page: Page,
+): Promise<HomeTrackingSnapshot> {
+  const card = page.locator(".msh-donut-card");
+  const medRow = card.locator(".msh-legend-row", { hasText: "Medications" });
+  await expect(medRow).toBeVisible({ timeout: 30_000 });
+  const medText = (await medRow.textContent()) ?? "";
+  const fraction = medText.match(/(\d+) of (\d+)/);
+  if (!fraction) throw new Error(`No fraction in legend row: ${medText}`);
+  const centerPercent =
+    (await page.locator(".msh-donut-center strong").textContent()) ?? "";
+  const medsLeftText =
+    (await page
+      .getByText(/med doses? left to record|All med doses recorded/)
+      .first()
+      .textContent()) ?? "";
+  return {
+    medFraction: `${fraction[1]} of ${fraction[2]}`,
+    medCompleted: Number(fraction[1]),
+    medTotal: Number(fraction[2]),
+    centerPercent: centerPercent.trim(),
+    medsLeftText: medsLeftText.trim(),
+  };
+}
+
+/**
+ * The home tracking surface as one comparable string: the donut card
+ * (legend fractions + center percent) plus the greeting's doses-left
+ * line. `null` while the card is not on screen (e.g. mid-navigation).
+ */
+async function sampleHomeTrackingText(page: Page): Promise<string | null> {
+  const cardText = await page
+    .locator(".msh-donut-card")
+    .textContent({ timeout: 1_000 })
+    .catch(() => null);
+  if (cardText === null) return null;
+  const medsLeftText = await page
+    .getByText(/med doses? left to record|All med doses recorded/)
+    .first()
+    .textContent({ timeout: 1_000 })
+    .catch(() => null);
+  if (medsLeftText === null) return null;
+  return `${cardText}\n${medsLeftText}`;
+}
+
+/**
+ * Go back to the shell home and wait until the tracking numbers the
+ * return-triggered refetch produces have SETTLED.
+ *
+ * The previous version waited for the "Loading today’s tracking…"
+ * indicator to paint and then clear. That flakes: on the exception path
+ * the refetch often settles before the indicator ever paints, so the
+ * wait failed even though the numbers were already fresh and correct.
+ * Waiting on the paint tests the spinner, not the data.
+ *
+ * Instead, poll the tracking surface itself and require BOTH:
+ *  - a minimum wait after the click (MIN_WAIT_MS), so at least one full
+ *    refetch cycle has had its chance to land — the values asserted
+ *    afterwards can never be the pre-return, session-start numbers; and
+ *  - a stability window (STABLE_FOR_MS) in which the text does not
+ *    change at all — any in-flight refetch that lands mid-window resets
+ *    the clock, so we only return once the displayed values have stopped
+ *    moving. Absent/unreadable samples also reset the clock.
+ */
+async function returnHomeRefreshed(page: Page) {
+  const MIN_WAIT_MS = 2_500;
+  const STABLE_FOR_MS = 1_250;
+  const POLL_MS = 200;
+  const TIMEOUT_MS = 30_000;
+
+  await page.getByRole("button", { name: "‹ Home" }).click();
+  await expect(page.locator(".msh-donut-card")).toBeVisible({
+    timeout: 15_000,
+  });
+
+  const startedAt = Date.now();
+  let lastText = await sampleHomeTrackingText(page);
+  let stableSince = Date.now();
+  for (;;) {
+    await page.waitForTimeout(POLL_MS);
+    const text = await sampleHomeTrackingText(page);
+    const now = Date.now();
+    if (text === null || text !== lastText) {
+      lastText = text;
+      stableSince = now;
+    }
+    const elapsed = now - startedAt;
+    if (elapsed >= MIN_WAIT_MS && now - stableSince >= STABLE_FOR_MS) {
+      return;
+    }
+    if (elapsed > TIMEOUT_MS) {
+      throw new Error(
+        `Home tracking never settled within ${TIMEOUT_MS}ms. Last text: ${lastText}`,
+      );
+    }
+  }
+}
+
+test("mobile home: a Refused exception does NOT move the donut, and home refreshes on return", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+  const before = await readHomeTracking(page);
+
+  // Record a Refused exception on Ellis Hart's 8:00 AM dose — an exception
+  // with no dose mark. The dose itself stays "Not yet given".
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+  await page.getByRole("button", { name: /Levetiracetam/ }).click();
+  await page.getByLabel("Record type").selectOption("refused");
+  await page
+    .getByLabel(/Reason \(required\)/)
+    .fill("Refused the morning dose and spat out the tablet.");
+  await page.getByLabel(/I confirm the administered time/).check();
+  await page.getByRole("button", { name: "Save record" }).click();
+  await page.getByRole("button", { name: "Other", exact: true }).click();
+  await expect(page.getByText(/Levetiracetam · Refused/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Back home (no reload): the refetch runs, and because exceptions never
+  // complete a dose, the Medications fraction, the center percent, and
+  // the greeting's doses-left line are all exactly as before.
+  await returnHomeRefreshed(page);
+  const after = await readHomeTracking(page);
+  expect(after.medFraction).toBe(before.medFraction);
+  expect(after.centerPercent).toBe(before.centerPercent);
+  expect(after.medsLeftText).toBe(before.medsLeftText);
+});
+
+test("mobile home: a Given mark moves the donut on return, without a reload", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+  const before = await readHomeTracking(page);
+
+  // Record the 8:00 AM Levetiracetam as Given (a real dose mark).
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await page.getByRole("button", { name: /8:00 AM/ }).click();
+  await page.getByRole("button", { name: /Levetiracetam/ }).click();
+  await page.getByLabel(/I confirm the administered time/).check();
+  await page.getByRole("button", { name: "Save record" }).click();
+  await expect(page.getByText(/Given by Sarah Mitchell/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Back home (no reload): the refetch picks the mark up — Medications
+  // gains exactly one completed dose, the center percent is the legend's
+  // new sum, and the greeting's doses-left drops by one.
+  await returnHomeRefreshed(page);
+  const card = page.locator(".msh-donut-card");
+  const medRow = card.locator(".msh-legend-row", { hasText: "Medications" });
+  await expect(medRow).toContainText(
+    `${before.medCompleted + 1} of ${before.medTotal}`,
+    { timeout: 30_000 },
+  );
+  const after = await readHomeTracking(page);
+  expect(after.medCompleted).toBe(before.medCompleted + 1);
+  expect(after.medTotal).toBe(before.medTotal);
+  const rowTexts = await card.locator(".msh-legend-row").allTextContents();
+  let completed = 0;
+  let total = 0;
+  for (const text of rowTexts) {
+    const match = text.match(/(\d+) of (\d+)/);
+    if (match) {
+      completed += Number(match[1]);
+      total += Number(match[2]);
+    }
+  }
+  expect(after.centerPercent).toBe(
+    `${Math.round((completed / total) * 100)}%`,
+  );
+  expect(after.centerPercent).not.toBe(before.centerPercent);
+  const leftBefore = Number(before.medsLeftText.match(/\d+/)?.[0]);
+  const leftAfter = Number(after.medsLeftText.match(/\d+/)?.[0]);
+  expect(leftAfter).toBe(leftBefore - 1);
+});
+
+test("mobile home: donut math, up next, and the bottom navigation", async ({
+  page,
+}) => {
+  await signInToShell(page);
+  await pickCedarHouse(page);
+
+  // Donut card: the legend's fractions are the record; the center percent
+  // must equal their sum — parse the texts and check the math, don't trust
+  // the ring.
+  const card = page.locator(".msh-donut-card");
+  await expect(card).toBeVisible();
+  await expect(
+    card.getByRole("heading", { name: "Today’s tracking" }),
+  ).toBeVisible();
+  const legendRows = card.locator(".msh-legend-row");
+  await expect(legendRows.first()).toBeVisible({ timeout: 30_000 });
+  const rowTexts = await legendRows.allTextContents();
+  let completed = 0;
+  let total = 0;
+  let fractionRows = 0;
+  for (const text of rowTexts) {
+    const match = text.match(/(\d+) of (\d+)/);
+    if (match) {
+      completed += Number(match[1]);
+      total += Number(match[2]);
+      fractionRows += 1;
+    }
+  }
+  expect(fractionRows).toBeGreaterThan(0);
+  expect(total).toBeGreaterThan(0);
+  await expect(page.locator(".msh-donut-center strong")).toHaveText(
+    `${Math.round((completed / total) * 100)}%`,
+  );
+  await card.screenshot({ path: shot("home-donut.png") });
+  await page.locator(".msh-upnext").screenshot({ path: shot("up-next.png") });
+  await page.screenshot({ path: shot("home-clean.png"), fullPage: true });
+
+  // Bottom navigation: Tasks and People are shell views, Meds opens the
+  // MAR — where the pill steps aside for the MAR's own tab bar.
+  const navBar = page.getByRole("navigation", { name: "Mobile" });
+  await expect(navBar).toBeVisible();
+  await navBar.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByText("Your due and priority work")).toBeVisible();
+  await navBar.getByRole("button", { name: "Home", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Today at Cedar House" }),
+  ).toBeVisible();
+  await navBar.getByRole("button", { name: "Meds", exact: true }).click();
+  await expect(
+    page.getByText("Pick the person whose medications"),
+  ).toBeVisible();
+  await expect(navBar).toHaveCount(0);
+  await page.getByRole("button", { name: "‹ Home" }).click();
+  await expect(navBar).toBeVisible();
+  await navBar.getByRole("button", { name: "People", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /Ellis Hart/ }).first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "‹ Home" }).click();
+
+  // More opens the sheet with the tiles the pill does not carry.
+  await navBar.getByRole("button", { name: "More", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: /Med Count/ })).toBeVisible();
+  await expect(
+    sheet.getByRole("button", { name: /Switch home/ }),
+  ).toBeVisible();
+  await page.screenshot({ path: shot("more-sheet.png") });
+  // Tap the dimmed backdrop above the sheet (its center is under the sheet).
+  await page
+    .getByRole("button", { name: "Close more menu" })
+    .click({ position: { x: 20, y: 20 } });
+  await expect(sheet).toHaveCount(0);
 });

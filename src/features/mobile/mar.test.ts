@@ -129,6 +129,43 @@ test("groupPasses groups scheduled doses by time and skips PRN meds", () => {
   assert.equal(passes[1].recorded, 0);
 });
 
+test("groupPasses recorded counts marks only — dose exceptions never complete a dose", () => {
+  const exception = {
+    id: "exc-1",
+    agencyId: "agency",
+    individualId: "person-1",
+    medicationId: "med-a",
+    occurredOn: "2026-09-12",
+    kind: "refused" as const,
+    pillsAffected: 1,
+    reason: "Refused the dose",
+    createdBy: "user-1",
+    createdAt: "2026-09-12T13:10:00.000Z",
+  };
+  const items = [
+    inventory({
+      medicationId: "med-a",
+      medicationName: "Alpha",
+      doseTimes: ["08:00"],
+      doseExceptions: [exception],
+    }),
+  ];
+  // A same-day Refused exception with NO dose mark: the dose is still
+  // unrecorded — the donut numerator (pass recorded counts) must not move.
+  const [withExceptionOnly] = groupPasses(items, []);
+  assert.equal(withExceptionOnly.recorded, 0);
+  assert.equal(
+    passSummaryText(withExceptionOnly),
+    "0 of 1 given · 1 not yet given",
+  );
+  // The same dose WITH a mark counts once — the exception adds nothing.
+  const [withMarkAndException] = groupPasses(items, [
+    mark({ medicationId: "med-a", doseTime: "08:00" }),
+  ]);
+  assert.equal(withMarkAndException.recorded, 1);
+  assert.equal(withMarkAndException.given, 1);
+});
+
 test("passSummaryText counts given, other marks and unrecorded doses in words", () => {
   const items = [
     inventory({ medicationId: "med-a", medicationName: "Alpha", doseTimes: ["08:00"] }),
