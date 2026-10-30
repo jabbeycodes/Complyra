@@ -86,6 +86,9 @@ import {
   canUseMessaging,
   canEnterMenuEntries,
   canSeeMenuEntries,
+  canViewHouseCard,
+  canRecordHouseCard,
+  canCloseHouseCardMonth,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -121,12 +124,28 @@ import {
 } from "./shiftNotes";
 import {
   canEditMenuEntryRow,
+  centralTodayIso,
   MEAL_SLOTS,
   AMOUNT_EATEN_OPTIONS,
   type MenuEntry,
   type MenuEntryHistory,
   type MenuEntryVersion,
 } from "./menuRecords";
+import {
+  balanceThroughCents,
+  closeForMonth,
+  closedMonthMessage,
+  monthEndIso,
+  toHouseCardEntryView,
+  validateHouseCardDraft,
+  validateHouseCardMonth,
+  validateHouseCardSignature,
+  validateHouseCardVoidReason,
+  type HouseCardEntryDraft,
+  type HouseCardEntryRow,
+  type HouseCardEntryView,
+  type HouseCardMonthClose,
+} from "./houseCard";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
@@ -1368,6 +1387,45 @@ export interface ComplyraApi {
     year: number,
     sites: Array<{ siteId: string; siteName: string; individualIds: string[] }>,
   ): Promise<import("./mileage").MileageAgencyYearlySummary>;
+  // ===== HOUSE CARD API (per-home petty cash ledger) =====
+  /**
+   * Every entry ever recorded for one home (all months, voided included),
+   * in ledger order. The balance and month totals are derived client-side
+   * from these rows (src/data/houseCard.ts) — the API never serves a
+   * stored balance.
+   */
+  listHouseCardEntries(
+    siteId: string,
+  ): Promise<import("./houseCard").HouseCardEntryView[]>;
+  /** Record one entry (credit / purchase / refund) for a home. */
+  createHouseCardEntry(
+    input: { siteId: string } & import("./houseCard").HouseCardEntryDraft,
+  ): Promise<import("./houseCard").HouseCardEntryView>;
+  /**
+   * Void an entry with a reason, optionally recording its replacement in
+   * the same call. Corrections stay possible after the entry's month is
+   * signed closed and are marked post-close corrections.
+   */
+  voidHouseCardEntry(
+    entryId: string,
+    reason: string,
+    replacement?:
+      | ({ siteId: string } & import("./houseCard").HouseCardEntryDraft)
+      | null,
+  ): Promise<{
+    voided: import("./houseCard").HouseCardEntryView;
+    replacement: import("./houseCard").HouseCardEntryView | null;
+  }>;
+  /** Signed month closes for one home (newest month first). */
+  listHouseCardMonthCloses(
+    siteId: string,
+  ): Promise<import("./houseCard").HouseCardMonthClose[]>;
+  /** Sign a month closed with the closer's typed signature. */
+  closeHouseCardMonth(input: {
+    siteId: string;
+    month: string;
+    signatureText: string;
+  }): Promise<import("./houseCard").HouseCardMonthClose>;
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
   /**
    * QA audit history for one program site (newest first). Read-only: the
@@ -11242,6 +11300,270 @@ export class LocalApi implements ComplyraApi {
       removed.id,
     );
     await persistMeta(this.store);
+  }
+
+  // ===== HOUSE CARD IMPL (per-home petty cash ledger, local) =====
+  // Domain rules live in src/data/houseCard.ts; the hosted API mirrors
+  // these semantics and the DB backstops them
+  // (supabase/migrations/20261029130000_house_card.sql). The ledger is
+  // append-only: no method here edits or deletes an entry — corrections
+  // void with a reason and optionally record a linked replacement.
+
+  private houseCardEntryRows(): HouseCardEntryRow[] {
+    const db = this.store.db;
+    db.houseCardEntries ??= [];
+    return db.houseCardEntries;
+  }
+
+  private houseCardCloseRows(): HouseCardMonthClose[] {
+    const db = this.store.db;
+    db.houseCardCloses ??= [];
+    return db.houseCardCloses;
+  }
+
+  private assertHouseCardViewer(session: SessionUser) {
+    if (!canViewHouseCard(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private assertHouseCardRecorder(session: SessionUser) {
+    if (!canRecordHouseCard(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private houseCardStaffName(userId: string): string {
+    return (
+      this.store.db.profiles.find((row) => row.id === userId)?.fullName ??
+      "Staff member"
+    );
+  }
+
+  private houseCardView(row: HouseCardEntryRow): HouseCardEntryView {
+    const closes = this.houseCardCloseRows().filter(
+      (close) => close.siteId === row.siteId && close.agencyId === row.agencyId,
+    );
+    const individualName = row.individualId
+      ? (this.store.db.individuals.find(
+          (person) => person.id === row.individualId,
+        )?.fullName ?? "Former Individual")
+      : null;
+    return toHouseCardEntryView(
+      row,
+      individualName,
+      (userId) => this.houseCardStaffName(userId),
+      closeForMonth(closes, monthKeyFrom(row.entryDate)),
+    );
+  }
+
+  private houseCardIndividualOrThrow(
+    session: { agencyId: string },
+    siteId: string,
+    individualId: string,
+  ) {
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId && row.agencyId === session.agencyId,
+    );
+    if (!person || person.siteId !== siteId) {
+      throw new Error("That Individual is not part of this home.");
+    }
+    return person;
+  }
+
+  /** A signed close blocks NEW entries dated in the closed month. */
+  private assertHouseCardMonthOpen(
+    session: { agencyId: string },
+    siteId: string,
+    entryDate: string,
+  ) {
+    const month = monthKeyFrom(entryDate);
+    const close = this.houseCardCloseRows().find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.siteId === siteId &&
+        row.month === month,
+    );
+    if (close) throw new Error(closedMonthMessage(monthLabel(month)));
+  }
+
+  async listHouseCardEntries(siteId: string) {
+    const session = assertSession(this.store);
+    this.assertHouseCardViewer(session);
+    this.siteOrThrow(session, siteId);
+    return this.houseCardEntryRows()
+      .filter(
+        (row) => row.agencyId === session.agencyId && row.siteId === siteId,
+      )
+      .map((row) => this.houseCardView(row));
+  }
+
+  async createHouseCardEntry(
+    input: { siteId: string } & HouseCardEntryDraft,
+  ) {
+    const session = assertSession(this.store);
+    this.assertHouseCardRecorder(session);
+    this.siteOrThrow(session, input.siteId);
+    const draft = validateHouseCardDraft(input, centralTodayIso());
+    if (draft.individualId) {
+      this.houseCardIndividualOrThrow(session, input.siteId, draft.individualId);
+    }
+    this.assertHouseCardMonthOpen(session, input.siteId, draft.entryDate);
+    const row: HouseCardEntryRow = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      entryDate: draft.entryDate,
+      kind: draft.kind,
+      location: draft.location,
+      amountCents: draft.amountCents,
+      category: draft.category,
+      individualId: draft.individualId,
+      note: draft.note,
+      receiptPhoto: draft.receiptPhoto,
+      recordedBy: session.userId,
+      recordedByName: session.fullName,
+      recordedByRole: session.roleKey,
+      createdAt: new Date().toISOString(),
+      voidedBy: null,
+      voidedAt: null,
+      voidReason: null,
+      replacesEntryId: null,
+      replacedByEntryId: null,
+    };
+    this.houseCardEntryRows().push(row);
+    await persistMeta(this.store);
+    return this.houseCardView(row);
+  }
+
+  async voidHouseCardEntry(
+    entryId: string,
+    reason: string,
+    replacement?: ({ siteId: string } & HouseCardEntryDraft) | null,
+  ) {
+    const session = assertSession(this.store);
+    this.assertHouseCardRecorder(session);
+    const row = this.houseCardEntryRows().find(
+      (item) => item.id === entryId && item.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("House card entry not found.");
+    this.siteOrThrow(session, row.siteId);
+    if (row.voidedAt) {
+      throw new Error("That entry is already voided.");
+    }
+    const voidReason = validateHouseCardVoidReason(reason);
+
+    // Validate the replacement BEFORE mutating anything, so a bad
+    // replacement never leaves a half-applied correction behind.
+    let replacementRow: HouseCardEntryRow | null = null;
+    if (replacement) {
+      if (replacement.siteId !== row.siteId) {
+        throw new Error("The replacement must belong to the same home.");
+      }
+      const draft = validateHouseCardDraft(replacement, centralTodayIso());
+      if (draft.individualId) {
+        this.houseCardIndividualOrThrow(session, row.siteId, draft.individualId);
+      }
+      const originalMonth = monthKeyFrom(row.entryDate);
+      const replacementMonth = monthKeyFrom(draft.entryDate);
+      if (replacementMonth !== originalMonth) {
+        // Moving the spend into a different month is a new entry into
+        // that month: allowed only while that month is still open.
+        this.assertHouseCardMonthOpen(session, row.siteId, draft.entryDate);
+      }
+      replacementRow = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        siteId: row.siteId,
+        entryDate: draft.entryDate,
+        kind: draft.kind,
+        location: draft.location,
+        amountCents: draft.amountCents,
+        category: draft.category,
+        individualId: draft.individualId,
+        note: draft.note,
+        receiptPhoto: draft.receiptPhoto,
+        recordedBy: session.userId,
+        recordedByName: session.fullName,
+        recordedByRole: session.roleKey,
+        createdAt: new Date().toISOString(),
+        voidedBy: null,
+        voidedAt: null,
+        voidReason: null,
+        replacesEntryId: row.id,
+        replacedByEntryId: null,
+      };
+    }
+
+    row.voidReason = voidReason;
+    row.voidedBy = session.userId;
+    row.voidedAt = new Date().toISOString();
+    if (replacementRow) {
+      row.replacedByEntryId = replacementRow.id;
+      this.houseCardEntryRows().push(replacementRow);
+    }
+    await persistMeta(this.store);
+    return {
+      voided: this.houseCardView(row),
+      replacement: replacementRow ? this.houseCardView(replacementRow) : null,
+    };
+  }
+
+  async listHouseCardMonthCloses(siteId: string) {
+    const session = assertSession(this.store);
+    this.assertHouseCardViewer(session);
+    this.siteOrThrow(session, siteId);
+    return this.houseCardCloseRows()
+      .filter(
+        (row) => row.agencyId === session.agencyId && row.siteId === siteId,
+      )
+      .sort((a, b) => (a.month < b.month ? 1 : -1));
+  }
+
+  async closeHouseCardMonth(input: {
+    siteId: string;
+    month: string;
+    signatureText: string;
+  }) {
+    const session = assertSession(this.store);
+    if (!canCloseHouseCardMonth(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    this.siteOrThrow(session, input.siteId);
+    const month = validateHouseCardMonth(input.month);
+    const signatureText = validateHouseCardSignature(input.signatureText);
+    const existing = this.houseCardCloseRows().find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.siteId === input.siteId &&
+        row.month === month,
+    );
+    if (existing) {
+      throw new Error(`${monthLabel(month)} is already closed and signed.`);
+    }
+    const siteEntries = this.houseCardEntryRows().filter(
+      (row) => row.agencyId === session.agencyId && row.siteId === input.siteId,
+    );
+    const now = new Date().toISOString();
+    const close: HouseCardMonthClose = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: input.siteId,
+      month,
+      closingBalanceCents: balanceThroughCents(
+        siteEntries,
+        monthEndIso(month),
+      ),
+      printedName: session.fullName,
+      signatureText,
+      signedBy: session.userId,
+      signedByName: session.fullName,
+      signedAt: now,
+      createdAt: now,
+    };
+    this.houseCardCloseRows().push(close);
+    await persistMeta(this.store);
+    return close;
   }
 
   // ===== E-SIGNATURES (local) =====

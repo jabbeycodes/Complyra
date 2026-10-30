@@ -26,7 +26,8 @@ export type MobileTileId =
   | "myTasks"
   | "individuals"
   | "appointments"
-  | "checklists";
+  | "checklists"
+  | "houseCard";
 
 export interface MobileTile {
   id: MobileTileId;
@@ -88,6 +89,16 @@ const TILE_DEFS: {
     label: "Checklists",
     hint: "Weekly house checklist",
     visible: (ctx) => ctx.canPage("Weekly checklist"),
+  },
+  {
+    // HOUSE CARD: daily recording is phone-first, so the home's petty
+    // cash ledger gets a tile. The gate is the desktop page gate itself
+    // (role list: DSP/HM record, PM/admin reach every home, auditors
+    // read; nurses never see it).
+    id: "houseCard",
+    label: "House Card",
+    hint: "Log house card spending",
+    visible: (ctx) => ctx.canPage("House Card"),
   },
 ];
 

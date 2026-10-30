@@ -1,0 +1,317 @@
+/* House Card — per-home petty cash ledger.
+   Screen styles for the stats strip, entry form, totals, and ledger
+   table; the print block at the bottom swaps the screen ledger for the
+   monthly statement (mileage-style body flag set by the print button). */
+
+.house-card .hc-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.house-card .hc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+}
+
+.house-card .hc-stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.house-card .hc-stat-value {
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
+.house-card .hc-flag {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.house-card .hc-month-picker {
+  margin-left: auto;
+}
+
+.house-card .hc-close-note {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--white);
+}
+
+.house-card .hc-notice {
+  font-weight: 600;
+}
+
+.house-card .hc-error {
+  font-weight: 600;
+  color: var(--red);
+}
+
+.house-card .hc-section {
+  margin-top: 22px;
+}
+
+.house-card .hc-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.house-card .hc-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.house-card .hc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  max-width: 420px;
+}
+
+.house-card .hc-field input,
+.house-card .hc-field select {
+  font: inherit;
+  font-weight: 400;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--text);
+  min-height: 40px;
+}
+
+.house-card .hc-field-wide {
+  grid-column: span 2;
+  max-width: none;
+}
+
+.house-card .hc-receipt-name {
+  font-weight: 400;
+  font-size: 0.8rem;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.house-card .hc-link-button {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--purple-dark);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.house-card .hc-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.house-card .hc-check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+  margin: 8px 0;
+}
+
+.house-card .hc-totals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.house-card .hc-total-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.house-card .hc-total-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.house-card .hc-table-wrap {
+  overflow-x: auto;
+}
+
+.house-card .hc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.house-card .hc-table th,
+.house-card .hc-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.house-card .hc-table .hc-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.house-card .hc-row-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.house-card .hc-row-voided td {
+  opacity: 0.75;
+}
+
+.house-card .hc-row-voided td strong,
+.house-card .hc-row-voided .hc-num {
+  text-decoration: line-through;
+}
+
+.house-card .hc-receipt-thumb {
+  display: block;
+  margin-top: 6px;
+  max-width: 120px;
+  max-height: 90px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* The printed statement never shows on screen. */
+.house-card-printout {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .house-card .hc-field-wide {
+    grid-column: span 1;
+  }
+
+  .house-card .hc-month-picker {
+    margin-left: 0;
+  }
+
+  .house-card .hc-table th,
+  .house-card .hc-table td {
+    padding: 8px 6px;
+  }
+}
+
+@media print {
+  body[data-house-card-print="1"] .sidebar,
+  body[data-house-card-print="1"] .topbar,
+  body[data-house-card-print="1"] .demo-banner,
+  body[data-house-card-print="1"] .msh-header,
+  body[data-house-card-print="1"] .msh-subheader,
+  body[data-house-card-print="1"] .msh-nav,
+  body[data-house-card-print="1"] .site-detail-tabs,
+  body[data-house-card-print="1"] .house-card-screen {
+    display: none !important;
+  }
+
+  body[data-house-card-print="1"] .main-shell,
+  body[data-house-card-print="1"] .page-shell,
+  body[data-house-card-print="1"] .msh-main {
+    margin-left: 0 !important;
+    padding-inline: 0.4in !important;
+    background: #fff !important;
+  }
+
+  body[data-house-card-print="1"] main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+
+  body[data-house-card-print="1"] .house-card-printout {
+    display: block !important;
+    color: #000;
+    background: #fff;
+    font-size: 11pt;
+  }
+
+  .house-card-printout h1 {
+    font-size: 16pt;
+    margin-bottom: 4px;
+  }
+
+  .house-card-printout h2 {
+    font-size: 12pt;
+    margin: 18px 0 6px;
+  }
+
+  .hc-print-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .hc-print-table th,
+  .hc-print-table td {
+    border: 1px solid #222;
+    padding: 5px 7px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .hc-print-table .hc-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .hc-print-table .hc-row-voided td {
+    text-decoration: line-through;
+  }
+
+  .hc-print-totals {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .hc-print-totals li {
+    padding: 2px 0;
+  }
+
+  .hc-print-mark {
+    margin-top: 24px;
+    font-style: italic;
+  }
+}

@@ -873,6 +873,58 @@ export function canRecordLifeEvents(session: {
   );
 }
 
+/**
+ * HOUSE CARD — the per-home petty cash ledger. Role lists (no new
+ * permission key, mirroring the menu-records approach so the
+ * program_manager template trap does not apply): DSPs and house managers
+ * record for their own home; program managers and administrators reach
+ * every home in the agency; house managers, PMs, and administrators sign
+ * months closed. Auditors and compliance administrators read only.
+ * Nurses are deliberately absent from every list — the house card is not
+ * their workflow, so the site tab stays hidden for them. Site scoping
+ * itself is enforced by the API layers (canAccessSite locally,
+ * private.can_read_site in the database); these lists are mirrored by
+ * the RLS policies in supabase/migrations/20261029130000_house_card.sql.
+ */
+export const HOUSE_CARD_VIEWER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "compliance_admin",
+  "program_manager",
+  "house_manager",
+  "dsp",
+  "auditor",
+];
+
+export const HOUSE_CARD_RECORDER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+  "house_manager",
+  "dsp",
+];
+
+export const HOUSE_CARD_CLOSER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+  "house_manager",
+];
+
+/** House card — who may open the ledger (view + print). */
+export function canViewHouseCard(roleKey: string) {
+  return (HOUSE_CARD_VIEWER_ROLE_KEYS as readonly string[]).includes(roleKey);
+}
+
+/** House card — who may record entries and void/replace them. */
+export function canRecordHouseCard(roleKey: string) {
+  return (HOUSE_CARD_RECORDER_ROLE_KEYS as readonly string[]).includes(
+    roleKey,
+  );
+}
+
+/** House card — who may sign a month closed. */
+export function canCloseHouseCardMonth(roleKey: string) {
+  return (HOUSE_CARD_CLOSER_ROLE_KEYS as readonly string[]).includes(roleKey);
+}
+
 /** Menu records — who may record what an Individual ate (daily-care staff). */
 export function canEnterMenuEntries(roleKey: string) {
   return [

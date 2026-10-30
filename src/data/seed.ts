@@ -206,6 +206,11 @@ export interface LocalDatabase {
   messageThreads?: import("./messaging").MessageThreadRow[];
   messageParticipants?: import("./messaging").MessageParticipantRow[];
   messages?: import("./messaging").MessageRow[];
+  // HOUSE CARD: per-home petty cash entries + signed month closes.
+  // Optional so older persisted demos still load; the API lazily
+  // initializes both.
+  houseCardEntries?: import("./houseCard").HouseCardEntryRow[];
+  houseCardCloses?: import("./houseCard").HouseCardMonthClose[];
   /** See SHOWCASE_REVISION. Missing on workspaces saved before the walkthrough seed. */
   showcaseRevision?: number;
 }
