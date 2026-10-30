@@ -1,7 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Car, Flame, HeartPulse, TriangleAlert, UtensilsCrossed, type LucideIcon } from "lucide-react";
+import {
+  Car,
+  Flame,
+  HeartPulse,
+  PiggyBank,
+  TriangleAlert,
+  UtensilsCrossed,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import { formatDate } from "../../components";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
+import {
+  HOUSE_CARD_CATEGORY_LABELS,
+  buildHouseCardLedger,
+  categoryNeedsIndividual,
+  formatCents,
+  recentHouseCardLocations,
+  type HouseCardCategory,
+  type HouseCardEntryDraft,
+  type HouseCardEntryView,
+} from "../../data/houseCard";
+import {
+  computePersonalBalanceCents,
+  recentPersonalSpendingLocations,
+  type PersonalSpendingEntryDraft,
+  type PersonalSpendingEntryView,
+} from "../../data/personalSpending";
 import {
   AMOUNT_EATEN_OPTIONS,
   MEAL_SLOTS,
@@ -20,35 +46,63 @@ import { validateTripInput } from "../../data/mileage";
 import type { MileageTripView } from "../../data/types";
 import type { GerReport } from "../../data/ger";
 import type { HealthTrackEntry } from "../../data/healthTrack";
-import { centralNowHhmm, centralTodayIso, formatIsoDay } from "./mar";
+import {
+  centralNowHhmm,
+  centralTodayIso,
+  formatCentralTime,
+  formatIsoDay,
+} from "./mar";
 import {
   drillMonthStatus,
   drillRowStatus,
   fieldLogAccess,
   gerMonthStatus,
   healthTodayStatus,
+  houseCardStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthKeyOf,
   personDayEntries,
+  personalSpendingStatus,
   type FieldLogDomain,
 } from "./fieldLogs";
 import MobilePeopleList from "./MobilePeopleList";
 import { PersonHeader } from "./MobileMar";
 import MobileGerLog from "./MobileGerLog";
 import MobileHealth from "./MobileHealth";
+import MoneyEntrySheet, { HOUSE_CATEGORY_ICONS } from "./MoneyEntrySheet";
+import { houseSheetToDraft } from "./MobileHouseCard";
+import { personalSheetToDraft } from "./MobilePersonalSpending";
+import {
+  blankMoneyValues,
+  houseEntryDetail,
+  houseEntryTitle,
+  houseSignedAmount,
+  houseTodayRows,
+  houseTodayTotals,
+  orderCategoriesByUse,
+  personalEntryDetail,
+  personalEntryTitle,
+  personalRecentRows,
+  personalSignedAmount,
+  type MoneySheetValues,
+} from "./money";
 import type { WorkspaceIndividual } from "./types";
 
 /**
  * Mobile Quick log — one door for the field logs that used to live only
  * on desktop surfaces: health trackers, menu records, mileage, drills,
- * and incident (GER) reports. Every flow writes through the SAME API
- * methods and validation the desktop surface uses, so a record logged
- * on a phone is the record the desktop shows. The chooser hides any
- * domain the role cannot use (the gates are the desktop gates —
+ * and incident (GER) reports — plus the two expenditure trackers, the
+ * house card and personal spending. Every flow writes through the SAME
+ * API methods and validation the desktop surface uses, so a record
+ * logged on a phone is the record the desktop shows. The chooser hides
+ * any domain the role cannot use (the gates are the desktop gates —
  * fieldLogs.ts), and each entry carries a factual status line for the
  * current home. Health is the Health home itself (MobileHealth) mounted
- * as a sub-flow — one implementation behind both doors.
+ * as a sub-flow — one implementation behind both doors; the money flows
+ * open the SAME shared entry sheet (MoneyEntrySheet) the mobile money
+ * views use, with the same draft mapping (houseSheetToDraft /
+ * personalSheetToDraft).
  */
 const DOMAIN_META: {
   id: FieldLogDomain;
@@ -86,6 +140,18 @@ const DOMAIN_META: {
     hint: "File a general event report (GER)",
     icon: TriangleAlert,
   },
+  {
+    id: "housecard",
+    label: "House card",
+    hint: "Record house spending and funds received",
+    icon: Wallet,
+  },
+  {
+    id: "spending",
+    label: "Personal spending",
+    hint: "Record spending for an Individual",
+    icon: PiggyBank,
+  },
 ];
 
 export default function MobileQuickLog({
@@ -97,6 +163,8 @@ export default function MobileQuickLog({
   drills,
   onOpenChart,
   onOpenMedications,
+  onOpenHouseCard,
+  onOpenSpending,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -108,6 +176,10 @@ export default function MobileQuickLog({
   onOpenChart: (name: string) => void;
   /** The Health flow's Medications row deep-links to the MAR. */
   onOpenMedications: () => void;
+  /** The full mobile House Card view (Today / This month / print). */
+  onOpenHouseCard: () => void;
+  /** The full mobile Personal Spending view for one Individual. */
+  onOpenSpending: (person: WorkspaceIndividual) => void;
 }) {
   const todayIso = centralTodayIso();
   const monthKey = monthKeyOf(todayIso);
@@ -121,6 +193,10 @@ export default function MobileQuickLog({
   const [healthEntries, setHealthEntries] = useState<HealthTrackEntry[]>([]);
   const [trips, setTrips] = useState<MileageTripView[]>([]);
   const [reports, setReports] = useState<GerReport[]>([]);
+  const [houseEntries, setHouseEntries] = useState<HouseCardEntryView[]>([]);
+  const [spendingEntries, setSpendingEntries] = useState<
+    { personId: string; entries: PersonalSpendingEntryView[] }[]
+  >([]);
   const [drillRows, setDrillRows] = useState<EmergencyDrill[]>(drills);
   const [statusError, setStatusError] = useState("");
 
@@ -150,6 +226,18 @@ export default function MobileQuickLog({
       if (access.gerView) {
         setReports(await api.listGerReports({ siteId }));
       }
+      if (access.houseCardView) {
+        setHouseEntries(await api.listHouseCardEntries(siteId));
+      }
+      if (access.spendingView) {
+        const perPerson = await Promise.all(
+          people.map(async (person) => ({
+            personId: person.id,
+            entries: await api.listPersonalSpendingEntries(person.id),
+          })),
+        );
+        setSpendingEntries(perPerson);
+      }
       setStatusError("");
     } catch (err) {
       setStatusError(
@@ -178,6 +266,12 @@ export default function MobileQuickLog({
         return access.gerView
           ? gerMonthStatus(reports, monthKey).text
           : "File a new report";
+      case "housecard":
+        return houseCardStatus(houseEntries).text;
+      case "spending":
+        return personalSpendingStatus(
+          spendingEntries.map((row) => row.entries),
+        ).text;
     }
   };
 
@@ -193,7 +287,24 @@ export default function MobileQuickLog({
         return access.drills;
       case "ger":
         return access.gerCreate || access.gerView;
+      case "housecard":
+        return access.houseCardView;
+      case "spending":
+        // The view gate plus at least one accessible Individual —
+        // without a person there is no ledger to open.
+        return access.spendingView && people.length > 0;
     }
+  };
+
+  const openDomain = (domain: FieldLogDomain) => {
+    // View-only roles never see the entry sheet: their House card row
+    // reaches the full (read-only for them) mobile view directly, the
+    // same door the House Card tile opens.
+    if (domain === "housecard" && !access.houseCardRecord) {
+      onOpenHouseCard();
+      return;
+    }
+    setScreen(domain);
   };
 
   if (screen === "health") {
@@ -271,6 +382,38 @@ export default function MobileQuickLog({
       />
     );
   }
+  if (screen === "housecard") {
+    return (
+      <HouseCardLogScreen
+        api={api}
+        session={session}
+        siteId={siteId}
+        siteName={siteName}
+        people={people}
+        entries={houseEntries}
+        todayIso={todayIso}
+        onOpenHouseCard={onOpenHouseCard}
+        onBack={() => setScreen("chooser")}
+        onLogged={onLogged}
+      />
+    );
+  }
+  if (screen === "spending") {
+    return (
+      <SpendingLogScreen
+        api={api}
+        session={session}
+        people={people}
+        entriesByPerson={spendingEntries}
+        canRecord={access.spendingRecord}
+        todayIso={todayIso}
+        onOpenChart={onOpenChart}
+        onOpenSpending={onOpenSpending}
+        onBack={() => setScreen("chooser")}
+        onLogged={onLogged}
+      />
+    );
+  }
 
   return (
     <div>
@@ -292,7 +435,7 @@ export default function MobileQuickLog({
                 key={domain.id}
                 type="button"
                 className="msh-row"
-                onClick={() => setScreen(domain.id)}
+                onClick={() => openDomain(domain.id)}
               >
                 <span className="msh-tile-icon" aria-hidden="true">
                   <Icon size={22} />
@@ -1040,5 +1183,443 @@ function DrillLogSheet({
         </form>
       </div>
     </>
+  );
+}
+
+// ───────────────────────────── House card ─────────────────────────────
+
+/**
+ * The Quick log's house-card flow: the home's pinned balance, today's
+ * entries, and the shared entry sheet (MoneyEntrySheet) opened for
+ * this house — the same sheet, draft mapping, and API the mobile
+ * House Card view uses. Saving returns to the chooser, whose balance
+ * line reloads. The full view (month totals, close, print) is one row
+ * away via "Open house card". Only recording roles reach this screen;
+ * the chooser sends view-only roles straight to the full view.
+ */
+function HouseCardLogScreen({
+  api,
+  session,
+  siteId,
+  siteName,
+  people,
+  entries,
+  todayIso,
+  onOpenHouseCard,
+  onBack,
+  onLogged,
+}: {
+  api: ComplyraApi;
+  session: SessionUser;
+  siteId: string;
+  siteName: string;
+  people: WorkspaceIndividual[];
+  entries: HouseCardEntryView[];
+  todayIso: string;
+  onOpenHouseCard: () => void;
+  onBack: () => void;
+  onLogged: () => void;
+}) {
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetError, setSheetError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const status = houseCardStatus(entries);
+  const ledger = useMemo(() => buildHouseCardLedger(entries), [entries]);
+  const todayRows = useMemo(
+    () => houseTodayRows(ledger, todayIso),
+    [ledger, todayIso],
+  );
+  const todayTotals = useMemo(
+    () => houseTodayTotals(ledger, todayIso),
+    [ledger, todayIso],
+  );
+  const locations = useMemo(
+    () => recentHouseCardLocations(entries),
+    [entries],
+  );
+  const categories = useMemo(
+    () =>
+      orderCategoriesByUse(entries).map((category) => ({
+        value: category,
+        label: HOUSE_CARD_CATEGORY_LABELS[category],
+        icon: HOUSE_CATEGORY_ICONS[category],
+      })),
+    [entries],
+  );
+
+  const saveSheet = async (values: MoneySheetValues) => {
+    setSheetError("");
+    let draft: HouseCardEntryDraft;
+    try {
+      draft = houseSheetToDraft(values);
+    } catch (err) {
+      setSheetError(err instanceof Error ? err.message : "Check the entry.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createHouseCardEntry({ siteId, ...draft });
+      setSheetOpen(false);
+      onLogged();
+      onBack();
+    } catch (err) {
+      setSheetError(
+        err instanceof Error ? err.message : "Could not record that entry.",
+      );
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <button type="button" className="msh-text-button" onClick={onBack}>
+        ‹ Quick log
+      </button>
+      <div className="mq-pin">
+        <div className="mq-pin-top">
+          <span className="mq-pin-label">
+            <Wallet size={15} aria-hidden="true" /> House card balance
+          </span>
+          {status.lowBalance && <span className="mq-flag">Low balance</span>}
+        </div>
+        <strong className="mq-pin-value">
+          {formatCents(status.balanceCents)}
+        </strong>
+        <span className="mq-pin-sub">
+          Today: {formatCents(todayTotals.spentCents)} spent ·{" "}
+          {formatCents(todayTotals.receivedCents)} received
+        </span>
+      </div>
+      <button
+        type="button"
+        className="msh-button primary block"
+        onClick={() => {
+          setSheetError("");
+          setSheetOpen(true);
+        }}
+      >
+        Record an entry
+      </button>
+      <h3 className="msh-pass-title">
+        Today at {siteName} · {formatIsoDay(todayIso)}
+      </h3>
+      <div className="msh-list">
+        {todayRows.length === 0 && (
+          <p className="msh-empty">Nothing recorded today yet.</p>
+        )}
+        {todayRows.map(({ entry, runningBalanceCents }) => (
+          <div
+            key={entry.id}
+            className={`msh-row static mq-row${entry.voided ? " mq-voided" : ""}`}
+          >
+            <span className="msh-row-main">
+              <strong>{houseEntryTitle(entry)}</strong>
+              <small>{houseEntryDetail(entry)}</small>
+              {entry.note && <small>{entry.note}</small>}
+              {entry.voided ? (
+                <small className="mq-void-label">
+                  Voided — {entry.voidReason} (voided by{" "}
+                  {entry.voidedByName ?? "a manager"})
+                </small>
+              ) : (
+                <small className="msh-status-text">
+                  Recorded by {entry.recordedByName} ·{" "}
+                  {formatCentralTime(entry.createdAt)}
+                </small>
+              )}
+            </span>
+            <span className="mq-row-side">
+              <strong className="mq-row-amount">
+                {houseSignedAmount(entry)}
+              </strong>
+              <small>
+                Balance {entry.voided ? "—" : formatCents(runningBalanceCents)}
+              </small>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="msh-list">
+        <button type="button" className="msh-row" onClick={onOpenHouseCard}>
+          <span className="msh-row-main">
+            <strong>Open house card</strong>
+            <small>Month totals, close the month, print the statement</small>
+          </span>
+          <span className="msh-chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
+      </div>
+      {sheetOpen && (
+        <MoneyEntrySheet
+          title="Record an entry"
+          kinds={[
+            { value: "purchase", label: "Purchase" },
+            { value: "credit", label: "Funds received" },
+            { value: "refund", label: "Refund" },
+          ]}
+          detailKind="purchase"
+          categories={categories}
+          locations={locations}
+          locationLabelFor={(kind) =>
+            kind === "credit" ? "Received from" : "Location"
+          }
+          locationPlaceholderFor={(kind) =>
+            kind === "credit"
+              ? "e.g. Monthly house funds"
+              : "Where was it spent?"
+          }
+          people={people}
+          individualApplies={(values) =>
+            values.kind === "purchase" &&
+            categoryNeedsIndividual(
+              values.category
+                ? (values.category as HouseCardCategory)
+                : null,
+            )
+          }
+          initial={blankMoneyValues(todayIso, "purchase")}
+          userId={session.userId}
+          busy={saving}
+          error={sheetError}
+          saveText="Record entry"
+          onClose={() => setSheetOpen(false)}
+          onSave={(values) => void saveSheet(values)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────── Personal spending ─────────────────────────
+
+/**
+ * The Quick log's personal-spending flow: pick an Individual, see
+ * their pinned balance and recent entries, and record through the
+ * shared entry sheet in personal-spending mode — the same sheet,
+ * draft mapping, and API the mobile Personal Spending view uses.
+ * Saving returns to the chooser, whose combined line reloads. The
+ * full view (month ledger, dual-sign-off close, per-Individual print)
+ * is one row away via "Open personal spending". View-only roles get
+ * the same screens with no Record button — recording follows the
+ * #152 role list, and the API enforces per-person assignment scope.
+ */
+function SpendingLogScreen({
+  api,
+  session,
+  people,
+  entriesByPerson,
+  canRecord,
+  todayIso,
+  onOpenChart,
+  onOpenSpending,
+  onBack,
+  onLogged,
+}: {
+  api: ComplyraApi;
+  session: SessionUser;
+  people: WorkspaceIndividual[];
+  entriesByPerson: { personId: string; entries: PersonalSpendingEntryView[] }[];
+  canRecord: boolean;
+  todayIso: string;
+  onOpenChart: (name: string) => void;
+  onOpenSpending: (person: WorkspaceIndividual) => void;
+  onBack: () => void;
+  onLogged: () => void;
+}) {
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetError, setSheetError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const person = people.find((row) => row.id === personId) ?? null;
+  const entries = useMemo(
+    () =>
+      entriesByPerson.find((row) => row.personId === personId)?.entries ??
+      [],
+    [entriesByPerson, personId],
+  );
+  const balance = useMemo(
+    () => computePersonalBalanceCents(entries),
+    [entries],
+  );
+  const recentRows = useMemo(() => personalRecentRows(entries), [entries]);
+  const locations = useMemo(
+    () => recentPersonalSpendingLocations(entries),
+    [entries],
+  );
+
+  const saveSheet = async (values: MoneySheetValues) => {
+    if (!person) return;
+    setSheetError("");
+    let draft: PersonalSpendingEntryDraft;
+    try {
+      draft = personalSheetToDraft(values);
+    } catch (err) {
+      setSheetError(err instanceof Error ? err.message : "Check the entry.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createPersonalSpendingEntry({
+        individualId: person.id,
+        ...draft,
+      });
+      setSheetOpen(false);
+      onLogged();
+      onBack();
+    } catch (err) {
+      setSheetError(
+        err instanceof Error ? err.message : "Could not record that entry.",
+      );
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <button type="button" className="msh-text-button" onClick={onBack}>
+        ‹ Quick log
+      </button>
+      {!person ? (
+        <>
+          <p className="msh-section-note">
+            Pick the Individual whose personal spending you want to open.
+          </p>
+          <MobilePeopleList
+            people={people}
+            onPick={(row) => setPersonId(row.id)}
+          />
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="msh-text-button"
+            onClick={() => setPersonId(null)}
+          >
+            ‹ All Individuals
+          </button>
+          <PersonHeader person={person} onOpenChart={onOpenChart} />
+          <div className="mq-pin">
+            <div className="mq-pin-top">
+              <span className="mq-pin-label">
+                <Wallet size={15} aria-hidden="true" /> Personal funds balance
+              </span>
+            </div>
+            <strong className="mq-pin-value">{formatCents(balance)}</strong>
+            <span className="mq-pin-sub">
+              {person.name}&rsquo;s own money — separate from the
+              home&rsquo;s house card.
+            </span>
+          </div>
+          {canRecord && (
+            <button
+              type="button"
+              className="msh-button primary block"
+              onClick={() => {
+                setSheetError("");
+                setSheetOpen(true);
+              }}
+            >
+              Record an entry
+            </button>
+          )}
+          <h3 className="msh-pass-title">Recent entries</h3>
+          <div className="msh-list">
+            {recentRows.length === 0 && (
+              <p className="msh-empty">
+                Nothing recorded in {person.name}&rsquo;s ledger yet.
+              </p>
+            )}
+            {recentRows.map((entry) => (
+              <div
+                key={entry.id}
+                className={`msh-row static mq-row${entry.voided ? " mq-voided" : ""}`}
+              >
+                <span className="msh-row-main">
+                  <strong>{personalEntryTitle(entry)}</strong>
+                  <small>
+                    {personalEntryDetail(entry)} ·{" "}
+                    {formatDate(entry.entryDate)}
+                  </small>
+                  {entry.note && <small>{entry.note}</small>}
+                  {entry.overBalance && !entry.voided && (
+                    <small>
+                      <span className="ps-flag">Over balance</span>
+                    </small>
+                  )}
+                  {entry.voided ? (
+                    <small className="mq-void-label">
+                      Voided — {entry.voidReason} (voided by{" "}
+                      {entry.voidedByName ?? "a manager"})
+                    </small>
+                  ) : (
+                    <small className="msh-status-text">
+                      Recorded by {entry.recordedByName}
+                    </small>
+                  )}
+                </span>
+                <span className="mq-row-side">
+                  <strong className="mq-row-amount">
+                    {personalSignedAmount(entry)}
+                  </strong>
+                  <small>
+                    Balance{" "}
+                    {entry.voided
+                      ? "—"
+                      : formatCents(entry.runningBalanceCents)}
+                  </small>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="msh-list">
+            <button
+              type="button"
+              className="msh-row"
+              onClick={() => onOpenSpending(person)}
+            >
+              <span className="msh-row-main">
+                <strong>Open personal spending</strong>
+                <small>
+                  Month ledger, close the month, print the statement
+                </small>
+              </span>
+              <span className="msh-chevron" aria-hidden="true">
+                ›
+              </span>
+            </button>
+          </div>
+          {sheetOpen && (
+            <MoneyEntrySheet
+              title="Record an entry"
+              kinds={[
+                { value: "spend", label: "Spent" },
+                { value: "deposit", label: "Funds received" },
+              ]}
+              detailKind="spend"
+              purposeLabel="What was it for?"
+              purposePlaceholder="e.g. Clothing — new shoes"
+              locations={locations}
+              locationLabelFor={(kind) =>
+                kind === "deposit" ? "Received from" : "Where was it spent?"
+              }
+              locationPlaceholderFor={(kind) =>
+                kind === "deposit"
+                  ? "e.g. Family — birthday money"
+                  : "e.g. Walmart"
+              }
+              initial={blankMoneyValues(todayIso, "spend")}
+              userId={session.userId}
+              busy={saving}
+              error={sheetError}
+              saveText="Record entry"
+              onClose={() => setSheetOpen(false)}
+              onSave={(values) => void saveSheet(values)}
+            />
+          )}
+        </>
+      )}
+    </div>
   );
 }

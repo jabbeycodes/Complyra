@@ -63,8 +63,14 @@ interface JustRecorded {
 
 const UNDO_REASON = "Undone right after recording";
 
-/** Sheet values → the ledger draft, mirroring the desktop panel's mapping. */
-function sheetToDraft(values: MoneySheetValues): HouseCardEntryDraft {
+/**
+ * Sheet values → the ledger draft, mirroring the desktop panel's
+ * mapping. Exported for the Quick log's house-card flow, which opens
+ * the same sheet — one mapping behind both doors.
+ */
+export function houseSheetToDraft(
+  values: MoneySheetValues,
+): HouseCardEntryDraft {
   const amountCents = parseAmountToCents(values.amountText);
   if (amountCents === null) {
     throw new Error("Enter the amount like 42.50.");
@@ -218,7 +224,7 @@ export default function MobileHouseCard({
     setSheetError("");
     let draft: HouseCardEntryDraft;
     try {
-      draft = sheetToDraft(values);
+      draft = houseSheetToDraft(values);
     } catch (err) {
       setSheetError(err instanceof Error ? err.message : "Check the entry.");
       return;

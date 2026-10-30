@@ -710,6 +710,11 @@ export default function MobileShell({
             )}
             onOpenChart={nav.openPersonChart}
             onOpenMedications={() => setView("mar")}
+            onOpenHouseCard={() => setView("housecard")}
+            onOpenSpending={(person) => {
+              setSpendingPersonId(person.id);
+              setView("spending");
+            }}
           />
         )}
 
