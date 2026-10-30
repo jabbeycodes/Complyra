@@ -55,11 +55,14 @@ export function BinderTab({
   store,
   staffList,
   onJumpToTab,
+  initialSubjectId,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   onJumpToTab: (tabId: string) => void;
+  /** Open on this staff member (the board's "Open binder" jump). */
+  initialSubjectId?: string;
 }) {
   const { api } = useData();
   const isAuditor = session.roleKey === "auditor";
@@ -80,7 +83,7 @@ export function BinderTab({
     hasPermission(session, "hr.view_staff");
   const readOnly = isAuditor;
 
-  const [subjectId, setSubjectId] = useState(session.userId);
+  const [subjectId, setSubjectId] = useState(initialSubjectId ?? session.userId);
   const subject = useMemo<HubStaffEntry>(
     () =>
       staffList.find((s) => s.userId === subjectId) ?? {
@@ -122,7 +125,7 @@ export function BinderTab({
       try {
         const [binderRow, wallet, contactRow, evidence, docs, acks, profile] =
           await Promise.all([
-            store.getBinder(subjectId),
+            store.getBinder(subjectId, subject.roleKey),
             store.listBinderDocuments(subjectId),
             store.getEmergencyContact(subjectId),
             store
@@ -394,22 +397,35 @@ export function BinderTab({
                 verification
               </p>
             )}
+            {derived.optionalItems > 0 && (
+              <p className="binder-awaiting">
+                Plus {derived.optionalItems} optional item
+                {derived.optionalItems === 1 ? "" : "s"} — tracked, not
+                counted above
+              </p>
+            )}
             {readOnly && <p className="binder-awaiting">Read-only — auditor view</p>}
           </div>
 
-          {derived.sections.map(({ section, items, satisfied, total }) => (
+          {derived.sections.map(({ section, items, satisfied, total, optional }) => (
             <div className="binder-section" key={section.key}>
               <h3>
                 {section.title}
                 <span className="binder-section-count">
                   {satisfied} of {total} complete
+                  {optional > 0 ? ` · ${optional} optional` : ""}
                 </span>
               </h3>
               <ul className="hub-list">
                 {items.map((row) => (
                   <li className="hub-list-item" key={row.item.key}>
                     <div className="hub-item-main">
-                      <span className="hub-item-title">{row.item.label}</span>
+                      <span className="hub-item-title">
+                        {row.item.label}
+                        {!row.required && (
+                          <span className="binder-optional-tag">Optional</span>
+                        )}
+                      </span>
                       <span className="hub-item-sub">{row.note}</span>
                       {row.document && (
                         <span className="hub-item-sub">

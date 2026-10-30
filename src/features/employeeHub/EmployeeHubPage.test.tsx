@@ -11,7 +11,10 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
-import { DEFAULT_BINDER_TEMPLATE } from "../../data/newHireBinder";
+import {
+  DEFAULT_BINDER_TEMPLATE,
+  defaultBinderTemplateLibrary,
+} from "../../data/newHireBinder";
 import type { SessionUser } from "../../data/types";
 import type {
   ComplianceEvidence,
@@ -589,6 +592,8 @@ function makeStubStore(): HrStore {
       updatedAt: new Date().toISOString(),
     }),
     getBinderTemplate: async () => DEFAULT_BINDER_TEMPLATE,
+    listBinderTemplates: async () => defaultBinderTemplateLibrary(),
+    saveBinderTemplate: async () => {},
     getBinder: async (staffId) => ({
       id: `binder-${staffId}`,
       agencyId: "agency-1",

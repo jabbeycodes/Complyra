@@ -73,10 +73,15 @@ import type {
 import { DEFAULT_PUNCH_RULES } from "./hr";
 import {
   DEFAULT_BINDER_TEMPLATE,
+  binderTemplateForRole,
+  cloneBinderTemplate,
+  defaultBinderTemplateLibrary,
   validateBinderDocumentFile,
+  validateBinderTemplate,
   validateEmergencyContact,
   type BinderDocument,
   type BinderTemplate,
+  type BinderTemplateLibrary,
   type EmergencyContactInput,
   type StaffBinder,
   type StaffEmergencyContact,
@@ -495,8 +500,16 @@ export interface HrStore {
   /* New Hire Binder (2026-10-30) */
   /** The agency's binder template; the seeded default when none is saved. */
   getBinderTemplate(): Promise<BinderTemplate>;
-  /** A staff member's binder, created from the template on first read. */
-  getBinder(staffId: string): Promise<StaffBinder>;
+  /** The full template library (build 2): the agency default plus the
+   *  role presets, with any saved edits merged over the starters. */
+  listBinderTemplates(): Promise<BinderTemplateLibrary>;
+  /** Save an edited template ("default" or a preset key). Edits apply
+   *  to future binder snapshots only — issued binders never change. */
+  saveBinderTemplate(templateId: string, template: BinderTemplate): Promise<void>;
+  /** A staff member's binder, created on first read by snapshotting the
+   *  template for their role (preset when one exists, else the agency
+   *  default). Existing binders return their own snapshot untouched. */
+  getBinder(staffId: string, roleKey?: string): Promise<StaffBinder>;
   /** Wallet documents filed against a staff member's binder. */
   listBinderDocuments(staffId: string): Promise<BinderDocument[]>;
   /** Upload (or replace) the wallet file for one document item. A fresh
@@ -1556,18 +1569,99 @@ class SupabaseHrStore implements HrStore {
 
   /* ------------------------- New Hire Binder ------------------------- */
 
-  async getBinderTemplate(): Promise<BinderTemplate> {
+  /** The hr_binder_templates jsonb holds either a bare BinderTemplate
+   *  (build 1) or the build-2 library wrapper { libraryVersion, default,
+   *  presets } — normalize both. Only template BODIES are stored; preset
+   *  names/roles come from the seeded constants. */
+  private binderLibraryFromRaw(raw: unknown): {
+    defaultTemplate: BinderTemplate;
+    presetOverrides: Record<string, BinderTemplate>;
+  } {
+    if (raw && typeof raw === "object") {
+      const obj = raw as Record<string, unknown>;
+      if (Array.isArray(obj.sections)) {
+        return {
+          defaultTemplate: obj as unknown as BinderTemplate,
+          presetOverrides: {},
+        };
+      }
+      if (obj.default && typeof obj.default === "object") {
+        return {
+          defaultTemplate: obj.default as BinderTemplate,
+          presetOverrides:
+            (obj.presets as Record<string, BinderTemplate> | undefined) ?? {},
+        };
+      }
+    }
+    return {
+      defaultTemplate: cloneBinderTemplate(DEFAULT_BINDER_TEMPLATE),
+      presetOverrides: {},
+    };
+  }
+
+  private async readBinderLibraryRaw(): Promise<unknown> {
     const { data, error } = await this.client
       .from("hr_binder_templates")
       .select("template")
       .eq("agency_id", this.agencyId)
       .maybeSingle();
     if (error) throwIf(error, "Could not load the binder template");
-    const template = (data as Record<string, unknown> | null)?.template;
-    return (template as BinderTemplate) ?? DEFAULT_BINDER_TEMPLATE;
+    return (data as Record<string, unknown> | null)?.template ?? null;
   }
 
-  async getBinder(staffId: string): Promise<StaffBinder> {
+  async getBinderTemplate(): Promise<BinderTemplate> {
+    const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
+    return stored.defaultTemplate;
+  }
+
+  async listBinderTemplates(): Promise<BinderTemplateLibrary> {
+    const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
+    const library = defaultBinderTemplateLibrary();
+    return {
+      defaultTemplate: stored.defaultTemplate,
+      presets: library.presets.map((preset) => ({
+        ...preset,
+        template: stored.presetOverrides[preset.key] ?? preset.template,
+      })),
+    };
+  }
+
+  async saveBinderTemplate(
+    templateId: string,
+    template: BinderTemplate,
+  ): Promise<void> {
+    validateBinderTemplate(template);
+    const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
+    const presetOverrides = { ...stored.presetOverrides };
+    let defaultTemplate = stored.defaultTemplate;
+    if (templateId === "default") {
+      defaultTemplate = template;
+    } else {
+      const known = defaultBinderTemplateLibrary().presets.some(
+        (p) => p.key === templateId,
+      );
+      if (!known) throw new Error(`Unknown binder template "${templateId}".`);
+      presetOverrides[templateId] = template;
+    }
+    const payload = {
+      libraryVersion: 2,
+      default: defaultTemplate,
+      presets: presetOverrides,
+    };
+    const { error } = await this.client
+      .from("hr_binder_templates")
+      .upsert(
+        {
+          agency_id: this.agencyId,
+          template: payload,
+          updated_by: this.userId,
+        },
+        { onConflict: "agency_id" },
+      );
+    if (error) throwIf(error, "Could not save the binder template");
+  }
+
+  async getBinder(staffId: string, roleKey?: string): Promise<StaffBinder> {
     const { data, error } = await this.client
       .from("hr_binders")
       .select("*")
@@ -1576,7 +1670,8 @@ class SupabaseHrStore implements HrStore {
       .maybeSingle();
     throwIf(error, "Could not load the binder");
     if (data) return mapBinder(data as Record<string, unknown>);
-    const template = await this.getBinderTemplate();
+    const library = await this.listBinderTemplates();
+    const template = binderTemplateForRole(library, roleKey);
     const { data: created, error: insertError } = await this.client
       .from("hr_binders")
       .insert({
@@ -3364,6 +3459,9 @@ interface LocalBucket {
    * buckets (an upload saved in the staff member's own session must show
    * in HR's), newest updatedAt wins — the agencyShifts pattern. */
   binderTemplate: BinderTemplate | null;
+  /** Build 2: role-preset template overrides by preset key (absent = the
+   *  seeded starter preset). The agency default rides binderTemplate. */
+  binderPresets: Record<string, BinderTemplate>;
   binders: Record<string, StaffBinder>;
   binderDocuments: BinderDocument[];
   emergencyContacts: Record<string, StaffEmergencyContact>;
@@ -3420,6 +3518,7 @@ function emptyBucket(): LocalBucket {
     remoteGrants: [],
     evidence: {},
     binderTemplate: null,
+    binderPresets: {},
     binders: {},
     binderDocuments: [],
     emergencyContacts: {},
@@ -4705,10 +4804,54 @@ class LocalHrStore implements HrStore {
     return DEFAULT_BINDER_TEMPLATE;
   }
 
-  async getBinder(staffId: string): Promise<StaffBinder> {
+  async listBinderTemplates(): Promise<BinderTemplateLibrary> {
+    const library = defaultBinderTemplateLibrary();
+    // First bucket holding an override wins, per template — the same
+    // merge-across-buckets rule the rest of the binder state follows.
+    let defaultTemplate: BinderTemplate | null = null;
+    const presetOverrides: Record<string, BinderTemplate> = {};
+    for (const bucket of this.allAgencyBuckets()) {
+      if (!defaultTemplate && bucket.binderTemplate) {
+        defaultTemplate = bucket.binderTemplate;
+      }
+      for (const [key, template] of Object.entries(bucket.binderPresets ?? {})) {
+        if (!(key in presetOverrides)) presetOverrides[key] = template;
+      }
+    }
+    return {
+      defaultTemplate: defaultTemplate ?? library.defaultTemplate,
+      presets: library.presets.map((preset) => ({
+        ...preset,
+        template: presetOverrides[preset.key] ?? preset.template,
+      })),
+    };
+  }
+
+  async saveBinderTemplate(
+    templateId: string,
+    template: BinderTemplate,
+  ): Promise<void> {
+    validateBinderTemplate(template);
+    if (templateId === "default") {
+      this.mutate((b) => {
+        b.binderTemplate = template;
+      });
+      return;
+    }
+    const known = defaultBinderTemplateLibrary().presets.some(
+      (p) => p.key === templateId,
+    );
+    if (!known) throw new Error(`Unknown binder template "${templateId}".`);
+    this.mutate((b) => {
+      b.binderPresets = { ...(b.binderPresets ?? {}), [templateId]: template };
+    });
+  }
+
+  async getBinder(staffId: string, roleKey?: string): Promise<StaffBinder> {
     const existing = this.mergedBinders()[staffId];
     if (existing) return existing;
-    const template = await this.getBinderTemplate();
+    const library = await this.listBinderTemplates();
+    const template = binderTemplateForRole(library, roleKey);
     const now = nowIso();
     const binder: StaffBinder = {
       id: newId(),
