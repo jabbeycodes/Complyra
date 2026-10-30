@@ -5,11 +5,17 @@
  * rather than picturing numbers that were not actually read (the same
  * rule the tracking hook follows). Refetches when the shell returns to
  * the home view, via the shared refresh key.
+ *
+ * The HR store is read first, in the desktop board's order: the local
+ * demo schedule seeds when the HR store loads, and the engine reads
+ * the coverage buckets that load writes — accountability read before
+ * any HR load would see an empty day in the demo.
  */
 import { useEffect, useState } from "react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import { zonedWallTimeMs } from "../../data/dueItems";
+import { createHrStore } from "../../data/hrStore";
 import type { ShiftAccountability } from "../../data/shiftAccountability";
 import { addIsoDays } from "../coverage/coverageWeek";
 import { centralTodayIso } from "./mar";
@@ -38,6 +44,12 @@ export function useYourShift(input: {
       const toIso = new Date(
         zonedWallTimeMs(addIsoDays(todayIso, 1), 0, "America/Chicago"),
       ).toISOString();
+      const store = createHrStore({
+        agencyId: session.agencyId,
+        userId: session.userId,
+      });
+      await store.listShifts(fromIso, toIso, siteId).catch(() => []);
+      if (!live) return;
       const rows = await api
         .getShiftAccountability(siteId, fromIso, toIso)
         .catch(() => [] as ShiftAccountability[]);
