@@ -14,6 +14,14 @@
  * scopes for them, auditors read. The template editor is HR/admin
  * only (certificates.manage or the administrator/HR roles — the same
  * gate the template table's RLS write policy uses).
+ *
+ * Visual restyle (2026-10-30): the board leads with the platform's
+ * compliance-donut grammar — an agency donut, pressure-point stat
+ * tiles, section completion bars, and a gap breakdown — over the same
+ * derived rows, and the staff table became a card grid. Presentation
+ * only: binderBoardStats aggregates the rows' DerivedBinder objects;
+ * filters, sorting, chase lists, and the Open binder jump behave
+ * exactly as before.
  */
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FolderOpen, Settings2 } from "lucide-react";
@@ -34,6 +42,14 @@ import {
 } from "../../data/newHireBinder";
 import type { HubSite, HubStaffEntry } from "../employeeHub/EmployeeHubPage";
 import { BinderTemplateEditor } from "./BinderTemplateEditor";
+import BinderDonut from "./BinderDonut";
+import {
+  binderDonutSegments,
+  binderGapBreakdown,
+  binderSectionCompletion,
+  binderStatusCounts,
+  summarizeBinderBoard,
+} from "./binderBoardStats";
 
 const STATUS_BADGE: Record<string, string> = {
   verified: "badge on-track",
@@ -172,6 +188,24 @@ export function BinderBoardTab({
     };
   }, [rows]);
 
+  // Dashboard aggregates over EVERY in-scope binder (the filters below
+  // narrow only the card grid, exactly as the summary line always did).
+  const summary = useMemo(
+    () => (rows ? summarizeBinderBoard(rows.map((r) => r.derived)) : null),
+    [rows],
+  );
+  const sectionRows = useMemo(
+    () => (rows ? binderSectionCompletion(rows.map((r) => r.derived)) : []),
+    [rows],
+  );
+  const gapData = useMemo(
+    () =>
+      rows
+        ? binderGapBreakdown(rows.map((r) => r.derived))
+        : { slices: [], totalGaps: 0 },
+    [rows],
+  );
+
   const siteName = (siteId: string | null) =>
     sites.find((s) => s.id === siteId)?.name ?? "No home assigned";
   const roleName = (roleKey: string) =>
@@ -225,6 +259,102 @@ export function BinderBoardTab({
                 {totals.awaiting} document{totals.awaiting === 1 ? "" : "s"}{" "}
                 awaiting verification
               </p>
+              {summary && rows.length > 0 && (
+                <>
+                  <div className="binder-dash">
+                    <BinderDonut
+                      segments={binderDonutSegments(summary.counts)}
+                      total={summary.counts.total}
+                      percent={summary.percent}
+                      label="Agency binder completion"
+                    />
+                    <div className="binder-dash-side">
+                      <p className="binder-dash-caption">
+                        <strong>{summary.percent}%</strong> —{" "}
+                        {summary.counts.satisfied} of {summary.counts.total}{" "}
+                        required items satisfied · {summary.fullyComplete} of{" "}
+                        {summary.staffCount} staff fully complete
+                      </p>
+                      <div className="binder-stat-grid">
+                        <div className="binder-stat">
+                          <strong>{summary.awaitingVerification}</strong>
+                          <span>Documents awaiting verification</span>
+                        </div>
+                        <div className="binder-stat">
+                          <strong>{summary.expiredItems}</strong>
+                          <span>Expired items</span>
+                        </div>
+                        <div className="binder-stat">
+                          <strong>{summary.missingItems}</strong>
+                          <span>Missing items</span>
+                        </div>
+                        <div className="binder-stat">
+                          <strong>
+                            {summary.fullyComplete} of {summary.staffCount}
+                          </strong>
+                          <span>Staff fully complete</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="binder-charts">
+                    <div className="binder-chart-block">
+                      <h3>Completion by section</h3>
+                      <ul className="binder-bars">
+                        {sectionRows.map((row) => (
+                          <li className="binder-bar-row" key={row.key}>
+                            <span className="binder-bar-label">{row.title}</span>
+                            {row.total > 0 ? (
+                              <>
+                                <div className="progress-track" aria-hidden="true">
+                                  <span style={{ width: `${row.percent}%` }} />
+                                </div>
+                                <span className="binder-bar-count">
+                                  {row.satisfied} of {row.total} · {row.percent}%
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span aria-hidden="true" />
+                                <span className="binder-bar-count">
+                                  No required items
+                                </span>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="binder-chart-block">
+                      <h3>Where the gaps are</h3>
+                      {gapData.totalGaps === 0 ? (
+                        <p className="binder-chart-note">
+                          No gaps — every binder is complete.
+                        </p>
+                      ) : (
+                        <ul className="binder-bars">
+                          {gapData.slices.map((slice) => (
+                            <li className="binder-bar-row" key={slice.key}>
+                              <span className="binder-bar-label">
+                                {slice.label}
+                              </span>
+                              <div className="progress-track" aria-hidden="true">
+                                <span
+                                  className="progress-fill clay"
+                                  style={{ width: `${slice.percent}%` }}
+                                />
+                              </div>
+                              <span className="binder-bar-count">
+                                {slice.count} · {slice.percent}% of gaps
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="hub-chip-row binder-board-filters" role="group" aria-label="Board filters">
                 <button
                   className={`hub-chip${filter === "all" ? " selected" : ""}`}
@@ -246,49 +376,33 @@ export function BinderBoardTab({
                 </button>
               </div>
 
-              <div className="hub-table-scroll">
-                <table className="hub-table binder-board-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Staff member</th>
-                      <th scope="col">Complete</th>
-                      <th scope="col">Missing</th>
-                      <th scope="col">Awaiting verification</th>
-                      <th scope="col">Most urgent gap</th>
-                      <th scope="col">Chase list</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((row) => {
-                      const expanded = expandedId === row.entry.userId;
-                      return (
-                        <BoardRowFragment
-                          key={row.entry.userId}
-                          row={row}
-                          expanded={expanded}
-                          roleLabel={roleName(row.entry.roleKey)}
-                          homeLabel={siteName(row.entry.siteId)}
-                          onToggle={() =>
-                            setExpandedId(expanded ? null : row.entry.userId)
-                          }
-                          onOpenBinder={() => onOpenBinder(row.entry.userId)}
-                        />
-                      );
-                    })}
-                    {visible.length === 0 && (
-                      <tr>
-                        <td colSpan={6}>
-                          {filter === "all"
-                            ? "No staff to show."
-                            : filter === "incomplete"
-                              ? "Every binder is complete — nothing to chase."
-                              : "No documents are awaiting verification."}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <div className="binder-cards">
+                {visible.map((row) => {
+                  const expanded = expandedId === row.entry.userId;
+                  return (
+                    <BoardCard
+                      key={row.entry.userId}
+                      row={row}
+                      expanded={expanded}
+                      roleLabel={roleName(row.entry.roleKey)}
+                      homeLabel={siteName(row.entry.siteId)}
+                      onToggle={() =>
+                        setExpandedId(expanded ? null : row.entry.userId)
+                      }
+                      onOpenBinder={() => onOpenBinder(row.entry.userId)}
+                    />
+                  );
+                })}
               </div>
+              {visible.length === 0 && (
+                <p className="binder-board-empty">
+                  {filter === "all"
+                    ? "No staff to show."
+                    : filter === "incomplete"
+                      ? "Every binder is complete — nothing to chase."
+                      : "No documents are awaiting verification."}
+                </p>
+              )}
             </>
           )}
         </>
@@ -297,7 +411,7 @@ export function BinderBoardTab({
   );
 }
 
-function BoardRowFragment({
+function BoardCard({
   row,
   expanded,
   roleLabel,
@@ -313,85 +427,90 @@ function BoardRowFragment({
   onOpenBinder: () => void;
 }) {
   const { entry, derived, gaps, urgent } = row;
+  const counts = binderStatusCounts(derived);
   return (
-    <>
-      <tr className={expanded ? "binder-board-open" : undefined}>
-        <td>
-          <span className="binder-board-name">{entry.fullName}</span>
-          <span className="binder-board-meta">
-            {roleLabel} · {homeLabel}
-          </span>
-        </td>
-        <td>
-          <strong>{derived.percentComplete}%</strong>
-          <span className="binder-board-meta">
-            {derived.satisfiedItems} of {derived.totalItems} required items
-          </span>
-        </td>
-        <td>
-          {gaps.length === 0 ? (
-            <span className="badge on-track">None</span>
-          ) : (
-            <span className="badge overdue">
-              {gaps.length} missing
+    <article className="binder-person-card">
+      <div className="binder-person-head">
+        <span className="binder-board-name">{entry.fullName}</span>
+        <span className="binder-board-meta">
+          {roleLabel} · {homeLabel}
+        </span>
+      </div>
+      <div className="binder-person-main">
+        <BinderDonut
+          segments={binderDonutSegments(counts)}
+          total={counts.total}
+          percent={derived.percentComplete}
+          variant="mini"
+          label={`${entry.fullName}'s binder`}
+        />
+        <div className="binder-person-facts">
+          <p className="binder-person-score">
+            <strong>{derived.percentComplete}%</strong> complete
+            <span className="binder-board-meta">
+              {derived.satisfiedItems} of {derived.totalItems} required items
             </span>
-          )}
-        </td>
-        <td>
-          {derived.awaitingVerification === 0
-            ? "—"
-            : `${derived.awaitingVerification} document${derived.awaitingVerification === 1 ? "" : "s"}`}
-        </td>
-        <td>
-          {urgent ? (
-            <>
-              <span className="binder-board-urgent">{urgent.item.label}</span>
-              <span className="binder-board-meta">{urgent.note}</span>
-            </>
-          ) : (
-            "Nothing outstanding"
-          )}
-        </td>
-        <td>
-          <button
-            className="hub-btn"
-            aria-expanded={expanded}
-            onClick={onToggle}
-            disabled={gaps.length === 0}
-          >
-            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            Chase list
-          </button>
-        </td>
-      </tr>
+          </p>
+          <p className="binder-person-line">
+            {gaps.length === 0 ? (
+              <span className="badge on-track">None missing</span>
+            ) : (
+              <span className="badge overdue">{gaps.length} missing</span>
+            )}
+          </p>
+          <p className="binder-person-line">
+            {derived.awaitingVerification === 0
+              ? "No documents awaiting verification"
+              : `${derived.awaitingVerification} document${derived.awaitingVerification === 1 ? "" : "s"} awaiting verification`}
+          </p>
+        </div>
+      </div>
+      <div className="binder-person-urgent">
+        {urgent ? (
+          <>
+            <span className="binder-board-urgent">{urgent.item.label}</span>
+            <span className="binder-board-meta">{urgent.note}</span>
+          </>
+        ) : (
+          "Nothing outstanding"
+        )}
+      </div>
+      <div className="binder-person-actions">
+        <button
+          className="hub-btn"
+          aria-expanded={expanded}
+          onClick={onToggle}
+          disabled={gaps.length === 0}
+        >
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          Chase list
+        </button>
+        <button className="hub-btn primary" onClick={onOpenBinder}>
+          <FolderOpen size={15} /> Open binder
+        </button>
+      </div>
       {expanded && (
-        <tr className="binder-board-chase">
-          <td colSpan={6}>
-            <div className="binder-board-chase-head">
-              <strong>
-                {entry.fullName} — {gaps.length} item{gaps.length === 1 ? "" : "s"} to
-                chase
-              </strong>
-              <button className="hub-btn primary" onClick={onOpenBinder}>
-                <FolderOpen size={15} /> Open binder
-              </button>
-            </div>
-            <ul className="hub-list">
-              {gaps.map((gap) => (
-                <li className="hub-list-item" key={gap.item.key}>
-                  <div className="hub-item-main">
-                    <span className="hub-item-title">{gap.item.label}</span>
-                    <span className="hub-item-sub">{gap.note}</span>
-                  </div>
-                  <span className={STATUS_BADGE[gap.status]}>
-                    {BINDER_STATUS_LABELS[gap.status]}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </td>
-        </tr>
+        <div className="binder-board-chase">
+          <div className="binder-board-chase-head">
+            <strong>
+              {gaps.length} item{gaps.length === 1 ? "" : "s"} to chase
+            </strong>
+          </div>
+          <ul className="hub-list">
+            {gaps.map((gap) => (
+              <li className="hub-list-item" key={gap.item.key}>
+                <div className="hub-item-main">
+                  <span className="hub-item-title">{gap.item.label}</span>
+                  <span className="hub-item-sub">{gap.note}</span>
+                </div>
+                <span className={STATUS_BADGE[gap.status]}>
+                  {BINDER_STATUS_LABELS[gap.status]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
-    </>
+    </article>
   );
 }

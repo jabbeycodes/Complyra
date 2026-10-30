@@ -35,6 +35,11 @@ import {
 } from "../../data/newHireBinder";
 import { summarizePerformanceRecords } from "../../data/performanceRecords";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
+import BinderDonut from "./BinderDonut";
+import {
+  binderDonutSegments,
+  binderStatusCounts,
+} from "./binderBoardStats";
 import type { HubStaffEntry } from "../employeeHub/EmployeeHubPage";
 
 const STATUS_BADGE: Record<BinderItemStatus, string> = {
@@ -403,6 +408,13 @@ export function BinderTab({
       ) : (
         <>
           <div className="binder-head">
+            <BinderDonut
+              segments={binderDonutSegments(binderStatusCounts(derived))}
+              total={derived.totalItems}
+              percent={derived.percentComplete}
+              variant="mini"
+              label={`${subject.fullName}'s binder`}
+            />
             <div className="binder-percent">
               <strong>{derived.percentComplete}%</strong>
               <span>
