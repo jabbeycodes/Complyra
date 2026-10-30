@@ -4,8 +4,8 @@
  * A tile renders ONLY when the signed-in role can actually use the surface
  * behind it; gates reuse the same helpers the desktop app uses, so the grid
  * can never offer a door the API would refuse. Tiles whose module does not
- * exist on main (Messages, Event Reports, Time Off) are deliberately absent
- * rather than dead links.
+ * exist on main (Event Reports, Time Off) are deliberately absent rather
+ * than dead links.
  *
  * There is deliberately no separate "Shift Notes" tile: in ComplyRer's
  * model a shift note IS an ISP data entry (the ISP flow saves through
@@ -23,6 +23,7 @@ export type MobileTileId =
   | "medications"
   | "ispData"
   | "health"
+  | "messages"
   | "timeClock"
   | "myTasks"
   | "individuals"
@@ -73,6 +74,22 @@ const TILE_DEFS: {
     hint: "Vitals, intake, seizures & more",
     visible: (ctx) =>
       ctx.permissions["individuals.view"] === true && ctx.roleKey !== "hr",
+  },
+  {
+    // MESSAGES: staff-to-staff conversations. The gate restates
+    // canUseMessaging (data/permissions) — the exact rule the desktop
+    // page gate (pageVisible → "Messages") and both API layers enforce:
+    // the messages.use permission AND never the auditor role. The role
+    // half is deliberate defense in depth (PR #121): messaging is staff
+    // communication, not a compliance record surface, so even if the
+    // permission is mistakenly granted on the auditor template, no tile
+    // renders and the view stays unreachable. (Checked against the
+    // session's complete permission map, like the health tile above.)
+    id: "messages",
+    label: "Messages",
+    hint: "Conversations with staff",
+    visible: (ctx) =>
+      ctx.roleKey !== "auditor" && ctx.permissions["messages.use"] === true,
   },
   {
     id: "timeClock",
