@@ -82,8 +82,12 @@ import {
   canEnterShiftNotes,
   canSeeShiftNotes,
   canSeeMenuEntries,
+  canViewPersonalSpending,
 } from "../data/permissions";
 import MenuSection from "./MenuSection";
+import PersonalSpendingCard, {
+  PersonalFundsGlance,
+} from "./personalSpending/PersonalSpendingCard";
 const EVIDENCE_OPTIONS: { value: ClinicalEvidenceKind; label: string }[] = [
   { value: "consultation", label: "Consultation note" },
   { value: "doctor_notes", label: "Doctor's notes" },
@@ -318,6 +322,7 @@ export default function IndividualChart({
         <button className="button" onClick={onBack}>
           <ArrowLeft size={16} /> Back to individuals
         </button>
+        <PersonalFundsGlance individualId={individualId} />
       </PageHeading>
 
       {error && <p className="form-error">{error}</p>}
@@ -661,6 +666,27 @@ export default function IndividualChart({
 
         <Consents individualId={individualId} />
         <MonthlyEquipmentCard individualId={individualId} />
+
+        {/* Personal spending: this Individual's own money — its own
+            ledger on the chart, separate from the home's house card.
+            Self-gated by role (nurses and HR never see it); the section
+            loads its own data and contains its own errors. */}
+        {canViewPersonalSpending(chartSession.roleKey) && (
+          <PersonalSpendingCard
+            individualId={individualId}
+            individualName={person.name}
+            dmhId={profile.dmhId ?? ""}
+            dateOfBirth={person.dateOfBirth ?? ""}
+            siteName={person.site}
+            staffOptions={(workspace?.staff ?? [])
+              .filter(
+                (member) =>
+                  member.siteId === person.siteId &&
+                  (!member.expiresOn || member.expiresOn >= todayIso()),
+              )
+              .map((member) => ({ id: member.id, name: member.name }))}
+          />
+        )}
 
         {/* Issue #76: today's scheduled-med MAR check-off (clears Overview
             unmarked-medication due items). */}

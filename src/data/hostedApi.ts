@@ -116,6 +116,20 @@ import {
   type HouseCardMonthClose,
   type HouseCardReceiptPhoto,
 } from "./houseCard";
+import {
+  balanceThroughCents as personalBalanceThroughCents,
+  buildPersonalSpendingViews,
+  closedMonthMessage as personalClosedMonthMessage,
+  monthEndIso as personalMonthEndIso,
+  validatePersonalSpendingCloseDraft,
+  validatePersonalSpendingDraft,
+  validatePersonalSpendingVoidReason,
+  type PersonalSpendingCloseDraft,
+  type PersonalSpendingEntryDraft,
+  type PersonalSpendingEntryRow,
+  type PersonalSpendingMonthClose,
+  type PersonalSpendingReceiptPhoto,
+} from "./personalSpending";
 import { centralTodayIso } from "./menuRecords";
 import { assertSiteHasCapacity } from "./siteCapacity";
 import {
@@ -183,6 +197,9 @@ import {
   canViewHouseCard,
   canRecordHouseCard,
   canCloseHouseCardMonth,
+  canViewPersonalSpending,
+  canRecordPersonalSpending,
+  canClosePersonalSpendingMonth,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -1218,6 +1235,409 @@ export class HostedApi implements ComplyraApi {
       .single();
     throwIf(error, "Could not close the month.");
     return this.houseCardCloseFromRow(data as Record<string, unknown>);
+  }
+
+  // ── PERSONAL SPENDING — one Individual's own money (hosted) ────────
+  // Mirrors LocalApi semantics exactly. The DB backstops everything
+  // (supabase/migrations/20261029130100_personal_spending.sql): RLS
+  // scopes reads and writes through private.can_read_individual plus
+  // the reader/recorder role lists, voids are reasoned updates, and
+  // there is no delete path. Until that migration is applied these
+  // queries fail and the chart section shows its own contained error
+  // state. SEPARATE from the house card: different tables, different
+  // money, no shared rows.
+
+  private personalSpendingFromRow(
+    row: Record<string, unknown>,
+  ): PersonalSpendingEntryRow {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      individualId: row.individual_id as string,
+      entryDate: String(row.entry_date).slice(0, 10),
+      kind: row.kind as PersonalSpendingEntryRow["kind"],
+      location: (row.location as string) ?? "",
+      purpose: (row.purpose as string) ?? "",
+      amountCents: Number(row.amount_cents),
+      note: (row.note as string) ?? "",
+      receiptPhoto:
+        (row.receipt_photo as PersonalSpendingReceiptPhoto | null) ?? null,
+      recordedBy: row.recorded_by as string,
+      recordedByName: (row.recorded_by_name as string) ?? "",
+      recordedByRole: (row.recorded_by_role as string) ?? "",
+      createdAt: row.created_at as string,
+      voidedBy: (row.voided_by as string | null) ?? null,
+      voidedAt: (row.voided_at as string | null) ?? null,
+      voidReason: (row.void_reason as string | null) ?? null,
+      replacesEntryId: (row.replaces_entry_id as string | null) ?? null,
+      replacedByEntryId: (row.replaced_by_entry_id as string | null) ?? null,
+    };
+  }
+
+  private personalSpendingCloseFromRow(
+    row: Record<string, unknown>,
+  ): PersonalSpendingMonthClose {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      individualId: row.individual_id as string,
+      month: String(row.month).slice(0, 7),
+      closingBalanceCents: Number(row.closing_balance_cents),
+      printedName: (row.printed_name as string) ?? "",
+      signatureText: (row.signature_text as string) ?? "",
+      signedBy: row.signed_by as string,
+      signedByName: (row.signed_by_name as string) ?? "",
+      signedAt: row.signed_at as string,
+      createdAt: row.created_at as string,
+      individualSignoff:
+        row.individual_signoff as PersonalSpendingMonthClose["individualSignoff"],
+      secondStaffId: (row.second_staff_id as string | null) ?? null,
+      secondStaffName: (row.second_staff_name as string | null) ?? null,
+      secondStaffSignatureText:
+        (row.second_staff_signature as string | null) ?? null,
+    };
+  }
+
+  private assertPersonalSpendingViewer(session: SessionUser) {
+    if (!canViewPersonalSpending(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private assertPersonalSpendingRecorder(session: SessionUser) {
+    if (!canRecordPersonalSpending(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  /** The Individual, if this session may read them; otherwise throws. */
+  private async assertPersonalSpendingReadable(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const { data } = await this.client
+      .from("staff_assignments")
+      .select("*")
+      .eq("agency_id", session.agencyId);
+    const assignments = (data ?? []).map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        id: record.id as string,
+        agencyId: record.agency_id as string,
+        userId: record.user_id as string,
+        individualId: (record.individual_id as string | null) ?? null,
+        siteId: (record.site_id as string | null) ?? null,
+        startsOn: record.starts_on as string,
+        endsOn: (record.ends_on as string | null) ?? null,
+      };
+    });
+    if (!canReadIndividual(session, person, assignments, [person])) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    return person;
+  }
+
+  private async personalSpendingClosesFor(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const { data, error } = await this.client
+      .from("personal_spending_month_closes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("month", { ascending: false });
+    throwIf(error, "Could not load the personal spending sign-offs.");
+    return (data ?? []).map((row) =>
+      this.personalSpendingCloseFromRow(row as Record<string, unknown>),
+    );
+  }
+
+  private async personalSpendingViewsFor(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const { data, error } = await this.client
+      .from("personal_spending_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .order("entry_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the personal spending ledger.");
+    const rows = (data ?? []).map((row) =>
+      this.personalSpendingFromRow(row as Record<string, unknown>),
+    );
+    const closes = await this.personalSpendingClosesFor(session, individualId);
+    const names = await this.lifeEventNames(
+      rows.flatMap((row) =>
+        [row.recordedBy, row.voidedBy].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    );
+    return buildPersonalSpendingViews(
+      rows,
+      closes,
+      (userId) => names.get(userId) ?? "Staff member",
+    );
+  }
+
+  private async assertPersonalSpendingMonthOpen(
+    session: SessionUser,
+    individualId: string,
+    entryDate: string,
+  ) {
+    const month = monthKeyFrom(entryDate);
+    const { data, error } = await this.client
+      .from("personal_spending_month_closes")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("month", month)
+      .maybeSingle();
+    throwIf(error, "Could not check whether the month is closed.");
+    if (data) throw new Error(personalClosedMonthMessage(monthLabel(month)));
+  }
+
+  async listPersonalSpendingEntries(individualId: string) {
+    const session = await this.requireSession();
+    this.assertPersonalSpendingViewer(session);
+    await this.assertPersonalSpendingReadable(session, individualId);
+    return this.personalSpendingViewsFor(session, individualId);
+  }
+
+  async createPersonalSpendingEntry(
+    input: { individualId: string } & PersonalSpendingEntryDraft,
+  ) {
+    const session = await this.requireSession();
+    this.assertPersonalSpendingRecorder(session);
+    const person = await this.assertPersonalSpendingReadable(
+      session,
+      input.individualId,
+    );
+    const draft = validatePersonalSpendingDraft(input, centralTodayIso());
+    await this.assertPersonalSpendingMonthOpen(
+      session,
+      person.id,
+      draft.entryDate,
+    );
+    const { data, error } = await this.client
+      .from("personal_spending_entries")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: person.siteId,
+        individual_id: person.id,
+        entry_date: draft.entryDate,
+        kind: draft.kind,
+        location: draft.location,
+        purpose: draft.purpose,
+        amount_cents: draft.amountCents,
+        note: draft.note,
+        receipt_photo: draft.receiptPhoto,
+        recorded_by: session.userId,
+        recorded_by_name: session.fullName,
+        recorded_by_role: session.roleKey,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save that personal spending entry.");
+    const row = this.personalSpendingFromRow(data as Record<string, unknown>);
+    const views = await this.personalSpendingViewsFor(session, person.id);
+    return views.find((view) => view.id === row.id) ?? views[views.length - 1];
+  }
+
+  async voidPersonalSpendingEntry(
+    entryId: string,
+    reason: string,
+    replacement?:
+      | ({ individualId: string } & PersonalSpendingEntryDraft)
+      | null,
+  ) {
+    const session = await this.requireSession();
+    this.assertPersonalSpendingRecorder(session);
+    const { data: existingData, error: fetchError } = await this.client
+      .from("personal_spending_entries")
+      .select("*")
+      .eq("id", entryId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(fetchError, "Could not load that personal spending entry.");
+    if (!existingData) throw new Error("Personal spending entry not found.");
+    const existing = this.personalSpendingFromRow(
+      existingData as Record<string, unknown>,
+    );
+    await this.assertPersonalSpendingReadable(session, existing.individualId);
+    if (existing.voidedAt) {
+      throw new Error("That entry is already voided.");
+    }
+    const voidReason = validatePersonalSpendingVoidReason(reason);
+
+    // Validate + insert the replacement BEFORE voiding, so a failed
+    // replacement never leaves a half-applied correction behind.
+    let replacementRow: PersonalSpendingEntryRow | null = null;
+    if (replacement) {
+      if (replacement.individualId !== existing.individualId) {
+        throw new Error(
+          "The replacement must belong to the same Individual's ledger.",
+        );
+      }
+      const draft = validatePersonalSpendingDraft(
+        replacement,
+        centralTodayIso(),
+      );
+      if (monthKeyFrom(draft.entryDate) !== monthKeyFrom(existing.entryDate)) {
+        await this.assertPersonalSpendingMonthOpen(
+          session,
+          existing.individualId,
+          draft.entryDate,
+        );
+      }
+      const { data, error } = await this.client
+        .from("personal_spending_entries")
+        .insert({
+          agency_id: session.agencyId,
+          site_id: existing.siteId,
+          individual_id: existing.individualId,
+          entry_date: draft.entryDate,
+          kind: draft.kind,
+          location: draft.location,
+          purpose: draft.purpose,
+          amount_cents: draft.amountCents,
+          note: draft.note,
+          receipt_photo: draft.receiptPhoto,
+          recorded_by: session.userId,
+          recorded_by_name: session.fullName,
+          recorded_by_role: session.roleKey,
+          replaces_entry_id: existing.id,
+        })
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the replacement entry.");
+      replacementRow = this.personalSpendingFromRow(
+        data as Record<string, unknown>,
+      );
+    }
+
+    const { error } = await this.client
+      .from("personal_spending_entries")
+      .update({
+        voided_at: new Date().toISOString(),
+        voided_by: session.userId,
+        void_reason: voidReason,
+        replaced_by_entry_id: replacementRow?.id ?? null,
+      })
+      .eq("id", existing.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not void that entry.");
+    const views = await this.personalSpendingViewsFor(
+      session,
+      existing.individualId,
+    );
+    const voided = views.find((view) => view.id === existing.id);
+    if (!voided) throw new Error("Personal spending entry not found.");
+    return {
+      voided,
+      replacement: replacementRow
+        ? (views.find((view) => view.id === replacementRow!.id) ?? null)
+        : null,
+    };
+  }
+
+  async listPersonalSpendingMonthCloses(individualId: string) {
+    const session = await this.requireSession();
+    this.assertPersonalSpendingViewer(session);
+    await this.assertPersonalSpendingReadable(session, individualId);
+    return this.personalSpendingClosesFor(session, individualId);
+  }
+
+  async closePersonalSpendingMonth(
+    input: { individualId: string } & PersonalSpendingCloseDraft,
+  ) {
+    const session = await this.requireSession();
+    if (!canClosePersonalSpendingMonth(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const person = await this.assertPersonalSpendingReadable(
+      session,
+      input.individualId,
+    );
+    const draft = validatePersonalSpendingCloseDraft(input);
+    const closes = await this.personalSpendingClosesFor(session, person.id);
+    if (closes.some((close) => close.month === draft.month)) {
+      throw new Error(`${monthLabel(draft.month)} is already closed and signed.`);
+    }
+
+    // The unable-to-sign case names a second staff member: an active
+    // member of this agency, never the closer themselves.
+    let secondStaffName: string | null = null;
+    if (draft.individualSignoff === "unable_second_staff") {
+      const secondId = draft.secondStaffId!;
+      if (secondId === session.userId) {
+        throw new Error(
+          "The second staff member must be someone other than the manager closing the month.",
+        );
+      }
+      const today = centralTodayIso();
+      const { data: member, error: memberError } = await this.client
+        .from("memberships")
+        .select("user_id, expires_on")
+        .eq("agency_id", session.agencyId)
+        .eq("user_id", secondId)
+        .maybeSingle();
+      throwIf(memberError, "Could not verify the second staff member.");
+      const memberRow = member as { expires_on: string | null } | null;
+      if (!memberRow || (memberRow.expires_on && memberRow.expires_on < today)) {
+        throw new Error(
+          "Choose an active staff member in this agency as the second signer.",
+        );
+      }
+      const names = await this.lifeEventNames([secondId]);
+      secondStaffName = names.get(secondId) ?? "Staff member";
+    }
+
+    const { data: entryData, error: entryError } = await this.client
+      .from("personal_spending_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", person.id)
+      .lte("entry_date", personalMonthEndIso(draft.month));
+    throwIf(entryError, "Could not total the month before closing it.");
+    const entries = (entryData ?? []).map((row) =>
+      this.personalSpendingFromRow(row as Record<string, unknown>),
+    );
+    const { data, error } = await this.client
+      .from("personal_spending_month_closes")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: person.siteId,
+        individual_id: person.id,
+        month: draft.month,
+        closing_balance_cents: personalBalanceThroughCents(
+          entries,
+          personalMonthEndIso(draft.month),
+        ),
+        printed_name: session.fullName,
+        signature_text: draft.signatureText,
+        signed_by: session.userId,
+        signed_by_name: session.fullName,
+        individual_signoff: draft.individualSignoff,
+        second_staff_id: draft.secondStaffId,
+        second_staff_name: secondStaffName,
+        second_staff_signature: draft.secondStaffSignatureText,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not close the month.");
+    return this.personalSpendingCloseFromRow(data as Record<string, unknown>);
   }
 
     async listConsentPackets(): Promise<ConsentPacket[]> {
