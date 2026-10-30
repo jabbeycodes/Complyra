@@ -60,6 +60,7 @@ import {
   weekStartMondayIso,
   type MenuEntry,
 } from "./menuRecords";
+import { healthTrackTitle, type HealthTrackEntry } from "./healthTrack";
 import type { MessageParticipantRow, MessageRow, MessageThreadRow } from "./messaging";
 import type {
   MedDoseException,
@@ -75,7 +76,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 6;
+export const SHOWCASE_REVISION = 7;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -1249,6 +1250,7 @@ function addDemoSurfaces(db: LocalDatabase) {
   addLifeEvents(db);
   addHouseCardLedgers(db);
   addPersonalSpendingLedgers(db);
+  addHealthTrackEntries(db);
 }
 
 /**
@@ -2446,6 +2448,118 @@ function addLifeEvents(db: LocalDatabase) {
   for (const event of events) {
     if (!db.lifeEvents.some((row) => row.id === event.id)) db.lifeEvents.push(event);
   }
+}
+
+/**
+ * Health tracker entries for the mobile Health home (and the chart's
+ * Trackers-and-logs section — same store). Ellis Hart (Cedar) and
+ * Harper Soto (Willow) carry today-dated entries across the seven
+ * mobile trackers so the home opens populated: intake, elimination,
+ * vitals, glucose, and skin logged today; seizures and menses show
+ * their last-logged dates (Ellis's last seizure sits 45 days back,
+ * matching his neurology note "no seizures this month"; Harper's cycle
+ * started two days ago). Yesterday's fluid totals stay at or above the
+ * 32 oz low-fluid alert line so the seed raises no alerts.
+ */
+function addHealthTrackEntries(db: LocalDatabase) {
+  db.healthTrackEntries ??= [];
+  const entries = db.healthTrackEntries;
+  const today = centralTodayIso();
+  const yesterday = addDaysIso(today, -1);
+  const alex = userId(db, "Alex Morgan");
+  const jordan = userId(db, "Jordan Lee");
+  const ellis = idOf(db, "Ellis Hart");
+  const harper = idOf(db, "Harper Soto");
+
+  const push = (
+    id: string,
+    individualId: string,
+    kind: HealthTrackEntry["kind"],
+    occurredOn: string,
+    details: Record<string, string>,
+    recordedByUserId: string,
+    createdAt: string,
+    note = "",
+  ) => {
+    if (entries.some((row) => row.id === id)) return;
+    entries.push({
+      id,
+      agencyId: agencyId(db),
+      individualId,
+      kind,
+      occurredOn,
+      title: healthTrackTitle(kind, details),
+      details,
+      flaggedAbnormal: false,
+      note,
+      recordedByUserId,
+      createdAt,
+    });
+  };
+
+  /* ------------------------------- Ellis Hart (Cedar) ------------------------------ */
+  push("health-showcase-ellis-intake-breakfast", ellis, "intake", today,
+    { entryType: "meal", mealType: "Breakfast", portion: "Most", appetiteNote: "Ate well with one prompt." },
+    alex, `${today}T13:15:00.000Z`);
+  push("health-showcase-ellis-intake-water", ellis, "intake", today,
+    { entryType: "fluid", fluidType: "Water", fluidOz: "8" },
+    alex, `${today}T15:00:00.000Z`);
+  push("health-showcase-ellis-intake-lunch", ellis, "intake", today,
+    { entryType: "meal", mealType: "Lunch", portion: "All", appetiteNote: "" },
+    alex, `${today}T17:45:00.000Z`);
+  push("health-showcase-ellis-intake-yesterday-water", ellis, "intake", yesterday,
+    { entryType: "fluid", fluidType: "Water", fluidOz: "24" },
+    alex, `${yesterday}T18:00:00.000Z`);
+  push("health-showcase-ellis-intake-yesterday-juice", ellis, "intake", yesterday,
+    { entryType: "fluid", fluidType: "Juice", fluidOz: "16" },
+    alex, `${yesterday}T22:00:00.000Z`);
+  push("health-showcase-ellis-intake-yesterday-dinner", ellis, "intake", yesterday,
+    { entryType: "meal", mealType: "Dinner", portion: "Most", appetiteNote: "" },
+    alex, `${yesterday}T23:00:00.000Z`);
+  push("health-showcase-ellis-elimination", ellis, "elimination", today,
+    { entryType: "bowel", timeOfDay: "09:15", amount: "Medium", consistency: "Formed", color: "Brown", bloodPresent: "no", painNoted: "no" },
+    alex, `${today}T14:20:00.000Z`);
+  push("health-showcase-ellis-vitals", ellis, "vitals", today,
+    { temperatureF: "98.4", systolic: "118", diastolic: "76", pulse: "72", respirations: "16", oxygenSaturation: "98", weightLb: "", heightIn: "" },
+    alex, `${today}T14:00:00.000Z`);
+  push("health-showcase-ellis-glucose", ellis, "glucose", today,
+    { timeOfDay: "11:30", readingMgDl: "112", context: "After meal", symptoms: "" },
+    alex, `${today}T16:35:00.000Z`);
+  push("health-showcase-ellis-skin", ellis, "skin", today,
+    { bodyLocation: "Left foot", observation: "Dryness", changeSinceLast: "Unchanged", sizeDescription: "", description: "Dry skin on the heel. Moisturizer applied.", followUpOn: "" },
+    alex, `${today}T19:10:00.000Z`);
+  push("health-showcase-ellis-seizure", ellis, "seizure", addDaysIso(today, -45),
+    { timeOfDay: "21:40", seizureType: "Tonic-clonic", durationMinutes: "2", triggers: "Evening dose was late the day before.", postEventState: "Sleepy for about an hour, then back to baseline." },
+    alex, `${addDaysIso(today, -45)}T03:00:00.000Z`);
+
+  /* ------------------------------ Harper Soto (Willow) ----------------------------- */
+  push("health-showcase-harper-vitals", harper, "vitals", today,
+    { temperatureF: "98.1", systolic: "124", diastolic: "80", pulse: "76", respirations: "16", oxygenSaturation: "99", weightLb: "", heightIn: "" },
+    jordan, `${today}T13:30:00.000Z`, "Morning readings before the lisinopril dose.");
+  push("health-showcase-harper-intake-breakfast", harper, "intake", today,
+    { entryType: "meal", mealType: "Breakfast", portion: "All", appetiteNote: "" },
+    jordan, `${today}T13:50:00.000Z`);
+  push("health-showcase-harper-intake-water", harper, "intake", today,
+    { entryType: "fluid", fluidType: "Water", fluidOz: "12" },
+    jordan, `${today}T15:20:00.000Z`);
+  push("health-showcase-harper-intake-yesterday-water", harper, "intake", yesterday,
+    { entryType: "fluid", fluidType: "Water", fluidOz: "20" },
+    jordan, `${yesterday}T19:00:00.000Z`);
+  push("health-showcase-harper-intake-yesterday-milk", harper, "intake", yesterday,
+    { entryType: "fluid", fluidType: "Milk", fluidOz: "12" },
+    jordan, `${yesterday}T23:30:00.000Z`);
+  push("health-showcase-harper-elimination", harper, "elimination", today,
+    { entryType: "urination", timeOfDay: "08:20", amount: "Medium", continence: "Continent" },
+    jordan, `${today}T13:25:00.000Z`);
+  push("health-showcase-harper-glucose", harper, "glucose", today,
+    { timeOfDay: "07:45", readingMgDl: "96", context: "Before meal", symptoms: "" },
+    jordan, `${today}T12:50:00.000Z`);
+  push("health-showcase-harper-skin", harper, "skin", addDaysIso(today, -2),
+    { bodyLocation: "Right hand", observation: "Redness", changeSinceLast: "Improving", sizeDescription: "", description: "Redness from gardening gloves, fading.", followUpOn: "" },
+    jordan, `${addDaysIso(today, -2)}T20:00:00.000Z`);
+  push("health-showcase-harper-menses", harper, "menses", addDaysIso(today, -2),
+    { endOn: "", flow: "Moderate", symptoms: "Mild cramps. Used a heat pack." },
+    jordan, `${addDaysIso(today, -2)}T15:00:00.000Z`);
 }
 
 function slug(value: string): string {

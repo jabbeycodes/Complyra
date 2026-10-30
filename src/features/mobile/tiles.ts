@@ -22,6 +22,7 @@ import { canSeeShiftNotes } from "../../data/permissions";
 export type MobileTileId =
   | "medications"
   | "ispData"
+  | "health"
   | "timeClock"
   | "myTasks"
   | "individuals"
@@ -59,6 +60,19 @@ const TILE_DEFS: {
     label: "ISP Data",
     hint: "Collect data on plan tasks",
     visible: (ctx) => canSeeShiftNotes(ctx.roleKey),
+  },
+  {
+    // HEALTH: the seven day-to-day trackers (intake, elimination, vitals,
+    // glucose, skin, seizures, menses) as a phone view over the chart's
+    // health-entry store. The gate mirrors canViewHealthTrack in
+    // data/healthTrack (chart read access: individuals.view, and never
+    // HR); recording inside follows the chart's health.record permission,
+    // so view-only roles such as auditors see statuses with no log actions.
+    id: "health",
+    label: "Health",
+    hint: "Vitals, intake, seizures & more",
+    visible: (ctx) =>
+      ctx.permissions["individuals.view"] === true && ctx.roleKey !== "hr",
   },
   {
     id: "timeClock",

@@ -24,6 +24,7 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
   assert.deepEqual(tiles, [
     "medications",
     "ispData",
+    "health",
     "timeClock",
     "myTasks",
     "individuals",
@@ -51,10 +52,24 @@ test("an auditor gets read surfaces but no time clock without hub access", () =>
   assert.ok(tiles.includes("medications"));
   assert.ok(!(tiles as string[]).includes("shiftNotes"));
   assert.ok(tiles.includes("ispData"));
+  // Health is a read surface for auditors too (statuses, no log actions) —
+  // the tile gate mirrors the chart's canViewHealthTrack.
+  assert.ok(tiles.includes("health"));
   assert.ok(tiles.includes("appointments"));
   // No separate Med Count tile: the count lives under Medications.
   assert.ok(!tiles.includes("medCount" as never));
   assert.ok(!tiles.includes("timeClock"));
+});
+
+test("the health tile mirrors the chart's health-track view gate", () => {
+  // canViewHealthTrack: individuals.view required, and HR never sees it.
+  assert.ok(
+    ids(ctx({ roleKey: "dsp", permissions: { "individuals.view": true } })).includes("health"),
+  );
+  assert.ok(
+    !ids(ctx({ roleKey: "hr", permissions: { "individuals.view": true } })).includes("health"),
+  );
+  assert.ok(!ids(ctx({ roleKey: "dsp", permissions: {} })).includes("health"));
 });
 
 test("page-gated tiles follow the desktop page gate exactly", () => {
@@ -85,6 +100,7 @@ test("tile order is daily-driver order, medications first", () => {
     [
       "medications",
       "ispData",
+      "health",
       "timeClock",
       "myTasks",
       "individuals",

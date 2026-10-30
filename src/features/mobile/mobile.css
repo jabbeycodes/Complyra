@@ -1407,6 +1407,17 @@
   font-size: 19px;
 }
 
+/* Mobile Health: the seizure quick action sits above the tracker list,
+ * and the quick-log sheet's fields run a touch taller for gloved hands. */
+.msh-button.block + .msh-list {
+  margin-top: 12px;
+}
+
+.msh-health-sheet .msh-field input,
+.msh-health-sheet .msh-field select {
+  min-height: 54px;
+}
+
 .msh-shell :focus-visible,
 .mobile-return-bar:focus-visible {
   outline: 2px solid var(--purple-dark);

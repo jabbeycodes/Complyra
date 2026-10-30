@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ClipboardList,
   Clock,
+  HeartPulse,
   ListChecks,
   ListTodo,
   LogOut,
@@ -34,6 +35,7 @@ import MobileToday from "./MobileToday";
 import MobileComplianceCard from "./MobileComplianceCard";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
+import MobileHealth from "./MobileHealth";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
@@ -44,6 +46,7 @@ export type ShellView =
   | "sites"
   | "mar"
   | "isp"
+  | "health"
   | "tasks"
   | "people"
   | "housecard"
@@ -52,6 +55,7 @@ export type ShellView =
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medications: Pill,
   ispData: ClipboardList,
+  health: HeartPulse,
   timeClock: Clock,
   myTasks: ListTodo,
   individuals: Users,
@@ -64,6 +68,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   sites: "Select your home",
   mar: "Medications",
   isp: "ISP Data",
+  health: "Health",
   tasks: "My Tasks",
   people: "Individuals",
   housecard: "House Card",
@@ -249,6 +254,9 @@ export default function MobileShell({
         setIspKey((value) => value + 1);
         setView("isp");
         break;
+      case "health":
+        setView("health");
+        break;
       case "timeClock":
         nav.openPage("Employee Hub");
         break;
@@ -315,6 +323,7 @@ export default function MobileShell({
     view === "home" ||
     view === "tasks" ||
     view === "people" ||
+    view === "health" ||
     (view === "isp" && !ispFormActive);
 
   const greeting = greetingForHour(centralHour());
@@ -596,6 +605,16 @@ export default function MobileShell({
             initialPersonId={ispPersonId}
             onOpenChart={nav.openPersonChart}
             onFormActiveChange={setIspFormActive}
+          />
+        )}
+
+        {view === "health" && scopedSite && (
+          <MobileHealth
+            api={api}
+            session={session}
+            people={people}
+            onOpenChart={nav.openPersonChart}
+            onOpenMedications={() => setView("mar")}
           />
         )}
 
