@@ -18,11 +18,13 @@
  */
 import { canSeeMeds } from "../../data/chart";
 import { canSeeShiftNotes } from "../../data/permissions";
+import { fieldLogAccess } from "./fieldLogs";
 
 export type MobileTileId =
   | "medications"
   | "ispData"
   | "health"
+  | "quickLog"
   | "messages"
   | "scheduling"
   | "timeClock"
@@ -75,6 +77,19 @@ const TILE_DEFS: {
     hint: "Vitals, intake, seizures & more",
     visible: (ctx) =>
       ctx.permissions["individuals.view"] === true && ctx.roleKey !== "hr",
+  },
+  {
+    // QUICK LOG: one door for the four field logs — menu records,
+    // mileage, drills, incident (GER) reports. The gate is "can record
+    // in at least one domain," computed from the same helpers and
+    // permission keys the desktop surfaces use (fieldLogAccess), so the
+    // tile never offers a door the API would refuse. Read-only roles
+    // record in no domain — an auditor gets no tile even though they
+    // may READ filed GERs on the desktop Reporting tab.
+    id: "quickLog",
+    label: "Quick log",
+    hint: "Menu, mileage, drills & incidents",
+    visible: (ctx) => fieldLogAccess(ctx.roleKey, ctx.permissions).any,
   },
   {
     // MESSAGES: staff-to-staff conversations. The gate restates
