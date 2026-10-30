@@ -24,6 +24,7 @@ export type MobileTileId =
   | "ispData"
   | "health"
   | "messages"
+  | "scheduling"
   | "timeClock"
   | "myTasks"
   | "individuals"
@@ -90,6 +91,18 @@ const TILE_DEFS: {
     hint: "Conversations with staff",
     visible: (ctx) =>
       ctx.roleKey !== "auditor" && ctx.permissions["messages.use"] === true,
+  },
+  {
+    // SCHEDULING: the manager's week coverage board with the engine's
+    // per-shift accountability lines. The gate is the desktop page gate
+    // itself (pageVisible "Scheduling": house managers, program
+    // managers, agency administrators — DSPs, nurses, and auditors
+    // never see it). Site scope inside follows the desktop page:
+    // sitesVisibleTo (an HM's own houses; PM/admin every house).
+    id: "scheduling",
+    label: "Scheduling",
+    hint: "Week coverage & accountability",
+    visible: (ctx) => ctx.canPage("Scheduling"),
   },
   {
     id: "timeClock",

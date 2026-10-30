@@ -94,6 +94,7 @@ export default function MobileToday({
   onOpenMar,
   onOpenQueueItem,
   complianceCard,
+  yourShift,
 }: {
   tracking: TodayTracking;
   queueItems: PersonalWorkItem[];
@@ -107,6 +108,13 @@ export default function MobileToday({
    * day's operations, never merged into the tracking donut.
    */
   complianceCard?: React.ReactNode;
+  /**
+   * The "Your shift" strip (the signed-in person's own shift today and
+   * its accountability counts, from the Phase 2 engine), rendered above
+   * the tracking card when the person has a shift today. Additive only —
+   * it never feeds the donut or the tracking math.
+   */
+  yourShift?: React.ReactNode;
 }) {
   const [filter, setFilter] = useState<UpFilter>("all");
   const { summary } = tracking;
@@ -147,6 +155,8 @@ export default function MobileToday({
 
   return (
     <>
+      {yourShift}
+
       <section className="msh-donut-card" aria-label="Today's tracking">
         <h3 className="msh-card-title">Today&rsquo;s tracking</h3>
         {tracking.loading ? (

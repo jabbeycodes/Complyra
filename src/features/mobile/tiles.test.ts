@@ -123,6 +123,31 @@ test("page-gated tiles follow the desktop page gate exactly", () => {
   assert.ok(!ids(withPages).includes("messages"));
 });
 
+test("the scheduling tile follows the desktop Scheduling page gate exactly", () => {
+  // pageVisible("Scheduling") in the app is the role list — house
+  // managers, program managers, administrators. The tile restates that
+  // gate through canPage, so it appears exactly when the page does.
+  for (const roleKey of ["house_manager", "program_manager", "administrator"]) {
+    assert.ok(
+      ids(ctx({ roleKey, canPage: (page) => page === "Scheduling" })).includes("scheduling"),
+      `${roleKey} with the page gate should see scheduling`,
+    );
+  }
+  // The gate closed means no tile, whatever else the role can open.
+  for (const roleKey of ["dsp", "nurse", "auditor", "house_manager"]) {
+    assert.ok(
+      !ids(
+        ctx({
+          roleKey,
+          permissions: { "hub.access": true, "individuals.view": true },
+          canPage: (page) => page === "Weekly checklist" || page === "House Card",
+        }),
+      ).includes("scheduling"),
+      `${roleKey} without the page gate should not see scheduling`,
+    );
+  }
+});
+
 test("tile order is daily-driver order, medications first", () => {
   const tiles = mobileTiles(
     ctx({
@@ -143,6 +168,7 @@ test("tile order is daily-driver order, medications first", () => {
       "ispData",
       "health",
       "messages",
+      "scheduling",
       "timeClock",
       "myTasks",
       "individuals",
