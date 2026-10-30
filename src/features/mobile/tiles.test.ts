@@ -29,6 +29,7 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
     "medications",
     "ispData",
     "health",
+    "quickLog",
     "messages",
     "timeClock",
     "myTasks",
@@ -148,6 +149,26 @@ test("the scheduling tile follows the desktop Scheduling page gate exactly", () 
   }
 });
 
+test("the quick log tile opens when the role records in any field-log domain", () => {
+  // Menu entry is a role list (dsp included) — no permission keys needed.
+  assert.ok(ids(ctx({ roleKey: "dsp", permissions: {} })).includes("quickLog"));
+  assert.ok(ids(ctx({ roleKey: "nurse", permissions: {} })).includes("quickLog"));
+  // Mileage alone opens it (HR records mileage and nothing else here).
+  assert.ok(
+    ids(ctx({ roleKey: "hr", permissions: { "mileage.manage": true } })).includes("quickLog"),
+  );
+  // GER filing alone opens it.
+  assert.ok(
+    ids(ctx({ roleKey: "compliance_admin", permissions: { "ger.create": true } })).includes("quickLog"),
+  );
+  // Read-only roles record in NO domain: an auditor may read filed GERs
+  // on the desktop but gets no quick-log tile; HR without mileage neither.
+  assert.ok(
+    !ids(ctx({ roleKey: "auditor", permissions: { "individuals.view": true } })).includes("quickLog"),
+  );
+  assert.ok(!ids(ctx({ roleKey: "hr", permissions: {} })).includes("quickLog"));
+});
+
 test("tile order is daily-driver order, medications first", () => {
   const tiles = mobileTiles(
     ctx({
@@ -167,6 +188,7 @@ test("tile order is daily-driver order, medications first", () => {
       "medications",
       "ispData",
       "health",
+      "quickLog",
       "messages",
       "scheduling",
       "timeClock",

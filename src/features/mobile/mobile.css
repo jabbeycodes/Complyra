@@ -1646,6 +1646,20 @@
   outline-offset: -2px;
 }
 
+/* Quick log — a filed incident report's read-only detail card. */
+.msh-ger-detail {
+  background: var(--white);
+  border: 0;
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(36, 30, 24, 0.07);
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.msh-ger-detail .msh-facts {
+  margin-top: 4px;
+}
+
 .msh-sched-warn {
   color: var(--purple-dark);
   font-weight: 600;

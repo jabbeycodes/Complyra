@@ -15,6 +15,7 @@ import {
   Search,
   Users,
   Wallet,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { ComplyRerWordmark } from "../../brand/ComplyrerBrand";
@@ -38,6 +39,7 @@ import MobileComplianceCard from "./MobileComplianceCard";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileHealth from "./MobileHealth";
+import MobileQuickLog from "./MobileQuickLog";
 import MobileMessages from "./MobileMessages";
 import MobileScheduling, { MobileYourShiftDetail } from "./MobileScheduling";
 import { useYourShift } from "./useYourShift";
@@ -53,6 +55,7 @@ export type ShellView =
   | "mar"
   | "isp"
   | "health"
+  | "quicklog"
   | "messages"
   | "scheduling"
   | "yourshift"
@@ -65,6 +68,7 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medications: Pill,
   ispData: ClipboardList,
   health: HeartPulse,
+  quickLog: Zap,
   messages: MessageSquare,
   scheduling: CalendarDays,
   timeClock: Clock,
@@ -80,6 +84,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   mar: "Medications",
   isp: "ISP Data",
   health: "Health",
+  quicklog: "Quick log",
   messages: "Messages",
   scheduling: "Scheduling",
   yourshift: "Your shift",
@@ -308,6 +313,9 @@ export default function MobileShell({
       case "health":
         setView("health");
         break;
+      case "quickLog":
+        setView("quicklog");
+        break;
       case "messages":
         setView("messages");
         break;
@@ -382,6 +390,7 @@ export default function MobileShell({
     view === "tasks" ||
     view === "people" ||
     view === "health" ||
+    view === "quicklog" ||
     view === "scheduling" ||
     (view === "messages" && !messagesInThread) ||
     (view === "isp" && !ispFormActive);
@@ -676,6 +685,20 @@ export default function MobileShell({
             people={people}
             onOpenChart={nav.openPersonChart}
             onOpenMedications={() => setView("mar")}
+          />
+        )}
+
+        {view === "quicklog" && scopedSite && (
+          <MobileQuickLog
+            api={api}
+            session={session}
+            siteId={scopedSite.id}
+            siteName={scopedSite.name}
+            people={people}
+            drills={workspace.monthly.drills.filter(
+              (drill) => drill.siteId === scopedSite.id,
+            )}
+            onOpenChart={nav.openPersonChart}
           />
         )}
 

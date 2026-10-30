@@ -49,6 +49,7 @@ import { emptyCareData } from "./careScreening";
 import type { ConsentRecord } from "./consents";
 import { HEALTH_SCOPE, PACKET_COPY_VERSION, PACKET_ITEMS, type ConsentPacket } from "./consentPackets";
 import type { LifeEventRow } from "./lifeEvents";
+import type { GerReport } from "./ger";
 import type { HouseCardEntryRow } from "./houseCard";
 import type {
   PersonalSpendingEntryRow,
@@ -76,7 +77,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 9;
+export const SHOWCASE_REVISION = 10;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -87,6 +88,7 @@ export function applyAgencyDemo(db: LocalDatabase): void {
   addMedications(db);
   addAppointments(db);
   addMileage(db);
+  addGerReports(db);
   addChecklists(db);
   addIspPrograms(db);
   addShiftNotes(db);
@@ -592,6 +594,186 @@ function addMileage(db: LocalDatabase) {
       db.mileageTrips.push(trip);
       odometer += miles;
     }
+  }
+}
+
+/**
+ * Event reports (GER) for the walkthrough: a small, believable spread at
+ * both houses — one awaiting review, one approved and resolved, one
+ * submitted, and one high-severity report mid-investigation — so the
+ * desktop Reporting tab and the mobile Quick log open on real content.
+ */
+function addGerReports(db: LocalDatabase) {
+  db.gerReports ??= [];
+  const today = todayIso();
+  const agency = agencyId(db);
+  const specs: Array<{
+    slug: string;
+    house: string;
+    person: string;
+    reporter: string;
+    daysAgo: number;
+    eventTime: string;
+    location: string;
+    eventType: GerReport["eventType"];
+    severity: GerReport["severity"];
+    description: string;
+    immediateActions: string;
+    notificationsMade: GerReport["notificationsMade"];
+    witnesses: string;
+    status: GerReport["status"];
+    reviewedBy?: string;
+    resolutionStatus: GerReport["resolutionStatus"];
+    investigationRequired?: boolean;
+    investigationNotes?: string;
+    assignedManager?: string;
+    resolutionDueInDays?: number;
+    closureNote?: string;
+    resolvedBy?: string;
+  }> = [
+    {
+      slug: "ellis-fall",
+      house: "Cedar House",
+      person: "Ellis Hart",
+      reporter: "Alex Morgan",
+      daysAgo: 2,
+      eventTime: "08:40",
+      location: "Bathroom",
+      eventType: "Fall",
+      severity: "Moderate",
+      description:
+        "Ellis slipped getting out of the shower and caught himself on the grab bar. He did not go to the floor and had no visible injury.",
+      immediateActions:
+        "Checked for injuries — none found. Helped Ellis to his chair, stayed with him for 15 minutes, and re-checked him at lunch. He ate and moved normally.",
+      notificationsMade: [
+        { party: "Guardian", name: "Mary Hart", atTime: "9:05 AM" },
+        { party: "Agency administrator", name: "Sarah Mitchell", atTime: "9:10 AM" },
+      ],
+      witnesses: "Taylor Reed",
+      status: "submitted",
+      resolutionStatus: "unaddressed",
+    },
+    {
+      slug: "morgan-behavior",
+      house: "Cedar House",
+      person: "Morgan Pruitt",
+      reporter: "Taylor Reed",
+      daysAgo: 6,
+      eventTime: "17:25",
+      location: "Living room",
+      eventType: "Behavior incident",
+      severity: "Low",
+      description:
+        "Morgan raised her voice at her housemate during a disagreement over the television, then went to her room to cool down on her own. No property damage and no injuries.",
+      immediateActions:
+        "Gave Morgan space per her plan, checked in after ten minutes, and helped both housemates agree on a TV schedule for the evening.",
+      notificationsMade: [
+        { party: "Agency administrator", name: "Sarah Mitchell", atTime: "5:50 PM" },
+      ],
+      witnesses: "",
+      status: "approved",
+      reviewedBy: "Sarah Mitchell",
+      resolutionStatus: "resolved",
+      closureNote:
+        "Reviewed at the house meeting; a posted TV schedule is working. No recurrence this week.",
+      resolvedBy: "Sarah Mitchell",
+    },
+    {
+      slug: "harper-illness",
+      house: "Willow House",
+      person: "Harper Soto",
+      reporter: "Jordan Lee",
+      daysAgo: 3,
+      eventTime: "06:15",
+      location: "Bedroom",
+      eventType: "Illness",
+      severity: "Moderate",
+      description:
+        "Harper vomited twice overnight and had a temperature of 100.8°F at the morning check. She stayed in bed and sipped water through the morning.",
+      immediateActions:
+        "Took vitals, called the nurse for guidance, encouraged fluids, and re-checked her temperature at noon (99.9°F).",
+      notificationsMade: [
+        { party: "Nurse", name: "Cameron Price", atTime: "6:30 AM" },
+        { party: "Guardian", name: "Ana Soto", atTime: "7:00 AM" },
+      ],
+      witnesses: "Casey Adams",
+      status: "submitted",
+      resolutionStatus: "unaddressed",
+    },
+    {
+      slug: "reese-medication",
+      house: "Willow House",
+      person: "Reese Lang",
+      reporter: "Casey Adams",
+      daysAgo: 9,
+      eventTime: "20:05",
+      location: "Medication room",
+      eventType: "Medication issue",
+      severity: "High",
+      description:
+        "An evening dose was prepared for the wrong Individual and caught during the two-person check before anything was administered. No medication was given in error.",
+      immediateActions:
+        "The prepared dose was discarded per policy, the correct dose was given on time, and the nurse and house manager were notified the same evening.",
+      notificationsMade: [
+        { party: "Nurse", name: "Cameron Price", atTime: "8:20 PM" },
+        { party: "House manager", name: "James Wilson", atTime: "8:25 PM" },
+      ],
+      witnesses: "Jordan Lee",
+      status: "approved",
+      reviewedBy: "James Wilson",
+      resolutionStatus: "in_progress",
+      investigationRequired: true,
+      investigationNotes: "Med-pass retraining scheduled for both evening staff.",
+      assignedManager: "James Wilson",
+      resolutionDueInDays: 5,
+    },
+  ];
+  for (const spec of specs) {
+    const id = `ger-showcase-${spec.slug}`;
+    if (db.gerReports.some((row) => row.id === id)) continue;
+    const eventDate = addDaysIso(today, -spec.daysAgo);
+    const reporterId = userId(db, spec.reporter);
+    const reviewedById = spec.reviewedBy ? userId(db, spec.reviewedBy) : null;
+    const stamp = `${eventDate}T21:00:00.000Z`;
+    db.gerReports.push({
+      id,
+      agencyId: agency,
+      siteId: siteId(db, spec.house),
+      individualId: idOf(db, spec.person),
+      linkedIndividualIds: [],
+      eventDate,
+      eventTime: spec.eventTime,
+      location: spec.location,
+      eventType: spec.eventType,
+      severity: spec.severity,
+      description: spec.description,
+      immediateActions: spec.immediateActions,
+      notificationsMade: spec.notificationsMade,
+      witnesses: spec.witnesses,
+      reporterName: spec.reporter,
+      reporterSignature: spec.reporter,
+      reporterDate: eventDate,
+      status: spec.status,
+      reviewNote: "",
+      reviewedByUserId: reviewedById,
+      reviewedAt: reviewedById ? stamp : null,
+      resolutionStatus: spec.resolutionStatus,
+      investigationRequired: spec.investigationRequired ?? false,
+      investigationNotes: spec.investigationNotes ?? "",
+      assignedManagerUserId: spec.assignedManager
+        ? userId(db, spec.assignedManager)
+        : null,
+      resolutionDueOn:
+        spec.resolutionDueInDays !== undefined
+          ? addDaysIso(today, spec.resolutionDueInDays)
+          : null,
+      closureNote: spec.closureNote ?? "",
+      resolvedByUserId: spec.resolvedBy ? userId(db, spec.resolvedBy) : null,
+      resolvedAt: spec.resolvedBy ? stamp : null,
+      createdByUserId: reporterId,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
   }
 }
 
