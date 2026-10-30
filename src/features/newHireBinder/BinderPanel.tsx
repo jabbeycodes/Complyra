@@ -33,6 +33,7 @@ import {
   type StaffBinder,
   type StaffEmergencyContact,
 } from "../../data/newHireBinder";
+import { summarizePerformanceRecords } from "../../data/performanceRecords";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
 import type { HubStaffEntry } from "../employeeHub/EmployeeHubPage";
 
@@ -44,6 +45,7 @@ const STATUS_BADGE: Record<BinderItemStatus, string> = {
   missing: "badge overdue",
   returned: "badge overdue",
   expired: "badge expired",
+  informational: "badge",
 };
 
 function errMessage(err: unknown, fallback: string): string {
@@ -56,6 +58,7 @@ export function BinderTab({
   staffList,
   onJumpToTab,
   initialSubjectId,
+  onOpenPerformance,
 }: {
   session: SessionUser;
   store: HrStore;
@@ -63,6 +66,8 @@ export function BinderTab({
   onJumpToTab: (tabId: string) => void;
   /** Open on this staff member (the board's "Open binder" jump). */
   initialSubjectId?: string;
+  /** Jump to the Performance tab for this staff member (build 3). */
+  onOpenPerformance?: (staffId: string) => void;
 }) {
   const { api } = useData();
   const isAuditor = session.roleKey === "auditor";
@@ -123,7 +128,7 @@ export function BinderTab({
     setError("");
     (async () => {
       try {
-        const [binderRow, wallet, contactRow, evidence, docs, acks, profile] =
+        const [binderRow, wallet, contactRow, evidence, docs, acks, profile, perfReviews, perfActions] =
           await Promise.all([
             store.getBinder(subjectId, subject.roleKey),
             store.listBinderDocuments(subjectId),
@@ -141,6 +146,8 @@ export function BinderTab({
             store.listDocuments().catch(() => []),
             store.listDocumentAcks().catch(() => []),
             api.getStaffTrainingProfile(subjectId).catch(() => null),
+            store.listPerformanceReviews(subjectId).catch(() => []),
+            store.listStaffCorrectiveActions(subjectId).catch(() => []),
           ]);
         if (cancelled) return;
         const titleById = new Map(docs.map((d) => [d.id, d.title]));
@@ -158,6 +165,7 @@ export function BinderTab({
             })),
           walletDocuments: wallet,
           emergencyContact: contactRow,
+          performance: summarizePerformanceRecords(perfReviews, perfActions),
         };
         setBinder(binderRow);
         setContact(contactRow);
@@ -329,6 +337,18 @@ export function BinderTab({
         </div>
       );
     }
+    if (item.kind === "records" && onOpenPerformance) {
+      return (
+        <div className="binder-actions">
+          <button
+            className="hub-btn"
+            onClick={() => onOpenPerformance(subjectId)}
+          >
+            <Eye size={15} /> Open Performance
+          </button>
+        </div>
+      );
+    }
     if (item.kind === "profile" && !readOnly && (isSelf || canVerify || canViewTeam)) {
       return (
         <div className="binder-actions">
@@ -407,13 +427,16 @@ export function BinderTab({
             {readOnly && <p className="binder-awaiting">Read-only — auditor view</p>}
           </div>
 
-          {derived.sections.map(({ section, items, satisfied, total, optional }) => (
+          {derived.sections.map(({ section, items, satisfied, total, optional, informational }) => (
             <div className="binder-section" key={section.key}>
               <h3>
                 {section.title}
                 <span className="binder-section-count">
-                  {satisfied} of {total} complete
-                  {optional > 0 ? ` · ${optional} optional` : ""}
+                  {informational > 0
+                    ? "File records — not counted in completeness"
+                    : `${satisfied} of ${total} complete${
+                        optional > 0 ? ` · ${optional} optional` : ""
+                      }`}
                 </span>
               </h3>
               <ul className="hub-list">
@@ -422,7 +445,7 @@ export function BinderTab({
                     <div className="hub-item-main">
                       <span className="hub-item-title">
                         {row.item.label}
-                        {!row.required && (
+                        {!row.required && row.item.kind !== "records" && (
                           <span className="binder-optional-tag">Optional</span>
                         )}
                       </span>

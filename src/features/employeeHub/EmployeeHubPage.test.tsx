@@ -626,6 +626,26 @@ function makeStubStore(): HrStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
+    listPerformanceReviews: async () => [],
+    filePerformanceReview: async () => {
+      throw new Error("not used in this test");
+    },
+    acknowledgePerformanceReview: async () => {
+      throw new Error("not used in this test");
+    },
+    addPerformanceReviewResponse: async () => {
+      throw new Error("not used in this test");
+    },
+    listStaffCorrectiveActions: async () => [],
+    fileStaffCorrectiveAction: async () => {
+      throw new Error("not used in this test");
+    },
+    acknowledgeStaffCorrectiveAction: async () => {
+      throw new Error("not used in this test");
+    },
+    setStaffCorrectiveActionOutcome: async () => {
+      throw new Error("not used in this test");
+    },
   };
   void notFound;
   return store;

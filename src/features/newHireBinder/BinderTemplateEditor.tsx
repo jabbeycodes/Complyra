@@ -33,6 +33,7 @@ const KIND_OPTIONS: Array<{ value: BinderItemKind; label: string }> = [
   { value: "acknowledgment", label: "Acknowledgment — linked to a signed HR document" },
   { value: "training", label: "Training — linked to the staff training checklist" },
   { value: "profile", label: "Profile — satisfied by staff profile data" },
+  { value: "records", label: "Records — performance file pointer (never counted)" },
 ];
 
 function errMessage(err: unknown, fallback: string): string {

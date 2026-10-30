@@ -30,7 +30,9 @@ function itemOf(template: BinderTemplate | { sections: BinderTemplate["sections"
 describe("template library", () => {
   test("lists the agency default plus the three role presets", async () => {
     const library = await store("hr-1").listBinderTemplates();
-    assert.equal(binderItemCount(library.defaultTemplate), 34);
+    // 34 paper-binder items (builds 1–2) + build 3's two Performance
+    // "records" items (Performance reviews, Corrective actions).
+    assert.equal(binderItemCount(library.defaultTemplate), 36);
     assert.deepEqual(
       library.presets.map((p) => p.key),
       ["preset-dsp", "preset-house-manager", "preset-nurse"],
