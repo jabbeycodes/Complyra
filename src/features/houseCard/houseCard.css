@@ -3,10 +3,24 @@
    table; the print block at the bottom swaps the screen ledger for the
    monthly statement (mileage-style body flag set by the print button). */
 
+/* The .panel chrome carries no padding of its own: sibling panels pad
+   their bodies with --panel-inline (see mileage.css — "so nothing sits
+   on the card edge"). The house card body does the same, so its content
+   shares the heading/intro rhythm instead of running to the card edge. */
+.house-card {
+  padding: 2px var(--panel-inline) 22px;
+}
+
+/* In the mobile shell the view already pads the screen (.msh-main);
+   the panel token would double it there. */
+.msh-main .house-card {
+  padding: 0 0 12px;
+}
+
 .house-card .hc-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 14px 22px;
   align-items: flex-end;
   margin-bottom: 12px;
 }
@@ -79,10 +93,14 @@
   flex-wrap: wrap;
 }
 
+/* One 12-column grid for the whole form: row 1 is type / date /
+   location (wide) / amount (narrow) / category; row 2 is the optional
+   Individual picker, the note, and the receipt photo — every field on
+   the same tracks, so widths and gaps stay even at any panel width. */
 .house-card .hc-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px 14px;
   margin: 10px 0;
 }
 
@@ -95,6 +113,47 @@
   max-width: 420px;
 }
 
+.house-card .hc-form-grid .hc-field {
+  max-width: none;
+  min-width: 0;
+}
+
+.house-card .hc-f-type {
+  grid-column: span 2;
+}
+
+.house-card .hc-f-date {
+  grid-column: span 2;
+}
+
+.house-card .hc-f-location {
+  grid-column: span 4;
+}
+
+.house-card .hc-f-amount {
+  grid-column: span 2;
+}
+
+.house-card .hc-f-category {
+  grid-column: span 2;
+}
+
+.house-card .hc-f-individual {
+  grid-column: span 3;
+}
+
+.house-card .hc-f-note {
+  grid-column: span 6;
+}
+
+.house-card .hc-f-note.hc-f-note-wide {
+  grid-column: span 9;
+}
+
+.house-card .hc-f-receipt {
+  grid-column: span 3;
+}
+
 .house-card .hc-field input,
 .house-card .hc-field select {
   font: inherit;
@@ -105,11 +164,6 @@
   background: var(--white);
   color: var(--text);
   min-height: 40px;
-}
-
-.house-card .hc-field-wide {
-  grid-column: span 2;
-  max-width: none;
 }
 
 .house-card .hc-receipt-name {
@@ -146,10 +200,15 @@
   margin: 8px 0;
 }
 
+/* Three fixed columns on one grid, sized to their content (the
+   By Individual column is the narrowest) and capped so the
+   label–amount pairs stay close instead of spanning the full panel. */
 .house-card .hc-totals-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
+  grid-template-columns: 1.15fr 0.95fr 1.15fr;
+  gap: 14px 36px;
+  align-items: start;
+  max-width: 1060px;
 }
 
 .house-card .hc-total-list {
@@ -180,7 +239,7 @@
 .house-card .hc-table td {
   text-align: left;
   vertical-align: top;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -220,9 +279,61 @@
   display: none;
 }
 
+@media (max-width: 1024px) {
+  .house-card .hc-form-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .house-card .hc-f-type {
+    grid-column: span 3;
+  }
+
+  .house-card .hc-f-date {
+    grid-column: span 3;
+  }
+
+  .house-card .hc-f-location {
+    grid-column: span 4;
+  }
+
+  .house-card .hc-f-amount {
+    grid-column: span 2;
+  }
+
+  .house-card .hc-f-category {
+    grid-column: span 3;
+  }
+
+  .house-card .hc-f-individual {
+    grid-column: span 3;
+  }
+
+  .house-card .hc-f-note,
+  .house-card .hc-f-note.hc-f-note-wide {
+    grid-column: span 6;
+  }
+
+  .house-card .hc-f-receipt {
+    grid-column: span 3;
+  }
+
+  .house-card .hc-totals-grid {
+    grid-template-columns: 1fr 1fr;
+    max-width: none;
+  }
+}
+
 @media (max-width: 640px) {
-  .house-card .hc-field-wide {
+  .house-card .hc-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .house-card .hc-form-grid .hc-field {
     grid-column: span 1;
+  }
+
+  .house-card .hc-totals-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .house-card .hc-month-picker {
@@ -261,6 +372,27 @@
     min-height: 0 !important;
   }
 
+  /* The statement stands alone on the page: drop the screen panel's
+     border/shadow, the tab heading and intro that sit outside the
+     panel body, and the demo strip — the page margins come from the
+     shell padding above, evenly on both sides. */
+  body[data-house-card-print="1"] .panel:has(.house-card) {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  body[data-house-card-print="1"] .panel:has(.house-card) > .panel-heading,
+  body[data-house-card-print="1"] .panel:has(.house-card) > .stack-help,
+  body[data-house-card-print="1"] .demo-strip {
+    display: none !important;
+  }
+
+  body[data-house-card-print="1"] .house-card {
+    padding: 0 !important;
+  }
+
   body[data-house-card-print="1"] .house-card-printout {
     display: block !important;
     color: #000;
@@ -270,7 +402,7 @@
 
   .house-card-printout h1 {
     font-size: 16pt;
-    margin-bottom: 4px;
+    margin: 0 0 4px;
   }
 
   .house-card-printout h2 {
@@ -307,7 +439,7 @@
   }
 
   .hc-print-totals li {
-    padding: 2px 0;
+    padding: 3px 0;
   }
 
   .hc-print-mark {

@@ -151,7 +151,7 @@ function EntryFormFields({
 
   return (
     <div className="hc-form-grid">
-      <label className="hc-field">
+      <label className="hc-field hc-f-type">
         <span>Entry type</span>
         <select
           value={form.kind}
@@ -164,7 +164,7 @@ function EntryFormFields({
           <option value="refund">Refund</option>
         </select>
       </label>
-      <label className="hc-field">
+      <label className="hc-field hc-f-date">
         <span>Date</span>
         <input
           type="date"
@@ -172,7 +172,7 @@ function EntryFormFields({
           onChange={(e) => setForm({ ...form, entryDate: e.target.value })}
         />
       </label>
-      <label className="hc-field">
+      <label className="hc-field hc-f-location">
         <span>{form.kind === "credit" ? "Received from" : "Location"}</span>
         <input
           type="text"
@@ -189,7 +189,7 @@ function EntryFormFields({
           ))}
         </datalist>
       </label>
-      <label className="hc-field">
+      <label className="hc-field hc-f-amount">
         <span>Amount</span>
         <input
           type="text"
@@ -201,7 +201,7 @@ function EntryFormFields({
       </label>
       {form.kind === "purchase" && (
         <>
-          <label className="hc-field">
+          <label className="hc-field hc-f-category">
             <span>What was it for?</span>
             <select
               value={form.category}
@@ -216,7 +216,7 @@ function EntryFormFields({
             </select>
           </label>
           {needsIndividual && (
-            <label className="hc-field">
+            <label className="hc-field hc-f-individual">
               <span>Individual</span>
               <select
                 value={form.individualId}
@@ -235,7 +235,9 @@ function EntryFormFields({
           )}
         </>
       )}
-      <label className="hc-field hc-field-wide">
+      <label
+        className={`hc-field hc-f-note${needsIndividual ? "" : " hc-f-note-wide"}`}
+      >
         <span>Note (required for purchases over $250)</span>
         <input
           type="text"
@@ -243,7 +245,7 @@ function EntryFormFields({
           onChange={(e) => setForm({ ...form, note: e.target.value })}
         />
       </label>
-      <label className="hc-field">
+      <label className="hc-field hc-f-receipt">
         <span>Receipt photo (optional)</span>
         <input
           type="file"
