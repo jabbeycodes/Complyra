@@ -3,6 +3,25 @@
    print block at the bottom swaps the whole chart for the monthly
    statement (body flag set by the print button, house-card style). */
 
+/* Wide chart section: spans every chart-grid column, the same treatment
+   .health-widget gets in styles.css. The ledger grammar (stats strip,
+   entry form grid, totals, table) is laid out at panel width — in a
+   half-width chart column it clipped instead of reflowing. The card's
+   own padding still comes from .chart-widget (16px / --panel-inline),
+   so the content keeps the sibling cards' inset rhythm. */
+.personal-spending {
+  grid-column: 1 / -1;
+}
+
+/* The screen wrapper is the widget's grid item; without this its
+   automatic minimum size is the ledger table's min-content, which
+   forced the whole card wider than its column on phone widths (the
+   table is meant to scroll inside .ps-table-wrap, not widen the card).
+   min-width: 0 lets the wrapper take the column it is given. */
+.personal-spending-screen {
+  min-width: 0;
+}
+
 .personal-spending .ps-stats {
   display: flex;
   flex-wrap: wrap;
