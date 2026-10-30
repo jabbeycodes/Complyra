@@ -59,8 +59,14 @@ interface JustRecorded {
 
 const UNDO_REASON = "Undone right after recording";
 
-/** Sheet values → the ledger draft, mirroring the chart card's mapping. */
-function sheetToDraft(values: MoneySheetValues): PersonalSpendingEntryDraft {
+/**
+ * Sheet values → the ledger draft, mirroring the chart card's mapping.
+ * Exported for the Quick log's personal-spending flow, which opens the
+ * same sheet — one mapping behind both doors.
+ */
+export function personalSheetToDraft(
+  values: MoneySheetValues,
+): PersonalSpendingEntryDraft {
   const amountCents = parseAmountToCents(values.amountText);
   if (amountCents === null) {
     throw new Error("Enter the amount like 42.50.");
@@ -221,7 +227,7 @@ export default function MobilePersonalSpending({
     setSheetError("");
     let draft: PersonalSpendingEntryDraft;
     try {
-      draft = sheetToDraft(values);
+      draft = personalSheetToDraft(values);
     } catch (err) {
       setSheetError(err instanceof Error ? err.message : "Check the entry.");
       return;

@@ -1,7 +1,8 @@
 /**
  * Mobile Quick log — the field logs (health trackers, menu records,
- * mileage, drills, incident/GER reports) as phone flows over the SAME
- * stores and API methods the desktop surfaces use.
+ * mileage, drills, incident/GER reports) and the expenditure trackers
+ * (house card, personal spending) as phone flows over the SAME stores
+ * and API methods the desktop surfaces use.
  *
  * This module is the pure half: who may record in each domain (computed
  * from the exact helpers and permission keys the desktop surfaces gate
@@ -17,7 +18,23 @@ import {
   drillComplete,
   type EmergencyDrill,
 } from "../../data/monthlyChecks";
-import { canEnterMenuEntries } from "../../data/permissions";
+import {
+  canEnterMenuEntries,
+  canRecordHouseCard,
+  canRecordPersonalSpending,
+  canViewHouseCard,
+  canViewPersonalSpending,
+} from "../../data/permissions";
+import {
+  computeBalanceCents,
+  formatCents,
+  isLowBalance,
+  type HouseCardEntryView,
+} from "../../data/houseCard";
+import {
+  computePersonalBalanceCents,
+  type PersonalSpendingEntryView,
+} from "../../data/personalSpending";
 import {
   MEAL_SLOT_LABELS,
   type MealSlot,
@@ -32,7 +49,14 @@ import type { HealthTrackEntry } from "../../data/healthTrack";
 import type { MileageTripView } from "../../data/types";
 import { todaysHealthEntryCount } from "./health";
 
-export type FieldLogDomain = "menu" | "mileage" | "drills" | "ger" | "health";
+export type FieldLogDomain =
+  | "menu"
+  | "mileage"
+  | "drills"
+  | "ger"
+  | "health"
+  | "housecard"
+  | "spending";
 
 export interface FieldLogAccess {
   /** Record menu entries (the chart Menu section's entry gate). */
@@ -58,9 +82,30 @@ export interface FieldLogAccess {
    */
   healthView: boolean;
   /**
+   * Open the home's House Card ledger (canViewHouseCard — the desktop
+   * page gate itself is the pure role list, restated verbatim by both
+   * API layers; no permission key is involved). View-only roles
+   * (auditor, compliance_admin) get the row reaching the read-only
+   * mobile view; recording follows houseCardRecord.
+   */
+  houseCardView: boolean;
+  /** Record house card entries (canRecordHouseCard, the role list). */
+  houseCardRecord: boolean;
+  /**
+   * Open Personal Spending (canViewPersonalSpending — the same pure
+   * role list the chart card and both APIs gate on). The chooser row
+   * additionally needs at least one accessible Individual, checked
+   * where the people list lives. Per-person recording follows
+   * spendingRecord, with assignment scoping enforced by the APIs
+   * (canReadIndividual) exactly as the spending view relies on.
+   */
+  spendingView: boolean;
+  /** Record personal spending entries (canRecordPersonalSpending). */
+  spendingRecord: boolean;
+  /**
    * The Quick log tile's gate: record in at least one domain, or view
-   * health — a health-only viewer gets the tile with the Health row
-   * (and any read rows their other flags allow), nothing more.
+   * health, or view either money tracker — a view-only user gets the
+   * tile with the read rows their flags allow, nothing more.
    */
   any: boolean;
 }
@@ -77,6 +122,10 @@ export function fieldLogAccess(
     permissions["individuals.view"] === true && roleKey !== "hr";
   const healthView =
     permissions["individuals.view"] === true && roleKey !== "hr";
+  const houseCardView = canViewHouseCard(roleKey);
+  const houseCardRecord = canRecordHouseCard(roleKey);
+  const spendingView = canViewPersonalSpending(roleKey);
+  const spendingRecord = canRecordPersonalSpending(roleKey);
   return {
     menu,
     mileage,
@@ -84,7 +133,18 @@ export function fieldLogAccess(
     gerCreate,
     gerView,
     healthView,
-    any: menu || mileage || drills || gerCreate || healthView,
+    houseCardView,
+    houseCardRecord,
+    spendingView,
+    spendingRecord,
+    any:
+      menu ||
+      mileage ||
+      drills ||
+      gerCreate ||
+      healthView ||
+      houseCardView ||
+      spendingView,
   };
 }
 
@@ -294,6 +354,62 @@ export function healthTodayStatus(
       ? "No health entries logged today"
       : `${count} health ${count === 1 ? "entry" : "entries"} logged today`;
   return { count, text };
+}
+
+// ───────────────────────── House card status ─────────────────────────
+
+export interface HouseCardStatus {
+  balanceCents: number;
+  /** The ledger's own low-balance state (balance under $100). */
+  lowBalance: boolean;
+  text: string;
+}
+
+/**
+ * The home's house card picture: the live balance from the derivation
+ * the desktop panel and the phone view share (computeBalanceCents —
+ * never a second tally), with the low-balance state stated in words,
+ * the same isLowBalance rule the pinned header flags.
+ */
+export function houseCardStatus(
+  entries: readonly HouseCardEntryView[],
+): HouseCardStatus {
+  const balanceCents = computeBalanceCents([...entries]);
+  const lowBalance = isLowBalance(balanceCents);
+  const text = lowBalance
+    ? `Balance ${formatCents(balanceCents)} · Low balance`
+    : `Balance ${formatCents(balanceCents)}`;
+  return { balanceCents, lowBalance, text };
+}
+
+// ────────────────────── Personal spending status ──────────────────────
+
+export interface PersonalSpendingStatus {
+  /** Every accessible Individual's balance added together, in cents. */
+  totalCents: number;
+  personCount: number;
+  text: string;
+}
+
+/**
+ * The home's personal spending picture: each Individual's balance from
+ * the ledger derivation the chart card and the phone view share
+ * (computePersonalBalanceCents), combined into one factual line.
+ * `entryLists` is one entry list per accessible Individual.
+ */
+export function personalSpendingStatus(
+  entryLists: readonly (readonly PersonalSpendingEntryView[])[],
+): PersonalSpendingStatus {
+  const totalCents = entryLists.reduce(
+    (sum, entries) => sum + computePersonalBalanceCents([...entries]),
+    0,
+  );
+  const personCount = entryLists.length;
+  const text =
+    personCount === 0
+      ? "No Individuals at this home"
+      : `${formatCents(totalCents)} across ${personCount} Individual${personCount === 1 ? "" : "s"}`;
+  return { totalCents, personCount, text };
 }
 
 // ─────────────────── GER notifications (desktop line format) ───────────────────

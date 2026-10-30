@@ -6,6 +6,7 @@ import {
   fieldLogAccess,
   gerMonthStatus,
   healthTodayStatus,
+  houseCardStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthLabel,
@@ -13,12 +14,15 @@ import {
   notificationsToText,
   parseNotificationsText,
   personDayEntries,
+  personalSpendingStatus,
 } from "./fieldLogs";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
 import type { MenuEntryView } from "../../data/menuRecords";
 import type { GerReport } from "../../data/ger";
 import type { HealthTrackEntry } from "../../data/healthTrack";
 import type { MileageTripView } from "../../data/types";
+import type { HouseCardEntryView } from "../../data/houseCard";
+import type { PersonalSpendingEntryView } from "../../data/personalSpending";
 
 const FULL = {
   "mileage.manage": true,
@@ -35,11 +39,22 @@ test("field log access mirrors each desktop surface's gate", () => {
   );
   // Health viewing follows canViewHealthTrack: individuals.view, never HR.
   assert.equal(dsp.healthView, true);
-  // Nurse mirrors desktop too: menu entry, monthly-check completion.
+  // The money trackers follow their desktop role lists (canView /
+  // canRecord HouseCard + PersonalSpending): DSPs view and record both.
+  assert.deepEqual(
+    [dsp.houseCardView, dsp.houseCardRecord, dsp.spendingView, dsp.spendingRecord],
+    [true, true, true, true],
+  );
+  // Nurse mirrors desktop too: menu entry, monthly-check completion —
+  // and NO money tracker: nurses are absent from every money role list.
   const nurse = fieldLogAccess("nurse", FULL);
   assert.equal(nurse.menu, true);
   assert.equal(nurse.drills, true);
   assert.equal(nurse.healthView, true);
+  assert.deepEqual(
+    [nurse.houseCardView, nurse.houseCardRecord, nurse.spendingView, nurse.spendingRecord],
+    [false, false, false, false],
+  );
   // Without the permission keys, mileage and GER recording close even for
   // roles on the menu/drill role lists.
   const bare = fieldLogAccess("house_manager", {});
@@ -49,6 +64,12 @@ test("field log access mirrors each desktop surface's gate", () => {
   assert.equal(bare.gerCreate, false);
   assert.equal(bare.healthView, false);
   assert.equal(bare.any, true);
+  // The money role lists need no permission keys either — a bare house
+  // manager views and records both trackers, like the desktop gates.
+  assert.deepEqual(
+    [bare.houseCardView, bare.houseCardRecord, bare.spendingView, bare.spendingRecord],
+    [true, true, true, true],
+  );
 });
 
 test("an auditor records in no domain, but the tile opens for health and GER reading", () => {
@@ -63,11 +84,40 @@ test("an auditor records in no domain, but the tile opens for health and GER rea
   assert.equal(auditor.healthView, true);
   assert.equal(auditor.gerView, true);
   assert.equal(auditor.any, true);
-  // Without individuals.view the auditor has no door at all.
-  assert.equal(fieldLogAccess("auditor", {}).any, false);
+  // The money trackers are read surfaces for auditors too — view both,
+  // record in neither (the desktop role lists, verbatim).
+  assert.deepEqual(
+    [auditor.houseCardView, auditor.houseCardRecord, auditor.spendingView, auditor.spendingRecord],
+    [true, false, true, false],
+  );
+  // Without individuals.view the auditor loses the health and GER read
+  // rows — but the money rows are pure role-list gates (the desktop
+  // House Card page and chart card ask for no permission key), so the
+  // tile still opens on the two money read rows alone.
+  const bareAuditor = fieldLogAccess("auditor", {});
+  assert.equal(bareAuditor.healthView, false);
+  assert.equal(bareAuditor.gerView, false);
+  assert.equal(bareAuditor.houseCardView, true);
+  assert.equal(bareAuditor.spendingView, true);
+  assert.equal(bareAuditor.any, true);
 });
 
-test("HR records mileage only, and never reads GERs or health", () => {
+test("a compliance admin reads both money trackers and records in neither", () => {
+  // Money reading alone opens the tile: with no permission keys at
+  // all, the compliance admin's only Quick log doors are the two
+  // money rows, both read-only (the GER read row stays closed without
+  // individuals.view, and compliance admins file nothing here).
+  const compliance = fieldLogAccess("compliance_admin", {});
+  assert.deepEqual(
+    [compliance.houseCardView, compliance.houseCardRecord, compliance.spendingView, compliance.spendingRecord],
+    [true, false, true, false],
+  );
+  assert.equal(compliance.menu, false);
+  assert.equal(compliance.gerCreate, false);
+  assert.equal(compliance.any, true);
+});
+
+test("HR records mileage only, and never reads GERs, health, or money", () => {
   const hr = fieldLogAccess("hr", { "mileage.manage": true, "individuals.view": true });
   assert.equal(hr.mileage, true);
   assert.equal(hr.any, true);
@@ -77,6 +127,11 @@ test("HR records mileage only, and never reads GERs or health", () => {
   assert.equal(hr.gerView, false);
   // canViewHealthTrack excludes HR the same way.
   assert.equal(hr.healthView, false);
+  // HR is on no money role list either.
+  assert.deepEqual(
+    [hr.houseCardView, hr.houseCardRecord, hr.spendingView, hr.spendingRecord],
+    [false, false, false, false],
+  );
 });
 
 function menuEntry(partial: Partial<MenuEntryView>): MenuEntryView {
@@ -335,4 +390,129 @@ test("new GER drafts default to today, now, and the reporter", () => {
   assert.equal(draft.reporterDate, "2026-10-30");
   assert.equal(draft.reporterName, "Alex Morgan");
   assert.equal(draft.severity, "Moderate");
+});
+
+function houseEntry(
+  partial: Partial<HouseCardEntryView>,
+): HouseCardEntryView {
+  return {
+    id: "hc1",
+    agencyId: "a1",
+    siteId: "s1",
+    entryDate: "2026-10-30",
+    kind: "credit",
+    location: "",
+    amountCents: 0,
+    category: null,
+    individualId: null,
+    note: "",
+    receiptPhoto: null,
+    recordedBy: "u1",
+    recordedByName: "Alex Morgan",
+    recordedByRole: "dsp",
+    createdAt: "2026-10-30T13:00:00.000Z",
+    voidedBy: null,
+    voidedAt: null,
+    voidReason: null,
+    replacesEntryId: null,
+    replacedByEntryId: null,
+    individualName: null,
+    voidedByName: null,
+    voided: false,
+    postCloseCorrection: false,
+    ...partial,
+  };
+}
+
+test("house card status states the live balance, and low balance in words", () => {
+  const entries = [
+    houseEntry({ id: "c", kind: "credit", amountCents: 61500 }),
+    houseEntry({
+      id: "p",
+      kind: "purchase",
+      amountCents: 46132,
+      category: "groceries_household",
+      location: "Hy-Vee",
+    }),
+    // A voided purchase never counts toward the balance.
+    houseEntry({
+      id: "v",
+      kind: "purchase",
+      amountCents: 5000,
+      voidedBy: "u2",
+      voidedAt: "2026-10-30T15:00:00.000Z",
+      voidReason: "Wrong amount",
+      voided: true,
+    }),
+  ];
+  const status = houseCardStatus(entries);
+  assert.equal(status.balanceCents, 15368);
+  assert.equal(status.lowBalance, false);
+  assert.equal(status.text, "Balance $153.68");
+  const low = houseCardStatus([
+    houseEntry({ id: "c", kind: "credit", amountCents: 9492 }),
+  ]);
+  assert.equal(low.balanceCents, 9492);
+  assert.equal(low.lowBalance, true);
+  assert.equal(low.text, "Balance $94.92 · Low balance");
+  assert.equal(houseCardStatus([]).text, "Balance $0.00 · Low balance");
+});
+
+function spendingEntry(
+  partial: Partial<PersonalSpendingEntryView>,
+): PersonalSpendingEntryView {
+  return {
+    id: "ps1",
+    agencyId: "a1",
+    siteId: "s1",
+    individualId: "p1",
+    entryDate: "2026-10-30",
+    kind: "deposit",
+    location: "",
+    purpose: "",
+    amountCents: 0,
+    note: "",
+    receiptPhoto: null,
+    recordedBy: "u1",
+    recordedByName: "Alex Morgan",
+    recordedByRole: "dsp",
+    createdAt: "2026-10-30T13:00:00.000Z",
+    voidedBy: null,
+    voidedAt: null,
+    voidReason: null,
+    replacesEntryId: null,
+    replacedByEntryId: null,
+    voidedByName: null,
+    voided: false,
+    runningBalanceCents: 0,
+    overBalance: false,
+    postCloseCorrection: false,
+    ...partial,
+  };
+}
+
+test("personal spending status combines every Individual's balance", () => {
+  const ellis = [
+    spendingEntry({ id: "d", kind: "deposit", amountCents: 21000 }),
+    spendingEntry({
+      id: "s",
+      kind: "spend",
+      amountCents: 2916,
+      purpose: "Clothing",
+      location: "Walmart",
+    }),
+  ];
+  const morgan = [
+    spendingEntry({ id: "d2", individualId: "p2", kind: "deposit", amountCents: 1020 }),
+  ];
+  const status = personalSpendingStatus([ellis, morgan]);
+  assert.equal(status.totalCents, 19104);
+  assert.equal(status.personCount, 2);
+  assert.equal(status.text, "$191.04 across 2 Individuals");
+  const single = personalSpendingStatus([ellis]);
+  assert.equal(single.text, "$180.84 across 1 Individual");
+  const none = personalSpendingStatus([]);
+  assert.equal(none.totalCents, 0);
+  assert.equal(none.personCount, 0);
+  assert.equal(none.text, "No Individuals at this home");
 });
