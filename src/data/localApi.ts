@@ -89,6 +89,9 @@ import {
   canViewHouseCard,
   canRecordHouseCard,
   canCloseHouseCardMonth,
+  canViewPersonalSpending,
+  canRecordPersonalSpending,
+  canClosePersonalSpendingMonth,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
@@ -146,6 +149,20 @@ import {
   type HouseCardEntryView,
   type HouseCardMonthClose,
 } from "./houseCard";
+import {
+  balanceThroughCents as personalBalanceThroughCents,
+  buildPersonalSpendingViews,
+  closedMonthMessage as personalClosedMonthMessage,
+  monthEndIso as personalMonthEndIso,
+  validatePersonalSpendingCloseDraft,
+  validatePersonalSpendingDraft,
+  validatePersonalSpendingVoidReason,
+  type PersonalSpendingCloseDraft,
+  type PersonalSpendingEntryDraft,
+  type PersonalSpendingEntryRow,
+  type PersonalSpendingEntryView,
+  type PersonalSpendingMonthClose,
+} from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
 import { canReadIndividual, assertCalendarDate } from "./access";
@@ -1426,6 +1443,50 @@ export interface ComplyraApi {
     month: string;
     signatureText: string;
   }): Promise<import("./houseCard").HouseCardMonthClose>;
+  // ===== PERSONAL SPENDING API (one Individual's own money) =====
+  /**
+   * Every entry ever recorded for one Individual (all months, voided
+   * included), in ledger order with running balances, over-balance
+   * marks, and post-close markers derived from the full history. The
+   * balance and month totals are derived client-side from these views —
+   * the API never serves a stored balance. SEPARATE from the house
+   * card: no house-card entry ever appears here.
+   */
+  listPersonalSpendingEntries(
+    individualId: string,
+  ): Promise<import("./personalSpending").PersonalSpendingEntryView[]>;
+  /** Record one entry (spend / deposit) in an Individual's ledger. */
+  createPersonalSpendingEntry(
+    input: { individualId: string } & import("./personalSpending").PersonalSpendingEntryDraft,
+  ): Promise<import("./personalSpending").PersonalSpendingEntryView>;
+  /**
+   * Void an entry with a reason, optionally recording its replacement
+   * in the same call. Corrections stay possible after the entry's month
+   * is signed closed and are marked post-close corrections.
+   */
+  voidPersonalSpendingEntry(
+    entryId: string,
+    reason: string,
+    replacement?:
+      | ({ individualId: string } & import("./personalSpending").PersonalSpendingEntryDraft)
+      | null,
+  ): Promise<{
+    voided: import("./personalSpending").PersonalSpendingEntryView;
+    replacement: import("./personalSpending").PersonalSpendingEntryView | null;
+  }>;
+  /** Signed month closes for one Individual (newest month first). */
+  listPersonalSpendingMonthCloses(
+    individualId: string,
+  ): Promise<import("./personalSpending").PersonalSpendingMonthClose[]>;
+  /**
+   * Sign a month closed: the closer's attestation PLUS the Individual's
+   * sign-off state — either the Individual signed, or the Individual
+   * was unable to sign and a second staff member signed instead (that
+   * member is resolved and named on the close).
+   */
+  closePersonalSpendingMonth(
+    input: { individualId: string } & import("./personalSpending").PersonalSpendingCloseDraft,
+  ): Promise<import("./personalSpending").PersonalSpendingMonthClose>;
   // ===== SITE DETAIL API (program-site detail view, read-focused) =====
   /**
    * QA audit history for one program site (newest first). Read-only: the
@@ -11562,6 +11623,303 @@ export class LocalApi implements ComplyraApi {
       createdAt: now,
     };
     this.houseCardCloseRows().push(close);
+    await persistMeta(this.store);
+    return close;
+  }
+
+  // ===== PERSONAL SPENDING IMPL (one Individual's own money, local) =====
+  // Domain rules live in src/data/personalSpending.ts; the hosted API
+  // mirrors these semantics and the DB backstops them
+  // (supabase/migrations/20261029130100_personal_spending.sql). The
+  // ledger is append-only: no method here edits or deletes an entry —
+  // corrections void with a reason and optionally record a linked
+  // replacement. SEPARATE from the house card above: different rows,
+  // different money, no shared entry ever.
+
+  private personalSpendingEntryRows(): PersonalSpendingEntryRow[] {
+    const db = this.store.db;
+    db.personalSpendingEntries ??= [];
+    return db.personalSpendingEntries;
+  }
+
+  private personalSpendingCloseRows(): PersonalSpendingMonthClose[] {
+    const db = this.store.db;
+    db.personalSpendingCloses ??= [];
+    return db.personalSpendingCloses;
+  }
+
+  private assertPersonalSpendingViewer(session: SessionUser) {
+    if (!canViewPersonalSpending(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private assertPersonalSpendingRecorder(session: SessionUser) {
+    if (!canRecordPersonalSpending(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private personalSpendingStaffName(userId: string): string {
+    return (
+      this.store.db.profiles.find((row) => row.id === userId)?.fullName ??
+      "Staff member"
+    );
+  }
+
+  /** Every view of one person's ledger (running balances need them all). */
+  private personalSpendingViews(
+    session: { agencyId: string },
+    individualId: string,
+  ): PersonalSpendingEntryView[] {
+    const rows = this.personalSpendingEntryRows().filter(
+      (row) =>
+        row.agencyId === session.agencyId && row.individualId === individualId,
+    );
+    const closes = this.personalSpendingCloseRows().filter(
+      (row) =>
+        row.agencyId === session.agencyId && row.individualId === individualId,
+    );
+    return buildPersonalSpendingViews(rows, closes, (userId) =>
+      this.personalSpendingStaffName(userId),
+    );
+  }
+
+  private personalSpendingView(
+    session: { agencyId: string },
+    row: PersonalSpendingEntryRow,
+  ): PersonalSpendingEntryView {
+    const view = this.personalSpendingViews(session, row.individualId).find(
+      (item) => item.id === row.id,
+    );
+    if (!view) throw new Error("Personal spending entry not found.");
+    return view;
+  }
+
+  /** A signed close blocks NEW entries dated in the closed month. */
+  private assertPersonalSpendingMonthOpen(
+    session: { agencyId: string },
+    individualId: string,
+    entryDate: string,
+  ) {
+    const month = monthKeyFrom(entryDate);
+    const close = this.personalSpendingCloseRows().find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === individualId &&
+        row.month === month,
+    );
+    if (close) throw new Error(personalClosedMonthMessage(monthLabel(month)));
+  }
+
+  async listPersonalSpendingEntries(individualId: string) {
+    const session = assertSession(this.store);
+    this.assertPersonalSpendingViewer(session);
+    accessibleIndividual(this.store, session, individualId);
+    return this.personalSpendingViews(session, individualId);
+  }
+
+  async createPersonalSpendingEntry(
+    input: { individualId: string } & PersonalSpendingEntryDraft,
+  ) {
+    const session = assertSession(this.store);
+    this.assertPersonalSpendingRecorder(session);
+    const person = accessibleIndividual(this.store, session, input.individualId);
+    const draft = validatePersonalSpendingDraft(input, centralTodayIso());
+    this.assertPersonalSpendingMonthOpen(session, person.id, draft.entryDate);
+    const row: PersonalSpendingEntryRow = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: person.siteId,
+      individualId: person.id,
+      entryDate: draft.entryDate,
+      kind: draft.kind,
+      location: draft.location,
+      purpose: draft.purpose,
+      amountCents: draft.amountCents,
+      note: draft.note,
+      receiptPhoto: draft.receiptPhoto,
+      recordedBy: session.userId,
+      recordedByName: session.fullName,
+      recordedByRole: session.roleKey,
+      createdAt: new Date().toISOString(),
+      voidedBy: null,
+      voidedAt: null,
+      voidReason: null,
+      replacesEntryId: null,
+      replacedByEntryId: null,
+    };
+    this.personalSpendingEntryRows().push(row);
+    await persistMeta(this.store);
+    return this.personalSpendingView(session, row);
+  }
+
+  async voidPersonalSpendingEntry(
+    entryId: string,
+    reason: string,
+    replacement?:
+      | ({ individualId: string } & PersonalSpendingEntryDraft)
+      | null,
+  ) {
+    const session = assertSession(this.store);
+    this.assertPersonalSpendingRecorder(session);
+    const row = this.personalSpendingEntryRows().find(
+      (item) => item.id === entryId && item.agencyId === session.agencyId,
+    );
+    if (!row) throw new Error("Personal spending entry not found.");
+    accessibleIndividual(this.store, session, row.individualId);
+    if (row.voidedAt) {
+      throw new Error("That entry is already voided.");
+    }
+    const voidReason = validatePersonalSpendingVoidReason(reason);
+
+    // Validate the replacement BEFORE mutating anything, so a bad
+    // replacement never leaves a half-applied correction behind.
+    let replacementRow: PersonalSpendingEntryRow | null = null;
+    if (replacement) {
+      if (replacement.individualId !== row.individualId) {
+        throw new Error(
+          "The replacement must belong to the same Individual's ledger.",
+        );
+      }
+      const draft = validatePersonalSpendingDraft(
+        replacement,
+        centralTodayIso(),
+      );
+      const originalMonth = monthKeyFrom(row.entryDate);
+      const replacementMonth = monthKeyFrom(draft.entryDate);
+      if (replacementMonth !== originalMonth) {
+        // Moving the entry into a different month is a new entry into
+        // that month: allowed only while that month is still open.
+        this.assertPersonalSpendingMonthOpen(
+          session,
+          row.individualId,
+          draft.entryDate,
+        );
+      }
+      replacementRow = {
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        siteId: row.siteId,
+        individualId: row.individualId,
+        entryDate: draft.entryDate,
+        kind: draft.kind,
+        location: draft.location,
+        purpose: draft.purpose,
+        amountCents: draft.amountCents,
+        note: draft.note,
+        receiptPhoto: draft.receiptPhoto,
+        recordedBy: session.userId,
+        recordedByName: session.fullName,
+        recordedByRole: session.roleKey,
+        createdAt: new Date().toISOString(),
+        voidedBy: null,
+        voidedAt: null,
+        voidReason: null,
+        replacesEntryId: row.id,
+        replacedByEntryId: null,
+      };
+    }
+
+    row.voidReason = voidReason;
+    row.voidedBy = session.userId;
+    row.voidedAt = new Date().toISOString();
+    if (replacementRow) {
+      row.replacedByEntryId = replacementRow.id;
+      this.personalSpendingEntryRows().push(replacementRow);
+    }
+    await persistMeta(this.store);
+    return {
+      voided: this.personalSpendingView(session, row),
+      replacement: replacementRow
+        ? this.personalSpendingView(session, replacementRow)
+        : null,
+    };
+  }
+
+  async listPersonalSpendingMonthCloses(individualId: string) {
+    const session = assertSession(this.store);
+    this.assertPersonalSpendingViewer(session);
+    accessibleIndividual(this.store, session, individualId);
+    return this.personalSpendingCloseRows()
+      .filter(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.individualId === individualId,
+      )
+      .sort((a, b) => (a.month < b.month ? 1 : -1));
+  }
+
+  async closePersonalSpendingMonth(
+    input: { individualId: string } & PersonalSpendingCloseDraft,
+  ) {
+    const session = assertSession(this.store);
+    if (!canClosePersonalSpendingMonth(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    const person = accessibleIndividual(this.store, session, input.individualId);
+    const draft = validatePersonalSpendingCloseDraft(input);
+    const existing = this.personalSpendingCloseRows().find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.individualId === person.id &&
+        row.month === draft.month,
+    );
+    if (existing) {
+      throw new Error(`${monthLabel(draft.month)} is already closed and signed.`);
+    }
+
+    // The unable-to-sign case names a second staff member: an active
+    // member of this agency, never the closer themselves.
+    let secondStaffName: string | null = null;
+    if (draft.individualSignoff === "unable_second_staff") {
+      const secondId = draft.secondStaffId!;
+      if (secondId === session.userId) {
+        throw new Error(
+          "The second staff member must be someone other than the manager closing the month.",
+        );
+      }
+      const today = centralTodayIso();
+      const member = this.store.db.memberships.find(
+        (row) =>
+          row.agencyId === session.agencyId &&
+          row.userId === secondId &&
+          (!row.expiresOn || row.expiresOn >= today),
+      );
+      if (!member) {
+        throw new Error(
+          "Choose an active staff member in this agency as the second signer.",
+        );
+      }
+      secondStaffName = this.personalSpendingStaffName(secondId);
+    }
+
+    const personEntries = this.personalSpendingEntryRows().filter(
+      (row) => row.agencyId === session.agencyId && row.individualId === person.id,
+    );
+    const now = new Date().toISOString();
+    const close: PersonalSpendingMonthClose = {
+      id: crypto.randomUUID(),
+      agencyId: session.agencyId,
+      siteId: person.siteId,
+      individualId: person.id,
+      month: draft.month,
+      closingBalanceCents: personalBalanceThroughCents(
+        personEntries,
+        personalMonthEndIso(draft.month),
+      ),
+      printedName: session.fullName,
+      signatureText: draft.signatureText,
+      signedBy: session.userId,
+      signedByName: session.fullName,
+      signedAt: now,
+      createdAt: now,
+      individualSignoff: draft.individualSignoff,
+      secondStaffId: draft.secondStaffId,
+      secondStaffName,
+      secondStaffSignatureText: draft.secondStaffSignatureText,
+    };
+    this.personalSpendingCloseRows().push(close);
     await persistMeta(this.store);
     return close;
   }
