@@ -48,6 +48,7 @@ import type { CarePlan, CareScreeningData, Screening, ScreeningType } from "./ca
 import { emptyCareData } from "./careScreening";
 import type { ConsentRecord } from "./consents";
 import { HEALTH_SCOPE, PACKET_COPY_VERSION, PACKET_ITEMS, type ConsentPacket } from "./consentPackets";
+import { RIGHTS_PACKET_COPY_VERSION, type RightsPacket } from "./rightsPackets";
 import type { LifeEventRow } from "./lifeEvents";
 import type { GerReport } from "./ger";
 import type { HouseCardEntryRow } from "./houseCard";
@@ -77,7 +78,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 10;
+export const SHOWCASE_REVISION = 11;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -1429,6 +1430,7 @@ function addDemoSurfaces(db: LocalDatabase) {
   addMessagingThreads(db);
   addCarePlansAndScreenings(db);
   addConsentRegister(db);
+  addRightsPackets(db);
   addLifeEvents(db);
   addHouseCardLedgers(db);
   addPersonalSpendingLedgers(db);
@@ -2576,6 +2578,79 @@ function addConsentRegister(db: LocalDatabase) {
       { packetId, event: "generated", at: hoursAgo(51) },
       { packetId, event: "sent", at: hoursAgo(50) },
     );
+  }
+}
+
+/* --------------------------- Rights packets --------------------------- */
+
+/**
+ * The annual Rights packet, seeded as the front cover of each chart's
+ * consents. Ellis carries two years of history: last year's packet and
+ * the current one, typed 335 days ago so its renewal lands 30 days out
+ * — the tracker sits in its final month ("Due in 30 days"). His sister
+ * Dana signed as Guardian. Harper signed her own packet recently, as
+ * Self, so its countdown runs long. Morgan and Reese have none yet:
+ * their state reads "Not yet signed".
+ */
+function addRightsPackets(db: LocalDatabase) {
+  const today = todayIso();
+  const sarah = userId(db, "Sarah Mitchell");
+  const ellis = idOf(db, "Ellis Hart");
+  const harper = idOf(db, "Harper Soto");
+  const agency = agencyId(db);
+  db.rightsPackets ??= [];
+  const packets: RightsPacket[] = [
+    {
+      id: "rights-showcase-ellis-prior",
+      agencyId: agency,
+      individualId: ellis,
+      createdBy: sarah,
+      createdAt: `${addDaysIso(today, -700)}T15:00:00.000Z`,
+      signerName: "Dana Hart",
+      reviewedBy: "James Wilson",
+      packetOn: addDaysIso(today, -700),
+      status: "signed",
+      signer: { printedName: "Dana Hart", authority: "Guardian", authorityOther: "", signature: "Dana Hart", witness: "Casey Adams", accepted: true },
+      signedAt: `${addDaysIso(today, -700)}T15:05:00.000Z`,
+      filedAt: null,
+      evidenceName: null,
+      copyVersion: RIGHTS_PACKET_COPY_VERSION,
+    },
+    {
+      id: "rights-showcase-ellis",
+      agencyId: agency,
+      individualId: ellis,
+      createdBy: sarah,
+      createdAt: `${addDaysIso(today, -335)}T15:00:00.000Z`,
+      signerName: "Dana Hart",
+      reviewedBy: "James Wilson",
+      packetOn: addDaysIso(today, -335),
+      status: "signed",
+      signer: { printedName: "Dana Hart", authority: "Guardian", authorityOther: "", signature: "Dana Hart", witness: "Casey Adams", accepted: true },
+      signedAt: `${addDaysIso(today, -335)}T15:05:00.000Z`,
+      filedAt: null,
+      evidenceName: null,
+      copyVersion: RIGHTS_PACKET_COPY_VERSION,
+    },
+    {
+      id: "rights-showcase-harper",
+      agencyId: agency,
+      individualId: harper,
+      createdBy: sarah,
+      createdAt: `${addDaysIso(today, -18)}T15:00:00.000Z`,
+      signerName: "Harper Soto",
+      reviewedBy: "James Wilson",
+      packetOn: addDaysIso(today, -18),
+      status: "signed",
+      signer: { printedName: "Harper Soto", authority: "Self", authorityOther: "", signature: "Harper Soto", witness: "Jordan Lee", accepted: true },
+      signedAt: `${addDaysIso(today, -18)}T15:05:00.000Z`,
+      filedAt: null,
+      evidenceName: null,
+      copyVersion: RIGHTS_PACKET_COPY_VERSION,
+    },
+  ];
+  for (const packet of packets) {
+    if (!db.rightsPackets.some((row) => row.id === packet.id)) db.rightsPackets.push(packet);
   }
 }
 

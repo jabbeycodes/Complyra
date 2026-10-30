@@ -130,3 +130,21 @@ test("attention: kind meta is icon + text, never color alone", () => {
     assert.ok(meta.description.length > 0);
   }
 });
+
+test("attention: rights items keep their own wording instead of a generic past-due line", () => {
+  const feed = buildAttentionFeed({
+    riskContext: riskContext(),
+    timelineFacts: timelineFacts({
+      rightsRenewals: [
+        { id: "rp2", individualName: "Morgan Pruitt", siteName: "Cedar House", dueOn: "2026-09-10", unsigned: true, detail: "Not yet signed — awaiting signature since 2026-09-10" },
+        { id: "rp3", individualName: "Reese Lang", siteName: "Willow House", dueOn: "2026-09-14", unsigned: false, detail: "Due today" },
+      ],
+    }),
+  });
+  const overdue = feed.find((item) => item.sourceId === "rights-renewal:rp2")!;
+  assert.equal(overdue.kind, "overdue");
+  assert.equal(overdue.detail, "Not yet signed — awaiting signature since 2026-09-10");
+  const today = feed.find((item) => item.sourceId === "rights-renewal:rp3")!;
+  assert.equal(today.kind, "due-today");
+  assert.equal(today.detail, "Due today");
+});

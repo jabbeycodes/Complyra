@@ -17,7 +17,8 @@ export type TimelineItemKind =
   | "checklist"
   | "medication"
   | "corrective-action"
-  | "provider-recertification";
+  | "provider-recertification"
+  | "rights-renewal";
 
 export type TimelineUrgency = "overdue" | "today" | "this-week" | "upcoming";
 
@@ -32,6 +33,7 @@ export const TIMELINE_KIND_META: Record<
   medication: { label: "Medication supply", icon: "💊" },
   "corrective-action": { label: "Corrective action", icon: "🛠" },
   "provider-recertification": { label: "Provider recertification", icon: "🏛" },
+  "rights-renewal": { label: "Rights renewal", icon: "📜" },
 };
 
 export const TIMELINE_URGENCY_META: Record<
@@ -104,6 +106,21 @@ export interface TimelineFacts {
     expiresOn: string | null;
     submitted: boolean;
   } | null;
+  /**
+   * Annual Rights packet renewals, one row per Individual who has a
+   * packet record. dueOn is the renewal date (typed packet date + 1
+   * year) for a signed packet, or the date the unsigned packet was
+   * started. detail carries the shared countdown text from the rights
+   * tracker so every surface repeats the same words.
+   */
+  rightsRenewals?: Array<{
+    id: string;
+    individualName: string;
+    siteName?: string;
+    dueOn: string;
+    unsigned: boolean;
+    detail: string;
+  }>;
 }
 
 const MS_PER_DAY = 86400000;
@@ -236,6 +253,24 @@ export function buildTimeline(facts: TimelineFacts): TimelineItem[] {
         : `File the recertification application (certificate expires ${expiresOn})`,
       dueOn: filingDeadline,
       deepLink: "/audit",
+    });
+  }
+
+  for (const rights of facts.rightsRenewals ?? []) {
+    const daysRemaining = daysFrom(today, rights.dueOn);
+    items.push({
+      id: `rights-renewal:${rights.id}`,
+      kind: "rights-renewal",
+      urgency: urgencyFor(daysRemaining),
+      daysRemaining,
+      title: rights.unsigned
+        ? `${rights.individualName} — Rights packet not yet signed`
+        : `${rights.individualName} — Rights packet ${daysRemaining < 0 ? "renewal overdue" : "renews"}`,
+      detail: rights.detail,
+      personName: rights.individualName,
+      siteName: rights.siteName,
+      dueOn: rights.dueOn,
+      deepLink: "/consents",
     });
   }
 

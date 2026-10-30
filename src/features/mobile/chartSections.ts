@@ -19,6 +19,13 @@ import {
   type ConsentType,
 } from "../../data/consents";
 import type { LifeEventView } from "../../data/lifeEvents";
+import {
+  isCompletedRightsPacket,
+  rightsTrackingFor,
+  rightsTrackingText,
+  type RightsPacket,
+} from "../../data/rightsPackets";
+import { todayStamp } from "../../data/status";
 
 /* ------------------------------ Care plans ------------------------------ */
 
@@ -110,6 +117,59 @@ export function consentRecordStatus(
   record: ConsentRecord,
 ): string {
   return consentStatus(record, register.records, register.revocations);
+}
+
+/* ---------------------------- Rights packet ---------------------------- */
+
+export interface RightsPacketSummary {
+  /** The shared tracking line: a countdown or "Not yet signed". */
+  trackingText: string;
+  state: string;
+  packetOn: string | null;
+  renewalOn: string | null;
+  /** The latest completed packet (drives the countdown), if any. */
+  latest: RightsPacket | null;
+  /** The open packet awaiting signature, if any. */
+  awaiting: RightsPacket | null;
+  /** Everything else, newest first — prior years stay in history. */
+  history: RightsPacket[];
+}
+
+/**
+ * The mobile Rights packet card, projected from the same derivation
+ * the desktop chart uses (rightsTrackingFor) — the countdown figure
+ * is identical on both surfaces because it is computed in one place.
+ */
+export function rightsPacketSummary(
+  packets: RightsPacket[],
+  today = todayStamp(),
+): RightsPacketSummary {
+  const tracking = rightsTrackingFor(packets, today);
+  const latest = tracking.kind === "tracked" ? tracking.packet : null;
+  const awaiting =
+    [...packets]
+      .filter((packet) => packet.status === "awaiting_signature")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  const history = packets
+    .filter((packet) => packet.id !== latest?.id && packet.id !== awaiting?.id)
+    .sort((a, b) =>
+      (b.packetOn ?? b.createdAt).localeCompare(a.packetOn ?? a.createdAt),
+    );
+  return {
+    trackingText: rightsTrackingText(tracking),
+    state: tracking.kind === "tracked" ? tracking.renewal.state : "not_signed",
+    packetOn: latest?.packetOn ?? null,
+    renewalOn: tracking.kind === "tracked" ? tracking.renewal.renewalOn : null,
+    latest,
+    awaiting,
+    history,
+  };
+}
+
+export function rightsHistoryLine(packet: RightsPacket): string {
+  return isCompletedRightsPacket(packet)
+    ? `Packet date ${packet.packetOn} · signed by ${packet.signer?.printedName} (${packet.signer?.authority}) · ${packet.status}`
+    : `Started ${packet.createdAt.slice(0, 10)} · awaiting signature · expected signer ${packet.signerName}`;
 }
 
 /* ------------------------------ Life events ----------------------------- */

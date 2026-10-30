@@ -10,6 +10,7 @@ import {
   groupLifeEventsByYear,
   planAckCount,
   planAwaitingMyAck,
+  rightsPacketSummary,
 } from "./chartSections";
 
 const careData = (patch: Partial<CareScreeningData>): CareScreeningData => ({
@@ -149,4 +150,26 @@ test("groupLifeEventsByYear groups in order without re-sorting", () => {
   ]);
   assert.deepEqual(groups.map((g) => g.year), ["2026", "2025"]);
   assert.deepEqual(groups[0].rows.map((r) => r.id), ["a", "b"]);
+});
+
+test("rightsPacketSummary mirrors the shared derivation: latest packet, countdown, history", () => {
+  const signer = { printedName: "Dana Hart", authority: "Guardian", authorityOther: "", signature: "Dana Hart", witness: "Casey Adams", accepted: true };
+  const base = {
+    agencyId: "a1", individualId: "i1", createdBy: "hm", signerName: "Dana Hart",
+    reviewedBy: "James Wilson", evidenceName: null, copyVersion: "v1",
+    signer: null, signedAt: null, filedAt: null, packetOn: null,
+  } as const;
+  const prior = { ...base, id: "prior", createdAt: "2024-05-01T10:00:00Z", packetOn: "2024-05-01", status: "signed" as const, signer, signedAt: "2024-05-01T10:05:00Z" };
+  const latest = { ...base, id: "latest", createdAt: "2026-10-01T10:00:00Z", packetOn: "2026-10-01", status: "signed" as const, signer, signedAt: "2026-10-01T10:05:00Z" };
+  const summary = rightsPacketSummary([prior, latest], "2026-10-30");
+  assert.equal(summary.trackingText, "Renews in 336 days");
+  assert.equal(summary.renewalOn, "2027-10-01");
+  assert.equal(summary.latest?.id, "latest");
+  assert.deepEqual(summary.history.map((packet) => packet.id), ["prior"]);
+
+  const awaiting = { ...base, id: "next", createdAt: "2026-10-29T10:00:00Z", status: "awaiting_signature" as const };
+  const unsigned = rightsPacketSummary([awaiting], "2026-10-30");
+  assert.equal(unsigned.trackingText, "Not yet signed");
+  assert.equal(unsigned.awaiting?.id, "next");
+  assert.equal(rightsPacketSummary([], "2026-10-30").trackingText, "Not yet signed");
 });
