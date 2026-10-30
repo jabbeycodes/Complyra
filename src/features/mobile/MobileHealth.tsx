@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pill, Wallet } from "lucide-react";
+import { FileHeart, FileSignature, HeartPulse, Pill, Wallet } from "lucide-react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import { canViewPersonalSpending } from "../../data/permissions";
+import { canViewCare } from "../../data/careScreening";
+import { canSeeConsents } from "../../data/consents";
 import {
   computePersonalBalanceCents,
   formatCents,
@@ -49,6 +51,9 @@ export default function MobileHealth({
   backLabel,
   onEntrySaved,
   onOpenSpending,
+  onOpenCarePlans,
+  onOpenConsents,
+  onOpenLifeEvents,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -70,6 +75,17 @@ export default function MobileHealth({
    * shown only to roles that may view personal spending (#152).
    */
   onOpenSpending?: (person: WorkspaceIndividual) => void;
+  /**
+   * Chart-section doors (Phase 4): the person's Care Plans, Consents,
+   * and Life Events mobile views. Optional like onOpenSpending — hosts
+   * that only need the health trackers (the Quick log embedding) omit
+   * them and the rows never render. Each row also follows its desktop
+   * chart gate (canViewCare / canSeeConsents; life events ride the
+   * chart read access this view already requires).
+   */
+  onOpenCarePlans?: (person: WorkspaceIndividual) => void;
+  onOpenConsents?: (person: WorkspaceIndividual) => void;
+  onOpenLifeEvents?: (person: WorkspaceIndividual) => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(null);
@@ -255,6 +271,60 @@ export default function MobileHealth({
                       ? `Personal funds balance: ${formatCents(spendingBalance)}`
                       : `${person.name}'s own money — spends, deposits, and balance`}
                   </small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            )}
+            {onOpenCarePlans && canViewCare(session.roleKey) && (
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => onOpenCarePlans(person)}
+              >
+                <span className="msh-tile-icon" aria-hidden="true">
+                  <FileHeart size={22} />
+                </span>
+                <span className="msh-row-main">
+                  <strong>Care plans</strong>
+                  <small>Care plans and health screenings</small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            )}
+            {onOpenConsents && canSeeConsents(session.roleKey) && (
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => onOpenConsents(person)}
+              >
+                <span className="msh-tile-icon" aria-hidden="true">
+                  <FileSignature size={22} />
+                </span>
+                <span className="msh-row-main">
+                  <strong>Consents</strong>
+                  <small>Consent register and packets</small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            )}
+            {onOpenLifeEvents && (
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => onOpenLifeEvents(person)}
+              >
+                <span className="msh-tile-icon" aria-hidden="true">
+                  <HeartPulse size={22} />
+                </span>
+                <span className="msh-row-main">
+                  <strong>Life events</strong>
+                  <small>Significant moments in this person&rsquo;s life</small>
                 </span>
                 <span className="msh-chevron" aria-hidden="true">
                   ›

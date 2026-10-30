@@ -1981,3 +1981,102 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 4a — chart sections (Care Plans, Consents, Life Events).     */
+/* Record cards read like the chart: a titled block, plain text        */
+/* status lines, and the shared list rows around them.                 */
+/* ------------------------------------------------------------------ */
+
+.msh-record-card {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #ddd6c9);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msh-record-card p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.msh-record-item {
+  border-top: 1px solid var(--line, #ddd6c9);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msh-record-item p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.msh-record-version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--line, #ddd6c9);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+
+.msh-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+/* The desktop PacketForm renders bare labels/fieldsets; inside the
+   mobile sheet they take the sheet's field rhythm. */
+.msh-packet-sheet form > label,
+.msh-packet-sheet fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.msh-packet-sheet fieldset {
+  border: 1px solid var(--line, #ddd6c9);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 400;
+}
+
+.msh-packet-sheet fieldset legend {
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.msh-packet-sheet input,
+.msh-packet-sheet select {
+  font: inherit;
+  font-weight: 400;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #ddd6c9);
+  border-radius: 10px;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.msh-packet-sheet input[type="checkbox"] {
+  width: auto;
+}
+
+.msh-packet-sheet {
+  max-height: 88vh;
+  overflow-y: auto;
+}
