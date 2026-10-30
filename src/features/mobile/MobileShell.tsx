@@ -22,6 +22,7 @@ import type { ComplyraApi, WorkspaceView } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import type { PersonalWorkItem } from "../../data/dashboard";
 import { pageVisible, roleLabel } from "../../data/status";
+import { sitesVisibleTo } from "../../data/dashboard";
 import {
   isUnread,
   type NotificationRow,
@@ -38,6 +39,9 @@ import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileHealth from "./MobileHealth";
 import MobileMessages from "./MobileMessages";
+import MobileScheduling, { MobileYourShiftDetail } from "./MobileScheduling";
+import { useYourShift } from "./useYourShift";
+import { yourShiftText } from "./scheduling";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
@@ -50,6 +54,8 @@ export type ShellView =
   | "isp"
   | "health"
   | "messages"
+  | "scheduling"
+  | "yourshift"
   | "tasks"
   | "people"
   | "housecard"
@@ -60,6 +66,7 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   ispData: ClipboardList,
   health: HeartPulse,
   messages: MessageSquare,
+  scheduling: CalendarDays,
   timeClock: Clock,
   myTasks: ListTodo,
   individuals: Users,
@@ -74,6 +81,8 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   isp: "ISP Data",
   health: "Health",
   messages: "Messages",
+  scheduling: "Scheduling",
+  yourshift: "Your shift",
   tasks: "My Tasks",
   people: "Individuals",
   housecard: "House Card",
@@ -200,6 +209,42 @@ export default function MobileShell({
     refreshKey: homeRefreshKey,
   });
 
+  // The "Your shift" strip: the signed-in person's own shift today at
+  // the picked home, with the accountability engine's counts for its
+  // window. Managers tap through to the Scheduling board; everyone else
+  // gets a read-only detail of their own shift. Absent entirely when
+  // they have no shift today.
+  const ownShift = useYourShift({
+    api,
+    session,
+    siteId: scopedSite?.id ?? null,
+    refreshKey: homeRefreshKey,
+  });
+  const canOpenScheduling = pageVisible(session, "Scheduling");
+  const ownShiftText = ownShift.acc ? yourShiftText(ownShift.acc) : null;
+  const ownShiftStrip = ownShift.acc && ownShiftText ? (
+    <button
+      type="button"
+      className="msh-row msh-yourshift"
+      onClick={() => setView(canOpenScheduling ? "scheduling" : "yourshift")}
+    >
+      <span className="msh-row-main">
+        <strong>{ownShiftText.title}</strong>
+        <small className="msh-status-text">{ownShiftText.detail}</small>
+      </span>
+      <span className="msh-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  ) : null;
+
+  // Houses the Scheduling board may show this viewer — the desktop
+  // page's own scoping (an HM's houses; PM/admin every house).
+  const schedSites = useMemo(
+    () => sitesVisibleTo(session, workspace.sites, workspace.staff),
+    [session, workspace],
+  );
+
   const refreshNotifications = useCallback(async () => {
     try {
       setNotifRows(await api.listNotifications());
@@ -265,6 +310,9 @@ export default function MobileShell({
         break;
       case "messages":
         setView("messages");
+        break;
+      case "scheduling":
+        setView("scheduling");
         break;
       case "timeClock":
         nav.openPage("Employee Hub");
@@ -334,6 +382,7 @@ export default function MobileShell({
     view === "tasks" ||
     view === "people" ||
     view === "health" ||
+    view === "scheduling" ||
     (view === "messages" && !messagesInThread) ||
     (view === "isp" && !ispFormActive);
 
@@ -507,6 +556,7 @@ export default function MobileShell({
                 onOpenTasks={() => setView("tasks")}
                 onOpenMar={() => setView("mar")}
                 onOpenQueueItem={openQueueItem}
+                yourShift={ownShiftStrip}
                 complianceCard={
                   <MobileComplianceCard
                     session={session}
@@ -644,6 +694,23 @@ export default function MobileShell({
               if (person) nav.openPersonChart(person.name);
             }}
             onThreadOpenChange={setMessagesInThread}
+          />
+        )}
+
+        {view === "scheduling" && (
+          <MobileScheduling
+            api={api}
+            session={session}
+            sites={schedSites.map((site) => ({ id: site.id, name: site.name }))}
+            staff={workspace.staff}
+            initialSiteId={scopedSite?.id ?? null}
+          />
+        )}
+
+        {view === "yourshift" && ownShift.acc && (
+          <MobileYourShiftDetail
+            acc={ownShift.acc}
+            siteName={scopedSite?.name ?? ""}
           />
         )}
 

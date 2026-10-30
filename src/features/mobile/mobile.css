@@ -1589,3 +1589,64 @@
   justify-content: center;
   gap: 6px;
 }
+
+/* Scheduling — week coverage cards, the staff picker, and the
+   "Your shift" strip. Same card language as the rest of the shell;
+   accountability always rides in text, never color alone. */
+.msh-yourshift {
+  border: 2px solid var(--moss);
+}
+
+.msh-weeknav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.msh-sched-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--white);
+  border-radius: 18px;
+  box-shadow: 0 4px 16px rgba(36, 30, 24, 0.06);
+  color: var(--text);
+}
+
+.msh-sched-card strong {
+  font-size: 16px;
+}
+
+.msh-sched-card small {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.msh-sched-acc {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--purple-dark);
+}
+
+.msh-sched-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.msh-sched-pick.selected {
+  outline: 2px solid var(--moss);
+  outline-offset: -2px;
+}
+
+.msh-sched-warn {
+  color: var(--purple-dark);
+  font-weight: 600;
+}
