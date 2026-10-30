@@ -1664,3 +1664,320 @@
   color: var(--purple-dark);
   font-weight: 600;
 }
+
+/* Money quick-entry — the House Card and Personal Spending phone
+ * views. Design follows the expense-tracker research (amount-first
+ * entry, a stable category grid, a pinned balance header, today as
+ * home, and a persistent Undo that performs the ledger's void flow).
+ * Both trackers reuse their desktop statement markup for printing;
+ * the classes below are the screen layer only. The desktop panels
+ * (houseCard.css / personalSpending.css) are untouched by this build. */
+
+/* Pinned balance header: stays under the shell header while the
+ * timeline scrolls, so the current balance is one glance away. */
+.mq-pin {
+  position: sticky;
+  top: calc(46px + env(safe-area-inset-top, 0px));
+  z-index: 15;
+  background: var(--white);
+  border-radius: 18px;
+  box-shadow: 0 6px 22px rgba(36, 30, 24, 0.09);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mq-pin-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mq-pin-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.mq-pin-value {
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.mq-pin-sub {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+/* Text state pill — balance states are words, never color alone. */
+.mq-flag {
+  display: inline-block;
+  border: 1px solid var(--text);
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--sand);
+  white-space: nowrap;
+}
+
+.mq-notice {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+/* The persistent Undo bar: sits above the timeline until the next
+ * save or action replaces it — never a vanishing toast. */
+.mq-undo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--white);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(36, 30, 24, 0.07);
+  padding: 10px 12px 10px 16px;
+  margin-bottom: 12px;
+}
+
+.mq-undo-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.mq-undo .msh-chip-button {
+  flex-shrink: 0;
+}
+
+.mq-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 0;
+  text-align: right;
+}
+
+.mq-row-amount {
+  font-size: 16px;
+}
+
+.mq-row-side small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.mq-voided {
+  opacity: 0.75;
+}
+
+.mq-voided .mq-row-amount {
+  text-decoration: line-through;
+}
+
+.mq-void-label {
+  font-weight: 600;
+}
+
+.mq-repeat {
+  margin-top: 4px;
+  min-height: 32px;
+  font-size: 13.5px;
+}
+
+.mq-month {
+  margin-top: 20px;
+}
+
+.mq-month-picker {
+  margin-bottom: 10px;
+}
+
+.mq-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 40px;
+}
+
+/* --- Shared entry sheet ------------------------------------------ */
+
+.mq-sheet .msh-field input,
+.mq-sheet .msh-field select {
+  min-height: 54px;
+}
+
+.mq-sheet .msh-field textarea {
+  min-height: 64px;
+}
+
+.mq-block {
+  margin-bottom: 14px;
+}
+
+.mq-field-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* Kind tiles: the spend/deposit (or purchase/credit) choice, one
+ * finger-sized tile per kind. */
+.mq-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mq-amount {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.mq-kind {
+  min-height: 52px;
+  border: 1px solid var(--purple);
+  border-radius: 14px;
+  background: var(--white);
+  color: var(--purple-dark);
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px 6px;
+}
+
+.mq-kind.on {
+  background: var(--purple);
+  color: var(--white);
+}
+
+/* Amount first: the largest control on the sheet. */
+.mq-amount-box {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--white);
+  padding: 10px 14px;
+}
+
+.mq-amount-box > span {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mq-amount-box input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+/* Stable category grid: same order all session, positions never
+ * reshuffle — muscle memory is the point. */
+.mq-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mq-cat {
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--white);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  text-align: center;
+}
+
+.mq-cat.on {
+  border: 2px solid var(--purple-dark);
+  font-weight: 700;
+}
+
+.mq-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mq-chips .msh-chip-button.mq-chip-on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: var(--white);
+}
+
+.mq-more-toggle {
+  margin: 2px 0 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--purple-dark);
+  cursor: pointer;
+}
+
+.mq-more {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mq-receipt-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.mq-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--purple-dark);
+  text-decoration: underline;
+  cursor: pointer;
+}

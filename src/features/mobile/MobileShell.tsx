@@ -44,7 +44,8 @@ import MobileMessages from "./MobileMessages";
 import MobileScheduling, { MobileYourShiftDetail } from "./MobileScheduling";
 import { useYourShift } from "./useYourShift";
 import { yourShiftText } from "./scheduling";
-import HouseCardPanel from "../houseCard/HouseCardPanel";
+import MobileHouseCard from "./MobileHouseCard";
+import MobilePersonalSpending from "./MobilePersonalSpending";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
 import "./mobile.css";
@@ -62,6 +63,7 @@ export type ShellView =
   | "tasks"
   | "people"
   | "housecard"
+  | "spending"
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
@@ -91,6 +93,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   tasks: "My Tasks",
   people: "Individuals",
   housecard: "House Card",
+  spending: "Personal spending",
   notifications: "Notifications",
 };
 
@@ -161,6 +164,9 @@ export default function MobileShell({
   );
   const [siteQuery, setSiteQuery] = useState("");
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
+  const [spendingPersonId, setSpendingPersonId] = useState<string | null>(
+    null,
+  );
   const [ispKey, setIspKey] = useState(0);
   const [ispFormActive, setIspFormActive] = useState(false);
   const [messagesInThread, setMessagesInThread] = useState(false);
@@ -685,6 +691,10 @@ export default function MobileShell({
             people={people}
             onOpenChart={nav.openPersonChart}
             onOpenMedications={() => setView("mar")}
+            onOpenSpending={(person) => {
+              setSpendingPersonId(person.id);
+              setView("spending");
+            }}
           />
         )}
 
@@ -739,7 +749,7 @@ export default function MobileShell({
         )}
 
         {view === "housecard" && scopedSite && (
-          <HouseCardPanel
+          <MobileHouseCard
             api={api}
             session={session}
             siteId={scopedSite.id}
@@ -750,6 +760,36 @@ export default function MobileShell({
             }))}
           />
         )}
+
+        {view === "spending" &&
+          (() => {
+            const person = workspace.individuals.find(
+              (row) => row.id === spendingPersonId,
+            );
+            if (!person) {
+              return (
+                <p className="msh-empty">
+                  Pick an Individual from the Health view to see their
+                  personal spending.
+                </p>
+              );
+            }
+            const personSite = sites.find((site) => site.id === person.siteId);
+            return (
+              <MobilePersonalSpending
+                api={api}
+                session={session}
+                person={person}
+                siteName={personSite?.name ?? ""}
+                staffOptions={workspace.staff.map((member) => ({
+                  id: member.id,
+                  name: member.name,
+                }))}
+                onBack={() => setView("health")}
+                onOpenChart={nav.openPersonChart}
+              />
+            );
+          })()}
 
         {view === "tasks" && (
           <div>
