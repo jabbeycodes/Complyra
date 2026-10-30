@@ -16,6 +16,10 @@ import {
 import { owedLinesForDay, rowsToCopy, rowsToFill, type PlanShift } from "./coveragePlan";
 import { canEditSiteReview, normalizeSiteFacts, type SiteFacts } from "../../data/siteReview";
 import {
+  accountabilityStateLabel,
+  type ShiftAccountability,
+} from "../../data/shiftAccountability";
+import {
   chicagoShiftInstants,
   chicagoWallClock,
   coverageQueryWindow,
@@ -72,6 +76,28 @@ function compactOwed(
   return `Open. ${tail}`;
 }
 
+/**
+ * One text line carrying a shift's accountability: the owner (or
+ * "Unowned"), the state in words, the done fraction, and the first
+ * missing obligations by name — the state never rides on color alone.
+ * Undone work reads "Missing" once the window has ended and "Still to
+ * do" while it can still be done.
+ */
+function accountabilityLine(acc: ShiftAccountability): string {
+  const counts = `${acc.doneCount} of ${acc.totalDue} done`;
+  const head =
+    acc.state === "unowned"
+      ? "Unowned"
+      : `${acc.ownerName ?? "Unassigned"} · ${accountabilityStateLabel(acc.state)}`;
+  if (acc.totalDue === 0) return `${head} · Nothing due in this window`;
+  if (acc.missingItems.length === 0) return `${head} · ${counts} · All complete`;
+  const verb = acc.endsAt <= new Date().toISOString() ? "Missing" : "Still to do";
+  const labels = acc.missingItems.slice(0, 3).map((entry) => entry.label);
+  const more =
+    acc.missingItems.length > 3 ? ` · and ${acc.missingItems.length - 3} more` : "";
+  return `${head} · ${counts} · ${verb}: ${labels.join("; ")}${more}`;
+}
+
 function choiceLabel(person: StaffChoice, siteId: string): string {
   const where = person.siteId === siteId ? "" : person.siteId ? ", other house" : ", agency";
   return `${person.name}, ${person.role}${where}`;
@@ -81,6 +107,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   const { api, session, workspace, refresh } = useData();
   const [weekStart, setWeekStart] = useState(currentWeekStart);
   const [shifts, setShifts] = useState<HrShift[]>([]);
+  const [accountability, setAccountability] = useState<Map<string, ShiftAccountability>>(new Map());
   const [openShifts, setOpenShifts] = useState<HrOpenShift[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -129,6 +156,15 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     const dates = weekDates(start);
     if (ticket !== loadTicket.current) return;
     setShifts(rows.filter((row) => row.status !== "cancelled"));
+    // Accountability reads the same local coverage buckets the shift list
+    // just loaded (the demo seed lands with that load), so it runs after.
+    // A failed read leaves the board usable without the lines — the board
+    // never pictures numbers it could not actually read.
+    const rollups = await api
+      .getShiftAccountability(siteId, range.fromIso, range.toIso)
+      .catch(() => [] as ShiftAccountability[]);
+    if (ticket !== loadTicket.current) return;
+    setAccountability(new Map(rollups.map((row) => [row.shiftId, row])));
     setOpenShifts(
       openings.filter(
         (row) =>
@@ -198,6 +234,17 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         return {
           id: row.id,
           who: person?.name ?? "Staff",
+          when: `${start.hhmm} to ${end.hhmm}`,
+        };
+      }),
+    unassigned: shifts
+      .filter((row) => !row.staffId && shiftTouchesDate(row.startsAt, row.endsAt, date))
+      .map((row) => {
+        const start = chicagoWallClock(row.startsAt);
+        const end = chicagoWallClock(row.endsAt);
+        return {
+          id: row.id,
+          who: "Open shift",
           when: `${start.hhmm} to ${end.hhmm}`,
         };
       }),
@@ -472,13 +519,32 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
                     <p key={line.blockId} className="coverage-owed">{line.text}</p>
                   ))
                 )}
-                {!day.summary && day.shifts.length === 0 && day.openings.length === 0 && <p>Open</p>}
+                {!day.summary && day.shifts.length === 0 && day.unassigned.length === 0 && day.openings.length === 0 && <p>Open</p>}
                 {day.shifts.map((shift) => {
                   const row = shifts.find((item) => item.id === shift.id);
+                  const acc = accountability.get(shift.id);
                   return (
                     <div key={shift.id} className="coverage-shift">
                       <strong>{shift.who}</strong>
                       <span>{shift.when}</span>
+                      {acc && <p className="coverage-accountability">{accountabilityLine(acc)}</p>}
+                      {row && (
+                        <span className="coverage-shift-actions">
+                          <button type="button" className="button" onClick={() => openDraft(day.date, row)}>Change</button>
+                          <button type="button" className="button" onClick={() => void removeShift(row)}>Take off</button>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                {day.unassigned.map((shift) => {
+                  const row = shifts.find((item) => item.id === shift.id);
+                  const acc = accountability.get(shift.id);
+                  return (
+                    <div key={shift.id} className="coverage-shift">
+                      <strong>{shift.who}</strong>
+                      <span>{shift.when}</span>
+                      {acc && <p className="coverage-accountability">{accountabilityLine(acc)}</p>}
                       {row && (
                         <span className="coverage-shift-actions">
                           <button type="button" className="button" onClick={() => openDraft(day.date, row)}>Change</button>
