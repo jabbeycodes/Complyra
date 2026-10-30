@@ -3017,6 +3017,8 @@ interface LocalBucket {
   evidence: Record<string, ComplianceEvidence>;
   /** True once the Evergreen demo readiness seed (requirements + evidence) has been written into this bucket. */
   demoReadinessSeeded?: boolean;
+  /** True once the Evergreen demo accountability seed (one unassigned published shift) has been written into this bucket. */
+  demoAccountabilitySeeded?: boolean;
   /* HR-PHASE2 */
   policies: HrAccrualPolicy[];
   ledger: HrAccrualLedgerEntry[];
@@ -3381,6 +3383,32 @@ function seedDemoHubData(): Pick<
   return { policies, ledger, timeOff, timeOffEvents, shifts };
 }
 
+/**
+ * One deliberately UNASSIGNED published shift for the Evergreen demo
+ * agency (Cedar House, Friday evening of the current week), so the
+ * Scheduling board's shift-accountability lines include an "Unowned"
+ * shift next to the staffed ones. Friday already carries a staffed day
+ * shift and Saturday an evening shift, so this row marks no new day as
+ * scheduled — it only leaves one published window without an owner.
+ */
+function seedDemoOpenShift(): HrShift {
+  const today = demoDayIso(0);
+  const sunday = demoDayIso(-new Date(`${today}T12:00:00Z`).getUTCDay());
+  const sundayDate = new Date(`${sunday}T12:00:00Z`);
+  return {
+    id: "shift-demo-cedar-open-fri",
+    agencyId: EVERGREEN_DEMO_AGENCY_ID,
+    siteId: DEMO_CEDAR_ID,
+    staffId: null,
+    title: "Evening shift",
+    startsAt: `${demoDayIso(5, sundayDate)}T20:00:00.000Z`,
+    endsAt: `${demoDayIso(6, sundayDate)}T04:00:00.000Z`,
+    status: "published",
+    notes: null,
+    createdBy: DEMO_STAFF_IDS.sarah,
+  };
+}
+
 /* --------------------- demo readiness seed (local) ----------------------- */
 /* Fictional readiness requirements + per-staff compliance evidence for the
  * Evergreen demo agency, localStorage only, so the personal-compliance
@@ -3641,6 +3669,20 @@ class LocalHrStore implements HrStore {
       this.memory.timeOffEvents.push(...demo.timeOffEvents);
       this.memory.shifts.push(...demo.shifts);
       this.memory.demoHubSeeded = true;
+      this.save(this.memory);
+    }
+    // One-time fictional accountability seed: a single unassigned published
+    // shift (Cedar, Friday evening) so the demo Scheduling board shows an
+    // "Unowned" accountability line. Same merge-across-buckets id dedupe
+    // as the hub seed above.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoAccountabilitySeeded
+    ) {
+      if (!this.memory.shifts.some((row) => row.id === "shift-demo-cedar-open-fri")) {
+        this.memory.shifts.push(seedDemoOpenShift());
+      }
+      this.memory.demoAccountabilitySeeded = true;
       this.save(this.memory);
     }
     // One-time fictional readiness seed (requirements + per-staff evidence)
