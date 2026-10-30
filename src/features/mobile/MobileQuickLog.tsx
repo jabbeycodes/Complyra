@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Car,
+  ClipboardList,
   Flame,
   HeartPulse,
   PiggyBank,
@@ -44,6 +45,10 @@ import { validateTripInput } from "../../data/mileage";
 import type { MileageTripView } from "../../data/types";
 import type { GerReport } from "../../data/ger";
 import type { HealthTrackEntry } from "../../data/healthTrack";
+import type {
+  IspProgramView,
+  ShiftNoteView,
+} from "../../data/shiftNotes";
 import {
   centralNowHhmm,
   centralTodayIso,
@@ -62,12 +67,14 @@ import {
   monthKeyOf,
   personDayEntries,
   personalSpendingStatus,
+  shiftNotesTodayStatus,
   type FieldLogDomain,
 } from "./fieldLogs";
 import MobilePeopleList from "./MobilePeopleList";
 import { PersonHeader } from "./MobileMar";
 import MobileGerLog from "./MobileGerLog";
 import MobileHealth from "./MobileHealth";
+import MobileIsp from "./MobileIsp";
 import MoneyEntrySheet, { HOUSE_CATEGORY_ICONS } from "./MoneyEntrySheet";
 import { houseSheetToDraft } from "./MobileHouseCard";
 import { personalSheetToDraft } from "./MobilePersonalSpending";
@@ -89,65 +96,69 @@ import type { WorkspaceIndividual } from "./types";
 
 /**
  * Mobile Quick log — one door for the field logs that used to live only
- * on desktop surfaces: health trackers, menu records, mileage, drills,
- * and incident (GER) reports — plus the two expenditure trackers, the
- * house card and personal spending. Every flow writes through the SAME
- * API methods and validation the desktop surface uses, so a record
- * logged on a phone is the record the desktop shows. The chooser hides
- * any domain the role cannot use (the gates are the desktop gates —
- * fieldLogs.ts), and each entry carries a factual status line for the
- * current home. Health is the Health home itself (MobileHealth) mounted
- * as a sub-flow — one implementation behind both doors; the money flows
- * open the SAME shared entry sheet (MoneyEntrySheet) the mobile money
- * views use, with the same draft mapping (houseSheetToDraft /
- * personalSheetToDraft).
+ * on desktop surfaces: shift notes, health trackers, menu records,
+ * mileage, drills, and incident (GER) reports — plus the two
+ * expenditure trackers, the house card and personal spending. Every
+ * flow writes through the SAME API methods and validation the desktop
+ * surface uses, so a record logged on a phone is the record the
+ * desktop shows. The chooser is a tile grid in the home grid's tile
+ * language; it hides any domain the role cannot use (the gates are
+ * the desktop gates — fieldLogs.ts), and each tile carries a factual
+ * status line for the current home. Shift notes lead the grid: the
+ * flow is the ISP Data surface itself (MobileIsp) mounted as a
+ * sub-flow, because in ComplyRer's model a shift note IS an ISP data
+ * entry — one record, one implementation behind both doors. Health
+ * is likewise the Health home itself (MobileHealth) mounted as a
+ * sub-flow; the money flows open the SAME shared entry sheet
+ * (MoneyEntrySheet) the mobile money views use, with the same draft
+ * mapping (houseSheetToDraft / personalSheetToDraft).
  */
 const DOMAIN_META: {
   id: FieldLogDomain;
   label: string;
-  hint: string;
+  /** Small label under the name (only where a second name is in use). */
+  tag?: string;
   icon: LucideIcon;
 }[] = [
   {
+    id: "shiftnotes",
+    label: "Shift notes",
+    tag: "ISP data",
+    icon: ClipboardList,
+  },
+  {
     id: "health",
     label: "Health",
-    hint: "Vitals, intake, elimination, seizures and more",
     icon: HeartPulse,
   },
   {
     id: "menu",
     label: "Menu record",
-    hint: "Record what an Individual ate",
     icon: UtensilsCrossed,
   },
   {
     id: "mileage",
     label: "Mileage",
-    hint: "Log a vehicle trip for this home",
     icon: Car,
   },
   {
     id: "drills",
     label: "Drill",
-    hint: "Record this month's emergency drills",
     icon: Flame,
   },
   {
     id: "ger",
     label: "Incident report",
-    hint: "File a general event report (GER)",
     icon: TriangleAlert,
   },
   {
     id: "housecard",
     label: "House card",
-    hint: "Record house spending and funds received",
     icon: Wallet,
   },
   {
     id: "spending",
     label: "Personal spending",
-    hint: "Record spending for an Individual",
     icon: PiggyBank,
   },
 ];
@@ -187,6 +198,9 @@ export default function MobileQuickLog({
   );
   const [screen, setScreen] = useState<"chooser" | FieldLogDomain>("chooser");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [ispPrograms, setIspPrograms] = useState<IspProgramView[]>([]);
+  const [ispNotes, setIspNotes] = useState<ShiftNoteView[]>([]);
+  const [notesFormActive, setNotesFormActive] = useState(false);
   const [menuEntries, setMenuEntries] = useState<MenuEntryView[]>([]);
   const [healthEntries, setHealthEntries] = useState<HealthTrackEntry[]>([]);
   const [trips, setTrips] = useState<MileageTripView[]>([]);
@@ -202,6 +216,13 @@ export default function MobileQuickLog({
   // bumps refreshKey via onLogged) — no polling.
   const loadStatuses = useCallback(async () => {
     try {
+      if (access.notesView) {
+        const perPerson = await Promise.all(
+          people.map((person) => api.getIspData(person.id)),
+        );
+        setIspPrograms(perPerson.flatMap((data) => data.programs));
+        setIspNotes(perPerson.flatMap((data) => data.notes));
+      }
       if (access.menu) {
         const perPerson = await Promise.all(
           people.map((person) =>
@@ -252,6 +273,9 @@ export default function MobileQuickLog({
 
   const statusFor = (domain: FieldLogDomain): string => {
     switch (domain) {
+      case "shiftnotes":
+        return shiftNotesTodayStatus(people, ispPrograms, ispNotes, todayIso)
+          .text;
       case "health":
         return healthTodayStatus(healthEntries, todayIso).text;
       case "menu":
@@ -275,6 +299,10 @@ export default function MobileQuickLog({
 
   const domainVisible = (domain: FieldLogDomain): boolean => {
     switch (domain) {
+      case "shiftnotes":
+        // The flow opens on the person picker — without a person at
+        // this home there is no note to write or read.
+        return access.notesView && people.length > 0;
       case "health":
         return access.healthView;
       case "menu":
@@ -305,6 +333,24 @@ export default function MobileQuickLog({
     setScreen(domain);
   };
 
+  if (screen === "shiftnotes") {
+    return (
+      <div className={notesFormActive ? "ql-notes-form" : undefined}>
+        <MobileIsp
+          api={api}
+          session={session}
+          people={people}
+          siteId={siteId}
+          siteName={siteName}
+          onOpenChart={onOpenChart}
+          onBack={() => setScreen("chooser")}
+          backLabel="Quick log"
+          onEntrySaved={onLogged}
+          onFormActiveChange={setNotesFormActive}
+        />
+      </div>
+    );
+  }
   if (screen === "health") {
     return (
       <MobileHealth
@@ -424,7 +470,7 @@ export default function MobileQuickLog({
           {statusError}
         </p>
       )}
-      <div className="msh-list">
+      <div className="msh-grid ql-grid">
         {DOMAIN_META.filter((domain) => domainVisible(domain.id)).map(
           (domain) => {
             const Icon = domain.icon;
@@ -432,22 +478,19 @@ export default function MobileQuickLog({
               <button
                 key={domain.id}
                 type="button"
-                className="msh-row"
+                className="msh-tile ql-tile"
                 onClick={() => openDomain(domain.id)}
               >
                 <span className="msh-tile-icon" aria-hidden="true">
-                  <Icon size={22} />
+                  <Icon size={26} />
                 </span>
-                <span className="msh-row-main">
-                  <strong>{domain.label}</strong>
-                  <small>{domain.hint}</small>
-                  <small className="msh-status-text">
-                    {statusFor(domain.id)}
-                  </small>
-                </span>
-                <span className="msh-chevron" aria-hidden="true">
-                  ›
-                </span>
+                <strong>{domain.label}</strong>
+                {domain.tag && (
+                  <small className="ql-tile-tag">{domain.tag}</small>
+                )}
+                <small className="ql-tile-status">
+                  {statusFor(domain.id)}
+                </small>
               </button>
             );
           },

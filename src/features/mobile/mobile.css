@@ -2090,4 +2090,37 @@
   align-items: center;
   cursor: pointer;
   margin-top: 6px;
+/* ────────────────────────────────────────────────────────────────
+   Quick log chooser grid + Shift notes domain.
+   The chooser renders its eight domains as tiles in the home
+   grid's own language (.msh-grid / .msh-tile above); these rules
+   only size the tiles for their live status lines. Statuses wrap
+   to two or three lines at phone width and must never truncate,
+   so tile height is content-driven with a min-height fitted to
+   the longest status (menu / mileage) at 390px. The status is
+   stated in words in full text color — never color alone.
+   ──────────────────────────────────────────────────────────────── */
+.ql-tile {
+  min-height: 182px;
+}
+
+.ql-tile-tag {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.msh-tile small.ql-tile-status {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* While the shift-note entry form is open inside the Quick log,
+   the shell's bottom navigation stays up (the ISP tile's shell
+   mount hides it instead) — extra scroll room keeps the form's
+   actions clear of the pill. */
+.ql-notes-form {
+  padding-bottom: 96px;
 }

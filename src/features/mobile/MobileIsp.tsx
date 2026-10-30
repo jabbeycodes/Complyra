@@ -467,6 +467,9 @@ export default function MobileIsp({
   initialPersonId,
   onOpenChart,
   onFormActiveChange,
+  onBack,
+  backLabel,
+  onEntrySaved,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -477,6 +480,16 @@ export default function MobileIsp({
   onOpenChart: (name: string) => void;
   /** Lets the shell hide its bottom navigation while the entry form is open. */
   onFormActiveChange?: (active: boolean) => void;
+  /**
+   * Embedding door (the Quick log chooser): when set, the people
+   * picker carries a back button to the host flow. The ISP Data tile
+   * mounts this view without it — the shell's own subheader is the
+   * way back there.
+   */
+  onBack?: () => void;
+  backLabel?: string;
+  /** Embedding door: told after every successful save (drives the host's status refresh). */
+  onEntrySaved?: () => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(
@@ -539,6 +552,11 @@ export default function MobileIsp({
   if (step === "people" || !person) {
     return (
       <div>
+        {onBack && (
+          <button type="button" className="msh-text-button" onClick={onBack}>
+            ‹ {backLabel ?? "Back"}
+          </button>
+        )}
         <p className="msh-section-note">
           Pick the Individual whose plan data you are collecting.
         </p>
@@ -743,6 +761,7 @@ export default function MobileIsp({
             setSelectedNote(null);
             void reload();
             setStep("entries");
+            onEntrySaved?.();
           }}
         />
       )}

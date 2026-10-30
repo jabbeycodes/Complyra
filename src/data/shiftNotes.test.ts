@@ -42,6 +42,8 @@ function acceptableProgress(summary: string) {
   };
 }
 import { canConfigureIspTasks, canEnterShiftNotes, canSeeShiftNotes } from "./permissions";
+import { ispAccountabilityItems } from "./shiftAccountability";
+import { dueItemClock } from "./operatingReminders";
 
 function api() {
   return new LocalApi(new MemoryStore(structuredClone(createEvergreenSeed())));
@@ -477,4 +479,95 @@ test("shift note print window stays on the last 14 days, then falls back to note
   assert.equal(saved.from, "2026-09-16");
   assert.equal(saved.to, "2026-09-29");
   assert.equal(saved.notes.length, 2);
+});
+
+test("quick log identity: a note saved through the shared API is the chart's record and today's ISP collection", async () => {
+  const impl = api();
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const ellisId = await individualId(impl, admin, "Ellis Hart");
+  const morganId = await individualId(impl, admin, "Morgan Pruitt");
+  // The Central service date the mobile surfaces call "today".
+  const today = dueItemClock(new Date()).doseDate;
+
+  // A manager records the plan's goal text first — the API's
+  // progress-note rule requires it before any new note can be saved.
+  const adminData = await impl.getIspData(ellisId);
+  const program = adminData.programs.find((p) => p.status === "approved");
+  assert.ok(program);
+  await impl.updateIspProgram(program.id, {
+    goalService: "Complete the morning routine with one or fewer prompts.",
+  });
+
+  // Gather the accountability inputs the way the Quick log chooser
+  // does: per-person getIspData reads as the signed-in DSP.
+  const dsp = await signInAs(impl, DEMO_DSP_USERNAME);
+  const people = [
+    { id: ellisId, name: "Ellis Hart" },
+    { id: morganId, name: "Morgan Pruitt" },
+  ];
+  const gather = async () => {
+    const perPerson = await Promise.all(
+      people.map((person) => impl.getIspData(person.id)),
+    );
+    return {
+      programs: perPerson.flatMap((data) => data.programs),
+      notes: perPerson.flatMap((data) => data.notes),
+    };
+  };
+  const before = await gather();
+  const beforeItems = ispAccountabilityItems({
+    people,
+    programs: before.programs,
+    notes: before.notes,
+    dates: [today],
+  });
+  // Only Ellis carries an expectation (Morgan's program is a draft),
+  // and the seeded notes are dated yesterday — nothing written today.
+  assert.equal(beforeItems.length, 1);
+  assert.equal(beforeItems[0].done, false);
+
+  // The exact save the mobile composer makes (MobileIsp's entry form
+  // → api.saveShiftNote — the Quick log mounts that same form; there
+  // is no second store and no separate ISP record anywhere).
+  const yesLevel = program.scoringMethod!.levels.find(
+    (level) => level.caption === "Yes",
+  )!;
+  const noteId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: today,
+    shift: "7a–3p",
+    beginTime: "07:00",
+    endTime: "15:00",
+    location: "Cedar House",
+    staffTitle: dsp.jobTitle,
+    waiverService: "Individualized Supported Living",
+    signatureDataUrl: PNG_1X1,
+    summary:
+      "Supported Ellis through the morning routine and a community outing.",
+    timeSpentMinutes: 480,
+    scores: [
+      { taskId: program.tasks[0].id, levelId: yesLevel.id, comment: "" },
+    ],
+  });
+
+  // The desktop chart's Shift notes section reads getIspData — the
+  // note saved from the phone door is the record it shows.
+  const chartData = await impl.getIspData(ellisId);
+  const saved = chartData.notes.find((note) => note.id === noteId);
+  assert.ok(saved, "the saved note is on the chart's shift-note read");
+  assert.equal(saved.noteDate, today);
+  assert.equal(saved.programId, program.id);
+
+  // And the accountability engine counts that same note as the
+  // Individual's ISP data collection for the service date.
+  const after = await gather();
+  const afterItems = ispAccountabilityItems({
+    people,
+    programs: after.programs,
+    notes: after.notes,
+    dates: [today],
+  });
+  assert.equal(afterItems.length, 1);
+  assert.equal(afterItems[0].done, true);
 });
