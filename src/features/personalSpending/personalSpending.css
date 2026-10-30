@@ -1,0 +1,339 @@
+/* Personal Spending — one Individual's own money, on their chart.
+   Screen styles mirror the house card's (same ledger grammar); the
+   print block at the bottom swaps the whole chart for the monthly
+   statement (body flag set by the print button, house-card style). */
+
+.personal-spending .ps-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.personal-spending .ps-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+}
+
+.personal-spending .ps-stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.personal-spending .ps-stat-value {
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
+.personal-spending .ps-flag {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 2px;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.personal-spending .ps-month-picker {
+  margin-left: auto;
+}
+
+.personal-spending .ps-close-note,
+.personal-spending .ps-attention {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--white);
+}
+
+.personal-spending .ps-attention .ps-flag {
+  margin-top: 0;
+}
+
+.personal-spending .ps-notice {
+  font-weight: 600;
+}
+
+.personal-spending .ps-error {
+  font-weight: 600;
+  color: var(--red);
+}
+
+.personal-spending .ps-section {
+  margin-top: 22px;
+}
+
+.personal-spending .ps-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.personal-spending .ps-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.personal-spending .ps-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  max-width: 420px;
+}
+
+.personal-spending .ps-field input,
+.personal-spending .ps-field select {
+  font: inherit;
+  font-weight: 400;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--text);
+  min-height: 40px;
+}
+
+.personal-spending .ps-field-wide {
+  grid-column: span 2;
+  max-width: none;
+}
+
+.personal-spending .ps-signoff-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 0;
+  max-width: none;
+}
+
+.personal-spending .ps-receipt-name {
+  font-weight: 400;
+  font-size: 0.8rem;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.personal-spending .ps-link-button {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--purple-dark);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.personal-spending .ps-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.personal-spending .ps-check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+  margin: 8px 0;
+}
+
+.personal-spending .ps-total-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 520px;
+}
+
+.personal-spending .ps-total-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.personal-spending .ps-table-wrap {
+  overflow-x: auto;
+}
+
+.personal-spending .ps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.personal-spending .ps-table th,
+.personal-spending .ps-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.personal-spending .ps-table .ps-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.personal-spending .ps-row-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.personal-spending .ps-row-voided td {
+  opacity: 0.75;
+}
+
+.personal-spending .ps-row-voided td strong,
+.personal-spending .ps-row-voided .ps-num {
+  text-decoration: line-through;
+}
+
+.personal-spending .ps-receipt-thumb {
+  display: block;
+  margin-top: 6px;
+  max-width: 120px;
+  max-height: 90px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* The chart header glance: one small labeled line under the heading. */
+.ps-glance {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.ps-glance strong {
+  color: var(--text);
+}
+
+/* The printed statement never shows on screen. */
+.personal-spending-printout {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .personal-spending .ps-field-wide {
+    grid-column: span 1;
+  }
+
+  .personal-spending .ps-month-picker {
+    margin-left: 0;
+  }
+
+  .personal-spending .ps-table th,
+  .personal-spending .ps-table td {
+    padding: 8px 6px;
+  }
+}
+
+@media print {
+  body[data-personal-spending-print="1"] .sidebar,
+  body[data-personal-spending-print="1"] .topbar,
+  body[data-personal-spending-print="1"] .demo-banner,
+  body[data-personal-spending-print="1"] .msh-header,
+  body[data-personal-spending-print="1"] .msh-subheader,
+  body[data-personal-spending-print="1"] .msh-nav,
+  body[data-personal-spending-print="1"] .page-heading,
+  body[data-personal-spending-print="1"] .plan-stack,
+  body[data-personal-spending-print="1"] .chart-grid > *:not(.personal-spending),
+  body[data-personal-spending-print="1"] .personal-spending-screen {
+    display: none !important;
+  }
+
+  body[data-personal-spending-print="1"] .main-shell,
+  body[data-personal-spending-print="1"] .page-shell,
+  body[data-personal-spending-print="1"] .msh-main {
+    margin-left: 0 !important;
+    padding-inline: 0.4in !important;
+    background: #fff !important;
+  }
+
+  body[data-personal-spending-print="1"] main {
+    padding: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+
+  body[data-personal-spending-print="1"] .personal-spending-printout {
+    display: block !important;
+    color: #000;
+    background: #fff;
+    font-size: 11pt;
+  }
+
+  .personal-spending-printout h1 {
+    font-size: 16pt;
+    margin-bottom: 4px;
+  }
+
+  .personal-spending-printout h2 {
+    font-size: 12pt;
+    margin: 18px 0 6px;
+  }
+
+  .ps-print-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .ps-print-table th,
+  .ps-print-table td {
+    border: 1px solid #222;
+    padding: 5px 7px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .ps-print-table .ps-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .ps-print-table .ps-row-voided td {
+    text-decoration: line-through;
+  }
+
+  .ps-print-totals {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ps-print-totals li {
+    padding: 2px 0;
+  }
+
+  .ps-print-mark {
+    margin-top: 24px;
+    font-style: italic;
+  }
+}

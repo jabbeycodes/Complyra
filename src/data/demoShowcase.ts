@@ -50,6 +50,10 @@ import type { ConsentRecord } from "./consents";
 import { HEALTH_SCOPE, PACKET_COPY_VERSION, PACKET_ITEMS, type ConsentPacket } from "./consentPackets";
 import type { LifeEventRow } from "./lifeEvents";
 import type { HouseCardEntryRow } from "./houseCard";
+import type {
+  PersonalSpendingEntryRow,
+  PersonalSpendingMonthClose,
+} from "./personalSpending";
 import {
   centralTodayIso,
   weekDayIsos,
@@ -71,7 +75,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 5;
+export const SHOWCASE_REVISION = 6;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -1244,6 +1248,7 @@ function addDemoSurfaces(db: LocalDatabase) {
   addConsentRegister(db);
   addLifeEvents(db);
   addHouseCardLedgers(db);
+  addPersonalSpendingLedgers(db);
 }
 
 /**
@@ -1487,6 +1492,239 @@ function addHouseCardLedgers(db: LocalDatabase) {
     amountCents: 2990,
     category: "gas",
     individualId: reese,
+  });
+}
+
+/**
+ * Personal Spending ledgers for Ellis Hart (Cedar) and Harper Soto
+ * (Willow) — each person's OWN money, separate from the house card
+ * above. Ellis's previous month is closed and signed with the dual
+ * sign-off in its "Individual signed" state (closing $93.88), and his
+ * current month carries that balance forward to $180.84. Harper's
+ * current month deliberately includes one spend that takes her below
+ * $0 (labeled "Over balance" by the guardrail) before a family deposit
+ * brings her back to $10.20, so the flag is visible in the demo.
+ */
+function addPersonalSpendingLedgers(db: LocalDatabase) {
+  db.personalSpendingEntries = db.personalSpendingEntries ?? [];
+  db.personalSpendingCloses = db.personalSpendingCloses ?? [];
+  const entries = db.personalSpendingEntries;
+  const closes = db.personalSpendingCloses;
+  const today = centralTodayIso();
+  const monthPrefix = today.slice(0, 8);
+  const todayDay = Number(today.slice(8, 10));
+  const dayIso = (day: number) =>
+    `${monthPrefix}${String(Math.min(day, todayDay)).padStart(2, "0")}`;
+  const at = (day: number, seq: number) =>
+    `${dayIso(day)}T${String(14 + (seq % 6)).padStart(2, "0")}:${String(
+      (seq * 7) % 60,
+    ).padStart(2, "0")}:00.000Z`;
+  const [yearNum, monthNum] = today.split("-").map(Number);
+  const prevFirst = new Date(Date.UTC(yearNum, monthNum - 2, 1));
+  const prevPrefix = prevFirst.toISOString().slice(0, 8);
+  const prevMonth = prevFirst.toISOString().slice(0, 7);
+  const prevDayIso = (day: number) =>
+    `${prevPrefix}${String(day).padStart(2, "0")}`;
+  const prevAt = (day: number, seq: number) =>
+    `${prevDayIso(day)}T${String(14 + (seq % 6)).padStart(2, "0")}:${String(
+      (seq * 7) % 60,
+    ).padStart(2, "0")}:00.000Z`;
+
+  const james = userId(db, "James Wilson");
+  const alex = userId(db, "Alex Morgan");
+  const taylor = userId(db, "Taylor Reed");
+  const jordan = userId(db, "Jordan Lee");
+  const casey = userId(db, "Casey Adams");
+  const cedar = siteId(db, "Cedar House");
+  const willow = siteId(db, "Willow House");
+  const ellis = idOf(db, "Ellis Hart");
+  const harper = idOf(db, "Harper Soto");
+
+  const push = (row: PersonalSpendingEntryRow) => {
+    if (!entries.some((entry) => entry.id === row.id)) entries.push(row);
+  };
+  const base = (
+    id: string,
+    site: string,
+    person: string,
+    entryDate: string,
+    createdAt: string,
+    recorder: string,
+    recorderName: string,
+    recorderRole: string,
+  ): PersonalSpendingEntryRow => ({
+    id,
+    agencyId: agencyId(db),
+    siteId: site,
+    individualId: person,
+    entryDate,
+    kind: "spend",
+    location: "",
+    purpose: "",
+    amountCents: 0,
+    note: "",
+    receiptPhoto: null,
+    recordedBy: recorder,
+    recordedByName: recorderName,
+    recordedByRole: recorderRole,
+    createdAt,
+    voidedBy: null,
+    voidedAt: null,
+    voidReason: null,
+    replacesEntryId: null,
+    replacedByEntryId: null,
+  });
+
+  /* --------------------- Ellis Hart — previous month ---------------------
+     Deposited $185.00 · Spent $91.12 · Closed at $93.88 (Individual signed) */
+  push({
+    ...base("personalspending-showcase-ellis-prev-deposit", cedar, ellis, prevDayIso(1), prevAt(1, 0), james, "James Wilson", "house_manager"),
+    kind: "deposit",
+    location: "Monthly personal funds",
+    amountCents: 18500,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-prev-s1", cedar, ellis, prevDayIso(5), prevAt(5, 1), taylor, "Taylor Reed", "dsp"),
+    location: "Target",
+    purpose: "Clothing — new jeans",
+    amountCents: 3850,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-prev-s2", cedar, ellis, prevDayIso(9), prevAt(9, 2), alex, "Alex Morgan", "dsp"),
+    location: "Regal Cinema",
+    purpose: "Movie outing with housemates",
+    amountCents: 1525,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-prev-s3", cedar, ellis, prevDayIso(14), prevAt(14, 3), alex, "Alex Morgan", "dsp"),
+    location: "Great Clips",
+    purpose: "Haircut",
+    amountCents: 1600,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-prev-s4", cedar, ellis, prevDayIso(20), prevAt(20, 4), taylor, "Taylor Reed", "dsp"),
+    location: "Walmart",
+    purpose: "Personal care items — shampoo and soap",
+    amountCents: 2137,
+  });
+  if (!closes.some((close) => close.id === "personalspending-showcase-ellis-close-prev")) {
+    closes.push({
+      id: "personalspending-showcase-ellis-close-prev",
+      agencyId: agencyId(db),
+      siteId: cedar,
+      individualId: ellis,
+      month: prevMonth,
+      closingBalanceCents: 9388,
+      printedName: "James Wilson",
+      signatureText: "James Wilson",
+      signedBy: james,
+      signedByName: "James Wilson",
+      signedAt: `${monthPrefix}01T15:00:00.000Z`,
+      createdAt: `${monthPrefix}01T15:00:00.000Z`,
+      individualSignoff: "individual_signed",
+      secondStaffId: null,
+      secondStaffName: null,
+      secondStaffSignatureText: null,
+    } satisfies PersonalSpendingMonthClose);
+  }
+
+  /* ---------------------- Ellis Hart — current month ----------------------
+     Deposited $210.00 · Spent $123.04 · Month net +$86.96 · Balance $180.84 */
+  push({
+    ...base("personalspending-showcase-ellis-deposit", cedar, ellis, dayIso(1), at(1, 0), james, "James Wilson", "house_manager"),
+    kind: "deposit",
+    location: "Monthly personal funds",
+    amountCents: 18500,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s1", cedar, ellis, dayIso(3), at(3, 1), alex, "Alex Morgan", "dsp"),
+    location: "Walmart",
+    purpose: "Personal care items — shampoo, soap, toothpaste",
+    amountCents: 2436,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s2", cedar, ellis, dayIso(6), at(6, 2), taylor, "Taylor Reed", "dsp"),
+    location: "Dollar Tree",
+    purpose: "Snacks for the week",
+    amountCents: 850,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s3", cedar, ellis, dayIso(9), at(9, 3), alex, "Alex Morgan", "dsp"),
+    location: "Target",
+    purpose: "Clothing — new shoes",
+    amountCents: 4299,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s4", cedar, ellis, dayIso(12), at(12, 4), taylor, "Taylor Reed", "dsp"),
+    location: "Regal Cinema",
+    purpose: "Movie ticket and popcorn — community outing",
+    amountCents: 1875,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s5", cedar, ellis, dayIso(15), at(15, 5), alex, "Alex Morgan", "dsp"),
+    location: "Great Clips",
+    purpose: "Haircut",
+    amountCents: 1600,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-s6", cedar, ellis, dayIso(18), at(18, 6), taylor, "Taylor Reed", "dsp"),
+    location: "Hy-Vee",
+    purpose: "Favorite foods — yogurt and berries",
+    amountCents: 1244,
+  });
+  push({
+    ...base("personalspending-showcase-ellis-deposit2", cedar, ellis, dayIso(20), at(20, 7), alex, "Alex Morgan", "dsp"),
+    kind: "deposit",
+    location: "Family",
+    amountCents: 2500,
+    note: "Birthday money from his sister.",
+  });
+
+  /* ---------------------- Harper Soto — current month ---------------------
+     Deposited $170.00 · Spent $159.80 · Balance $10.20
+     (the day-14 spend takes her to −$33.55: the over-balance example) */
+  push({
+    ...base("personalspending-showcase-harper-deposit", willow, harper, dayIso(1), at(1, 0), james, "James Wilson", "house_manager"),
+    kind: "deposit",
+    location: "Monthly personal funds",
+    amountCents: 12000,
+  });
+  push({
+    ...base("personalspending-showcase-harper-s1", willow, harper, dayIso(4), at(4, 1), casey, "Casey Adams", "dsp"),
+    location: "Target",
+    purpose: "Clothing — new sweater",
+    amountCents: 3120,
+  });
+  push({
+    ...base("personalspending-showcase-harper-s2", willow, harper, dayIso(8), at(8, 2), jordan, "Jordan Lee", "dsp"),
+    location: "Walgreens",
+    purpose: "Personal care items",
+    amountCents: 1465,
+  });
+  push({
+    ...base("personalspending-showcase-harper-s3", willow, harper, dayIso(11), at(11, 3), casey, "Casey Adams", "dsp"),
+    location: "McDonald's",
+    purpose: "Lunch out during a community outing",
+    amountCents: 1130,
+  });
+  push({
+    ...base("personalspending-showcase-harper-s4", willow, harper, dayIso(14), at(14, 4), jordan, "Jordan Lee", "dsp"),
+    location: "Walmart",
+    purpose: "Personal items and gifts for family",
+    amountCents: 9640,
+  });
+  push({
+    ...base("personalspending-showcase-harper-deposit2", willow, harper, dayIso(17), at(17, 5), casey, "Casey Adams", "dsp"),
+    kind: "deposit",
+    location: "Family",
+    amountCents: 5000,
+    note: "Money sent by her mother.",
+  });
+  push({
+    ...base("personalspending-showcase-harper-s5", willow, harper, dayIso(19), at(19, 6), jordan, "Jordan Lee", "dsp"),
+    location: "Dollar General",
+    purpose: "Snacks",
+    amountCents: 625,
   });
 }
 

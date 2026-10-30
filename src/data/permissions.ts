@@ -925,6 +925,64 @@ export function canCloseHouseCardMonth(roleKey: string) {
   return (HOUSE_CARD_CLOSER_ROLE_KEYS as readonly string[]).includes(roleKey);
 }
 
+/**
+ * PERSONAL SPENDING — one Individual's own money, on their chart. Role
+ * lists (no new permission key, the same menu-records approach as the
+ * house card): DSPs and house managers record for the Individuals at
+ * their own site; program managers and administrators reach the whole
+ * agency; house managers, PMs, and administrators sign months closed
+ * (with the Individual's own sign-off recorded alongside). Auditors and
+ * compliance administrators read only. Nurses are deliberately absent
+ * from every list — an Individual's money is not their workflow, so the
+ * chart section stays hidden for them. Person scoping itself is
+ * enforced by the API layers (canReadIndividual locally,
+ * private.can_read_individual in the database); these lists are
+ * mirrored by the RLS policies in
+ * supabase/migrations/20261029130100_personal_spending.sql.
+ */
+export const PERSONAL_SPENDING_VIEWER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "compliance_admin",
+  "program_manager",
+  "house_manager",
+  "dsp",
+  "auditor",
+];
+
+export const PERSONAL_SPENDING_RECORDER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+  "house_manager",
+  "dsp",
+];
+
+export const PERSONAL_SPENDING_CLOSER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+  "house_manager",
+];
+
+/** Personal spending — who may open the ledger (view + print). */
+export function canViewPersonalSpending(roleKey: string) {
+  return (PERSONAL_SPENDING_VIEWER_ROLE_KEYS as readonly string[]).includes(
+    roleKey,
+  );
+}
+
+/** Personal spending — who may record entries and void/replace them. */
+export function canRecordPersonalSpending(roleKey: string) {
+  return (PERSONAL_SPENDING_RECORDER_ROLE_KEYS as readonly string[]).includes(
+    roleKey,
+  );
+}
+
+/** Personal spending — who may sign a month closed. */
+export function canClosePersonalSpendingMonth(roleKey: string) {
+  return (PERSONAL_SPENDING_CLOSER_ROLE_KEYS as readonly string[]).includes(
+    roleKey,
+  );
+}
+
 /** Menu records — who may record what an Individual ate (daily-care staff). */
 export function canEnterMenuEntries(roleKey: string) {
   return [

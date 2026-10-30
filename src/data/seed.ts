@@ -211,6 +211,11 @@ export interface LocalDatabase {
   // initializes both.
   houseCardEntries?: import("./houseCard").HouseCardEntryRow[];
   houseCardCloses?: import("./houseCard").HouseCardMonthClose[];
+  // PERSONAL SPENDING: per-Individual personal-funds entries + signed
+  // month closes (dual sign-off). Optional so older persisted demos
+  // still load; the API lazily initializes both.
+  personalSpendingEntries?: import("./personalSpending").PersonalSpendingEntryRow[];
+  personalSpendingCloses?: import("./personalSpending").PersonalSpendingMonthClose[];
   /** See SHOWCASE_REVISION. Missing on workspaces saved before the walkthrough seed. */
   showcaseRevision?: number;
 }
