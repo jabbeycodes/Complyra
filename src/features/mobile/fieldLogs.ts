@@ -1,7 +1,7 @@
 /**
- * Mobile Quick log — the four field logs (menu records, mileage, drills,
- * incident/GER reports) as phone flows over the SAME stores and API
- * methods the desktop surfaces use.
+ * Mobile Quick log — the field logs (health trackers, menu records,
+ * mileage, drills, incident/GER reports) as phone flows over the SAME
+ * stores and API methods the desktop surfaces use.
  *
  * This module is the pure half: who may record in each domain (computed
  * from the exact helpers and permission keys the desktop surfaces gate
@@ -28,9 +28,11 @@ import type {
   GerReport,
   GerReportDraft,
 } from "../../data/ger";
+import type { HealthTrackEntry } from "../../data/healthTrack";
 import type { MileageTripView } from "../../data/types";
+import { todaysHealthEntryCount } from "./health";
 
-export type FieldLogDomain = "menu" | "mileage" | "drills" | "ger";
+export type FieldLogDomain = "menu" | "mileage" | "drills" | "ger" | "health";
 
 export interface FieldLogAccess {
   /** Record menu entries (the chart Menu section's entry gate). */
@@ -47,7 +49,19 @@ export interface FieldLogAccess {
    * HR holds no clinical permissions; auditors ARE readers here).
    */
   gerView: boolean;
-  /** Record in at least one domain — the Quick log tile's gate. */
+  /**
+   * Open the Health flow (canViewHealthTrack restated against the tile
+   * context: individuals.view, and never the HR role). Health is a view
+   * gate, not a record gate — recording inside follows health.record,
+   * exactly as the Health home enforces; view-only roles (auditors)
+   * see the trackers' statuses with no log actions.
+   */
+  healthView: boolean;
+  /**
+   * The Quick log tile's gate: record in at least one domain, or view
+   * health — a health-only viewer gets the tile with the Health row
+   * (and any read rows their other flags allow), nothing more.
+   */
   any: boolean;
 }
 
@@ -61,13 +75,16 @@ export function fieldLogAccess(
   const gerCreate = permissions["ger.create"] === true;
   const gerView =
     permissions["individuals.view"] === true && roleKey !== "hr";
+  const healthView =
+    permissions["individuals.view"] === true && roleKey !== "hr";
   return {
     menu,
     mileage,
     drills,
     gerCreate,
     gerView,
-    any: menu || mileage || drills || gerCreate,
+    healthView,
+    any: menu || mileage || drills || gerCreate || healthView,
   };
 }
 
@@ -252,6 +269,32 @@ export const GER_STATUS_LABELS: Record<GerReport["status"], string> = {
   approved: "Approved",
   returned: "Returned for corrections",
 };
+
+// ───────────────────────────── Health status ─────────────────────────────
+
+export interface HealthTodayStatus {
+  /** Entries across the seven mobile trackers dated today, house-wide. */
+  count: number;
+  text: string;
+}
+
+/**
+ * The house's health picture for today: how many tracker entries were
+ * logged today across every Individual at the home. `entries` is the
+ * flattened per-person entry lists the Health home reads; the count is
+ * health.ts's own (todaysHealthEntryCount), never a second tally.
+ */
+export function healthTodayStatus(
+  entries: readonly HealthTrackEntry[],
+  todayIso: string,
+): HealthTodayStatus {
+  const count = todaysHealthEntryCount(entries, todayIso);
+  const text =
+    count === 0
+      ? "No health entries logged today"
+      : `${count} health ${count === 1 ? "entry" : "entries"} logged today`;
+  return { count, text };
+}
 
 // ─────────────────── GER notifications (desktop line format) ───────────────────
 

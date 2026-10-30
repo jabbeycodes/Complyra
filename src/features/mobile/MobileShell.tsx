@@ -699,6 +699,7 @@ export default function MobileShell({
               (drill) => drill.siteId === scopedSite.id,
             )}
             onOpenChart={nav.openPersonChart}
+            onOpenMedications={() => setView("mar")}
           />
         )}
 

@@ -116,6 +116,22 @@ export function healthHomeStatuses(
 }
 
 /**
+ * How many entries across the seven mobile trackers are dated today.
+ * Summed from the same trackerStatus counts the Health home renders, so
+ * a house-level total (the Quick log chooser sums this over the home's
+ * Individuals) can never drift from what the Health home itself shows.
+ */
+export function todaysHealthEntryCount(
+  entries: readonly HealthTrackEntry[],
+  todayIso: string,
+): number {
+  return MOBILE_HEALTH_KINDS.reduce(
+    (sum, kind) => sum + trackerStatus(entries, kind, todayIso).todayCount,
+    0,
+  );
+}
+
+/**
  * Starting detail values for a quick-log sheet: kinds that carry a
  * time-of-day start at the current Central time so logging "now" is one
  * tap; everything else starts blank, exactly as on the chart.

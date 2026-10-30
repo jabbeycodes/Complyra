@@ -79,13 +79,14 @@ const TILE_DEFS: {
       ctx.permissions["individuals.view"] === true && ctx.roleKey !== "hr",
   },
   {
-    // QUICK LOG: one door for the four field logs — menu records,
-    // mileage, drills, incident (GER) reports. The gate is "can record
-    // in at least one domain," computed from the same helpers and
-    // permission keys the desktop surfaces use (fieldLogAccess), so the
-    // tile never offers a door the API would refuse. Read-only roles
-    // record in no domain — an auditor gets no tile even though they
-    // may READ filed GERs on the desktop Reporting tab.
+    // QUICK LOG: one door for the field logs — health trackers, menu
+    // records, mileage, drills, incident (GER) reports. The gate is
+    // "can record in at least one domain, or can view health,"
+    // computed from the same helpers and permission keys the desktop
+    // surfaces use (fieldLogAccess), so the tile never offers a door
+    // the API would refuse. A health-only viewer (an auditor, say)
+    // gets the tile with the read surfaces their flags allow — health
+    // statuses and filed GERs — and no recording door.
     id: "quickLog",
     label: "Quick log",
     hint: "Menu, mileage, drills & incidents",

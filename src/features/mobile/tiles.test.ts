@@ -149,7 +149,7 @@ test("the scheduling tile follows the desktop Scheduling page gate exactly", () 
   }
 });
 
-test("the quick log tile opens when the role records in any field-log domain", () => {
+test("the quick log tile opens when the role records in any field-log domain or views health", () => {
   // Menu entry is a role list (dsp included) — no permission keys needed.
   assert.ok(ids(ctx({ roleKey: "dsp", permissions: {} })).includes("quickLog"));
   assert.ok(ids(ctx({ roleKey: "nurse", permissions: {} })).includes("quickLog"));
@@ -161,10 +161,11 @@ test("the quick log tile opens when the role records in any field-log domain", (
   assert.ok(
     ids(ctx({ roleKey: "compliance_admin", permissions: { "ger.create": true } })).includes("quickLog"),
   );
-  // Read-only roles record in NO domain: an auditor may read filed GERs
-  // on the desktop but gets no quick-log tile; HR without mileage neither.
+  // Health viewing alone opens it: an auditor records in NO domain, but
+  // health statuses (and filed GERs) are read surfaces for them, so the
+  // tile renders with those rows only.
   assert.ok(
-    !ids(ctx({ roleKey: "auditor", permissions: { "individuals.view": true } })).includes("quickLog"),
+    ids(ctx({ roleKey: "auditor", permissions: { "individuals.view": true } })).includes("quickLog"),
   );
   assert.ok(!ids(ctx({ roleKey: "hr", permissions: {} })).includes("quickLog"));
 });
