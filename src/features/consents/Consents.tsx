@@ -1,4 +1,5 @@
 import Packets from "./Packets";
+import RightsPackets from "./RightsPackets";
 import { useEffect, useState } from 'react';
 import { useData } from '../../data/DataProvider';
 import { canManageConsents, canSeeConsents, consentOutcomeLabel, consentGaps, consentOnFile, consentStatus, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
@@ -95,7 +96,7 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         return error ? <p role="alert">{error}</p> : null;
     if (attentionOnly && data) {
         const gaps = consentGaps(data).filter(g => !siteId || g.person.siteId === siteId);
-        return <section className="consents"><Packets attentionOnly siteId={siteId}/><h2>Consents needing attention</h2>{gaps.length ? <ul>{gaps.map(g => <li key={`${g.person.id}:${g.type.id}`}><a href="#/consents">{g.person.fullName} — {g.type.label}: {g.status}</a></li>)}</ul> : <p>No missing or expiring consents in this scope.</p>}</section>;
+        return <section className="consents"><RightsPackets attentionOnly siteId={siteId}/><Packets attentionOnly siteId={siteId}/><h2>Consents needing attention</h2>{gaps.length ? <ul>{gaps.map(g => <li key={`${g.person.id}:${g.type.id}`}><a href="#/consents">{g.person.fullName} — {g.type.label}: {g.status}</a></li>)}</ul> : <p>No missing or expiring consents in this scope.</p>}</section>;
     }
     function start(personId: string, typeId: string, prior?: ConsentDraft & {
         id: string;
@@ -105,7 +106,7 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
     }
     const people = data?.individuals.filter(p => (!individualId || p.id === individualId) && (!site || p.siteId === site)) ?? [];
     return <section className="consents" id="chart-consents" aria-label="Consents register">
-    <Packets individualId={individualId} onFiled={async () => setData(await api.getConsents())}/><h2>{individualId ? 'Consents and version history' : 'Consents register'}</h2>
+    <RightsPackets individualId={individualId}/><Packets individualId={individualId} onFiled={async () => setData(await api.getConsents())}/><h2>{individualId ? 'Consents and version history' : 'Consents register'}</h2>
     <p>Signed versions stay on the Individual’s chart. Renewing adds a version; revoking records who, when, and why.</p>
     {error && <p role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading consents…</p>}

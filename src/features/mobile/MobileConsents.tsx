@@ -15,12 +15,37 @@ import {
   type PacketSignature,
 } from "../../data/consentPackets";
 import { buildConsentPacketPdf } from "../../pdf/consentPacketPdf";
+import { buildRightsPacketPdf } from "../../pdf/rightsPacketPdf";
 import { downloadBlob, openPrintable } from "../../data/openFile";
 import { todayStamp } from "../../data/status";
 import PacketForm from "../consents/PacketForm";
+import RightsPacketForm from "../consents/RightsPacketForm";
+import {
+  type RightsPacket,
+  type RightsPacketCompletion,
+} from "../../data/rightsPackets";
 import { PersonHeader } from "./MobileMar";
-import { consentRecordStatus, consentTypeRows } from "./chartSections";
+import {
+  consentRecordStatus,
+  consentTypeRows,
+  rightsHistoryLine,
+  rightsPacketSummary,
+} from "./chartSections";
 import type { WorkspaceIndividual } from "./types";
+
+const emptyRightsCompletion = (): RightsPacketCompletion => ({
+  reviewedBy: "",
+  // Deliberately empty: the manager types the packet date.
+  packetOn: "",
+  signer: {
+    printedName: "",
+    authority: "Self",
+    authorityOther: "",
+    signature: "",
+    witness: "",
+    accepted: false,
+  },
+});
 
 /**
  * Mobile Consents — the chart's consents register and consent packets
@@ -69,6 +94,16 @@ export default function MobileConsents({
   });
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [openAudit, setOpenAudit] = useState<string | null>(null);
+  const [rights, setRights] = useState<RightsPacket[]>([]);
+  const [rightsCompleting, setRightsCompleting] = useState<{
+    packet: RightsPacket;
+    paper: boolean;
+  } | null>(null);
+  const [rightsCompletion, setRightsCompletion] =
+    useState<RightsPacketCompletion>(emptyRightsCompletion());
+  const [rightsFile, setRightsFile] = useState<File | undefined>(undefined);
+  const [rightsStart, setRightsStart] = useState(false);
+  const [rightsSignerName, setRightsSignerName] = useState("");
 
   const visible = canSeeConsents(session.roleKey);
   const manage = canManageConsents(session.roleKey);
@@ -77,12 +112,14 @@ export default function MobileConsents({
   const load = useCallback(async () => {
     if (!visible) return;
     try {
-      const [reg, packs] = await Promise.all([
+      const [reg, packs, rightsPacks] = await Promise.all([
         api.getConsents(),
         packetsVisible ? api.listConsentPackets() : Promise.resolve([]),
+        packetsVisible ? api.listRightsPackets() : Promise.resolve([]),
       ]);
       setRegister(reg);
       setPackets(packs.filter((packet) => packet.individualId === person.id));
+      setRights(rightsPacks.filter((packet) => packet.individualId === person.id));
       setError("");
     } catch (err) {
       setError(
@@ -113,6 +150,17 @@ export default function MobileConsents({
   };
 
   const rows = register ? consentTypeRows(register, person.id, session.roleKey) : [];
+  const rightsSummary = rightsPacketSummary(rights);
+  const rightsPrintable = rightsSummary.latest ?? rightsSummary.awaiting;
+
+  const beginRightsComplete = (packet: RightsPacket, paper: boolean) => {
+    setRightsCompleting({ packet, paper });
+    setRightsFile(undefined);
+    setRightsCompletion({
+      ...emptyRightsCompletion(),
+      signer: { ...emptyRightsCompletion().signer, printedName: packet.signerName },
+    });
+  };
 
   return (
     <div>
@@ -120,6 +168,186 @@ export default function MobileConsents({
         ‹ Back
       </button>
       <PersonHeader person={person} onOpenChart={onOpenChart} />
+
+      {packetsVisible && (
+        <>
+          <h3 className="msh-pass-title">Rights packet</h3>
+          <p className="msh-section-note">
+            The annual rights signoff packet sits in front of the consent
+            forms, renewed every year. The countdown runs from the packet
+            date a manager types when the packet is signed.
+          </p>
+          <div className="msh-list">
+            <div className="msh-row static">
+              <span className="msh-row-main">
+                <strong>{rightsSummary.trackingText}</strong>
+                {rightsSummary.latest ? (
+                  <>
+                    <small>
+                      Packet date {rightsSummary.packetOn} · Renews{" "}
+                      {rightsSummary.renewalOn}
+                    </small>
+                    <small>
+                      Rights reviewed with the signer by{" "}
+                      {rightsSummary.latest.reviewedBy}. Signed by{" "}
+                      {rightsSummary.latest.signer?.printedName}; authority{" "}
+                      {rightsSummary.latest.signer?.authority}
+                      {rightsSummary.latest.signer?.authorityOther
+                        ? `: ${rightsSummary.latest.signer.authorityOther}`
+                        : ""}
+                      ; witness {rightsSummary.latest.signer?.witness}.
+                    </small>
+                    <small>
+                      Status:{" "}
+                      {rightsSummary.latest.status === "filed"
+                        ? "Signed paper copy filed"
+                        : "Signed"}
+                      .
+                    </small>
+                  </>
+                ) : (
+                  <small>
+                    {rightsSummary.awaiting
+                      ? `A packet is started and awaiting signature. Expected signer ${rightsSummary.awaiting.signerName}.`
+                      : "No completed rights packet on file."}
+                  </small>
+                )}
+                {rightsSummary.history.map((packet) => (
+                  <small key={packet.id}>{rightsHistoryLine(packet)}</small>
+                ))}
+                <span className="msh-row-actions">
+                  {rightsPrintable && (
+                    <>
+                      <button
+                        type="button"
+                        className="msh-chip-button"
+                        onClick={() =>
+                          downloadBlob(
+                            "Rights packet.pdf",
+                            buildRightsPacketPdf(
+                              rightsPrintable,
+                              person.name,
+                              session.agencyName,
+                            ).output("blob") as Blob,
+                          )
+                        }
+                      >
+                        Download packet
+                      </button>
+                      <button
+                        type="button"
+                        className="msh-chip-button"
+                        onClick={() =>
+                          void openPrintable(
+                            "Rights packet.pdf",
+                            buildRightsPacketPdf(
+                              rightsPrintable,
+                              person.name,
+                              session.agencyName,
+                            ).output("blob") as Blob,
+                            "print",
+                          )
+                        }
+                      >
+                        Print packet
+                      </button>
+                    </>
+                  )}
+                  {rightsSummary.latest?.status === "filed" && (
+                    <button
+                      type="button"
+                      className="msh-chip-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const evidence = await api.getRightsPacketEvidence(
+                            rightsSummary.latest!.id,
+                          );
+                          downloadBlob(evidence.name, evidenceBlob(evidence));
+                        })
+                      }
+                    >
+                      Download filed signed evidence
+                    </button>
+                  )}
+                  {manage && rightsSummary.awaiting && (
+                    <>
+                      <button
+                        type="button"
+                        className="msh-chip-button"
+                        disabled={busy}
+                        onClick={() => beginRightsComplete(rightsSummary.awaiting!, false)}
+                      >
+                        Record signature
+                      </button>
+                      <button
+                        type="button"
+                        className="msh-chip-button"
+                        disabled={busy}
+                        onClick={() => beginRightsComplete(rightsSummary.awaiting!, true)}
+                      >
+                        File signed paper copy
+                      </button>
+                    </>
+                  )}
+                  {manage && !rightsSummary.awaiting && (
+                    <button
+                      type="button"
+                      className="msh-chip-button"
+                      disabled={busy}
+                      onClick={() => {
+                        setRightsStart(true);
+                        setRightsSignerName("");
+                      }}
+                    >
+                      Start a new Rights packet
+                    </button>
+                  )}
+                </span>
+                {manage && rightsStart && (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void run(async () => {
+                        await api.createRightsPacket({
+                          individualId: person.id,
+                          signerName: rightsSignerName,
+                        });
+                        setRightsStart(false);
+                      });
+                    }}
+                  >
+                    <label className="msh-field">
+                      <span>Expected signer</span>
+                      <input
+                        required
+                        value={rightsSignerName}
+                        onChange={(event) => setRightsSignerName(event.target.value)}
+                      />
+                    </label>
+                    <span className="msh-form-actions">
+                      <button
+                        type="button"
+                        className="msh-button secondary"
+                        onClick={() => setRightsStart(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="msh-button primary"
+                        disabled={busy}
+                      >
+                        Start packet
+                      </button>
+                    </span>
+                  </form>
+                )}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
       <h3 className="msh-pass-title">Consents and version history</h3>
       <p className="msh-section-note">
@@ -491,6 +719,85 @@ export default function MobileConsents({
                   disabled={busy || !file}
                 >
                   File signed packet
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {rightsCompleting && (
+        <>
+          <button
+            type="button"
+            className="msh-sheet-backdrop"
+            aria-label="Close rights packet form"
+            onClick={() => setRightsCompleting(null)}
+          />
+          <div className="msh-sheet msh-packet-sheet" role="dialog" aria-label="Complete rights packet">
+            <h3 className="msh-sheet-title">
+              {rightsCompleting.paper
+                ? "File the signed paper Rights packet"
+                : "Record the Rights packet signature"}
+            </h3>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (busy) return;
+                void run(async () => {
+                  if (rightsCompleting.paper) {
+                    if (!rightsFile)
+                      throw new Error("Attach the signed copy.");
+                    await api.filePaperRightsPacket(
+                      rightsCompleting.packet.id,
+                      rightsCompletion,
+                      rightsFile,
+                    );
+                  } else {
+                    await api.signRightsPacket(
+                      rightsCompleting.packet.id,
+                      rightsCompletion,
+                    );
+                  }
+                  setRightsCompleting(null);
+                });
+              }}
+            >
+              <RightsPacketForm
+                paper={rightsCompleting.paper}
+                value={rightsCompletion}
+                onChange={setRightsCompletion}
+              />
+              {rightsCompleting.paper && (
+                <label className="msh-field">
+                  <span>Signed copy (PDF, PNG, JPEG; up to 10 MB)</span>
+                  <input
+                    required
+                    type="file"
+                    accept="application/pdf,image/png,image/jpeg"
+                    onChange={(event) => setRightsFile(event.target.files?.[0])}
+                  />
+                </label>
+              )}
+              {error && (
+                <p className="msh-alert" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="msh-form-actions">
+                <button
+                  type="button"
+                  className="msh-button secondary"
+                  onClick={() => setRightsCompleting(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="msh-button primary"
+                  disabled={busy || (rightsCompleting.paper && !rightsFile)}
+                >
+                  {rightsCompleting.paper ? "File signed packet" : "Complete packet"}
                 </button>
               </div>
             </form>

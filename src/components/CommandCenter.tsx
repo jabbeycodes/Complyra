@@ -39,6 +39,7 @@ import {
   ATTENTION_KIND_META,
   buildAttentionFeed,
 } from "../data/attentionFeed";
+import { rightsTrackingFor } from "../data/rightsPackets";
 import {
   evaluateReadiness,
   readinessByCategory,
@@ -83,6 +84,7 @@ export interface CommandCenterData {
   unavailable?: string[];
   medications?: MedInventoryView[];
   planStacks?: WorkspaceView["planStacks"];
+  rightsPackets?: import("../data/rightsPackets").RightsPacket[];
 }
 
 export interface AddActionInput {
@@ -335,6 +337,30 @@ export function CommandCenterView({
         status: deriveCorrectiveActionStatus(action, new Date()),
       })),
       providerRecertification: null,
+      rightsRenewals: (data.individuals ?? []).flatMap((person): NonNullable<TimelineFacts["rightsRenewals"]> => {
+        const mine = (data.rightsPackets ?? []).filter((packet) => packet.individualId === person.id);
+        if (mine.length === 0) return [];
+        const tracking = rightsTrackingFor(mine);
+        if (tracking.kind === "tracked") {
+          return [{
+            id: tracking.packet.id,
+            individualName: person.name,
+            siteName: person.site,
+            dueOn: tracking.renewal.renewalOn,
+            unsigned: false,
+            detail: tracking.renewal.text,
+          }];
+        }
+        if (!tracking.packet) return [];
+        return [{
+          id: tracking.packet.id,
+          individualName: person.name,
+          siteName: person.site,
+          dueOn: tracking.packet.createdAt.slice(0, 10),
+          unsigned: true,
+          detail: `Not yet signed — awaiting signature since ${tracking.packet.createdAt.slice(0, 10)}`,
+        }];
+      }),
     }),
     [certs, checklists, actions, siteNameById, data],
   );
@@ -928,13 +954,14 @@ export default function CommandCenter() {
       const optional = async <T,>(label: string, request: Promise<T>, fallback: T): Promise<T> => {
         try { return await request; } catch { unavailable.push(label); return fallback; }
       };
-      const [actions, certs, clearance, checklists, snapshots, medicationGroups] = await Promise.all([
+      const [actions, certs, clearance, checklists, snapshots, medicationGroups, rightsPackets] = await Promise.all([
         api.listCorrectiveActions(),
         optional("Certificates", api.certificatesExpiringSoon(36500), []),
         optional("Staff training", api.listStaffNeedingClearance(), [] as StaffClearanceRow[]),
         optional("Weekly checklists", api.listWeeklyChecklists(), [] as HmWeeklyChecklist[]),
         optional("Score history", api.listComplianceSnapshots(null, 30), [] as ScoreSnapshot[]),
         optional("Medication supply", Promise.all((workspace?.individuals ?? []).map((person) => api.getMedInventory(person.id))), [] as MedInventoryView[][]),
+        optional("Rights packets", api.listRightsPackets(), [] as import("../data/rightsPackets").RightsPacket[]),
       ]);
       if (request !== loadSequence.current) return;
       setData({
@@ -950,6 +977,7 @@ export default function CommandCenter() {
         unavailable,
         medications: medicationGroups.flat(),
         planStacks: workspace?.planStacks ?? [],
+        rightsPackets,
       });
     } catch (err) {
       if (request === loadSequence.current) setError(err instanceof Error ? err.message : "Could not load the command center.");

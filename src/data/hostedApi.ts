@@ -1,4 +1,5 @@
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
+import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
@@ -1690,6 +1691,51 @@ export class HostedApi implements ComplyraApi {
         const { data, error } = await this.client.rpc('get_consent_packet_evidence', { p_id: id });
         throwIf(error, 'Could not load packet evidence.');
         return data;
+    }
+    async listRightsPackets(): Promise<import("./rightsPackets").RightsPacket[]> {
+        const session = await this.requireSession();
+        assertConsentRole(session);
+        if (session.roleKey === 'dsp')
+            return [];
+        const { data, error } = await this.client.from('rights_packets').select('*').eq('agency_id', session.agencyId);
+        throwIf(error, 'Could not load rights packets.');
+        return (data ?? []).map(r => ({ id: r.id, agencyId: r.agency_id, individualId: r.individual_id, createdBy: r.created_by, createdAt: r.created_at, signerName: r.signer_name, reviewedBy: r.reviewed_by, packetOn: r.packet_on, status: r.status, signer: r.signer, signedAt: r.signed_at, filedAt: r.filed_at, evidenceName: r.evidence_name, copyVersion: r.copy_version }));
+    }
+    async createRightsPacket(input: { individualId: string; signerName: string }): Promise<string> {
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
+        validateRightsPacketStart(input);
+        const { data, error } = await this.client.from('rights_packets').insert({ agency_id: session.agencyId, individual_id: input.individualId, created_by: session.userId, signer_name: input.signerName.trim(), copy_version: RIGHTS_PACKET_COPY_VERSION }).select('id').single();
+        throwIf(error, 'Could not start the rights packet.');
+        return (data as { id: string }).id;
+    }
+    private async completeRightsPacket(id: string, input: import("./rightsPackets").RightsPacketCompletion, evidence: PacketEvidence | null) {
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
+        const fields = rightsCompletionFields(input);
+        validateRightsCompletion(fields);
+        const now = new Date().toISOString();
+        const { data, error } = await this.client.from('rights_packets').update({ reviewed_by: fields.reviewedBy.trim(), packet_on: fields.packetOn, signer: fields.signer, status: evidence ? 'filed' : 'signed', signed_at: now, filed_at: evidence ? now : null, evidence_name: evidence?.name ?? null }).eq('id', id).eq('agency_id', session.agencyId).eq('status', 'awaiting_signature').select('id, individual_id').single();
+        throwIf(error, 'Could not complete the rights packet.');
+        if (evidence) {
+            const { error: evidenceError } = await this.client.from('rights_packet_evidence').insert({ packet_id: id, agency_id: session.agencyId, individual_id: (data as { individual_id: string }).individual_id, evidence });
+            throwIf(evidenceError, 'Could not file the signed evidence.');
+        }
+    }
+    async signRightsPacket(id: string, input: import("./rightsPackets").RightsPacketCompletion) {
+        await this.completeRightsPacket(id, input, null);
+    }
+    async filePaperRightsPacket(id: string, input: import("./rightsPackets").RightsPacketCompletion, file: File) {
+        const evidence = await packetFile(file);
+        await this.completeRightsPacket(id, input, evidence);
+    }
+    async getRightsPacketEvidence(id: string): Promise<PacketEvidence> {
+        assertConsentRole(await this.requireSession());
+        if (!(await this.listRightsPackets()).some(p => p.id === id))
+            throw new Error('Rights packet not found.');
+        const { data, error } = await this.client.from('rights_packet_evidence').select('evidence').eq('packet_id', id).single();
+        throwIf(error, 'No signed evidence filed.');
+        return (data as { evidence: PacketEvidence }).evidence;
     }
     private async publicPacketRequest(body: Record<string, unknown>) {
         // Suppress any signed-in account JWT: the token is the sole authority here.

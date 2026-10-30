@@ -122,3 +122,29 @@ test("timeline: every item carries an in-app deep link and icon meta", () => {
   assert.ok(items[0].title.length > 0);
   assert.ok(items[0].detail.length > 0);
 });
+
+test("timeline: rights renewals join the deadline list with the shared countdown detail", () => {
+  const items = buildTimeline(
+    facts({
+      rightsRenewals: [
+        { id: "rp1", individualName: "Ellis Hart", siteName: "Cedar House", dueOn: "2026-09-24", unsigned: false, detail: "Due in 10 days" },
+        { id: "rp2", individualName: "Morgan Pruitt", siteName: "Cedar House", dueOn: "2026-09-10", unsigned: true, detail: "Not yet signed — awaiting signature since 2026-09-10" },
+      ],
+    }),
+  );
+  const rights = items.filter((item) => item.kind === "rights-renewal");
+  assert.equal(rights.length, 2);
+  const signed = rights.find((item) => item.id === "rights-renewal:rp1")!;
+  assert.equal(signed.daysRemaining, 10);
+  assert.equal(signed.urgency, "upcoming");
+  assert.equal(signed.detail, "Due in 10 days");
+  assert.equal(signed.deepLink, "/consents");
+  const unsigned = rights.find((item) => item.id === "rights-renewal:rp2")!;
+  assert.equal(unsigned.title, "Morgan Pruitt — Rights packet not yet signed");
+  assert.equal(unsigned.daysRemaining, -4);
+  assert.equal(unsigned.urgency, "overdue");
+});
+
+test("timeline: rightsRenewals is optional — older fact sets are unchanged", () => {
+  assert.deepEqual(buildTimeline(facts()), []);
+});

@@ -81,7 +81,11 @@ export function buildAttentionFeed(input: AttentionInput): AttentionItem[] {
       kind: "overdue",
       severity: item.kind === "corrective-action" || item.kind === "certificate" ? "critical" : "warning",
       title: item.title,
-      detail: `${Math.abs(item.daysRemaining)} day${Math.abs(item.daysRemaining) === 1 ? "" : "s"} past due`,
+      // Rights items carry their own honest wording (a countdown or an
+      // awaiting-signature note), never a generic "days past due".
+      detail: item.kind === "rights-renewal"
+        ? item.detail
+        : `${Math.abs(item.daysRemaining)} day${Math.abs(item.daysRemaining) === 1 ? "" : "s"} past due`,
       personName: item.personName,
       siteName: item.siteName,
       daysPastDue: Math.abs(item.daysRemaining),
@@ -113,7 +117,7 @@ export function buildAttentionFeed(input: AttentionInput): AttentionItem[] {
       kind: "due-today",
       severity: item.kind === "certificate" || item.kind === "medication" ? "warning" : "info",
       title: item.title,
-      detail: `Due today (${item.dueOn})`,
+      detail: item.kind === "rights-renewal" ? item.detail : `Due today (${item.dueOn})`,
       personName: item.personName,
       siteName: item.siteName,
       deepLink: item.deepLink,

@@ -1,6 +1,7 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
 import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, rightsPacketAlerts, rightsTrackingFor, validateRightsCompletion, validateRightsPacketStart, type RightsPacket, type RightsPacketCompletion } from "./rightsPackets";
 import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
@@ -588,6 +589,11 @@ export interface ComplyraApi {
   getConsentPacketEvidence(id: string): Promise<PacketEvidence>;
   openConsentPacket(token: string): Promise<PacketPublicView>;
   signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature): Promise<PacketEvidence>;
+  listRightsPackets(): Promise<import("./rightsPackets").RightsPacket[]>;
+  createRightsPacket(input: { individualId: string; signerName: string }): Promise<string>;
+  signRightsPacket(id: string, input: import("./rightsPackets").RightsPacketCompletion): Promise<void>;
+  filePaperRightsPacket(id: string, input: import("./rightsPackets").RightsPacketCompletion, file: File): Promise<void>;
+  getRightsPacketEvidence(id: string): Promise<PacketEvidence>;
   getConsents(): Promise<ConsentRegister>;
   saveConsent(draft: ConsentDraft, id?: string): Promise<string>;
   activateConsent(id: string): Promise<void>;
@@ -3419,6 +3425,78 @@ export class LocalApi implements ComplyraApi {
             throw new Error('No signed evidence filed.');
         return structuredClone(evidence);
     }
+    async listRightsPackets() {
+        const session = assertSession(this.store);
+        assertConsentRole(session);
+        if (session.roleKey === 'dsp')
+            return [];
+        return structuredClone((this.store.db.rightsPackets ?? []).filter(p => p.agencyId === session.agencyId && canReadIndividual(session, this.store.db.individuals.find(i => i.id === p.individualId)!, this.store.db.assignments, this.store.db.individuals)));
+    }
+    private rightsPacketForWrite(id: string) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        const packet = this.store.db.rightsPackets?.find(p => p.id === id && p.agencyId === session.agencyId);
+        if (!packet)
+            throw new Error('Rights packet not found.');
+        accessibleIndividual(this.store, session, packet.individualId);
+        if (packet.status !== 'awaiting_signature')
+            throw new Error('Completed rights packets are immutable. Start a new packet for the next year.');
+        return { packet, session };
+    }
+    async createRightsPacket(input: { individualId: string; signerName: string }) {
+        const session = assertSession(this.store);
+        assertConsentRole(session, true);
+        validateRightsPacketStart(input);
+        const person = accessibleIndividual(this.store, session, input.individualId);
+        const id = crypto.randomUUID();
+        this.store.db.rightsPackets ??= [];
+        this.store.db.rightsPackets.push({ id, agencyId: session.agencyId, individualId: person.id, createdBy: session.userId, createdAt: new Date().toISOString(),
+            signerName: input.signerName.trim(), reviewedBy: '', packetOn: null, status: 'awaiting_signature', signer: null, signedAt: null, filedAt: null, evidenceName: null, copyVersion: RIGHTS_PACKET_COPY_VERSION });
+        await persistMeta(this.store);
+        return id;
+    }
+    private async completeRightsPacket(packet: RightsPacket, input: RightsPacketCompletion, evidence: PacketEvidence | null) {
+        const fields = rightsCompletionFields(structuredClone(input));
+        validateRightsCompletion(fields);
+        const now = new Date().toISOString();
+        packet.reviewedBy = fields.reviewedBy.trim();
+        // The manager-typed date is authoritative: stored exactly as
+        // entered, never re-stamped to the completion time.
+        packet.packetOn = fields.packetOn;
+        packet.signer = structuredClone(fields.signer);
+        packet.signedAt = now;
+        if (evidence) {
+            packet.status = 'filed';
+            packet.filedAt = now;
+            packet.evidenceName = evidence.name;
+            this.store.db.rightsPacketEvidence ??= {};
+            this.store.db.rightsPacketEvidence[packet.id] = structuredClone(evidence);
+        }
+        else {
+            packet.status = 'signed';
+        }
+        const person = this.store.db.individuals.find(i => i.id === packet.individualId);
+        if (this.store.db.memberships.some(m => m.agencyId === packet.agencyId && m.userId === packet.createdBy && canManageConsents(m.roleKey) && (!m.expiresOn || m.expiresOn >= todayIso())))
+            this.pushRecognitionNotification({ agencyId: packet.agencyId, userId: packet.createdBy, roleKey: null, type: 'consent.packet_signed', title: 'Rights packet completed', body: `${person?.fullName ?? 'Individual'}: annual Rights packet ${evidence ? 'filed' : 'signed'}.`, deepLink: '/consents', entityType: 'rights_packet', entityId: packet.id, dedupeKey: `rights.packet_signed:${packet.id}:${packet.createdBy}` });
+        await persistMeta(this.store);
+    }
+    async signRightsPacket(id: string, input: RightsPacketCompletion) {
+        const { packet } = this.rightsPacketForWrite(id);
+        await this.completeRightsPacket(packet, input, null);
+    }
+    async filePaperRightsPacket(id: string, input: RightsPacketCompletion, file: File) {
+        const evidence = await packetFile(file);
+        const { packet } = this.rightsPacketForWrite(id);
+        await this.completeRightsPacket(packet, input, evidence);
+    }
+    async getRightsPacketEvidence(id: string) {
+        if (!(await this.listRightsPackets()).some(p => p.id === id))
+            throw new Error('Rights packet not found.');
+        const evidence = this.store.db.rightsPacketEvidence?.[id];
+        if (!evidence)
+            throw new Error('No signed evidence filed.');
+        return structuredClone(evidence);
+    }
     async getConsents(): Promise<ConsentRegister> {
         const session = assertSession(this.store);
         assertConsentRole(session);
@@ -3519,6 +3597,13 @@ export class LocalApi implements ComplyraApi {
             for (const alert of consentAlerts(pseudo, this.store.db.memberships))
                 this.pushRecognitionNotification({ ...alert, type: 'consent.packet_outstanding', entityType: 'consent_packet', entityId: packet.id, dedupeKey: `consent.packet_outstanding:${packet.id}:${alert.userId ?? alert.roleKey}` });
         }
+        const rightsPackets = await this.listRightsPackets().catch(() => [] as RightsPacket[]);
+        const rightsPeople = register.individuals.map(person => ({
+            person,
+            tracking: rightsTrackingFor(rightsPackets.filter(p => p.individualId === person.id)),
+        }));
+        for (const payload of rightsPacketAlerts(rightsPeople, this.store.db.memberships))
+            this.pushRecognitionNotification(payload);
         await persistMeta(this.store);
     }
 

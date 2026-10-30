@@ -20,7 +20,7 @@ function person(db: ReturnType<typeof seed>, name: string) {
 
 test("walkthrough charts are filled for all four individuals", () => {
   const db = seed();
-  assert.equal(db.showcaseRevision, 10);
+  assert.equal(db.showcaseRevision, 11);
   for (const name of ["Ellis Hart", "Morgan Pruitt", "Reese Lang", "Harper Soto"]) {
     const row = person(db, name);
     assert.ok(row.profile?.phone, `${name} phone`);
