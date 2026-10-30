@@ -33,6 +33,7 @@ import {
   Plus,
   Send,
   ShieldCheck,
+  Star,
   Trash2,
   Users,
   Wallet,
@@ -121,6 +122,7 @@ import {
   StaffingPatternRow,
 } from "./StaffingBoard";
 import { BinderTab } from "../newHireBinder/BinderPanel";
+import { PerformanceTab } from "./PerformanceTab";
 import { BinderBoardTab } from "../newHireBinder/BinderBoardPanel";
 import { WhosHereNow } from "./WhosHereNow";
 import { PunchExceptions } from "./PunchExceptions";
@@ -398,6 +400,7 @@ const EMPLOYEE_TABS: TabDef[] = [
   { id: "timecard", label: "My Timecard", icon: FileText },
   { id: "compliance", label: "My Compliance", icon: ShieldCheck },
   { id: "binder", label: "New Hire Binder", icon: FolderCheck },
+  { id: "performance", label: "Performance", icon: Star },
   { id: "documents", label: "Documents", icon: FolderOpen },
   { id: "timeoff", label: "Time Off", icon: CalendarCheck },
 ];
@@ -470,6 +473,8 @@ export function EmployeeHubShell({
   const [tab, setTab] = useState(initialTab && tabs.some((t) => t.id === initialTab) ? initialTab : tabs[0]?.id ?? "schedule");
   /** The board's "Open binder" jump: which staff member's binder to open. */
   const [binderFocusId, setBinderFocusId] = useState<string | null>(null);
+  /** The binder's Performance-section jump: whose file to open. */
+  const [performanceFocusId, setPerformanceFocusId] = useState<string | null>(null);
   const [badges, setBadges] = useState<BadgeCounts>({ attendance: 0, timecards: 0, timeoff: 0, documents: 0 });
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -617,6 +622,19 @@ export function EmployeeHubShell({
             staffList={staffList}
             onJumpToTab={(id) => setTab(id)}
             initialSubjectId={binderFocusId ?? undefined}
+            onOpenPerformance={(staffId) => {
+              setPerformanceFocusId(staffId);
+              setTab("performance");
+            }}
+          />
+        )}
+        {tab === "performance" && (
+          <PerformanceTab
+            key={performanceFocusId ?? "self"}
+            session={session}
+            store={store}
+            staffList={staffList}
+            initialSubjectId={performanceFocusId ?? undefined}
           />
         )}
         {tab === "binder-board" &&

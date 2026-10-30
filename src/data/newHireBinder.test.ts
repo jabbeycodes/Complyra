@@ -143,6 +143,10 @@ describe("default template covers the paper binder", () => {
       "Emergency contact",
       "Staff training checklist",
       "ISP Acknowledgement",
+      // Build 3: the paper binder's Performance Review + Corrective
+      // Action sections, as informational "records" items.
+      "Performance reviews",
+      "Corrective actions",
     ];
     for (const line of paperLines) {
       assert.ok(labels.includes(line), `template is missing: ${line}`);
@@ -433,5 +437,61 @@ describe("validation", () => {
       /phone/,
     );
     validateEmergencyContact({ contactName: "A", relationship: "Sister", phone: "1" });
+  });
+});
+
+describe("records derivation (build 3)", () => {
+  test("records items report what is on file and never count", () => {
+    const derived = deriveBinder(
+      binderWith(),
+      evidence({
+        performance: {
+          reviewCount: 2,
+          latestReviewOn: "2026-10-12",
+          actionCount: 1,
+          latestActionOn: "2026-09-03",
+        },
+      }),
+      TODAY,
+    );
+    const reviews = item(derived, "performance-reviews");
+    assert.equal(reviews.status, "informational");
+    assert.equal(reviews.note, "2 reviews · latest Oct 12, 2026");
+    assert.equal(reviews.satisfied, false);
+    assert.equal(reviews.required, false);
+    const actions = item(derived, "corrective-actions");
+    assert.equal(actions.note, "1 corrective action · latest Sep 3, 2026");
+    // The two records items are invisible to the completeness math.
+    const section = derived.sections.find((s) => s.section.key === "performance");
+    assert.equal(section?.total, 0);
+    assert.equal(section?.informational, 2);
+    assert.equal(derived.informationalItems, 2);
+    assert.equal(
+      derived.totalItems,
+      binderItemCount(DEFAULT_BINDER_TEMPLATE) - 2,
+    );
+  });
+
+  test("an empty performance file reads None on file", () => {
+    const derived = deriveBinder(binderWith(), evidence(), TODAY);
+    assert.equal(item(derived, "performance-reviews").note, "None on file");
+    assert.equal(item(derived, "corrective-actions").note, "None on file");
+  });
+
+  test("records items never appear as gaps", async () => {
+    const { binderGaps } = await import("./newHireBinder");
+    const derived = deriveBinder(binderWith(), evidence(), TODAY);
+    const gapKeys = binderGaps(derived).map((g) => g.item.key);
+    assert.ok(!gapKeys.includes("performance-reviews"));
+    assert.ok(!gapKeys.includes("corrective-actions"));
+  });
+
+  test("a pre-build-3 snapshot without the Performance section derives unchanged", () => {
+    const oldSections = DEFAULT_BINDER_TEMPLATE.sections.filter(
+      (s) => s.key !== "performance",
+    );
+    const derived = deriveBinder(binderWith(oldSections), evidence(), TODAY);
+    assert.equal(derived.informationalItems, 0);
+    assert.equal(derived.totalItems, oldSections.flatMap((s) => s.items).length);
   });
 });

@@ -86,6 +86,20 @@ import {
   type StaffBinder,
   type StaffEmergencyContact,
 } from "./newHireBinder";
+import {
+  validateAcknowledgmentSignature,
+  validateCorrectiveActionAck,
+  validateCorrectiveActionOutcome,
+  validatePerformanceReviewInput,
+  validateReviewResponse,
+  validateStaffCorrectiveActionInput,
+  type CorrectiveActionAckInput,
+  type CorrectiveActionOutcome,
+  type PerformanceReview,
+  type PerformanceReviewInput,
+  type StaffCorrectiveAction,
+  type StaffCorrectiveActionInput,
+} from "./performanceRecords";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
 
 /* ------------------------------ input types ------------------------------ */
@@ -526,6 +540,44 @@ export interface HrStore {
     staffId: string,
     input: EmergencyContactInput,
   ): Promise<StaffEmergencyContact>;
+  /* Performance records (New Hire Binder build 3, 2026-10-30): append-
+   * only reviews + corrective actions in the employee file. Visibility
+   * and filing gates live in the UI (performanceRecords.ts) and, hosted,
+   * in RLS — the store enforces the state machine: content is frozen at
+   * filing; only the acknowledgment, the one response note, and the
+   * outcome move afterwards. */
+  /** A staff member's performance reviews, newest first. */
+  listPerformanceReviews(staffId: string): Promise<PerformanceReview[]>;
+  /** File a review. The reviewer is the signed-in user. */
+  filePerformanceReview(input: PerformanceReviewInput): Promise<PerformanceReview>;
+  /** The subject acknowledges with a typed signature. */
+  acknowledgePerformanceReview(
+    reviewId: string,
+    signatureName: string,
+  ): Promise<PerformanceReview>;
+  /** The subject's one response note, appended after acknowledging. */
+  addPerformanceReviewResponse(
+    reviewId: string,
+    note: string,
+  ): Promise<PerformanceReview>;
+  /** A staff member's corrective actions, newest first. */
+  listStaffCorrectiveActions(staffId: string): Promise<StaffCorrectiveAction[]>;
+  /** File a corrective action. The issuer is the signed-in user. */
+  fileStaffCorrectiveAction(
+    input: StaffCorrectiveActionInput,
+  ): Promise<StaffCorrectiveAction>;
+  /** The subject signs, or declines to sign before a named witness. */
+  acknowledgeStaffCorrectiveAction(
+    actionId: string,
+    ack: CorrectiveActionAckInput,
+  ): Promise<StaffCorrectiveAction>;
+  /** Move the outcome (issuer or HR), with a dated note. */
+  setStaffCorrectiveActionOutcome(
+    actionId: string,
+    outcome: CorrectiveActionOutcome,
+    note: string,
+    actorName: string,
+  ): Promise<StaffCorrectiveAction>;
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -722,6 +774,61 @@ function mapEmergencyContact(r: Record<string, unknown>): StaffEmergencyContact 
     phone: String(r.phone ?? ""),
     alternatePhone: r.alternate_phone == null ? null : String(r.alternate_phone),
     updatedBy: String(r.updated_by),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+/* ------------------ Performance records mappers (build 3) ------------ */
+
+function mapPerformanceReview(r: Record<string, unknown>): PerformanceReview {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    reviewDate: String(r.review_date),
+    periodStart: String(r.period_start),
+    periodEnd: String(r.period_end),
+    reviewerId: String(r.reviewer_id),
+    reviewerName: String(r.reviewer_name ?? ""),
+    rating: (r.rating as PerformanceReview["rating"]) ?? "Meets expectations",
+    strengths: String(r.strengths ?? ""),
+    growthAreas: String(r.growth_areas ?? ""),
+    goals: String(r.goals ?? ""),
+    state: (r.state as PerformanceReview["state"]) ?? "filed",
+    ackSignatureName:
+      r.ack_signature_name == null ? null : String(r.ack_signature_name),
+    ackAt: r.ack_at == null ? null : String(r.ack_at),
+    responseNote: r.response_note == null ? null : String(r.response_note),
+    responseAt: r.response_at == null ? null : String(r.response_at),
+    supersedesId: r.supersedes_id == null ? null : String(r.supersedes_id),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapStaffCorrectiveAction(r: Record<string, unknown>): StaffCorrectiveAction {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    actionDate: String(r.action_date),
+    issuerId: String(r.issuer_id),
+    issuerName: String(r.issuer_name ?? ""),
+    level: (r.level as StaffCorrectiveAction["level"]) ?? "Verbal warning",
+    description: String(r.description ?? ""),
+    expectations: String(r.expectations ?? ""),
+    followUpDate: r.follow_up_date == null ? null : String(r.follow_up_date),
+    ackState: (r.ack_state as StaffCorrectiveAction["ackState"]) ?? "pending",
+    ackSignatureName:
+      r.ack_signature_name == null ? null : String(r.ack_signature_name),
+    ackAt: r.ack_at == null ? null : String(r.ack_at),
+    witnessName: r.witness_name == null ? null : String(r.witness_name),
+    outcome: (r.outcome as StaffCorrectiveAction["outcome"]) ?? "open",
+    outcomeNote: r.outcome_note == null ? null : String(r.outcome_note),
+    outcomeAt: r.outcome_at == null ? null : String(r.outcome_at),
+    outcomeByName: r.outcome_by_name == null ? null : String(r.outcome_by_name),
+    supersedesId: r.supersedes_id == null ? null : String(r.supersedes_id),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
   };
@@ -1859,6 +1966,178 @@ class SupabaseHrStore implements HrStore {
       .single();
     throwIf(error, "Could not save the emergency contact");
     return mapEmergencyContact(data as Record<string, unknown>);
+  }
+
+  /* --------------------- Performance records (build 3) ---------------- */
+
+  async listPerformanceReviews(staffId: string): Promise<PerformanceReview[]> {
+    const { data, error } = await this.client
+      .from("hr_performance_reviews")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .order("review_date", { ascending: false });
+    throwIf(error, "Could not load performance reviews");
+    return (data ?? []).map(mapPerformanceReview);
+  }
+
+  async filePerformanceReview(
+    input: PerformanceReviewInput,
+  ): Promise<PerformanceReview> {
+    validatePerformanceReviewInput(input);
+    const { data, error } = await this.client
+      .from("hr_performance_reviews")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: input.staffId,
+        review_date: input.reviewDate,
+        period_start: input.periodStart,
+        period_end: input.periodEnd,
+        reviewer_id: this.userId,
+        reviewer_name: input.reviewerName.trim(),
+        rating: input.rating,
+        strengths: input.strengths.trim(),
+        growth_areas: input.growthAreas.trim(),
+        goals: input.goals.trim(),
+        state: "filed",
+        supersedes_id: input.supersedesId ?? null,
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not file the performance review");
+    return mapPerformanceReview(data as Record<string, unknown>);
+  }
+
+  async acknowledgePerformanceReview(
+    reviewId: string,
+    signatureName: string,
+  ): Promise<PerformanceReview> {
+    validateAcknowledgmentSignature(signatureName);
+    const { data, error } = await this.client
+      .from("hr_performance_reviews")
+      .update({
+        state: "acknowledged",
+        ack_signature_name: signatureName.trim(),
+        ack_at: nowIso(),
+      })
+      .eq("id", reviewId)
+      .eq("agency_id", this.agencyId)
+      .eq("state", "filed")
+      .select()
+      .single();
+    throwIf(error, "Could not acknowledge the review");
+    return mapPerformanceReview(data as Record<string, unknown>);
+  }
+
+  async addPerformanceReviewResponse(
+    reviewId: string,
+    note: string,
+  ): Promise<PerformanceReview> {
+    validateReviewResponse(note);
+    const { data, error } = await this.client
+      .from("hr_performance_reviews")
+      .update({ response_note: note.trim(), response_at: nowIso() })
+      .eq("id", reviewId)
+      .eq("agency_id", this.agencyId)
+      .eq("state", "acknowledged")
+      .is("response_note", null)
+      .select()
+      .single();
+    throwIf(error, "Could not save the response");
+    return mapPerformanceReview(data as Record<string, unknown>);
+  }
+
+  async listStaffCorrectiveActions(
+    staffId: string,
+  ): Promise<StaffCorrectiveAction[]> {
+    const { data, error } = await this.client
+      .from("hr_staff_corrective_actions")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .order("action_date", { ascending: false });
+    throwIf(error, "Could not load corrective actions");
+    return (data ?? []).map(mapStaffCorrectiveAction);
+  }
+
+  async fileStaffCorrectiveAction(
+    input: StaffCorrectiveActionInput,
+  ): Promise<StaffCorrectiveAction> {
+    validateStaffCorrectiveActionInput(input);
+    const { data, error } = await this.client
+      .from("hr_staff_corrective_actions")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: input.staffId,
+        action_date: input.actionDate,
+        issuer_id: this.userId,
+        issuer_name: input.issuerName.trim(),
+        level: input.level,
+        description: input.description.trim(),
+        expectations: input.expectations.trim(),
+        follow_up_date: input.followUpDate || null,
+        ack_state: "pending",
+        outcome: "open",
+        supersedes_id: input.supersedesId ?? null,
+      })
+      .select()
+      .single();
+    throwIf(error, "Could not file the corrective action");
+    return mapStaffCorrectiveAction(data as Record<string, unknown>);
+  }
+
+  async acknowledgeStaffCorrectiveAction(
+    actionId: string,
+    ack: CorrectiveActionAckInput,
+  ): Promise<StaffCorrectiveAction> {
+    validateCorrectiveActionAck(ack);
+    const patch =
+      ack.kind === "signed"
+        ? {
+            ack_state: "signed",
+            ack_signature_name: ack.signatureName.trim(),
+            ack_at: nowIso(),
+            witness_name: null,
+          }
+        : {
+            ack_state: "declined",
+            ack_signature_name: null,
+            ack_at: nowIso(),
+            witness_name: ack.witnessName.trim(),
+          };
+    const { data, error } = await this.client
+      .from("hr_staff_corrective_actions")
+      .update(patch)
+      .eq("id", actionId)
+      .eq("agency_id", this.agencyId)
+      .eq("ack_state", "pending")
+      .select()
+      .single();
+    throwIf(error, "Could not record the acknowledgment");
+    return mapStaffCorrectiveAction(data as Record<string, unknown>);
+  }
+
+  async setStaffCorrectiveActionOutcome(
+    actionId: string,
+    outcome: CorrectiveActionOutcome,
+    note: string,
+    actorName: string,
+  ): Promise<StaffCorrectiveAction> {
+    validateCorrectiveActionOutcome(note);
+    const { data, error } = await this.client
+      .from("hr_staff_corrective_actions")
+      .update({
+        outcome,
+        outcome_note: note.trim(),
+        outcome_at: nowIso(),
+        outcome_by_name: actorName,
+      })
+      .eq("id", actionId)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not update the outcome");
+    return mapStaffCorrectiveAction(data as Record<string, unknown>);
   }
 
   /** Day rows for a set of requests, grouped by request id. */
@@ -3467,6 +3746,12 @@ interface LocalBucket {
   emergencyContacts: Record<string, StaffEmergencyContact>;
   /** True once the Evergreen demo binder seed has been written. */
   demoBinderSeeded?: boolean;
+  /* PERFORMANCE (build 3): per-staff reviews + corrective actions.
+   * Reads merge across buckets like the binder; newest updatedAt wins. */
+  performanceReviews: PerformanceReview[];
+  staffCorrectiveActions: StaffCorrectiveAction[];
+  /** True once the Evergreen demo performance seed has been written. */
+  demoPerformanceSeeded?: boolean;
 }
 
 /** Local hub.remote_punch grant row (mirrors hr_staff_permission_grants). */
@@ -3522,6 +3807,8 @@ function emptyBucket(): LocalBucket {
     binders: {},
     binderDocuments: [],
     emergencyContacts: {},
+    performanceReviews: [],
+    staffCorrectiveActions: [],
   };
 }
 
@@ -4230,6 +4517,115 @@ function seedDemoBinderData(): {
   return { documents, acks, binders, binderDocuments, emergencyContacts, evidenceCerts };
 }
 
+/* ----------------- demo performance-records seed (local) -------------- */
+/* Fictional performance file for the Evergreen demo agency (build 3):
+ * Jordan Lee has a review filed and awaiting his acknowledgment; Casey
+ * Adams's review is acknowledged with his response note attached;
+ * Taylor Reed carries a written warning for late shift documentation,
+ * signed, its outcome still open with a follow-up date ahead. Dates are
+ * relative to today, like the other demo seeds, and the rows are
+ * written into every demo bucket (identical ids dedupe on merge). */
+
+function seedDemoPerformanceData(): {
+  reviews: PerformanceReview[];
+  actions: StaffCorrectiveAction[];
+} {
+  const agencyId = EVERGREEN_DEMO_AGENCY_ID;
+  const james = DEMO_STAFF_IDS.james;
+  const sarah = DEMO_STAFF_IDS.sarah;
+  const quarterStart = demoMonthStartIso(3);
+  const quarterEnd = (() => {
+    // The last day of last month: the first of this month, stepped back.
+    const first = new Date(`${demoMonthStartIso(0)}T12:00:00Z`);
+    first.setUTCDate(0);
+    return first.toISOString().slice(0, 10);
+  })();
+
+  const reviews: PerformanceReview[] = [
+    {
+      id: "perfreview-demo-jordan",
+      agencyId,
+      staffId: DEMO_STAFF_IDS.jordan,
+      reviewDate: demoDayIso(-6),
+      periodStart: quarterStart,
+      periodEnd: quarterEnd,
+      reviewerId: james,
+      reviewerName: DEMO_STAFF_NAMES[james],
+      rating: "Developing",
+      strengths:
+        "Builds genuine rapport with the Individuals at Willow House and is consistently reliable for shift coverage.",
+      growthAreas:
+        "ISP data entries are sometimes finished after the shift ends; entries need to be completed during the shift they describe.",
+      goals:
+        "Complete all ISP data before the end of each shift for the next 60 days; confirm with the house manager at the weekly check-in.",
+      state: "filed",
+      ackSignatureName: null,
+      ackAt: null,
+      responseNote: null,
+      responseAt: null,
+      supersedesId: null,
+      createdAt: `${demoDayIso(-6)}T14:00:00.000Z`,
+      updatedAt: `${demoDayIso(-6)}T14:00:00.000Z`,
+    },
+    {
+      id: "perfreview-demo-casey",
+      agencyId,
+      staffId: DEMO_STAFF_IDS.casey,
+      reviewDate: demoDayIso(-13),
+      periodStart: quarterStart,
+      periodEnd: quarterEnd,
+      reviewerId: james,
+      reviewerName: DEMO_STAFF_NAMES[james],
+      rating: "Meets expectations",
+      strengths:
+        "Careful, unhurried medication passes and clear, factual shift notes that the next shift can act on.",
+      growthAreas:
+        "Double-check the med count at shift change even when the outgoing count looks right.",
+      goals:
+        "Keep MAR accuracy at 100% through the next review period and mentor new staff on the count routine.",
+      state: "acknowledged",
+      ackSignatureName: DEMO_STAFF_NAMES[DEMO_STAFF_IDS.casey],
+      ackAt: `${demoDayIso(-12)}T09:30:00.000Z`,
+      responseNote:
+        "Thanks for the feedback — I will keep using the two-person count at shift change like we discussed.",
+      responseAt: `${demoDayIso(-12)}T09:32:00.000Z`,
+      supersedesId: null,
+      createdAt: `${demoDayIso(-13)}T15:00:00.000Z`,
+      updatedAt: `${demoDayIso(-12)}T09:32:00.000Z`,
+    },
+  ];
+
+  const actions: StaffCorrectiveAction[] = [
+    {
+      id: "perfaction-demo-taylor",
+      agencyId,
+      staffId: DEMO_STAFF_IDS.taylor,
+      actionDate: demoDayIso(-9),
+      issuerId: sarah,
+      issuerName: DEMO_STAFF_NAMES[sarah],
+      level: "Written warning",
+      description:
+        "Shift documentation for October 14, 16, and 19 was submitted one to two days after the shifts ended, outside the same-day documentation standard.",
+      expectations:
+        "All shift notes and ISP data are completed before the end of the shift they cover. Any barrier to same-day documentation is raised with the house manager during the shift, not after it.",
+      followUpDate: demoDayIso(21),
+      ackState: "signed",
+      ackSignatureName: DEMO_STAFF_NAMES[DEMO_STAFF_IDS.taylor],
+      ackAt: `${demoDayIso(-9)}T16:45:00.000Z`,
+      witnessName: null,
+      outcome: "open",
+      outcomeNote: null,
+      outcomeAt: null,
+      outcomeByName: null,
+      supersedesId: null,
+      createdAt: `${demoDayIso(-9)}T16:30:00.000Z`,
+      updatedAt: `${demoDayIso(-9)}T16:45:00.000Z`,
+    },
+  ];
+
+  return { reviews, actions };
+}
+
 type LocalRoot = Record<string, Record<string, LocalBucket>>;
 
 class LocalHrStore implements HrStore {
@@ -4282,6 +4678,10 @@ class LocalHrStore implements HrStore {
         if (!Array.isArray(bucket.binderDocuments)) bucket.binderDocuments = [];
         if (!bucket.emergencyContacts || typeof bucket.emergencyContacts !== "object")
           bucket.emergencyContacts = {};
+        // Buckets written before performance records existed have no arrays.
+        if (!Array.isArray(bucket.performanceReviews)) bucket.performanceReviews = [];
+        if (!Array.isArray(bucket.staffCorrectiveActions))
+          bucket.staffCorrectiveActions = [];
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -4375,6 +4775,21 @@ class LocalHrStore implements HrStore {
         ...this.memory.emergencyContacts,
       };
       this.memory.demoBinderSeeded = true;
+      this.save(this.memory);
+    }
+    // One-time fictional performance-records seed for the Evergreen demo
+    // agency (build 3): one review awaiting its subject's acknowledgment,
+    // one acknowledged review with a response note, one signed written
+    // warning with an open outcome. Written into every demo bucket like
+    // the binder seed (identical ids dedupe on merge).
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoPerformanceSeeded
+    ) {
+      const demo = seedDemoPerformanceData();
+      this.memory.performanceReviews.push(...demo.reviews);
+      this.memory.staffCorrectiveActions.push(...demo.actions);
+      this.memory.demoPerformanceSeeded = true;
       this.save(this.memory);
     }
     return this.memory;
@@ -4990,6 +5405,226 @@ class LocalHrStore implements HrStore {
       b.emergencyContacts[staffId] = contact;
     });
     return contact;
+  }
+
+  /* --------------------- Performance records (build 3) ---------------- */
+  /* Like the binder, records are keyed by the SUBJECT staff member but
+   * the store belongs to the signed-in user — reads merge every bucket
+   * of this agency (newest updatedAt wins), writes upsert into the
+   * caller's own bucket by record id. */
+
+  private mergedPerformanceReviews(): PerformanceReview[] {
+    const byId = new Map<string, PerformanceReview>();
+    for (const bucket of this.allAgencyBuckets()) {
+      for (const row of bucket.performanceReviews ?? []) {
+        const prev = byId.get(row.id);
+        if (!prev || row.updatedAt >= prev.updatedAt) byId.set(row.id, row);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  private mergedStaffCorrectiveActions(): StaffCorrectiveAction[] {
+    const byId = new Map<string, StaffCorrectiveAction>();
+    for (const bucket of this.allAgencyBuckets()) {
+      for (const row of bucket.staffCorrectiveActions ?? []) {
+        const prev = byId.get(row.id);
+        if (!prev || row.updatedAt >= prev.updatedAt) byId.set(row.id, row);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  private upsertPerformanceReview(row: PerformanceReview): void {
+    this.mutate((b) => {
+      const idx = b.performanceReviews.findIndex((r) => r.id === row.id);
+      if (idx >= 0) b.performanceReviews[idx] = row;
+      else b.performanceReviews.push(row);
+    });
+  }
+
+  private upsertStaffCorrectiveAction(row: StaffCorrectiveAction): void {
+    this.mutate((b) => {
+      const idx = b.staffCorrectiveActions.findIndex((r) => r.id === row.id);
+      if (idx >= 0) b.staffCorrectiveActions[idx] = row;
+      else b.staffCorrectiveActions.push(row);
+    });
+  }
+
+  async listPerformanceReviews(staffId: string): Promise<PerformanceReview[]> {
+    return this.mergedPerformanceReviews()
+      .filter((r) => r.staffId === staffId)
+      .sort((a, b) => (a.reviewDate < b.reviewDate ? 1 : -1));
+  }
+
+  async filePerformanceReview(
+    input: PerformanceReviewInput,
+  ): Promise<PerformanceReview> {
+    validatePerformanceReviewInput(input);
+    const now = nowIso();
+    const row: PerformanceReview = {
+      id: newId(),
+      agencyId: this.agencyId,
+      staffId: input.staffId,
+      reviewDate: input.reviewDate,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      reviewerId: this.userId,
+      reviewerName: input.reviewerName.trim(),
+      rating: input.rating,
+      strengths: input.strengths.trim(),
+      growthAreas: input.growthAreas.trim(),
+      goals: input.goals.trim(),
+      state: "filed",
+      ackSignatureName: null,
+      ackAt: null,
+      responseNote: null,
+      responseAt: null,
+      supersedesId: input.supersedesId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.upsertPerformanceReview(row);
+    return row;
+  }
+
+  async acknowledgePerformanceReview(
+    reviewId: string,
+    signatureName: string,
+  ): Promise<PerformanceReview> {
+    validateAcknowledgmentSignature(signatureName);
+    const row = this.mergedPerformanceReviews().find((r) => r.id === reviewId);
+    if (!row) throw new Error("That review could not be found.");
+    if (row.state !== "filed") {
+      throw new Error("This review has already been acknowledged.");
+    }
+    const next: PerformanceReview = {
+      ...row,
+      state: "acknowledged",
+      ackSignatureName: signatureName.trim(),
+      ackAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    this.upsertPerformanceReview(next);
+    return next;
+  }
+
+  async addPerformanceReviewResponse(
+    reviewId: string,
+    note: string,
+  ): Promise<PerformanceReview> {
+    validateReviewResponse(note);
+    const row = this.mergedPerformanceReviews().find((r) => r.id === reviewId);
+    if (!row) throw new Error("That review could not be found.");
+    if (row.state !== "acknowledged") {
+      throw new Error("Acknowledge the review before adding a response.");
+    }
+    if (row.responseNote) {
+      throw new Error("A response has already been added to this review.");
+    }
+    const next: PerformanceReview = {
+      ...row,
+      responseNote: note.trim(),
+      responseAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    this.upsertPerformanceReview(next);
+    return next;
+  }
+
+  async listStaffCorrectiveActions(
+    staffId: string,
+  ): Promise<StaffCorrectiveAction[]> {
+    return this.mergedStaffCorrectiveActions()
+      .filter((r) => r.staffId === staffId)
+      .sort((a, b) => (a.actionDate < b.actionDate ? 1 : -1));
+  }
+
+  async fileStaffCorrectiveAction(
+    input: StaffCorrectiveActionInput,
+  ): Promise<StaffCorrectiveAction> {
+    validateStaffCorrectiveActionInput(input);
+    const now = nowIso();
+    const row: StaffCorrectiveAction = {
+      id: newId(),
+      agencyId: this.agencyId,
+      staffId: input.staffId,
+      actionDate: input.actionDate,
+      issuerId: this.userId,
+      issuerName: input.issuerName.trim(),
+      level: input.level,
+      description: input.description.trim(),
+      expectations: input.expectations.trim(),
+      followUpDate: input.followUpDate || null,
+      ackState: "pending",
+      ackSignatureName: null,
+      ackAt: null,
+      witnessName: null,
+      outcome: "open",
+      outcomeNote: null,
+      outcomeAt: null,
+      outcomeByName: null,
+      supersedesId: input.supersedesId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.upsertStaffCorrectiveAction(row);
+    return row;
+  }
+
+  async acknowledgeStaffCorrectiveAction(
+    actionId: string,
+    ack: CorrectiveActionAckInput,
+  ): Promise<StaffCorrectiveAction> {
+    validateCorrectiveActionAck(ack);
+    const row = this.mergedStaffCorrectiveActions().find((r) => r.id === actionId);
+    if (!row) throw new Error("That corrective action could not be found.");
+    if (row.ackState !== "pending") {
+      throw new Error("This corrective action has already been acknowledged.");
+    }
+    const now = nowIso();
+    const next: StaffCorrectiveAction =
+      ack.kind === "signed"
+        ? {
+            ...row,
+            ackState: "signed",
+            ackSignatureName: ack.signatureName.trim(),
+            ackAt: now,
+            witnessName: null,
+            updatedAt: now,
+          }
+        : {
+            ...row,
+            ackState: "declined",
+            ackSignatureName: null,
+            ackAt: now,
+            witnessName: ack.witnessName.trim(),
+            updatedAt: now,
+          };
+    this.upsertStaffCorrectiveAction(next);
+    return next;
+  }
+
+  async setStaffCorrectiveActionOutcome(
+    actionId: string,
+    outcome: CorrectiveActionOutcome,
+    note: string,
+    actorName: string,
+  ): Promise<StaffCorrectiveAction> {
+    validateCorrectiveActionOutcome(note);
+    const row = this.mergedStaffCorrectiveActions().find((r) => r.id === actionId);
+    if (!row) throw new Error("That corrective action could not be found.");
+    const now = nowIso();
+    const next: StaffCorrectiveAction = {
+      ...row,
+      outcome,
+      outcomeNote: note.trim(),
+      outcomeAt: now,
+      outcomeByName: actorName,
+      updatedAt: now,
+    };
+    this.upsertStaffCorrectiveAction(next);
+    return next;
   }
 
   /** Fill the lifecycle fields onto a request row written before TIME-OFF. */

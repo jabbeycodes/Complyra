@@ -43,6 +43,7 @@ const STATUS_BADGE: Record<string, string> = {
   missing: "badge overdue",
   returned: "badge overdue",
   expired: "badge expired",
+  informational: "badge",
 };
 
 function errMessage(err: unknown, fallback: string): string {

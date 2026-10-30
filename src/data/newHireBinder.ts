@@ -20,6 +20,14 @@
  *                      or returned.
  *  - "profile"       — satisfied by structured profile data (the staff
  *                      member's emergency contact).
+ *  - "records"       — INFORMATIONAL pointers at the performance file
+ *                      (build 3: performance reviews + corrective
+ *                      actions). The note reports what is on file
+ *                      ("2 reviews · latest Oct 12, 2026" / "None on
+ *                      file"); these items NEVER count toward the
+ *                      binder's % complete — they are ongoing file
+ *                      records, not onboarding items. Snapshots issued
+ *                      before build 3 simply do not contain them.
  *
  * The agency default template below covers every item on the paper list.
  * Creating a binder snapshots the template, so a later template edit
@@ -33,6 +41,7 @@
  * alone.
  */
 import { daysRemaining } from "./certificates";
+import type { PerformanceRecordsSummary } from "./performanceRecords";
 import type { StaffTrainingProfile } from "./types";
 
 /**
@@ -55,7 +64,8 @@ export type BinderItemKind =
   | "training"
   | "acknowledgment"
   | "document"
-  | "profile";
+  | "profile"
+  | "records";
 
 export interface BinderTemplateItem {
   /** Stable key inside the binder snapshot (also the wallet document key). */
@@ -329,6 +339,24 @@ export const DEFAULT_BINDER_TEMPLATE: BinderTemplate = {
         },
       ],
     },
+    {
+      key: "performance",
+      title: "Performance",
+      items: [
+        {
+          key: "performance-reviews",
+          label: "Performance reviews",
+          kind: "records",
+          matchKeys: [],
+        },
+        {
+          key: "corrective-actions",
+          label: "Corrective actions",
+          kind: "records",
+          matchKeys: [],
+        },
+      ],
+    },
   ],
 };
 
@@ -445,6 +473,7 @@ const BINDER_ITEM_KINDS: BinderItemKind[] = [
   "acknowledgment",
   "document",
   "profile",
+  "records",
 ];
 
 /**
@@ -584,7 +613,8 @@ export type BinderItemStatus =
   | "returned"
   | "expired"
   | "due_soon"
-  | "in_progress";
+  | "in_progress"
+  | "informational";
 
 export const BINDER_STATUS_LABELS: Record<BinderItemStatus, string> = {
   missing: "Missing",
@@ -594,6 +624,7 @@ export const BINDER_STATUS_LABELS: Record<BinderItemStatus, string> = {
   expired: "Expired",
   due_soon: "Due soon",
   in_progress: "In progress",
+  informational: "File record",
 };
 
 export interface DerivedBinderItem {
@@ -619,6 +650,8 @@ export interface DerivedBinderSection {
   total: number;
   /** Optional items in the section (shown, never counted). */
   optional: number;
+  /** "records" items in the section (informational, never counted). */
+  informational: number;
 }
 
 export interface DerivedBinder {
@@ -631,6 +664,8 @@ export interface DerivedBinder {
   percentComplete: number;
   /** Optional items across the binder (shown, never counted). */
   optionalItems: number;
+  /** "records" items across the binder (informational, never counted). */
+  informationalItems: number;
   /** Wallet documents uploaded but not yet verified by HR. */
   awaitingVerification: number;
 }
@@ -647,6 +682,13 @@ export interface BinderEvidence {
   documentAcks: Array<{ docKey: string; ackedAt: string }>;
   walletDocuments: BinderDocument[];
   emergencyContact: StaffEmergencyContact | null;
+  /**
+   * Performance-file summary for "records" items (build 3): counts +
+   * latest dates from the performance records store. Optional so
+   * evidence bundles assembled before build 3 keep working — a missing
+   * summary derives the same "None on file" note as an empty file.
+   */
+  performance?: PerformanceRecordsSummary;
 }
 
 /**
@@ -863,6 +905,55 @@ function deriveProfileItem(
   };
 }
 
+/**
+ * A "records" item (build 3): a pointer at the performance file. The
+ * note reports what is on file; the item is NEVER satisfied and NEVER
+ * required — performance records are an ongoing file, not an onboarding
+ * task, so they stay out of the % math and the gap list entirely.
+ */
+function deriveRecordsItem(
+  item: BinderTemplateItem,
+  evidence: BinderEvidence,
+): Omit<DerivedBinderItem, "required"> {
+  const summary = evidence.performance;
+  const describe = (
+    count: number,
+    latestOn: string | null,
+    singular: string,
+    plural: string,
+  ): string => {
+    if (!summary || count === 0) return "None on file";
+    const noun = count === 1 ? singular : plural;
+    return latestOn
+      ? `${count} ${noun} · latest ${shortDate(latestOn)}`
+      : `${count} ${noun} on file`;
+  };
+  const note =
+    item.key === "performance-reviews"
+      ? describe(
+          summary?.reviewCount ?? 0,
+          summary?.latestReviewOn ?? null,
+          "review",
+          "reviews",
+        )
+      : item.key === "corrective-actions"
+        ? describe(
+            summary?.actionCount ?? 0,
+            summary?.latestActionOn ?? null,
+            "corrective action",
+            "corrective actions",
+          )
+        : "Performance file records — see the Performance tab";
+  return {
+    item,
+    status: "informational",
+    satisfied: false,
+    note,
+    document: null,
+    certificate: null,
+  };
+}
+
 export function deriveBinderItem(
   item: BinderTemplateItem,
   staffId: string,
@@ -882,9 +973,16 @@ export function deriveBinderItem(
         return deriveDocumentItem(item, evidence);
       case "profile":
         return deriveProfileItem(item, evidence);
+      case "records":
+        return deriveRecordsItem(item, evidence);
     }
   })();
-  return { ...derived, required: isRequiredBinderItem(item) };
+  // "records" items never count against the staff member, whatever the
+  // template's required flag says — they are not onboarding items.
+  return {
+    ...derived,
+    required: item.kind === "records" ? false : isRequiredBinderItem(item),
+  };
 }
 
 /** Derive every item in a binder snapshot against the evidence bundle. */
@@ -902,12 +1000,14 @@ export function deriveBinder(
       items,
       satisfied: items.filter((i) => i.required && i.satisfied).length,
       total: items.filter((i) => i.required).length,
-      optional: items.filter((i) => !i.required).length,
+      optional: items.filter((i) => !i.required && i.item.kind !== "records").length,
+      informational: items.filter((i) => i.item.kind === "records").length,
     };
   });
   const totalItems = sections.reduce((n, s) => n + s.total, 0);
   const satisfiedItems = sections.reduce((n, s) => n + s.satisfied, 0);
   const optionalItems = sections.reduce((n, s) => n + s.optional, 0);
+  const informationalItems = sections.reduce((n, s) => n + s.informational, 0);
   const awaitingVerification = evidence.walletDocuments.filter(
     (d) => d.status === "on_file",
   ).length;
@@ -919,6 +1019,7 @@ export function deriveBinder(
       ? Math.round((satisfiedItems / totalItems) * 100)
       : 100,
     optionalItems,
+    informationalItems,
     awaitingVerification,
   };
 }
