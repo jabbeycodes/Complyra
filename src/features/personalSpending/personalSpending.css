@@ -272,6 +272,16 @@
   .personal-spending .ps-table td {
     padding: 8px 6px;
   }
+
+  /* The ledger keeps its natural column widths and scrolls sideways
+     inside .ps-table-wrap — the platform's .table-scroll pattern.
+     Letting the table compress to the phone's width instead squeezed
+     Entry into a word-by-word ribbon and clipped the nowrap Balance
+     figures at the card edge; amounts must never truncate. Scoped to
+     phone widths so the desktop layout is untouched. */
+  .personal-spending .ps-table {
+    min-width: 620px;
+  }
 }
 
 @media print {
