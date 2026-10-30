@@ -17,7 +17,6 @@ import {
   computeBalanceCents,
   formatCents,
   isLowBalance,
-  recentHouseCardLocations,
   signedAmountCents,
   summarizeHouseCardMonth,
   type HouseCardCategory,
@@ -191,10 +190,6 @@ export default function MobileHouseCard({
     [ledger, today],
   );
   const close = closeForMonth(closes, month);
-  const locations = useMemo(
-    () => (entries ? recentHouseCardLocations(entries) : []),
-    [entries],
-  );
   const categories = useMemo(
     () =>
       orderCategoriesByUse(entries ?? []).map((category) => ({
@@ -736,7 +731,6 @@ export default function MobileHouseCard({
             ]}
             detailKind="purchase"
             categories={categories}
-            locations={locations}
             locationLabelFor={(kind) =>
               kind === "credit" ? "Received from" : "Location"
             }

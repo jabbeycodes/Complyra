@@ -17,14 +17,12 @@ import {
   buildHouseCardLedger,
   categoryNeedsIndividual,
   formatCents,
-  recentHouseCardLocations,
   type HouseCardCategory,
   type HouseCardEntryDraft,
   type HouseCardEntryView,
 } from "../../data/houseCard";
 import {
   computePersonalBalanceCents,
-  recentPersonalSpendingLocations,
   type PersonalSpendingEntryDraft,
   type PersonalSpendingEntryView,
 } from "../../data/personalSpending";
@@ -1233,10 +1231,6 @@ function HouseCardLogScreen({
     () => houseTodayTotals(ledger, todayIso),
     [ledger, todayIso],
   );
-  const locations = useMemo(
-    () => recentHouseCardLocations(entries),
-    [entries],
-  );
   const categories = useMemo(
     () =>
       orderCategoriesByUse(entries).map((category) => ({
@@ -1360,7 +1354,6 @@ function HouseCardLogScreen({
           ]}
           detailKind="purchase"
           categories={categories}
-          locations={locations}
           locationLabelFor={(kind) =>
             kind === "credit" ? "Received from" : "Location"
           }
@@ -1443,10 +1436,6 @@ function SpendingLogScreen({
     [entries],
   );
   const recentRows = useMemo(() => personalRecentRows(entries), [entries]);
-  const locations = useMemo(
-    () => recentPersonalSpendingLocations(entries),
-    [entries],
-  );
 
   const saveSheet = async (values: MoneySheetValues) => {
     if (!person) return;
@@ -1600,7 +1589,6 @@ function SpendingLogScreen({
               detailKind="spend"
               purposeLabel="What was it for?"
               purposePlaceholder="e.g. Clothing — new shoes"
-              locations={locations}
               locationLabelFor={(kind) =>
                 kind === "deposit" ? "Received from" : "Where was it spent?"
               }

@@ -14,7 +14,6 @@ import {
   computePersonalBalanceCents,
   formatCents,
   personalSpendingNeedsAttention,
-  recentPersonalSpendingLocations,
   signedAmountCents,
   summarizePersonalSpendingMonth,
   type PersonalSpendingEntryDraft,
@@ -198,10 +197,6 @@ export default function MobilePersonalSpending({
     [entries],
   );
   const close = closeForMonth(closes, month);
-  const locations = useMemo(
-    () => (entries ? recentPersonalSpendingLocations(entries) : []),
-    [entries],
-  );
   const postCloseCount = monthRows.filter(
     (row) => row.postCloseCorrection,
   ).length;
@@ -806,7 +801,6 @@ export default function MobilePersonalSpending({
                 detailKind="spend"
                 purposeLabel="What was it for?"
                 purposePlaceholder="e.g. Clothing — new shoes"
-                locations={locations}
                 locationLabelFor={(kind) =>
                   kind === "deposit" ? "Received from" : "Where was it spent?"
                 }
