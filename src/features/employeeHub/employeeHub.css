@@ -917,9 +917,13 @@
 .binder-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 8px 24px;
   margin: 4px 0 18px;
+}
+
+.binder-head .binder-donut {
+  flex: 0 0 auto;
 }
 
 .binder-percent {
@@ -1052,8 +1056,9 @@
   margin-bottom: 14px;
 }
 
-.binder-board-table td {
-  min-width: 0;
+.binder-board-empty {
+  font-size: 14px;
+  margin: 4px 0 0;
 }
 
 .binder-board-name {
@@ -1074,8 +1079,10 @@
   font-weight: 600;
 }
 
-.binder-board-chase td {
+.binder-board-chase {
   background: var(--color-h-f6f1e6);
+  border-radius: 10px;
+  padding: 12px 14px;
 }
 
 .binder-board-chase-head {
@@ -1085,6 +1092,210 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+/* ------- Binder board visuals (compliance-first restyle, 2026-10-30) ------- */
+
+/* The platform donut figure (styles.css .status-mix) carries panel
+   padding for its Overview home; binder contexts lay it out themselves. */
+.status-mix.binder-donut {
+  padding: 0;
+}
+
+.binder-dash {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px 36px;
+  margin: 2px 0 20px;
+}
+
+.binder-dash-side {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+.binder-dash-caption {
+  font-size: 15px;
+  margin: 0 0 14px;
+}
+
+.binder-dash-caption strong {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.binder-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.binder-stat {
+  border: 1px solid var(--border, var(--color-h-b59a74));
+  border-radius: 10px;
+  background: var(--color-h-fff);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.binder-stat strong {
+  display: block;
+  font-size: 26px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.binder-stat span {
+  display: block;
+  font-size: 12.5px;
+  opacity: 0.8;
+  margin-top: 3px;
+}
+
+.binder-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 40px;
+  margin-bottom: 22px;
+}
+
+.binder-chart-block h3 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.binder-chart-note {
+  font-size: 14px;
+  margin: 0;
+}
+
+.binder-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.binder-bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.binder-bar-label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.binder-bar-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.binder-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
+  gap: 14px;
+}
+
+.binder-person-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border, var(--color-h-b59a74));
+  border-radius: 12px;
+  background: var(--color-h-fff);
+  padding: 16px;
+}
+
+.binder-person-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.binder-person-main .binder-donut {
+  flex: 0 0 auto;
+}
+
+.binder-person-facts {
+  min-width: 0;
+}
+
+.binder-person-score {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.binder-person-score strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.binder-person-line {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+}
+
+.binder-person-line:last-child {
+  margin-bottom: 0;
+}
+
+.binder-person-urgent {
+  border-top: 1px solid var(--color-h-f0ebe3);
+  padding-top: 9px;
+  font-size: 14px;
+}
+
+.binder-person-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+@media (max-width: 720px) {
+  /* The global phone rule for .status-mix-chart forces every donut to
+     180px; binder minis (cards, binder header) must stay mini or they
+     crush the facts beside them. The full board donut keeps 180px. */
+  .binder-donut.status-mix-mini .status-mix-chart {
+    width: 76px;
+    max-width: 76px;
+    margin-inline: 0;
+  }
+  .binder-dash {
+    flex-direction: column;
+    align-items: center;
+  }
+  .binder-dash .status-mix {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .binder-dash-side {
+    flex: none;
+    width: 100%;
+  }
+  .binder-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .binder-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .binder-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .binder-bar-row {
+    grid-template-columns: minmax(0, 118px) minmax(0, 1fr) auto;
+  }
 }
 
 .binder-editor-note {
