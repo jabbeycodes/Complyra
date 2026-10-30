@@ -9,6 +9,7 @@ import {
   ListChecks,
   ListTodo,
   LogOut,
+  MessageSquare,
   Monitor,
   Pill,
   Search,
@@ -36,6 +37,7 @@ import MobileComplianceCard from "./MobileComplianceCard";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileHealth from "./MobileHealth";
+import MobileMessages from "./MobileMessages";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
@@ -47,6 +49,7 @@ export type ShellView =
   | "mar"
   | "isp"
   | "health"
+  | "messages"
   | "tasks"
   | "people"
   | "housecard"
@@ -56,6 +59,7 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   medications: Pill,
   ispData: ClipboardList,
   health: HeartPulse,
+  messages: MessageSquare,
   timeClock: Clock,
   myTasks: ListTodo,
   individuals: Users,
@@ -69,6 +73,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   mar: "Medications",
   isp: "ISP Data",
   health: "Health",
+  messages: "Messages",
   tasks: "My Tasks",
   people: "Individuals",
   housecard: "House Card",
@@ -144,6 +149,7 @@ export default function MobileShell({
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
   const [ispKey, setIspKey] = useState(0);
   const [ispFormActive, setIspFormActive] = useState(false);
+  const [messagesInThread, setMessagesInThread] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState<boolean>(
     () => startSheetOpen ?? false,
@@ -257,6 +263,9 @@ export default function MobileShell({
       case "health":
         setView("health");
         break;
+      case "messages":
+        setView("messages");
+        break;
       case "timeClock":
         nav.openPage("Employee Hub");
         break;
@@ -317,13 +326,15 @@ export default function MobileShell({
 
   // The pill shows on the home and list-level screens. It hides on the
   // home picker, in the MAR flow (the MAR's own Scheduled/PRN/Other bar
-  // owns the bottom there), on the notifications surface, and while the
-  // ISP entry form is open — never two bars stacked.
+  // owns the bottom there), on the notifications surface, while the
+  // ISP entry form is open, and while a message conversation is open
+  // (the reply composer owns the bottom there) — never two bars stacked.
   const showBottomNav =
     view === "home" ||
     view === "tasks" ||
     view === "people" ||
     view === "health" ||
+    (view === "messages" && !messagesInThread) ||
     (view === "isp" && !ispFormActive);
 
   const greeting = greetingForHour(centralHour());
@@ -615,6 +626,24 @@ export default function MobileShell({
             people={people}
             onOpenChart={nav.openPersonChart}
             onOpenMedications={() => setView("mar")}
+          />
+        )}
+
+        {view === "messages" && (
+          <MobileMessages
+            api={api}
+            session={session}
+            individuals={workspace.individuals.map((person) => ({
+              id: person.id,
+              name: person.name,
+            }))}
+            onOpenIndividual={(individualId) => {
+              const person = workspace.individuals.find(
+                (row) => row.id === individualId,
+              );
+              if (person) nav.openPersonChart(person.name);
+            }}
+            onThreadOpenChange={setMessagesInThread}
           />
         )}
 

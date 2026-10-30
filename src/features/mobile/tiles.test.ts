@@ -17,7 +17,11 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
   const tiles = ids(
     ctx({
       roleKey: "dsp",
-      permissions: { "hub.access": true, "individuals.view": true },
+      permissions: {
+        "hub.access": true,
+        "individuals.view": true,
+        "messages.use": true,
+      },
       canPage: (page) => page === "Weekly checklist",
     }),
   );
@@ -25,6 +29,7 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
     "medications",
     "ispData",
     "health",
+    "messages",
     "timeClock",
     "myTasks",
     "individuals",
@@ -59,6 +64,35 @@ test("an auditor gets read surfaces but no time clock without hub access", () =>
   // No separate Med Count tile: the count lives under Medications.
   assert.ok(!tiles.includes("medCount" as never));
   assert.ok(!tiles.includes("timeClock"));
+  // Messaging is staff communication, not a record surface: no tile.
+  assert.ok(!tiles.includes("messages"));
+});
+
+test("the messages tile mirrors canUseMessaging, auditors excluded outright", () => {
+  // Operational roles with the permission see the tile.
+  assert.ok(
+    ids(
+      ctx({ roleKey: "dsp", permissions: { "messages.use": true } }),
+    ).includes("messages"),
+  );
+  assert.ok(
+    ids(
+      ctx({ roleKey: "nurse", permissions: { "messages.use": true } }),
+    ).includes("messages"),
+  );
+  // Without the permission there is no tile, whatever the role.
+  assert.ok(!ids(ctx({ roleKey: "dsp", permissions: {} })).includes("messages"));
+  // HARD RULE (PR #121): an auditor never gets the tile — even if the
+  // messages.use permission was mistakenly granted to the auditor
+  // template, the role half of canUseMessaging keeps messaging closed.
+  assert.ok(
+    !ids(
+      ctx({
+        roleKey: "auditor",
+        permissions: { "messages.use": true, "individuals.view": true },
+      }),
+    ).includes("messages"),
+  );
 });
 
 test("the health tile mirrors the chart's health-track view gate", () => {
@@ -84,13 +118,20 @@ test("page-gated tiles follow the desktop page gate exactly", () => {
   assert.ok(ids(withPages).includes("checklists"));
   assert.ok(ids(withPages).includes("houseCard"));
   assert.ok(!ids(withPages).includes("medCount" as never));
+  // Messages is NOT page-gated: it follows the messages.use permission,
+  // so a permissive page gate alone never surfaces it.
+  assert.ok(!ids(withPages).includes("messages"));
 });
 
 test("tile order is daily-driver order, medications first", () => {
   const tiles = mobileTiles(
     ctx({
       roleKey: "administrator",
-      permissions: { "hub.access": true, "individuals.view": true },
+      permissions: {
+        "hub.access": true,
+        "individuals.view": true,
+        "messages.use": true,
+      },
       canPage: () => true,
     }),
   );
@@ -101,6 +142,7 @@ test("tile order is daily-driver order, medications first", () => {
       "medications",
       "ispData",
       "health",
+      "messages",
       "timeClock",
       "myTasks",
       "individuals",

@@ -43,12 +43,16 @@ test("the More sheet carries the tiles the pill does not", () => {
   const tiles = mobileTiles(
     ctx({
       roleKey: "administrator",
-      permissions: { "hub.access": true, "individuals.view": true },
+      permissions: {
+        "hub.access": true,
+        "individuals.view": true,
+        "messages.use": true,
+      },
       canPage: () => true,
     }),
   );
   assert.deepEqual(
     moreSheetTiles(tiles).map((tile) => tile.id),
-    ["ispData", "health", "timeClock", "appointments", "checklists", "houseCard"],
+    ["ispData", "health", "messages", "timeClock", "appointments", "checklists", "houseCard"],
   );
 });
