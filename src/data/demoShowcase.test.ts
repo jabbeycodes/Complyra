@@ -5,6 +5,7 @@ import { dueItemClock } from "./operatingReminders";
 import { addDaysIso, blankItemNumbers, weekOfSundayIso } from "./hmChecklist";
 import { monthKeyFrom } from "./monthlyChecks";
 import { createEvergreenSeed } from "./seed";
+import { centralTodayIso } from "./menuRecords";
 import { isSiteReviewInPlace, siteFactsFrom } from "./siteReview";
 
 function seed() {
@@ -19,7 +20,7 @@ function person(db: ReturnType<typeof seed>, name: string) {
 
 test("walkthrough charts are filled for all four individuals", () => {
   const db = seed();
-  assert.equal(db.showcaseRevision, 6);
+  assert.equal(db.showcaseRevision, 7);
   for (const name of ["Ellis Hart", "Morgan Pruitt", "Reese Lang", "Harper Soto"]) {
     const row = person(db, name);
     assert.ok(row.profile?.phone, `${name} phone`);
@@ -107,6 +108,54 @@ test("each person has two weeks of shift notes, and Morgan's program stays a sin
       `${name} stays inside the chart's 30-note window`,
     );
   }
+});
+
+test("the mobile Health home opens populated for Ellis and Harper", () => {
+  const db = seed();
+  const today = centralTodayIso();
+  // Both open with today-dated entries; Harper's skin check sits two days
+  // back on purpose, so her home also shows a "last logged" state.
+  const todayKinds: Record<string, string[]> = {
+    "Ellis Hart": ["intake", "elimination", "vitals", "glucose", "skin"],
+    "Harper Soto": ["intake", "elimination", "vitals", "glucose"],
+  };
+  for (const [name, kinds] of Object.entries(todayKinds)) {
+    const row = person(db, name);
+    for (const kind of kinds) {
+      assert.ok(
+        db.healthTrackEntries.some(
+          (entry) =>
+            entry.individualId === row.id &&
+            entry.kind === kind &&
+            entry.occurredOn === today,
+        ),
+        `${name} has a ${kind} entry today`,
+      );
+    }
+  }
+  const harperRow = person(db, "Harper Soto");
+  assert.ok(
+    db.healthTrackEntries.some(
+      (entry) =>
+        entry.individualId === harperRow.id &&
+        entry.kind === "skin" &&
+        entry.occurredOn < today,
+    ),
+    "Harper has an earlier skin check",
+  );
+  // Episodic kinds carry a last-logged date, not a today entry.
+  const ellis = person(db, "Ellis Hart");
+  const seizure = db.healthTrackEntries.find(
+    (entry) => entry.individualId === ellis.id && entry.kind === "seizure",
+  );
+  assert.ok(seizure);
+  assert.ok(seizure.occurredOn < today);
+  const harper = person(db, "Harper Soto");
+  assert.ok(
+    db.healthTrackEntries.some(
+      (entry) => entry.individualId === harper.id && entry.kind === "menses",
+    ),
+  );
 });
 
 test("printable site reviews, monthly checks, QA, and Reese's delegation are ready", () => {
