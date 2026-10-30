@@ -396,7 +396,18 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import { agencyClock, dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import {
+  accountabilityDates,
+  checklistAccountabilityItems,
+  computeShiftAccountability,
+  ispAccountabilityItems,
+  medicationAccountabilityItems,
+  menuAccountabilityItems,
+  shiftNoteAccountabilityItems,
+  type AccountabilityDueItem,
+  type AccountabilityShift,
+} from "./shiftAccountability";
 import { operatingRulesFrom } from "./rules";
 import { LocalRulesStore } from "./rulesStore";
 import {
@@ -844,6 +855,19 @@ export interface ComplyraApi {
   getSiteDueItems(
     siteId: string,
   ): Promise<import("./dueItems").SiteDueItemsResult>;
+  /**
+   * Shift accountability — per-shift rollups for one site across an ISO
+   * instant range: the published shift is the accountability unit, and
+   * every tracked obligation due inside its window (MAR med passes, ISP
+   * data, the Shift note, menu records, checklist items) is attributed to
+   * the assignee of record. Open shifts come back unowned. See
+   * shiftAccountability.ts for the attribution contract.
+   */
+  getShiftAccountability(
+    siteId: string,
+    fromIso: string,
+    toIso: string,
+  ): Promise<import("./shiftAccountability").ShiftAccountability[]>;
   /** Issue #75 — HM alone-time windows for one Individual (read). */
   listAloneTime(
     individualId: string,
@@ -5770,6 +5794,137 @@ export class LocalApi implements ComplyraApi {
       serviceDate,
       doseDate: today,
     };
+  }
+
+  async getShiftAccountability(
+    siteId: string,
+    fromIso: string,
+    toIso: string,
+  ): Promise<import("./shiftAccountability").ShiftAccountability[]> {
+    const session = assertSession(this.store);
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Site not found.");
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const people = this.store.db.individuals.filter(
+      (row) => row.siteId === siteId && row.agencyId === session.agencyId,
+    );
+    const peopleRefs = people.map((p) => ({ id: p.id, name: p.fullName }));
+    const peopleIds = new Set(people.map((p) => p.id));
+    // Central dates covering the requested instants, padded a day each way
+    // so an overnight shift at either edge still sees its whole window.
+    const fromDate = addDaysIso(agencyClock(new Date(fromIso)).today, -1);
+    const toDate = addDaysIso(agencyClock(new Date(toIso)).today, 1);
+    const dates = accountabilityDates(fromDate, toDate);
+
+    // Published/scheduled shifts for the site across the range, read from
+    // the same local coverage buckets the board and due list read.
+    const shiftById = new Map<string, AccountabilityShift>();
+    for (const date of dates) {
+      for (const row of readLocalCoverage(session.agencyId, siteId, date)) {
+        // Keep every shift that overlaps the requested range, edges included.
+        if (!(row.startsAt < toIso && row.endsAt > fromIso)) continue;
+        shiftById.set(row.id, {
+          id: row.id,
+          staffId: row.staffUserId ? row.staffUserId : null,
+          startsAt: row.startsAt,
+          endsAt: row.endsAt,
+          status: "published",
+        });
+      }
+    }
+    const shifts = [...shiftById.values()];
+    const ownerNameById = new Map(
+      this.store.db.profiles.map((profile) => [profile.id, profile.fullName]),
+    );
+
+    const dateSet = new Set(dates);
+    const items: AccountabilityDueItem[] = [];
+
+    if (canSeeMeds(session.roleKey)) {
+      items.push(
+        ...medicationAccountabilityItems({
+          scheduledDoses: this.siteScheduledDoses(session, people),
+          marks: this.medDoseMarkRows().filter(
+            (m) => m.agencyId === session.agencyId && dateSet.has(m.doseDate.slice(0, 10)),
+          ),
+          dates,
+        }),
+      );
+    }
+
+    if (canSeeShiftNotes(session.roleKey)) {
+      const notes = this.store.db.shiftNotes.filter(
+        (note) =>
+          !note.deletedAt &&
+          peopleIds.has(note.individualId) &&
+          dateSet.has(note.noteDate.slice(0, 10)),
+      );
+      items.push(
+        ...ispAccountabilityItems({
+          people: peopleRefs,
+          programs: this.store.db.ispPrograms.filter(
+            (program) =>
+              program.agencyId === session.agencyId && peopleIds.has(program.individualId),
+          ),
+          notes,
+          dates,
+        }),
+        ...shiftNoteAccountabilityItems({
+          shifts,
+          people: peopleRefs,
+          notes: notes.map((note) => ({
+            individualId: note.individualId,
+            staffUserId: note.staffUserId,
+            noteDate: note.noteDate,
+            shift: note.shift,
+            beginTime: note.beginTime,
+            endTime: note.endTime,
+            hrShiftId: note.hrShiftId ?? null,
+          })),
+          blocks: shiftBlocksForSite(siteFactsFrom(site)),
+        }),
+      );
+    }
+
+    if (canSeeMenuEntries(session.roleKey)) {
+      items.push(
+        ...menuAccountabilityItems({
+          people: peopleRefs,
+          entries: this.menuEntryRows().filter(
+            (entry) =>
+              !entry.deletedAt &&
+              peopleIds.has(entry.individualId) &&
+              dateSet.has(entry.entryDate.slice(0, 10)),
+          ),
+          dates,
+        }),
+      );
+    }
+
+    if (this.checklistOversight(session)) {
+      items.push(
+        ...checklistAccountabilityItems({
+          checklists: this.weeklyChecklists().filter(
+            (row) =>
+              row.agencyId === session.agencyId &&
+              row.siteId === siteId &&
+              (row.weekStart ?? row.weekOf).slice(0, 10) >= addDaysIso(fromDate, -7) &&
+              (row.weekStart ?? row.weekOf).slice(0, 10) <= toDate,
+          ),
+        }),
+      );
+    }
+
+    return computeShiftAccountability({
+      shifts,
+      ownerNameById,
+      items,
+      now: new Date(),
+    });
   }
 
   async listAloneTime(

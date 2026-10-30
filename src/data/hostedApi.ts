@@ -130,7 +130,7 @@ import {
   type PersonalSpendingMonthClose,
   type PersonalSpendingReceiptPhoto,
 } from "./personalSpending";
-import { centralTodayIso } from "./menuRecords";
+import { addDaysIso, centralTodayIso } from "./menuRecords";
 import { assertSiteHasCapacity } from "./siteCapacity";
 import {
   appointmentChangeDetail,
@@ -295,7 +295,18 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import {
+  accountabilityDates,
+  checklistAccountabilityItems,
+  computeShiftAccountability,
+  ispAccountabilityItems,
+  medicationAccountabilityItems,
+  menuAccountabilityItems,
+  shiftNoteAccountabilityItems,
+  type AccountabilityDueItem,
+  type AccountabilityShift,
+} from "./shiftAccountability";
 import { operatingRulesFrom, type EffectiveRule } from "./rules";
 // Delegation template workflow: domain types + helpers.
 import {
@@ -11817,6 +11828,227 @@ export class HostedApi implements ComplyraApi {
       serviceDate,
       doseDate: today,
     };
+  }
+
+  async getShiftAccountability(
+    siteId: string,
+    fromIso: string,
+    toIso: string,
+  ): Promise<import("./shiftAccountability").ShiftAccountability[]> {
+    const session = await this.requireSession();
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Site not found or outside your assigned access.");
+    }
+    const { data: site, error: siteError } = await this.client
+      .from("sites")
+      .select("id,name,agency_id")
+      .eq("id", siteId)
+      .single();
+    throwIf(siteError, "Site not found.");
+    if ((site!.agency_id as string) !== session.agencyId) {
+      throw new Error("Site not found.");
+    }
+    const siteFacts = await this.siteFacts(siteId);
+    const { data: peopleRows, error: peopleError } = await this.client
+      .from("individuals")
+      .select("id, full_name")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId);
+    throwIf(peopleError, "Could not load shift accountability.");
+    const people = ((peopleRows ?? []) as Array<{ id: string; full_name: string }>).map(
+      (row) => ({ id: String(row.id), name: String(row.full_name ?? "") }),
+    );
+    const peopleIds = people.map((p) => p.id);
+    const peopleSet = new Set(peopleIds);
+    const nameById = new Map(people.map((p) => [p.id, p.name]));
+    // Central dates covering the requested instants, padded a day each way
+    // so an overnight shift at either edge still sees its whole window.
+    const fromDate = addDaysIso(agencyClock(new Date(fromIso)).today, -1);
+    const toDate = addDaysIso(agencyClock(new Date(toIso)).today, 1);
+    const dates = accountabilityDates(fromDate, toDate);
+
+    const { data: shiftRows, error: shiftError } = await this.client
+      .from("hr_shifts")
+      .select("id, staff_id, starts_at, ends_at, status")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .in("status", ["scheduled", "published"])
+      .lt("starts_at", toIso)
+      .gt("ends_at", fromIso)
+      .order("starts_at", { ascending: true });
+    throwIf(shiftError, "Could not load shift accountability.");
+    const shifts: AccountabilityShift[] = ((shiftRows ?? []) as Array<Record<string, unknown>>).map(
+      (row) => ({
+        id: String(row.id),
+        staffId: row.staff_id ? String(row.staff_id) : null,
+        startsAt: String(row.starts_at),
+        endsAt: String(row.ends_at),
+        status: String(row.status ?? "published"),
+      }),
+    );
+    const staffIds = [...new Set(shifts.map((s) => s.staffId).filter(Boolean))] as string[];
+    const ownerNameById = new Map<string, string>();
+    if (staffIds.length) {
+      const { data: profs } = await this.client
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", staffIds);
+      for (const p of (profs ?? []) as Array<{ id: string; full_name: string }>) {
+        ownerNameById.set(String(p.id), String(p.full_name ?? "Staff"));
+      }
+    }
+
+    const items: AccountabilityDueItem[] = [];
+
+    if (canSeeMeds(session.roleKey) && peopleIds.length) {
+      const { data: medRows } = await this.client
+        .from("medications")
+        .select("id, individual_id, name, strength, kind")
+        .eq("agency_id", session.agencyId)
+        .eq("kind", "scheduled")
+        .in("individual_id", peopleIds);
+      const meds = (medRows ?? []) as Array<Record<string, unknown>>;
+      const medIds = meds.map((m) => String(m.id));
+      const doseByMed = new Map<string, string[]>();
+      if (medIds.length) {
+        const { data: invRows } = await this.client
+          .from("med_inventory")
+          .select("medication_id, dose_times")
+          .eq("agency_id", session.agencyId)
+          .in("medication_id", medIds);
+        for (const inv of (invRows ?? []) as Array<Record<string, unknown>>) {
+          doseByMed.set(
+            String(inv.medication_id),
+            Array.isArray(inv.dose_times) ? (inv.dose_times as string[]) : [],
+          );
+        }
+      }
+      const scheduledDoses: ScheduledDose[] = meds
+        .map((m) => ({
+          individualId: String(m.individual_id),
+          individualName: nameById.get(String(m.individual_id)) ?? "",
+          medicationId: String(m.id),
+          medName: String(m.name ?? ""),
+          strength: String(m.strength ?? ""),
+          doseTimes: doseByMed.get(String(m.id)) ?? [],
+        }))
+        .filter((d) => d.doseTimes.length > 0);
+      const { data: markRows } = medIds.length
+        ? await this.client
+            .from("med_dose_marks")
+            .select("medication_id, dose_date, dose_time")
+            .eq("agency_id", session.agencyId)
+            .gte("dose_date", fromDate)
+            .lte("dose_date", toDate)
+            .in("medication_id", medIds)
+        : { data: [] };
+      items.push(
+        ...medicationAccountabilityItems({
+          scheduledDoses,
+          marks: ((markRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+            medicationId: String(row.medication_id),
+            doseDate: String(row.dose_date ?? "").slice(0, 10),
+            doseTime: String(row.dose_time ?? "").slice(0, 5),
+          })),
+          dates,
+        }),
+      );
+    }
+
+    if (canSeeShiftNotes(session.roleKey) && peopleIds.length) {
+      const { data: noteRows } = await this.client
+        .from("shift_notes")
+        .select("individual_id, staff_user_id, shift, note_date, hr_shift_id, program_id, begin_time, end_time")
+        .eq("agency_id", session.agencyId)
+        .in("individual_id", peopleIds)
+        .is("deleted_at", null)
+        .gte("note_date", fromDate)
+        .lte("note_date", toDate);
+      const notes = ((noteRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+        individualId: String(row.individual_id),
+        staffUserId: String(row.staff_user_id ?? ""),
+        noteDate: String(row.note_date ?? "").slice(0, 10),
+        shift: String(row.shift ?? ""),
+        beginTime: String(row.begin_time ?? ""),
+        endTime: String(row.end_time ?? ""),
+        hrShiftId: row.hr_shift_id ? String(row.hr_shift_id) : null,
+        programId: String(row.program_id ?? ""),
+      }));
+      const { data: programRows } = await this.client
+        .from("isp_programs")
+        .select("id, individual_id, name, status, effective_on, expires_on")
+        .eq("agency_id", session.agencyId)
+        .in("individual_id", peopleIds);
+      items.push(
+        ...ispAccountabilityItems({
+          people,
+          programs: ((programRows ?? []) as Array<Record<string, unknown>>)
+            .filter((row) => peopleSet.has(String(row.individual_id)))
+            .map((row) => ({
+              id: String(row.id),
+              individualId: String(row.individual_id),
+              name: String(row.name ?? ""),
+              status: String(row.status ?? "draft"),
+              effectiveOn: String(row.effective_on ?? "").slice(0, 10),
+              expiresOn: String(row.expires_on ?? "").slice(0, 10),
+            })),
+          notes,
+          dates,
+        }),
+        ...shiftNoteAccountabilityItems({
+          shifts,
+          people,
+          notes,
+          blocks: shiftBlocksForSite(siteFacts),
+        }),
+      );
+    }
+
+    if (canSeeMenuEntries(session.roleKey) && peopleIds.length) {
+      const { data: menuRows } = await this.client
+        .from("menu_entries")
+        .select("individual_id, entry_date, meal_slot")
+        .eq("agency_id", session.agencyId)
+        .in("individual_id", peopleIds)
+        .is("deleted_at", null)
+        .gte("entry_date", fromDate)
+        .lte("entry_date", toDate);
+      items.push(
+        ...menuAccountabilityItems({
+          people,
+          entries: ((menuRows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+            individualId: String(row.individual_id),
+            entryDate: String(row.entry_date ?? "").slice(0, 10),
+            mealSlot: String(row.meal_slot ?? ""),
+          })),
+          dates,
+        }),
+      );
+    }
+
+    if (this.checklistCanOversee(session)) {
+      const { data: checklistRows } = await this.client
+        .from("hm_weekly_checklists")
+        .select("*")
+        .eq("agency_id", session.agencyId)
+        .eq("site_id", siteId)
+        .gte("week_of", addDaysIso(fromDate, -7))
+        .lte("week_of", toDate);
+      items.push(
+        ...checklistAccountabilityItems({
+          checklists: ((checklistRows ?? []) as Array<Record<string, unknown>>).map((row) =>
+            this.mapChecklistRow(row),
+          ),
+        }),
+      );
+    }
+
+    return computeShiftAccountability({
+      shifts,
+      ownerNameById,
+      items,
+      now: new Date(),
+    });
   }
 
   async listAloneTime(
