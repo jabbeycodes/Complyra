@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Car, Flame, TriangleAlert, UtensilsCrossed, type LucideIcon } from "lucide-react";
+import { Car, Flame, HeartPulse, TriangleAlert, UtensilsCrossed, type LucideIcon } from "lucide-react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -19,12 +19,14 @@ import {
 import { validateTripInput } from "../../data/mileage";
 import type { MileageTripView } from "../../data/types";
 import type { GerReport } from "../../data/ger";
+import type { HealthTrackEntry } from "../../data/healthTrack";
 import { centralNowHhmm, centralTodayIso, formatIsoDay } from "./mar";
 import {
   drillMonthStatus,
   drillRowStatus,
   fieldLogAccess,
   gerMonthStatus,
+  healthTodayStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthKeyOf,
@@ -34,16 +36,19 @@ import {
 import MobilePeopleList from "./MobilePeopleList";
 import { PersonHeader } from "./MobileMar";
 import MobileGerLog from "./MobileGerLog";
+import MobileHealth from "./MobileHealth";
 import type { WorkspaceIndividual } from "./types";
 
 /**
- * Mobile Quick log — one door for the four field logs that used to live
- * only on desktop surfaces: menu records, mileage, drills, and incident
- * (GER) reports. Every flow writes through the SAME API methods and
- * validation the desktop surface uses, so a record logged on a phone is
- * the record the desktop shows. The chooser hides any domain the role
- * cannot record in (the gates are the desktop gates — fieldLogs.ts),
- * and each entry carries a factual status line for the current home.
+ * Mobile Quick log — one door for the field logs that used to live only
+ * on desktop surfaces: health trackers, menu records, mileage, drills,
+ * and incident (GER) reports. Every flow writes through the SAME API
+ * methods and validation the desktop surface uses, so a record logged
+ * on a phone is the record the desktop shows. The chooser hides any
+ * domain the role cannot use (the gates are the desktop gates —
+ * fieldLogs.ts), and each entry carries a factual status line for the
+ * current home. Health is the Health home itself (MobileHealth) mounted
+ * as a sub-flow — one implementation behind both doors.
  */
 const DOMAIN_META: {
   id: FieldLogDomain;
@@ -51,6 +56,12 @@ const DOMAIN_META: {
   hint: string;
   icon: LucideIcon;
 }[] = [
+  {
+    id: "health",
+    label: "Health",
+    hint: "Vitals, intake, elimination, seizures and more",
+    icon: HeartPulse,
+  },
   {
     id: "menu",
     label: "Menu record",
@@ -85,6 +96,7 @@ export default function MobileQuickLog({
   people,
   drills,
   onOpenChart,
+  onOpenMedications,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -94,6 +106,8 @@ export default function MobileQuickLog({
   /** The current home's scheduled drill rows (workspace monthly data). */
   drills: EmergencyDrill[];
   onOpenChart: (name: string) => void;
+  /** The Health flow's Medications row deep-links to the MAR. */
+  onOpenMedications: () => void;
 }) {
   const todayIso = centralTodayIso();
   const monthKey = monthKeyOf(todayIso);
@@ -104,6 +118,7 @@ export default function MobileQuickLog({
   const [screen, setScreen] = useState<"chooser" | FieldLogDomain>("chooser");
   const [refreshKey, setRefreshKey] = useState(0);
   const [menuEntries, setMenuEntries] = useState<MenuEntryView[]>([]);
+  const [healthEntries, setHealthEntries] = useState<HealthTrackEntry[]>([]);
   const [trips, setTrips] = useState<MileageTripView[]>([]);
   const [reports, setReports] = useState<GerReport[]>([]);
   const [drillRows, setDrillRows] = useState<EmergencyDrill[]>(drills);
@@ -120,6 +135,14 @@ export default function MobileQuickLog({
           ),
         );
         setMenuEntries(perPerson.flat());
+      }
+      if (access.healthView) {
+        const perPerson = await Promise.all(
+          people.map((person) =>
+            api.listHealthTrackEntries({ individualId: person.id }),
+          ),
+        );
+        setHealthEntries(perPerson.flat());
       }
       if (access.mileage) {
         setTrips(await api.listMileageTrips(siteId, monthKey));
@@ -143,6 +166,8 @@ export default function MobileQuickLog({
 
   const statusFor = (domain: FieldLogDomain): string => {
     switch (domain) {
+      case "health":
+        return healthTodayStatus(healthEntries, todayIso).text;
       case "menu":
         return menuTodayStatus(menuEntries, todayIso).text;
       case "mileage":
@@ -158,6 +183,8 @@ export default function MobileQuickLog({
 
   const domainVisible = (domain: FieldLogDomain): boolean => {
     switch (domain) {
+      case "health":
+        return access.healthView;
       case "menu":
         return access.menu;
       case "mileage":
@@ -169,6 +196,20 @@ export default function MobileQuickLog({
     }
   };
 
+  if (screen === "health") {
+    return (
+      <MobileHealth
+        api={api}
+        session={session}
+        people={people}
+        onOpenChart={onOpenChart}
+        onOpenMedications={onOpenMedications}
+        onBack={() => setScreen("chooser")}
+        backLabel="Quick log"
+        onEntrySaved={onLogged}
+      />
+    );
+  }
   if (screen === "menu") {
     return (
       <MenuLogScreen

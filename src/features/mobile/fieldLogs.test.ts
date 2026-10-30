@@ -5,6 +5,7 @@ import {
   drillRowStatus,
   fieldLogAccess,
   gerMonthStatus,
+  healthTodayStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthLabel,
@@ -16,6 +17,7 @@ import {
 import type { EmergencyDrill } from "../../data/monthlyChecks";
 import type { MenuEntryView } from "../../data/menuRecords";
 import type { GerReport } from "../../data/ger";
+import type { HealthTrackEntry } from "../../data/healthTrack";
 import type { MileageTripView } from "../../data/types";
 
 const FULL = {
@@ -31,10 +33,13 @@ test("field log access mirrors each desktop surface's gate", () => {
     [dsp.menu, dsp.mileage, dsp.drills, dsp.gerCreate, dsp.gerView, dsp.any],
     [true, true, true, true, true, true],
   );
+  // Health viewing follows canViewHealthTrack: individuals.view, never HR.
+  assert.equal(dsp.healthView, true);
   // Nurse mirrors desktop too: menu entry, monthly-check completion.
   const nurse = fieldLogAccess("nurse", FULL);
   assert.equal(nurse.menu, true);
   assert.equal(nurse.drills, true);
+  assert.equal(nurse.healthView, true);
   // Without the permission keys, mileage and GER recording close even for
   // roles on the menu/drill role lists.
   const bare = fieldLogAccess("house_manager", {});
@@ -42,21 +47,27 @@ test("field log access mirrors each desktop surface's gate", () => {
   assert.equal(bare.drills, true);
   assert.equal(bare.mileage, false);
   assert.equal(bare.gerCreate, false);
+  assert.equal(bare.healthView, false);
   assert.equal(bare.any, true);
 });
 
-test("an auditor records in no domain and gets no tile, but may read GERs", () => {
+test("an auditor records in no domain, but the tile opens for health and GER reading", () => {
   const auditor = fieldLogAccess("auditor", { "individuals.view": true });
   assert.equal(auditor.menu, false);
   assert.equal(auditor.mileage, false);
   assert.equal(auditor.drills, false);
   assert.equal(auditor.gerCreate, false);
-  assert.equal(auditor.any, false);
-  // The platform rule: auditors see everything, read-only.
+  // The platform rule: auditors see everything, read-only — health
+  // statuses and filed GERs are read surfaces, so the tile opens on the
+  // health view gate even though the auditor records nothing anywhere.
+  assert.equal(auditor.healthView, true);
   assert.equal(auditor.gerView, true);
+  assert.equal(auditor.any, true);
+  // Without individuals.view the auditor has no door at all.
+  assert.equal(fieldLogAccess("auditor", {}).any, false);
 });
 
-test("HR records mileage only, and never reads GERs", () => {
+test("HR records mileage only, and never reads GERs or health", () => {
   const hr = fieldLogAccess("hr", { "mileage.manage": true, "individuals.view": true });
   assert.equal(hr.mileage, true);
   assert.equal(hr.any, true);
@@ -64,6 +75,8 @@ test("HR records mileage only, and never reads GERs", () => {
   assert.equal(hr.drills, false);
   // canViewGerReports excludes HR outright (no clinical permissions).
   assert.equal(hr.gerView, false);
+  // canViewHealthTrack excludes HR the same way.
+  assert.equal(hr.healthView, false);
 });
 
 function menuEntry(partial: Partial<MenuEntryView>): MenuEntryView {
@@ -265,6 +278,48 @@ test("GER notification lines round-trip in the desktop format", () => {
   assert.equal(text, "Guardian — Mary Hart — 3:15 PM\nPhysician — Dr. Lee — ");
   assert.deepEqual(parseNotificationsText(text), list);
   assert.deepEqual(parseNotificationsText("  \n"), []);
+});
+
+function healthEntry(
+  partial: Partial<HealthTrackEntry> &
+    Pick<HealthTrackEntry, "kind" | "occurredOn">,
+): HealthTrackEntry {
+  return {
+    id: `h-${partial.kind}-${partial.occurredOn}-${Math.random()}`,
+    agencyId: "a1",
+    individualId: "p1",
+    title: "Entry",
+    details: {},
+    flaggedAbnormal: false,
+    note: "",
+    recordedByUserId: "u1",
+    createdAt: `${partial.occurredOn}T12:00:00.000Z`,
+    ...partial,
+  };
+}
+
+test("health status counts today's tracker entries across the whole home", () => {
+  const entries = [
+    healthEntry({ kind: "vitals", occurredOn: "2026-10-30" }),
+    healthEntry({ kind: "intake", occurredOn: "2026-10-30" }),
+    // Another Individual at the same home — the chooser counts the house.
+    healthEntry({ kind: "intake", occurredOn: "2026-10-30", individualId: "p2" }),
+    healthEntry({ kind: "seizure", occurredOn: "2026-10-30", individualId: "p2" }),
+    // Yesterday and chart-only kinds never count toward the seven.
+    healthEntry({ kind: "vitals", occurredOn: "2026-10-29" }),
+    healthEntry({ kind: "immunization", occurredOn: "2026-10-30" }),
+  ];
+  const status = healthTodayStatus(entries, "2026-10-30");
+  assert.equal(status.count, 4);
+  assert.equal(status.text, "4 health entries logged today");
+  assert.equal(
+    healthTodayStatus([entries[0]], "2026-10-30").text,
+    "1 health entry logged today",
+  );
+  assert.equal(
+    healthTodayStatus([], "2026-10-30").text,
+    "No health entries logged today",
+  );
 });
 
 test("new GER drafts default to today, now, and the reporter", () => {

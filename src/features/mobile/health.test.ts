@@ -6,6 +6,7 @@ import {
   MOBILE_HEALTH_KINDS,
   healthHomeStatuses,
   initialHealthDetails,
+  todaysHealthEntryCount,
   trackerStatus,
 } from "./health";
 
@@ -124,6 +125,20 @@ test("the home statuses come back in display order for all seven kinds", () => {
     [...MOBILE_HEALTH_KINDS],
   );
   assert.equal(statuses.find((row) => row.kind === "glucose")?.todayCount, 1);
+});
+
+test("today's entry count sums the seven trackers and nothing else", () => {
+  const entries = [
+    entry({ kind: "intake", occurredOn: TODAY }),
+    entry({ kind: "intake", occurredOn: TODAY }),
+    entry({ kind: "seizure", occurredOn: TODAY }),
+    entry({ kind: "vitals", occurredOn: "2026-10-28" }),
+    // Chart-only kinds are not part of the mobile seven — never counted.
+    entry({ kind: "lab", occurredOn: TODAY }),
+    entry({ kind: "sleep", occurredOn: TODAY }),
+  ];
+  assert.equal(todaysHealthEntryCount(entries, TODAY), 3);
+  assert.equal(todaysHealthEntryCount([], TODAY), 0);
 });
 
 test("quick-log sheets prefill the time of day only for kinds that carry one", () => {

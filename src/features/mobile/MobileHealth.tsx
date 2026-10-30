@@ -40,12 +40,24 @@ export default function MobileHealth({
   people,
   onOpenChart,
   onOpenMedications,
+  onBack,
+  backLabel,
+  onEntrySaved,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
   onOpenChart: (name: string) => void;
   onOpenMedications: () => void;
+  /**
+   * Embedding door (the Quick log chooser): when set, the people picker
+   * carries a back button to the host flow. The Health TILE mounts this
+   * view without it — the shell's own subheader is the way back there.
+   */
+  onBack?: () => void;
+  backLabel?: string;
+  /** Embedding door: told after every successful save (drives the host's status refresh). */
+  onEntrySaved?: () => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(null);
@@ -88,6 +100,11 @@ export default function MobileHealth({
   if (!person) {
     return (
       <div>
+        {onBack && (
+          <button type="button" className="msh-text-button" onClick={onBack}>
+            ‹ {backLabel ?? "Back"}
+          </button>
+        )}
         <p className="msh-section-note">
           Pick the Individual whose health you are logging or checking.
         </p>
@@ -203,6 +220,7 @@ export default function MobileHealth({
           onSaved={() => {
             setLogKind(null);
             void load();
+            onEntrySaved?.();
           }}
         />
       )}
