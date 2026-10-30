@@ -16,8 +16,9 @@ import type { MoneySheetValues } from "./money";
  * The shared quick-entry sheet for both mobile money views — one
  * component, two ledgers. Built from the expense-tracker research
  * (2026-10-30): amount FIRST on a big keypad-friendly input, then a
- * stable category grid (or the spend's purpose), recent locations as
- * one-tap chips, and everything else (date, note, receipt) behind
+ * stable category grid (or the spend's purpose), a location staff
+ * simply type (no pick-lists — Joshua, 2026-10-30), and everything
+ * else (date, note, receipt) behind
  * "More details" — log now in the fewest fields, code the rest later.
  * The receipt attaches on this same sheet and never blocks the save.
  *
@@ -58,7 +59,6 @@ export default function MoneyEntrySheet({
   categories,
   purposeLabel,
   purposePlaceholder,
-  locations,
   locationLabelFor,
   locationPlaceholderFor,
   people,
@@ -79,8 +79,6 @@ export default function MoneyEntrySheet({
   /** Personal spends: the purpose field's label (shown for detailKind). */
   purposeLabel?: string;
   purposePlaceholder?: string;
-  /** Recent locations/sources from this ledger's history — one-tap chips. */
-  locations: string[];
   locationLabelFor: (kind: string) => string;
   locationPlaceholderFor?: (kind: string) => string;
   /** House card: the home's Individuals (picker shows only on demand). */
@@ -250,25 +248,6 @@ export default function MoneyEntrySheet({
                 onChange={(event) => set({ location: event.target.value })}
               />
             </label>
-            {locations.length > 0 && (
-              <div className="mq-chips" aria-label="Recent locations">
-                {locations.map((location) => (
-                  <button
-                    key={location}
-                    type="button"
-                    className={
-                      values.location === location
-                        ? "msh-chip-button mq-chip-on"
-                        : "msh-chip-button"
-                    }
-                    aria-pressed={values.location === location}
-                    onClick={() => set({ location })}
-                  >
-                    {location}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           <button

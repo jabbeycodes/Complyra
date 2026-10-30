@@ -4,7 +4,7 @@
  *
  * The patterns come from the expense-tracker UX research (2026-10-30):
  * amount-first entry, a stable category grid ordered by recent use,
- * recent-location chips, a Today timeline with the running balance on
+ * a free-typed location, a Today timeline with the running balance on
  * every row, and corrections as a plainly labeled Void — never a
  * delete. Everything here is presentation logic over the SAME ledger
  * modules the desktop panels use (data/houseCard, data/personalSpending);
