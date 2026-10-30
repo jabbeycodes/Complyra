@@ -32,6 +32,7 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
     "quickLog",
     "messages",
     "timeClock",
+    "myHub",
     "myTasks",
     "individuals",
     "checklists",
@@ -193,15 +194,40 @@ test("tile order is daily-driver order, medications first", () => {
       "messages",
       "scheduling",
       "timeClock",
+      "myHub",
       "myTasks",
       "individuals",
       "appointments",
       "checklists",
       "houseCard",
+      "reports",
+      "qaReview",
     ],
   );
   for (const tile of tiles) {
     assert.ok(tile.label.length > 0);
     assert.ok(tile.hint.length > 0);
   }
+});
+
+test("phase 4b tiles follow their desktop gates exactly", () => {
+  // My Hub rides hub.access, like the Time Clock tile.
+  assert.ok(!ids(ctx({ roleKey: "dsp", permissions: {} })).includes("myHub"));
+  assert.ok(
+    ids(ctx({ roleKey: "dsp", permissions: { "hub.access": true } })).includes("myHub"),
+  );
+  // Report Library and QA Review render only when the desktop page
+  // gate admits the role — no page access, no tile.
+  const noPages = ids(ctx({ roleKey: "house_manager", permissions: {} }));
+  assert.ok(!noPages.includes("reports"));
+  assert.ok(!noPages.includes("qaReview"));
+  const withPages = ids(
+    ctx({
+      roleKey: "house_manager",
+      permissions: {},
+      canPage: (page) => page === "Report Library" || page === "QA Review",
+    }),
+  );
+  assert.ok(withPages.includes("reports"));
+  assert.ok(withPages.includes("qaReview"));
 });

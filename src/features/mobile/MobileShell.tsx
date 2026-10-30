@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BadgeCheck,
   Bell,
+  Briefcase,
   CalendarDays,
   ChevronDown,
   ClipboardList,
   Clock,
   HeartPulse,
+  LibraryBig,
   ListChecks,
   ListTodo,
   LogOut,
@@ -49,6 +52,9 @@ import MobilePersonalSpending from "./MobilePersonalSpending";
 import MobileCarePlans from "./MobileCarePlans";
 import MobileConsents from "./MobileConsents";
 import MobileLifeEvents from "./MobileLifeEvents";
+import MobileHub from "./MobileHub";
+import MobileReports from "./MobileReports";
+import MobileQaReview from "./MobileQaReview";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
 import "./mobile.css";
@@ -70,6 +76,9 @@ export type ShellView =
   | "careplans"
   | "consents"
   | "lifeevents"
+  | "hub"
+  | "reports"
+  | "qa"
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
@@ -80,11 +89,14 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   messages: MessageSquare,
   scheduling: CalendarDays,
   timeClock: Clock,
+  myHub: Briefcase,
   myTasks: ListTodo,
   individuals: Users,
   appointments: CalendarDays,
   checklists: ListChecks,
   houseCard: Wallet,
+  reports: LibraryBig,
+  qaReview: BadgeCheck,
 };
 
 const VIEW_TITLES: Partial<Record<ShellView, string>> = {
@@ -103,6 +115,9 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   careplans: "Care plans",
   consents: "Consents",
   lifeevents: "Life events",
+  hub: "My Hub",
+  reports: "Report Library",
+  qa: "QA Review",
   notifications: "Notifications",
 };
 
@@ -347,6 +362,15 @@ export default function MobileShell({
       case "timeClock":
         nav.openPage("Employee Hub");
         break;
+      case "myHub":
+        setView("hub");
+        break;
+      case "reports":
+        setView("reports");
+        break;
+      case "qaReview":
+        setView("qa");
+        break;
       case "myTasks":
         setView("tasks");
         break;
@@ -414,6 +438,9 @@ export default function MobileShell({
     view === "health" ||
     view === "quicklog" ||
     view === "scheduling" ||
+    view === "hub" ||
+    view === "reports" ||
+    view === "qa" ||
     (view === "messages" && !messagesInThread) ||
     (view === "isp" && !ispFormActive);
 
@@ -870,6 +897,27 @@ export default function MobileShell({
               />
             );
           })()}
+
+        {view === "hub" && (
+          <MobileHub
+            api={api}
+            session={session}
+            onOpenFullHub={() => nav.openPage("Employee Hub")}
+          />
+        )}
+
+        {view === "reports" && (
+          <MobileReports api={api} session={session} workspace={workspace} />
+        )}
+
+        {view === "qa" && scopedSite && (
+          <MobileQaReview
+            api={api}
+            session={session}
+            siteId={scopedSite.id}
+            siteName={scopedSite.name}
+          />
+        )}
 
         {view === "tasks" && (
           <div>
