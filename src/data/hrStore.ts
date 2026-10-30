@@ -71,6 +71,16 @@ import type {
   ShiftSwapStatus,
 } from "./hr";
 import { DEFAULT_PUNCH_RULES } from "./hr";
+import {
+  DEFAULT_BINDER_TEMPLATE,
+  validateBinderDocumentFile,
+  validateEmergencyContact,
+  type BinderDocument,
+  type BinderTemplate,
+  type EmergencyContactInput,
+  type StaffBinder,
+  type StaffEmergencyContact,
+} from "./newHireBinder";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
 
 /* ------------------------------ input types ------------------------------ */
@@ -99,6 +109,17 @@ export type HrStaffingPatternInput = Omit<
   HrStaffingPattern,
   "id" | "agencyId" | "staffName" | "individualName" | "siteName"
 >;
+
+/** Upload a wallet file for one binder "document" item (NEW-HIRE-BINDER). */
+export interface BinderDocumentUploadInput {
+  staffId: string;
+  itemKey: string;
+  file: File;
+  /** "Obtained on" date for dated pulls (MVR); omit for other items. */
+  obtainedOn?: string | null;
+  /** Display name of the person uploading (self or HR on their behalf). */
+  uploaderName: string;
+}
 
 /* ------------------------- kiosk time clock (Worker 3) ---------------------- */
 /*
@@ -471,6 +492,27 @@ export interface HrStore {
       >
     >,
   ): Promise<HrPunchRules>;
+  /* New Hire Binder (2026-10-30) */
+  /** The agency's binder template; the seeded default when none is saved. */
+  getBinderTemplate(): Promise<BinderTemplate>;
+  /** A staff member's binder, created from the template on first read. */
+  getBinder(staffId: string): Promise<StaffBinder>;
+  /** Wallet documents filed against a staff member's binder. */
+  listBinderDocuments(staffId: string): Promise<BinderDocument[]>;
+  /** Upload (or replace) the wallet file for one document item. A fresh
+   *  upload always lands as "on_file" awaiting verification. */
+  uploadBinderDocument(input: BinderDocumentUploadInput): Promise<BinderDocument>;
+  /** HR verification: stamps the verifier + time. */
+  verifyBinderDocument(documentId: string, verifierName: string): Promise<BinderDocument>;
+  /** HR sends a document back with a note; the file must be re-uploaded. */
+  returnBinderDocument(documentId: string, note: string): Promise<BinderDocument>;
+  /** A viewable URL for a wallet file (signed URL hosted; data URL local). */
+  getBinderDocumentFileUrl(documentId: string): Promise<string | null>;
+  getEmergencyContact(staffId: string): Promise<StaffEmergencyContact | null>;
+  saveEmergencyContact(
+    staffId: string,
+    input: EmergencyContactInput,
+  ): Promise<StaffEmergencyContact>;
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -480,6 +522,23 @@ function newId(): string {
     return crypto.randomUUID();
   }
   return `hr-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+}
+
+/** Read a wallet file into a data URL for the local store; null when the
+ *  runtime cannot (metadata still records — the demo seed does the same). */
+async function fileToDataUrl(file: File): Promise<string | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return `data:${file.type || "application/octet-stream"};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
 }
 
 function nowIso(): string {
@@ -598,6 +657,60 @@ function mapAck(r: Record<string, unknown>): HrDocumentAck {
     staffId: String(r.staff_id),
     ackedAt: String(r.acked_at),
     signatureName: String(r.signature_name ?? ""),
+  };
+}
+
+/* --------------------- New Hire Binder mappers ---------------------- */
+
+function mapBinder(r: Record<string, unknown>): StaffBinder {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    sections: (r.sections ?? []) as StaffBinder["sections"],
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapBinderDocument(r: Record<string, unknown>): BinderDocument {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    binderId: String(r.binder_id),
+    staffId: String(r.staff_id),
+    itemKey: String(r.item_key),
+    fileName: String(r.file_name ?? ""),
+    fileSize: Number(r.file_size ?? 0),
+    mimeType: String(r.mime_type ?? ""),
+    storagePath: r.storage_path == null ? null : String(r.storage_path),
+    dataUrl: null,
+    obtainedOn: r.obtained_on == null ? null : String(r.obtained_on),
+    status: (r.status as BinderDocument["status"]) ?? "on_file",
+    uploadedBy: String(r.uploaded_by),
+    uploadedByName: String(r.uploaded_by_name ?? ""),
+    uploadedAt: String(r.uploaded_at),
+    verifiedBy: r.verified_by == null ? null : String(r.verified_by),
+    verifiedByName: r.verified_by_name == null ? null : String(r.verified_by_name),
+    verifiedAt: r.verified_at == null ? null : String(r.verified_at),
+    returnNote: r.return_note == null ? null : String(r.return_note),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  };
+}
+
+function mapEmergencyContact(r: Record<string, unknown>): StaffEmergencyContact {
+  return {
+    id: String(r.id),
+    agencyId: String(r.agency_id),
+    staffId: String(r.staff_id),
+    contactName: String(r.contact_name ?? ""),
+    relationship: String(r.relationship ?? ""),
+    phone: String(r.phone ?? ""),
+    alternatePhone: r.alternate_phone == null ? null : String(r.alternate_phone),
+    updatedBy: String(r.updated_by),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
   };
 }
 
@@ -1439,6 +1552,218 @@ class SupabaseHrStore implements HrStore {
     const { data, error } = await q;
     throwIf(error, "Could not load document acknowledgments");
     return (data ?? []).map(mapAck);
+  }
+
+  /* ------------------------- New Hire Binder ------------------------- */
+
+  async getBinderTemplate(): Promise<BinderTemplate> {
+    const { data, error } = await this.client
+      .from("hr_binder_templates")
+      .select("template")
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    if (error) throwIf(error, "Could not load the binder template");
+    const template = (data as Record<string, unknown> | null)?.template;
+    return (template as BinderTemplate) ?? DEFAULT_BINDER_TEMPLATE;
+  }
+
+  async getBinder(staffId: string): Promise<StaffBinder> {
+    const { data, error } = await this.client
+      .from("hr_binders")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .maybeSingle();
+    throwIf(error, "Could not load the binder");
+    if (data) return mapBinder(data as Record<string, unknown>);
+    const template = await this.getBinderTemplate();
+    const { data: created, error: insertError } = await this.client
+      .from("hr_binders")
+      .insert({
+        agency_id: this.agencyId,
+        staff_id: staffId,
+        sections: template.sections,
+      })
+      .select()
+      .single();
+    throwIf(insertError, "Could not open the binder");
+    return mapBinder(created as Record<string, unknown>);
+  }
+
+  async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {
+    const { data, error } = await this.client
+      .from("hr_binder_documents")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .order("uploaded_at", { ascending: true });
+    throwIf(error, "Could not load binder documents");
+    return (data ?? []).map(mapBinderDocument);
+  }
+
+  async uploadBinderDocument(input: BinderDocumentUploadInput): Promise<BinderDocument> {
+    validateBinderDocumentFile(input.file);
+    const binder = await this.getBinder(input.staffId);
+    const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "document.pdf";
+    const storagePath = `agency/${this.agencyId}/binder/${input.staffId}/${input.itemKey}/${safeName}`;
+    const { error: uploadError } = await this.client.storage
+      .from("binder-documents")
+      .upload(storagePath, input.file, {
+        contentType: input.file.type || "application/pdf",
+        upsert: true,
+      });
+    if (uploadError) {
+      throw new Error(uploadError.message || "Could not store the document file.");
+    }
+    const row = {
+      agency_id: this.agencyId,
+      binder_id: binder.id,
+      staff_id: input.staffId,
+      item_key: input.itemKey,
+      file_name: input.file.name,
+      file_size: input.file.size,
+      mime_type: input.file.type || "application/octet-stream",
+      storage_path: storagePath,
+      obtained_on: input.obtainedOn ?? null,
+      status: "on_file",
+      uploaded_by: this.userId,
+      uploaded_by_name: input.uploaderName,
+      uploaded_at: nowIso(),
+      verified_by: null,
+      verified_by_name: null,
+      verified_at: null,
+      return_note: null,
+    };
+    const { data: existing } = await this.client
+      .from("hr_binder_documents")
+      .select("id")
+      .eq("binder_id", binder.id)
+      .eq("item_key", input.itemKey)
+      .maybeSingle();
+    if (existing) {
+      const { data, error } = await this.client
+        .from("hr_binder_documents")
+        .update(row)
+        .eq("id", String((existing as Record<string, unknown>).id))
+        .select()
+        .single();
+      throwIf(error, "Could not save the document");
+      return mapBinderDocument(data as Record<string, unknown>);
+    }
+    const { data, error } = await this.client
+      .from("hr_binder_documents")
+      .insert(row)
+      .select()
+      .single();
+    throwIf(error, "Could not save the document");
+    return mapBinderDocument(data as Record<string, unknown>);
+  }
+
+  async verifyBinderDocument(
+    documentId: string,
+    verifierName: string,
+  ): Promise<BinderDocument> {
+    const { data, error } = await this.client
+      .from("hr_binder_documents")
+      .update({
+        status: "verified",
+        verified_by: this.userId,
+        verified_by_name: verifierName,
+        verified_at: nowIso(),
+        return_note: null,
+      })
+      .eq("id", documentId)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not verify the document");
+    return mapBinderDocument(data as Record<string, unknown>);
+  }
+
+  async returnBinderDocument(documentId: string, note: string): Promise<BinderDocument> {
+    const trimmed = note.trim();
+    if (!trimmed) throw new Error("Say what needs fixing before sending a document back.");
+    const { data, error } = await this.client
+      .from("hr_binder_documents")
+      .update({
+        status: "returned",
+        return_note: trimmed,
+        verified_by: null,
+        verified_by_name: null,
+        verified_at: null,
+      })
+      .eq("id", documentId)
+      .eq("agency_id", this.agencyId)
+      .select()
+      .single();
+    throwIf(error, "Could not send the document back");
+    return mapBinderDocument(data as Record<string, unknown>);
+  }
+
+  async getBinderDocumentFileUrl(documentId: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("hr_binder_documents")
+      .select("storage_path")
+      .eq("id", documentId)
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const path = (data as Record<string, unknown>).storage_path;
+    if (!path) return null;
+    const { data: signed } = await this.client.storage
+      .from("binder-documents")
+      .createSignedUrl(String(path), 3600);
+    return signed?.signedUrl ?? null;
+  }
+
+  async getEmergencyContact(staffId: string): Promise<StaffEmergencyContact | null> {
+    const { data, error } = await this.client
+      .from("hr_emergency_contacts")
+      .select("*")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .maybeSingle();
+    throwIf(error, "Could not load the emergency contact");
+    return data ? mapEmergencyContact(data as Record<string, unknown>) : null;
+  }
+
+  async saveEmergencyContact(
+    staffId: string,
+    input: EmergencyContactInput,
+  ): Promise<StaffEmergencyContact> {
+    validateEmergencyContact(input);
+    const row = {
+      agency_id: this.agencyId,
+      staff_id: staffId,
+      contact_name: input.contactName.trim(),
+      relationship: input.relationship.trim(),
+      phone: input.phone.trim(),
+      alternate_phone: input.alternatePhone?.trim() ? input.alternatePhone.trim() : null,
+      updated_by: this.userId,
+    };
+    const { data: existing } = await this.client
+      .from("hr_emergency_contacts")
+      .select("id")
+      .eq("agency_id", this.agencyId)
+      .eq("staff_id", staffId)
+      .maybeSingle();
+    if (existing) {
+      const { data, error } = await this.client
+        .from("hr_emergency_contacts")
+        .update(row)
+        .eq("id", String((existing as Record<string, unknown>).id))
+        .select()
+        .single();
+      throwIf(error, "Could not save the emergency contact");
+      return mapEmergencyContact(data as Record<string, unknown>);
+    }
+    const { data, error } = await this.client
+      .from("hr_emergency_contacts")
+      .insert(row)
+      .select()
+      .single();
+    throwIf(error, "Could not save the emergency contact");
+    return mapEmergencyContact(data as Record<string, unknown>);
   }
 
   /** Day rows for a set of requests, grouped by request id. */
@@ -3031,6 +3356,17 @@ interface LocalBucket {
   kioskTestSeeded?: boolean;
   /* hub.remote_punch grants: active + revoked rows (revocation is soft). */
   remoteGrants: LocalGrantRow[];
+  /* NEW-HIRE-BINDER: agency template override (null = seeded default),
+   * per-staff binder snapshots by staff id, wallet documents, and
+   * emergency contacts by staff id. Reads merge across this agency's
+   * buckets (an upload saved in the staff member's own session must show
+   * in HR's), newest updatedAt wins — the agencyShifts pattern. */
+  binderTemplate: BinderTemplate | null;
+  binders: Record<string, StaffBinder>;
+  binderDocuments: BinderDocument[];
+  emergencyContacts: Record<string, StaffEmergencyContact>;
+  /** True once the Evergreen demo binder seed has been written. */
+  demoBinderSeeded?: boolean;
 }
 
 /** Local hub.remote_punch grant row (mirrors hr_staff_permission_grants). */
@@ -3081,6 +3417,10 @@ function emptyBucket(): LocalBucket {
     punchRules: null,
     remoteGrants: [],
     evidence: {},
+    binderTemplate: null,
+    binders: {},
+    binderDocuments: [],
+    emergencyContacts: {},
   };
 }
 
@@ -3564,6 +3904,205 @@ function seedDemoReadinessData(): {
   return { requirements, evidence };
 }
 
+/* --------------------- demo new-hire-binder seed (local) ------------------ */
+/* Fictional binder content for the Evergreen demo agency: the HR policy
+ * documents the binder's acknowledgment items read (with every demo staff
+ * member's signature), one binder per staff member snapshotted from the
+ * default template, wallet documents in a believable spread of states,
+ * and emergency contacts. Names are the demo staff's own; phone numbers
+ * use the fictional 555 range. */
+
+const DEMO_STAFF_NAMES: Record<string, string> = {
+  [DEMO_STAFF_IDS.sarah]: "Sarah Mitchell",
+  [DEMO_STAFF_IDS.james]: "James Wilson",
+  [DEMO_STAFF_IDS.alex]: "Alex Morgan",
+  [DEMO_STAFF_IDS.taylor]: "Taylor Reed",
+  [DEMO_STAFF_IDS.jordan]: "Jordan Lee",
+  [DEMO_STAFF_IDS.casey]: "Casey Adams",
+  [DEMO_STAFF_IDS.cameron]: "Cameron Price",
+};
+
+const DEMO_POLICY_DOCS: Array<{ key: string; title: string }> = [
+  { key: "onboarding-packet", title: "Onboarding Packet" },
+  { key: "hipaa-107", title: "HIPAA 107" },
+  { key: "help-protocol-207", title: "HELP Protocol 207" },
+  { key: "abuse-neglect-200", title: "Abuse & Neglect 200" },
+  { key: "event-reporting-205", title: "Event Reporting 205" },
+  { key: "infection-control-210", title: "Infection Control 210" },
+  { key: "emergency-preparedness-204", title: "Emergency Preparedness 204" },
+  { key: "dress-code-203", title: "Dress Code 203" },
+  { key: "vehicle-use-agreement", title: "Vehicle Use Agreement" },
+  { key: "hcbs", title: "HCBS" },
+  { key: "individual-rights", title: "Individual Rights Cover Page" },
+  { key: "isp-acknowledgment", title: "ISP Acknowledgment" },
+];
+
+/** Wallet ("document") item keys from the default template, in order. */
+const DEMO_WALLET_ITEMS = [
+  "fcsr-record",
+  "background-authorization",
+  "fcsr-registration",
+  "ee01-voluntary-info",
+  "interview-packet",
+  "resume",
+  "mvr",
+  "direct-deposit",
+  "missouri-w4",
+  "federal-w4",
+  "offer-letter",
+  "job-description",
+  "benefits-enrollment",
+  "education-record",
+] as const;
+
+function seedDemoBinderData(): {
+  documents: HrDocument[];
+  acks: HrDocumentAck[];
+  binders: Record<string, StaffBinder>;
+  binderDocuments: BinderDocument[];
+  emergencyContacts: Record<string, StaffEmergencyContact>;
+  evidenceCerts: Record<string, ComplianceEvidence["certs"]>;
+} {
+  const agencyId = EVERGREEN_DEMO_AGENCY_ID;
+  const staffIds = Object.values(DEMO_STAFF_IDS);
+  const slugOf = (id: string) =>
+    Object.entries(DEMO_STAFF_IDS).find(([, v]) => v === id)?.[0] ?? id;
+
+  const documents: HrDocument[] = DEMO_POLICY_DOCS.map((doc) => ({
+    id: `doc-demo-policy-${doc.key}`,
+    agencyId,
+    title: doc.title,
+    category: "policy",
+    body: null,
+    fileUrl: null,
+    requiresAck: true,
+    active: true,
+  }));
+  const acks: HrDocumentAck[] = staffIds.flatMap((staffId, si) =>
+    DEMO_POLICY_DOCS.map((doc, di) => ({
+      id: `ack-demo-${slugOf(staffId)}-${doc.key}`,
+      docId: `doc-demo-policy-${doc.key}`,
+      staffId,
+      ackedAt: `${demoDayIso(-(20 + si * 3 + di))}T15:00:00.000Z`,
+      signatureName: DEMO_STAFF_NAMES[staffId],
+    })),
+  );
+
+  const binders: Record<string, StaffBinder> = {};
+  for (const staffId of staffIds) {
+    binders[staffId] = {
+      id: `binder-demo-${slugOf(staffId)}`,
+      agencyId,
+      staffId,
+      sections: JSON.parse(
+        JSON.stringify(DEFAULT_BINDER_TEMPLATE.sections),
+      ) as StaffBinder["sections"],
+      createdAt: `${demoDayIso(-45)}T09:00:00.000Z`,
+      updatedAt: `${demoDayIso(-2)}T09:00:00.000Z`,
+    };
+  }
+
+  // The spread: Sarah + James fully verified; Alex missing his FCSR
+  // registration; Jordan's direct deposit + resume still awaiting
+  // verification; Taylor missing her education record; Casey missing
+  // his MVR; Cameron complete on paper (his gap is the emergency
+  // contact below).
+  const missing: Record<string, string[]> = {
+    [DEMO_STAFF_IDS.alex]: ["fcsr-registration"],
+    [DEMO_STAFF_IDS.taylor]: ["education-record"],
+    [DEMO_STAFF_IDS.casey]: ["mvr"],
+  };
+  const awaiting: Record<string, string[]> = {
+    [DEMO_STAFF_IDS.jordan]: ["direct-deposit", "resume"],
+  };
+  const binderDocuments: BinderDocument[] = [];
+  for (const staffId of staffIds) {
+    const slug = slugOf(staffId);
+    const verifierId =
+      staffId === DEMO_STAFF_IDS.sarah ? DEMO_STAFF_IDS.james : DEMO_STAFF_IDS.sarah;
+    DEMO_WALLET_ITEMS.forEach((itemKey, ii) => {
+      if ((missing[staffId] ?? []).includes(itemKey)) return;
+      const uploadedAt = `${demoDayIso(-(28 - ii))}T10:00:00.000Z`;
+      const onFile = (awaiting[staffId] ?? []).includes(itemKey);
+      binderDocuments.push({
+        id: `binderdoc-demo-${slug}-${itemKey}`,
+        agencyId,
+        binderId: `binder-demo-${slug}`,
+        staffId,
+        itemKey,
+        fileName: `${itemKey}.pdf`,
+        fileSize: 84_000 + ii * 3_100,
+        mimeType: "application/pdf",
+        storagePath: null,
+        dataUrl: null,
+        obtainedOn:
+          itemKey === "mvr" ? demoDayIso(-26) : null,
+        status: onFile ? "on_file" : "verified",
+        uploadedBy: staffId,
+        uploadedByName: DEMO_STAFF_NAMES[staffId],
+        uploadedAt,
+        verifiedBy: onFile ? null : verifierId,
+        verifiedByName: onFile ? null : DEMO_STAFF_NAMES[verifierId],
+        verifiedAt: onFile ? null : `${demoDayIso(-(26 - ii))}T11:00:00.000Z`,
+        returnNote: null,
+        createdAt: uploadedAt,
+        updatedAt: uploadedAt,
+      });
+    });
+  }
+
+  const contactNames: Record<string, [string, string]> = {
+    [DEMO_STAFF_IDS.sarah]: ["Daniel Mitchell", "Spouse"],
+    [DEMO_STAFF_IDS.james]: ["Renee Wilson", "Spouse"],
+    [DEMO_STAFF_IDS.alex]: ["Marcus Morgan", "Brother"],
+    [DEMO_STAFF_IDS.taylor]: ["Priya Reed", "Sister"],
+    [DEMO_STAFF_IDS.jordan]: ["Sam Lee", "Father"],
+    [DEMO_STAFF_IDS.casey]: ["Jamie Adams", "Partner"],
+  };
+  const emergencyContacts: Record<string, StaffEmergencyContact> = {};
+  staffIds.forEach((staffId, i) => {
+    const entry = contactNames[staffId];
+    if (!entry) return; // Cameron: no contact on file — his one binder gap.
+    emergencyContacts[staffId] = {
+      id: `emergency-demo-${slugOf(staffId)}`,
+      agencyId,
+      staffId,
+      contactName: entry[0],
+      relationship: entry[1],
+      phone: `573-555-014${i}`,
+      alternatePhone: null,
+      updatedBy: staffId,
+      createdAt: `${demoDayIso(-40)}T09:00:00.000Z`,
+      updatedAt: `${demoDayIso(-40)}T09:00:00.000Z`,
+    };
+  });
+
+  // Certificate evidence for the binder's linked items the readiness
+  // seed doesn't carry (L1MA, insulin, CPI, Relias driving). Everyone is
+  // current; Sarah (administrator) also gains the driver's license her
+  // readiness set doesn't require but her binder lists.
+  const evidenceCerts: Record<string, ComplianceEvidence["certs"]> = {};
+  for (const staffId of staffIds) {
+    evidenceCerts[staffId] = [
+      { key: "L1MA", name: "Level 1 Medication Aide (L1MA)", expiresOn: demoDayIso(500) },
+      { key: "Insulin", name: "Insulin Administration", expiresOn: demoDayIso(450) },
+      { key: "CPI", name: "Crisis Prevention (CPI)", expiresOn: demoDayIso(380) },
+      {
+        key: "Relias Driving",
+        name: "Relias Driving Certificate",
+        expiresOn: demoDayIso(300),
+      },
+    ];
+  }
+  evidenceCerts[DEMO_STAFF_IDS.sarah].push({
+    key: "Driver's License",
+    name: "Driver's License",
+    expiresOn: demoDayIso(600),
+  });
+
+  return { documents, acks, binders, binderDocuments, emergencyContacts, evidenceCerts };
+}
+
 type LocalRoot = Record<string, Record<string, LocalBucket>>;
 
 class LocalHrStore implements HrStore {
@@ -3610,6 +4149,12 @@ class LocalHrStore implements HrStore {
         if (!Array.isArray(bucket.timeOffEvents)) bucket.timeOffEvents = [];
         // Buckets written before compliance evidence existed have no evidence map.
         if (!bucket.evidence || typeof bucket.evidence !== "object") bucket.evidence = {};
+        // Buckets written before the New Hire Binder existed have no binder data.
+        if (bucket.binderTemplate === undefined) bucket.binderTemplate = null;
+        if (!bucket.binders || typeof bucket.binders !== "object") bucket.binders = {};
+        if (!Array.isArray(bucket.binderDocuments)) bucket.binderDocuments = [];
+        if (!bucket.emergencyContacts || typeof bucket.emergencyContacts !== "object")
+          bucket.emergencyContacts = {};
         this.memory = bucket;
       } catch {
         this.memory = emptyBucket();
@@ -3657,6 +4202,38 @@ class LocalHrStore implements HrStore {
       this.memory.requirements.push(...demo.requirements);
       this.memory.evidence = { ...this.memory.evidence, ...demo.evidence };
       this.memory.demoReadinessSeeded = true;
+      this.save(this.memory);
+    }
+    // One-time fictional New Hire Binder seed for the Evergreen demo
+    // agency: the policy documents + signatures the binder's
+    // acknowledgment items read, one binder per demo staff member, a
+    // believable spread of wallet documents (Jordan has two awaiting
+    // verification; Alex is missing his FCSR registration; Taylor her
+    // education record; Casey his MVR; Cameron his emergency contact),
+    // written into every demo bucket like the readiness seed.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoBinderSeeded
+    ) {
+      const demo = seedDemoBinderData();
+      this.memory.documents.push(...demo.documents);
+      this.memory.acks.push(...demo.acks);
+      for (const [staffId, certs] of Object.entries(demo.evidenceCerts)) {
+        const ev = (this.memory.evidence[staffId] ??= {
+          certs: [],
+          trainings: [],
+          delegations: [],
+          docAcks: [],
+        });
+        ev.certs = [...ev.certs, ...certs];
+      }
+      this.memory.binders = { ...demo.binders, ...this.memory.binders };
+      this.memory.binderDocuments.push(...demo.binderDocuments);
+      this.memory.emergencyContacts = {
+        ...demo.emergencyContacts,
+        ...this.memory.emergencyContacts,
+      };
+      this.memory.demoBinderSeeded = true;
       this.save(this.memory);
     }
     return this.memory;
@@ -4021,6 +4598,213 @@ class LocalHrStore implements HrStore {
     return this.load()
       .acks.filter((a) => !docId || a.docId === docId)
       .sort((a, b) => (a.ackedAt < b.ackedAt ? 1 : -1));
+  }
+
+  /* ------------------------- New Hire Binder ------------------------- */
+  /* Binder state is keyed by the SUBJECT staff member, but the store
+   * instance belongs to the signed-in user — so reads merge every bucket
+   * of this agency (the agencyShifts pattern), newest updatedAt wins,
+   * and writes upsert into the caller's own bucket. */
+
+  private allAgencyBuckets(): LocalBucket[] {
+    const buckets: LocalBucket[] = [];
+    if (this.storageAvailable()) {
+      try {
+        const raw = localStorage.getItem(LOCAL_KEY);
+        const root = (raw ? JSON.parse(raw) : {}) as LocalRoot;
+        for (const bucket of Object.values(root[this.agencyId] ?? {})) {
+          if (bucket && typeof bucket === "object") buckets.push(bucket);
+        }
+      } catch {
+        // Keep just the signed-in person's bucket.
+      }
+    }
+    buckets.push(this.load());
+    return buckets;
+  }
+
+  private mergedBinders(): Record<string, StaffBinder> {
+    const out: Record<string, StaffBinder> = {};
+    for (const bucket of this.allAgencyBuckets()) {
+      for (const binder of Object.values(bucket.binders ?? {})) {
+        const prev = out[binder.staffId];
+        if (!prev || binder.updatedAt >= prev.updatedAt) out[binder.staffId] = binder;
+      }
+    }
+    return out;
+  }
+
+  private mergedBinderDocuments(): BinderDocument[] {
+    const byId = new Map<string, BinderDocument>();
+    for (const bucket of this.allAgencyBuckets()) {
+      for (const doc of bucket.binderDocuments ?? []) {
+        const prev = byId.get(doc.id);
+        if (!prev || doc.updatedAt >= prev.updatedAt) byId.set(doc.id, doc);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  private mergedEmergencyContacts(): Record<string, StaffEmergencyContact> {
+    const out: Record<string, StaffEmergencyContact> = {};
+    for (const bucket of this.allAgencyBuckets()) {
+      for (const contact of Object.values(bucket.emergencyContacts ?? {})) {
+        const prev = out[contact.staffId];
+        if (!prev || contact.updatedAt >= prev.updatedAt) out[contact.staffId] = contact;
+      }
+    }
+    return out;
+  }
+
+  async getBinderTemplate(): Promise<BinderTemplate> {
+    for (const bucket of this.allAgencyBuckets()) {
+      if (bucket.binderTemplate) return bucket.binderTemplate;
+    }
+    return DEFAULT_BINDER_TEMPLATE;
+  }
+
+  async getBinder(staffId: string): Promise<StaffBinder> {
+    const existing = this.mergedBinders()[staffId];
+    if (existing) return existing;
+    const template = await this.getBinderTemplate();
+    const now = nowIso();
+    const binder: StaffBinder = {
+      id: newId(),
+      agencyId: this.agencyId,
+      staffId,
+      sections: JSON.parse(JSON.stringify(template.sections)) as StaffBinder["sections"],
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.mutate((b) => {
+      b.binders[staffId] = binder;
+    });
+    return binder;
+  }
+
+  async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {
+    return this.mergedBinderDocuments()
+      .filter((d) => d.staffId === staffId && d.agencyId === this.agencyId)
+      .sort((a, b) => (a.uploadedAt < b.uploadedAt ? -1 : 1));
+  }
+
+  async uploadBinderDocument(input: BinderDocumentUploadInput): Promise<BinderDocument> {
+    validateBinderDocumentFile(input.file);
+    const binder = await this.getBinder(input.staffId);
+    const dataUrl = await fileToDataUrl(input.file);
+    const now = nowIso();
+    const existing = this.mergedBinderDocuments().find(
+      (d) => d.binderId === binder.id && d.itemKey === input.itemKey,
+    );
+    const doc: BinderDocument = {
+      id: existing?.id ?? newId(),
+      agencyId: this.agencyId,
+      binderId: binder.id,
+      staffId: input.staffId,
+      itemKey: input.itemKey,
+      fileName: input.file.name,
+      fileSize: input.file.size,
+      mimeType: input.file.type || "application/octet-stream",
+      storagePath: null,
+      dataUrl,
+      obtainedOn: input.obtainedOn ?? null,
+      status: "on_file",
+      uploadedBy: this.userId,
+      uploadedByName: input.uploaderName,
+      uploadedAt: now,
+      verifiedBy: null,
+      verifiedByName: null,
+      verifiedAt: null,
+      returnNote: null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.mutate((b) => {
+      const idx = b.binderDocuments.findIndex((d) => d.id === doc.id);
+      if (idx >= 0) b.binderDocuments[idx] = doc;
+      else b.binderDocuments.push(doc);
+    });
+    return doc;
+  }
+
+  async verifyBinderDocument(
+    documentId: string,
+    verifierName: string,
+  ): Promise<BinderDocument> {
+    const doc = this.mergedBinderDocuments().find((d) => d.id === documentId);
+    if (!doc) throw new Error("Document not found.");
+    const now = nowIso();
+    const updated: BinderDocument = {
+      ...doc,
+      status: "verified",
+      verifiedBy: this.userId,
+      verifiedByName: verifierName,
+      verifiedAt: now,
+      returnNote: null,
+      updatedAt: now,
+    };
+    this.mutate((b) => {
+      const idx = b.binderDocuments.findIndex((d) => d.id === documentId);
+      if (idx >= 0) b.binderDocuments[idx] = updated;
+      else b.binderDocuments.push(updated);
+    });
+    return updated;
+  }
+
+  async returnBinderDocument(documentId: string, note: string): Promise<BinderDocument> {
+    const trimmed = note.trim();
+    if (!trimmed) throw new Error("Say what needs fixing before sending a document back.");
+    const doc = this.mergedBinderDocuments().find((d) => d.id === documentId);
+    if (!doc) throw new Error("Document not found.");
+    const updated: BinderDocument = {
+      ...doc,
+      status: "returned",
+      returnNote: trimmed,
+      verifiedBy: null,
+      verifiedByName: null,
+      verifiedAt: null,
+      updatedAt: nowIso(),
+    };
+    this.mutate((b) => {
+      const idx = b.binderDocuments.findIndex((d) => d.id === documentId);
+      if (idx >= 0) b.binderDocuments[idx] = updated;
+      else b.binderDocuments.push(updated);
+    });
+    return updated;
+  }
+
+  async getBinderDocumentFileUrl(documentId: string): Promise<string | null> {
+    const doc = this.mergedBinderDocuments().find((d) => d.id === documentId);
+    return doc?.dataUrl ?? null;
+  }
+
+  async getEmergencyContact(staffId: string): Promise<StaffEmergencyContact | null> {
+    return this.mergedEmergencyContacts()[staffId] ?? null;
+  }
+
+  async saveEmergencyContact(
+    staffId: string,
+    input: EmergencyContactInput,
+  ): Promise<StaffEmergencyContact> {
+    validateEmergencyContact(input);
+    const existing = this.mergedEmergencyContacts()[staffId];
+    const now = nowIso();
+    const contact: StaffEmergencyContact = {
+      id: existing?.id ?? newId(),
+      agencyId: this.agencyId,
+      staffId,
+      contactName: input.contactName.trim(),
+      relationship: input.relationship.trim(),
+      phone: input.phone.trim(),
+      alternatePhone: input.alternatePhone?.trim() ? input.alternatePhone.trim() : null,
+      updatedBy: this.userId,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.mutate((b) => {
+      b.emergencyContacts[staffId] = contact;
+    });
+    return contact;
   }
 
   /** Fill the lifecycle fields onto a request row written before TIME-OFF. */

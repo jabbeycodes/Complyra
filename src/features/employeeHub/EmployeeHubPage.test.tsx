@@ -11,6 +11,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
+import { DEFAULT_BINDER_TEMPLATE } from "../../data/newHireBinder";
 import type { SessionUser } from "../../data/types";
 import type {
   ComplianceEvidence,
@@ -585,6 +586,39 @@ function makeStubStore(): HrStore {
       autoClockoutBufferMinutes: patch.autoClockoutBufferMinutes ?? 30,
       autoApprovalScoreThreshold: patch.autoApprovalScoreThreshold ?? 90,
       updatedBy: "user-pat",
+      updatedAt: new Date().toISOString(),
+    }),
+    getBinderTemplate: async () => DEFAULT_BINDER_TEMPLATE,
+    getBinder: async (staffId) => ({
+      id: `binder-${staffId}`,
+      agencyId: "agency-1",
+      staffId,
+      sections: DEFAULT_BINDER_TEMPLATE.sections,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    listBinderDocuments: async () => [],
+    uploadBinderDocument: async () => {
+      throw new Error("not used in this test");
+    },
+    verifyBinderDocument: async () => {
+      throw new Error("not used in this test");
+    },
+    returnBinderDocument: async () => {
+      throw new Error("not used in this test");
+    },
+    getBinderDocumentFileUrl: async () => null,
+    getEmergencyContact: async () => null,
+    saveEmergencyContact: async (staffId, input) => ({
+      id: "emergency-1",
+      agencyId: "agency-1",
+      staffId,
+      contactName: input.contactName,
+      relationship: input.relationship,
+      phone: input.phone,
+      alternatePhone: input.alternatePhone ?? null,
+      updatedBy: "user-pat",
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
   };

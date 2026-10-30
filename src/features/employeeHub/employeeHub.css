@@ -911,3 +911,112 @@
     min-width: 0;
   }
 }
+
+/* --------------------------- New Hire Binder --------------------------- */
+
+.binder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 24px;
+  margin: 4px 0 18px;
+}
+
+.binder-percent {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.binder-percent strong {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--hub-ink, #2d2a26);
+}
+
+.binder-percent span {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.binder-awaiting {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.binder-subject {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.binder-subject select {
+  min-height: 38px;
+  font-size: 15px;
+}
+
+.binder-section {
+  margin-bottom: 22px;
+}
+
+.binder-section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.binder-section-count {
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.binder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.binder-upload {
+  cursor: pointer;
+}
+
+.binder-obtained {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.binder-obtained input {
+  min-height: 34px;
+}
+
+.binder-return-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.binder-return-form input {
+  flex: 1;
+  min-height: 36px;
+}
+
+@media (max-width: 860px) {
+  .binder-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .binder-section .hub-list-item {
+    flex-wrap: wrap;
+  }
+}

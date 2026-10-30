@@ -24,6 +24,7 @@ import {
   Clock,
   Download,
   FileText,
+  FolderCheck,
   FolderOpen,
   Lock,
   MonitorSmartphone,
@@ -118,6 +119,7 @@ import {
   StaffingConfigForm,
   StaffingPatternRow,
 } from "./StaffingBoard";
+import { BinderTab } from "../newHireBinder/BinderPanel";
 import { WhosHereNow } from "./WhosHereNow";
 import { PunchExceptions } from "./PunchExceptions";
 import { MissedPunchReview } from "./MissedPunchReview";
@@ -390,6 +392,7 @@ const EMPLOYEE_TABS: TabDef[] = [
   { id: "timeclock", label: "Time Clock", icon: Clock },
   { id: "timecard", label: "My Timecard", icon: FileText },
   { id: "compliance", label: "My Compliance", icon: ShieldCheck },
+  { id: "binder", label: "New Hire Binder", icon: FolderCheck },
   { id: "documents", label: "Documents", icon: FolderOpen },
   { id: "timeoff", label: "Time Off", icon: CalendarCheck },
 ];
@@ -595,6 +598,14 @@ export function EmployeeHubShell({
           <MyTimecardTab session={session} store={store} onChanged={refresh} />
         )}
         {tab === "compliance" && <MyComplianceTab session={session} store={store} />}
+        {tab === "binder" && (
+          <BinderTab
+            session={session}
+            store={store}
+            staffList={staffList}
+            onJumpToTab={(id) => setTab(id)}
+          />
+        )}
         {tab === "documents" && (
           <DocumentsTab
             session={session}
