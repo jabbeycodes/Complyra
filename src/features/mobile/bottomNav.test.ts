@@ -49,6 +49,6 @@ test("the More sheet carries the tiles the pill does not", () => {
   );
   assert.deepEqual(
     moreSheetTiles(tiles).map((tile) => tile.id),
-    ["ispData", "timeClock", "appointments", "checklists", "houseCard"],
+    ["ispData", "health", "timeClock", "appointments", "checklists", "houseCard"],
   );
 });
