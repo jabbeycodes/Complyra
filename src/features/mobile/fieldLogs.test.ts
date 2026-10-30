@@ -15,6 +15,7 @@ import {
   parseNotificationsText,
   personDayEntries,
   personalSpendingStatus,
+  shiftNotesTodayStatus,
 } from "./fieldLogs";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
 import type { MenuEntryView } from "../../data/menuRecords";
@@ -23,6 +24,10 @@ import type { HealthTrackEntry } from "../../data/healthTrack";
 import type { MileageTripView } from "../../data/types";
 import type { HouseCardEntryView } from "../../data/houseCard";
 import type { PersonalSpendingEntryView } from "../../data/personalSpending";
+import type {
+  IspProgramView,
+  ShiftNoteView,
+} from "../../data/shiftNotes";
 
 const FULL = {
   "mileage.manage": true,
@@ -37,6 +42,10 @@ test("field log access mirrors each desktop surface's gate", () => {
     [dsp.menu, dsp.mileage, dsp.drills, dsp.gerCreate, dsp.gerView, dsp.any],
     [true, true, true, true, true, true],
   );
+  // Shift notes follow canSeeShiftNotes / canEnterShiftNotes (the ISP
+  // Data role lists): a DSP views and writes — the note IS the ISP
+  // data collection, so one gate covers both names.
+  assert.deepEqual([dsp.notesView, dsp.notesRecord], [true, true]);
   // Health viewing follows canViewHealthTrack: individuals.view, never HR.
   assert.equal(dsp.healthView, true);
   // The money trackers follow their desktop role lists (canView /
@@ -51,6 +60,9 @@ test("field log access mirrors each desktop surface's gate", () => {
   assert.equal(nurse.menu, true);
   assert.equal(nurse.drills, true);
   assert.equal(nurse.healthView, true);
+  // Nurses are on both shift-note role lists (they enter notes on the
+  // desktop chart too).
+  assert.deepEqual([nurse.notesView, nurse.notesRecord], [true, true]);
   assert.deepEqual(
     [nurse.houseCardView, nurse.houseCardRecord, nurse.spendingView, nurse.spendingRecord],
     [false, false, false, false],
@@ -64,6 +76,8 @@ test("field log access mirrors each desktop surface's gate", () => {
   assert.equal(bare.gerCreate, false);
   assert.equal(bare.healthView, false);
   assert.equal(bare.any, true);
+  // The shift-note role lists need no permission keys either.
+  assert.deepEqual([bare.notesView, bare.notesRecord], [true, true]);
   // The money role lists need no permission keys either — a bare house
   // manager views and records both trackers, like the desktop gates.
   assert.deepEqual(
@@ -84,6 +98,10 @@ test("an auditor records in no domain, but the tile opens for health and GER rea
   assert.equal(auditor.healthView, true);
   assert.equal(auditor.gerView, true);
   assert.equal(auditor.any, true);
+  // Shift notes are a read surface for auditors under the platform
+  // rule (canSeeShiftNotes includes the role) — view, never write
+  // (canEnterShiftNotes excludes it).
+  assert.deepEqual([auditor.notesView, auditor.notesRecord], [true, false]);
   // The money trackers are read surfaces for auditors too — view both,
   // record in neither (the desktop role lists, verbatim).
   assert.deepEqual(
@@ -91,14 +109,19 @@ test("an auditor records in no domain, but the tile opens for health and GER rea
     [true, false, true, false],
   );
   // Without individuals.view the auditor loses the health and GER read
-  // rows — but the money rows are pure role-list gates (the desktop
-  // House Card page and chart card ask for no permission key), so the
-  // tile still opens on the two money read rows alone.
+  // rows — but the money rows and the shift-notes row are pure
+  // role-list gates (the desktop House Card page, chart card, and ISP
+  // surfaces ask for no permission key), so the tile still opens on
+  // those read rows alone.
   const bareAuditor = fieldLogAccess("auditor", {});
   assert.equal(bareAuditor.healthView, false);
   assert.equal(bareAuditor.gerView, false);
   assert.equal(bareAuditor.houseCardView, true);
   assert.equal(bareAuditor.spendingView, true);
+  assert.deepEqual(
+    [bareAuditor.notesView, bareAuditor.notesRecord],
+    [true, false],
+  );
   assert.equal(bareAuditor.any, true);
 });
 
@@ -111,6 +134,12 @@ test("a compliance admin reads both money trackers and records in neither", () =
   assert.deepEqual(
     [compliance.houseCardView, compliance.houseCardRecord, compliance.spendingView, compliance.spendingRecord],
     [true, false, true, false],
+  );
+  // Compliance admins also read shift notes (canSeeShiftNotes) and
+  // record none — same read-only shape as the money trackers.
+  assert.deepEqual(
+    [compliance.notesView, compliance.notesRecord],
+    [true, false],
   );
   assert.equal(compliance.menu, false);
   assert.equal(compliance.gerCreate, false);
@@ -132,6 +161,8 @@ test("HR records mileage only, and never reads GERs, health, or money", () => {
     [hr.houseCardView, hr.houseCardRecord, hr.spendingView, hr.spendingRecord],
     [false, false, false, false],
   );
+  // And on neither shift-note list (no clinical permissions).
+  assert.deepEqual([hr.notesView, hr.notesRecord], [false, false]);
 });
 
 function menuEntry(partial: Partial<MenuEntryView>): MenuEntryView {
@@ -515,4 +546,114 @@ test("personal spending status combines every Individual's balance", () => {
   assert.equal(none.totalCents, 0);
   assert.equal(none.personCount, 0);
   assert.equal(none.text, "No Individuals at this home");
+});
+
+function ispProgram(partial: Partial<IspProgramView>): IspProgramView {
+  return {
+    id: "prog1",
+    agencyId: "a1",
+    individualId: "p1",
+    planYear: "2026",
+    name: "2026 ISP — Daily living supports",
+    effectiveOn: "2026-01-01",
+    expiresOn: "2026-12-31",
+    schedule: "per_shift",
+    maxEntriesPerDay: 3,
+    scoringMethodId: "m1",
+    status: "approved",
+    approvedBy: "u9",
+    approvedByName: "Sarah Mitchell",
+    approvedAt: "2026-01-06T10:00:00.000Z",
+    createdBy: "u9",
+    createdByName: "Sarah Mitchell",
+    createdAt: "2026-01-05T15:30:00.000Z",
+    updatedAt: "2026-01-06T10:00:00.000Z",
+    tasks: [],
+    scoringMethod: null,
+    ...partial,
+  };
+}
+
+function shiftNote(partial: Partial<ShiftNoteView>): ShiftNoteView {
+  return {
+    id: "n1",
+    agencyId: "a1",
+    individualId: "p1",
+    programId: "prog1",
+    noteDate: "2026-10-30",
+    shift: "7a–3p",
+    summary: "Worked on the morning routine.",
+    timeSpentMinutes: 480,
+    staffUserId: "u1",
+    staffName: "Alex Morgan",
+    createdAt: "2026-10-30T20:00:00.000Z",
+    updatedAt: "2026-10-30T20:00:00.000Z",
+    deletedAt: null,
+    programName: "2026 ISP — Daily living supports",
+    scoringMethodName: "Daily ISP scoring",
+    scores: [],
+    ...partial,
+  };
+}
+
+test("shift notes status counts today's collections by the ISP rule", () => {
+  const people = [
+    { id: "p1", name: "Ellis Hart" },
+    { id: "p2", name: "Morgan Pruitt" },
+  ];
+  const programs = [
+    ispProgram({}),
+    // A draft program is no expectation (staff never collect on it).
+    ispProgram({ id: "prog2", individualId: "p2", status: "draft" }),
+    // An approved program outside its period is no expectation either.
+    ispProgram({
+      id: "prog3",
+      individualId: "p2",
+      effectiveOn: "2025-01-01",
+      expiresOn: "2025-12-31",
+    }),
+  ];
+  const before = shiftNotesTodayStatus(people, programs, [], "2026-10-30");
+  assert.equal(before.expectedCount, 1);
+  assert.equal(before.writtenCount, 0);
+  assert.equal(before.text, "0 of 1 shift notes written today");
+  // Yesterday's note does not satisfy today's collection.
+  const yesterday = shiftNotesTodayStatus(
+    people,
+    programs,
+    [shiftNote({ noteDate: "2026-10-29" })],
+    "2026-10-30",
+  );
+  assert.equal(yesterday.text, "0 of 1 shift notes written today");
+  // Today's note for the Individual + program IS the collection.
+  const after = shiftNotesTodayStatus(
+    people,
+    programs,
+    [shiftNote({})],
+    "2026-10-30",
+  );
+  assert.equal(after.writtenCount, 1);
+  assert.equal(after.expectedCount, 1);
+  assert.equal(after.text, "1 of 1 shift notes written today");
+});
+
+test("shift notes status falls back to the plain count with no active programs", () => {
+  const people = [{ id: "p1", name: "Ellis Hart" }];
+  assert.equal(
+    shiftNotesTodayStatus(people, [], [], "2026-10-30").text,
+    "No shift notes written today",
+  );
+  const status = shiftNotesTodayStatus(
+    people,
+    [],
+    [
+      shiftNote({ id: "a" }),
+      shiftNote({ id: "b", shift: "3p–11p" }),
+      shiftNote({ id: "c", noteDate: "2026-10-29" }),
+    ],
+    "2026-10-30",
+  );
+  assert.equal(status.expectedCount, 0);
+  assert.equal(status.notesToday, 2);
+  assert.equal(status.text, "2 shift notes written today");
 });

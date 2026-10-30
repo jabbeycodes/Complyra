@@ -1,8 +1,8 @@
 /**
- * Mobile Quick log — the field logs (health trackers, menu records,
- * mileage, drills, incident/GER reports) and the expenditure trackers
- * (house card, personal spending) as phone flows over the SAME stores
- * and API methods the desktop surfaces use.
+ * Mobile Quick log — the field logs (shift notes, health trackers,
+ * menu records, mileage, drills, incident/GER reports) and the
+ * expenditure trackers (house card, personal spending) as phone flows
+ * over the SAME stores and API methods the desktop surfaces use.
  *
  * This module is the pure half: who may record in each domain (computed
  * from the exact helpers and permission keys the desktop surfaces gate
@@ -20,11 +20,18 @@ import {
 } from "../../data/monthlyChecks";
 import {
   canEnterMenuEntries,
+  canEnterShiftNotes,
   canRecordHouseCard,
   canRecordPersonalSpending,
+  canSeeShiftNotes,
   canViewHouseCard,
   canViewPersonalSpending,
 } from "../../data/permissions";
+import { ispAccountabilityItems } from "../../data/shiftAccountability";
+import type {
+  IspProgramView,
+  ShiftNoteView,
+} from "../../data/shiftNotes";
 import {
   computeBalanceCents,
   formatCents,
@@ -50,6 +57,7 @@ import type { MileageTripView } from "../../data/types";
 import { todaysHealthEntryCount } from "./health";
 
 export type FieldLogDomain =
+  | "shiftnotes"
   | "menu"
   | "mileage"
   | "drills"
@@ -59,6 +67,17 @@ export type FieldLogDomain =
   | "spending";
 
 export interface FieldLogAccess {
+  /**
+   * Open the Shift notes flow (canSeeShiftNotes — the role list the
+   * ISP Data tile and both API layers gate shift notes on; auditors
+   * and compliance admins included, HR never). In ComplyRer's model
+   * the shift note IS the ISP data collection, so this one flag is
+   * the door for both. View-only roles (auditor, compliance_admin)
+   * read today's notes inside; writing follows notesRecord.
+   */
+  notesView: boolean;
+  /** Write shift notes (canEnterShiftNotes, the API's own gate). */
+  notesRecord: boolean;
   /** Record menu entries (the chart Menu section's entry gate). */
   menu: boolean;
   /** Log mileage trips (the mileage.manage permission the API asserts). */
@@ -104,8 +123,8 @@ export interface FieldLogAccess {
   spendingRecord: boolean;
   /**
    * The Quick log tile's gate: record in at least one domain, or view
-   * health, or view either money tracker — a view-only user gets the
-   * tile with the read rows their flags allow, nothing more.
+   * shift notes, health, or either money tracker — a view-only user
+   * gets the tile with the read tiles their flags allow, nothing more.
    */
   any: boolean;
 }
@@ -114,6 +133,8 @@ export function fieldLogAccess(
   roleKey: string,
   permissions: Record<string, boolean>,
 ): FieldLogAccess {
+  const notesView = canSeeShiftNotes(roleKey);
+  const notesRecord = canEnterShiftNotes(roleKey);
   const menu = canEnterMenuEntries(roleKey);
   const mileage = permissions["mileage.manage"] === true;
   const drills = canCompleteMonthly(roleKey);
@@ -127,6 +148,8 @@ export function fieldLogAccess(
   const spendingView = canViewPersonalSpending(roleKey);
   const spendingRecord = canRecordPersonalSpending(roleKey);
   return {
+    notesView,
+    notesRecord,
     menu,
     mileage,
     drills,
@@ -138,6 +161,7 @@ export function fieldLogAccess(
     spendingView,
     spendingRecord,
     any:
+      notesView ||
       menu ||
       mileage ||
       drills ||
@@ -354,6 +378,69 @@ export function healthTodayStatus(
       ? "No health entries logged today"
       : `${count} health ${count === 1 ? "entry" : "entries"} logged today`;
   return { count, text };
+}
+
+// ──────────────────────── Shift notes status ────────────────────────
+
+export interface ShiftNotesTodayStatus {
+  /** Due collections (Individual + active program) with a note today. */
+  writtenCount: number;
+  /** Due collections for today; 0 when no expectation derives. */
+  expectedCount: number;
+  /** Every note dated today across the home's Individuals. */
+  notesToday: number;
+  text: string;
+}
+
+/**
+ * The house's shift-note picture for today. The expected count is the
+ * accountability engine's own ISP rule (ispAccountabilityItems): one
+ * collection per Individual per ACTIVE program per Central service
+ * date, satisfied by that date's shift note — the note IS the ISP
+ * data, so a written collection and a written shift note are the same
+ * fact counted once, here. `programs` / `notes` are the flattened
+ * per-person getIspData reads the ISP flow itself uses; nothing is
+ * tallied a second way. When no program expectation derives (no
+ * active programs at the home), the line falls back to the plain
+ * count of today's notes.
+ */
+export function shiftNotesTodayStatus(
+  people: readonly { id: string; name: string }[],
+  programs: readonly IspProgramView[],
+  notes: readonly ShiftNoteView[],
+  todayIso: string,
+): ShiftNotesTodayStatus {
+  const items = ispAccountabilityItems({
+    people: people.map((person) => ({ id: person.id, name: person.name })),
+    programs: programs.map((program) => ({
+      id: program.id,
+      individualId: program.individualId,
+      name: program.name,
+      status: program.status,
+      effectiveOn: program.effectiveOn,
+      expiresOn: program.expiresOn,
+    })),
+    notes: notes.map((note) => ({
+      individualId: note.individualId,
+      programId: note.programId,
+      noteDate: note.noteDate,
+    })),
+    dates: [todayIso],
+  });
+  const writtenCount = items.filter((item) => item.done).length;
+  const expectedCount = items.length;
+  const notesToday = notes.filter(
+    (note) => note.noteDate.slice(0, 10) === todayIso,
+  ).length;
+  let text: string;
+  if (expectedCount > 0) {
+    text = `${writtenCount} of ${expectedCount} shift notes written today`;
+  } else if (notesToday === 0) {
+    text = "No shift notes written today";
+  } else {
+    text = `${notesToday} shift note${notesToday === 1 ? "" : "s"} written today`;
+  }
+  return { writtenCount, expectedCount, notesToday, text };
 }
 
 // ───────────────────────── House card status ─────────────────────────
