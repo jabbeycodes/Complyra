@@ -28,11 +28,14 @@ export type MobileTileId =
   | "messages"
   | "scheduling"
   | "timeClock"
+  | "myHub"
   | "myTasks"
   | "individuals"
   | "appointments"
   | "checklists"
-  | "houseCard";
+  | "houseCard"
+  | "reports"
+  | "qaReview";
 
 export interface MobileTile {
   id: MobileTileId;
@@ -129,6 +132,20 @@ const TILE_DEFS: {
     visible: (ctx) => ctx.permissions["hub.access"] === true,
   },
   {
+    // MY HUB (Phase 4b): the employee's self-service hub in the shell —
+    // my compliance detail, time off, my New Hire Binder (with phone
+    // uploads), my performance file, and documents with acknowledgment
+    // signing. The gate is the desktop Employee Hub page's own gate
+    // (hub.access — the same permission the Time Clock tile uses; that
+    // tile still opens the full desktop hub for punches/schedule and
+    // the manager tabs). Inside, sections follow the desktop hub's
+    // rules — auditors are excluded from Time Off, exactly as there.
+    id: "myHub",
+    label: "My Hub",
+    hint: "Time off, binder, documents & more",
+    visible: (ctx) => ctx.permissions["hub.access"] === true,
+  },
+  {
     id: "myTasks",
     label: "My Tasks",
     hint: "What is due for you",
@@ -161,6 +178,29 @@ const TILE_DEFS: {
     label: "House Card",
     hint: "Log house card spending",
     visible: (ctx) => ctx.canPage("House Card"),
+  },
+  {
+    // REPORT LIBRARY (Phase 4b): the manager read/run surface. The
+    // gate is the desktop page gate itself (pageVisible "Report
+    // Library" — the REPORT_LIBRARY_ROLES list: administrator,
+    // compliance_admin, PM, HM, nurse, auditor; DSP and HR never see
+    // it). Inside, each entry keeps its own per-report role list via
+    // reportsForRole, exactly as the desktop page filters.
+    id: "reports",
+    label: "Report Library",
+    hint: "Run and print reports",
+    visible: (ctx) => ctx.canPage("Report Library"),
+  },
+  {
+    // QA REVIEW (Phase 4b): read-first audits for the picked home. The
+    // gate is the desktop page gate itself (pageVisible "QA Review":
+    // qa.audit / qa.dispute / qa.schedule / audit.read permissions).
+    // Scoring and photo disputes stay on the desktop page; the one
+    // action inside is the auditor's finalize-with-signature.
+    id: "qaReview",
+    label: "QA Review",
+    hint: "Quarterly audits for this home",
+    visible: (ctx) => ctx.canPage("QA Review"),
   },
 ];
 

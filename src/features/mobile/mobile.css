@@ -2080,3 +2080,14 @@
   max-height: 88vh;
   overflow-y: auto;
 }
+/* Phase 4b — Employee Hub + manager reads. The hub sections, report   */
+/* scope forms, and QA detail reuse the Phase 4a record-card and the   */
+/* shared list/field classes; only the binder upload label is new.     */
+/* ------------------------------------------------------------------ */
+
+.msh-upload-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  margin-top: 6px;
+}
