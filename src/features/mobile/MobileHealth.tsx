@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pill } from "lucide-react";
+import { Pill, Wallet } from "lucide-react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
+import { canViewPersonalSpending } from "../../data/permissions";
+import {
+  computePersonalBalanceCents,
+  formatCents,
+} from "../../data/personalSpending";
 import {
   canViewHealthTrack,
   validateHealthTrackDraft,
@@ -43,6 +48,7 @@ export default function MobileHealth({
   onBack,
   backLabel,
   onEntrySaved,
+  onOpenSpending,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -58,6 +64,12 @@ export default function MobileHealth({
   backLabel?: string;
   /** Embedding door: told after every successful save (drives the host's status refresh). */
   onEntrySaved?: () => void;
+  /**
+   * Opens the person's mobile Personal Spending view (the quick-entry
+   * money screen). Optional so other hosts keep the health view alone;
+   * shown only to roles that may view personal spending (#152).
+   */
+  onOpenSpending?: (person: WorkspaceIndividual) => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(null);
@@ -65,10 +77,37 @@ export default function MobileHealth({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [logKind, setLogKind] = useState<HealthTrackKind | null>(null);
+  const [spendingBalance, setSpendingBalance] = useState<number | null>(
+    null,
+  );
 
   const person = people.find((row) => row.id === personId) ?? null;
   const visible = canViewHealthTrack(session);
   const canRecord = session.permissions["health.record"] === true;
+  const spendingVisible = canViewPersonalSpending(session.roleKey);
+
+  // The person's current personal-funds balance, for the spending row
+  // below. Best-effort: a failed load just shows the plain row.
+  useEffect(() => {
+    if (!personId || !spendingVisible || !onOpenSpending) {
+      setSpendingBalance(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .listPersonalSpendingEntries(personId)
+      .then((rows) => {
+        if (!cancelled) {
+          setSpendingBalance(computePersonalBalanceCents(rows));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSpendingBalance(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, personId, spendingVisible, onOpenSpending]);
 
   const load = useCallback(async () => {
     if (!personId || !visible) return;
@@ -200,6 +239,28 @@ export default function MobileHealth({
                 ›
               </span>
             </button>
+            {spendingVisible && onOpenSpending && (
+              <button
+                type="button"
+                className="msh-row"
+                onClick={() => onOpenSpending(person)}
+              >
+                <span className="msh-tile-icon" aria-hidden="true">
+                  <Wallet size={22} />
+                </span>
+                <span className="msh-row-main">
+                  <strong>Personal spending</strong>
+                  <small>
+                    {spendingBalance !== null
+                      ? `Personal funds balance: ${formatCents(spendingBalance)}`
+                      : `${person.name}'s own money — spends, deposits, and balance`}
+                  </small>
+                </span>
+                <span className="msh-chevron" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            )}
           </div>
           {!canRecord && (
             <p className="msh-section-note">
