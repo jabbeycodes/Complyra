@@ -46,6 +46,9 @@ import { useYourShift } from "./useYourShift";
 import { yourShiftText } from "./scheduling";
 import MobileHouseCard from "./MobileHouseCard";
 import MobilePersonalSpending from "./MobilePersonalSpending";
+import MobileCarePlans from "./MobileCarePlans";
+import MobileConsents from "./MobileConsents";
+import MobileLifeEvents from "./MobileLifeEvents";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
 import "./mobile.css";
@@ -64,6 +67,9 @@ export type ShellView =
   | "people"
   | "housecard"
   | "spending"
+  | "careplans"
+  | "consents"
+  | "lifeevents"
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
@@ -94,6 +100,9 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   people: "Individuals",
   housecard: "House Card",
   spending: "Personal spending",
+  careplans: "Care plans",
+  consents: "Consents",
+  lifeevents: "Life events",
   notifications: "Notifications",
 };
 
@@ -166,6 +175,13 @@ export default function MobileShell({
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
   const [spendingPersonId, setSpendingPersonId] = useState<string | null>(
     null,
+  );
+  // The person whose chart sections (Care Plans / Consents / Life
+  // Events) are open — set from the Health person view's rows.
+  const [chartPersonId, setChartPersonId] = useState<string | null>(null);
+  const staffNames = useMemo(
+    () => new Map(workspace.staff.map((member) => [member.id, member.name])),
+    [workspace.staff],
   );
   const [ispKey, setIspKey] = useState(0);
   const [ispFormActive, setIspFormActive] = useState(false);
@@ -695,8 +711,67 @@ export default function MobileShell({
               setSpendingPersonId(person.id);
               setView("spending");
             }}
+            onOpenCarePlans={(person) => {
+              setChartPersonId(person.id);
+              setView("careplans");
+            }}
+            onOpenConsents={(person) => {
+              setChartPersonId(person.id);
+              setView("consents");
+            }}
+            onOpenLifeEvents={(person) => {
+              setChartPersonId(person.id);
+              setView("lifeevents");
+            }}
           />
         )}
+
+        {(view === "careplans" || view === "consents" || view === "lifeevents") &&
+          (() => {
+            const person = workspace.individuals.find(
+              (row) => row.id === chartPersonId,
+            );
+            if (!person) {
+              return (
+                <p className="msh-empty">
+                  Pick an Individual from the Health view to see this
+                  section of their chart.
+                </p>
+              );
+            }
+            if (view === "careplans") {
+              return (
+                <MobileCarePlans
+                  api={api}
+                  session={session}
+                  person={person}
+                  staffNames={staffNames}
+                  onOpenChart={nav.openPersonChart}
+                  onBack={() => setView("health")}
+                />
+              );
+            }
+            if (view === "consents") {
+              return (
+                <MobileConsents
+                  api={api}
+                  session={session}
+                  person={person}
+                  onOpenChart={nav.openPersonChart}
+                  onBack={() => setView("health")}
+                />
+              );
+            }
+            return (
+              <MobileLifeEvents
+                api={api}
+                session={session}
+                person={person}
+                onOpenChart={nav.openPersonChart}
+                onBack={() => setView("health")}
+              />
+            );
+          })()}
 
         {view === "quicklog" && scopedSite && (
           <MobileQuickLog
