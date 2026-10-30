@@ -23,7 +23,9 @@
  *
  * The agency default template below covers every item on the paper list.
  * Creating a binder snapshots the template, so a later template edit
- * (build 2) never rewrites an existing hire's binder.
+ * never rewrites an existing hire's binder. Build 2 adds the HR binder
+ * board, the template editor, and role presets (DSP / House Manager /
+ * Nurse) — new binders snapshot the preset for the hire's role.
  *
  * This module is pure: derivation takes an evidence bundle assembled by
  * the caller (the same records the linked systems already own) and
@@ -69,6 +71,18 @@ export interface BinderTemplateItem {
   matchKeys: string[];
   /** Wallet documents may carry an "obtained on" date (e.g. an MVR pull). */
   withObtainedDate?: boolean;
+  /**
+   * Required items count against the binder's % complete and the board's
+   * chase list; optional items are tracked and shown but never counted
+   * against the staff member. Undefined = required (build 1 snapshots
+   * predate the flag and stay all-required).
+   */
+  required?: boolean;
+}
+
+/** An item counts against completeness unless the template marks it optional. */
+export function isRequiredBinderItem(item: BinderTemplateItem): boolean {
+  return item.required !== false;
 }
 
 export interface BinderTemplateSection {
@@ -327,6 +341,167 @@ export function binderItemCount(template: BinderTemplate): number {
   return binderItemKeys(template).length;
 }
 
+/** Deep copy (templates are plain JSON — snapshots must never alias). */
+export function cloneBinderTemplate(template: BinderTemplate): BinderTemplate {
+  return JSON.parse(JSON.stringify(template)) as BinderTemplate;
+}
+
+/** A copy of the default template with the named items marked optional. */
+function presetFromDefault(optionalKeys: string[]): BinderTemplate {
+  const template = cloneBinderTemplate(DEFAULT_BINDER_TEMPLATE);
+  for (const section of template.sections) {
+    for (const item of section.items) {
+      if (optionalKeys.includes(item.key)) item.required = false;
+    }
+  }
+  return template;
+}
+
+/* ------------------------------------------------------------------ */
+/* Role presets + the agency template library (build 2)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A starter template bound to a staff role. New binders snapshot the
+ * preset for the hire's role; roles without a preset use the agency
+ * default. Presets are ordinary templates — HR edits them in the same
+ * editor, and editing one never rewrites an issued binder.
+ */
+export interface BinderTemplatePreset {
+  /** Stable id used to address the template on save ("preset-dsp", …). */
+  key: string;
+  name: string;
+  /** The staff role this preset binds to (SessionUser roleKey). */
+  roleKey: string;
+  /** How this preset differs from the agency default, in plain words. */
+  differences: string;
+  template: BinderTemplate;
+}
+
+export const BINDER_TEMPLATE_PRESETS: BinderTemplatePreset[] = [
+  {
+    key: "preset-dsp",
+    name: "Direct Support Professional",
+    roleKey: "dsp",
+    differences:
+      "The full default, with one change: insulin administration is optional — it is a delegated task only some DSPs perform, so it is tracked without counting against completeness. L1MA stays required (every DSP passes medications).",
+    template: presetFromDefault(["insulin"]),
+  },
+  {
+    key: "preset-house-manager",
+    name: "House Manager",
+    roleKey: "house_manager",
+    differences:
+      "The full default with nothing removed and nothing optional — house managers are hired to the complete standard, including the full driver file.",
+    template: presetFromDefault([]),
+  },
+  {
+    key: "preset-nurse",
+    name: "Nurse",
+    roleKey: "nurse",
+    differences:
+      "L1MA and insulin stay required (medication administration is the core of the role), but the driver file — Relias driving certificate, driver's license copy, and MVR — is optional: nurses are not hired to transport Individuals unless assigned.",
+    template: presetFromDefault(["relias-driving", "drivers-license", "mvr"]),
+  },
+];
+
+/** Everything the template editor works with: the agency default plus
+ *  the role presets (stored edits already merged over the starters). */
+export interface BinderTemplateLibrary {
+  defaultTemplate: BinderTemplate;
+  presets: BinderTemplatePreset[];
+}
+
+/** The seeded library: default template + untouched starter presets. */
+export function defaultBinderTemplateLibrary(): BinderTemplateLibrary {
+  return {
+    defaultTemplate: cloneBinderTemplate(DEFAULT_BINDER_TEMPLATE),
+    presets: BINDER_TEMPLATE_PRESETS.map((p) => ({
+      ...p,
+      template: cloneBinderTemplate(p.template),
+    })),
+  };
+}
+
+/** The template a NEW binder snapshots for a staff member of this role. */
+export function binderTemplateForRole(
+  library: BinderTemplateLibrary,
+  roleKey: string | null | undefined,
+): BinderTemplate {
+  if (roleKey) {
+    const preset = library.presets.find((p) => p.roleKey === roleKey);
+    if (preset) return preset.template;
+  }
+  return library.defaultTemplate;
+}
+
+/* ------------------------------------------------------------------ */
+/* Template validation + key minting (the editor's rules)              */
+/* ------------------------------------------------------------------ */
+
+const BINDER_ITEM_KINDS: BinderItemKind[] = [
+  "certificate",
+  "training",
+  "acknowledgment",
+  "document",
+  "profile",
+];
+
+/**
+ * The editor's save gate. Templates feed future binder snapshots, so
+ * keys must stay unique across the whole template (a wallet document is
+ * addressed by item key) and every section/item needs a real label.
+ */
+export function validateBinderTemplate(template: BinderTemplate): void {
+  if (!template.sections || template.sections.length === 0) {
+    throw new Error("A binder template needs at least one section.");
+  }
+  const sectionKeys = new Set<string>();
+  const itemKeys = new Set<string>();
+  for (const section of template.sections) {
+    if (!section.title.trim()) throw new Error("Every section needs a title.");
+    if (sectionKeys.has(section.key)) {
+      throw new Error(`Duplicate section key "${section.key}".`);
+    }
+    sectionKeys.add(section.key);
+    if (section.items.length === 0) {
+      throw new Error(`Section "${section.title}" needs at least one item.`);
+    }
+    for (const item of section.items) {
+      if (!item.label.trim()) throw new Error("Every item needs a label.");
+      if (itemKeys.has(item.key)) {
+        throw new Error(`Duplicate item key "${item.key}".`);
+      }
+      itemKeys.add(item.key);
+      if (!BINDER_ITEM_KINDS.includes(item.kind)) {
+        throw new Error(`"${item.label}" has an unknown item kind.`);
+      }
+      if (
+        (item.kind === "certificate" || item.kind === "acknowledgment") &&
+        item.matchKeys.map((k) => k.trim()).filter(Boolean).length === 0
+      ) {
+        throw new Error(
+          `"${item.label}" is a linked item — give it at least one name to match records against.`,
+        );
+      }
+    }
+  }
+}
+
+/** Mint a unique slug key for an editor-created section or item. */
+export function mintBinderKey(label: string, taken: Set<string>): string {
+  const base =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "item";
+  let key = base;
+  let n = 2;
+  while (taken.has(key)) key = `${base}-${n++}`;
+  taken.add(key);
+  return key;
+}
+
 /* ------------------------------------------------------------------ */
 /* Stored records                                                      */
 /* ------------------------------------------------------------------ */
@@ -426,6 +601,8 @@ export interface DerivedBinderItem {
   status: BinderItemStatus;
   /** Counts toward the binder's % complete. */
   satisfied: boolean;
+  /** Required items count against completeness; optional ones never do. */
+  required: boolean;
   /** Human-readable evidence line ("CPR — current through May 1, 2027"). */
   note: string;
   /** The wallet document, for "document" items that have one. */
@@ -437,16 +614,23 @@ export interface DerivedBinderItem {
 export interface DerivedBinderSection {
   section: BinderTemplateSection;
   items: DerivedBinderItem[];
+  /** Required items satisfied / required items total (% math basis). */
   satisfied: number;
   total: number;
+  /** Optional items in the section (shown, never counted). */
+  optional: number;
 }
 
 export interface DerivedBinder {
   sections: DerivedBinderSection[];
+  /** Required items only — the completeness denominator. */
   totalItems: number;
+  /** Required items satisfied. */
   satisfiedItems: number;
   /** satisfied / total as a whole percent; 100 when the binder is empty. */
   percentComplete: number;
+  /** Optional items across the binder (shown, never counted). */
+  optionalItems: number;
   /** Wallet documents uploaded but not yet verified by HR. */
   awaitingVerification: number;
 }
@@ -490,7 +674,7 @@ function deriveCertificateItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
   today: string,
-): DerivedBinderItem {
+): Omit<DerivedBinderItem, "required"> {
   const matches = evidence.certificates.filter((cert) =>
     binderKeyMatches(item.matchKeys, cert.certName),
   );
@@ -542,7 +726,7 @@ function deriveCertificateItem(
 function deriveTrainingItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): DerivedBinderItem {
+): Omit<DerivedBinderItem, "required"> {
   const profile = evidence.trainingProfile;
   if (!profile || profile.counts.required === 0) {
     return {
@@ -582,7 +766,7 @@ function deriveTrainingItem(
 function deriveAcknowledgmentItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): DerivedBinderItem {
+): Omit<DerivedBinderItem, "required"> {
   const ack = evidence.documentAcks
     .filter((a) => binderKeyMatches(item.matchKeys, a.docKey))
     .sort((a, b) => (a.ackedAt < b.ackedAt ? 1 : -1))[0];
@@ -609,7 +793,7 @@ function deriveAcknowledgmentItem(
 function deriveDocumentItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): DerivedBinderItem {
+): Omit<DerivedBinderItem, "required"> {
   const doc = evidence.walletDocuments.find((d) => d.itemKey === item.key) ?? null;
   if (!doc) {
     return {
@@ -657,7 +841,7 @@ function deriveDocumentItem(
 function deriveProfileItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): DerivedBinderItem {
+): Omit<DerivedBinderItem, "required"> {
   const contact = evidence.emergencyContact;
   if (!contact) {
     return {
@@ -686,18 +870,21 @@ export function deriveBinderItem(
   today: string,
 ): DerivedBinderItem {
   void staffId; // identity only — the evidence bundle is pre-scoped per staff.
-  switch (item.kind) {
-    case "certificate":
-      return deriveCertificateItem(item, evidence, today);
-    case "training":
-      return deriveTrainingItem(item, evidence);
-    case "acknowledgment":
-      return deriveAcknowledgmentItem(item, evidence);
-    case "document":
-      return deriveDocumentItem(item, evidence);
-    case "profile":
-      return deriveProfileItem(item, evidence);
-  }
+  const derived = ((): Omit<DerivedBinderItem, "required"> => {
+    switch (item.kind) {
+      case "certificate":
+        return deriveCertificateItem(item, evidence, today);
+      case "training":
+        return deriveTrainingItem(item, evidence);
+      case "acknowledgment":
+        return deriveAcknowledgmentItem(item, evidence);
+      case "document":
+        return deriveDocumentItem(item, evidence);
+      case "profile":
+        return deriveProfileItem(item, evidence);
+    }
+  })();
+  return { ...derived, required: isRequiredBinderItem(item) };
 }
 
 /** Derive every item in a binder snapshot against the evidence bundle. */
@@ -713,12 +900,14 @@ export function deriveBinder(
     return {
       section,
       items,
-      satisfied: items.filter((i) => i.satisfied).length,
-      total: items.length,
+      satisfied: items.filter((i) => i.required && i.satisfied).length,
+      total: items.filter((i) => i.required).length,
+      optional: items.filter((i) => !i.required).length,
     };
   });
   const totalItems = sections.reduce((n, s) => n + s.total, 0);
   const satisfiedItems = sections.reduce((n, s) => n + s.satisfied, 0);
+  const optionalItems = sections.reduce((n, s) => n + s.optional, 0);
   const awaitingVerification = evidence.walletDocuments.filter(
     (d) => d.status === "on_file",
   ).length;
@@ -729,8 +918,54 @@ export function deriveBinder(
     percentComplete: totalItems
       ? Math.round((satisfiedItems / totalItems) * 100)
       : 100,
+    optionalItems,
     awaitingVerification,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Gap analysis (the HR board's chase list)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Chase-list urgency ranking. An expired certificate is a live
+ * compliance breach, so it outranks a merely missing item; a document
+ * HR sent back outranks training still in progress. Wallet documents
+ * sitting "on file" are NOT gaps — HR already holds them (they are the
+ * board's awaiting-verification count, HR's own queue, not something
+ * to chase the staff member for).
+ */
+export const BINDER_GAP_RANK: Partial<Record<BinderItemStatus, number>> = {
+  expired: 0,
+  missing: 1,
+  returned: 2,
+  in_progress: 3,
+};
+
+/**
+ * The required items still standing between this binder and complete,
+ * most urgent first (template order breaks ties). Optional items and
+ * satisfied items never appear; neither do documents awaiting HR's own
+ * verification.
+ */
+export function binderGaps(derived: DerivedBinder): DerivedBinderItem[] {
+  const gaps: Array<{ row: DerivedBinderItem; order: number }> = [];
+  let order = 0;
+  for (const section of derived.sections) {
+    for (const row of section.items) {
+      const position = order++;
+      if (!row.required || row.satisfied) continue;
+      const rank = BINDER_GAP_RANK[row.status];
+      if (rank === undefined) continue;
+      gaps.push({ row, order: position + rank * 1000 });
+    }
+  }
+  return gaps.sort((a, b) => a.order - b.order).map((g) => g.row);
+}
+
+/** The single most urgent gap, or null when the binder has none. */
+export function mostUrgentBinderGap(derived: DerivedBinder): DerivedBinderItem | null {
+  return binderGaps(derived)[0] ?? null;
 }
 
 /* ------------------------------------------------------------------ */

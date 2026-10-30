@@ -20,6 +20,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   Download,
@@ -120,6 +121,7 @@ import {
   StaffingPatternRow,
 } from "./StaffingBoard";
 import { BinderTab } from "../newHireBinder/BinderPanel";
+import { BinderBoardTab } from "../newHireBinder/BinderBoardPanel";
 import { WhosHereNow } from "./WhosHereNow";
 import { PunchExceptions } from "./PunchExceptions";
 import { MissedPunchReview } from "./MissedPunchReview";
@@ -382,6 +384,9 @@ interface TabDef {
   perm?: PermissionKey;
   /** Any-of permissions that also open the tab (union with perm). */
   permAny?: PermissionKey[];
+  /** Roles that also open the tab (union with perm) — e.g. the binder
+   *  board follows the Binder tab's HR/admin/auditor visibility rule. */
+  roleAny?: string[];
   badge?: number;
 }
 
@@ -402,6 +407,7 @@ const MANAGER_TABS: TabDef[] = [
   { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team" },
   { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards" },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
+  { id: "binder-board", label: "Binder Board", icon: ClipboardCheck, perm: "hub.view_team", roleAny: ["hr", "administrator", "auditor"] },
   { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll" },
   { id: "kiosk", label: "Kiosk", icon: MonitorSmartphone, permAny: ["hub.manage_staffing", "hub.manage_pay_settings"] },
 ];
@@ -452,13 +458,18 @@ export function EmployeeHubShell({
         : EMPLOYEE_TABS),
       ...MANAGER_TABS.filter(
         (t) =>
-          !t.perm || can(t.perm) || (t.permAny?.some((p) => can(p)) ?? false),
+          !t.perm ||
+          can(t.perm) ||
+          (t.permAny?.some((p) => can(p)) ?? false) ||
+          (t.roleAny?.includes(session.roleKey) ?? false),
       ),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session],
   );
   const [tab, setTab] = useState(initialTab && tabs.some((t) => t.id === initialTab) ? initialTab : tabs[0]?.id ?? "schedule");
+  /** The board's "Open binder" jump: which staff member's binder to open. */
+  const [binderFocusId, setBinderFocusId] = useState<string | null>(null);
   const [badges, setBadges] = useState<BadgeCounts>({ attendance: 0, timecards: 0, timeoff: 0, documents: 0 });
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -600,12 +611,28 @@ export function EmployeeHubShell({
         {tab === "compliance" && <MyComplianceTab session={session} store={store} />}
         {tab === "binder" && (
           <BinderTab
+            key={binderFocusId ?? "self"}
             session={session}
             store={store}
             staffList={staffList}
             onJumpToTab={(id) => setTab(id)}
+            initialSubjectId={binderFocusId ?? undefined}
           />
         )}
+        {tab === "binder-board" &&
+          (can("hub.view_team") ||
+            ["hr", "administrator", "auditor"].includes(session.roleKey)) && (
+            <BinderBoardTab
+              session={session}
+              store={store}
+              staffList={staffList}
+              sites={sites}
+              onOpenBinder={(staffId) => {
+                setBinderFocusId(staffId);
+                setTab("binder");
+              }}
+            />
+          )}
         {tab === "documents" && (
           <DocumentsTab
             session={session}
