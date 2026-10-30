@@ -67,6 +67,7 @@ test("page-gated tiles follow the desktop page gate exactly", () => {
   });
   assert.ok(ids(withPages).includes("appointments"));
   assert.ok(ids(withPages).includes("checklists"));
+  assert.ok(ids(withPages).includes("houseCard"));
   assert.ok(!ids(withPages).includes("medCount" as never));
 });
 
@@ -89,6 +90,7 @@ test("tile order is daily-driver order, medications first", () => {
       "individuals",
       "appointments",
       "checklists",
+      "houseCard",
     ],
   );
   for (const tile of tiles) {

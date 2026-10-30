@@ -4,6 +4,7 @@ import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
   canSeeShiftNotes,
+  canViewHouseCard,
   canViewMedicationOrders,
   canUseMessaging,
   hasPermission,
@@ -132,6 +133,9 @@ export function pageVisible(session: SessionUser, page: string) {
   // LIFEPATH-P8-PAGEVIS (recognition): every role sees the winners surface.
   if (page === "Recognition") return can(session, "recognition.view_winners");
   if (page === "Mileage") return can(session, "mileage.manage");
+  // HOUSE CARD: the per-home petty cash ledger. Role-list gate (nurses
+  // never see the tab); site scope is enforced by the API layer.
+  if (page === "House Card") return canViewHouseCard(session.roleKey);
   // SCHEDULING-TAB (2026-10-28): the Scheduling tab carries the Right Now
   // strip and the house coverage board — the strip's own audience: house
   // managers, program managers, agency administrators. No one else gains it.

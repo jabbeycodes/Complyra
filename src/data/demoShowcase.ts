@@ -49,6 +49,7 @@ import { emptyCareData } from "./careScreening";
 import type { ConsentRecord } from "./consents";
 import { HEALTH_SCOPE, PACKET_COPY_VERSION, PACKET_ITEMS, type ConsentPacket } from "./consentPackets";
 import type { LifeEventRow } from "./lifeEvents";
+import type { HouseCardEntryRow } from "./houseCard";
 import {
   centralTodayIso,
   weekDayIsos,
@@ -70,7 +71,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 4;
+export const SHOWCASE_REVISION = 5;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -1242,6 +1243,251 @@ function addDemoSurfaces(db: LocalDatabase) {
   addCarePlansAndScreenings(db);
   addConsentRegister(db);
   addLifeEvents(db);
+  addHouseCardLedgers(db);
+}
+
+/**
+ * House Card ledgers for both Evergreen homes, dated in the current
+ * month so the tab opens on a live month: the agency's $600 funds credit
+ * on the 1st, everyday purchases across every category (gas, health card,
+ * and food stamps tied to named Individuals), one refund each, and one
+ * voided-and-replaced pair each so corrections are visible. The numbers
+ * reconcile exactly — Cedar closes the month so far at $153.68 and
+ * Willow at $94.92, which trips Willow's "Low balance" flag.
+ */
+function addHouseCardLedgers(db: LocalDatabase) {
+  db.houseCardEntries = db.houseCardEntries ?? [];
+  db.houseCardCloses = db.houseCardCloses ?? [];
+  const entries = db.houseCardEntries;
+  const today = centralTodayIso();
+  const monthPrefix = today.slice(0, 8);
+  const todayDay = Number(today.slice(8, 10));
+  const dayIso = (day: number) =>
+    `${monthPrefix}${String(Math.min(day, todayDay)).padStart(2, "0")}`;
+  const at = (day: number, seq: number) =>
+    `${dayIso(day)}T${String(14 + (seq % 6)).padStart(2, "0")}:${String(
+      (seq * 7) % 60,
+    ).padStart(2, "0")}:00.000Z`;
+
+  const james = userId(db, "James Wilson");
+  const alex = userId(db, "Alex Morgan");
+  const taylor = userId(db, "Taylor Reed");
+  const jordan = userId(db, "Jordan Lee");
+  const casey = userId(db, "Casey Adams");
+  const cedar = siteId(db, "Cedar House");
+  const willow = siteId(db, "Willow House");
+  const ellis = idOf(db, "Ellis Hart");
+  const morganP = idOf(db, "Morgan Pruitt");
+  const reese = idOf(db, "Reese Lang");
+  const harper = idOf(db, "Harper Soto");
+
+  const push = (row: HouseCardEntryRow) => {
+    if (!entries.some((entry) => entry.id === row.id)) entries.push(row);
+  };
+  const base = (
+    id: string,
+    site: string,
+    day: number,
+    seq: number,
+    recorder: string,
+    recorderName: string,
+    recorderRole: string,
+  ): HouseCardEntryRow => ({
+    id,
+    agencyId: agencyId(db),
+    siteId: site,
+    entryDate: dayIso(day),
+    kind: "purchase",
+    location: "",
+    amountCents: 0,
+    category: null,
+    individualId: null,
+    note: "",
+    receiptPhoto: null,
+    recordedBy: recorder,
+    recordedByName: recorderName,
+    recordedByRole: recorderRole,
+    createdAt: at(day, seq),
+    voidedBy: null,
+    voidedAt: null,
+    voidReason: null,
+    replacesEntryId: null,
+    replacedByEntryId: null,
+  });
+
+  /* ------------------------------ Cedar House ------------------------------
+     Deposited $615.00 · Spent $461.32 · Balance $153.68 */
+  push({
+    ...base("housecard-showcase-cedar-credit", cedar, 1, 0, james, "James Wilson", "house_manager"),
+    kind: "credit",
+    amountCents: 60000,
+    note: "Monthly house funds.",
+  });
+  push({
+    ...base("housecard-showcase-cedar-g1", cedar, 2, 1, alex, "Alex Morgan", "dsp"),
+    location: "Hy-Vee",
+    amountCents: 8423,
+    category: "groceries_household",
+  });
+  push({
+    ...base("housecard-showcase-cedar-gas1", cedar, 3, 2, taylor, "Taylor Reed", "dsp"),
+    location: "Casey's",
+    amountCents: 4000,
+    category: "gas",
+    individualId: ellis,
+  });
+  push({
+    ...base("housecard-showcase-cedar-health1", cedar, 5, 3, alex, "Alex Morgan", "dsp"),
+    location: "CVS Pharmacy",
+    amountCents: 1275,
+    category: "health_card",
+    individualId: morganP,
+  });
+  push({
+    ...base("housecard-showcase-cedar-food1", cedar, 7, 4, taylor, "Taylor Reed", "dsp"),
+    location: "Walmart",
+    amountCents: 9650,
+    category: "food_stamps",
+    individualId: ellis,
+  });
+  push({
+    ...base("housecard-showcase-cedar-g2", cedar, 9, 5, alex, "Alex Morgan", "dsp"),
+    location: "ALDI",
+    amountCents: 6320,
+    category: "groceries_household",
+  });
+  push({
+    ...base("housecard-showcase-cedar-gas2", cedar, 11, 6, taylor, "Taylor Reed", "dsp"),
+    location: "QuikTrip",
+    amountCents: 3550,
+    category: "gas",
+    individualId: morganP,
+  });
+  push({
+    ...base("housecard-showcase-cedar-voided", cedar, 13, 7, alex, "Alex Morgan", "dsp"),
+    location: "Dollar General",
+    amountCents: 2199,
+    category: "groceries_household",
+    voidedBy: alex,
+    voidedAt: at(13, 9),
+    voidReason: "Amount keyed from the wrong receipt.",
+    replacedByEntryId: "housecard-showcase-cedar-replacement",
+  });
+  push({
+    ...base("housecard-showcase-cedar-replacement", cedar, 13, 8, alex, "Alex Morgan", "dsp"),
+    location: "Dollar General",
+    amountCents: 2499,
+    category: "groceries_household",
+    replacesEntryId: "housecard-showcase-cedar-voided",
+  });
+  push({
+    ...base("housecard-showcase-cedar-refund", cedar, 15, 10, taylor, "Taylor Reed", "dsp"),
+    kind: "refund",
+    location: "Walmart",
+    amountCents: 1500,
+    note: "Returned unopened cleaning supplies.",
+  });
+  push({
+    ...base("housecard-showcase-cedar-gas3", cedar, 17, 11, alex, "Alex Morgan", "dsp"),
+    location: "Casey's",
+    amountCents: 2875,
+    category: "gas",
+    individualId: ellis,
+  });
+  push({
+    ...base("housecard-showcase-cedar-g3", cedar, 19, 12, taylor, "Taylor Reed", "dsp"),
+    location: "Hy-Vee",
+    amountCents: 7540,
+    category: "groceries_household",
+  });
+
+  /* ------------------------------ Willow House -----------------------------
+     Deposited $608.25 · Spent $513.33 · Balance $94.92 (low balance) */
+  push({
+    ...base("housecard-showcase-willow-credit", willow, 1, 0, james, "James Wilson", "house_manager"),
+    kind: "credit",
+    amountCents: 60000,
+    note: "Monthly house funds.",
+  });
+  push({
+    ...base("housecard-showcase-willow-g1", willow, 2, 1, jordan, "Jordan Lee", "dsp"),
+    location: "Hy-Vee",
+    amountCents: 9118,
+    category: "groceries_household",
+  });
+  push({
+    ...base("housecard-showcase-willow-gas1", willow, 4, 2, casey, "Casey Adams", "dsp"),
+    location: "Shell",
+    amountCents: 4500,
+    category: "gas",
+    individualId: reese,
+  });
+  push({
+    ...base("housecard-showcase-willow-food1", willow, 6, 3, jordan, "Jordan Lee", "dsp"),
+    location: "Walmart",
+    amountCents: 10230,
+    category: "food_stamps",
+    individualId: harper,
+  });
+  push({
+    ...base("housecard-showcase-willow-health1", willow, 8, 4, casey, "Casey Adams", "dsp"),
+    location: "Walgreens",
+    amountCents: 2340,
+    category: "health_card",
+    individualId: reese,
+  });
+  push({
+    ...base("housecard-showcase-willow-g2", willow, 10, 5, jordan, "Jordan Lee", "dsp"),
+    location: "ALDI",
+    amountCents: 5575,
+    category: "groceries_household",
+  });
+  push({
+    ...base("housecard-showcase-willow-voided", willow, 12, 6, casey, "Casey Adams", "dsp"),
+    location: "Casey's",
+    amountCents: 3200,
+    category: "gas",
+    individualId: harper,
+    voidedBy: casey,
+    voidedAt: at(12, 8),
+    voidReason: "Filled the agency van instead of the house car.",
+    replacedByEntryId: "housecard-showcase-willow-replacement",
+  });
+  push({
+    ...base("housecard-showcase-willow-replacement", willow, 12, 7, casey, "Casey Adams", "dsp"),
+    location: "Casey's",
+    amountCents: 3275,
+    category: "gas",
+    individualId: harper,
+    replacesEntryId: "housecard-showcase-willow-voided",
+  });
+  push({
+    ...base("housecard-showcase-willow-refund", willow, 14, 9, jordan, "Jordan Lee", "dsp"),
+    kind: "refund",
+    location: "Target",
+    amountCents: 825,
+    note: "Returned a duplicate kitchen item.",
+  });
+  push({
+    ...base("housecard-showcase-willow-g3", willow, 16, 10, casey, "Casey Adams", "dsp"),
+    location: "Hy-Vee",
+    amountCents: 8890,
+    category: "groceries_household",
+  });
+  push({
+    ...base("housecard-showcase-willow-food2", willow, 18, 11, jordan, "Jordan Lee", "dsp"),
+    location: "Save A Lot",
+    amountCents: 4415,
+    category: "food_stamps",
+    individualId: reese,
+  });
+  push({
+    ...base("housecard-showcase-willow-gas2", willow, 20, 12, casey, "Casey Adams", "dsp"),
+    location: "Shell",
+    amountCents: 2990,
+    category: "gas",
+    individualId: reese,
+  });
 }
 
 function hoursAgo(hours: number): string {

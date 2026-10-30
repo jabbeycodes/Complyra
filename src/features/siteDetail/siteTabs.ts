@@ -10,6 +10,7 @@ export type SiteDetailTabId =
   | "training"
   | "medications"
   | "mileage"
+  | "housecard"
   | "shiftnotes"
   | "reporting"
   | "staff";
@@ -92,6 +93,15 @@ const SITE_DETAIL_TABS: readonly SiteDetailTab[] = [
     id: "mileage",
     label: "Mileage",
     visible: (s) => !!s && pageVisible(s, "Mileage"),
+  },
+  {
+    // HOUSE CARD: the home's petty cash ledger, directly after Mileage
+    // (founder tab order). Role-list gate — nurses never see this tab;
+    // DSPs and house managers record for their own home, PMs and
+    // administrators reach every home, auditors read only.
+    id: "housecard",
+    label: "House Card",
+    visible: (s) => !!s && pageVisible(s, "House Card"),
   },
   {
     // Issue #80: the Documents tab becomes Shift notes. Standalone document

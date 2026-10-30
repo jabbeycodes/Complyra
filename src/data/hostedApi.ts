@@ -100,6 +100,23 @@ import {
   type LifeEventDraft,
   type LifeEventRow,
 } from "./lifeEvents";
+import {
+  balanceThroughCents,
+  closeForMonth,
+  closedMonthMessage,
+  monthEndIso,
+  toHouseCardEntryView,
+  validateHouseCardDraft,
+  validateHouseCardMonth,
+  validateHouseCardSignature,
+  validateHouseCardVoidReason,
+  type HouseCardEntryDraft,
+  type HouseCardEntryRow,
+  type HouseCardEntryView,
+  type HouseCardMonthClose,
+  type HouseCardReceiptPhoto,
+} from "./houseCard";
+import { centralTodayIso } from "./menuRecords";
 import { assertSiteHasCapacity } from "./siteCapacity";
 import {
   appointmentChangeDetail,
@@ -163,6 +180,9 @@ import {
   canUseMessaging,
   canEnterMenuEntries,
   canSeeMenuEntries,
+  canViewHouseCard,
+  canRecordHouseCard,
+  canCloseHouseCardMonth,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -829,6 +849,375 @@ export class HostedApi implements ComplyraApi {
     return this.lifeEventView(
       this.lifeEventFromRow(data as Record<string, unknown>),
     );
+  }
+
+  // ── HOUSE CARD — per-home petty cash ledger (hosted) ───────────────
+  // Mirrors LocalApi semantics exactly. The DB backstops everything
+  // (supabase/migrations/20261029130000_house_card.sql): RLS scopes reads
+  // to the ledger's reader roles at readable sites, writes to the
+  // recorder roles in scope, voids are reasoned updates, and there is no
+  // delete path. Until that migration is applied these queries fail and
+  // the House Card tab shows its own contained error state.
+
+  private houseCardFromRow(row: Record<string, unknown>): HouseCardEntryRow {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      entryDate: String(row.entry_date).slice(0, 10),
+      kind: row.kind as HouseCardEntryRow["kind"],
+      location: (row.location as string) ?? "",
+      amountCents: Number(row.amount_cents),
+      category: (row.category as HouseCardEntryRow["category"]) ?? null,
+      individualId: (row.individual_id as string | null) ?? null,
+      note: (row.note as string) ?? "",
+      receiptPhoto:
+        (row.receipt_photo as HouseCardReceiptPhoto | null) ?? null,
+      recordedBy: row.recorded_by as string,
+      recordedByName: (row.recorded_by_name as string) ?? "",
+      recordedByRole: (row.recorded_by_role as string) ?? "",
+      createdAt: row.created_at as string,
+      voidedBy: (row.voided_by as string | null) ?? null,
+      voidedAt: (row.voided_at as string | null) ?? null,
+      voidReason: (row.void_reason as string | null) ?? null,
+      replacesEntryId: (row.replaces_entry_id as string | null) ?? null,
+      replacedByEntryId: (row.replaced_by_entry_id as string | null) ?? null,
+    };
+  }
+
+  private houseCardCloseFromRow(
+    row: Record<string, unknown>,
+  ): HouseCardMonthClose {
+    return {
+      id: row.id as string,
+      agencyId: row.agency_id as string,
+      siteId: row.site_id as string,
+      month: String(row.month).slice(0, 7),
+      closingBalanceCents: Number(row.closing_balance_cents),
+      printedName: (row.printed_name as string) ?? "",
+      signatureText: (row.signature_text as string) ?? "",
+      signedBy: row.signed_by as string,
+      signedByName: (row.signed_by_name as string) ?? "",
+      signedAt: row.signed_at as string,
+      createdAt: row.created_at as string,
+    };
+  }
+
+  private assertHouseCardViewer(session: SessionUser) {
+    if (!canViewHouseCard(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  private assertHouseCardRecorder(session: SessionUser) {
+    if (!canRecordHouseCard(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+  }
+
+  /** The home must exist in the agency AND sit inside the session's scope. */
+  private async assertHouseCardSite(session: SessionUser, siteId: string) {
+    await this.assertSiteInAgency(session, siteId);
+    if (!canAccessSite(session, siteId)) {
+      throw new Error("Home not found.");
+    }
+  }
+
+  private async houseCardClosesFor(session: SessionUser, siteId: string) {
+    const { data, error } = await this.client
+      .from("house_card_month_closes")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .order("month", { ascending: false });
+    throwIf(error, "Could not load the house card sign-offs.");
+    return (data ?? []).map((row) =>
+      this.houseCardCloseFromRow(row as Record<string, unknown>),
+    );
+  }
+
+  private async houseCardViewList(
+    session: SessionUser,
+    rows: HouseCardEntryRow[],
+    closes: HouseCardMonthClose[],
+  ): Promise<HouseCardEntryView[]> {
+    const names = await this.lifeEventNames(
+      rows.flatMap((row) =>
+        [row.recordedBy, row.voidedBy].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    );
+    const individualIds = [
+      ...new Set(
+        rows
+          .map((row) => row.individualId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const individualNames = new Map<string, string>();
+    if (individualIds.length) {
+      const { data } = await this.client
+        .from("individuals")
+        .select("id, full_name")
+        .eq("agency_id", session.agencyId)
+        .in("id", individualIds);
+      for (const row of data ?? []) {
+        const record = row as { id: string; full_name: string };
+        individualNames.set(record.id, record.full_name);
+      }
+    }
+    return rows.map((row) =>
+      toHouseCardEntryView(
+        row,
+        row.individualId
+          ? (individualNames.get(row.individualId) ?? "Former Individual")
+          : null,
+        (userId) => names.get(userId) ?? row.recordedByName ?? "Staff member",
+        closeForMonth(closes, monthKeyFrom(row.entryDate)),
+      ),
+    );
+  }
+
+  private async houseCardIndividualOrThrow(
+    session: SessionUser,
+    siteId: string,
+    individualId: string,
+  ) {
+    const { data, error } = await this.client
+      .from("individuals")
+      .select("id, site_id")
+      .eq("id", individualId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(error, "Could not verify the Individual.");
+    if (!data || (data as { site_id: string }).site_id !== siteId) {
+      throw new Error("That Individual is not part of this home.");
+    }
+  }
+
+  private async assertHouseCardMonthOpen(
+    session: SessionUser,
+    siteId: string,
+    entryDate: string,
+  ) {
+    const month = monthKeyFrom(entryDate);
+    const { data, error } = await this.client
+      .from("house_card_month_closes")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .eq("month", month)
+      .maybeSingle();
+    throwIf(error, "Could not check whether the month is closed.");
+    if (data) throw new Error(closedMonthMessage(monthLabel(month)));
+  }
+
+  async listHouseCardEntries(siteId: string) {
+    const session = await this.requireSession();
+    this.assertHouseCardViewer(session);
+    await this.assertHouseCardSite(session, siteId);
+    const { data, error } = await this.client
+      .from("house_card_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", siteId)
+      .order("entry_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    throwIf(error, "Could not load the house card ledger.");
+    const rows = (data ?? []).map((row) =>
+      this.houseCardFromRow(row as Record<string, unknown>),
+    );
+    const closes = await this.houseCardClosesFor(session, siteId);
+    return this.houseCardViewList(session, rows, closes);
+  }
+
+  async createHouseCardEntry(
+    input: { siteId: string } & HouseCardEntryDraft,
+  ) {
+    const session = await this.requireSession();
+    this.assertHouseCardRecorder(session);
+    await this.assertHouseCardSite(session, input.siteId);
+    const draft = validateHouseCardDraft(input, centralTodayIso());
+    if (draft.individualId) {
+      await this.houseCardIndividualOrThrow(
+        session,
+        input.siteId,
+        draft.individualId,
+      );
+    }
+    await this.assertHouseCardMonthOpen(session, input.siteId, draft.entryDate);
+    const { data, error } = await this.client
+      .from("house_card_entries")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: input.siteId,
+        entry_date: draft.entryDate,
+        kind: draft.kind,
+        location: draft.location,
+        amount_cents: draft.amountCents,
+        category: draft.category,
+        individual_id: draft.individualId,
+        note: draft.note,
+        receipt_photo: draft.receiptPhoto,
+        recorded_by: session.userId,
+        recorded_by_name: session.fullName,
+        recorded_by_role: session.roleKey,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not save that house card entry.");
+    const row = this.houseCardFromRow(data as Record<string, unknown>);
+    const closes = await this.houseCardClosesFor(session, input.siteId);
+    const [view] = await this.houseCardViewList(session, [row], closes);
+    return view;
+  }
+
+  async voidHouseCardEntry(
+    entryId: string,
+    reason: string,
+    replacement?: ({ siteId: string } & HouseCardEntryDraft) | null,
+  ) {
+    const session = await this.requireSession();
+    this.assertHouseCardRecorder(session);
+    const { data: existingData, error: fetchError } = await this.client
+      .from("house_card_entries")
+      .select("*")
+      .eq("id", entryId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    throwIf(fetchError, "Could not load that house card entry.");
+    if (!existingData) throw new Error("House card entry not found.");
+    const existing = this.houseCardFromRow(
+      existingData as Record<string, unknown>,
+    );
+    await this.assertHouseCardSite(session, existing.siteId);
+    if (existing.voidedAt) {
+      throw new Error("That entry is already voided.");
+    }
+    const voidReason = validateHouseCardVoidReason(reason);
+
+    // Validate + insert the replacement BEFORE voiding, so a failed
+    // replacement never leaves a half-applied correction behind.
+    let replacementRow: HouseCardEntryRow | null = null;
+    if (replacement) {
+      if (replacement.siteId !== existing.siteId) {
+        throw new Error("The replacement must belong to the same home.");
+      }
+      const draft = validateHouseCardDraft(replacement, centralTodayIso());
+      if (draft.individualId) {
+        await this.houseCardIndividualOrThrow(
+          session,
+          existing.siteId,
+          draft.individualId,
+        );
+      }
+      if (monthKeyFrom(draft.entryDate) !== monthKeyFrom(existing.entryDate)) {
+        await this.assertHouseCardMonthOpen(
+          session,
+          existing.siteId,
+          draft.entryDate,
+        );
+      }
+      const { data, error } = await this.client
+        .from("house_card_entries")
+        .insert({
+          agency_id: session.agencyId,
+          site_id: existing.siteId,
+          entry_date: draft.entryDate,
+          kind: draft.kind,
+          location: draft.location,
+          amount_cents: draft.amountCents,
+          category: draft.category,
+          individual_id: draft.individualId,
+          note: draft.note,
+          receipt_photo: draft.receiptPhoto,
+          recorded_by: session.userId,
+          recorded_by_name: session.fullName,
+          recorded_by_role: session.roleKey,
+          replaces_entry_id: existing.id,
+        })
+        .select("*")
+        .single();
+      throwIf(error, "Could not save the replacement entry.");
+      replacementRow = this.houseCardFromRow(data as Record<string, unknown>);
+    }
+
+    const { data, error } = await this.client
+      .from("house_card_entries")
+      .update({
+        voided_at: new Date().toISOString(),
+        voided_by: session.userId,
+        void_reason: voidReason,
+        replaced_by_entry_id: replacementRow?.id ?? null,
+      })
+      .eq("id", existing.id)
+      .eq("agency_id", session.agencyId)
+      .select("*")
+      .single();
+    throwIf(error, "Could not void that entry.");
+    const voidedRow = this.houseCardFromRow(data as Record<string, unknown>);
+    const closes = await this.houseCardClosesFor(session, existing.siteId);
+    const views = await this.houseCardViewList(
+      session,
+      replacementRow ? [voidedRow, replacementRow] : [voidedRow],
+      closes,
+    );
+    return {
+      voided: views[0],
+      replacement: replacementRow ? views[1] : null,
+    };
+  }
+
+  async listHouseCardMonthCloses(siteId: string) {
+    const session = await this.requireSession();
+    this.assertHouseCardViewer(session);
+    await this.assertHouseCardSite(session, siteId);
+    return this.houseCardClosesFor(session, siteId);
+  }
+
+  async closeHouseCardMonth(input: {
+    siteId: string;
+    month: string;
+    signatureText: string;
+  }) {
+    const session = await this.requireSession();
+    if (!canCloseHouseCardMonth(session.roleKey)) {
+      throw new Error("You do not have permission to do that.");
+    }
+    await this.assertHouseCardSite(session, input.siteId);
+    const month = validateHouseCardMonth(input.month);
+    const signatureText = validateHouseCardSignature(input.signatureText);
+    const closes = await this.houseCardClosesFor(session, input.siteId);
+    if (closeForMonth(closes, month)) {
+      throw new Error(`${monthLabel(month)} is already closed and signed.`);
+    }
+    const { data: entryData, error: entryError } = await this.client
+      .from("house_card_entries")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("site_id", input.siteId)
+      .lte("entry_date", monthEndIso(month));
+    throwIf(entryError, "Could not total the month before closing it.");
+    const entries = (entryData ?? []).map((row) =>
+      this.houseCardFromRow(row as Record<string, unknown>),
+    );
+    const { data, error } = await this.client
+      .from("house_card_month_closes")
+      .insert({
+        agency_id: session.agencyId,
+        site_id: input.siteId,
+        month,
+        closing_balance_cents: balanceThroughCents(entries, monthEndIso(month)),
+        printed_name: session.fullName,
+        signature_text: signatureText,
+        signed_by: session.userId,
+        signed_by_name: session.fullName,
+      })
+      .select("*")
+      .single();
+    throwIf(error, "Could not close the month.");
+    return this.houseCardCloseFromRow(data as Record<string, unknown>);
   }
 
     async listConsentPackets(): Promise<ConsentPacket[]> {

@@ -12,6 +12,7 @@ import {
   Pill,
   Search,
   Users,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { ComplyRerWordmark } from "../../brand/ComplyrerBrand";
@@ -33,6 +34,7 @@ import MobileToday from "./MobileToday";
 import MobileComplianceCard from "./MobileComplianceCard";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
+import HouseCardPanel from "../houseCard/HouseCardPanel";
 import MobileIsp from "./MobileIsp";
 import MobilePeopleList from "./MobilePeopleList";
 import "./mobile.css";
@@ -44,6 +46,7 @@ export type ShellView =
   | "isp"
   | "tasks"
   | "people"
+  | "housecard"
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
@@ -54,6 +57,7 @@ const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
   individuals: Users,
   appointments: CalendarDays,
   checklists: ListChecks,
+  houseCard: Wallet,
 };
 
 const VIEW_TITLES: Partial<Record<ShellView, string>> = {
@@ -62,6 +66,7 @@ const VIEW_TITLES: Partial<Record<ShellView, string>> = {
   isp: "ISP Data",
   tasks: "My Tasks",
   people: "Individuals",
+  housecard: "House Card",
   notifications: "Notifications",
 };
 
@@ -258,6 +263,9 @@ export default function MobileShell({
         break;
       case "checklists":
         nav.openPage("Weekly checklist");
+        break;
+      case "houseCard":
+        setView("housecard");
         break;
     }
   };
@@ -588,6 +596,19 @@ export default function MobileShell({
             initialPersonId={ispPersonId}
             onOpenChart={nav.openPersonChart}
             onFormActiveChange={setIspFormActive}
+          />
+        )}
+
+        {view === "housecard" && scopedSite && (
+          <HouseCardPanel
+            api={api}
+            session={session}
+            siteId={scopedSite.id}
+            siteName={scopedSite.name}
+            people={people.map((person) => ({
+              id: person.id,
+              name: person.name,
+            }))}
           />
         )}
 

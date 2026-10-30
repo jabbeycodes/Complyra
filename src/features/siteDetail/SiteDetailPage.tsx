@@ -14,6 +14,7 @@ import {
   Printer,
   User,
   Users,
+  Wallet,
 } from "lucide-react";
 import { Avatar, Badge, Empty, formatDate } from "../../components";
 import StatusMixDonut from "../../components/StatusMixDonut";
@@ -33,6 +34,7 @@ import { agencyStateCode, siteHeroAddressLine } from "../../data/siteAddress";
 import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { openPrintable } from "../../data/openFile";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
+import HouseCardPanel from "../houseCard/HouseCardPanel";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
@@ -133,6 +135,7 @@ const TAB_ICONS: Record<SiteDetailTabId, typeof Building2> = {
   training: GraduationCap,
   medications: Pill,
   mileage: CarFront,
+  housecard: Wallet,
   shiftnotes: FileText,
   reporting: FileText,
   staff: Users,
@@ -1366,6 +1369,29 @@ export default function SiteDetailPage({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "housecard" && (
+          <div className="panel">
+            <div className="panel-heading">
+              <h2>House Card</h2>
+            </div>
+            <p className="stack-help">
+              This home&rsquo;s petty cash ledger: funds received, every
+              purchase, and the running balance. House managers sign each
+              month closed; the signed statement prints from here.
+            </p>
+            <HouseCardPanel
+              api={api}
+              session={session}
+              siteId={siteId}
+              siteName={siteName}
+              people={siteIndividuals.map((person) => ({
+                id: person.id,
+                name: person.name,
+              }))}
+            />
           </div>
         )}
 

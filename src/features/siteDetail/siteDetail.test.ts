@@ -67,6 +67,7 @@ const EXPECTED_ORDER: SiteDetailTabId[] = [
   "training",
   "medications",
   "mileage",
+  "housecard",
   "shiftnotes",
   // THERAP-CORE-GAPS-1: event reports sit after Shift notes; Staff stays last.
   "reporting",
