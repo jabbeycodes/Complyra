@@ -28,7 +28,10 @@ export default function SiteQaReview({
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const canAudit = !!session && can(session, "qa.audit");
+  // Start-review follows qa.schedule (Program Manager / administrator),
+  // matching QaAuditsPage and both APIs — not qa.audit, which is the
+  // scoring permission held by the read-only auditor role.
+  const canStartReview = !!session && can(session, "qa.schedule");
   const canView =
     !!session &&
     (can(session, "qa.audit") ||
@@ -110,7 +113,7 @@ export default function SiteQaReview({
           from its own records are pre-filled and locked; the auditor scores
           the rest.
         </p>
-        {canAudit && (
+        {canStartReview && (
           <button
             type="button"
             className="button primary"
