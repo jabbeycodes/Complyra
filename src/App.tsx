@@ -136,6 +136,7 @@ import InactivityGuard from "./security/InactivityGuard";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import OperatorAudit from "./features/operator/OperatorAudit";
 import OperatorOverview from "./features/operator/OperatorOverview";
 import OperatorDirectory from "./features/operator/OperatorDirectory";
 import PlatformConsole from "./features/PlatformConsole";
@@ -753,7 +754,7 @@ export default function App() {
     );
   }
   const navItems = [
-    { title: "Operator Control Center", items: [["Operator overview", LayoutDashboard], ["Operator agencies", Building2], ["Platform", ShieldCheck], ["AI settings", ServerCog]] },
+    { title: "Operator Control Center", items: [["Operator overview", LayoutDashboard], ["Operator agencies", Building2], ["Platform", ShieldCheck], ["AI settings", ServerCog], ["Operator audit", History]] },
     {
       title: "Programs",
       items: [
@@ -1900,6 +1901,7 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Operator audit" && <OperatorAudit />}
               {page === "Operator overview" && <OperatorOverview />}
               {page === "Operator agencies" && <OperatorDirectory onSaved={notify} />}
               {page === "Platform" && (

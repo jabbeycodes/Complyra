@@ -51,6 +51,7 @@ function mapRow(row: Record<string, unknown>): RuleValueRow {
     effectiveFrom: String(row.effective_from),
     reason: String(row.reason ?? ""),
     setByName: String(row.set_by_name ?? ""),
+    setById: row.set_by ? String(row.set_by) : undefined,
     setAsOperator: Boolean(row.set_as_operator),
     createdAt: String(row.created_at),
   };
@@ -201,6 +202,7 @@ export class LocalRulesStore implements RulesStore {
       effectiveFrom: new Date(Math.max(effective.getTime(), now.getTime())).toISOString(),
       reason: input.reason.trim(),
       setByName: this.actor.fullName,
+      setById: this.actor.userId,
       setAsOperator: this.actor.isOperator,
       createdAt: now.toISOString(),
     });

@@ -30,3 +30,16 @@ export function validateOperatorAi(input: OperatorAiInput) {
  if(!input.model.trim() || input.model.length>120) throw new Error("Enter a model name of at most 120 characters.");
  if(input.enabled && !input.policyAcknowledged) throw new Error("Confirm authorization and required agreements before enabling AI processing.");
 }
+
+export interface OperatorAuditQuery extends OperatorPeriod { agencyId: string; actorId: string; action: string; source: string; page: number; }
+export interface OperatorAuditRow { id: string; agencyId: string; actorId: string | null; action: string; source: string; summary: string; createdAt: string; }
+export interface OperatorAuditPage { rows: OperatorAuditRow[]; hasMore: boolean; }
+export function validateOperatorAudit(q: OperatorAuditQuery){
+ validateOperatorPeriod(q);
+ if(!Number.isInteger(q.page)||q.page<0||q.page>2000||q.action.length>80||!["all","application","lifecycle","rules","ai"].includes(q.source))throw new Error("Invalid audit filters.");
+ for(const id of [q.agencyId,q.actorId]) if(id&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))throw new Error("Enter a valid agency/actor ID.");
+}
+export function operatorAuditCsv(rows: OperatorAuditRow[]){
+ const cell=(v:string|null)=>'"'+String(v??"").replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
+ return [["Event ID","Agency ID","Actor ID","Action","Source","Summary","UTC time"],...rows.map(r=>[r.id,r.agencyId,r.actorId,r.action,r.source,r.summary,r.createdAt])].map(r=>r.map(cell).join(",")).join("\r\n");
+}
