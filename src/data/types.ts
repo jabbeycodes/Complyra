@@ -476,6 +476,13 @@ export type DelegationRescindReason = "health_status_change" | "other";
 export interface DelegationRosterRow {
   printName: string;
   title: string;
+  /**
+   * The agency staff member this row names, when the row was seeded
+   * from the recipient picker at creation time (or matched to a member
+   * since). Null for rows typed by hand on the paper-style form — the
+   * printed name stays the signing key either way.
+   */
+  staffUserId?: string | null;
   staffSignature: string | null;
   signatureName: string | null;
   signedAt: string | null;
@@ -529,6 +536,13 @@ export interface DelegationForm {
 
 export const DELEGATION_ROSTER_ROWS = 12;
 
+/** A staff member who may receive an RN delegation for one Individual. */
+export interface DelegationRecipient {
+  userId: string;
+  name: string;
+  title: string;
+}
+
 /** Patch shape accepted by updateDelegationForm (local + hosted). */
 export type DelegationFormPatch = Partial<
   Omit<DelegationForm, "roster" | "instructingProfessional" | "delegatingRn" | "templateVersion">
@@ -566,6 +580,7 @@ export function blankDelegationRoster(): DelegationRosterRow[] {
   return Array.from({ length: DELEGATION_ROSTER_ROWS }, () => ({
     printName: "",
     title: "",
+    staffUserId: null,
     staffSignature: null,
     signatureName: null,
     signedAt: null,

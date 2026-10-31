@@ -13,6 +13,7 @@ import {
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
+  DEMO_HM_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 
@@ -34,6 +35,10 @@ function dspLogin() {
     username: DEMO_DSP_USERNAME,
 password: DEMO_PASSWORD
   };
+}
+
+function hmLogin() {
+  return { ...dspLogin(), username: DEMO_HM_USERNAME };
 }
 
 test("actions api: admin creates, lists, updates, and resolves", async () => {
@@ -103,6 +108,33 @@ test("actions api: staff without the permission cannot write", async () => {
   // Reads are agency-member-wide.
   const listed = await api.listCorrectiveActions();
   assert.ok(Array.isArray(listed));
+});
+
+test("actions api: house manager can create and resolve (simulation batch 7)", async () => {
+  // Batch 7: the HM — the role that owns QA follow-up at a home — could
+  // not create a corrective action anywhere. correctiveActions.manage is
+  // now in the house_manager pack (permissions.ts + the
+  // 20261031170000 seed refresh).
+  const api = new LocalApi(store());
+  const session = await api.signIn(hmLogin());
+  assert.equal(session.roleKey, "house_manager");
+
+  const created = await api.addCorrectiveAction({
+    title: "Re-train night shift on incident reporting",
+    description: "Raised by the Q3 QA review.",
+    dueOn: "2026-10-15",
+  });
+  assert.equal(created.storedStatus, "open");
+  assert.equal(created.createdByUserId, session.userId);
+
+  const listed = await api.listCorrectiveActions();
+  assert.ok(
+    listed.some((row) => row.id === created.id),
+    "the HM sees the action they just created",
+  );
+
+  const resolved = await api.resolveCorrectiveAction(created.id);
+  assert.equal(resolved.storedStatus, "resolved");
 });
 
 test("actions api: overdue items sort first in listings", async () => {

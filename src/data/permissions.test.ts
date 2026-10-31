@@ -258,7 +258,10 @@ test("WS4: assertNoDrift catches undeclared permission strings", () => {
 test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field staff off", () => {
   assert.ok(PERMISSION_KEYS.includes("correctiveActions.manage"));
   assert.equal(PERMISSION_LABELS["correctiveActions.manage"], "Manage corrective actions");
-  // Granted: administrator, compliance_admin, program_manager, program_manager.
+  // Granted: administrator, compliance_admin, program_manager, house_manager.
+  // House manager joined the granted set with the simulation batch-7 fix:
+  // HMs own house-level QA follow-up, and with the key off for HM the QA
+  // corrective-action entity had no creator at the houses at all.
   assert.equal(defaultPermissions("administrator")["correctiveActions.manage"], true);
   assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], true);
   assert.equal(
@@ -266,8 +269,8 @@ test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field 
     true,
   );
   assert.equal(defaultPermissions("program_manager")["correctiveActions.manage"], true);
-  // Not granted: house_manager, dsp, nurse, hr, auditor.
-  assert.equal(defaultPermissions("house_manager")["correctiveActions.manage"], false);
+  // Not granted: dsp, nurse, hr, auditor.
+  assert.equal(defaultPermissions("house_manager")["correctiveActions.manage"], true);
   assert.equal(defaultPermissions("dsp")["correctiveActions.manage"], false);
   assert.equal(defaultPermissions("nurse")["correctiveActions.manage"], false);
   assert.equal(defaultPermissions("hr")["correctiveActions.manage"], false);
@@ -281,5 +284,5 @@ test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field 
     hasPermission({ role: "program_manager" }, "correctiveActions.manage"),
     true,
   );
-  assert.equal(hasPermission({ role: "house_manager" }, "correctiveActions.manage"), false);
+  assert.equal(hasPermission({ role: "house_manager" }, "correctiveActions.manage"), true);
 });

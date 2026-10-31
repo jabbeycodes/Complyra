@@ -166,7 +166,12 @@ import {
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
-import { canReadIndividual, assertCalendarDate } from "./access";
+import {
+  canActAtSite,
+  canReadIndividual,
+  assertCalendarDate,
+  dspScopeCoversIndividual,
+} from "./access";
 import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
   AcknowledgmentPacket,
@@ -176,6 +181,7 @@ import type {
   AssignTrainingInput,
   ChecklistAnswer,
   DelegationFormPatch,
+  DelegationRecipient,
   DelegationTemplateVersion,
   DocumentVersion,
   DoseExceptionKind,
@@ -229,7 +235,7 @@ import type {
   SignatureSettings,
   UserSignature,
 } from "./types";
-import { blankDelegationForm } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
 import {
   dspRatingChangedPayload,
@@ -1199,7 +1205,11 @@ export interface ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }): Promise<{ id: string }>;
+  /** DSPs whose own scope covers this Individual — the delegation recipient picker. */
+  listDelegationRecipients(individualId: string): Promise<DelegationRecipient[]>;
   /** Patch fields on the delegation form (purpose, procedures, instructing RN, rescind state, …). */
   updateDelegationForm(input: {
     obligationId: string;
@@ -9222,6 +9232,84 @@ export class LocalApi implements ComplyraApi {
     }
   }
 
+  /**
+   * DSPs who may receive a delegation for this Individual: active agency
+   * DSP memberships whose own scope covers the Individual (membership
+   * home site, or an assignment to them or their site) — the same rule
+   * that decides what the DSP can read.
+   */
+  private delegationRecipientsFor(
+    session: SessionUser,
+    person: IndividualRecord,
+  ): DelegationRecipient[] {
+    const today = todayIso();
+    const rows: DelegationRecipient[] = [];
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== session.agencyId || m.roleKey !== "dsp") continue;
+      if (m.expiresOn && m.expiresOn < today) continue;
+      const profile = this.store.db.profiles.find((p) => p.id === m.userId);
+      if (!profile) continue;
+      if (
+        !dspScopeCoversIndividual(
+          { userId: m.userId, agencyId: m.agencyId, siteId: m.siteId },
+          person,
+          this.store.db.assignments,
+          this.store.db.individuals,
+        )
+      ) {
+        continue;
+      }
+      rows.push({
+        userId: m.userId,
+        name: profile.fullName,
+        title: profile.jobTitle || "DSP",
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Validate picker selections against the eligible recipient list. */
+  private resolveDelegationRecipients(
+    session: SessionUser,
+    person: IndividualRecord,
+    recipientUserIds: string[] | undefined,
+  ): DelegationRecipient[] {
+    if (!recipientUserIds || recipientUserIds.length === 0) return [];
+    if (recipientUserIds.length > DELEGATION_ROSTER_ROWS) {
+      throw new Error("A delegation form holds at most 12 staff.");
+    }
+    const eligible = this.delegationRecipientsFor(session, person);
+    return recipientUserIds.map((userId) => {
+      const found = eligible.find((row) => row.userId === userId);
+      if (!found) {
+        throw new Error(
+          "Choose recipients from the staff who work at this individual's site.",
+        );
+      }
+      return found;
+    });
+  }
+
+  async listDelegationRecipients(individualId: string) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return this.delegationRecipientsFor(session, person);
+  }
+
   async createDelegation(input: {
     individualId: string;
     taskTitle: string;
@@ -9230,6 +9318,8 @@ export class LocalApi implements ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }) {
     const session = assertSession(this.store);
     this.assertDelegationEditor(session);
@@ -9238,16 +9328,40 @@ export class LocalApi implements ComplyraApi {
     );
     if (!person) throw new Error("Individual not found.");
     accessibleIndividual(this.store, session, person.id);
-    if (!canAccessSite(session, person.siteId)) {
+    // Site scope honors staff assignments, not just the membership home
+    // site (simulation batch 10: an agency-wide nurse whose homes come
+    // from assignments was refused at both of her assigned sites).
+    // Mirrors private.can_read_site via canActAtSite.
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
       throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const recipients = this.resolveDelegationRecipients(
+      session,
+      person,
+      input.recipientUserIds,
+    );
     const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    recipients.forEach((recipient, i) => {
+      form.roster[i] = {
+        ...form.roster[i],
+        printName: recipient.name,
+        title: recipient.title,
+        staffUserId: recipient.userId,
+      };
+    });
     const item: ObligationItem = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,

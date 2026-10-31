@@ -139,6 +139,7 @@ export function mapDelegationForm(value: unknown): DelegationForm | null {
     return {
       printName: str(r.printName),
       title: str(r.title),
+      staffUserId: strOrNull(r.staffUserId),
       staffSignature: strOrNull(r.staffSignature),
       signatureName: strOrNull(r.signatureName),
       signedAt: isoDateTime(r.signedAt),

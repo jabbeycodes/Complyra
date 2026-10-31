@@ -26,6 +26,7 @@ import type {
   ChecklistAttestation,
   ChecklistItem,
   DelegationFormPatch,
+  DelegationRecipient,
   DelegationTemplateVersion,
   DocumentRecord,
   DocumentVersion,
@@ -58,6 +59,7 @@ import type {
   ServiceLogKind,
   SessionUser,
   SiteRecord,
+  StaffAssignment,
   StaffCertificate,
   StaffClearanceRow,
   StaffTrainingProfile,
@@ -80,7 +82,7 @@ import type {
   SignatureEvent,
   SignatureSettings,
 } from "./types";
-import { blankDelegationForm } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import {
   LOGIN_BAD_PASSWORD_MESSAGE,
   LOGIN_FAILED_MESSAGE,
@@ -92,7 +94,12 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
-import { assertCalendarDate, canReadIndividual } from "./access";
+import {
+  assertCalendarDate,
+  canActAtSite,
+  canReadIndividual,
+  dspScopeCoversIndividual,
+} from "./access";
 import {
   sortLifeEvents,
   toLifeEventView,
@@ -719,20 +726,13 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
-  /** The Individual, if this session may read them; otherwise throws. */
-  private async assertLifeEventReadable(
-    session: SessionUser,
-    individualId: string,
-  ) {
-    const person = await this.individualRecord(individualId);
-    if (!person || person.agencyId !== session.agencyId) {
-      throw new Error("Individual not found or outside your assigned access.");
-    }
+  /** Every staff_assignments row in the agency, mapped to the app shape. */
+  private async agencyAssignments(agencyId: string): Promise<StaffAssignment[]> {
     const { data } = await this.client
       .from("staff_assignments")
       .select("*")
-      .eq("agency_id", session.agencyId);
-    const assignments = (data ?? []).map((row) => {
+      .eq("agency_id", agencyId);
+    return (data ?? []).map((row) => {
       const record = row as Record<string, unknown>;
       return {
         id: record.id as string,
@@ -744,6 +744,32 @@ export class HostedApi implements ComplyraApi {
         endsOn: (record.ends_on as string | null) ?? null,
       };
     });
+  }
+
+  /** Lightweight Individual refs (id + site) for assignment resolution. */
+  private async agencyIndividualRefs(
+    agencyId: string,
+  ): Promise<{ id: string; siteId: string }[]> {
+    const { data } = await this.client
+      .from("individuals")
+      .select("id, site_id")
+      .eq("agency_id", agencyId);
+    return (data ?? []).map((row) => {
+      const record = row as Record<string, unknown>;
+      return { id: record.id as string, siteId: record.site_id as string };
+    });
+  }
+
+  /** The Individual, if this session may read them; otherwise throws. */
+  private async assertLifeEventReadable(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const assignments = await this.agencyAssignments(session.agencyId);
     if (!canReadIndividual(session, person, assignments, [person])) {
       throw new Error("Individual not found or outside your assigned access.");
     }
@@ -8098,6 +8124,118 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
+  /**
+   * DSPs who may receive a delegation for this Individual: active agency
+   * DSP memberships whose own scope covers the Individual (membership
+   * home site, or an assignment to them or their site) — the same rule
+   * that decides what the DSP can read.
+   */
+  private async delegationRecipientsFor(
+    session: SessionUser,
+    person: IndividualRecord,
+    assignments: StaffAssignment[],
+    individuals: { id: string; siteId: string }[],
+  ): Promise<DelegationRecipient[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: memberships } = await this.client
+      .from("memberships")
+      .select("user_id, site_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("role_key", "dsp");
+    const dspRows = (memberships ?? []).filter((row) => {
+      const expiresOn = ((row as Record<string, unknown>).expires_on as string | null) ?? null;
+      return !expiresOn || expiresOn >= today;
+    });
+    if (dspRows.length === 0) return [];
+    const userIds = dspRows.map(
+      (row) => (row as Record<string, unknown>).user_id as string,
+    );
+    const { data: profiles } = await this.client
+      .from("profiles")
+      .select("id, full_name, job_title")
+      .eq("home_agency_id", session.agencyId)
+      .in("id", userIds);
+    const profileById = new Map(
+      (profiles ?? []).map((row) => {
+        const r = row as Record<string, unknown>;
+        return [
+          r.id as string,
+          { name: r.full_name as string, title: (r.job_title as string) || "DSP" },
+        ] as const;
+      }),
+    );
+    const rows: DelegationRecipient[] = [];
+    for (const row of dspRows) {
+      const r = row as Record<string, unknown>;
+      const userId = r.user_id as string;
+      const profile = profileById.get(userId);
+      if (!profile) continue;
+      if (
+        !dspScopeCoversIndividual(
+          {
+            userId,
+            agencyId: session.agencyId,
+            siteId: (r.site_id as string | null) ?? null,
+          },
+          person,
+          assignments,
+          individuals,
+        )
+      ) {
+        continue;
+      }
+      rows.push({ userId, name: profile.name, title: profile.title });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Validate picker selections against the eligible recipient list. */
+  private async resolveDelegationRecipients(
+    session: SessionUser,
+    person: IndividualRecord,
+    assignments: StaffAssignment[],
+    individuals: { id: string; siteId: string }[],
+    recipientUserIds: string[] | undefined,
+  ): Promise<DelegationRecipient[]> {
+    if (!recipientUserIds || recipientUserIds.length === 0) return [];
+    if (recipientUserIds.length > DELEGATION_ROSTER_ROWS) {
+      throw new Error("A delegation form holds at most 12 staff.");
+    }
+    const eligible = await this.delegationRecipientsFor(
+      session,
+      person,
+      assignments,
+      individuals,
+    );
+    return recipientUserIds.map((userId) => {
+      const found = eligible.find((row) => row.userId === userId);
+      if (!found) {
+        throw new Error(
+          "Choose recipients from the staff who work at this individual's site.",
+        );
+      }
+      return found;
+    });
+  }
+
+  async listDelegationRecipients(individualId: string) {
+    const session = await this.requireSession();
+    this.requirePermission(session, "clinical.view");
+    this.assertDelegationEditor(session);
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    if (!canActAtSite(session, person.siteId, assignments, individuals)) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return this.delegationRecipientsFor(session, person, assignments, individuals);
+  }
+
   async createDelegation(input: {
     individualId: string;
     taskTitle: string;
@@ -8106,6 +8244,8 @@ export class HostedApi implements ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }) {
     const session = await this.requireSession();
     this.requirePermission(session, "clinical.view");
@@ -8114,16 +8254,39 @@ export class HostedApi implements ComplyraApi {
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
     }
-    if (!canAccessSite(session, person.siteId)) {
+    // Site scope honors staff assignments, not just the membership home
+    // site (simulation batch 10: an agency-wide nurse whose homes come
+    // from assignments was refused at both of her assigned sites).
+    // Mirrors private.can_read_site via canActAtSite.
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    if (!canActAtSite(session, person.siteId, assignments, individuals)) {
       throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const recipients = await this.resolveDelegationRecipients(
+      session,
+      person,
+      assignments,
+      individuals,
+      input.recipientUserIds,
+    );
     const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    recipients.forEach((recipient, i) => {
+      form.roster[i] = {
+        ...form.roster[i],
+        printName: recipient.name,
+        title: recipient.title,
+        staffUserId: recipient.userId,
+      };
+    });
     const { data, error } = await this.client
       .from("obligations")
       .insert({
