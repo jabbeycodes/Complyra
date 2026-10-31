@@ -68,11 +68,21 @@ export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
   ].includes(session.roleKey);
 }
 
-export function assignedSiteIds(session: SessionUser, staff: StaffSiteRef[]): string[] {
+export function assignedSiteIds(
+  session: SessionUser,
+  staff: StaffSiteRef[],
+  assignmentSiteIds: string[] = [],
+): string[] {
   const ids = new Set<string>();
   if (session.siteId) ids.add(session.siteId);
   const member = staff.find((row) => row.id === session.userId);
   if (member?.siteId) ids.add(member.siteId);
+  // Pass 3 (simulation Phase D): the viewer's own staff_assignments sites
+  // (WorkspaceView.assignmentSiteIds) count toward site-list visibility,
+  // mirroring the assignment branch of private.can_read_site — a nurse or
+  // DSP whose homes come only from assignments still sees those houses in
+  // site lists, not just their Individuals.
+  for (const id of assignmentSiteIds) if (id) ids.add(id);
   return [...ids];
 }
 
@@ -80,9 +90,10 @@ export function sitesVisibleTo<T extends { id: string }>(
   session: SessionUser,
   sites: T[],
   staff: StaffSiteRef[],
+  assignmentSiteIds: string[] = [],
 ): T[] {
   if (isAgencyWideViewer(session)) return sites;
-  const ids = new Set(assignedSiteIds(session, staff));
+  const ids = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
   return sites.filter((site) => ids.has(site.id));
 }
 

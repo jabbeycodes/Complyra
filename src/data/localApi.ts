@@ -1905,6 +1905,14 @@ export type WorkspaceSite = {
 export interface WorkspaceView {
   session: SessionUser;
   sites: WorkspaceSite[];
+  /**
+   * Pass 3 (simulation Phase D): the SESSION user's active assignment
+   * site ids — site assignments directly, plus the site of any Individual
+   * they are assigned to (active = startsOn <= today and (endsOn null or
+   * >= today), mirroring private.can_read_site's assignment branch).
+   * Feeds sitesVisibleTo so assignment-only homes appear in site lists.
+   */
+  assignmentSiteIds: string[];
   individuals: {
     id: string;
     name: string;
@@ -2990,6 +2998,19 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit = hasPermission(session, "audit.read") && isAgencyWideViewer(session);
+  const today = todayIso();
+  const assignmentSiteIds = [...new Set(
+    store.db.assignments
+      .filter((row) => row.agencyId === session.agencyId &&
+        row.userId === session.userId &&
+        row.startsOn <= today &&
+        (!row.endsOn || row.endsOn >= today))
+      .map((row) => row.siteId ??
+        (row.individualId
+          ? store.db.individuals.find((person) => person.id === row.individualId)?.siteId ?? null
+          : null))
+      .filter((id): id is string => Boolean(id)),
+  )];
   const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
   const individuals = canViewPeople
     ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
@@ -3139,6 +3160,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         },
       )))),
     branding: { logoUrl: null },
+    assignmentSiteIds,
   };
 }
 

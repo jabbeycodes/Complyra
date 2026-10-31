@@ -7,6 +7,7 @@ import {
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
+  DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD, type SessionUser } from "./types";
 import {
@@ -193,6 +194,107 @@ test("a nurse with a home site is denied the other site; site lists route throug
   assert.deepEqual(
     sitesVisibleTo(nurse, fakeSites, [{ id: nurse.userId, siteId: "site-a" }]).map((site) => site.id),
     ["site-a"],
+  );
+});
+
+test("Pass 3: assignment sites union into site lists (assignment-only nurse, DSP beyond home)", () => {
+  // A nurse with NO membership home whose coverage comes only from
+  // staff_assignments sees both assigned sites — and only those
+  // (mirrors the assignment branch of private.can_read_site).
+  const nurse = fakeSession("nurse", null);
+  assert.deepEqual(
+    sitesVisibleTo(nurse, fakeSites, [], ["site-a", "site-b"]).map((site) => site.id),
+    ["site-a", "site-b"],
+  );
+  assert.deepEqual(
+    sitesVisibleTo(nurse, fakeSites, [], ["site-a"]).map((site) => site.id),
+    ["site-a"],
+  );
+  // An unassigned third site stays hidden.
+  const threeSites = [{ id: "site-a" }, { id: "site-b" }, { id: "site-c" }];
+  assert.deepEqual(
+    sitesVisibleTo(nurse, threeSites, [], ["site-b"]).map((site) => site.id),
+    ["site-b"],
+  );
+  // A DSP's assignment site beyond their membership home becomes visible.
+  const dsp = fakeSession("dsp", "site-a");
+  assert.deepEqual(
+    sitesVisibleTo(dsp, fakeSites, [{ id: dsp.userId, siteId: "site-a" }], ["site-b"]).map((site) => site.id),
+    ["site-a", "site-b"],
+  );
+  // Default (no assignment ids passed) preserves the previous behavior.
+  assert.deepEqual(sitesVisibleTo(nurse, fakeSites, []), []);
+});
+
+test("Pass 3: LocalApi workspace carries the viewer's active assignment site ids", async () => {
+  const client = api();
+  const dsp = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_DSP_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const dspWorkspace = await client.loadWorkspace(dsp);
+  // Demo parity: Evergreen DSPs are assigned to every Individual at their
+  // home (Cedar House), so their assignmentSiteIds equal their home site —
+  // site lists render exactly as before this plumbing existed.
+  const cedar = dspWorkspace.sites.find((site) => site.name === "Cedar House")!;
+  assert.deepEqual(dspWorkspace.assignmentSiteIds, [cedar.id]);
+  assert.deepEqual(
+    sitesVisibleTo(dsp, dspWorkspace.sites, dspWorkspace.staff, dspWorkspace.assignmentSiteIds).map((site) => site.name),
+    ["Cedar House"],
+  );
+  // An administrator stays agency-wide regardless of any seed assignments.
+  const admin = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_ADMIN_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  const adminWorkspace = await client.loadWorkspace(admin);
+  assert.equal(
+    sitesVisibleTo(admin, adminWorkspace.sites, adminWorkspace.staff, adminWorkspace.assignmentSiteIds).length,
+    adminWorkspace.sites.length,
+  );
+});
+
+test("Pass 3: a nurse assigned at a second site (via an Individual) gets both assignment site ids; an ended assignment does not count", async () => {
+  const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  const client = new LocalApi(store);
+  const nurseProfile = store.db.profiles.find((p) => p.username === DEMO_NURSE_USERNAME)!;
+  const nurseMembership = store.db.memberships.find((m) => m.userId === nurseProfile.id)!;
+  const homeSiteId = nurseMembership.siteId!;
+  const otherSite = store.db.sites.find((s) => s.id !== homeSiteId && s.agencyId === nurseMembership.agencyId)!;
+  const otherPerson = store.db.individuals.find((p) => p.siteId === otherSite.id)!;
+  // Ended assignment at the other site: must NOT contribute.
+  store.db.assignments.push({
+    id: "test-assignment-ended",
+    agencyId: nurseMembership.agencyId,
+    userId: nurseProfile.id,
+    individualId: otherPerson.id,
+    siteId: null,
+    startsOn: "2026-01-01",
+    endsOn: "2026-06-01",
+  });
+  const nurse = await client.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: DEMO_NURSE_USERNAME,
+    password: DEMO_PASSWORD,
+  });
+  let workspace = await client.loadWorkspace(nurse);
+  assert.deepEqual(workspace.assignmentSiteIds, [homeSiteId]);
+  // Active Individual assignment at the other site: its site joins the list.
+  store.db.assignments.push({
+    id: "test-assignment-active",
+    agencyId: nurseMembership.agencyId,
+    userId: nurseProfile.id,
+    individualId: otherPerson.id,
+    siteId: null,
+    startsOn: "2026-01-01",
+    endsOn: null,
+  });
+  workspace = await client.loadWorkspace(nurse);
+  assert.deepEqual(
+    [...workspace.assignmentSiteIds].sort(),
+    [homeSiteId, otherSite.id].sort(),
   );
 });
 

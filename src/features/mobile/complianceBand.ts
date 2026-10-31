@@ -45,9 +45,10 @@ export function bandHouseRows(
   sites: BandSiteRef[],
   staff: StaffSiteRef[],
   requirements: Requirement[],
+  assignmentSiteIds: string[] = [],
 ): HouseComplianceRow[] | null {
   if (!HOUSE_DONUT_ROLES.has(session.roleKey)) return null;
-  const visibleSites = sitesVisibleTo(session, sites, staff);
+  const visibleSites = sitesVisibleTo(session, sites, staff, assignmentSiteIds);
   const visibleNames = new Set(visibleSites.map((site) => site.name));
   const visibleRequirements = requirements.filter((r) =>
     visibleNames.has(r.site),

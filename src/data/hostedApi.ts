@@ -3011,8 +3011,29 @@ export class HostedApi implements ComplyraApi {
     );
     const logoUrl = await this.hostedLogoDataUrl(agencyId);
 
+    // Pass 3 (simulation Phase D): the session user's own active
+    // assignment site ids — site assignments directly, plus the site of
+    // any Individual they are assigned to (active = starts_on <= today
+    // and (ends_on null or >= today), mirroring the assignment branch of
+    // private.can_read_site). RLS already scoped assignmentsRes to rows
+    // this caller may read; filter to their own rows here.
+    const assignmentToday = todayIso();
+    const individualSiteById = Object.fromEntries(
+      (individualsRes.data ?? []).map((row) => [row.id as string, row.site_id as string]),
+    );
+    const assignmentSiteIds = [...new Set(
+      ((assignmentsRes.data ?? []) as Record<string, unknown>[])
+        .filter((row) => row.user_id === session.userId &&
+          (row.starts_on as string) <= assignmentToday &&
+          (!row.ends_on || (row.ends_on as string) >= assignmentToday))
+        .map((row) => (row.site_id as string | null) ??
+          (row.individual_id ? individualSiteById[row.individual_id as string] ?? null : null))
+        .filter((id): id is string => Boolean(id)),
+    )];
+
     return {
       session,
+      assignmentSiteIds,
       sites: sites.map((site, i) => ({
         id: site.id,
         name: site.name,
