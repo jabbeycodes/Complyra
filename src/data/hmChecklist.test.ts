@@ -6,6 +6,7 @@ import {
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
+  DEMO_HM_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { todayIso } from "./chart";
@@ -276,4 +277,59 @@ test("assign reuses the open instance for a site/week (idempotent)", async () =>
   assert.equal(first.id, second.id);
   const rows = await api.listWeeklyChecklists({ weekOf: input.weekOf });
   assert.equal(rows.filter((c) => c.siteId === site.id).length, 1);
+});
+
+// Batch 19 mirror: the rollover runs under the signed-in user's own
+// session (the HM checklist page mounts it). Creation scope must match
+// the hosted insert policy (20261031200000): oversight roles open every
+// home's week, a house manager opens only their own row, a DSP opens
+// nothing. The stock seed has one HM (James Wilson, Willow); add a
+// second HM membership at Cedar so an over-broad rollover would create
+// a row the caller has no right to create.
+function twoHmStore() {
+  const db = structuredClone(createEvergreenSeed());
+  db.weeklyChecklists = [];
+  const cedar = db.sites.find((s) => s.name.includes("Cedar"))!;
+  const taylor = db.profiles.find((p) => p.username === "taylor.reed")!;
+  db.memberships.push({
+    id: "test-membership-hm-cedar",
+    agencyId: cedar.agencyId,
+    userId: taylor.id,
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: cedar.id,
+    expiresOn: null,
+  });
+  return new MemoryStore(db);
+}
+
+test("rollover as a house manager opens only their own home's row", async () => {
+  const api = new LocalApi(twoHmStore());
+  const hm = await api.signIn(login(DEMO_HM_USERNAME));
+  const result = await api.rolloverWeeklyChecklists();
+  assert.equal(result.created, 1);
+  const mine = await api.listWeeklyChecklists();
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].assignedToUserId, hm.userId);
+  // As oversight, confirm no Cedar row was created by the HM's rollover.
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const all = await api.listWeeklyChecklists();
+  assert.equal(all.length, 1);
+});
+
+test("rollover as a DSP creates no checklist rows", async () => {
+  const api = new LocalApi(twoHmStore());
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const result = await api.rolloverWeeklyChecklists();
+  assert.equal(result.created, 0);
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const all = await api.listWeeklyChecklists();
+  assert.equal(all.length, 0);
+});
+
+test("rollover as oversight still opens every home's week", async () => {
+  const api = new LocalApi(twoHmStore());
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const result = await api.rolloverWeeklyChecklists();
+  assert.equal(result.created, 2);
 });

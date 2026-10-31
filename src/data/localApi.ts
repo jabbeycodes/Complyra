@@ -11399,12 +11399,19 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     const currentWeek = weekOfSundayIso(todayIso());
     const now = new Date().toISOString();
+    // Mirror of the hosted creation/update scope (migration
+    // 20261031200000): oversight roles roll every home forward; anyone
+    // else — the checklist page runs this under the HM's own session —
+    // only locks and opens rows assigned to themselves. A DSP session
+    // creates nothing.
+    const oversight = this.checklistOversight(session);
     let locked = 0;
     for (const row of this.weeklyChecklists()) {
       if (
         row.agencyId === session.agencyId &&
         row.status === "open" &&
-        row.weekOf < currentWeek
+        row.weekOf < currentWeek &&
+        (oversight || row.assignedToUserId === session.userId)
       ) {
         row.status = "overdue";
         row.updatedAt = now;
@@ -11421,6 +11428,7 @@ export class LocalApi implements ComplyraApi {
     );
     let created = 0;
     for (const m of hmAssignments) {
+      if (!oversight && m.userId !== session.userId) continue;
       const exists = this.weeklyChecklists().some(
         (c) =>
           c.agencyId === session.agencyId &&

@@ -20,6 +20,105 @@ export function requirementMatchesQuery(item: Requirement, query: string) {
     .includes(q);
 }
 
+/* ------------------------------------------------------------------ */
+/* Directory search (simulation batch 13): the header search also finds */
+/* people and homes, not just requirements. A real agency built through */
+/* the UI can have few or no requirement rows, which left the header    */
+/* search answering "No matching records" to every name query. The      */
+/* caller passes ONLY collections already scoped to the caller's        */
+/* readable sites, so a hit can never leak a cross-site record.         */
+/* ------------------------------------------------------------------ */
+
+export interface DirectoryIndividual {
+  id: string;
+  name: string;
+  site: string;
+}
+
+export interface DirectoryStaffMember {
+  id: string;
+  name: string;
+  role: string;
+  site: string;
+}
+
+export interface DirectorySite {
+  id: string;
+  name: string;
+}
+
+export type DirectoryHit =
+  | { kind: "individual"; id: string; name: string; site: string }
+  | { kind: "staff"; id: string; name: string; role: string; site: string }
+  | { kind: "site"; id: string; name: string };
+
+/**
+ * Every whitespace-separated token of the query must appear in the name,
+ * so a first name ("Alex"), a last name, or "Alex Riv" all match the
+ * same person.
+ */
+export function directoryNameMatches(name: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  const haystack = name.toLowerCase();
+  return q.split(/\s+/).every((token) => haystack.includes(token));
+}
+
+function rankByName<T extends { name: string }>(rows: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  return [...rows].sort((a, b) => {
+    const aPrefix = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+    const bPrefix = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+    if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function searchDirectory(
+  input: {
+    individuals: DirectoryIndividual[];
+    staff: DirectoryStaffMember[];
+    sites: DirectorySite[];
+  },
+  query: string,
+  perGroupLimit = 4,
+): DirectoryHit[] {
+  if (!query.trim()) return [];
+  const hits: DirectoryHit[] = [];
+  const seen = new Set<string>();
+  const push = (hit: DirectoryHit) => {
+    const key = `${hit.kind}:${hit.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    hits.push(hit);
+  };
+  for (const person of rankByName(
+    input.individuals.filter((p) => directoryNameMatches(p.name, query)),
+    query,
+  ).slice(0, perGroupLimit)) {
+    push({ kind: "individual", id: person.id, name: person.name, site: person.site });
+  }
+  for (const member of rankByName(
+    input.staff.filter((s) => directoryNameMatches(s.name, query)),
+    query,
+  ).slice(0, perGroupLimit)) {
+    push({
+      kind: "staff",
+      id: member.id,
+      name: member.name,
+      role: member.role,
+      site: member.site,
+    });
+  }
+  for (const home of rankByName(
+    input.sites.filter((s) => directoryNameMatches(s.name, query)),
+    query,
+  ).slice(0, perGroupLimit)) {
+    push({ kind: "site", id: home.id, name: home.name });
+  }
+  return hits;
+}
+
 /**
  * Filter, drop duplicate ids, then surface open work before completed copies
  * of the same title. Limit is applied after ranking so "Ellis" is not five

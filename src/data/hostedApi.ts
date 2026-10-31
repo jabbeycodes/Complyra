@@ -11573,12 +11573,23 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     const today = new Date().toISOString().slice(0, 10);
     const currentWeek = weekOfSundayIso(today);
-    const { data: stale, error: staleError } = await this.client
+    // The checklist page runs this under every viewer's own session,
+    // including the assigned HM's. Creation/update scope mirrors the RLS
+    // policies (20261031200000): oversight roles work agency-wide, anyone
+    // else only on rows assigned to themselves — otherwise the loop would
+    // attempt inserts the insert policy rightly refuses and surface a raw
+    // row-level-security error on the HM's own page (batch 19).
+    const canOversee = this.checklistCanOversee(session);
+    let staleQuery = this.client
       .from("hm_weekly_checklists")
       .select("id")
       .eq("agency_id", session.agencyId)
       .eq("status", "open")
       .lt("week_of", currentWeek);
+    if (!canOversee) {
+      staleQuery = staleQuery.eq("assigned_to_user_id", session.userId);
+    }
+    const { data: stale, error: staleError } = await staleQuery;
     throwIf(staleError, "Could not find stale checklists.");
     let locked = 0;
     if (stale && stale.length > 0) {
@@ -11612,6 +11623,8 @@ export class HostedApi implements ComplyraApi {
     for (const m of (assignments ?? []) as Array<Record<string, unknown>>) {
       const expiresOn = m.expires_on as string | null;
       if (expiresOn && expiresOn < today) continue;
+      // Non-oversight callers may only open their own row (see above).
+      if (!canOversee && (m.user_id as string) !== session.userId) continue;
       const siteId = m.site_id as string;
       if (haveSites.has(siteId)) continue;
       const readiness = await this.trainingReadinessHosted(session, siteId);
