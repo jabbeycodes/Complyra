@@ -2090,6 +2090,7 @@
   align-items: center;
   cursor: pointer;
   margin-top: 6px;
+}
 /* ────────────────────────────────────────────────────────────────
    Quick log chooser grid + Shift notes domain.
    The chooser renders its eight domains as tiles in the home
