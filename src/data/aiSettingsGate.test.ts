@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canManageAiSettings } from "../features/documents/documents";
 import { pageVisible } from "./status";
+import { canSeeConsents } from "./consents";
 import { LocalApi, MemoryStore } from "./localApi";
 import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE } from "./seed";
 import * as appTypes from "./types";
@@ -158,6 +159,37 @@ test("pageVisible AI settings is platformAdmin only", () => {
     pageVisible(session({ role: "dsp", platformAdmin: false }), "AI settings"),
     false,
   );
+});
+
+test("pageVisible Consents agrees with canSeeConsents for every role", async () => {
+  // Regression (role audit 2026-10-30, M1): PR #171 added administrator to
+  // canSeeConsents, but the Consents page gate in status.ts kept its own
+  // stale role list, so the agency Consents page never rendered for admins.
+  // The page gate and the data predicate must agree for all eight roles.
+  const api = new LocalApi(new MemoryStore(createEvergreenSeed()));
+  const usernames = [
+    "sarah.mitchell", // administrator
+    "melissa.grant", // program_manager
+    "james.wilson", // house_manager
+    "alex.morgan", // dsp
+    "cameron.price", // nurse
+    "tanya.brooks", // hr
+    "omar.haddad", // compliance_admin
+    "mark.delaney", // auditor
+  ];
+  for (const username of usernames) {
+    const session = await api.signIn({
+      agencyCode: DEMO_AGENCY_CODE,
+      username,
+      password: DEMO_PASSWORD_VALUE,
+    });
+    assert.equal(
+      pageVisible(session, "Consents"),
+      canSeeConsents(session.roleKey),
+      `${session.roleKey}: page gate must match canSeeConsents`,
+    );
+    await api.signOut();
+  }
 });
 
 test("agency admin cannot write AI settings; operator can", async () => {

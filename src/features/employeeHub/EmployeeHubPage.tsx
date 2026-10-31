@@ -461,8 +461,12 @@ export function EmployeeHubShell({
         : EMPLOYEE_TABS),
       ...MANAGER_TABS.filter(
         (t) =>
-          !t.perm ||
-          can(t.perm) ||
+          // A manager tab opens when at least one of its SPECIFIED gates
+          // matches (union semantics per TabDef). An unspecified gate is
+          // not a pass: the old leading "!t.perm ||" clause leaked the
+          // employee-tab rule in here and offered the permAny-only Kiosk
+          // tab to every role.
+          (t.perm !== undefined && can(t.perm)) ||
           (t.permAny?.some((p) => can(p)) ?? false) ||
           (t.roleAny?.includes(session.roleKey) ?? false),
       ),
