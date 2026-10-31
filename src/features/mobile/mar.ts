@@ -132,7 +132,8 @@ export function doseStatusText(mark: MedDoseMark | null): string {
   const label = DOSE_MARK_LABELS[mark.status] ?? mark.status;
   const by = mark.markedByName ? ` by ${mark.markedByName}` : "";
   const at = mark.markedAt ? ` · ${formatCentralTime(mark.markedAt)}` : "";
-  return `${label}${by}${at}`;
+  const late = mark.late ? " · Late" : "";
+  return `${label}${by}${at}${late}`;
 }
 
 /** Plain-words frequency from the dose times: "Twice daily · 8:00 AM, 8:00 PM". */

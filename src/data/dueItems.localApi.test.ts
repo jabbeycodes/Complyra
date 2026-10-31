@@ -153,13 +153,15 @@ test("marking a scheduled dose is recorded and readable", async () => {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const day = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
-  // Levetiracetam is Ellis' keppra scheduled med. A past day is a late mark, which stays allowed.
+  // Levetiracetam is Ellis' keppra scheduled med. A past day is a late mark:
+  // it stays allowed, but it must carry a late reason and is stamped Late.
   const medId = `${ellis.id}-med-keppra`;
   await api.markMedDose({
     medicationId: medId,
     doseDate: day,
     doseTime: "08:00",
     status: "given",
+    lateReason: "Recorded from the paper MAR the next morning",
   });
   const marks = await api.getMedDoseMarks(ellis.id, day);
   assert.ok(marks.some((m) => m.doseTime === "08:00" && m.status === "given"));
@@ -367,7 +369,7 @@ test("a recorded PRN follow-up is what stops the repeat", async () => {
   const api = new LocalApi(store());
   const { ellis } = await cedar(api);
   const medId = `${ellis.id}-med-lorazepam`;
-  await api.logPrnDose(medId, 1);
+  await api.logPrnDose(medId, { pills: 1, reason: "Anxiety" });
   await api.recordPrnFollowup(medId, { indication: "Anxiety", result: "Calmer after 20 minutes" });
   const notes = await api.listNotifications();
   assert.equal(notes.filter((row) => row.type === "med.prn_repeat").length, 0);

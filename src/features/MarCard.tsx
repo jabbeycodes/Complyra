@@ -41,6 +41,13 @@ export default function MarCard({ individualId }: { individualId: string }) {
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // A mark recorded after the dose window ends needs a late reason; when
+  // the API refuses for that, the row opens a reason input and retries.
+  const [latePrompt, setLatePrompt] = useState<{
+    key: string;
+    status: MedDoseMarkStatus;
+    reason: string;
+  } | null>(null);
 
   async function reloadMarks() {
     try {
@@ -100,15 +107,28 @@ export default function MarCard({ individualId }: { individualId: string }) {
     medicationId: string,
     doseTime: string,
     status: MedDoseMarkStatus,
+    lateReason?: string,
   ) {
     const key = `${medicationId}:${doseTime}`;
     setError("");
     setBusy(key);
     try {
-      await api.markMedDose({ medicationId, doseDate: today, doseTime, status });
+      await api.markMedDose({
+        medicationId,
+        doseDate: today,
+        doseTime,
+        status,
+        lateReason,
+      });
+      setLatePrompt(null);
       await reloadMarks();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      if (!lateReason && message.includes("past its recording window")) {
+        setLatePrompt({ key, status, reason: "" });
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(null);
     }
@@ -155,9 +175,48 @@ export default function MarCard({ individualId }: { individualId: string }) {
                   {existing ? (
                     <p className="muted mar-status">
                       {STATUS_LABEL[existing.status]} · {existing.markedByName}
+                      {existing.late
+                        ? ` · Late${existing.lateReason ? `: ${existing.lateReason}` : ""}`
+                        : ""}
                     </p>
                   ) : (
                     <p className="muted mar-status mar-status-open">Not marked</p>
+                  )}
+                  {latePrompt?.key === key && (
+                    <form
+                      className="stack"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void mark(
+                          dose.medicationId,
+                          dose.doseTime,
+                          latePrompt.status,
+                          latePrompt.reason,
+                        );
+                      }}
+                    >
+                      <label>
+                        This dose is past its recording window. Reason for the
+                        late entry (required)
+                        <input
+                          value={latePrompt.reason}
+                          onChange={(event) =>
+                            setLatePrompt((prev) =>
+                              prev
+                                ? { ...prev, reason: event.target.value }
+                                : prev,
+                            )
+                          }
+                        />
+                      </label>
+                      <button
+                        className="button primary"
+                        type="submit"
+                        disabled={!latePrompt.reason.trim() || busy === key}
+                      >
+                        Save late entry
+                      </button>
+                    </form>
                   )}
                 </div>
                 {canMark && (

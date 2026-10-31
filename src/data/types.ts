@@ -878,6 +878,10 @@ export interface MedDeliverySummary {
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;
+  /** Countdown-expected on-hand figure at count time; null for first counts. */
+  expectedPills?: number | null;
+  /** Note explaining a count that differs from expectedPills. */
+  varianceReason?: string | null;
 }
 
 /** Medication + stored inventory state + deterministic projection. */
@@ -1097,6 +1101,35 @@ export interface MedDoseMark {
   markedBy: string | null;
   markedByName: string;
   markedAt: string;
+  /** True when the mark was recorded after the dose window ended. */
+  late?: boolean;
+  /** Brief reason recorded with a late mark; null when not late. */
+  lateReason?: string | null;
+}
+
+/**
+ * One logged PRN administration — the per-dose audit record for a PRN med.
+ * Written by logPrnDose (hosted: prn_dose_logs via record_prn_dose); the
+ * reason is required so every dose answers who gave it, when, and why.
+ */
+export interface PrnDoseLog {
+  id: string;
+  agencyId: string;
+  individualId: string;
+  medicationId: string;
+  /** ISO timestamp the dose was given. */
+  givenAt: string;
+  /** ISO date (YYYY-MM-DD) of the dose. */
+  givenOn: string;
+  pills: number;
+  /** Why the dose was given (required at log time). */
+  reason: string;
+  /** Optional follow-up note captured at log time. */
+  followUp: string | null;
+  givenByName: string;
+  givenByUserId: string | null;
+  /** Stock remaining immediately after this dose. */
+  remainingAfter: number;
 }
 
 // ===== MEDICATION ORDERS + RECONCILIATION =====

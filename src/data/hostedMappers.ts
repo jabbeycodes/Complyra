@@ -353,6 +353,11 @@ export function mapMedicationDelivery(row: Row): MedicationDelivery {
     remainingPills: num(row.remaining_pills),
     pillsPerDay: num(row.pills_per_day),
     recordedBy: str(row.recorded_by),
+    expectedPills:
+      row.expected_pills === null || row.expected_pills === undefined
+        ? null
+        : num(row.expected_pills),
+    varianceReason: row.variance_reason ? str(row.variance_reason) : null,
   };
 }
 

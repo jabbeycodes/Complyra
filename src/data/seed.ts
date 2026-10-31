@@ -124,6 +124,8 @@ export interface LocalDatabase {
   chartFiles: ChartFile[];
   medications: Medication[];
   medicationDeliveries: MedicationDelivery[];
+  /** Per-dose PRN administration records (logPrnDose); lazily initialized. */
+  prnDoseLogs?: import("./types").PrnDoseLog[];
   medDoseExceptions: MedDoseException[];
   /** LIFEPATH-P6: per-medication inventory state (threshold, dose times). */
   medInventory?: import("./types").MedInventoryRecord[];

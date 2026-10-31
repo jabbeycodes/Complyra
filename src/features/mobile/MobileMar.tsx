@@ -6,6 +6,7 @@ import type {
   MedDoseMark,
   MedDoseMarkStatus,
   MedInventoryView,
+  PrnDoseLog,
   SessionUser,
 } from "../../data/types";
 import {
@@ -13,7 +14,8 @@ import {
   canLogPrnDose,
   canRecordDelivery,
 } from "../../data/chart";
-import { medCountdown, type MedCountdown } from "./medcount";
+import { hhmmToMinutes } from "../../data/dueItems";
+import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
 import {
@@ -161,6 +163,7 @@ function AdministerForm({
   const [confirmTime, setConfirmTime] = useState(false);
   const [pills, setPills] = useState(1);
   const [reason, setReason] = useState("");
+  const [lateReason, setLateReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [, setTick] = useState(0);
@@ -173,10 +176,20 @@ function AdministerForm({
 
   const isException = !MARK_CHOICES.includes(recordType as MedDoseMarkStatus);
   const nowLabel = `${formatDoseTime(centralNowHhmm())} Central · ${marDayHeading(centralTodayIso(), centralTodayIso())}`;
+  // A mark recorded after the dose window ends is stamped Late and must
+  // carry a brief reason; the API is the final judge on the window, this
+  // prompt (past day, or an hour past today's dose time) mirrors it.
+  const todayCentral = centralTodayIso();
+  const needsLateReason =
+    !isException &&
+    (doseDate < todayCentral ||
+      (doseDate === todayCentral &&
+        hhmmToMinutes(centralNowHhmm()) > hhmmToMinutes(doseTime) + 60));
   const canSubmit =
     confirmTime &&
     !busy &&
-    (!isException || (reason.trim().length > 0 && pills >= 1));
+    (!isException || (reason.trim().length > 0 && pills >= 1)) &&
+    (!needsLateReason || lateReason.trim().length > 0);
 
   const submit = async () => {
     setBusy(true);
@@ -200,6 +213,10 @@ function AdministerForm({
           doseDate,
           doseTime,
           status: recordType as MedDoseMarkStatus,
+          lateReason:
+            needsLateReason && lateReason.trim()
+              ? lateReason.trim()
+              : undefined,
         });
       }
       onDone();
@@ -283,6 +300,18 @@ function AdministerForm({
             />
           </label>
         </>
+      )}
+
+      {needsLateReason && (
+        <label className="msh-field">
+          <span>Late entry — reason (required)</span>
+          <textarea
+            value={lateReason}
+            onChange={(event) => setLateReason(event.target.value)}
+            rows={2}
+            placeholder="Why is this dose being recorded late?"
+          />
+        </label>
       )}
 
       <label className="msh-confirm">
@@ -386,14 +415,24 @@ function RefillCountForm({
   onCancel: () => void;
 }) {
   const [pillsText, setPillsText] = useState("");
+  const [varianceReason, setVarianceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const pills = Number(pillsText);
+  // A count that disagrees with the countdown's expected on-hand figure
+  // must carry an explanation — the API refuses it otherwise.
+  const expected = countdown.hasBaseline ? countdown.pillsLeft : null;
+  const differs =
+    expected !== null &&
+    pillsText.trim() !== "" &&
+    Number.isInteger(pills) &&
+    pills !== expected;
   const valid =
     pillsText.trim() !== "" &&
     Number.isInteger(pills) &&
     pills >= 0 &&
-    !busy;
+    !busy &&
+    (!differs || varianceReason.trim().length > 0);
 
   const submit = async () => {
     setBusy(true);
@@ -406,6 +445,7 @@ function RefillCountForm({
         remainingPills: pills,
         pillsPerDay: med.kind === "prn" ? 0 : med.dosesPerDay,
         countedOn: centralTodayIso(),
+        varianceReason: differs ? varianceReason.trim() : undefined,
       });
       onDone();
     } catch (err) {
@@ -451,6 +491,22 @@ function RefillCountForm({
           autoFocus
         />
       </label>
+      {expected !== null && (
+        <p className="msh-section-note">
+          Expected on hand: {formatPillCount(expected)} pills
+        </p>
+      )}
+      {differs && (
+        <label className="msh-field">
+          <span>Count variance — why the count differs (required)</span>
+          <textarea
+            value={varianceReason}
+            onChange={(event) => setVarianceReason(event.target.value)}
+            rows={2}
+            placeholder="What explains the difference?"
+          />
+        </label>
+      )}
       <p className="msh-section-note">
         Saving records this count with your name and today's date (Central)
         and restarts the countdown from it.
@@ -485,6 +541,91 @@ function RefillCountForm({
   );
 }
 
+/**
+ * The PRN dose form: a dose is an audit record, not a tap — it requires
+ * the reason it was given and stamps the giver + actual Central time.
+ */
+function PrnDoseForm({
+  api,
+  med,
+  onDone,
+  onCancel,
+}: {
+  api: ComplyraApi;
+  med: MedInventoryView;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [followUp, setFollowUp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const valid = reason.trim().length > 0 && !busy;
+
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.logPrnDose(med.medicationId, {
+        pills: 1,
+        reason: reason.trim(),
+        followUp: followUp.trim() ? followUp.trim() : undefined,
+      });
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      className="msh-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) void submit();
+      }}
+    >
+      <h3 className="msh-form-title">
+        {med.medicationName} {med.strength}
+      </h3>
+      <p className="msh-form-sub">PRN dose · recorded with your name and the time now (Central)</p>
+      <label className="msh-field">
+        <span>Why it was given (required)</span>
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={3}
+          placeholder="What was happening that called for this dose?"
+          autoFocus
+        />
+      </label>
+      <label className="msh-field">
+        <span>Follow-up note (optional)</span>
+        <textarea
+          value={followUp}
+          onChange={(event) => setFollowUp(event.target.value)}
+          rows={2}
+          placeholder="Anything to check or watch for after?"
+        />
+      </label>
+      {error && (
+        <p className="msh-alert" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="msh-form-actions">
+        <button type="button" className="msh-button secondary" onClick={onCancel}>
+          Back
+        </button>
+        <button type="submit" className="msh-button primary" disabled={!valid}>
+          {busy ? "Saving…" : "Log dose"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function MobileMar({
   api,
   session,
@@ -503,6 +644,8 @@ export default function MobileMar({
   const [passTime, setPassTime] = useState<string | null>(null);
   const [administer, setAdminister] = useState<MarPassMed | null>(null);
   const [refillMed, setRefillMed] = useState<MedInventoryView | null>(null);
+  const [prnMed, setPrnMed] = useState<MedInventoryView | null>(null);
+  const [prnLogs, setPrnLogs] = useState<PrnDoseLog[]>([]);
   const [inventory, setInventory] = useState<MedInventoryView[]>([]);
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
   const [marksRange, setMarksRange] = useState<MedDoseMark[]>([]);
@@ -513,7 +656,6 @@ export default function MobileMar({
   const [countsUnavailable, setCountsUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [prnBusy, setPrnBusy] = useState("");
 
   const person = people.find((row) => row.id === personId) ?? null;
   const canMark = canLogDoseException(session.roleKey);
@@ -549,6 +691,13 @@ export default function MobileMar({
         // countdown area shows its unavailable state until a retry
         // loads the real dose records.
         setCountsUnavailable(true);
+      }
+      // Per-dose PRN audit records (reason, giver, actual time) for the
+      // history under each PRN med; a failed read just hides the history.
+      try {
+        setPrnLogs(await api.listPrnDoses(personId));
+      } catch {
+        setPrnLogs([]);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -820,7 +969,19 @@ export default function MobileMar({
         />
       )}
 
-      {!administer && !refillMed && tab === "prn" && (
+      {prnMed && (
+        <PrnDoseForm
+          api={api}
+          med={prnMed}
+          onCancel={() => setPrnMed(null)}
+          onDone={() => {
+            setPrnMed(null);
+            void reload();
+          }}
+        />
+      )}
+
+      {!administer && !refillMed && !prnMed && tab === "prn" && (
         <div className="msh-list">
           {prnMeds.length === 0 && (
             <p className="msh-empty">No PRN medications for {person.name}.</p>
@@ -846,21 +1007,9 @@ export default function MobileMar({
                 <button
                   type="button"
                   className="msh-chip-button"
-                  disabled={prnBusy === item.medicationId}
-                  onClick={async () => {
-                    setPrnBusy(item.medicationId);
-                    setError("");
-                    try {
-                      await api.logPrnDose(item.medicationId);
-                      await reload();
-                    } catch (err) {
-                      setError((err as Error).message);
-                    } finally {
-                      setPrnBusy("");
-                    }
-                  }}
+                  onClick={() => setPrnMed(item)}
                 >
-                  {prnBusy === item.medicationId ? "Logging…" : "Log dose"}
+                  Log dose
                 </button>
               )}
               </div>
@@ -874,6 +1023,25 @@ export default function MobileMar({
                     onReset={() => setRefillMed(item)}
                   />
                 )
+              )}
+              {prnLogs.filter((log) => log.medicationId === item.medicationId)
+                .length > 0 && (
+                <div className="msh-form-history">
+                  <h4>Dose history</h4>
+                  {prnLogs
+                    .filter((log) => log.medicationId === item.medicationId)
+                    .slice(0, 5)
+                    .map((log) => (
+                      <p key={log.id}>
+                        {log.givenOn} · {formatCentralTime(log.givenAt)} —{" "}
+                        {formatPillCount(log.pills)} pill
+                        {log.pills === 1 ? "" : "s"} ·{" "}
+                        {log.reason || "No reason recorded"} · by{" "}
+                        {log.givenByName || "staff"}
+                        {log.followUp ? ` · Follow-up: ${log.followUp}` : ""}
+                      </p>
+                    ))}
+                </div>
               )}
             </div>
           ))}

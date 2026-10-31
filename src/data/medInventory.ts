@@ -7,6 +7,8 @@
  * every render recomputes it on the fly.
  */
 import { daysBetween, todayIso, type Medication, type MedicationDelivery } from "./chart";
+import { medCountdown } from "../features/mobile/medcount";
+import type { MedDoseMark } from "./types";
 import {
   DEFAULT_MED_LOW_THRESHOLD_DAYS,
   type AddMedDoseExceptionInput,
@@ -204,11 +206,44 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
         remainingPills: row.remainingPills,
         pillsPerDay: row.pillsPerDay,
         recordedBy: row.recordedBy,
+        expectedPills: row.expectedPills ?? null,
+        varianceReason: row.varianceReason ?? null,
       })),
     doseExceptions: [...input.doseExceptions].sort((a, b) =>
       a.occurredOn < b.occurredOn ? 1 : -1,
     ),
   };
+}
+
+/**
+ * The figure a fresh count is expected to match: the countdown's
+ * baseline-and-burn-down number for this med (newest count baseline minus
+ * recorded administrations since it). Null when the med has never been
+ * counted — a first count has no expectation to disagree with.
+ */
+export function expectedCountNow(
+  view: MedInventoryView,
+  marks: MedDoseMark[],
+  today: string,
+): number | null {
+  const countdown = medCountdown(view, marks, today);
+  return countdown.hasBaseline ? countdown.pillsLeft : null;
+}
+
+/**
+ * Why a count may not be recorded as-is, or null when it may. A count that
+ * differs from the expected on-hand figure needs a note explaining the
+ * variance; a matching count (the happy path) needs nothing extra.
+ */
+export function countVarianceProblem(
+  expected: number | null,
+  entered: number,
+  varianceReason?: string | null,
+): string | null {
+  if (expected === null) return null;
+  if (Math.round(entered * 100) === Math.round(expected * 100)) return null;
+  if (varianceReason && varianceReason.trim()) return null;
+  return `The count differs from the expected ${expected} pills on hand. Add a note explaining the variance.`;
 }
 
 const SEVERITY: Record<MedInventoryStatus, number> = {

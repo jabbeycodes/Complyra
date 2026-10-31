@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { BellRing, History, Pill, Settings2, TriangleAlert } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
-import { medSupplyStatus } from "../../data/complianceStatus";
+import {
+  medSupplyBadgeLabel,
+  medSupplyStatusFromInventory,
+} from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canLogDoseException, canRecordDelivery } from "../../data/chart";
 import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
@@ -97,16 +100,31 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             ? Math.max(0, Math.min(100, (view.currentCount / view.quantityOnDelivery) * 100))
             : 0;
         const expanded = openMed === view.medicationId;
+        // A medication with no count on file has no supply figure to
+        // project: it must not read "0 pills", "Expired", or "Due soon".
+        const neverCounted = view.lastCountedOn === null;
         return (
           <article key={view.medicationId} className="obligation-card med-card">
             <header>
               <span className={`kind-pill ${view.kind}`}>{view.kind}</span>
               <h3>{view.medicationName}</h3>
               {/* WS3 (accessible status system): shared badge — the band is
-                  computed with the same thresholds as the app's reorder logic
-                  (medSupplyStatus mirrors computeInventory). */}
-              <StatusBadge status={medSupplyStatus(view.daysRemaining)} />
+                  the inventory status itself (days-based medSupplyStatus
+                  calls an uncounted PRN med "expired", which is wrong). */}
+              {!neverCounted && (
+                <StatusBadge
+                  status={medSupplyStatusFromInventory(view.status)}
+                  label={medSupplyBadgeLabel(view.status, view.lastCountedOn)}
+                />
+              )}
             </header>
+            {neverCounted ? (
+              <p>
+                {view.strength} · No count recorded yet — a house manager,
+                RN, or PM records the first count.
+              </p>
+            ) : (
+              <>
             <p>
               {view.strength} · {inventoryCountdownLabel(view)}
               {view.deliveredOn ? ` · Counted ${formatDate(view.deliveredOn)}` : ""}
@@ -162,14 +180,23 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 </button>
               </p>
             )}
+              </>
+            )}
             <p style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="button"
-                onClick={() => setOpenMed(expanded ? null : view.medicationId)}
-                aria-expanded={expanded}
-              >
-                <Settings2 size={15} /> Threshold & correction
-              </button>
+              {canManage ? (
+                <button
+                  className="button"
+                  onClick={() => setOpenMed(expanded ? null : view.medicationId)}
+                  aria-expanded={expanded}
+                >
+                  <Settings2 size={15} /> Threshold & correction
+                </button>
+              ) : (
+                <span className="stack-help">
+                  Thresholds and corrections are set by the house manager,
+                  RN, or PM.
+                </span>
+              )}
               {canLogException && (
                 <button
                   className="button"
@@ -398,6 +425,11 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                       <strong>{formatDate(delivery.countedOn)}</strong> — {delivery.remainingPills}{" "}
                       pills counted
                       {view.kind === "scheduled" ? ` · ${delivery.pillsPerDay}/day` : ""}
+                      {delivery.expectedPills !== null &&
+                      delivery.expectedPills !== undefined &&
+                      delivery.expectedPills !== delivery.remainingPills
+                        ? ` · Count variance: expected ${delivery.expectedPills}, counted ${delivery.remainingPills}${delivery.varianceReason ? ` — ${delivery.varianceReason}` : ""}`
+                        : ""}
                     </span>
                   </li>
                 ))}

@@ -379,6 +379,7 @@ import {
   blockForShiftLabel,
   shiftBlocksForSite,
   consecutiveRefusals,
+  marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
   type ScheduledDose,
@@ -913,12 +914,15 @@ export interface ComplyraApi {
     fromDate: string,
     toDate: string,
   ): Promise<import("./types").MedDoseMark[]>;
-  /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold. */
+  /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold.
+   * A first mark recorded after the dose window ends is stamped Late and
+   * requires a brief lateReason. */
   markMedDose(input: {
     medicationId: string;
     doseDate: string;
     doseTime: string;
     status: import("./types").MedDoseMarkStatus;
+    lateReason?: string;
   }): Promise<void>;
   // ===== MEDICATION ORDERS + RECONCILIATION =====
   /** Prescriber orders for one Individual, newest first. */
@@ -938,9 +942,13 @@ export interface ComplyraApi {
     orderId: string,
     patch: import("./types").UpdateMedicationOrderInput,
   ): Promise<import("./types").MedicationOrder>;
-  /** Activate a draft order: project it onto the MAR medication list. */
+  /** Activate a draft order: project it onto the MAR medication list.
+   * When the medication has no count on file yet, an initial count (pills
+   * on hand) is required and is recorded as its first delivery/count
+   * record; when a count already exists the initial count is optional. */
   activateMedicationOrder(
     orderId: string,
+    input?: { initialCount?: number },
   ): Promise<import("./types").MedicationOrder>;
   /** Discontinue an active order and clear its dose from the MAR. */
   discontinueMedicationOrder(
@@ -1020,8 +1028,17 @@ export interface ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    /** Required when the count differs from the expected on-hand figure. */
+    varianceReason?: string;
   }): Promise<void>;
-  logPrnDose(medicationId: string, pills?: number): Promise<void>;
+  logPrnDose(
+    medicationId: string,
+    input: { pills?: number; reason: string; followUp?: string },
+  ): Promise<void>;
+  /** Per-dose PRN administration records for one Individual, newest first. */
+  listPrnDoses(
+    individualId: string,
+  ): Promise<import("./types").PrnDoseLog[]>;
   /** Closes the open PRN follow-up so the repeat reminder stops. */
   recordPrnFollowup(
     medicationId: string,
@@ -5775,6 +5792,37 @@ export class LocalApi implements ComplyraApi {
     return db.medDoseMarks;
   }
 
+  private prnDoseLogRows(): import("./types").PrnDoseLog[] {
+    const db = this.store.db as LocalDatabase & {
+      prnDoseLogs?: import("./types").PrnDoseLog[];
+    };
+    if (!db.prnDoseLogs) db.prnDoseLogs = [];
+    return db.prnDoseLogs;
+  }
+
+  /** The inventory view for one medication (same construction as getMedInventory). */
+  private async p6viewForMed(
+    med: Medication,
+    today: string,
+  ): Promise<import("./types").MedInventoryView> {
+    const { projectMedInventory } = await this.p6lib();
+    return projectMedInventory({
+      med,
+      inventory:
+        this.p6rows().find((row) => row.medicationId === med.id) ?? null,
+      deliveries: this.store.db.medicationDeliveries.filter(
+        (delivery) => delivery.medicationId === med.id,
+      ),
+      // Local backend: logPrnDose decrements the medication row directly,
+      // so projectMedInventory falls back to the row count for PRN meds.
+      prnDoses: [],
+      doseExceptions: this.p6doseExceptions().filter(
+        (exception) => exception.medicationId === med.id,
+      ),
+      today,
+    });
+  }
+
   /** Assigned house DSPs are the on-duty writers in the no-clock-in v1. */
   private siteRequiredWriters(
     session: SessionUser,
@@ -6281,6 +6329,20 @@ export class LocalApi implements ComplyraApi {
     if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
       throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
     }
+    // A first mark recorded after the dose window ended is stamped Late
+    // and must carry a brief reason; corrections keep the original stamp
+    // (a fresh reason on a correction updates it).
+    const isLate = !existing && marLateRecording({
+      doseDate: day,
+      doseTime: input.doseTime,
+      now: clock.now,
+      windowAfterMinutes: rules.medWindowAfterMinutes,
+      timeZone: clock.timeZone,
+    });
+    const lateReason = (input.lateReason ?? "").trim();
+    if (isLate && !lateReason) {
+      throw new Error("This dose is past its recording window. Add a brief reason for the late entry.");
+    }
     const late = !existing && recordingCostsAPoint({
       doseDate: day,
       doseTime: input.doseTime,
@@ -6293,6 +6355,10 @@ export class LocalApi implements ComplyraApi {
       existing.markedBy = session.userId;
       existing.markedByName = session.fullName;
       existing.markedAt = now;
+      if (lateReason) {
+        existing.late = true;
+        existing.lateReason = lateReason;
+      }
     } else {
       rows.push({
         id: `mm-${crypto.randomUUID().slice(0, 8)}`,
@@ -6305,6 +6371,8 @@ export class LocalApi implements ComplyraApi {
         markedBy: session.userId,
         markedByName: session.fullName,
         markedAt: now,
+        late: isLate,
+        lateReason: isLate ? lateReason : null,
       });
     }
     if (late) {
@@ -6608,7 +6676,10 @@ export class LocalApi implements ComplyraApi {
     return { ...order };
   }
 
-  async activateMedicationOrder(orderId: string): Promise<MedicationOrder> {
+  async activateMedicationOrder(
+    orderId: string,
+    input?: { initialCount?: number },
+  ): Promise<MedicationOrder> {
     const { session, order } = this.medOrderOrThrow(orderId);
     if (!canManageMedicationOrders(session.roleKey)) {
       throw new Error("Only a nurse or Program Manager activates medication orders.");
@@ -6622,6 +6693,23 @@ export class LocalApi implements ComplyraApi {
     const existing = medicationId
       ? this.store.db.medications.find((row) => row.id === medicationId)
       : undefined;
+    // First count at setup: a medication with no count on file cannot go
+    // live at an invented zero — the activator records the pills on hand,
+    // which becomes the first delivery/count record (the existing path,
+    // not a bypass).
+    const hasCount = existing
+      ? this.store.db.medicationDeliveries.some(
+          (delivery) => delivery.medicationId === existing.id,
+        ) || existing.lastDeliveryOn !== null
+      : false;
+    const initialCount = input?.initialCount;
+    if (initialCount !== undefined) {
+      if (!Number.isFinite(initialCount) || initialCount < 0) {
+        throw new Error("Enter the initial count (pills on hand).");
+      }
+    } else if (!hasCount) {
+      throw new Error("Record the initial count (pills on hand) to activate this medication.");
+    }
     if (existing) {
       existing.name = fields.name;
       existing.strength = fields.strength;
@@ -6651,6 +6739,32 @@ export class LocalApi implements ComplyraApi {
         { agencyId: session.agencyId },
         { id: medicationId, individualId: order.individualId },
         { doseTimes: fields.kind === "scheduled" ? fields.doseTimes : [] },
+      );
+    }
+    if (medicationId && initialCount !== undefined) {
+      const med = this.store.db.medications.find((row) => row.id === medicationId)!;
+      const countedOn = todayIso();
+      med.remainingPills = initialCount;
+      med.lastDeliveryOn = countedOn;
+      med.lastCountdownOn = countedOn;
+      this.store.db.medicationDeliveries.push({
+        id: crypto.randomUUID(),
+        medicationId: med.id,
+        countedOn,
+        countedAt: now,
+        remainingPills: initialCount,
+        pillsPerDay: med.pillsPerDay,
+        recordedBy: session.userId,
+        expectedPills: null,
+        varianceReason: null,
+      });
+      log(
+        this.store,
+        session,
+        "medication.delivery",
+        `${session.fullName} counted ${med.name} at ${initialCount} pills`,
+        "medication",
+        med.id,
       );
     }
     order.status = "active";
@@ -7182,6 +7296,7 @@ export class LocalApi implements ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    varianceReason?: string;
   }) {
     const session = assertSession(this.store);
     if (!canRecordDelivery(session.roleKey)) {
@@ -7198,6 +7313,23 @@ export class LocalApi implements ComplyraApi {
     }
     const countedOn = input.countedOn ?? todayIso();
     assertCalendarDate(countedOn, "Use a valid count date.");
+    // Variance guard: a count that disagrees with the countdown's expected
+    // on-hand figure must carry an explanation — never a silent overwrite.
+    const { expectedCountNow, countVarianceProblem } = await this.p6lib();
+    const view = await this.p6viewForMed(med, todayIso());
+    const marks = this.medDoseMarkRows().filter(
+      (mark) => mark.medicationId === med.id,
+    );
+    const expected = expectedCountNow(view, marks, todayIso());
+    const problem = countVarianceProblem(
+      expected,
+      input.remainingPills,
+      input.varianceReason,
+    );
+    if (problem) throw new Error(problem);
+    const differs =
+      expected !== null &&
+      Math.round(expected * 100) !== Math.round(input.remainingPills * 100);
     med.remainingPills = input.remainingPills;
     med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
     med.lastDeliveryOn = countedOn;
@@ -7210,6 +7342,8 @@ export class LocalApi implements ComplyraApi {
       remainingPills: med.remainingPills,
       pillsPerDay: med.pillsPerDay,
       recordedBy: session.userId,
+      expectedPills: expected,
+      varianceReason: differs ? (input.varianceReason?.trim() ?? null) : null,
     });
     log(
       this.store,
@@ -7222,7 +7356,10 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
-  async logPrnDose(medicationId: string, pills = 1) {
+  async logPrnDose(
+    medicationId: string,
+    input: { pills?: number; reason: string; followUp?: string },
+  ) {
     const session = assertSession(this.store);
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
@@ -7232,9 +7369,46 @@ export class LocalApi implements ComplyraApi {
       throw new Error("PRN medication not found.");
     }
     accessibleIndividual(this.store, session, med.individualId);
+    const pills = input.pills ?? 1;
     if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
-    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    const reason = (input.reason ?? "").trim();
+    if (!reason) throw new Error("Say why the PRN was given.");
+    if (pills > med.remainingPills) {
+      // The message names the fix the caller's role can actually take:
+      // counters reconcile it themselves; everyone else asks a counter.
+      const neverCounted =
+        med.lastDeliveryOn === null &&
+        !this.store.db.medicationDeliveries.some(
+          (delivery) => delivery.medicationId === med.id,
+        );
+      if (neverCounted) {
+        throw new Error(
+          canRecordDelivery(session.roleKey)
+            ? "No count has been recorded for this medication yet. Record the first count before logging a dose."
+            : "No count has been recorded for this medication yet. Ask your house manager, RN, or PM to record the first count.",
+        );
+      }
+      throw new Error(
+        canRecordDelivery(session.roleKey)
+          ? "The dose exceeds the recorded stock. Reconcile the count first."
+          : "The dose exceeds the recorded stock. Ask your house manager, RN, or PM to record the count first.",
+      );
+    }
     med.remainingPills = Math.max(0, med.remainingPills - pills);
+    this.prnDoseLogRows().push({
+      id: crypto.randomUUID(),
+      agencyId: med.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      givenAt: new Date().toISOString(),
+      givenOn: todayIso(),
+      pills,
+      reason,
+      followUp: input.followUp?.trim() ? input.followUp.trim() : null,
+      givenByName: session.fullName,
+      givenByUserId: session.userId,
+      remainingAfter: med.remainingPills,
+    });
     log(
       this.store,
       session,
@@ -7310,6 +7484,23 @@ export class LocalApi implements ComplyraApi {
       med.id,
     );
     await persistMeta(this.store);
+  }
+
+  async listPrnDoses(
+    individualId: string,
+  ): Promise<import("./types").PrnDoseLog[]> {
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.prnDoseLogRows()
+      .filter(
+        (row) =>
+          row.individualId === individualId && row.agencyId === session.agencyId,
+      )
+      .sort((a, b) => b.givenAt.localeCompare(a.givenAt))
+      .map((row) => ({ ...row }));
   }
 
   async noteLateClockIn(input: {
@@ -11211,6 +11402,7 @@ export class LocalApi implements ComplyraApi {
       0,
       Math.round((med.remainingPills + input.quantityDelta) * 100) / 100,
     );
+    const expectedPills = med.remainingPills;
     med.remainingPills = next;
     med.lastDeliveryOn = countedOn;
     med.lastCountdownOn = countedOn;
@@ -11222,6 +11414,8 @@ export class LocalApi implements ComplyraApi {
       remainingPills: next,
       pillsPerDay: med.pillsPerDay,
       recordedBy: session.userId,
+      expectedPills,
+      varianceReason: reason,
     });
     log(
       this.store,
