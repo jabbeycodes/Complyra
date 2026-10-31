@@ -2702,6 +2702,11 @@ export class HostedApi implements ComplyraApi {
     }));
   }
 
+  async operatorHealth(): Promise<import("./operator").OperatorHealth> {
+    const session=await this.requireSession();if(!session.platformAdmin)throw new Error("Operator access required.");
+    const {data,error}=await this.client.rpc("operator_health");throwIf(error,"Could not load observed system health.");return data as import("./operator").OperatorHealth;
+  }
+
   async operatorPeople(q: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage> {
     const session=await this.requireSession();if(!session.platformAdmin)throw new Error("Operator access required.");validateOperatorPeople(q);
     const {data,error}=await this.client.rpc("operator_people",{p_query:q.query,p_agency_id:q.agencyId||null,p_page:q.page});throwIf(error,"Could not load operator people search.");return data as import("./operator").OperatorPeoplePage;

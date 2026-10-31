@@ -1,3 +1,4 @@
+import { observeJob } from "../_shared/observeJob.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -268,6 +269,7 @@ Deno.serve(async (req) => {
     return fail("Not authorized: service_role or recognition.manage is required.", 403);
   }
 
+  return observeJob(admin, "select-weekly-winners", async () => {
   const warnings: string[] = [];
 
   // -- Target week ------------------------------------------------------------
@@ -872,4 +874,5 @@ Deno.serve(async (req) => {
   });
 
   return json({ week_start: weekStart, agencies: results, warnings });
+  });
 });

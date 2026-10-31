@@ -6,7 +6,7 @@ import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApprove
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
-import { summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
+import { OPERATOR_JOBS, summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -663,6 +663,7 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorHealth(): Promise<import("./operator").OperatorHealth>;
   operatorPeople(query: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage>;
   operatorAudit(query: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage>;
   operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings>;
@@ -4526,6 +4527,11 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorHealth(): Promise<import("./operator").OperatorHealth> {
+    await this.operatorDirectory();const runs=this.store.db.operatorJobRuns??[];
+    return {checkedAt:new Date().toISOString(),jobs:OPERATOR_JOBS.map(jobKey=>{const rows=runs.filter(r=>r.jobKey===jobKey).sort((a,b)=>b.startedAt.localeCompare(a.startedAt));return {jobKey,expectedSeconds:jobKey==="sweep-operating-reminders"?1800:jobKey==="delegation-ack-sweep"?172800:691200,latest:structuredClone(rows[0]??null),lastSuccess:rows.find(r=>r.state==="succeeded")?.finishedAt??null,failures24h:rows.filter(r=>r.state==="failed"&&Date.parse(r.startedAt)>=Date.now()-86400000).length};})};
   }
 
   async operatorPeople(query: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage> {

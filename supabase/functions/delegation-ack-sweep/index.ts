@@ -1,3 +1,4 @@
+import { observeJob } from "../_shared/observeJob.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -95,10 +96,12 @@ Deno.serve(async (req) => {
     return fail("Not authorized: service_role or an admin member is required.", 403);
   }
 
+  return observeJob(admin, "delegation-ack-sweep", async () => {
   // -- Run the sweep ----------------------------------------------------------
   const { data, error } = await admin.rpc("sweep_delegation_ack_overdue");
   if (error) {
     return fail(`Sweep failed: ${error.message}`, 500);
   }
   return json({ notifications_queued: data ?? 0, actor });
+  });
 });

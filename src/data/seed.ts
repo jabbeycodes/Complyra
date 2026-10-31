@@ -91,6 +91,7 @@ export function emailFor(name: string) {
 }
 
 export interface LocalDatabase {
+  operatorJobRuns?: import("./operator").OperatorJobRun[];
   operatorLifecycle?: import("./types").AgencyLifecycleEvent[];
   consentPackets?: import('./consentPackets').ConsentPacket[];
   consentPacketTokens?: Record<string, { hash:string; expiresAt:string }>;

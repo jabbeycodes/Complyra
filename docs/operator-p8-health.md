@@ -1,0 +1,9 @@
+# Operator phase 8: observed system health
+
+Depends on phase 7 support context/navigation, now linked to health, and prior operator authorization. Records safe job start/outcome/duration codes for four scheduled functions after their existing authorization gates. Only service-role RPCs can write observations; operators can read through a guarded RPC. Telemetry deployment gaps do not prevent existing jobs running, but they also never manufacture successful observations.
+
+The health page shows last observation/success, failures in 24 hours, request duration and unknown/stale/unfinished states. The reminder sweep is scheduled every five minutes in repository DDL; its stale threshold is 30 minutes. Other thresholds are explicit observation tolerances, not proof that a scheduler is deployed. Authorized manual invocations can appear. Local jobs remain unknown unless tests explicitly simulate observations. External endpoint uptime/resource saturation and continuous Vertex health remain unmeasured.
+
+Validation: npm test PASS (160 file-level entries, zero failures); npm run build PASS (bundle warning); npx tsc -b PASS; git diff --check PASS. Worker-observer tests exercise real success/failure/exception paths without recording raw messages; local tests deny every tenant role and reject healthy-looking missing/stale data. Chromium operator-console.spec.ts: 4 PASS. PostgreSQL 15 pgTAP operator_health.sql: 8 PASS, including browser-write denial, trusted worker outcome, immutable completion, and missing telemetry. Isolated local database only; included migrations are UNAPPLIED to hosted projects. Phase 1–7 pgTAP also passed 32 assertions after the narrowly scoped Phase 5 audit-trigger fix.
+
+Deferred: external probes, resource metrics and broader job coverage need actual collectors; they are labeled uninstrumented. No production deployment or health claim is made.
