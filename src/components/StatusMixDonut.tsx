@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Modal } from "../components";
 import { statusMix, type Requirement } from "../domain";
 
 const SLICES = [
@@ -12,6 +14,8 @@ const RADIUS = 36;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 export default function StatusMixDonut({ items }: { items: Requirement[] }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectedRows = selected ? items.filter(item => selected === "compliant" ? item.status === "Compliant" : selected === "dueSoon" ? item.status === "Due soon" : selected === "overdue" ? ["Overdue", "Expired"].includes(item.status) : selected === "review" ? item.status === "Pending review" : item.status === "Upcoming") : [];
   const mix = statusMix(items);
   const rows = SLICES.map((slice) => ({
     ...slice,
@@ -92,7 +96,7 @@ export default function StatusMixDonut({ items }: { items: Requirement[] }) {
           return (
             <li key={row.key}>
               <i style={{ background: row.color }} aria-hidden="true" />
-              <span>{row.label}</span>
+              <button type="button" className="text-button" onClick={() => setSelected(row.key)} aria-label={`View ${row.count} ${row.label.toLowerCase()} requirement records`}>{row.label}</button>
               <strong>
                 {row.count} · {pct}%
               </strong>
@@ -100,6 +104,12 @@ export default function StatusMixDonut({ items }: { items: Requirement[] }) {
           );
         })}
       </ul>
+      {selected !== null && <Modal title="Requirement source records" onClose={() => setSelected(null)} wide>
+        <p>{selectedRows.length} matching requirement record{selectedRows.length === 1 ? "" : "s"} in this chart's authorized scope.</p>
+        {!selectedRows.length ? <p>No records in this status. This does not assess other compliance areas.</p> : <ul className="record-list">{selectedRows.map(row => <li key={row.id} className="record-row">
+          <div><strong>{row.title}</strong><p>{row.person} · {row.site} · {row.status} · due {row.due}</p><p>Owner: {row.owner} · {row.source}, page {row.page}</p><p>Evidence: {row.evidence || "Not recorded"}</p></div>
+        </li>)}</ul>}
+      </Modal>}
     </figure>
   );
 }
