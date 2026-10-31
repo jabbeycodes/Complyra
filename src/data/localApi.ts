@@ -6,6 +6,7 @@ import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApprove
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
+import { summarizeOperatorAgencies } from "./operator";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -662,6 +663,7 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorOverview(period: import("./operator").OperatorPeriod): Promise<import("./operator").OperatorOverviewData>;
   operatorDirectory(): Promise<import("./operator").OperatorAgency[]>;
   listPendingAgencies(): Promise<PendingAgency[]>;
   /** Operator only: every agency, any status (for the Rules console). */
@@ -4519,6 +4521,13 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorOverview(period: import("./operator").OperatorPeriod) {
+    const rows = await this.operatorDirectory();
+    const ids = new Set(rows.filter(a => period.category === "all" || a.reportingCategory === period.category).map(a=>a.id));
+    const activity = this.store.db.audit.filter(e => ids.has(e.agencyId) && e.createdAt.slice(0,10)>=period.start && e.createdAt.slice(0,10)<=period.end).length;
+    return summarizeOperatorAgencies(rows, period, activity);
   }
 
   async operatorDirectory(): Promise<import("./operator").OperatorAgency[]> {

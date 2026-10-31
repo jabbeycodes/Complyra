@@ -137,6 +137,7 @@ import InactivityGuard from "./security/InactivityGuard";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import OperatorOverview from "./features/operator/OperatorOverview";
 import OperatorDirectory from "./features/operator/OperatorDirectory";
 import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
@@ -390,7 +391,7 @@ export default function App() {
     const applyHash = () => {
       try {
         const fromHash = decodeURIComponent(window.location.hash.replace(/^#/, "")).trim();
-        const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash;
+        const next = fromHash.startsWith("/") ? notificationPage(fromHash) : fromHash.startsWith("Operator ") ? fromHash.split("?")[0] : fromHash;
         if (next) setPage(next);
       } catch { /* Ignore malformed external links. */ }
     };
@@ -398,6 +399,11 @@ export default function App() {
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
+  useEffect(() => {
+    if (session?.platformAdmin && !window.location.hash) {
+      setPage("Operator overview"); window.history.replaceState(null, "", "#Operator%20overview");
+    }
+  }, [session?.userId, session?.platformAdmin]);
   // KIOSK-TIME-CLOCK: keep the standalone kiosk screen in sync with the hash.
   useEffect(() => {
     const syncKioskHash = () => setKioskHash(window.location.hash);
@@ -754,6 +760,7 @@ export default function App() {
         ["Overview", LayoutDashboard],
         ["Scheduling", CalendarClock],
         ["Platform", ShieldCheck],
+        ["Operator overview", LayoutDashboard],
         ["Operator agencies", Building2],
         ["Individuals", Users],
         ["Appointments", CalendarDays],
@@ -1899,6 +1906,7 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Operator overview" && <OperatorOverview />}
               {page === "Operator agencies" && <OperatorDirectory onSaved={notify} />}
               {page === "Platform" && (
                 <PlatformConsole onSaved={notify} />

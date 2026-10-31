@@ -95,6 +95,7 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "audit.read")
     );
   }
+  if (page === "Operator overview") return Boolean(session.platformAdmin);
   if (page === "Operator agencies") return Boolean(session.platformAdmin);
   if (page === "Platform") return Boolean(session.platformAdmin);
   if (page === "Activity log") {
@@ -224,6 +225,7 @@ export const CANONICAL_PAGE_ORDER = [
 ] as const;
 
 export function defaultLandingPage(session: SessionUser): string {
+  if (session.platformAdmin) return "Operator overview";
   for (const page of CANONICAL_PAGE_ORDER) {
     if (pageVisible(session, page)) return page;
   }
