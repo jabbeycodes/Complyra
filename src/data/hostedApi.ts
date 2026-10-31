@@ -13000,7 +13000,9 @@ export class HostedApi implements ComplyraApi {
       };
     });
     // No cron: alert the nurse + Program Manager when a reviewer opens the
-    // worklist. The notice RPC dedupes per order + review date.
+    // worklist. The notice RPC dedupes per role + order + review date, so
+    // each role keeps its own copy (one shared key would dedupe the second
+    // role's notice away).
     for (const view of views) {
       if (view.expiry === "ok") continue;
       const type =
@@ -13025,7 +13027,7 @@ export class HostedApi implements ComplyraApi {
           body,
           deepLink: "/medication-orders",
           entityId: view.id,
-          dedupeKey: `${type}:${view.id}:${when}`,
+          dedupeKey: `${type}:${roleKey}:${view.id}:${when}`,
         });
       }
     }

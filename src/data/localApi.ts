@@ -6555,7 +6555,9 @@ export class LocalApi implements ComplyraApi {
         deepLink: "/medication-orders",
         entityType: "medication_order",
         entityId: view.id,
-        dedupeKey: `${type}:${view.id}:${when}`,
+        // Role-scoped: the store dedupes on the key alone, so a key shared
+        // across roles would keep only the first role's copy.
+        dedupeKey: `${type}:${roleKey}:${view.id}:${when}`,
         agencyId: view.agencyId,
       });
     }
