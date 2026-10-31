@@ -21,7 +21,7 @@ export type ReviewStatus = "pending_review" | "active" | "archived";
 export type PacketStatus = "open" | "archived";
 
 export type AgencyProvisionedBy = "self" | "platform";
-export type AgencyStatus = "pending" | "active" | "rejected";
+export type AgencyStatus = "pending" | "active" | "rejected" | "suspended";
 
 export interface AgencyLifecycleEvent {
   id: string; agencyId: string; actorId: string; fromStatus: AgencyStatus; toStatus: AgencyStatus; reason: string; createdAt: string;

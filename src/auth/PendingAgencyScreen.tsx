@@ -4,6 +4,7 @@ import { useData } from "../data/DataProvider";
 
 export default function PendingAgencyScreen() {
   const { session, signOut } = useData();
+  const suspended = session?.agencyStatus === "suspended";
   const rejected = session?.agencyStatus === "rejected";
 
   return (
@@ -12,9 +13,9 @@ export default function PendingAgencyScreen() {
         <div className="login-brand">
           <ComplyRerWordmark size={36} />
         </div>
-        <h1>{rejected ? "This setup was not approved" : "Waiting for Complyrer review"}</h1>
+        <h1>{suspended ? "Agency access is suspended" : rejected ? "This setup was not approved" : "Waiting for Complyrer review"}</h1>
         <p>
-          {rejected
+          {suspended ? "Your agency workspace is suspended. Contact Complyrer for review." : rejected
             ? `${session?.agencyName} (${session?.agencyCode}) was not activated. Contact Complyrer if you believe this is a mistake.`
             : `${session?.agencyName} is in the review queue. Staff can use care records after Complyrer approves ${session?.agencyCode}.`}
         </p>
