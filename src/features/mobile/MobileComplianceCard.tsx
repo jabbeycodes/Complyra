@@ -53,7 +53,7 @@ export function MobileComplianceCardView({
       ) : loading ? (
         <small>Loading your compliance…</small>
       ) : summary.total === 0 ? (
-        <small>No requirements assigned to your role right now.</small>
+        <small>No requirements assigned to your role right now. Readiness is not assessed; your New Hire Binder is separate.</small>
       ) : (
         <>
           <small>
