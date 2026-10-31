@@ -36,7 +36,8 @@ select is((agency_scorecard('a6000000-0000-0000-0000-000000000001')->>'total')::
 select is((select count(*)::int from individuals),0,'HR still has no Individual records');
 select set_config('request.jwt.claims','{"sub":"d6000000-0000-0000-0000-000000000003","role":"authenticated"}',true);
 select is((agency_scorecard('a6000000-0000-0000-0000-000000000001')->>'total')::int,2,'auditor reads agency aggregate');
-select is((with changed as (update requirement_definitions set title='Forbidden' where id='f6000000-0000-0000-0000-000000000001' returning id) select count(*)::int from changed),0,'auditor cannot mutate source');
+with changed as (update requirement_definitions set title='Forbidden' where id='f6000000-0000-0000-0000-000000000001' returning id)
+select is(count(*)::int,0,'auditor cannot mutate source') from changed;
 reset role;
 update profiles set active=false where id='d6000000-0000-0000-0000-000000000001';
 set local role authenticated;
