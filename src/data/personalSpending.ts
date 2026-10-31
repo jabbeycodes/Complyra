@@ -23,11 +23,16 @@
  *    used for" must always have an answer. A deposit names its source.
  *  - The balance is DERIVED from the entries and carries across months;
  *    it is never stored as an editable number.
- *  - OVER-BALANCE GUARDRAIL: a spend that takes the balance below $0
- *    still records (staff document reality, they do not rewrite it), but
- *    the entry is labeled "Over balance" in text — never color alone —
- *    and while its month is still open the ledger raises a
- *    needs-attention flag for the house manager.
+ *  - OVER-BALANCE GUARDRAIL (tightened by the agency simulation,
+ *    batch 7 — supersedes the original record-anyway rule): a spend
+ *    that would take the balance below $0 is REFUSED at entry creation
+ *    in both APIs and again in the database, and a month cannot be
+ *    signed closed while its closing balance is below $0. Balances can
+ *    still land below $0 when a deposit is voided out from under later
+ *    spends (a correction, not a new spend); those entries keep the
+ *    "Over balance" text label — never color alone — and the ledger
+ *    raises a needs-attention flag for the house manager while the
+ *    month is open, until the funds are recorded or the month closes.
  *  - Corrections never erase: a wrong entry is VOIDED with a reason and,
  *    when the money still moved, replaced by a fresh entry linked to
  *    the voided one. Voided entries stay visible (labeled Void) and
@@ -378,6 +383,49 @@ export function computePersonalBalanceCents(
     (sum, entry) => sum + signedAmountCents(entry),
     0,
   );
+}
+
+/**
+ * The entry-creation guard (simulation batch 7): a SPEND that would
+ * take the person's balance below $0 is refused, in both APIs and in
+ * the database. `replacesEntryId` names the entry this draft replaces
+ * (a void-and-replace correction): the replaced entry is treated as
+ * already voided, so correcting a spend never double-counts it.
+ * Deposits are never refused by this guard.
+ */
+export function assertPersonalSpendingSpendWithinBalance(
+  entries: PersonalSpendingEntryRow[],
+  draft: Pick<PersonalSpendingEntryDraft, "kind" | "amountCents">,
+  replacesEntryId?: string | null,
+): void {
+  if (draft.kind !== "spend") return;
+  const counting = effectiveEntries(entries).filter(
+    (entry) => entry.id !== (replacesEntryId ?? ""),
+  );
+  const balanceAfter =
+    computePersonalBalanceCents(counting) - draft.amountCents;
+  if (balanceAfter < 0) {
+    throw new Error(
+      `That spend would take the balance below $0. The balance is ` +
+        `${formatCents(computePersonalBalanceCents(counting))} and the spend is ` +
+        `${formatCents(draft.amountCents)} — record the funds first, or ` +
+        `correct the amount.`,
+    );
+  }
+}
+
+/** The month-close guard (simulation batch 7): no negative closes. */
+export function assertPersonalSpendingCloseBalance(
+  closingBalanceCents: number,
+  monthLabel: string,
+): void {
+  if (closingBalanceCents < 0) {
+    throw new Error(
+      `${monthLabel} cannot be closed while the balance is below $0 — ` +
+        `it stands at ${formatCents(closingBalanceCents)} at month end. ` +
+        `Record the missing funds or correct the entries, then close the month.`,
+    );
+  }
 }
 
 /** Balance once every counting entry dated on or before `throughDate` lands. */

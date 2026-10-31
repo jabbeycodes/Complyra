@@ -156,25 +156,122 @@ test("nurse cannot see personal spending at all", async () => {
   );
 });
 
-test("an over-balance spend records, is labeled, and raises the flag", async () => {
+test("a spend that would take the balance below $0 is refused (batch 7)", async () => {
   const api = new LocalApi(store());
   const { harper } = await people(api);
   await api.signIn(login(DEMO_HM_USERNAME)); // James Wilson, Willow HM
 
-  const created = await api.createPersonalSpendingEntry({
+  // Harper's balance is $10.20; a $50 spend used to record at -$39.80.
+  await assert.rejects(
+    () =>
+      api.createPersonalSpendingEntry({
+        individualId: harper.id,
+        entryDate: today(),
+        kind: "spend",
+        location: "Walmart",
+        purpose: "Extra personal items",
+        amountCents: 5000,
+      }),
+    /below \$0/,
+  );
+  const entries = await api.listPersonalSpendingEntries(harper.id);
+  assert.equal(computePersonalBalanceCents(entries), 1020);
+
+  // The seeded history still carries its over-balance label + flag:
+  // history is documented reality; only NEW over-balance spends stop.
+  const over = entries.filter((entry) => entry.overBalance);
+  assert.equal(over.length, 1);
+  const closes = await api.listPersonalSpendingMonthCloses(harper.id);
+  assert.equal(personalSpendingNeedsAttention(entries, closes), true);
+
+  // A spend within the balance still records.
+  const ok = await api.createPersonalSpendingEntry({
     individualId: harper.id,
     entryDate: today(),
     kind: "spend",
-    location: "Walmart",
-    purpose: "Extra personal items",
+    location: "Dollar General",
+    purpose: "Snacks",
+    amountCents: 1000,
+  });
+  assert.equal(ok.overBalance, false);
+});
+
+test("a month cannot close on a negative balance; the close figure is the ledger's (batch 7)", async () => {
+  const api = new LocalApi(store());
+  const { harper } = await people(api);
+  await api.signIn(login(DEMO_HM_USERNAME)); // James Wilson, Willow HM
+
+  // Voiding Harper's $50 family deposit (a correction, not a spend)
+  // takes the balance to -$39.80 — the state batch 7 closed at -$15.
+  const entries = await api.listPersonalSpendingEntries(harper.id);
+  const familyDeposit = entries.find(
+    (entry) => entry.kind === "deposit" && entry.amountCents === 5000,
+  )!;
+  await api.voidPersonalSpendingEntry(
+    familyDeposit.id,
+    "The deposit was recorded twice.",
+  );
+  assert.equal(
+    computePersonalBalanceCents(await api.listPersonalSpendingEntries(harper.id)),
+    1020 - 5000,
+  );
+
+  await assert.rejects(
+    () =>
+      api.closePersonalSpendingMonth({
+        individualId: harper.id,
+        month: thisMonth(),
+        signatureText: "James Wilson",
+        individualSignoff: "individual_signed",
+      }),
+    /below \$0/,
+  );
+
+  // Record the funds and the close lands on the ledger's own figure.
+  await api.createPersonalSpendingEntry({
+    individualId: harper.id,
+    entryDate: today(),
+    kind: "deposit",
+    location: "Family",
     amountCents: 5000,
   });
-  assert.equal(created.overBalance, true);
-  assert.equal(created.runningBalanceCents, 1020 - 5000);
+  const close = await api.closePersonalSpendingMonth({
+    individualId: harper.id,
+    month: thisMonth(),
+    signatureText: "James Wilson",
+    individualSignoff: "individual_signed",
+  });
+  assert.equal(close.closingBalanceCents, 1020);
+});
 
-  const entries = await api.listPersonalSpendingEntries(harper.id);
-  const closes = await api.listPersonalSpendingMonthCloses(harper.id);
-  assert.equal(personalSpendingNeedsAttention(entries, closes), true);
+test("a replacement spend that would over-draw is refused and the original stays live", async () => {
+  const api = new LocalApi(store());
+  const { ellis } = await people(api);
+  await api.signIn(login(DEMO_DSP_USERNAME));
+
+  const created = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "ALDI",
+    purpose: "Favorite foods",
+    amountCents: 1244,
+  });
+  await assert.rejects(
+    () =>
+      api.voidPersonalSpendingEntry(created.id, "Keyed the wrong total.", {
+        individualId: ellis.id,
+        entryDate: today(),
+        kind: "spend",
+        location: "ALDI",
+        purpose: "Favorite foods",
+        amountCents: 999999,
+      }),
+    /below \$0/,
+  );
+  const entries = await api.listPersonalSpendingEntries(ellis.id);
+  const original = entries.find((entry) => entry.id === created.id)!;
+  assert.equal(original.voided, false);
 });
 
 test("void and replace: the original stops counting and the pair stays linked", async () => {

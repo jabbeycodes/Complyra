@@ -118,6 +118,8 @@ import {
   type HouseCardReceiptPhoto,
 } from "./houseCard";
 import {
+  assertPersonalSpendingCloseBalance,
+  assertPersonalSpendingSpendWithinBalance,
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
@@ -1121,6 +1123,18 @@ export class HostedApi implements ComplyraApi {
       existingData as Record<string, unknown>,
     );
     await this.assertHouseCardSite(session, existing.siteId);
+    // Voiding is a manager action (simulation batch 9): anyone who can
+    // close the month may void any entry; a recorder may void only
+    // their OWN entry (the quick-entry Undo and self-correction path) —
+    // never another staff member's.
+    if (
+      !canCloseHouseCardMonth(session.roleKey) &&
+      existing.recordedBy !== session.userId
+    ) {
+      throw new Error(
+        "Only a manager can void another staff member's entry. Ask your house manager to void it.",
+      );
+    }
     if (existing.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -1440,6 +1454,13 @@ export class HostedApi implements ComplyraApi {
       person.id,
       draft.entryDate,
     );
+    // A spend may not take the person's balance below $0 (batch 7) —
+    // the ledger is fetched so the refusal uses the real balance.
+    const currentEntries = await this.personalSpendingViewsFor(
+      session,
+      person.id,
+    );
+    assertPersonalSpendingSpendWithinBalance(currentEntries, draft);
     const { data, error } = await this.client
       .from("personal_spending_entries")
       .insert({
@@ -1511,6 +1532,17 @@ export class HostedApi implements ComplyraApi {
           draft.entryDate,
         );
       }
+      // The replacement is a new spend: it may not take the balance
+      // below $0 either (the entry it replaces counts as voided).
+      const currentEntries = await this.personalSpendingViewsFor(
+        session,
+        existing.individualId,
+      );
+      assertPersonalSpendingSpendWithinBalance(
+        currentEntries,
+        draft,
+        existing.id,
+      );
       const { data, error } = await this.client
         .from("personal_spending_entries")
         .insert({
@@ -1626,6 +1658,16 @@ export class HostedApi implements ComplyraApi {
     const entries = (entryData ?? []).map((row) =>
       this.personalSpendingFromRow(row as Record<string, unknown>),
     );
+    // A month cannot be signed closed on a negative balance (batch 7):
+    // the figure is computed here from the ledger, never client-given.
+    const closingBalanceCents = personalBalanceThroughCents(
+      entries,
+      personalMonthEndIso(draft.month),
+    );
+    assertPersonalSpendingCloseBalance(
+      closingBalanceCents,
+      monthLabel(draft.month),
+    );
     const { data, error } = await this.client
       .from("personal_spending_month_closes")
       .insert({
@@ -1633,10 +1675,7 @@ export class HostedApi implements ComplyraApi {
         site_id: person.siteId,
         individual_id: person.id,
         month: draft.month,
-        closing_balance_cents: personalBalanceThroughCents(
-          entries,
-          personalMonthEndIso(draft.month),
-        ),
+        closing_balance_cents: closingBalanceCents,
         printed_name: session.fullName,
         signature_text: draft.signatureText,
         signed_by: session.userId,

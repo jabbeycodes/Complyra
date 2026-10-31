@@ -710,7 +710,10 @@ export default function HouseCardPanel({
                         {entry.voided ? "—" : formatCents(runningBalanceCents)}
                       </td>
                       <td>
-                        {canRecord && !entry.voided && (
+                        {/* Voiding is a manager action (batch 9): the
+                            button follows the close-month gate, not the
+                            record gate — DSPs record but never void. */}
+                        {canClose && !entry.voided && (
                           <button
                             type="button"
                             className="hc-link-button"

@@ -151,6 +151,8 @@ import {
   type HouseCardMonthClose,
 } from "./houseCard";
 import {
+  assertPersonalSpendingCloseBalance,
+  assertPersonalSpendingSpendWithinBalance,
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
@@ -11797,6 +11799,18 @@ export class LocalApi implements ComplyraApi {
     );
     if (!row) throw new Error("House card entry not found.");
     this.siteOrThrow(session, row.siteId);
+    // Voiding is a manager action (simulation batch 9): anyone who can
+    // close the month may void any entry; a recorder may void only
+    // their OWN entry (the quick-entry Undo and self-correction path) —
+    // never another staff member's.
+    if (
+      !canCloseHouseCardMonth(session.roleKey) &&
+      row.recordedBy !== session.userId
+    ) {
+      throw new Error(
+        "Only a manager can void another staff member's entry. Ask your house manager to void it.",
+      );
+    }
     if (row.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -12015,6 +12029,14 @@ export class LocalApi implements ComplyraApi {
     const person = accessibleIndividual(this.store, session, input.individualId);
     const draft = validatePersonalSpendingDraft(input, centralTodayIso());
     this.assertPersonalSpendingMonthOpen(session, person.id, draft.entryDate);
+    // A spend may not take the person's balance below $0 (batch 7).
+    assertPersonalSpendingSpendWithinBalance(
+      this.personalSpendingEntryRows().filter(
+        (row) =>
+          row.agencyId === session.agencyId && row.individualId === person.id,
+      ),
+      draft,
+    );
     const row: PersonalSpendingEntryRow = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -12085,6 +12107,17 @@ export class LocalApi implements ComplyraApi {
           draft.entryDate,
         );
       }
+      // The replacement is a new spend: it may not take the balance
+      // below $0 either (the entry it replaces counts as voided).
+      assertPersonalSpendingSpendWithinBalance(
+        this.personalSpendingEntryRows().filter(
+          (item) =>
+            item.agencyId === session.agencyId &&
+            item.individualId === row.individualId,
+        ),
+        draft,
+        row.id,
+      );
       replacementRow = {
         id: crypto.randomUUID(),
         agencyId: session.agencyId,
@@ -12185,6 +12218,16 @@ export class LocalApi implements ComplyraApi {
     const personEntries = this.personalSpendingEntryRows().filter(
       (row) => row.agencyId === session.agencyId && row.individualId === person.id,
     );
+    // A month cannot be signed closed on a negative balance (batch 7):
+    // the figure is computed here from the ledger, never client-given.
+    const closingBalanceCents = personalBalanceThroughCents(
+      personEntries,
+      personalMonthEndIso(draft.month),
+    );
+    assertPersonalSpendingCloseBalance(
+      closingBalanceCents,
+      monthLabel(draft.month),
+    );
     const now = new Date().toISOString();
     const close: PersonalSpendingMonthClose = {
       id: crypto.randomUUID(),
@@ -12192,10 +12235,7 @@ export class LocalApi implements ComplyraApi {
       siteId: person.siteId,
       individualId: person.id,
       month: draft.month,
-      closingBalanceCents: personalBalanceThroughCents(
-        personEntries,
-        personalMonthEndIso(draft.month),
-      ),
+      closingBalanceCents,
       printedName: session.fullName,
       signatureText: draft.signatureText,
       signedBy: session.userId,

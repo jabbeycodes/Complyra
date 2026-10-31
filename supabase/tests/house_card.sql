@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(37);
+select plan(38);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -90,6 +90,8 @@ select lives_ok($$update house_card_entries set voided_at=now(), void_reason='Ke
   'Voiding while naming someone else as the voider runs');
 select is((select voided_by::text from house_card_entries where location='ALDI'),'d3000000-0000-0000-0000-000000000002',
   'The void is stamped with the actual voider, not the client-named one');
+select throws_ok($$update house_card_entries set voided_at=now(), void_reason='Not mine to void' where id='f3000000-0000-0000-0000-000000000001'$$,
+  'P0001',null,'A DSP cannot void another staff member''s entry — voiding is a manager action (wave 3, batch 9)');
 select throws_ok($$update house_card_entries set voided_at=null, voided_by=null, void_reason=null where location='ALDI'$$,
   'P0001',null,'A voided entry cannot be un-voided');
 select throws_ok($$update house_card_entries set amount_cents=2600 where location='Shell'$$,

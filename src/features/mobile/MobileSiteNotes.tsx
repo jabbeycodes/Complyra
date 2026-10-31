@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
-import type {
-  IspProgramView,
-  ShiftNoteView,
-  SiteShiftNoteView,
+import {
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
+  type IspProgramView,
+  type ShiftNoteView,
+  type SiteShiftNoteView,
 } from "../../data/shiftNotes";
 import { canEnterShiftNotes } from "../../data/permissions";
 import MobilePeopleList from "./MobilePeopleList";
@@ -185,7 +187,12 @@ export default function MobileSiteNotes({
                 onClick={() => void openNote(note)}
               >
                 <span className="msh-row-main">
-                  <strong>{note.individualName}</strong>
+                  <strong>
+                    {note.individualName}
+                    {isLateShiftNote(note)
+                      ? ` · ${LATE_SHIFT_NOTE_LABEL}`
+                      : ""}
+                  </strong>
                   <small>
                     {note.staffName}
                     {note.staffTitle ? ` · ${note.staffTitle}` : ""} ·{" "}
