@@ -166,7 +166,15 @@ import {
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
-import { canReadIndividual, assertCalendarDate } from "./access";
+import {
+  canActAtSite,
+  canReadIndividual,
+  assertCalendarDate,
+  correctiveActionInScope,
+  CORRECTIVE_ACTION_AGENCY_ROLES,
+  dspRecipientCoversIndividual,
+  staffActiveAtSite,
+} from "./access";
 import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
   AcknowledgmentPacket,
@@ -176,6 +184,7 @@ import type {
   AssignTrainingInput,
   ChecklistAnswer,
   DelegationFormPatch,
+  DelegationRecipient,
   DelegationTemplateVersion,
   DocumentVersion,
   DoseExceptionKind,
@@ -229,7 +238,7 @@ import type {
   SignatureSettings,
   UserSignature,
 } from "./types";
-import { blankDelegationForm } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
 import {
   dspRatingChangedPayload,
@@ -1199,7 +1208,11 @@ export interface ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }): Promise<{ id: string }>;
+  /** DSPs whose own scope covers this Individual — the delegation recipient picker. */
+  listDelegationRecipients(individualId: string): Promise<DelegationRecipient[]>;
   /** Patch fields on the delegation form (purpose, procedures, instructing RN, rescind state, …). */
   updateDelegationForm(input: {
     obligationId: string;
@@ -9222,6 +9235,87 @@ export class LocalApi implements ComplyraApi {
     }
   }
 
+  /**
+   * DSPs who may receive a delegation for this Individual: active agency
+   * DSP memberships who are at the Individual's site NOW — membership
+   * home site, or an ACTIVE assignment to them or their site
+   * (dspRecipientCoversIndividual). Deliberately stricter than the read
+   * rule (dspScopeCoversIndividual ignores assignment endsOn so former
+   * DSPs can correct their own notes): a NEW delegation never goes to
+   * someone whose assignment has ended or not yet started.
+   */
+  private delegationRecipientsFor(
+    session: SessionUser,
+    person: IndividualRecord,
+  ): DelegationRecipient[] {
+    const today = todayIso();
+    const rows: DelegationRecipient[] = [];
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== session.agencyId || m.roleKey !== "dsp") continue;
+      if (m.expiresOn && m.expiresOn < today) continue;
+      const profile = this.store.db.profiles.find((p) => p.id === m.userId);
+      if (!profile) continue;
+      if (
+        !dspRecipientCoversIndividual(
+          { userId: m.userId, agencyId: m.agencyId, siteId: m.siteId },
+          person,
+          this.store.db.assignments,
+          this.store.db.individuals,
+        )
+      ) {
+        continue;
+      }
+      rows.push({
+        userId: m.userId,
+        name: profile.fullName,
+        title: profile.jobTitle || "DSP",
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Validate picker selections against the eligible recipient list. */
+  private resolveDelegationRecipients(
+    session: SessionUser,
+    person: IndividualRecord,
+    recipientUserIds: string[] | undefined,
+  ): DelegationRecipient[] {
+    if (!recipientUserIds || recipientUserIds.length === 0) return [];
+    if (recipientUserIds.length > DELEGATION_ROSTER_ROWS) {
+      throw new Error("A delegation form holds at most 12 staff.");
+    }
+    const eligible = this.delegationRecipientsFor(session, person);
+    return recipientUserIds.map((userId) => {
+      const found = eligible.find((row) => row.userId === userId);
+      if (!found) {
+        throw new Error(
+          "Choose recipients from the staff who work at this individual's site.",
+        );
+      }
+      return found;
+    });
+  }
+
+  async listDelegationRecipients(individualId: string) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return this.delegationRecipientsFor(session, person);
+  }
+
   async createDelegation(input: {
     individualId: string;
     taskTitle: string;
@@ -9230,6 +9324,8 @@ export class LocalApi implements ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }) {
     const session = assertSession(this.store);
     this.assertDelegationEditor(session);
@@ -9238,16 +9334,40 @@ export class LocalApi implements ComplyraApi {
     );
     if (!person) throw new Error("Individual not found.");
     accessibleIndividual(this.store, session, person.id);
-    if (!canAccessSite(session, person.siteId)) {
+    // Site scope honors staff assignments, not just the membership home
+    // site (simulation batch 10: an agency-wide nurse whose homes come
+    // from assignments was refused at both of her assigned sites).
+    // Mirrors private.can_read_site via canActAtSite.
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
       throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const recipients = this.resolveDelegationRecipients(
+      session,
+      person,
+      input.recipientUserIds,
+    );
     const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    recipients.forEach((recipient, i) => {
+      form.roster[i] = {
+        ...form.roster[i],
+        printName: recipient.name,
+        title: recipient.title,
+        staffUserId: recipient.userId,
+      };
+    });
     const item: ObligationItem = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -9623,6 +9743,13 @@ export class LocalApi implements ComplyraApi {
 
   // ===== AUDIT-READINESS IMPL (corrective actions) =====
   // AUDIT-READINESS: corrective-action workflow (LocalApi, in-memory).
+  // Site scope (reviewer HOLD fix-up, PR #199): every action belongs to
+  // a home. Reads and writes follow correctiveActionInScope — agency
+  // management and auditors see the whole agency; everyone else reaches
+  // an action only through its site (membership home or an active
+  // assignment there); a site-less action is agency-level, management
+  // only. Mirrors private.corrective_action_in_scope in
+  // 20261031170000_hm_corrective_actions_seed.sql.
   private correctiveActionsOf() {
     return (this.store.db.correctiveActions ??= []);
   }
@@ -9631,12 +9758,116 @@ export class LocalApi implements ComplyraApi {
     assertCan(session, "correctiveActions.manage");
   }
 
+  private actionInScope(session: SessionUser, action: CorrectiveAction): boolean {
+    return correctiveActionInScope(
+      session,
+      action,
+      this.store.db.assignments,
+      this.store.db.individuals,
+    );
+  }
+
+  /** Agency-management tier: a record's site never narrows these users. */
+  private isCorrectiveActionManager(session: SessionUser): boolean {
+    return (
+      session.platformAdmin ||
+      (CORRECTIVE_ACTION_AGENCY_ROLES as readonly string[]).includes(session.roleKey)
+    );
+  }
+
   private findCorrectiveAction(session: SessionUser, id: string) {
     const action = this.correctiveActionsOf().find(
-      (row) => row.id === id && row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
+      (row) => row.id === id && this.actionInScope(session, row),
     );
     if (!action) throw new Error("Corrective action not found.");
     return action;
+  }
+
+  /** The assignee must currently work at the action's home: membership
+   *  home site there, or an ACTIVE staff assignment that places them
+   *  there — never an assignment that has ended or not yet started. */
+  private assertCorrectiveActionAssignee(
+    session: SessionUser,
+    assigneeId: string,
+    siteId: string,
+  ) {
+    const member = this.store.db.memberships.find(
+      (row) => row.agencyId === session.agencyId && row.userId === assigneeId,
+    );
+    const today = todayIso();
+    if (
+      !member ||
+      (member.expiresOn && member.expiresOn < today) ||
+      !staffActiveAtSite(
+        { userId: member.userId, agencyId: member.agencyId, siteId: member.siteId },
+        siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
+      throw new Error("Assign corrective actions to staff who work at that home.");
+    }
+  }
+
+  /** Validate a resolved (site, assignee) pair for create/update. */
+  private assertCorrectiveActionPlacement(
+    session: SessionUser,
+    siteId: string | null,
+    assigneeId: string | null,
+  ) {
+    if (!siteId) return;
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Choose a home in this agency.");
+    if (
+      !this.isCorrectiveActionManager(session) &&
+      !canActAtSite(session, siteId, this.store.db.assignments, this.store.db.individuals)
+    ) {
+      throw new Error("Choose a home you manage.");
+    }
+    if (assigneeId) this.assertCorrectiveActionAssignee(session, assigneeId, siteId);
+  }
+
+  /**
+   * Resolve the home a NEW corrective action belongs to, in order: the
+   * QA audit that raised it, the explicit site, the creator's home
+   * (site-scoped creators' actions belong to their home), then the
+   * assignee's home (so a manager's assignment lands in the assignee's
+   * house). Null survives only for agency-level actions.
+   */
+  private resolveNewCorrectiveActionSite(
+    session: SessionUser,
+    input: {
+      siteId?: string | null;
+      qaAuditId?: string | null;
+      assignedToUserId?: string | null;
+    },
+  ): { siteId: string | null; qaAuditId: string | null } {
+    const db = this.store.db;
+    let siteId = input.siteId ?? null;
+    const qaAuditId = input.qaAuditId ?? null;
+    if (qaAuditId) {
+      const audit = (db.qaAudits ?? []).find(
+        (row) => row.id === qaAuditId && row.agencyId === session.agencyId,
+      );
+      if (!audit) throw new Error("QA review not found.");
+      if (siteId && siteId !== audit.siteId) {
+        throw new Error("The corrective action's home must match its QA review.");
+      }
+      siteId = audit.siteId;
+    }
+    if (!siteId && !this.isCorrectiveActionManager(session) && session.siteId) {
+      siteId = session.siteId;
+    }
+    if (!siteId && input.assignedToUserId) {
+      const member = db.memberships.find(
+        (row) => row.agencyId === session.agencyId && row.userId === input.assignedToUserId,
+      );
+      if (member?.siteId) siteId = member.siteId;
+    }
+    this.assertCorrectiveActionPlacement(session, siteId, input.assignedToUserId ?? null);
+    return { siteId, qaAuditId };
   }
 
   private assigneeName(session: SessionUser, userId: string | null): string | null {
@@ -9653,9 +9884,7 @@ export class LocalApi implements ComplyraApi {
   }): Promise<CorrectiveAction[]> {
     const session = assertSession(this.store);
     const now = new Date();
-    let rows = this.correctiveActionsOf().filter(
-      (row) => row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
-    );
+    let rows = this.correctiveActionsOf().filter((row) => this.actionInScope(session, row));
     if (input?.assignedToUserId) {
       rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
     }
@@ -9674,6 +9903,7 @@ export class LocalApi implements ComplyraApi {
     if (errors.length > 0) throw new Error(errors[0]);
     const assigneeId = input.assignedToUserId ?? null;
     if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+    const placement = this.resolveNewCorrectiveActionSite(session, input);
     const now = new Date().toISOString();
     const action: CorrectiveAction = {
       id: crypto.randomUUID(),
@@ -9686,6 +9916,8 @@ export class LocalApi implements ComplyraApi {
       storedStatus: "open",
       linkedRiskId: input.linkedRiskId ?? null,
       linkedRiskSource: input.linkedRiskSource ?? null,
+      siteId: placement.siteId,
+      qaAuditId: placement.qaAuditId,
       createdByUserId: session.userId,
       createdAt: now,
       resolvedAt: null,
@@ -9725,6 +9957,16 @@ export class LocalApi implements ComplyraApi {
       });
       if (errors.length > 0) throw new Error(errors[0]);
       action.dueOn = input.dueOn?.trim() || null;
+    }
+    if (input.siteId !== undefined || input.assignedToUserId !== undefined) {
+      const nextSiteId = input.siteId !== undefined ? input.siteId : action.siteId;
+      const nextAssigneeId =
+        input.assignedToUserId !== undefined ? input.assignedToUserId : action.assignedToUserId;
+      if (input.siteId === null && action.siteId && !this.isCorrectiveActionManager(session)) {
+        throw new Error("Only agency management can move an action agency-wide.");
+      }
+      this.assertCorrectiveActionPlacement(session, nextSiteId, nextAssigneeId);
+      if (input.siteId !== undefined) action.siteId = input.siteId;
     }
     if (input.description !== undefined) action.description = input.description?.trim() ?? "";
     if (input.assignedToUserId !== undefined) {

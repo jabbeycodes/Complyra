@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, CalendarDays, Download, Plus, TrendingDown, TrendingUp } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import {
+  CORRECTIVE_ACTION_STATUS_META,
+  deriveCorrectiveActionStatus,
+  sortCorrectiveActions,
+  type CorrectiveAction,
+} from "../../data/correctiveActions";
 import { can } from "../../data/status";
+import { isAgencyWideViewer } from "../../data/dashboard";
 import {
   nextQaDueDate,
   qaPeriodLabel,
@@ -34,10 +41,17 @@ function TrendIcon({ trend }: { trend: number | null }) {
 
 export default function QaAuditsPage() {
   const { api, session, workspace, refresh } = useData();
-  const [tab, setTab] = useState<"audits" | "schedules" | "ranking">("audits");
+  const [tab, setTab] = useState<"audits" | "schedules" | "ranking" | "actions">("audits");
   const [audits, setAudits] = useState<QaAudit[]>([]);
   const [schedules, setSchedules] = useState<QaAuditSchedule[]>([]);
   const [ranking, setRanking] = useState<QaRankedSite[]>([]);
+  const [actions, setActions] = useState<CorrectiveAction[]>([]);
+  const [actionTitle, setActionTitle] = useState("");
+  const [actionDescription, setActionDescription] = useState("");
+  const [actionSiteId, setActionSiteId] = useState("");
+  const [actionAssignee, setActionAssignee] = useState("");
+  const [actionDue, setActionDue] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
   const [openAudit, setOpenAudit] = useState<QaAudit | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -53,6 +67,26 @@ export default function QaAuditsPage() {
 
   const canAudit = can(session!, "qa.audit");
   const canSchedule = can(session!, "qa.schedule");
+  const canManageActions = can(session!, "correctiveActions.manage");
+  // Corrective actions belong to a home (site scope): the create form
+  // names the home, and the assignee picker offers only staff whose
+  // home that is. Agency-wide managers may also file agency-level
+  // actions (no home). The API enforces the same rule server-side.
+  const agencyWide = session ? isAgencyWideViewer(session) : false;
+  const siteOptions = workspace?.sites ?? [];
+  const assigneeOptions = (workspace?.staff ?? []).filter(
+    (person) => !actionSiteId || person.siteId === actionSiteId,
+  );
+
+  useEffect(() => {
+    if (actionSiteId || agencyWide || siteOptions.length === 0) return;
+    const home =
+      session?.siteId && siteOptions.some((s) => s.id === session.siteId)
+        ? session.siteId
+        : siteOptions[0].id;
+    setActionSiteId(home);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteOptions.length, agencyWide]);
   const siteName = useMemo(() => {
     const map = new Map<string, string>();
     for (const s of workspace?.sites ?? []) map.set(s.id, s.name);
@@ -63,14 +97,16 @@ export default function QaAuditsPage() {
     setLoading(true);
     setError("");
     try {
-      const [a, s, r] = await Promise.all([
+      const [a, s, r, ca] = await Promise.all([
         api.listQaAudits(siteFilter ? { siteId: siteFilter } : undefined),
         api.listQaSchedules(),
         api.getQaSiteRanking(),
+        api.listCorrectiveActions().catch(() => [] as CorrectiveAction[]),
       ]);
       setAudits(a);
       setSchedules(s);
       setRanking(r);
+      setActions(sortCorrectiveActions(ca, new Date()));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -125,6 +161,40 @@ export default function QaAuditsPage() {
     }
   }
 
+  async function addAction(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setActionBusy(true);
+    try {
+      await api.addCorrectiveAction({
+        title: actionTitle,
+        description: actionDescription || null,
+        siteId: actionSiteId || null,
+        assignedToUserId: actionAssignee || null,
+        dueOn: actionDue || null,
+      });
+      setActionTitle("");
+      setActionDescription("");
+      setActionAssignee("");
+      setActionDue("");
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function resolveAction(id: string) {
+    setError("");
+    try {
+      await api.resolveCorrectiveAction(id);
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function sweepReminders() {
     setError("");
     try {
@@ -163,7 +233,7 @@ export default function QaAuditsPage() {
       {error && <p className="form-error">{error}</p>}
 
       <div className="tabs" role="tablist" aria-label="QA Review views">
-        {(["audits", "schedules", "ranking"] as const).map((t) => (
+        {(["audits", "schedules", "ranking", "actions"] as const).map((t) => (
           <button
             key={t}
             role="tab"
@@ -171,7 +241,13 @@ export default function QaAuditsPage() {
             className={tab === t ? "selected" : ""}
             onClick={() => setTab(t)}
           >
-            {t === "audits" ? "Reviews" : t === "schedules" ? "Schedules" : "Site ranking"}
+            {t === "audits"
+              ? "Reviews"
+              : t === "schedules"
+                ? "Schedules"
+                : t === "ranking"
+                  ? "Site ranking"
+                  : "Corrective actions"}
           </button>
         ))}
       </div>
@@ -411,6 +487,138 @@ export default function QaAuditsPage() {
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "actions" && (
+        <>
+          <p className="muted">
+            Follow-up actions raised from QA findings. An action names an owner and a
+            due date; it stays open until a manager resolves it.
+          </p>
+          {canManageActions ? (
+            <form className="qa-new-audit" onSubmit={(e) => void addAction(e)}>
+              <label>
+                <span>Action title</span>
+                <input
+                  type="text"
+                  value={actionTitle}
+                  onChange={(e) => setActionTitle(e.target.value)}
+                  placeholder="e.g. Re-train night shift on incident reporting"
+                  minLength={3}
+                  required
+                />
+              </label>
+              <label>
+                <span>Description</span>
+                <input
+                  type="text"
+                  value={actionDescription}
+                  onChange={(e) => setActionDescription(e.target.value)}
+                  placeholder="What needs to happen (optional)"
+                />
+              </label>
+              <label>
+                <span>Home</span>
+                <select
+                  value={actionSiteId}
+                  onChange={(e) => {
+                    setActionSiteId(e.target.value);
+                    setActionAssignee("");
+                  }}
+                >
+                  {agencyWide && <option value="">Agency-wide (no home)</option>}
+                  {siteOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Assign to</span>
+                <select
+                  value={actionAssignee}
+                  onChange={(e) => setActionAssignee(e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {assigneeOptions.map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.name} — {person.site}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Due date</span>
+                <input
+                  type="date"
+                  value={actionDue}
+                  onChange={(e) => setActionDue(e.target.value)}
+                />
+              </label>
+              <button
+                type="submit"
+                className="button primary"
+                disabled={actionBusy || actionTitle.trim().length < 3}
+              >
+                <Plus size={16} /> {actionBusy ? "Adding…" : "Add corrective action"}
+              </button>
+            </form>
+          ) : (
+            <p className="muted">
+              You can view corrective actions. An authorized manager can assign and
+              resolve them.
+            </p>
+          )}
+          {loading ? (
+            <Empty title="Loading corrective actions…" text="Fetching corrective actions." />
+          ) : actions.length === 0 ? (
+            <Empty
+              title="No corrective actions yet"
+              text={
+                canManageActions
+                  ? "Add the first corrective action above when a QA finding needs follow-up."
+                  : "No corrective actions are on record for your view."
+              }
+            />
+          ) : (
+            <div className="qa-list">
+              {actions.map((action) => {
+                const status = deriveCorrectiveActionStatus(action, new Date());
+                const meta = CORRECTIVE_ACTION_STATUS_META[status];
+                return (
+                  <div key={action.id} className="qa-row">
+                    <span className="qa-row-main">
+                      <span className={`qa-status qa-status--${status}`}>
+                        <span aria-hidden="true">{meta.icon}</span> {meta.label}
+                      </span>
+                      <span>
+                        <strong>{action.title}</strong>
+                        <span className="qa-row-sub">
+                          {action.assignedToName ? `Owner: ${action.assignedToName}` : "Unassigned"}
+                          {action.siteId ? ` · ${siteName(action.siteId)}` : " · Agency-wide"}
+                          {action.dueOn ? ` · Due ${formatDate(action.dueOn)}` : " · No due date"}
+                          {action.description ? ` · ${action.description}` : ""}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="qa-row-side">
+                      {canManageActions && status !== "resolved" && (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void resolveAction(action.id)}
+                        >
+                          Resolve
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>

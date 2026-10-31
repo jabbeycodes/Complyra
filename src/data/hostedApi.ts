@@ -26,6 +26,7 @@ import type {
   ChecklistAttestation,
   ChecklistItem,
   DelegationFormPatch,
+  DelegationRecipient,
   DelegationTemplateVersion,
   DocumentRecord,
   DocumentVersion,
@@ -58,6 +59,7 @@ import type {
   ServiceLogKind,
   SessionUser,
   SiteRecord,
+  StaffAssignment,
   StaffCertificate,
   StaffClearanceRow,
   StaffTrainingProfile,
@@ -80,7 +82,7 @@ import type {
   SignatureEvent,
   SignatureSettings,
 } from "./types";
-import { blankDelegationForm } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import {
   LOGIN_BAD_PASSWORD_MESSAGE,
   LOGIN_FAILED_MESSAGE,
@@ -92,7 +94,15 @@ import {
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite } from "./dashboard";
 import { portraitSrc } from "./personPortrait";
-import { assertCalendarDate, canReadIndividual } from "./access";
+import {
+  assertCalendarDate,
+  canActAtSite,
+  canReadIndividual,
+  correctiveActionInScope,
+  CORRECTIVE_ACTION_AGENCY_ROLES,
+  dspRecipientCoversIndividual,
+  staffActiveAtSite,
+} from "./access";
 import {
   sortLifeEvents,
   toLifeEventView,
@@ -719,20 +729,13 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
-  /** The Individual, if this session may read them; otherwise throws. */
-  private async assertLifeEventReadable(
-    session: SessionUser,
-    individualId: string,
-  ) {
-    const person = await this.individualRecord(individualId);
-    if (!person || person.agencyId !== session.agencyId) {
-      throw new Error("Individual not found or outside your assigned access.");
-    }
+  /** Every staff_assignments row in the agency, mapped to the app shape. */
+  private async agencyAssignments(agencyId: string): Promise<StaffAssignment[]> {
     const { data } = await this.client
       .from("staff_assignments")
       .select("*")
-      .eq("agency_id", session.agencyId);
-    const assignments = (data ?? []).map((row) => {
+      .eq("agency_id", agencyId);
+    return (data ?? []).map((row) => {
       const record = row as Record<string, unknown>;
       return {
         id: record.id as string,
@@ -744,6 +747,32 @@ export class HostedApi implements ComplyraApi {
         endsOn: (record.ends_on as string | null) ?? null,
       };
     });
+  }
+
+  /** Lightweight Individual refs (id + site) for assignment resolution. */
+  private async agencyIndividualRefs(
+    agencyId: string,
+  ): Promise<{ id: string; siteId: string }[]> {
+    const { data } = await this.client
+      .from("individuals")
+      .select("id, site_id")
+      .eq("agency_id", agencyId);
+    return (data ?? []).map((row) => {
+      const record = row as Record<string, unknown>;
+      return { id: record.id as string, siteId: record.site_id as string };
+    });
+  }
+
+  /** The Individual, if this session may read them; otherwise throws. */
+  private async assertLifeEventReadable(
+    session: SessionUser,
+    individualId: string,
+  ) {
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found or outside your assigned access.");
+    }
+    const assignments = await this.agencyAssignments(session.agencyId);
     if (!canReadIndividual(session, person, assignments, [person])) {
       throw new Error("Individual not found or outside your assigned access.");
     }
@@ -8098,6 +8127,121 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
+  /**
+   * DSPs who may receive a delegation for this Individual: active agency
+   * DSP memberships who are at the Individual's site NOW — membership
+   * home site, or an ACTIVE assignment to them or their site
+   * (dspRecipientCoversIndividual). Deliberately stricter than the read
+   * rule (dspScopeCoversIndividual ignores assignment endsOn so former
+   * DSPs can correct their own notes): a NEW delegation never goes to
+   * someone whose assignment has ended or not yet started.
+   */
+  private async delegationRecipientsFor(
+    session: SessionUser,
+    person: IndividualRecord,
+    assignments: StaffAssignment[],
+    individuals: { id: string; siteId: string }[],
+  ): Promise<DelegationRecipient[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: memberships } = await this.client
+      .from("memberships")
+      .select("user_id, site_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("role_key", "dsp");
+    const dspRows = (memberships ?? []).filter((row) => {
+      const expiresOn = ((row as Record<string, unknown>).expires_on as string | null) ?? null;
+      return !expiresOn || expiresOn >= today;
+    });
+    if (dspRows.length === 0) return [];
+    const userIds = dspRows.map(
+      (row) => (row as Record<string, unknown>).user_id as string,
+    );
+    const { data: profiles } = await this.client
+      .from("profiles")
+      .select("id, full_name, job_title")
+      .eq("home_agency_id", session.agencyId)
+      .in("id", userIds);
+    const profileById = new Map(
+      (profiles ?? []).map((row) => {
+        const r = row as Record<string, unknown>;
+        return [
+          r.id as string,
+          { name: r.full_name as string, title: (r.job_title as string) || "DSP" },
+        ] as const;
+      }),
+    );
+    const rows: DelegationRecipient[] = [];
+    for (const row of dspRows) {
+      const r = row as Record<string, unknown>;
+      const userId = r.user_id as string;
+      const profile = profileById.get(userId);
+      if (!profile) continue;
+      if (
+        !dspRecipientCoversIndividual(
+          {
+            userId,
+            agencyId: session.agencyId,
+            siteId: (r.site_id as string | null) ?? null,
+          },
+          person,
+          assignments,
+          individuals,
+        )
+      ) {
+        continue;
+      }
+      rows.push({ userId, name: profile.name, title: profile.title });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Validate picker selections against the eligible recipient list. */
+  private async resolveDelegationRecipients(
+    session: SessionUser,
+    person: IndividualRecord,
+    assignments: StaffAssignment[],
+    individuals: { id: string; siteId: string }[],
+    recipientUserIds: string[] | undefined,
+  ): Promise<DelegationRecipient[]> {
+    if (!recipientUserIds || recipientUserIds.length === 0) return [];
+    if (recipientUserIds.length > DELEGATION_ROSTER_ROWS) {
+      throw new Error("A delegation form holds at most 12 staff.");
+    }
+    const eligible = await this.delegationRecipientsFor(
+      session,
+      person,
+      assignments,
+      individuals,
+    );
+    return recipientUserIds.map((userId) => {
+      const found = eligible.find((row) => row.userId === userId);
+      if (!found) {
+        throw new Error(
+          "Choose recipients from the staff who work at this individual's site.",
+        );
+      }
+      return found;
+    });
+  }
+
+  async listDelegationRecipients(individualId: string) {
+    const session = await this.requireSession();
+    this.requirePermission(session, "clinical.view");
+    this.assertDelegationEditor(session);
+    const person = await this.individualRecord(individualId);
+    if (!person || person.agencyId !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    if (!canActAtSite(session, person.siteId, assignments, individuals)) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return this.delegationRecipientsFor(session, person, assignments, individuals);
+  }
+
   async createDelegation(input: {
     individualId: string;
     taskTitle: string;
@@ -8106,6 +8250,8 @@ export class HostedApi implements ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }) {
     const session = await this.requireSession();
     this.requirePermission(session, "clinical.view");
@@ -8114,16 +8260,39 @@ export class HostedApi implements ComplyraApi {
     if (!person || person.agencyId !== session.agencyId) {
       throw new Error("Individual not found.");
     }
-    if (!canAccessSite(session, person.siteId)) {
+    // Site scope honors staff assignments, not just the membership home
+    // site (simulation batch 10: an agency-wide nurse whose homes come
+    // from assignments was refused at both of her assigned sites).
+    // Mirrors private.can_read_site via canActAtSite.
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    if (!canActAtSite(session, person.siteId, assignments, individuals)) {
       throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const recipients = await this.resolveDelegationRecipients(
+      session,
+      person,
+      assignments,
+      individuals,
+      input.recipientUserIds,
+    );
     const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    recipients.forEach((recipient, i) => {
+      form.roster[i] = {
+        ...form.roster[i],
+        printName: recipient.name,
+        title: recipient.title,
+        staffUserId: recipient.userId,
+      };
+    });
     const { data, error } = await this.client
       .from("obligations")
       .insert({
@@ -9681,9 +9850,146 @@ export class HostedApi implements ComplyraApi {
   // ===== AUDIT-READINESS HOSTED (corrective actions) =====
   // AUDIT-READINESS: corrective-action workflow (HostedApi, Supabase).
   // Table: public.corrective_actions (migration 20260914070000_audit_readiness.sql).
+  // Site scope (reviewer HOLD fix-up, PR #199): every action belongs to
+  // a home. Reads and writes follow correctiveActionInScope — agency
+  // management and auditors see the whole agency; everyone else reaches
+  // an action only through its site (membership home or an active
+  // assignment there); a site-less action is agency-level, management
+  // only. The same rule is enforced by RLS
+  // (private.corrective_action_in_scope in
+  // 20261031170000_hm_corrective_actions_seed.sql); this layer mirrors
+  // it so callers get the app's own errors, not raw RLS failures.
 
   private requireCorrectiveActionWrite(session: SessionUser) {
     this.requirePermission(session, "correctiveActions.manage");
+  }
+
+  /** Agency-management tier: a record's site never narrows these users. */
+  private isCorrectiveActionManager(session: SessionUser): boolean {
+    return (
+      session.platformAdmin ||
+      (CORRECTIVE_ACTION_AGENCY_ROLES as readonly string[]).includes(session.roleKey)
+    );
+  }
+
+  /** Assignments + Individual site refs the scope predicates resolve against. */
+  private async correctiveActionScopeData(session: SessionUser) {
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    return { assignments, individuals };
+  }
+
+  private async correctiveActionMembership(session: SessionUser, userId: string) {
+    const { data } = await this.client
+      .from("memberships")
+      .select("user_id, site_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!data) return null;
+    const r = data as Record<string, unknown>;
+    return {
+      userId: r.user_id as string,
+      siteId: (r.site_id as string | null) ?? null,
+      expiresOn: (r.expires_on as string | null) ?? null,
+    };
+  }
+
+  /** The assignee must currently work at the action's home: membership
+   *  home site there, or an ACTIVE staff assignment that places them
+   *  there — never an assignment that has ended or not yet started. */
+  private async assertCorrectiveActionPlacement(
+    session: SessionUser,
+    siteId: string | null,
+    assigneeId: string | null,
+    scope: {
+      assignments: StaffAssignment[];
+      individuals: { id: string; siteId: string }[];
+    },
+  ) {
+    if (!siteId) return;
+    const { data: site } = await this.client
+      .from("sites")
+      .select("id")
+      .eq("id", siteId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    if (!site) throw new Error("Choose a home in this agency.");
+    if (
+      !this.isCorrectiveActionManager(session) &&
+      !canActAtSite(session, siteId, scope.assignments, scope.individuals)
+    ) {
+      throw new Error("Choose a home you manage.");
+    }
+    if (assigneeId) {
+      const member = await this.correctiveActionMembership(session, assigneeId);
+      const today = new Date().toISOString().slice(0, 10);
+      if (
+        !member ||
+        (member.expiresOn && member.expiresOn < today) ||
+        !staffActiveAtSite(
+          { userId: member.userId, agencyId: session.agencyId, siteId: member.siteId },
+          siteId,
+          scope.assignments,
+          scope.individuals,
+        )
+      ) {
+        throw new Error("Assign corrective actions to staff who work at that home.");
+      }
+    }
+  }
+
+  /**
+   * Resolve the home a NEW corrective action belongs to, in order: the
+   * QA audit that raised it, the explicit site, the creator's home
+   * (site-scoped creators' actions belong to their home), then the
+   * assignee's home (so a manager's assignment lands in the assignee's
+   * house). Null survives only for agency-level actions.
+   */
+  private async resolveNewCorrectiveActionSite(
+    session: SessionUser,
+    input: {
+      siteId?: string | null;
+      qaAuditId?: string | null;
+      assignedToUserId?: string | null;
+    },
+    scope: {
+      assignments: StaffAssignment[];
+      individuals: { id: string; siteId: string }[];
+    },
+  ): Promise<{ siteId: string | null; qaAuditId: string | null }> {
+    let siteId = input.siteId ?? null;
+    const qaAuditId = input.qaAuditId ?? null;
+    if (qaAuditId) {
+      const { data: audit } = await this.client
+        .from("qa_audits")
+        .select("id, site_id")
+        .eq("id", qaAuditId)
+        .eq("agency_id", session.agencyId)
+        .maybeSingle();
+      if (!audit) throw new Error("QA review not found.");
+      const auditSite = (audit as Record<string, unknown>).site_id as string;
+      if (siteId && siteId !== auditSite) {
+        throw new Error("The corrective action's home must match its QA review.");
+      }
+      siteId = auditSite;
+    }
+    if (!siteId && !this.isCorrectiveActionManager(session) && session.siteId) {
+      siteId = session.siteId;
+    }
+    if (!siteId && input.assignedToUserId) {
+      const member = await this.correctiveActionMembership(session, input.assignedToUserId);
+      if (member?.siteId) siteId = member.siteId;
+    }
+    await this.assertCorrectiveActionPlacement(
+      session,
+      siteId,
+      input.assignedToUserId ?? null,
+      scope,
+    );
+    return { siteId, qaAuditId };
   }
 
   private mapCorrectiveActionRow(row: Record<string, unknown>): CorrectiveAction {
@@ -9703,7 +10009,22 @@ export class HostedApi implements ComplyraApi {
     if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
       throw new Error("Corrective action not found.");
     }
-    return data as Record<string, unknown>;
+    const row = data as Record<string, unknown>;
+    const scope = await this.correctiveActionScopeData(session);
+    if (
+      !correctiveActionInScope(
+        session,
+        {
+          agencyId: row.agency_id as string,
+          siteId: (row.site_id as string | null) ?? null,
+        },
+        scope.assignments,
+        scope.individuals,
+      )
+    ) {
+      throw new Error("Corrective action not found.");
+    }
+    return row;
   }
 
   async listCorrectiveActions(input?: {
@@ -9721,9 +10042,12 @@ export class HostedApi implements ComplyraApi {
     }
     const { data, error } = await query;
     throwIf(error, "Could not load corrective actions.");
-    let rows = (data ?? []).map((row) =>
-      this.mapCorrectiveActionRow(row as Record<string, unknown>),
-    );
+    const scope = await this.correctiveActionScopeData(session);
+    let rows = (data ?? [])
+      .map((row) => this.mapCorrectiveActionRow(row as Record<string, unknown>))
+      .filter((row) =>
+        correctiveActionInScope(session, row, scope.assignments, scope.individuals),
+      );
     if (input?.status) {
       rows = rows.filter(
         (row) => deriveCorrectiveActionStatus(row, now) === input.status,
@@ -9747,13 +10071,15 @@ export class HostedApi implements ComplyraApi {
       throwIf(profileError, "Could not verify the staff member.");
       if (!profile) throw new Error("Staff member not found.");
     }
+    const scope = await this.correctiveActionScopeData(session);
+    const placement = await this.resolveNewCorrectiveActionSite(session, input, scope);
     const { data, error } = await this.client
       .from("corrective_actions")
       .insert(
         buildCorrectiveActionRow({
           agencyId: session.agencyId,
           createdByUserId: session.userId,
-          data: input,
+          data: { ...input, siteId: placement.siteId, qaAuditId: placement.qaAuditId },
         }),
       )
       .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
@@ -9791,12 +10117,23 @@ export class HostedApi implements ComplyraApi {
       throwIf(profileError, "Could not verify the staff member.");
       if (!profile) throw new Error("Staff member not found.");
     }
+    if (input.siteId !== undefined || input.assignedToUserId !== undefined) {
+      const scope = await this.correctiveActionScopeData(session);
+      const nextSiteId = input.siteId !== undefined ? input.siteId : current.siteId;
+      const nextAssigneeId =
+        input.assignedToUserId !== undefined ? input.assignedToUserId : current.assignedToUserId;
+      if (input.siteId === null && current.siteId && !this.isCorrectiveActionManager(session)) {
+        throw new Error("Only agency management can move an action agency-wide.");
+      }
+      await this.assertCorrectiveActionPlacement(session, nextSiteId, nextAssigneeId, scope);
+    }
     const patch: Record<string, unknown> = {};
     if (input.title !== undefined) patch.title = title;
     if (input.description !== undefined)
       patch.description = input.description?.trim() ?? "";
     if (input.assignedToUserId !== undefined)
       patch.assigned_to_user_id = input.assignedToUserId;
+    if (input.siteId !== undefined) patch.site_id = input.siteId;
     if (input.dueOn !== undefined) patch.due_on = dueOn;
     if (input.storedStatus !== undefined) patch.status = input.storedStatus;
     if (input.linkedRiskId !== undefined) patch.linked_risk_id = input.linkedRiskId;

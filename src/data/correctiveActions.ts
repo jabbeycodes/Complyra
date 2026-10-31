@@ -45,6 +45,14 @@ export interface CorrectiveAction {
   storedStatus: StoredCorrectiveActionStatus;
   linkedRiskId: string | null;
   linkedRiskSource: string | null;
+  /**
+   * The home the action belongs to (reviewer HOLD fix-up, PR #199):
+   * visibility and management are scoped to this site. Null =
+   * agency-level action, visible to agency management only.
+   */
+  siteId: string | null;
+  /** The QA audit that raised the action, when it came from one. */
+  qaAuditId: string | null;
   createdByUserId: string;
   createdAt: string;
   resolvedAt: string | null;
@@ -57,6 +65,8 @@ export interface NewCorrectiveAction {
   dueOn?: string | null;
   linkedRiskId?: string | null;
   linkedRiskSource?: string | null;
+  siteId?: string | null;
+  qaAuditId?: string | null;
 }
 
 /** API input for creating a corrective action. */
@@ -67,6 +77,11 @@ export interface AddCorrectiveActionInput {
   dueOn?: string | null;
   linkedRiskId?: string | null;
   linkedRiskSource?: string | null;
+  /** Originating home; inferred (QA audit, then the creator's or
+   *  assignee's home) when omitted. */
+  siteId?: string | null;
+  /** Originating QA audit; its site becomes the action's site. */
+  qaAuditId?: string | null;
 }
 
 /** API input for updating a corrective action. */
@@ -78,6 +93,8 @@ export interface UpdateCorrectiveActionInput {
   storedStatus?: StoredCorrectiveActionStatus;
   linkedRiskId?: string | null;
   linkedRiskSource?: string | null;
+  /** Move the action to another home (scope-checked in the APIs). */
+  siteId?: string | null;
 }
 
 /** Days as whole calendar days between two ISO dates (date part only). */
@@ -169,6 +186,8 @@ export function buildCorrectiveActionRow(input: {
     status: "open",
     linked_risk_id: input.data.linkedRiskId ?? null,
     linked_risk_source: input.data.linkedRiskSource ?? null,
+    site_id: input.data.siteId ?? null,
+    qa_audit_id: input.data.qaAuditId ?? null,
     created_by_user_id: input.createdByUserId,
   };
 }
@@ -189,6 +208,8 @@ export function correctiveActionFromRow(row: Record<string, unknown>): Correctiv
     storedStatus: stored,
     linkedRiskId: (row.linked_risk_id as string | null) ?? null,
     linkedRiskSource: (row.linked_risk_source as string | null) ?? null,
+    siteId: (row.site_id as string | null | undefined) ?? null,
+    qaAuditId: (row.qa_audit_id as string | null | undefined) ?? null,
     createdByUserId: row.created_by_user_id as string,
     createdAt: row.created_at as string,
     resolvedAt: (row.resolved_at as string | null) ?? null,
