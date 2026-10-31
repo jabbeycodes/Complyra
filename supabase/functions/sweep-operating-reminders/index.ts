@@ -271,6 +271,7 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
       p_dedupe_key: notice.dedupeKey,
     });
     if (!error) queued += Number(data ?? 0);
+    else { try { await admin.rpc("operator_notice_failure", {p_type:notice.type,p_agency_id:agencyId}); } catch { /* Missing telemetry must not stop the existing sweep. */ } }
   }
   if (!shiftError) {
     const liveIds = [...new Set(

@@ -91,6 +91,9 @@ export function emailFor(name: string) {
 }
 
 export interface LocalDatabase {
+  operatorNoticeTemplates?: import("./operator").OperatorNoticeTemplate[];
+  operatorNoticeFailures?: {type:string;agencyId:string;createdAt:string;code:"enqueue_failed"}[];
+  operatorNoticeTemplateHistory?: {id:string;type:string;version:number;reason:string;actorId:string;createdAt:string}[];
   operatorJobRuns?: import("./operator").OperatorJobRun[];
   operatorLifecycle?: import("./types").AgencyLifecycleEvent[];
   consentPackets?: import('./consentPackets').ConsentPacket[];

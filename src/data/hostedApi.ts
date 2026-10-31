@@ -1,4 +1,4 @@
-import { validateOperatorPeriod, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
+import { validateOperatorPeriod, validateOperatorTemplate, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -2700,6 +2700,15 @@ export class HostedApi implements ComplyraApi {
       provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
       status: row.status as AgencyStatus,
     }));
+  }
+
+  async operatorCommunications(period: import("./operator").OperatorPeriod, agencyId=""): Promise<import("./operator").OperatorCommunications> {
+    const session=await this.requireSession();if(!session.platformAdmin)throw new Error("Operator access required.");validateOperatorPeriod(period);
+    const {data,error}=await this.client.rpc("operator_communications",{p_start:period.start,p_end:period.end,p_agency_id:agencyId||null});throwIf(error,"Could not load notification operations.");return data as import("./operator").OperatorCommunications;
+  }
+  async operatorSaveTemplate(input: import("./operator").OperatorTemplateInput){
+    const session=await this.requireSession();if(!session.platformAdmin)throw new Error("Operator access required.");validateOperatorTemplate(input);
+    const {error}=await this.client.rpc("operator_save_notice_template",{p_type:input.type,p_title:input.titleTemplate,p_body:input.bodyTemplate,p_reason:input.reason,p_expected_version:input.expectedVersion});throwIf(error,"Could not save notice template.");
   }
 
   async operatorHealth(): Promise<import("./operator").OperatorHealth> {

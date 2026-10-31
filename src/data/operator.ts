@@ -59,3 +59,15 @@ export function jobHealthLabel(job:OperatorJobHealth, now=Date.now()){
  if(job.latest.state==="running"&&now-Date.parse(job.latest.startedAt)>900000)return "Stale — unfinished run";
  return job.latest.state==="succeeded" ? "Observed success" : job.latest.state==="failed" ? "Observed failure" : "Running";
 }
+
+export const OPERATOR_NOTICE_TYPES = ["documentation.missing_note","med.unrecorded","med.prn_repeat"] as const;
+export interface OperatorNoticeTemplate { type:string;channel:"in_app";provider:"database";titleTemplate:string;bodyTemplate:string;version:number;updatedAt:string|null; }
+export interface OperatorNoticeStatus extends OperatorNoticeTemplate { persisted:number;read:number;enqueueFailures:number;lastPersisted:string|null; }
+export interface OperatorCommunications { types:OperatorNoticeStatus[];producerJob:OperatorJobHealth|null; }
+export interface OperatorTemplateInput { type:string;titleTemplate:string;bodyTemplate:string;reason:string;expectedVersion:number; }
+export function defaultNoticeTemplate(type:string):OperatorNoticeTemplate{return {type,channel:"in_app",provider:"database",titleTemplate:"{{title}}",bodyTemplate:"{{body}}",version:1,updatedAt:null};}
+export function validateOperatorTemplate(input:OperatorTemplateInput){
+ const check=(s:string,token:string,max:number)=>s.length<=max&&s.split(token).length===2&&!s.replace(token,"").match(/\{\{|\}\}/);
+ if(!(OPERATOR_NOTICE_TYPES as readonly string[]).includes(input.type)||!check(input.titleTemplate,"{{title}}",200)||!check(input.bodyTemplate,"{{body}}",2000)||!input.reason.trim()||input.reason.length>500||!Number.isInteger(input.expectedVersion)||input.expectedVersion<1)throw new Error("Preserve exactly one original title/body token, use supported types and add a reason (max 500 characters).");
+}
+export function renderNoticeTemplate(type:string,title:string,body:string,templates:OperatorNoticeTemplate[]=[]){const t=templates.find(t=>t.type===type);return {title:t?t.titleTemplate.replace("{{title}}",title):title,body:t?t.bodyTemplate.replace("{{body}}",body):body};}
