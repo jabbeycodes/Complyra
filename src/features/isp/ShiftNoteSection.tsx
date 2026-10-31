@@ -58,7 +58,7 @@ function NoteForm({
   program: IspProgramView;
   api: ComplyraApi;
   individualId: string;
-  runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  runIsp: (action: () => Promise<unknown>) => Promise<boolean>;
   initial?: ShiftNoteView;
   /** This house's windows, including ones that overlap. */
   shiftOptions: string[];
@@ -147,7 +147,12 @@ function NoteForm({
               scores: scores.filter((s) => s.levelId.length > 0),
             })
             .then(() => undefined),
-        ).then(() => onDone?.());
+          // Close ONLY on success: runIsp resolves false when the save
+          // failed (the error shows in the chart banner and the form must
+          // stay open with the note intact — simulation batch 9, Finding 1).
+        ).then((saved) => {
+          if (saved) onDone?.();
+        });
       }}
     >
       <h3>{initial ? "Edit shift note" : `New shift note — ${program.name}`}</h3>
@@ -355,7 +360,7 @@ function NoteCard({
   api: ComplyraApi;
   individualId: string;
   program: IspProgramView | null;
-  runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  runIsp: (action: () => Promise<unknown>) => Promise<boolean>;
   shiftOptions: string[];
   defaultLocation: string;
   staffTitle: string;
@@ -494,7 +499,7 @@ export default function ShiftNoteSection({
   individualId: string;
   data: IspChartData;
   api: ComplyraApi;
-  runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  runIsp: (action: () => Promise<unknown>) => Promise<boolean>;
   sessionUserId: string;
   roleKey: string;
   canEnter: boolean;

@@ -112,6 +112,7 @@ function propsFor(roleKey: string, overrides: Partial<ChartOverviewProps> = {}):
     onPrintProfile: async () => {},
     run: async (action) => {
       await action();
+      return true;
     },
     ...overrides,
   };

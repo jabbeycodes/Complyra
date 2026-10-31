@@ -135,18 +135,26 @@ export default function IndividualChart({
   const pcspSeedTitles = [...chartStack.required, ...chartStack.checked]
     .filter((view) => view.item.kind === "pcsp" || view.item.kind === "shift_task")
     .map((view) => view.item.title);
-  async function runIsp(action: () => Promise<unknown>) {
-    await run(() => action().then(() => undefined));
+  // Both runners resolve to a success flag: errors are swallowed into the
+  // chart error banner (existing display behavior), but callers that close
+  // a form on completion — the shift-note form above all — must be able to
+  // tell a failed save from a saved one. Callers that ignore the return
+  // value behave exactly as before.
+  async function runIsp(action: () => Promise<unknown>): Promise<boolean> {
+    const ok = await run(() => action().then(() => undefined));
     await isp.reload();
+    return ok;
   }
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>): Promise<boolean> {
     setError("");
     try {
       await action();
       await refresh();
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     }
   }
 
@@ -520,10 +528,10 @@ export default function IndividualChart({
                   individualId,
                   ...draft,
                 }).then(() => undefined),
-              )
+              ).then(() => undefined)
             }
-            onUpdate={(id, draft) => run(() => api.updateAppointment(id, draft))}
-            onDelete={(id) => run(() => api.deleteAppointment(id))}
+            onUpdate={(id, draft) => run(() => api.updateAppointment(id, draft)).then(() => undefined)}
+            onDelete={(id) => run(() => api.deleteAppointment(id)).then(() => undefined)}
             onGenerate={generatePacket}
             onComplete={(appointment, file, comments) =>
               run(() =>
@@ -532,11 +540,11 @@ export default function IndividualChart({
                   file,
                   comments,
                 }),
-              )
+              ).then(() => undefined)
             }
             onOpenConsultation={(fileId) => openFile("consultation", fileId, "download")}
             onSaveAllergies={(allergies) =>
-              run(() => api.updateIndividualAllergies(individualId, allergies))
+              run(() => api.updateIndividualAllergies(individualId, allergies)).then(() => undefined)
             }
             />
           </div>

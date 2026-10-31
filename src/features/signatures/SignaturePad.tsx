@@ -22,24 +22,50 @@ export default function SignaturePad({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  useEffect(() => {
+  // Size the canvas backing store from the wrapper's real width. The pad
+  // usually mounts inside a native <dialog> that has not been shown yet, so
+  // the mount-time measurement is 0 wide and the buffer ends up ~1px:
+  // strokes are clipped and the canvas reads blank (simulation batch 9,
+  // Finding 1). A ResizeObserver re-sizes the moment the wrapper gains a
+  // real width, and resizing preserves any drawing already made.
+  function sizeCanvas() {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
+    const cssWidth = wrap.getBoundingClientRect().width;
+    if (!(cssWidth > 1)) return;
     const dpr = window.devicePixelRatio || 1;
-    const rect = wrap.getBoundingClientRect();
-    const cssWidth = Math.max(1, rect.width);
-    const cssHeight = minHeight;
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
-    canvas.style.height = `${cssHeight}px`;
+    const nextWidth = Math.round(cssWidth * dpr);
+    const nextHeight = Math.round(minHeight * dpr);
+    if (canvas.width === nextWidth && canvas.height === nextHeight) return;
+    let snapshot: HTMLCanvasElement | null = null;
+    if (canvas.width > 1 && canvas.height > 1 && !isBlankCanvas(canvas)) {
+      snapshot = document.createElement("canvas");
+      snapshot.width = canvas.width;
+      snapshot.height = canvas.height;
+      snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
+    }
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+    canvas.style.height = `${minHeight}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.strokeStyle = "#2b2620";
     ctx.lineWidth = 2.5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    if (snapshot) ctx.drawImage(snapshot, 0, 0, cssWidth, minHeight);
+  }
+
+  useEffect(() => {
+    sizeCanvas();
+    const wrap = wrapRef.current;
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => sizeCanvas());
+    observer.observe(wrap);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minHeight]);
 
   function point(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -86,6 +112,9 @@ export default function SignaturePad({
           style={{ touchAction: "none", width: "100%", display: "block" }}
           onPointerDown={(e) => {
             e.preventDefault();
+            // The dialog may have been shown without a resize reaching us
+            // yet; never start a stroke on a degenerate buffer.
+            if ((canvasRef.current?.width ?? 0) <= 1) sizeCanvas();
             canvasRef.current?.setPointerCapture(e.pointerId);
             drawing.current = true;
             last.current = point(e);

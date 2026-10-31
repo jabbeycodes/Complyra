@@ -349,7 +349,7 @@ function ProgramCard({
 }: {
   program: IspProgramView;
   api: ComplyraApi;
-  runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  runIsp: (action: () => Promise<unknown>) => Promise<boolean>;
   pcspSeedTitles: string[];
 }) {
   const [open, setOpen] = useState(
@@ -411,12 +411,12 @@ function ProgramCard({
           )}
           <ProgramNarrative
             program={program}
-            onSave={(patch) => runIsp(() => api.updateIspProgram(program.id, patch))}
+            onSave={(patch) => runIsp(() => api.updateIspProgram(program.id, patch)).then(() => undefined)}
           />
           <TaskEditor
             program={program}
             pcspSeedTitles={pcspSeedTitles}
-            onSave={(tasks) => runIsp(() => api.saveIspProgramTasks(program.id, tasks))}
+            onSave={(tasks) => runIsp(() => api.saveIspProgramTasks(program.id, tasks)).then(() => undefined)}
           />
         </div>
       )}
@@ -434,7 +434,7 @@ export default function IspConfigSection({
   individualId: string;
   data: IspChartData;
   api: ComplyraApi;
-  runIsp: (action: () => Promise<unknown>) => Promise<void>;
+  runIsp: (action: () => Promise<unknown>) => Promise<boolean>;
   pcspSeedTitles: string[];
 }) {
   const [showForm, setShowForm] = useState(false);
