@@ -32,7 +32,6 @@ insert into auth.users(id,email) values
  ('d5000000-0000-0000-0000-000000000008','ca-floater@example.invalid'),
  ('d5000000-0000-0000-0000-000000000009','ca-former@example.invalid');
 update profiles set must_change_password=false where id::text like 'd5000000-%';
- where id::text like 'd5000000-%';
 update profiles set home_agency_id='a5000000-0000-0000-0000-000000000001'
  where id::text like 'd5000000-%';
 insert into memberships(agency_id,user_id,role,role_key,site_id) values
