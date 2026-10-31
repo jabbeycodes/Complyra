@@ -61,10 +61,10 @@ export interface ConsentRegister {
 }
 export type ConsentStatus = 'Draft' | 'Scheduled' | 'Active' | 'Expiring soon' | 'Expired' | 'Revoked' | 'Superseded' | 'Missing';
 export function canSeeConsents(roleKey: string) {
-    return ['house_manager', 'program_manager', 'nurse', 'dsp', 'auditor'].includes(roleKey);
+    return ['house_manager', 'program_manager', 'nurse', 'dsp', 'auditor', 'administrator'].includes(roleKey);
 }
 export function canManageConsents(roleKey: string) {
-    return ['house_manager', 'program_manager', 'nurse'].includes(roleKey);
+    return ['house_manager', 'program_manager', 'nurse', 'administrator'].includes(roleKey);
 }
 export function assertConsentRole(session: SessionUser, write = false) {
     if (!(write ? canManageConsents(session.roleKey) : canSeeConsents(session.roleKey)))

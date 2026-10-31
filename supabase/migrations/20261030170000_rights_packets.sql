@@ -13,7 +13,8 @@
 --
 -- Security model mirrors the consent packets family:
 -- - Reads scope through private.can_read_individual AND the consent
---   reader role list (house_manager, program_manager, nurse, auditor).
+--   reader role list (house_manager, program_manager, nurse, auditor,
+--   administrator).
 --   DSPs never read packets, exactly like consent packets.
 -- - Writes (insert, and the one completion update) require
 --   private.can_manage_consent — the same gate the app enforces.
@@ -59,7 +60,7 @@ alter table public.rights_packet_evidence enable row level security;
 alter table public.rights_packet_evidence force row level security;
 
 create policy rights_packets_read on public.rights_packets for select to authenticated using (
- private.can_read_individual(agency_id, individual_id) and private.role_key_in(agency_id, '{house_manager,program_manager,nurse,auditor}'));
+ private.can_read_individual(agency_id, individual_id) and private.role_key_in(agency_id, '{house_manager,program_manager,nurse,auditor,administrator}'));
 create policy rights_packets_insert on public.rights_packets for insert to authenticated with check (
  private.can_manage_consent(agency_id, individual_id) and created_by = auth.uid() and status = 'awaiting_signature' and packet_on is null and signer is null and signed_at is null);
 create policy rights_packets_complete on public.rights_packets for update to authenticated using (
@@ -68,7 +69,7 @@ create policy rights_packets_complete on public.rights_packets for update to aut
  private.can_manage_consent(agency_id, individual_id) and status in ('signed','filed') and packet_on is not null and packet_on <= current_date and signer is not null);
 
 create policy rights_packet_evidence_read on public.rights_packet_evidence for select to authenticated using (
- private.can_read_individual(agency_id, individual_id) and private.role_key_in(agency_id, '{house_manager,program_manager,nurse,auditor}'));
+ private.can_read_individual(agency_id, individual_id) and private.role_key_in(agency_id, '{house_manager,program_manager,nurse,auditor,administrator}'));
 create policy rights_packet_evidence_insert on public.rights_packet_evidence for insert to authenticated with check (
  private.can_manage_consent(agency_id, individual_id)
  and exists (select 1 from public.rights_packets p where p.id = packet_id and p.status = 'filed' and p.agency_id = rights_packet_evidence.agency_id and p.individual_id = rights_packet_evidence.individual_id));
