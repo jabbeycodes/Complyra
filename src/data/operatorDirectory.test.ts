@@ -11,6 +11,9 @@ test("operator directory returns classified seeded records and filters without c
  const rows=await api.operatorDirectory(); assert.equal(rows.find(a=>a.agencyCode==="EVERGREEN-MO")?.reportingCategory,"demo");
  assert.equal(filterOperatorAgencies(rows,"evergreen","active","demo").length,1);
  assert.equal(filterOperatorAgencies(rows,"","disabled","all").length,0);
+ const rejected=rows.map((a,i)=>i===0?{...a,status:"rejected" as const}:a);
+ assert.equal(filterOperatorAgencies(rejected,"","inactive","all").length,1);
+ assert.equal(filterOperatorAgencies(rejected,"","disabled","all").length,0);
  assert.equal(filterOperatorAgencies(rows,"","all","customer").length,0);
  for(const t of ROLE_TEMPLATES){
  const p=store.db.profiles.find(p=>p.username===DEMO_ADMIN_USERNAME)!; const m=store.db.memberships.find(m=>m.userId===p.id)!;m.roleKey=t.key;m.role=t.capability;

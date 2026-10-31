@@ -15,7 +15,7 @@ test('operator overview drills to real seeded agency and audit explorer exports 
 });
 test('agency administrator cannot deep-link any new operator surface',async({page})=>{
  await login(page,false);
- for(const name of ['Operator overview','Operator agencies','Operator audit','Operator people','Operator health']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
+ for(const name of ['Operator overview','Operator agencies','Operator audit','Operator people','Operator health','Operator notifications']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
 });
 test('operator people search opens read-only agency support context',async({page})=>{
  await login(page,true);await page.locator('.sidebar').getByRole('button',{name:'Operator people',exact:true}).click();
@@ -24,4 +24,11 @@ test('operator people search opens read-only agency support context',async({page
 });
 test('health labels absent local telemetry as unknown',async({page})=>{
  await login(page,true);await page.locator('.sidebar').getByRole('button',{name:'Operator health',exact:true}).click();await expect(page.getByRole('heading',{name:'Operator Control Center · Observed system health'})).toBeVisible();await expect(page.getByText('Unknown — no observations',{exact:true})).toHaveCount(4);
+});
+test('operator configures supported in-app templates with original notice context preserved',async({page})=>{
+ await login(page,true);await page.locator('.sidebar').getByRole('button',{name:'Operator notifications',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Global in-app reminder templates'})).toBeVisible();
+ await page.getByLabel('Title template for med.unrecorded',{exact:true}).fill('Reminder: {{title}}');await page.getByLabel('Change reason for med.unrecorded',{exact:true}).fill('Clarify reminder label');
+ await page.getByRole('button',{name:'Save med.unrecorded template',exact:true}).click();await expect(page.getByRole('heading',{name:'med.unrecorded · version 2',exact:true})).toBeVisible();
+ await expect(page.getByRole('textbox',{name:'Body template for med.unrecorded',exact:true})).toHaveValue('{{body}}');
 });

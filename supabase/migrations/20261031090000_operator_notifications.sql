@@ -33,7 +33,7 @@ language plpgsql security definer set search_path=public,pg_temp as $$
 declare t operator_notice_templates%rowtype; event_id uuid; platform_id uuid;
 begin
  perform private.require_operator();
- if p_title is null or p_body is null or length(p_title)>200 or length(p_body)>2000 or array_length(string_to_array(p_title,'{{title}}'),1)<>2 or array_length(string_to_array(p_body,'{{body}}'),1)<>2
+ if p_title is null or p_body is null or length(p_title)>200 or length(p_body)>2000 or coalesce(array_length(string_to_array(p_title,'{{title}}'),1),0)<>2 or coalesce(array_length(string_to_array(p_body,'{{body}}'),1),0)<>2
  or strpos(replace(p_title,'{{title}}',''),'{{')>0 or strpos(replace(p_title,'{{title}}',''),'}}')>0 or strpos(replace(p_body,'{{body}}',''),'{{')>0 or strpos(replace(p_body,'{{body}}',''),'}}')>0
  or p_reason is null or length(trim(p_reason)) not between 1 and 500 or p_expected_version is null then raise exception 'Preserve original title/body tokens and add a reason.'; end if;
  select * into t from operator_notice_templates where type=p_type for update;

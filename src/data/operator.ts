@@ -5,7 +5,7 @@ export interface OperatorAgency extends PendingAgency {
 export function filterOperatorAgencies(rows: OperatorAgency[], query: string, status: string, category: string) {
   const q = query.trim().toLowerCase();
   return rows.filter((a) => (!q || `${a.name} ${a.agencyCode} ${a.stateCode}`.toLowerCase().includes(q))
-    && (status === "all" || (status === "disabled" ? !a.active : a.status === status))
+    && (status === "all" || (status === "disabled" ? !a.active : status === "inactive" ? a.status !== "active" || !a.active : a.status === status))
     && (category === "all" || a.reportingCategory === category));
 }
 export const OPERATOR_PAGES = ["Operator agencies"] as const;

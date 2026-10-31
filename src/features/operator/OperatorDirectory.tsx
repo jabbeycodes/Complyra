@@ -33,7 +33,7 @@ export default function OperatorDirectory({ onSaved }: { onSaved: (message: stri
     <p>Customer reporting excludes agencies classified as demo or internal. Classification is persisted; provider provisioning source does not imply customer status.</p>
     <div className="operator-filters">
       <label>Search name, provider code or state<input value={query} onChange={(e) => setQuery(e.target.value)} /></label>
-      <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}>{["all", "pending", "active", "rejected", "suspended", "disabled"].map((v) => <option key={v}>{v}</option>)}</select></label>
+      <label>Status<select value={status} onChange={(e) => setStatus(e.target.value)}>{["all", "pending", "active", "inactive", "rejected", "suspended", "disabled"].map((v) => <option key={v}>{v}</option>)}</select></label>
       <label>Reporting group<select value={category} onChange={(e) => setCategory(e.target.value)}>{["all", "customer", "demo", "internal"].map((v) => <option key={v}>{v}</option>)}</select></label>
       <label>Registered from (UTC)<input type="date" value={from} onChange={e=>setFrom(e.target.value)} /></label><label>Registered through (UTC)<input type="date" value={to} onChange={e=>setTo(e.target.value)} /></label>
       <button className="button" onClick={() => setReload((v) => v + 1)}>Refresh</button>
