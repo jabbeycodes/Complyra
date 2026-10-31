@@ -136,6 +136,7 @@ import InactivityGuard from "./security/InactivityGuard";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import OperatorCommunications from "./features/operator/OperatorCommunications";
 import OperatorHealth from "./features/operator/OperatorHealth";
 import OperatorPeople from "./features/operator/OperatorPeople";
 import OperatorAudit from "./features/operator/OperatorAudit";
@@ -756,7 +757,7 @@ export default function App() {
     );
   }
   const navItems = [
-    { title: "Operator Control Center", items: [["Operator overview", LayoutDashboard], ["Operator agencies", Building2], ["Platform", ShieldCheck], ["AI settings", ServerCog], ["Operator audit", History], ["Operator people", Users], ["Operator health", ServerCog]] },
+    { title: "Operator Control Center", items: [["Operator overview", LayoutDashboard], ["Operator agencies", Building2], ["Platform", ShieldCheck], ["AI settings", ServerCog], ["Operator audit", History], ["Operator people", Users], ["Operator health", ServerCog], ["Operator notifications", History]] },
     {
       title: "Programs",
       items: [
@@ -1903,6 +1904,7 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Operator notifications" && <OperatorCommunications />}
               {page === "Operator health" && <OperatorHealth />}
               {page === "Operator people" && <OperatorPeople />}
               {page === "Operator audit" && <OperatorAudit />}

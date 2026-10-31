@@ -6,7 +6,7 @@ import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApprove
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
-import { OPERATOR_JOBS, summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
+import { OPERATOR_JOBS, OPERATOR_NOTICE_TYPES, defaultNoticeTemplate, validateOperatorTemplate, renderNoticeTemplate, validateOperatorPeriod, summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -663,6 +663,8 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorCommunications(period: import("./operator").OperatorPeriod, agencyId?: string): Promise<import("./operator").OperatorCommunications>;
+  operatorSaveTemplate(input: import("./operator").OperatorTemplateInput): Promise<void>;
   operatorHealth(): Promise<import("./operator").OperatorHealth>;
   operatorPeople(query: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage>;
   operatorAudit(query: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage>;
@@ -4527,6 +4529,21 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorCommunications(period: import("./operator").OperatorPeriod, agencyId=""): Promise<import("./operator").OperatorCommunications> {
+    await this.operatorDirectory();validateOperatorPeriod(period);
+    const inRange=(at:string)=>at.slice(0,10)>=period.start&&at.slice(0,10)<=period.end;
+    const types=OPERATOR_NOTICE_TYPES.map(type=>{const template=(this.store.db.operatorNoticeTemplates??[]).find(t=>t.type===type)??defaultNoticeTemplate(type);const notices=(this.store.db.notifications??[]).filter(n=>n.type===type&&(!agencyId||n.agencyId===agencyId)&&inRange(n.createdAt));return {...template,persisted:notices.length,read:notices.filter(n=>n.readAt||Object.keys(this.store.db.notificationReads??{}).some(key=>key.endsWith(`:${n.id}`))).length,enqueueFailures:(this.store.db.operatorNoticeFailures??[]).filter(e=>e.type===type&&(!agencyId||e.agencyId===agencyId)&&inRange(e.createdAt)).length,lastPersisted:notices.map(n=>n.createdAt).sort().at(-1)??null};});
+    return {types,producerJob:(await this.operatorHealth()).jobs.find(j=>j.jobKey==="sweep-operating-reminders")??null};
+  }
+  async operatorSaveTemplate(input: import("./operator").OperatorTemplateInput){
+    await this.operatorDirectory();validateOperatorTemplate(input);const session=assertSession(this.store);
+    const templates=this.store.db.operatorNoticeTemplates??=[];const index=templates.findIndex(t=>t.type===input.type);const current=index<0?defaultNoticeTemplate(input.type):templates[index];
+    if(current.version!==input.expectedVersion)throw new Error("Template changed. Refresh and try again.");
+    const at=new Date().toISOString();const next={...current,titleTemplate:input.titleTemplate,bodyTemplate:input.bodyTemplate,version:current.version+1,updatedAt:at};if(index<0)templates.push(next);else templates[index]=next;
+    (this.store.db.operatorNoticeTemplateHistory??=[]).push({id:crypto.randomUUID(),type:input.type,version:next.version,reason:input.reason.trim(),actorId:session.userId,createdAt:at});
+    this.store.db.audit.push({id:crypto.randomUUID(),agencyId:this.store.db.agencies.find(a=>a.agencyCode==="COMPLYRER-MO")?.id??session.agencyId,actorId:session.userId,action:"notification.template_changed",targetType:"notification_template",targetId:null,detail:input.reason.trim(),createdAt:at});await persistMeta(this.store);
   }
 
   async operatorHealth(): Promise<import("./operator").OperatorHealth> {
@@ -13109,6 +13126,7 @@ export class LocalApi implements ComplyraApi {
     db.notifications.push({
       id: crypto.randomUUID(),
       ...input,
+      ...renderNoticeTemplate(input.type,input.title,input.body,db.operatorNoticeTemplates),
       createdAt: new Date().toISOString(),
       readAt: null,
     });
