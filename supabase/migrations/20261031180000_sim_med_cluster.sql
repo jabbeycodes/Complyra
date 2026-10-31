@@ -30,6 +30,15 @@
 --    called with no reason at all — so the two signatures coexist:
 --    overload resolution is unambiguous because the 4-argument form
 --    requires at least 3 arguments (p_reason has no default).
+--    Reviewer HOLD fix-up #2 (2026-10-31): coexisting was not enough —
+--    the legacy overload's EXECUTE grant to `authenticated` left the
+--    reason-free path reachable by any signed-in user through a direct
+--    RPC call, bypassing the mandatory reason/follow_up. The legacy
+--    overload now keeps NO end-user execution surface at all: EXECUTE
+--    is revoked from public, anon AND authenticated, and granted to
+--    service_role only (see the bottom of this file). Internal callers
+--    (the pgTAP suites, which run as postgres) are unaffected; the one
+--    shipped app caller already uses the 4-argument form exclusively.
 -- 3. LATE MAR (batch 7): med_dose_marks gains the Late stamp + reason
 --    for marks recorded after the dose window ended. The APIs compute
 --    lateness (agency window, Central clock) and write these columns;
@@ -225,17 +234,26 @@ end $$;
 revoke all on function public.record_prn_dose(uuid, numeric, text, text) from public, anon;
 grant execute on function public.record_prn_dose(uuid, numeric, text, text) to authenticated;
 
--- LEGACY OVERLOAD (CI fix-up, 2026-10-31): the original 2-argument
+-- LEGACY OVERLOAD (CI fix-up, 2026-10-31; execution surface removed by
+-- reviewer HOLD fix-up #2, 2026-10-31): the original 2-argument
 -- record_prn_dose from 20260915027000_atomic_medication_counts,
 -- restored verbatim so every pre-existing caller of that signature
 -- keeps working (the audit_workflows pgTAP suite calls it directly).
 -- It predates the PRN audit record, so it stores no reason/follow-up
 -- (both columns stay null) and keeps the original generic over-stock
--- wording. The reason requirement applies to the new 4-argument
--- signature only, and that is safe: the shipped app has exactly one
--- RPC caller (HostedApi.logPrnDose), which always invokes the
--- 4-argument form and itself refuses a blank reason before calling —
--- the 2-argument form is not reachable from the shipped UI.
+-- wording.
+--
+-- The body is restored verbatim, but the grants are NOT the original
+-- ones: the 20260915027000 grant to `authenticated` would leave a
+-- reason-free PRN path open to any signed-in user via a direct RPC
+-- call, bypassing the mandatory reason this migration adds. EXECUTE
+-- is therefore revoked from public, anon AND authenticated, and
+-- granted to service_role only — internal/server callers (and the
+-- pgTAP suites, which run as postgres) keep working, while no
+-- end-user role can execute the reason-free signature at all. The
+-- shipped app has exactly one RPC caller (HostedApi.logPrnDose),
+-- which always invokes the 4-argument form and itself refuses a blank
+-- reason before calling, so nothing in the app flow changes.
 create or replace function public.record_prn_dose(p_medication_id uuid, p_pills numeric)
 returns void language plpgsql security definer set search_path = public, pg_temp as $$
 declare m medications%rowtype; remaining numeric; staff_name text;
@@ -260,5 +278,10 @@ begin
     values(m.agency_id, auth.uid(), 'medication.prn', 'medication', m.id, 'Recorded PRN dose: ' || p_pills::text);
 end $$;
 
-revoke all on function public.record_prn_dose(uuid, numeric) from public, anon;
-grant execute on function public.record_prn_dose(uuid, numeric) to authenticated;
+-- Reviewer HOLD fix-up #2 (2026-10-31): unlike the original migration,
+-- the legacy overload is NOT granted to authenticated — that grant
+-- would let any signed-in user administer a PRN dose with no reason
+-- via a direct RPC call. Only service_role (server-side) may execute
+-- it; postgres (owner, used by the pgTAP suites) is unaffected.
+revoke all on function public.record_prn_dose(uuid, numeric) from public, anon, authenticated;
+grant execute on function public.record_prn_dose(uuid, numeric) to service_role;

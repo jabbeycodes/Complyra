@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(35);
+select plan(38);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Med cluster (batches 7/9/10/11): variance evidence on counts, the PRN
@@ -154,6 +154,21 @@ select throws_ok($$select public.record_prn_dose('f2200000-0000-0000-0000-000000
 select throws_ok($$select public.record_prn_dose('f2200000-0000-0000-0000-000000000003', 1, 'Agitation', null)$$,
   'P0001','No count has been recorded for this medication yet. Ask your house manager, RN, or PM to record the first count.',
   'an uncounted PRN tells the DSP to ask for the first count');
+
+-- ---------------- Legacy PRN overload: no end-user execution (reviewer HOLD fix-up #2) ----------------
+-- The 2-argument record_prn_dose survives for internal callers only
+-- (postgres/service_role). Still running as the DSP (authenticated role,
+-- claims set above), a direct call to the reason-free signature must be
+-- refused with 42501 before any function logic runs, while the same
+-- user can still dose through the reason-bearing 4-argument signature.
+-- Prn Med stock is 3 at this point (5 - the HM's 2-pill dose above).
+select throws_ok($$select public.record_prn_dose('f2200000-0000-0000-0000-000000000002', 1)$$,
+  '42501', null,
+  'an authenticated user cannot execute the legacy reason-free PRN signature');
+select lives_ok($$select public.record_prn_dose('f2200000-0000-0000-0000-000000000002', 1, 'Agitation', null)$$,
+  'the same user can still log a dose with a reason');
+select is((select remaining_pills::int from medications where id='f2200000-0000-0000-0000-000000000002'), 2,
+  'only the reason-bearing dose decremented the stock');
 
 select * from finish();
 rollback;
