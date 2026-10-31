@@ -1,0 +1,7 @@
+# Operator phase 6: activity and audit explorer
+
+Depends on phase 5's scoped AI policy and prior lifecycle/rule sources. Adds operator-only bounded server queries, local parity, agency/actor/action/source/date filters, stable pagination and current-page CSV export with spreadsheet-formula escaping. Lifecycle records replace duplicate agency.status application events. Rules and AI events remain source-labeled; application events omit care free text. Verification writes now record caller attribution and timestamp atomically via a service-only RPC after the edge function has verified the operator.
+
+Validation: final npm test PASS (157 file-level entries, zero failures), npm run build PASS (bundle warning), npx tsc -b PASS, git diff --check PASS. New tests cover 53-event pagination beyond the old 40-event limit, redaction, CSV formula escaping and every tenant-role denial. Chromium operator-console.spec.ts: 2 PASS, covering dated signup drill-down, Back/filter persistence, bounded CSV export and admin deep-link denial. The first browser attempt used an overly exact label locator; the semantic combobox locator passed. pgTAP tests included, not executed at this phase checkpoint; an isolated test-database setup is being investigated. Migration remains UNAPPLIED to any hosted project.
+
+Deferred: complete product-usage instrumentation and full clinical audit union are not claimed; current-page export is explicitly bounded. No production telemetry or external data was queried.
