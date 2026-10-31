@@ -1,0 +1,17 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select plan(3);
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+insert into agencies(id,name,agency_code,state_code,status) values('a3100000-0000-0000-0000-000000000001','Operator test','OPTEST-MO','MO','pending');
+insert into auth.users(id,email) values('d3100000-0000-0000-0000-000000000001','optest-admin@example.invalid'),('d3100000-0000-0000-0000-000000000002','optest-operator@example.invalid');
+update profiles set must_change_password=false,active=true where id in ('d3100000-0000-0000-0000-000000000001','d3100000-0000-0000-0000-000000000002');
+update profiles set platform_admin=true where id='d3100000-0000-0000-0000-000000000002';
+insert into memberships(agency_id,user_id,role,role_key) values('a3100000-0000-0000-0000-000000000001','d3100000-0000-0000-0000-000000000001','administrator','administrator');
+set local role authenticated;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3100000-0000-0000-0000-000000000001"}',true);
+select throws_ok($$select operator_directory()$$,'42501','Operator access required.','agency administrator denied directory');
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3100000-0000-0000-0000-000000000002"}',true);
+select lives_ok($$select operator_directory()$$,'operator reads directory');
+select ok(exists(select 1 from jsonb_array_elements(operator_directory()) a where a->>'agencyCode'='OPTEST-MO' and a->>'status'='pending'),'directory carries actual state');
+select * from finish(); rollback;

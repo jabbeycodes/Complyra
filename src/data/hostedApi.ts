@@ -2701,6 +2701,14 @@ export class HostedApi implements ComplyraApi {
     }));
   }
 
+  async operatorDirectory(): Promise<import("./operator").OperatorAgency[]> {
+    const session = await this.requireSession();
+    if (!session.platformAdmin) throw new Error("Operator access required.");
+    const { data, error } = await this.client.rpc("operator_directory");
+    throwIf(error, "Could not load the operator directory.");
+    return (data ?? []) as import("./operator").OperatorAgency[];
+  }
+
   async listPendingAgencies(): Promise<PendingAgency[]> {
     const session = await this.requireSession();
     if (!session.platformAdmin) {
