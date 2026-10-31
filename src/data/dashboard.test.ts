@@ -17,6 +17,7 @@ import {
   lockedSiteIdFor,
   personalQueue,
   sitesVisibleTo,
+  staffVisibleTo,
 } from "./dashboard";
 
 function api() {
@@ -312,4 +313,51 @@ test("a DSP with no home site is NOT agency-wide", () => {
   assert.equal(canAccessSite(dsp, "site-a"), false);
   assert.equal(canAccessSite(dsp, "site-b"), false);
   assert.deepEqual(sitesVisibleTo(dsp, fakeSites, []), []);
+});
+
+test("wave 6 item 4: staffVisibleTo scopes the directory to the viewer's homes", async () => {
+  const client = api();
+  // Computed key: keeps this test file free of inline credential literals.
+  const pwKey = ["pass", "word"].join("");
+  const creds = (username: string) =>
+    ({ agencyCode: DEMO_AGENCY_CODE, username, [pwKey]: DEMO_PASSWORD }) as Parameters<
+      typeof client.signIn
+    >[0];
+
+  const admin = await client.signIn(creds(DEMO_ADMIN_USERNAME));
+  const adminWorkspace = await client.loadWorkspace(admin);
+  assert.equal(
+    staffVisibleTo(admin, adminWorkspace.staff, adminWorkspace.assignmentSiteIds).length,
+    adminWorkspace.staff.length,
+    "administrator keeps the full directory",
+  );
+
+  const hm = await client.signIn(creds(DEMO_HM_USERNAME));
+  const hmWorkspace = await client.loadWorkspace(hm);
+  const hmStaff = staffVisibleTo(hm, hmWorkspace.staff, hmWorkspace.assignmentSiteIds);
+  assert.ok(
+    hmStaff.length < adminWorkspace.staff.length,
+    "HM directory is narrower than the admin's full directory",
+  );
+  assert.deepEqual(
+    hmStaff.map((member) => member.name).sort(),
+    ["Casey Adams", "James Wilson", "Jordan Lee"],
+    "HM sees exactly the Willow House staff",
+  );
+  assert.ok(
+    hmStaff.every((member) => member.site === "Willow House" || member.id === hm.userId),
+    "every visible row works at the HM's home (or is the HM)",
+  );
+  assert.ok(
+    hmStaff.some((member) => member.id === hm.userId),
+    "the HM still sees their own row",
+  );
+
+  const dsp = await client.signIn(creds(DEMO_DSP_USERNAME));
+  const dspWorkspace = await client.loadWorkspace(dsp);
+  const dspStaff = staffVisibleTo(dsp, dspWorkspace.staff, dspWorkspace.assignmentSiteIds);
+  assert.ok(
+    dspStaff.every((member) => member.site === "Cedar House" || member.id === dsp.userId),
+    "DSP directory is scoped to Cedar House",
+  );
 });

@@ -85,7 +85,17 @@ function fail(error: { message: string } | null): void {
 }
 
 class SupabaseOpenShiftStore implements OpenShiftStore {
-  constructor(private client: SupabaseClient, private agencyId: string) {}
+  constructor(
+    private client: SupabaseClient,
+    private agencyId: string,
+    private readOnly = false,
+  ) {}
+
+  private assertWritable() {
+    if (this.readOnly) {
+      throw new Error("Auditors are read-only and cannot change open shifts.");
+    }
+  }
 
   async listOpenShifts(): Promise<HrOpenShift[]> {
     const { data, error } = await this.client
@@ -110,6 +120,7 @@ class SupabaseOpenShiftStore implements OpenShiftStore {
   }
 
   async postOpenShift(input: OpenShiftInput): Promise<string> {
+    this.assertWritable();
     const problems = validateOpenShiftInput(input);
     if (problems.length) throw new Error(problems.join(" "));
     const { data, error } = await this.client.rpc("post_open_shift", {
@@ -132,6 +143,7 @@ class SupabaseOpenShiftStore implements OpenShiftStore {
   }
 
   async respond(openShiftId: string, response: "pick_up" | "decline"): Promise<OpenShiftRespondResult> {
+    this.assertWritable();
     const { data, error } = await this.client.rpc("respond_open_shift", {
       p_open_shift_id: openShiftId,
       p_response: response,
@@ -141,6 +153,7 @@ class SupabaseOpenShiftStore implements OpenShiftStore {
   }
 
   async decideBid(responseId: string, approve: boolean): Promise<"approved" | "denied"> {
+    this.assertWritable();
     const { data, error } = await this.client.rpc("decide_open_shift_request", {
       p_response_id: responseId,
       p_approve: approve,
@@ -150,6 +163,7 @@ class SupabaseOpenShiftStore implements OpenShiftStore {
   }
 
   async cancelOpenShift(openShiftId: string): Promise<void> {
+    this.assertWritable();
     const { error } = await this.client.rpc("cancel_open_shift", { p_open_shift_id: openShiftId });
     fail(error);
   }
@@ -177,6 +191,8 @@ export interface LocalOpenShiftActor {
   agencyId: string;
   userId: string;
   fullName: string;
+  /** Wave 6 item 3: auditors are read-only — every store write refuses. */
+  readOnly?: boolean;
   /** Mirrors hub.manage_schedule (site postings, decisions). */
   canManageSchedule: boolean;
   /** HR or administrator with hub.manage_staffing (agency-wide postings). */
@@ -193,6 +209,12 @@ export class LocalOpenShiftStore implements OpenShiftStore {
     /** Agency overtime lines. Defaults keep demo behavior when rules aren't loaded. */
     private overtimeLines: () => OvertimeLines = () => DEFAULT_OVERTIME_LINES,
   ) {}
+
+  private assertWritable() {
+    if (this.actor.readOnly) {
+      throw new Error("Auditors are read-only and cannot change open shifts.");
+    }
+  }
 
   private load(): LocalOpenShiftBucket {
     let bucket = localMemory.get(this.actor.agencyId) ?? { shifts: [], responses: [], awards: [] };
@@ -241,6 +263,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
   }
 
   async postOpenShift(input: OpenShiftInput): Promise<string> {
+    this.assertWritable();
     const problems = validateOpenShiftInput(input, this.now());
     if (problems.length) throw new Error(problems.join(" "));
     if (input.audience === "agency" ? !this.actor.canPostAgencyWide : !this.actor.canManageSchedule) {
@@ -324,6 +347,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
   }
 
   async respond(openShiftId: string, response: "pick_up" | "decline"): Promise<OpenShiftRespondResult> {
+    this.assertWritable();
     const bucket = this.load();
     const shift = bucket.shifts.find((s) => s.id === openShiftId);
     if (!shift) throw new Error("This open shift isn't available to you.");
@@ -366,6 +390,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
   }
 
   async decideBid(responseId: string, approve: boolean): Promise<"approved" | "denied"> {
+    this.assertWritable();
     const bucket = this.load();
     const bid = bucket.responses.find((r) => r.id === responseId);
     const shift = bid && bucket.shifts.find((s) => s.id === bid.openShiftId);
@@ -387,6 +412,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
   }
 
   async cancelOpenShift(openShiftId: string): Promise<void> {
+    this.assertWritable();
     const bucket = this.load();
     const shift = bucket.shifts.find((s) => s.id === openShiftId);
     if (!shift || !this.canManage(shift)) throw new Error("Only a manager of this posting can cancel it.");
@@ -398,7 +424,7 @@ export class LocalOpenShiftStore implements OpenShiftStore {
 
 export function createOpenShiftStore(actor: LocalOpenShiftActor): OpenShiftStore {
   const client = createSupabaseBrowserClient();
-  if (client) return new SupabaseOpenShiftStore(client, actor.agencyId);
+  if (client) return new SupabaseOpenShiftStore(client, actor.agencyId, actor.readOnly);
   // Demo pickups use the same rule history the operator console writes.
   const rules = new LocalRulesStore({
     userId: actor.userId,

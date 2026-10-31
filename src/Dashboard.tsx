@@ -69,6 +69,12 @@ interface Props {
    * it lives with the home itself. Defaults to true (agency-wide roles).
    */
   showCoverageBoard?: boolean;
+  /**
+   * Header snapshot label (wave 6 item 6): "Sample agency snapshot" is
+   * demo-only framing — the parent passes it only for the demo
+   * workspace; real agencies pass null and no label renders.
+   */
+  snapshotLabel?: string | null;
   /** Opens the Employee Hub with the My Compliance tab selected. */
   onOpenMyCompliance?: () => void;
   onSite: (s: string) => void;
@@ -95,6 +101,7 @@ export default function Dashboard({
   individuals,
   site,
   personalItems,
+  snapshotLabel = null,
   showCoverageBoard = true,
   onOpenMyCompliance,
   onSite,
@@ -161,9 +168,11 @@ export default function Dashboard({
             })}
           </span>
         </div>
-        <span className="snapshot-label">
-          <span /> Sample agency snapshot
-        </span>
+        {snapshotLabel && (
+          <span className="snapshot-label">
+            <span /> {snapshotLabel}
+          </span>
+        )}
       </div>
       {/* Personal compliance (2026-10-29): manager roles get the slim strip
           pinned above House compliance; every other role gets the full

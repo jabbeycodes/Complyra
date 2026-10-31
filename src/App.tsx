@@ -82,6 +82,10 @@ import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
+import {
+  defaultOverviewSiteFilter,
+  overviewSnapshotLabel,
+} from "./features/overview/overviewScope";
 import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
@@ -143,7 +147,7 @@ import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { furthestReminderDay } from "./data/rules";
 import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
-import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { individualsAtSite, personalQueue, sitesVisibleTo, staffVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible, roleLabel } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -197,7 +201,16 @@ export default function App() {
     setHubFocusTab("compliance");
     navigate("Employee Hub");
   };
-  const [site, setSite] = useState("All sites");
+  // Wave 6 item 6: the Overview site filter starts scoped to the
+  // viewer's single home when they have exactly one (a house manager
+  // should not land on an agency-wide "All sites" preset).
+  const [site, setSite] = useState(() =>
+    defaultOverviewSiteFilter(
+      sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds).map(
+        (row) => row.name,
+      ),
+    ),
+  );
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -210,6 +223,9 @@ export default function App() {
   const [certAlerts, setCertAlerts] = useState<Record<string, number>>({});
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
+  // Wave 6 item 2: a pending chart section deep-link (e.g. the mobile
+  // "Med count & supply" row opens the chart AT the medication board).
+  const [chartSection, setChartSection] = useState<string | null>(null);
   const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
   const [reportSitePreset, setReportSitePreset] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -478,7 +494,10 @@ export default function App() {
   const individuals = workspace.individuals.filter((person) =>
     sites.some((row) => row.name === person.site),
   );
-  const staff = workspace.staff;
+  // Wave 6 item 4: the Staff directory follows the same site scoping as
+  // every other staff list (staffVisibleTo) — a house manager sees the
+  // staff of her homes, not the whole agency.
+  const staff = staffVisibleTo(session, workspace.staff, workspace.assignmentSiteIds);
   // One visible-staff collection drives BOTH the header count and the table
   // rows, so the two can never disagree when a site or search filter is set.
   const visibleStaff = staff.filter(
@@ -583,6 +602,7 @@ export default function App() {
   function navigate(next: string, nextStatus = "All statuses") {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
+    if (next !== "Individual chart") setChartSection(null);
     if (next !== "Site detail") setDetailSiteId(null);
     setPage(next);
     setStatus(nextStatus);
@@ -591,12 +611,13 @@ export default function App() {
     window.history.replaceState(null, "", `#${encodeURIComponent(next)}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  function openPersonChart(name: string) {
+  function openPersonChart(name: string, sectionId?: string) {
     setPerson(name);
+    setChartSection(sectionId ?? null);
     setPage("Individual chart");
     setQuery("");
     setMobileOpen(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!sectionId) window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
@@ -830,9 +851,9 @@ export default function App() {
               setForceDesktop(true);
               openMyCompliance();
             },
-            openPersonChart: (name) => {
+            openPersonChart: (name, sectionId) => {
               setForceDesktop(true);
-              openPersonChart(name);
+              openPersonChart(name, sectionId);
             },
             openSite: (siteId) => {
               setForceDesktop(true);
@@ -1070,6 +1091,7 @@ export default function App() {
               individuals={individuals}
               site={site}
               personalItems={personalItems}
+              snapshotLabel={overviewSnapshotLabel(session)}
               // A house manager runs one home: their Overview opens already
               // focused on it (their visible sites are just that home), and
               // the coverage board does not render here — it belongs inside
@@ -1309,6 +1331,7 @@ export default function App() {
                   individualId={
                     individuals.find((p) => p.name === person)?.id ?? ""
                   }
+                  initialSection={chartSection}
                   onBack={() => navigate("Individuals")}
                   onOpenMessageThread={(threadId) => {
                     setMessageFocus(threadId);

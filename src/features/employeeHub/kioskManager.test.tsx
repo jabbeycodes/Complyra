@@ -871,3 +871,162 @@ describe("TimeClockTab remote-punch gate", () => {
     assert.ok(!html.includes("Clock in on the house kiosk laptop"), "no kiosk message");
   });
 });
+
+/* ------------- Wave 6 item 1: class-store binding regression ------------ */
+
+/**
+ * Regression for simulation batches 33–35: hosted sessions crashed the
+ * Missed-punch review (Attendance), Clock settings (Payroll), Punch
+ * exceptions, Who's here now and Kiosk admin sections with
+ * "Cannot read properties of undefined (reading 'client')".
+ * SupabaseHrStore and LocalHrStore are CLASSES whose kiosk methods read
+ * `this.client` / `this.load()`; adaptKioskStore returned those methods
+ * unbound, so every call ran with `this === undefined`. The fixtures below
+ * mirror both class shapes — plain-object arrow-function stores (used by
+ * the older tests) cannot reproduce the defect.
+ */
+class HostedShapeStore {
+  constructor(private client: { agencyId: string }) {}
+  async listMissedPunchReports() {
+    // Reads this.client exactly like SupabaseHrStore.listMissedPunchReports.
+    void this.client.agencyId;
+    return [
+      {
+        id: "mpr-hosted",
+        agencyId: "agency-1",
+        staffId: "user-alex",
+        siteId: "site-1",
+        workDate: "2026-09-15",
+        claimedInAt: null,
+        claimedOutAt: "2026-09-15T16:05:00",
+        reason: "Kiosk was unplugged at clock-out.",
+        status: "pending",
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: null,
+        createdAt: "2026-09-15T16:10:00",
+      },
+    ];
+  }
+  async getPunchRules() {
+    void this.client.agencyId;
+    return RULES;
+  }
+  async listOpenPunches() {
+    void this.client.agencyId;
+    return [punch({ id: "punch-open" })];
+  }
+  async listKioskTokens() {
+    void this.client.agencyId;
+    return [];
+  }
+  async listClockCredentials() {
+    void this.client.agencyId;
+    return [];
+  }
+}
+
+class LocalShapeStore {
+  private load() {
+    return { agencyId: "agency-1" };
+  }
+  async listMissedPunchReports() {
+    // Reads this.load() exactly like LocalHrStore.listMissedPunchReports.
+    void this.load().agencyId;
+    return [];
+  }
+  async getPunchRules() {
+    void this.load().agencyId;
+    return RULES;
+  }
+  async listOpenPunches() {
+    void this.load().agencyId;
+    return [];
+  }
+}
+
+class FaultyStore {
+  async listMissedPunchReports(): Promise<never> {
+    throw new TypeError("Cannot read properties of undefined (reading 'client')");
+  }
+  async getPunchRules(): Promise<never> {
+    throw new TypeError("Cannot read properties of undefined (reading 'client')");
+  }
+}
+
+describe("adaptKioskStore class-store binding (wave 6 item 1)", () => {
+  it("preserves `this` for hosted-shape (this.client) store methods", async () => {
+    const kiosk = adaptKioskStore(new HostedShapeStore({ agencyId: "agency-1" }) as unknown as HrStore);
+    const reports = await kiosk.listMissedPunchReports();
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].id, "mpr-hosted");
+    const rules = await kiosk.getPunchRules();
+    assert.equal(rules.roundingMinutes, 5);
+    const open = await kiosk.listOpenPunches("site-1");
+    assert.equal(open.length, 1);
+    assert.deepEqual(await kiosk.listKioskTokens(), []);
+  });
+
+  it("preserves `this` for local-shape (this.load()) store methods", async () => {
+    const kiosk = adaptKioskStore(new LocalShapeStore() as unknown as HrStore);
+    assert.deepEqual(await kiosk.listMissedPunchReports(), []);
+    const rules = await kiosk.getPunchRules();
+    assert.equal(rules.graceMinutes, 5);
+    assert.deepEqual(await kiosk.listOpenPunches("site-1"), []);
+  });
+
+  it("converts a store-layer TypeError into plain language, never raw exception text", async () => {
+    const kiosk = adaptKioskStore(new FaultyStore() as unknown as HrStore);
+    await assert.rejects(
+      () => kiosk.listMissedPunchReports(),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.ok(!/Cannot read properties/.test(err.message), "raw TypeError text must not surface");
+        assert.match(err.message, /could not be loaded/i);
+        return true;
+      },
+    );
+    await assert.rejects(() => kiosk.getPunchRules(), /could not be loaded/i);
+  });
+
+  it("renders Missed-punch review and Clock settings for the session shapes that crashed (admin, nurse, HR)", () => {
+    const store = new HostedShapeStore({ agencyId: "agency-1" }) as unknown as HrStore;
+    const shapes: Array<Partial<SessionUser>> = [
+      { role: "administrator", roleKey: "administrator", fullName: "Sim Admin" },
+      { role: "nurse", roleKey: "nurse", fullName: "Morgan Quinn" },
+      { role: "hr", roleKey: "hr", fullName: "Harper HR" },
+    ];
+    for (const shape of shapes) {
+      const review = renderToStaticMarkup(
+        <MissedPunchReview
+          session={makeSession(shape)}
+          store={store}
+          staffList={staffList}
+          initialReports={[
+            {
+              id: "mpr-1",
+              agencyId: "agency-1",
+              staffId: "user-alex",
+              siteId: "site-1",
+              workDate: "2026-09-15",
+              claimedInAt: null,
+              claimedOutAt: "2026-09-15T16:05:00",
+              reason: "Kiosk was unplugged at clock-out.",
+              status: "pending",
+              reviewedBy: null,
+              reviewedAt: null,
+              reviewNote: null,
+              createdAt: "2026-09-15T16:10:00",
+            },
+          ]}
+        />,
+      );
+      assert.ok(review.includes("Missed-punch review"), `${shape.roleKey} sees the section`);
+      assert.ok(!review.includes("Cannot read properties"), `${shape.roleKey} sees no raw TypeError`);
+
+      const rules = renderToStaticMarkup(<PunchRulesConfig store={store} initialRules={RULES} />);
+      assert.ok(rules.includes("Clock settings"), `${shape.roleKey} sees clock settings`);
+      assert.ok(!rules.includes("Cannot read properties"), `${shape.roleKey} sees no raw TypeError`);
+    }
+  });
+});

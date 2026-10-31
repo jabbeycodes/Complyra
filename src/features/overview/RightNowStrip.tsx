@@ -127,6 +127,7 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
         userId: session.userId,
         fullName: session.fullName,
         canManageSchedule: hasPermission(session, "hub.manage_schedule"),
+        readOnly: session.roleKey === "auditor",
         canPostAgencyWide: hasPermission(session, "hub.manage_staffing"),
       });
       const today = chicagoToday();

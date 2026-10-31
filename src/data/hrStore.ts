@@ -1276,7 +1276,16 @@ class SupabaseHrStore implements HrStore {
     private client: SupabaseClient,
     private agencyId: string,
     private userId: string,
+    private actorRoleKey?: string,
   ) {}
+
+  /** Wave 6 item 3: auditors are read-only — swap writes are refused in
+   *  the store itself, not just hidden in the UI. */
+  private assertSwapWritable() {
+    if (this.actorRoleKey === "auditor") {
+      throw new Error("Auditors are read-only and cannot change shift swaps.");
+    }
+  }
 
   async listShifts(fromIso: string, toIso: string, siteId?: string): Promise<HrShift[]> {
     let q = this.client
@@ -2872,6 +2881,7 @@ class SupabaseHrStore implements HrStore {
   }
 
   async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const offered = await this.getShiftById(input.offeredShiftId);
     const targetId = input.targetStaffId ?? null;
     if (targetId !== null && targetId === this.userId) {
@@ -2922,6 +2932,7 @@ class SupabaseHrStore implements HrStore {
     claimerId: string,
     counterOfferShiftId?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("This shift swap is no longer open.");
@@ -2986,6 +2997,7 @@ class SupabaseHrStore implements HrStore {
     decidedBy: string,
     note?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("This shift swap has already been decided.");
@@ -3024,6 +3036,7 @@ class SupabaseHrStore implements HrStore {
   }
 
   async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("Only a pending swap can be cancelled.");
@@ -4635,7 +4648,16 @@ class LocalHrStore implements HrStore {
     private agencyId: string,
     private userId: string,
     private kioskTestSeed?: KioskTestSeed,
+    private actorRoleKey?: string,
   ) {}
+
+  /** Wave 6 item 3: auditors are read-only — swap writes are refused in
+   *  the store itself, not just hidden in the UI. */
+  private assertSwapWritable() {
+    if (this.actorRoleKey === "auditor") {
+      throw new Error("Auditors are read-only and cannot change shift swaps.");
+    }
+  }
 
   private storageAvailable(): boolean {
     try {
@@ -6122,6 +6144,7 @@ class LocalHrStore implements HrStore {
   }
 
   async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const offered = this.getShiftLocal(b, input.offeredShiftId);
       const targetId = input.targetStaffId ?? null;
@@ -6169,6 +6192,7 @@ class LocalHrStore implements HrStore {
     claimerId: string,
     counterOfferShiftId?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6213,6 +6237,7 @@ class LocalHrStore implements HrStore {
     decidedBy: string,
     note?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6244,6 +6269,7 @@ class LocalHrStore implements HrStore {
   }
 
   async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6905,12 +6931,14 @@ class LocalHrStore implements HrStore {
 export function createHrStore(opts: {
   agencyId: string;
   userId: string;
+  /** Acting user's role — the stores refuse auditor writes (wave 6 item 3). */
+  roleKey?: string;
   /** Test-only: seeds a known kiosk token + PIN credential in the local impl. */
   kioskTestSeed?: KioskTestSeed;
 }): HrStore {
   const client = createSupabaseBrowserClient();
-  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId);
-  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed);
+  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId, opts.roleKey);
+  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed, opts.roleKey);
 }
 
 /** CSV export is pure domain logic; re-exported here for page convenience. */

@@ -140,13 +140,14 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   async function loadWeek(start: string) {
     if (!session || !siteId) return;
     const ticket = ++loadTicket.current;
-    const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+    const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
     const range = coverageQueryWindow(start);
     const posted = createOpenShiftStore({
       agencyId: session.agencyId,
       userId: session.userId,
       fullName: session.fullName,
       canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
       canPostAgencyWide: false,
     });
     const [rows, openings] = await Promise.all([
@@ -288,6 +289,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
           userId: session.userId,
           fullName: session.fullName,
           canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
           canPostAgencyWide: false,
         });
         await posted.postOpenShift({
@@ -303,7 +305,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         });
         setNotice("Posted. A PRN takes it from Open Shifts, and then that person owes the note.");
       } else {
-        const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+        const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
         const input: HrShiftInput = {
           siteId,
           staffId: draft.staffId,
@@ -331,7 +333,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       await store.updateShift(shift.id, { status: "cancelled" });
       await loadWeek(weekStart);
     } catch (err) {
@@ -352,6 +354,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         userId: session.userId,
         fullName: session.fullName,
         canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
         canPostAgencyWide: false,
       });
       await posted.cancelOpenShift(shift.id);
@@ -384,7 +387,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       for (const row of rows) {
         const times = chicagoShiftInstants(row.date, row.start, row.end);
         await store.createShift({
@@ -412,7 +415,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       const previousWeek = addWeek(weekStart, -1);
       const range = coverageQueryWindow(previousWeek);
       const previous = (await store.listShifts(range.fromIso, range.toIso, siteId)).filter((row) => row.status !== "cancelled");

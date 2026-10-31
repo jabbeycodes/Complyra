@@ -1,7 +1,8 @@
 import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatPillCount, medCountdown } from "./mobile/medcount";
+import { scrollToSectionId } from "./sectionLinks";
 import { formatCentralTime } from "./mobile/mar";
 import type {
   MedDoseMark,
@@ -111,10 +112,15 @@ export default function IndividualChart({
   individualId,
   onBack,
   onOpenMessageThread,
+  initialSection,
 }: {
   individualId: string;
   onBack: () => void;
   onOpenMessageThread?: (threadId: string) => void;
+  /** Wave 6 item 2: deep-link to a chart section (e.g. "chart-meds" from
+   * the mobile Med count row). Consumed once the chart body renders;
+   * ignored when the section is not rendered for this session. */
+  initialSection?: string | null;
 }) {
   const { api, session, workspace, refresh } = useData();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
@@ -163,6 +169,21 @@ export default function IndividualChart({
       live = false;
     };
   }, [api, individualId, medsEnabled, workspace]);
+
+  // Wave 6 item 2: honor the section deep-link once the chart body has
+  // rendered (this effect sits after the early return on purpose — the
+  // section element only exists from here down). One attempt on ready,
+  // one delayed retry for late layout; then the intent is spent.
+  const sectionScrolledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialSection || !stack || !person) return;
+    const key = `${individualId}:${initialSection}`;
+    if (sectionScrolledFor.current === key) return;
+    sectionScrolledFor.current = key;
+    scrollToSectionId(initialSection);
+    const retry = window.setTimeout(() => scrollToSectionId(initialSection), 300);
+    return () => window.clearTimeout(retry);
+  }, [initialSection, individualId, stack, person]);
 
   if (!session || !stack || !person) return null;
 
