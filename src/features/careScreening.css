@@ -1,11 +1,11 @@
-.care-records { color: var(--color-h-111827); background: var(--color-h-ffffff); border: 1px solid var(--color-h-6b7280); min-width: 0; }
-.care-records .care-record { border: 1px solid var(--color-h-6b7280); padding: 1rem; margin-block: 1rem; border-radius: 6px; overflow-wrap: anywhere; }
+.care-records { color: var(--text); background: var(--white); border: 1px solid var(--border); min-width: 0; }
+.care-records .care-record { border: 1px solid var(--border); padding: 1rem; margin-block: 1rem; border-radius: 6px; overflow-wrap: anywhere; }
 .care-records label { display: grid; gap: .375rem; margin-block: .5rem; }
 .care-records .care-role { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
-.care-records input:not([type=checkbox]), .care-records select, .care-records textarea { width: 100%; min-height: 44px; color: var(--color-h-111827); background: var(--color-h-ffffff); border: 1px solid var(--color-h-6b7280); }
+.care-records input:not([type=checkbox]), .care-records select, .care-records textarea { width: 100%; min-height: 44px; color: var(--text); background: var(--white); border: 1px solid var(--border); }
 .care-records textarea { min-height: 88px; }
-.care-records fieldset { min-width: 0; margin-block: .75rem; border: 1px solid var(--color-h-6b7280); }
+.care-records fieldset { min-width: 0; margin-block: .75rem; border: 1px solid var(--border); }
 .care-records button, .care-records summary { min-height: 44px; }
 .care-records summary { cursor: pointer; padding-block: .5rem; }
-.care-records :focus-visible { outline: 3px solid var(--color-h-1e40af); outline-offset: 2px; }
+.care-records :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 @media print { .care-records { color: black; background: white; } .care-records button, .care-records form { display: none; } .care-records article { break-inside: avoid; } }
