@@ -2584,8 +2584,8 @@ function addConsentRegister(db: LocalDatabase) {
 /* --------------------------- Rights packets --------------------------- */
 
 /**
- * The annual Rights packet, seeded as the front cover of each chart's
- * consents. Ellis carries two years of history: last year's packet and
+ * The annual Rights packet, seeded on each chart's consents. Ellis
+ * carries two years of history: last year's packet and
  * the current one, typed 335 days ago so its renewal lands 30 days out
  * — the tracker sits in its final month ("Due in 30 days"). His sister
  * Dana signed as Guardian. Harper signed her own packet recently, as

@@ -21,8 +21,7 @@ const emptyCompletion = (): RightsPacketCompletion => ({
 });
 
 /**
- * The Rights packet — the front cover of the chart's Consents area,
- * with the consent forms behind it, mirroring the binder. One packet
+ * The Rights packet section of the chart's Consents area. One packet
  * per year; the tracker counts down from the latest completed packet's
  * typed date. Awaiting-signature and due/overdue states surface in the
  * attention view alongside consent gaps.
@@ -99,7 +98,6 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
 
     return <section className="rights-packets" aria-label="Rights packet">
     <h2>Rights packet</h2>
-    <p>The annual rights signoff packet sits at the front of the Individual&rsquo;s consents, renewed every year. The countdown runs from the packet date a manager types when the packet is signed.</p>
     {error && <p role="alert">{error}</p>}
     {people.length === 0 && <p>No Individuals in your scope.</p>}
     {tracked.map(({ person, packets: mine, tracking }) => {
