@@ -295,6 +295,177 @@
   line-height: 1;
 }
 
+/* Compliance band (top of Home, right after the greeting — the personal
+   donut + status bar and, for house-scope roles, the house donuts) */
+.msh-band {
+  background: var(--white);
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(36, 30, 24, 0.07);
+  padding: 16px 18px;
+}
+.msh-band-personal {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.msh-band-personal-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+/* The desktop donut figure carries panel padding of its own; inside the
+   band it sits flush. The global phone rule also forces every
+   .status-mix-chart to 180px in a column — the band's mini keeps its
+   76px row form, the same correction the binder minis needed. */
+.msh-band .status-mix {
+  padding: 0;
+  gap: 0;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+}
+.msh-band .status-mix-chart {
+  width: 76px;
+  max-width: 76px;
+  margin-inline: 0;
+}
+.msh-band-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  flex: none;
+  color: var(--muted);
+}
+.msh-band-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.msh-band-title {
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+.msh-band-title .msh-chevron {
+  margin-left: auto;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 400;
+}
+.msh-band-percent {
+  font-size: 20px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.msh-band-copy small {
+  font-size: 13px;
+  line-height: 1.45;
+}
+.msh-band-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e8dcc8;
+  margin-top: 12px;
+}
+.msh-band-bar-seg {
+  display: block;
+  height: 100%;
+}
+.msh-band-bar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.msh-band-bar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.msh-band-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.msh-band-note {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(36, 30, 24, 0.08);
+  font-size: 13px;
+  color: var(--muted);
+}
+.msh-band-houses {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(36, 30, 24, 0.08);
+  scrollbar-width: none;
+}
+.msh-band-houses::-webkit-scrollbar {
+  display: none;
+}
+.msh-band-house {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  width: 148px;
+  text-align: center;
+  background: none;
+  border: 0;
+  border-radius: 14px;
+  padding: 8px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.msh-band-house-name {
+  font-size: 14.5px;
+  font-weight: 700;
+  max-width: 100%;
+}
+.msh-band-house-chart {
+  display: block;
+  margin: 4px 0;
+}
+.msh-band-house-score {
+  font-size: 14px;
+}
+.msh-band-house-score strong {
+  font-size: 17px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.msh-band-house small {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.msh-band-house-empty {
+  display: block;
+  padding: 18px 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 /* Donut card */
 .msh-donut-card {
   background: var(--white);
