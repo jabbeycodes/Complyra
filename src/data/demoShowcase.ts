@@ -78,7 +78,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 11;
+export const SHOWCASE_REVISION = 12;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
