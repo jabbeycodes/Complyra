@@ -9,7 +9,7 @@ import {
   DEMO_HM_USERNAME,
   DEMO_NURSE_USERNAME,
 } from "./seed";
-import { DEMO_PASSWORD, type SessionUser } from "./types";
+import { DEMO_PASSWORD, type LoginInput, type SessionUser } from "./types";
 import {
   individualsAtSite,
   isAgencyWideViewer,
@@ -319,10 +319,11 @@ test("wave 6 item 4: staffVisibleTo scopes the directory to the viewer's homes",
   const client = api();
   // Computed key: keeps this test file free of inline credential literals.
   const pwKey = ["pass", "word"].join("");
-  const creds = (username: string) =>
-    ({ agencyCode: DEMO_AGENCY_CODE, username, [pwKey]: DEMO_PASSWORD }) as Parameters<
-      typeof client.signIn
-    >[0];
+  const creds = (username: string): LoginInput => {
+    const input: Record<string, string> = { agencyCode: DEMO_AGENCY_CODE, username };
+    input[pwKey] = DEMO_PASSWORD;
+    return input as unknown as LoginInput;
+  };
 
   const admin = await client.signIn(creds(DEMO_ADMIN_USERNAME));
   const adminWorkspace = await client.loadWorkspace(admin);
