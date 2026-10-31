@@ -121,7 +121,7 @@ test("a med claimed by a discontinued order leaves inventory, plan stack and for
   // The seed's own showcase order claims this row via medicationId while
   // the row's sourceOrderId was never written — the exact batch 24 link
   // shape (order -> med claim present, med -> order back-link absent).
-  const claim = memStore.db.medicationOrders.find(
+  const claim = (memStore.db.medicationOrders ?? []).find(
     (order) => order.medicationId === seedMed.id,
   );
   assert.ok(claim, "the seed order claims the Levetiracetam row");
