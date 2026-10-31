@@ -37,7 +37,7 @@ export default function SchedulingPage({ onNavigate }: Props) {
   const sites = useMemo(
     () =>
       session && workspace
-        ? sitesVisibleTo(session, workspace.sites, workspace.staff)
+        ? sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds)
         : [],
     [session, workspace],
   );

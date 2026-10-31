@@ -267,6 +267,7 @@ export default function MobileComplianceBand({
         workspace.sites,
         workspace.staff,
         workspace.requirements,
+        workspace.assignmentSiteIds,
       ),
     [session, workspace],
   );

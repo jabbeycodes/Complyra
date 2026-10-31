@@ -1905,6 +1905,14 @@ export type WorkspaceSite = {
 export interface WorkspaceView {
   session: SessionUser;
   sites: WorkspaceSite[];
+  /**
+   * Pass 3 (simulation Phase D): the SESSION user's active assignment
+   * site ids — site assignments directly, plus the site of any Individual
+   * they are assigned to (active = startsOn <= today and (endsOn null or
+   * >= today), mirroring private.can_read_site's assignment branch).
+   * Feeds sitesVisibleTo so assignment-only homes appear in site lists.
+   */
+  assignmentSiteIds: string[];
   individuals: {
     id: string;
     name: string;
@@ -2990,6 +2998,19 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
   const canReadAudit = hasPermission(session, "audit.read") && isAgencyWideViewer(session);
+  const today = todayIso();
+  const assignmentSiteIds = [...new Set(
+    store.db.assignments
+      .filter((row) => row.agencyId === session.agencyId &&
+        row.userId === session.userId &&
+        row.startsOn <= today &&
+        (!row.endsOn || row.endsOn >= today))
+      .map((row) => row.siteId ??
+        (row.individualId
+          ? store.db.individuals.find((person) => person.id === row.individualId)?.siteId ?? null
+          : null))
+      .filter((id): id is string => Boolean(id)),
+  )];
   const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
   const individuals = canViewPeople
     ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
@@ -3139,6 +3160,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         },
       )))),
     branding: { logoUrl: null },
+    assignmentSiteIds,
   };
 }
 
@@ -4383,6 +4405,32 @@ export class LocalApi implements ComplyraApi {
       siteId: input.siteId ?? null,
       expiresOn: input.expiresOn ?? null,
     });
+    // Staff scope repair (2026-10-31, corrected design): mirror the
+    // invite-member edge function — site coverage for site-scoped
+    // roles is an explicit assignment record. A chosen site becomes
+    // one site assignment starting today (DSP, nurse, house manager);
+    // the "Agency-wide" choice for a nurse or house manager becomes
+    // one site assignment per current site in the agency.
+    if (input.roleKey === "dsp" || input.roleKey === "nurse" || input.roleKey === "house_manager") {
+      const assignmentSiteIds = input.siteId
+        ? [input.siteId]
+        : input.roleKey === "dsp"
+          ? []
+          : this.store.db.sites
+              .filter((row) => row.agencyId === session.agencyId)
+              .map((row) => row.id);
+      for (const assignmentSiteId of assignmentSiteIds) {
+        this.store.db.assignments.push({
+          id: crypto.randomUUID(),
+          agencyId: session.agencyId,
+          userId,
+          individualId: null,
+          siteId: assignmentSiteId,
+          startsOn: todayIso(),
+          endsOn: null,
+        });
+      }
+    }
     this.store.db.credentials.push({
       userId,
       email,

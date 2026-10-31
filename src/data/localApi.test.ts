@@ -146,6 +146,80 @@ test("login uses agency code and username, and invited members must change the t
   assert.equal(again.fullName, "Jordan Blake");
 });
 
+test("inviting a DSP with a home site also creates a site assignment starting today", async () => {
+  const mem = store();
+  const api = new LocalApi(mem);
+  const admin = await api.signIn(adminLogin());
+  const workspace = await api.loadWorkspace(admin);
+  const cedar = workspace.sites.find((site) => site.name === "Cedar House")!;
+  const before = mem.db.assignments.length;
+  const invited = await api.inviteMember({
+    fullName: "Riley Newdsp",
+    username: "riley.newdsp",
+    tempPassword: "TempPass!1",
+    roleKey: "dsp",
+    jobTitle: "DSP",
+    siteId: cedar.id,
+  });
+  assert.equal(invited.username, "riley.newdsp");
+  const created = mem.db.assignments.slice(before);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].siteId, cedar.id);
+  assert.equal(created[0].individualId, null);
+  assert.equal(created[0].startsOn, todayIso());
+  assert.equal(created[0].endsOn, null);
+  const member = mem.db.memberships.find(
+    (row) => row.userId === created[0].userId && row.roleKey === "dsp",
+  );
+  assert.equal(member?.siteId, cedar.id);
+
+  // A nurse invited with a single site also gets a site assignment
+  // (corrected design: caseload coverage is an assignment record for
+  // DSP, nurse, and house manager alike).
+  const beforeNurse = mem.db.assignments.length;
+  await api.inviteMember({
+    fullName: "Nina Newnurse",
+    username: "nina.newnurse",
+    tempPassword: "TempPass!1",
+    roleKey: "nurse",
+    jobTitle: "Nurse",
+    siteId: cedar.id,
+  });
+  const nurseAssignments = mem.db.assignments.slice(beforeNurse);
+  assert.equal(nurseAssignments.length, 1);
+  assert.equal(nurseAssignments[0].siteId, cedar.id);
+
+  // An agency-wide nurse invite (no site picked) creates one site
+  // assignment per current site in the agency.
+  const beforeWide = mem.db.assignments.length;
+  await api.inviteMember({
+    fullName: "Wanda Widenurse",
+    username: "wanda.widenurse",
+    tempPassword: "TempPass!1",
+    roleKey: "nurse",
+    jobTitle: "Nurse",
+  });
+  const wideAssignments = mem.db.assignments.slice(beforeWide);
+  const agencySites = mem.db.sites.filter((row) => row.agencyId === admin.agencyId);
+  assert.equal(wideAssignments.length, agencySites.length);
+  assert.deepEqual(
+    wideAssignments.map((row) => row.siteId).sort(),
+    agencySites.map((row) => row.id).sort(),
+  );
+
+  // A role outside the site-scoped set creates no assignment.
+  const beforeHr = mem.db.assignments.length;
+  await api.inviteMember({
+    fullName: "Hank Newhr",
+    username: "hank.newhr",
+    tempPassword: "TempPass!1",
+    roleKey: "hr",
+    jobTitle: "Human Resources",
+    siteId: cedar.id,
+  });
+  assert.equal(mem.db.assignments.length, beforeHr);
+});
+
 test("a new agency uses a state code and cannot see another tenant’s records", async () => {
   const api = new LocalApi(store());
   const created = await api.createAgency({

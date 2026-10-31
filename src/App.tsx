@@ -474,7 +474,7 @@ export default function App() {
     }
     return <div className="login-shell">Loading workspace…</div>;
   }
-  const sites = sitesVisibleTo(session, workspace.sites, workspace.staff);
+  const sites = sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds);
   const individuals = workspace.individuals.filter((person) =>
     sites.some((row) => row.name === person.site),
   );

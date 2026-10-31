@@ -287,7 +287,7 @@ export default function MobileShell({
   // Houses the Scheduling board may show this viewer — the desktop
   // page's own scoping (an HM's houses; PM/admin every house).
   const schedSites = useMemo(
-    () => sitesVisibleTo(session, workspace.sites, workspace.staff),
+    () => sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds),
     [session, workspace],
   );
 
