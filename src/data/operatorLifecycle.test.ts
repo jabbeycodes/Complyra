@@ -1,0 +1,20 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { LocalApi, MemoryStore } from "./localApi";
+import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE } from "./seed";
+import { DEMO_PASSWORD } from "./types";
+test("suspension blocks an already signed-in tenant and reactivation restores access without deleting data", async()=>{
+ const store=new MemoryStore(structuredClone(createEvergreenSeed()));const api=new LocalApi(store);
+ const admin=await api.signIn({agencyCode:DEMO_AGENCY_CODE,username:DEMO_ADMIN_USERNAME,password:DEMO_PASSWORD});
+ const adminId=store.sessionUserId; const count=store.db.individuals.length;
+ await api.signIn({agencyCode:"COMPLYRER-MO",username:"platform.owner",password:DEMO_PASSWORD});const operatorId=store.sessionUserId;
+ await api.setAgencyStatus(admin.agencyId,"suspended","Requested pause","active");
+ store.sessionUserId=adminId;
+ await assert.rejects(api.loadWorkspace(admin),/suspended/i);
+ await assert.rejects(api.signIn({agencyCode:DEMO_AGENCY_CODE,username:DEMO_ADMIN_USERNAME,password:DEMO_PASSWORD}),/suspended/i);
+ store.sessionUserId=operatorId;
+ await api.setAgencyStatus(admin.agencyId,"active","Resolved","suspended");
+ assert.equal(store.db.individuals.length,count); assert.equal(store.db.operatorLifecycle!.length,2);
+ await assert.rejects(api.setAgencyStatus(store.db.agencies.find(a=>a.agencyCode==="COMPLYRER-MO")!.id,"suspended","Pause platform"),/platform agency/);
+ store.sessionUserId=adminId; assert.ok(await api.loadWorkspace(admin));
+});

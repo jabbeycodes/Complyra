@@ -2216,6 +2216,8 @@ function rolesFor(store: MemoryStore, agencyId: string): AgencyRole[] {
 function assertSession(store: MemoryStore): SessionUser {
   const session = currentSession(store);
   if (!session) throw new Error("Sign in to continue.");
+  const agency = store.db.agencies.find((a) => a.id === session.agencyId);
+  if (!session.platformAdmin && (agency?.active === false || agency?.status === "suspended")) throw new Error("Agency access is suspended.");
   return session;
 }
 
@@ -4216,6 +4218,7 @@ export class LocalApi implements ComplyraApi {
     if (!membership || (membership.expiresOn && membership.expiresOn < todayIso())) {
       throw new Error(LOGIN_NO_MEMBERSHIP_MESSAGE);
     }
+    if (!profile.platformAdmin && (agency.active === false || agency.status === "suspended")) throw new Error("Agency access is suspended.");
     this.store.sessionUserId = credential.userId;
     const session = currentSession(this.store)!;
     // 13 CSR 65-3.050: track user log-in.
@@ -4550,10 +4553,13 @@ export class LocalApi implements ComplyraApi {
     if (!agency) throw new Error("Agency not found.");
     if (!reason.trim() || reason.length > 1000) throw new Error("Add a reason of at most 1000 characters.");
     if (expectedStatus && expectedStatus !== agency.status) throw new Error("Agency changed. Refresh and try again.");
-    if (agency.status !== "pending" || !["active", "rejected"].includes(status)) throw new Error("Invalid agency transition.");
+    if (agency.agencyCode === "COMPLYRER-MO") throw new Error("The platform agency cannot be suspended or reviewed.");
+    const allowed: Record<string, string[]> = { pending: ["active", "rejected"], active: ["suspended"], suspended: ["active"], rejected: [] };
+    if (!allowed[agency.status]?.includes(status)) throw new Error("Invalid agency transition.");
     (this.store.db.operatorLifecycle ??= []).push({ id: crypto.randomUUID(), agencyId, actorId: session.userId,
       fromStatus: agency.status, toStatus: status, reason: reason.trim(), createdAt: new Date().toISOString() });
     agency.status = status;
+    agency.active = status !== "suspended";
     log(this.store, session, "agency.status", reason.trim(), "agency", agency.id);
     await persistMeta(this.store);
   }
