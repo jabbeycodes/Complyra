@@ -5,7 +5,7 @@ import { PageHeading } from "../../components";
 import "./operator.css";
 export default function OperatorAudit(){
  const {api,session,usingHostedBackend}=useData();const [agencies,setAgencies]=useState<OperatorAgency[]>([]);
- const [q,setQ]=useState<OperatorAuditQuery>(()=>({start:new Date(Date.now()-29*86400000).toISOString().slice(0,10),end:new Date().toISOString().slice(0,10),category:"all",agencyId:"",actorId:"",action:"",source:"all",page:0}));
+ const [q,setQ]=useState<OperatorAuditQuery>(()=>({start:new Date(Date.now()-29*86400000).toISOString().slice(0,10),end:new Date().toISOString().slice(0,10),category:"all",agencyId:typeof window === "undefined" ? "" : new URLSearchParams(decodeURIComponent(window.location.hash).split("?")[1]).get("agencyId")??"",actorId:"",action:"",source:"all",page:0}));
  const [data,setData]=useState<OperatorAuditPage|null>(null);const [loading,setLoading]=useState(true);const [error,setError]=useState("");
  useEffect(()=>{let cancelled=false;if(session?.platformAdmin)api.operatorDirectory().then(a=>{if(!cancelled)setAgencies(a);}).catch(e=>{if(!cancelled)setError((e as Error).message);});return()=>{cancelled=true;};},[api,session?.platformAdmin]);
  useEffect(()=>{let cancelled=false;if(!session?.platformAdmin)return;setLoading(true);setError("");api.operatorAudit(q).then(d=>{if(!cancelled)setData(d);}).catch(e=>{if(!cancelled){setError((e as Error).message);setData(null);}}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[api,session?.platformAdmin,q]);

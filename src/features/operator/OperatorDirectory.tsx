@@ -13,7 +13,7 @@ export default function OperatorDirectory({ onSaved }: { onSaved: (message: stri
   const [query, setQuery] = useState(""); const [status, setStatus] = useState(() => new URLSearchParams(typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash).split("?")[1]).get("status") ?? "all");
   const params = new URLSearchParams(typeof window === "undefined" ? "" : decodeURIComponent(window.location.hash).split("?")[1]);
   const [category, setCategory] = useState(() => params.get("category") ?? "all");
-  const [from, setFrom] = useState(() => params.get("from") ?? ""); const [to, setTo] = useState(() => params.get("to") ?? ""); const [selected, setSelected] = useState<string | null>(null);
+  const [from, setFrom] = useState(() => params.get("from") ?? ""); const [to, setTo] = useState(() => params.get("to") ?? ""); const [selected, setSelected] = useState<string | null>(() => params.get("agencyId"));
   const [reload, setReload] = useState(0);
   useEffect(() => {
     let cancelled = false; setLoading(true); setError("");

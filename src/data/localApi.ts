@@ -6,7 +6,7 @@ import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApprove
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
-import { summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit } from "./operator";
+import { summarizeOperatorAgencies, validateOperatorAi, validateOperatorAudit, validateOperatorPeople } from "./operator";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -663,6 +663,7 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorPeople(query: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage>;
   operatorAudit(query: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage>;
   operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings>;
   operatorSaveAi(input: import("./operator").OperatorAiInput): Promise<void>;
@@ -4525,6 +4526,14 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorPeople(query: import("./operator").OperatorPeopleQuery): Promise<import("./operator").OperatorPeoplePage> {
+    await this.operatorDirectory();validateOperatorPeople(query);const q=query.query.trim().toLowerCase();
+    const rows=this.store.db.profiles.map(p=>({id:p.id,fullName:p.fullName,username:p.username,email:p.email,active:p.active??true,platformAdmin:Boolean(p.platformAdmin),mustChangePassword:p.mustChangePassword,
+      memberships:this.store.db.memberships.filter(m=>m.userId===p.id).map(m=>({agencyId:m.agencyId,agencyCode:this.store.db.agencies.find(a=>a.id===m.agencyId)?.agencyCode??"Unknown",roleKey:m.roleKey??m.role,expiresOn:m.expiresOn??null}))}))
+      .filter(p=>(!q||`${p.fullName} ${p.username} ${p.email} ${p.memberships.map(m=>m.agencyCode).join(" ")}`.toLowerCase().includes(q))&&(!query.agencyId||p.memberships.some(m=>m.agencyId===query.agencyId))).sort((a,b)=>a.fullName.localeCompare(b.fullName)||a.id.localeCompare(b.id));
+    return {rows:structuredClone(rows.slice(query.page*50,query.page*50+50)),hasMore:rows.length>(query.page+1)*50};
   }
 
   async operatorAudit(query: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage> {
