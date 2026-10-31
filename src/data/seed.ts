@@ -91,6 +91,7 @@ export function emailFor(name: string) {
 }
 
 export interface LocalDatabase {
+  operatorLifecycle?: import("./types").AgencyLifecycleEvent[];
   consentPackets?: import('./consentPackets').ConsentPacket[];
   consentPacketTokens?: Record<string, { hash:string; expiresAt:string }>;
   consentPacketEvidence?: Record<string, import('./consentPackets').PacketEvidence>;
@@ -1689,3 +1690,4 @@ export const DEMO_NURSE_EMAIL = emailFor("Cameron Price");
 export const DEMO_HM_EMAIL = emailFor("James Wilson");
 export const DEMO_NURSE_USERNAME = DEMO_NURSE_EMAIL.split("@")[0];
 export const DEMO_HM_USERNAME = DEMO_HM_EMAIL.split("@")[0];
+

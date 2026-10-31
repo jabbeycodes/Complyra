@@ -665,7 +665,7 @@ export interface ComplyraApi {
   listPendingAgencies(): Promise<PendingAgency[]>;
   /** Operator only: every agency, any status (for the Rules console). */
   listAgencies(): Promise<PendingAgency[]>;
-  setAgencyStatus(agencyId: string, status: AgencyStatus): Promise<void>;
+  setAgencyStatus(agencyId: string, status: AgencyStatus, reason?: string, expectedStatus?: AgencyStatus): Promise<void>;
   loadWorkspace(session: SessionUser): Promise<WorkspaceView>;
   createRequirementDraft(input: {
     individualId: string;
@@ -4533,22 +4533,18 @@ export class LocalApi implements ComplyraApi {
       }));
   }
 
-  async setAgencyStatus(agencyId: string, status: AgencyStatus) {
+  async setAgencyStatus(agencyId: string, status: AgencyStatus, reason = "Agency registration reviewed", expectedStatus?: AgencyStatus) {
     const session = assertSession(this.store);
-    if (!session.platformAdmin) {
-      throw new Error("Only the Complyrer operator can approve agency setups.");
-    }
+    if (!session.platformAdmin) throw new Error("Only the Complyrer operator can review agencies.");
     const agency = this.store.db.agencies.find((row) => row.id === agencyId);
     if (!agency) throw new Error("Agency not found.");
+    if (!reason.trim() || reason.length > 1000) throw new Error("Add a reason of at most 1000 characters.");
+    if (expectedStatus && expectedStatus !== agency.status) throw new Error("Agency changed. Refresh and try again.");
+    if (agency.status !== "pending" || !["active", "rejected"].includes(status)) throw new Error("Invalid agency transition.");
+    (this.store.db.operatorLifecycle ??= []).push({ id: crypto.randomUUID(), agencyId, actorId: session.userId,
+      fromStatus: agency.status, toStatus: status, reason: reason.trim(), createdAt: new Date().toISOString() });
     agency.status = status;
-    log(
-      this.store,
-      session,
-      "agency.status",
-      `${agency.name} marked ${status}`,
-      "agency",
-      agency.id,
-    );
+    log(this.store, session, "agency.status", reason.trim(), "agency", agency.id);
     await persistMeta(this.store);
   }
 
@@ -15615,3 +15611,4 @@ export function createLocalApi(store?: MemoryStore) {
 }
 
 export { browserStore };
+

@@ -23,6 +23,10 @@ export type PacketStatus = "open" | "archived";
 export type AgencyProvisionedBy = "self" | "platform";
 export type AgencyStatus = "pending" | "active" | "rejected";
 
+export interface AgencyLifecycleEvent {
+  id: string; agencyId: string; actorId: string; fromStatus: AgencyStatus; toStatus: AgencyStatus; reason: string; createdAt: string;
+}
+
 export interface Agency {
   id: string;
   name: string;

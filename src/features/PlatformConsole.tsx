@@ -27,6 +27,9 @@ export default function PlatformConsole({
       }),
     [session],
   );
+  const [reviewReason, setReviewReason] = useState("");
+  const [busyAgency, setBusyAgency] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [stateCode, setStateCode] = useState("MO");
@@ -47,15 +50,27 @@ export default function PlatformConsole({
   async function load() {
     const [pendingRows, everyAgency] = await Promise.all([
       api.listPendingAgencies(),
-      api.listAgencies().catch(() => [] as PendingAgency[]),
+      api.listAgencies(),
     ]);
     setPending(pendingRows);
     setAllAgencies(everyAgency.filter((a) => a.status === "active"));
   }
 
   useEffect(() => {
-    void load().catch((err) => setError((err as Error).message));
+    void load().catch((err) => setError((err as Error).message)).finally(() => setLoading(false));
   }, [api]);
+
+  async function review(agency: PendingAgency, status: "active" | "rejected") {
+    setBusyAgency(agency.id); setError("");
+    try {
+      await api.setAgencyStatus(agency.id, status, reviewReason, agency.status);
+      await load(); await refresh(); setReviewReason("");
+      onSaved(`${agency.agencyCode}: ${status}.`);
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusyAgency(null); }
+  }
+
+  if (!session?.platformAdmin) return <p role="alert">Operator access required.</p>;
 
   return (
     <>
@@ -68,9 +83,13 @@ export default function PlatformConsole({
           {error}
         </p>
       )}
-      <section className="panel">
+      <section className="panel" aria-busy={loading || busyAgency !== null}>
         <h2>Pending agencies</h2>
-        {pending.length === 0 ? (
+        {loading && <p role="status">Loading agency reviews…</p>}
+        <label className="form-label">Review reason (required)
+          <input value={reviewReason} onChange={(e) => setReviewReason(e.target.value)} maxLength={1000} />
+        </label>
+        {loading ? null : pending.length === 0 && !error ? (
           <p className="muted">No agencies are waiting.</p>
         ) : (
           <div className="table-scroll">
@@ -95,23 +114,16 @@ export default function PlatformConsole({
                       <button
                         className="button primary"
                         type="button"
-                        onClick={async () => {
-                          await api.setAgencyStatus(agency.id, "active");
-                          await load();
-                          await refresh();
-                          onSaved(`${agency.agencyCode} is active.`);
-                        }}
+                        disabled={busyAgency !== null || !reviewReason.trim()}
+                        onClick={() => void review(agency, "active")}
                       >
                         <Check size={16} /> Approve
                       </button>
                       <button
                         className="button"
                         type="button"
-                        onClick={async () => {
-                          await api.setAgencyStatus(agency.id, "rejected");
-                          await load();
-                          onSaved(`${agency.agencyCode} was rejected.`);
-                        }}
+                        disabled={busyAgency !== null || !reviewReason.trim()}
+                        onClick={() => void review(agency, "rejected")}
                       >
                         <X size={16} /> Reject
                       </button>
