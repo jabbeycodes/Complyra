@@ -1880,7 +1880,7 @@ export class HostedApi implements ComplyraApi {
       return rows.filter(
         (row) =>
           !isStaleConsentNotification(
-            { type: row.type, entityId: row.entity_id },
+            { type: row.type, entityId: row.entity_id, entityType: row.entity_type },
             livePairs,
             outstandingPacketIds,
           ),

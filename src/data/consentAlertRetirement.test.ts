@@ -175,4 +175,22 @@ test('pure pairs: one live pair per gap; staleness matrix', () => {
         false,
         'event rows are history, never stale',
     );
+    assert.equal(
+        isStaleConsentNotification(
+            { type: 'consent.missing', entityId: 'rights-entity-1', entityType: 'rights_packet' },
+            pairs,
+            noPackets,
+        ),
+        false,
+        'rights-packet alerts reuse the consent types but track packets, not gaps',
+    );
+    assert.equal(
+        isStaleConsentNotification(
+            { type: 'consent.missing', entityId: 'c-active-soon', entityType: 'consent' },
+            pairs,
+            noPackets,
+        ),
+        true,
+        'the consent register’s own rows are judged by the gap pairs',
+    );
 });

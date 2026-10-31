@@ -171,13 +171,21 @@ export function consentAlertPairKey(type: string, entityId: string | null): stri
  * (type, entity) pair is not a current gap, or its packet is no
  * longer outstanding. Non-alert types (e.g. consent.packet_signed)
  * are never stale — they are the record that the work happened.
+ * Rights-packet alerts REUSE the consent.missing / consent.expiring
+ * types with entityType 'rights_packet', but they track packet
+ * states, not consent gaps — an explicit non-'consent' entityType
+ * exempts a row from the gap rule.
  */
 export function isStaleConsentNotification(row: {
     type: string;
     entityId: string | null;
+    entityType?: string | null;
 }, livePairs: ReadonlySet<string>, outstandingPacketIds: ReadonlySet<string>): boolean {
-    if (row.type === 'consent.missing' || row.type === 'consent.expiring')
+    if (row.type === 'consent.missing' || row.type === 'consent.expiring') {
+        if (row.entityType && row.entityType !== 'consent')
+            return false;
         return !livePairs.has(consentAlertPairKey(row.type, row.entityId));
+    }
     if (row.type === 'consent.packet_outstanding')
         return !(row.entityId !== null && outstandingPacketIds.has(row.entityId));
     return false;
