@@ -20,6 +20,16 @@
 --    record_prn_dose demands the reason and words its over-stock error
 --    for the caller's role (a DSP cannot reconcile a count; the message
 --    names who can).
+--    CI fix-up (2026-10-31): the reason rule lives on a NEW 4-argument
+--    signature; the original 2-argument signature is kept alongside it
+--    as a legacy overload (see the bottom of this file). Dropping the
+--    2-argument form broke every pre-existing caller of it (the
+--    audit_workflows pgTAP suite failed with "function
+--    record_prn_dose(unknown, integer) does not exist"), and giving
+--    p_reason a default instead would have let the new function be
+--    called with no reason at all — so the two signatures coexist:
+--    overload resolution is unambiguous because the 4-argument form
+--    requires at least 3 arguments (p_reason has no default).
 -- 3. LATE MAR (batch 7): med_dose_marks gains the Late stamp + reason
 --    for marks recorded after the dose window ended. The APIs compute
 --    lateness (agency window, Central clock) and write these columns;
@@ -169,11 +179,13 @@ end $$;
 revoke all on function public.record_medication_delivery(uuid, numeric, numeric, date, numeric, text) from public, anon;
 grant execute on function public.record_medication_delivery(uuid, numeric, numeric, date, numeric, text) to authenticated;
 
--- Same replacement pattern for the PRN dose RPC: reason becomes a
--- required argument, follow-up optional; the old 2-argument signature
--- is dropped.
-drop function if exists public.record_prn_dose(uuid, numeric);
-
+-- The PRN dose RPC gains a new 4-argument signature: reason becomes a
+-- required argument, follow-up optional. Unlike the delivery RPC
+-- above, the old 2-argument signature is NOT dropped — it is restored
+-- verbatim as a legacy overload after the new function (see below),
+-- because pre-existing callers invoke the 2-argument form and there is
+-- no default that could stand in for a reason without defeating the
+-- reason requirement itself.
 create or replace function public.record_prn_dose(p_medication_id uuid, p_pills numeric, p_reason text, p_follow_up text default null)
 returns void language plpgsql security definer set search_path = public, pg_temp as $$
 declare m medications%rowtype; remaining numeric; staff_name text; why text := nullif(btrim(coalesce(p_reason, '')), '');
@@ -212,3 +224,41 @@ end $$;
 
 revoke all on function public.record_prn_dose(uuid, numeric, text, text) from public, anon;
 grant execute on function public.record_prn_dose(uuid, numeric, text, text) to authenticated;
+
+-- LEGACY OVERLOAD (CI fix-up, 2026-10-31): the original 2-argument
+-- record_prn_dose from 20260915027000_atomic_medication_counts,
+-- restored verbatim so every pre-existing caller of that signature
+-- keeps working (the audit_workflows pgTAP suite calls it directly).
+-- It predates the PRN audit record, so it stores no reason/follow-up
+-- (both columns stay null) and keeps the original generic over-stock
+-- wording. The reason requirement applies to the new 4-argument
+-- signature only, and that is safe: the shipped app has exactly one
+-- RPC caller (HostedApi.logPrnDose), which always invokes the
+-- 4-argument form and itself refuses a blank reason before calling —
+-- the 2-argument form is not reachable from the shipped UI.
+create or replace function public.record_prn_dose(p_medication_id uuid, p_pills numeric)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare m medications%rowtype; remaining numeric; staff_name text;
+begin
+  select * into m from medications where id = p_medication_id for update;
+  if m.id is null or m.kind <> 'prn' or not private.can_read_individual(m.agency_id, m.individual_id)
+    or not private.role_key_in(m.agency_id, array['administrator','house_manager','degreed_professional_manager','nurse','dsp']) then
+    raise exception 'PRN medication not found or dose access denied.';
+  end if;
+  if p_pills is null or p_pills::text in ('NaN','Infinity','-Infinity') or p_pills <= 0 then
+    raise exception 'Enter how many pills were given.';
+  end if;
+  if p_pills > m.remaining_pills then
+    raise exception 'The dose exceeds the recorded stock. Reconcile the count first.';
+  end if;
+  remaining := m.remaining_pills - p_pills;
+  select full_name into staff_name from profiles where id = auth.uid();
+  update medications set remaining_pills = remaining where id = m.id;
+  insert into prn_dose_logs(agency_id, medication_id, logged_on, pills_used, remaining_after, logged_by, logged_by_user_id)
+    values(m.agency_id, m.id, current_date, p_pills, remaining, coalesce(staff_name, ''), auth.uid());
+  insert into audit_events(agency_id, actor_id, action, target_type, target_id, detail)
+    values(m.agency_id, auth.uid(), 'medication.prn', 'medication', m.id, 'Recorded PRN dose: ' || p_pills::text);
+end $$;
+
+revoke all on function public.record_prn_dose(uuid, numeric) from public, anon;
+grant execute on function public.record_prn_dose(uuid, numeric) to authenticated;
