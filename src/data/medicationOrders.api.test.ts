@@ -63,7 +63,7 @@ test("activating an order projects it onto the MAR; discontinuing takes it off",
   assert.equal(draft.status, "draft");
   assert.equal(draft.medicationId, null);
 
-  const active = await api.activateMedicationOrder(draft.id);
+  const active = await api.activateMedicationOrder(draft.id, { initialCount: 30 });
   assert.equal(active.status, "active");
   assert.ok(active.medicationId);
 
@@ -107,7 +107,7 @@ test("a house manager can start a reconciliation for their home; only a nurse si
     prescriberName: "Dr. Rivera",
     reason: "Sleep",
     startDate: "2026-10-01",
-  }).then((order) => api.activateMedicationOrder(order.id));
+  }).then((order) => api.activateMedicationOrder(order.id, { initialCount: 30 }));
 
   await api.signIn(login(DEMO_HM_USERNAME));
   const started = await api.startReconciliation({
@@ -166,7 +166,7 @@ test("the worklist lists drafts and flags an expired active order", async () => 
     startDate: "2025-01-01",
     endReviewDate: "2025-06-01",
   });
-  await api.activateMedicationOrder(draft.id);
+  await api.activateMedicationOrder(draft.id, { initialCount: 30 });
 
   const worklist = await api.listMedicationOrderWorklist();
   const row = worklist.find((order) => order.id === draft.id);

@@ -1,6 +1,13 @@
 import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { formatPillCount, medCountdown } from "./mobile/medcount";
+import { formatCentralTime } from "./mobile/mar";
+import type {
+  MedDoseMark,
+  MedInventoryView,
+  PrnDoseLog,
+} from "../data/types";
 import {
   ArrowLeft,
   Download,
@@ -10,6 +17,11 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Badge, DueChip, Empty, formatDate, PageHeading } from "../components";
+import StatusBadge from "../components/StatusBadge";
+import {
+  medSupplyBadgeLabel,
+  medSupplyStatusFromInventory,
+} from "../data/complianceStatus";
 import { useData } from "../data/DataProvider";
 import {
   canLogPrnDose,
@@ -114,6 +126,43 @@ export default function IndividualChart({
   // Issue #80: ISP data (hook must run before the early return below).
   const ispEnabled = session !== null && canSeeShiftNotes(session.roleKey);
   const isp = useIspData(api, individualId, ispEnabled);
+
+  // Med cluster: the board's headline count is the countdown figure (the
+  // same baseline-and-burn-down number the mobile MAR shows), and the PRN
+  // section lists the per-dose audit records. Loaded here (hooks before
+  // the early return); child cards keep their own loads.
+  const medsEnabled = session !== null && canSeeMeds(session.roleKey);
+  const [medViews, setMedViews] = useState<MedInventoryView[] | null>(null);
+  const [medMarks, setMedMarks] = useState<MedDoseMark[]>([]);
+  const [prnLogs, setPrnLogs] = useState<PrnDoseLog[]>([]);
+  const [prnDraft, setPrnDraft] = useState<
+    Record<string, { reason: string; followUp: string }>
+  >({});
+  useEffect(() => {
+    if (!medsEnabled) return;
+    let live = true;
+    const today = todayIso();
+    const from = new Date(Date.now() - 370 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    Promise.all([
+      api.getMedInventory(individualId),
+      api.getMedDoseMarksInRange(individualId, from, today),
+      api.listPrnDoses(individualId),
+    ])
+      .then(([views, marks, logs]) => {
+        if (!live) return;
+        setMedViews(views);
+        setMedMarks(marks);
+        setPrnLogs(logs);
+      })
+      .catch(() => {
+        if (live) setMedViews(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, individualId, medsEnabled, workspace]);
 
   if (!session || !stack || !person) return null;
 
@@ -572,6 +621,25 @@ export default function IndividualChart({
             {stack.medications.length === 0 && <p>No medications on this chart.</p>}
             {stack.medications.map((med) => (
               <article key={med.id} className="obligation-card med-card">
+                {(() => {
+                  // Headline = the countdown figure (newest count baseline
+                  // minus Given marks and PRN doses since), the same number
+                  // the mobile MAR shows. The stored row drifts on hosted
+                  // because scheduled marks never decrement it.
+                  const view = medViews?.find(
+                    (row) => row.medicationId === med.id,
+                  );
+                  const countdown = view
+                    ? medCountdown(view, medMarks, todayIso())
+                    : null;
+                  const neverCounted = countdown
+                    ? !countdown.hasBaseline
+                    : false;
+                  const medLogs = prnLogs.filter(
+                    (log) => log.medicationId === med.id,
+                  );
+                  return (
+                    <>
                 <header>
                   <span className={`kind-pill ${med.kind}`}>{med.kind}</span>
                   {med.controlled && (
@@ -580,30 +648,76 @@ export default function IndividualChart({
                     </span>
                   )}
                   <h3>{med.name}</h3>
-                  {med.low && <Badge status="Due soon" />}
+                  {/* One supply state per med, from the same inventory
+                      status the forecast card below renders — never two
+                      different states (e.g. "Due soon" here and a
+                      different band there), and never "Expired" for a
+                      stocked med. Falls back to the stored-row low flag
+                      only until the inventory views load. */}
+                  {view ? (
+                    !neverCounted && view.status !== "ok" ? (
+                      <StatusBadge
+                        status={medSupplyStatusFromInventory(view.status)}
+                        label={medSupplyBadgeLabel(
+                          view.status,
+                          view.lastCountedOn,
+                        )}
+                        size="sm"
+                      />
+                    ) : null
+                  ) : med.low ? (
+                    <Badge status="Due soon" />
+                  ) : null}
                 </header>
                 <p>
-                  {med.strength} · {med.remainingPills} pills left
+                  {med.strength} ·{" "}
+                  {countdown
+                    ? neverCounted
+                      ? "No count recorded yet"
+                      : `${formatPillCount(countdown.pillsLeft ?? 0)} pills left`
+                    : `${med.remainingPills} pills left`}
                   {med.kind === "scheduled"
-                    ? ` · ${med.pillsPerDay} per day · ${
-                        med.daysLeft === null ? "—" : `${med.daysLeft} days left`
-                      }`
+                    ? countdown && !neverCounted
+                      ? ` · ${med.pillsPerDay} per day · ${
+                          countdown.daysLeft === null
+                            ? "—"
+                            : `${countdown.daysLeft} days left`
+                        }`
+                      : countdown
+                        ? ""
+                        : ` · ${med.pillsPerDay} per day · ${
+                            med.daysLeft === null
+                              ? "—"
+                              : `${med.daysLeft} days left`
+                          }`
                     : " · PRN, no automatic drop"}
-                  {med.lastDeliveryOn
-                    ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
-                    : ""}
+                  {view
+                    ? view.lastCountedOn
+                      ? ` · Last counted ${formatDate(view.lastCountedOn)}`
+                      : ""
+                    : med.lastDeliveryOn
+                      ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
+                      : ""}
                 </p>
                 {canRecordDelivery(session.roleKey) && (
                   <DeliveryForm
-                    defaultRemaining={med.remainingPills}
+                    defaultRemaining={
+                      countdown && !neverCounted
+                        ? (countdown.pillsLeft ?? med.remainingPills)
+                        : med.remainingPills
+                    }
                     defaultPerDay={med.pillsPerDay}
                     scheduled={med.kind === "scheduled"}
-                    onSave={(remainingPills, pillsPerDay) =>
+                    expectedPills={
+                      countdown && !neverCounted ? countdown.pillsLeft : null
+                    }
+                    onSave={(remainingPills, pillsPerDay, varianceReason) =>
                       run(() =>
                         api.recordMedDelivery({
                           medicationId: med.id,
                           remainingPills,
                           pillsPerDay,
+                          varianceReason: varianceReason || undefined,
                         }),
                       )
                     }
@@ -611,12 +725,70 @@ export default function IndividualChart({
                 )}
                 {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
                   <div className="stack">
-                    <button
-                      className="button"
-                      onClick={() => run(() => api.logPrnDose(med.id, 1))}
+                    <form
+                      className="stack"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const draft = prnDraft[med.id] ?? {
+                          reason: "",
+                          followUp: "",
+                        };
+                        void run(() =>
+                          api
+                            .logPrnDose(med.id, {
+                              pills: 1,
+                              reason: draft.reason,
+                              followUp: draft.followUp || undefined,
+                            })
+                            .then(() => {
+                              setPrnDraft((prev) => ({
+                                ...prev,
+                                [med.id]: { reason: "", followUp: "" },
+                              }));
+                            }),
+                        );
+                      }}
                     >
-                      <Pill size={16} /> PRN given
-                    </button>
+                      <label>
+                        Why {med.name} was given (required)
+                        <input
+                          value={prnDraft[med.id]?.reason ?? ""}
+                          onChange={(event) =>
+                            setPrnDraft((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                reason: event.target.value,
+                                followUp: prev[med.id]?.followUp ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Follow-up note (optional)
+                        <input
+                          value={prnDraft[med.id]?.followUp ?? ""}
+                          onChange={(event) =>
+                            setPrnDraft((prev) => ({
+                              ...prev,
+                              [med.id]: {
+                                reason: prev[med.id]?.reason ?? "",
+                                followUp: event.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        className="button"
+                        type="submit"
+                        disabled={
+                          !(prnDraft[med.id]?.reason ?? "").trim()
+                        }
+                      >
+                        <Pill size={16} /> Log dose
+                      </button>
+                    </form>
                     <form
                       className="stack"
                       onSubmit={(event) => {
@@ -665,6 +837,29 @@ export default function IndividualChart({
                     </form>
                   </div>
                 )}
+                {med.kind === "prn" && medLogs.length > 0 && (
+                  <div>
+                    <strong>PRN dose history</strong>
+                    <ul className="person-renewals">
+                      {medLogs.slice(0, 8).map((log) => (
+                        <li key={log.id}>
+                          {formatDate(log.givenOn)} ·{" "}
+                          {formatCentralTime(log.givenAt)} —{" "}
+                          {formatPillCount(log.pills)} pill
+                          {log.pills === 1 ? "" : "s"} ·{" "}
+                          {log.reason || "No reason recorded"} · by{" "}
+                          {log.givenByName || "staff"}
+                          {log.followUp
+                            ? ` · Follow-up: ${log.followUp}`
+                            : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                    </>
+                  );
+                })()}
               </article>
             ))}
             {/* LIFEPATH-P6: inventory countdown (thresholds, corrections, history) */}
@@ -974,21 +1169,34 @@ function DeliveryForm({
   defaultRemaining,
   defaultPerDay,
   scheduled,
+  expectedPills,
   onSave,
 }: {
   defaultRemaining: number;
   defaultPerDay: number;
   scheduled: boolean;
-  onSave: (remaining: number, perDay: number) => void;
+  /** The countdown's expected on-hand figure; a count that differs from
+   * it must carry a variance note (the API refuses it otherwise). */
+  expectedPills: number | null;
+  onSave: (remaining: number, perDay: number, varianceReason: string) => void;
 }) {
   const [remaining, setRemaining] = useState(String(defaultRemaining));
   const [perDay, setPerDay] = useState(String(defaultPerDay || 1));
+  const [varianceReason, setVarianceReason] = useState("");
+  const differs =
+    expectedPills !== null &&
+    remaining.trim() !== "" &&
+    Number(remaining) !== expectedPills;
   return (
     <form
       className="renewal-upload"
       onSubmit={(e) => {
         e.preventDefault();
-        onSave(Number(remaining), scheduled ? Number(perDay) : 0);
+        onSave(
+          Number(remaining),
+          scheduled ? Number(perDay) : 0,
+          differs ? varianceReason : "",
+        );
       }}
     >
       <label>
@@ -1000,6 +1208,20 @@ function DeliveryForm({
           onChange={(e) => setRemaining(e.target.value)}
         />
       </label>
+      {expectedPills !== null && (
+        <p className="muted">
+          Expected on hand: {formatPillCount(expectedPills)} pills
+        </p>
+      )}
+      {differs && (
+        <label>
+          Count variance — why the count differs (required)
+          <input
+            value={varianceReason}
+            onChange={(e) => setVarianceReason(e.target.value)}
+          />
+        </label>
+      )}
       {scheduled && (
         <label>
           Pills per day
@@ -1011,7 +1233,11 @@ function DeliveryForm({
           />
         </label>
       )}
-      <button className="button primary" type="submit">
+      <button
+        className="button primary"
+        type="submit"
+        disabled={differs && !varianceReason.trim()}
+      >
         Record delivery count
       </button>
     </form>

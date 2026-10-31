@@ -892,6 +892,30 @@ export function marRecordingProblem(input: {
   return null;
 }
 
+/**
+ * True when a mark recorded at `now` falls after the dose window's end
+ * (dose time + windowAfterMinutes), judged on the same zoned clock as
+ * marRecordingProblem. A dose dated before today is always late; a dose
+ * dated after today is never late. Late marks stay allowed, but the APIs
+ * require a brief reason and stamp the mark Late.
+ */
+export function marLateRecording(input: {
+  doseDate: string;
+  doseTime: string;
+  now: Date;
+  windowAfterMinutes: number;
+  /** Judge "now" in this zone (the Central dose clock). Omitted = device local. */
+  timeZone?: string;
+}): boolean {
+  const doseDay = input.doseDate.slice(0, 10);
+  const nowClock = input.timeZone
+    ? zonedDayMinutes(input.now, input.timeZone)
+    : { date: localIsoDate(input.now), minutes: input.now.getHours() * 60 + input.now.getMinutes() };
+  if (doseDay < nowClock.date) return true;
+  if (doseDay > nowClock.date) return false;
+  return nowClock.minutes > hhmmToMinutes(input.doseTime) + input.windowAfterMinutes;
+}
+
 /** True once the dose window has been closed longer than the late-recording allowance. */
 export function recordingCostsAPoint(input: {
   doseDate: string;

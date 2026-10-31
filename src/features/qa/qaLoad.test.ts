@@ -6,6 +6,7 @@ import type {
   QaAuditSchedule,
   QaRankedSite,
 } from "../../data/qaAudit";
+import type { CorrectiveAction } from "../../data/correctiveActions";
 
 /**
  * Simulation batch 16: QA Review read empty (and slow) even though the
@@ -42,6 +43,35 @@ test("all three reads land when all succeed", async () => {
   assert.deepEqual(data.audits, [audit]);
   assert.deepEqual(data.schedules, [schedule]);
   assert.deepEqual(data.ranking, [ranked]);
+});
+
+test("corrective actions (PR #199) land, and degrade to empty — never blanking Reviews", async () => {
+  const action = { id: "ca-1" } as unknown as CorrectiveAction;
+  const landed = await loadQaPageData({
+    listAudits: async () => [audit],
+    listSchedules: async () => [schedule],
+    getRanking: async () => [ranked],
+    listCorrectiveActions: async () => [action],
+  });
+  assert.deepEqual(landed.correctiveActions, [action]);
+
+  const degraded = await loadQaPageData({
+    listAudits: async () => [audit],
+    listSchedules: async () => [schedule],
+    getRanking: async () => [ranked],
+    listCorrectiveActions: async () => {
+      throw new Error("actions down");
+    },
+  });
+  assert.deepEqual(degraded.audits, [audit]);
+  assert.deepEqual(degraded.correctiveActions, []);
+
+  const absent = await loadQaPageData({
+    listAudits: async () => [audit],
+    listSchedules: async () => [schedule],
+    getRanking: async () => [ranked],
+  });
+  assert.deepEqual(absent.correctiveActions, []);
 });
 
 test("an audits failure still propagates as the page error", async () => {

@@ -102,6 +102,8 @@ export default function MedicationOrdersCard({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<DraftForm>(EMPTY_FORM);
   const [discontinueId, setDiscontinueId] = useState<string | null>(null);
+  const [activateId, setActivateId] = useState<string | null>(null);
+  const [initialCount, setInitialCount] = useState("");
   const [discontinueReason, setDiscontinueReason] = useState("");
 
   async function reload() {
@@ -364,12 +366,15 @@ export default function MedicationOrdersCard({
                 )}
                 {canManage && (
                   <div className="chart-actions">
-                    {order.status === "draft" && (
+                    {order.status === "draft" && activateId !== order.id && (
                       <>
                         <button
                           className="button primary"
                           disabled={busy}
-                          onClick={() => void run(() => api.activateMedicationOrder(order.id))}
+                          onClick={() => {
+                            setActivateId(order.id);
+                            setInitialCount("");
+                          }}
                         >
                           Activate
                         </button>
@@ -381,6 +386,61 @@ export default function MedicationOrdersCard({
                           Edit
                         </button>
                       </>
+                    )}
+                    {order.status === "draft" && activateId === order.id && (
+                      <form
+                        className="renewal-upload"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          let ok = false;
+                          void run(async () => {
+                            await api.activateMedicationOrder(order.id, {
+                              initialCount:
+                                initialCount.trim() === ""
+                                  ? undefined
+                                  : Number(initialCount),
+                            });
+                            ok = true;
+                          }).then(() => {
+                            if (ok) setActivateId(null);
+                          });
+                        }}
+                      >
+                        <label>
+                          Initial count — pills on hand
+                          {order.medicationId
+                            ? " (required if this medication has no count yet)"
+                            : " (required)"}
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={initialCount}
+                            onChange={(e) => setInitialCount(e.target.value)}
+                            required={order.medicationId === null}
+                          />
+                        </label>
+                        <div className="chart-actions">
+                          <button
+                            className="button primary"
+                            type="submit"
+                            disabled={
+                              busy ||
+                              (order.medicationId === null &&
+                                initialCount.trim() === "")
+                            }
+                          >
+                            Confirm activation
+                          </button>
+                          <button
+                            className="button"
+                            type="button"
+                            onClick={() => setActivateId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
                     )}
                     {order.status === "active" && discontinueId !== order.id && (
                       <button

@@ -13,7 +13,13 @@ import type { SessionUser } from "./types";
  * still go through exactly as before.
  *
  * Keep this list in step with the SQL allow-list — a type missing from
- * the SQL list fails for EVERY caller ("Unsupported notice").
+ * the SQL list fails for EVERY caller ("Unsupported notice"). The two
+ * med.order_* types become valid when migration 20261031210000
+ * (PR #204) applies; this list mirrors the post-#204 SQL list, so the
+ * gate never suppresses an order notice the RPC can deliver once both
+ * changes are live. Allow-listed is not exempt: the order types still
+ * pass through the notify-other permission branch below, exactly like
+ * the other med.* types.
  */
 export const OPERATING_NOTICE_TYPES: ReadonlySet<string> = new Set([
   "med.refusal_review",
@@ -22,6 +28,8 @@ export const OPERATING_NOTICE_TYPES: ReadonlySet<string> = new Set([
   "med.late_recording",
   "med.unrecorded",
   "med.prn_repeat",
+  "med.order_expiring",
+  "med.order_expired",
   "documentation.missing_note",
   "accountability.warning",
   "accountability.writeup",

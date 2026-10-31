@@ -180,6 +180,10 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "acknowledgments.sign_own",
       "clinical.view",
       "audit.read",
+      // CORRECTIVE-ACTIONS (simulation batch 7): the house manager owns
+      // QA follow-up at their home — they must be able to start and
+      // resolve corrective actions, not just view them.
+      "correctiveActions.manage",
       // LIFE-EVENTS: record/edit/void timeline entries for their home.
       "lifeEvents.record",
       "mileage.manage",

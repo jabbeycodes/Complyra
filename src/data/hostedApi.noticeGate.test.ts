@@ -97,9 +97,33 @@ test("queueOperatingNotice makes NO rpc call for a type the RPC does not support
   const internals = api as unknown as NoticeInternals;
   await internals.queueOperatingNotice(
     makeSession({ permissions: { "clinical.view": true } }),
-    { ...noticeInput, userId: null, roleKey: "nurse", type: "med.order_expired" },
+    { ...noticeInput, userId: null, roleKey: "nurse", type: "med.order_unknown" },
   );
   assert.deepEqual(calls, []);
+});
+
+test("queueOperatingNotice DOES call the rpc for a permitted med order notice (PR #204)", async () => {
+  const { api, calls } = recordingApi();
+  const internals = api as unknown as NoticeInternals;
+  // med.order_expired joins the RPC allow-list with migration
+  // 20261031210000; a clinical session queueing it for the nursing
+  // role is permitted, so the gate must let the call through…
+  await internals.queueOperatingNotice(
+    makeSession({ permissions: { "clinical.view": true } }),
+    { ...noticeInput, userId: null, roleKey: "nurse", type: "med.order_expired" },
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, "queue_operating_notice");
+  assert.equal(calls[0].args.p_type, "med.order_expired");
+  // …while an unprivileged DSP queueing the same type for someone
+  // else is still gated off (allow-listed, not exempt).
+  await internals.queueOperatingNotice(makeSession(), {
+    ...noticeInput,
+    userId: "user-other",
+    roleKey: null,
+    type: "med.order_expiring",
+  });
+  assert.equal(calls.length, 1);
 });
 
 test("queueOperatingNotice DOES call the rpc for permitted cases", async () => {

@@ -102,17 +102,43 @@ test("an unrelated permission does not open the gate", () => {
 });
 
 test("types outside the SQL allow-list are refused for every caller", () => {
-  // med.order_expired / med.order_expiring are queued by the medication
-  // orders worklist but are not in the RPC's type list — they fail with
-  // "Unsupported notice" even for an administrator until a migration
-  // extends the list.
+  // A type the RPC does not know fails with "Unsupported notice" even
+  // for an administrator — the gate must skip those calls for everyone.
   const admin = session({
     permissions: { "clinical.view": true, "hub.view_team": true },
   });
-  for (const type of ["med.order_expired", "med.order_expiring"]) {
+  for (const type of ["med.order_unknown", "announcement.broadcast"]) {
     assert.equal(
       operatingNoticeBlockReason(admin, { type, userId: null, roleKey: "nurse" }),
       "unsupported notice type",
+      type,
+    );
+  }
+});
+
+test("med order types are allow-listed by PR #204 — permitted calls pass, unprivileged ones still refuse", () => {
+  // Migration 20261031210000 adds med.order_expiring / med.order_expired
+  // to the RPC allow-list (the medication-orders worklist queues them).
+  // The gate mirrors the post-#204 list: a caller holding a notify-other
+  // permission may queue them for the nursing role…
+  const clinical = session({ permissions: { "clinical.view": true } });
+  for (const type of ["med.order_expiring", "med.order_expired"]) {
+    assert.equal(
+      operatingNoticeBlockReason(clinical, { type, userId: null, roleKey: "nurse" }),
+      null,
+      type,
+    );
+    // …and anyone may queue one for themselves…
+    assert.equal(
+      operatingNoticeBlockReason(session(), { type, userId: "user-dsp", roleKey: null }),
+      null,
+      type,
+    );
+    // …but the types are NOT exempt like documentation.missing_note:
+    // an unprivileged caller notifying someone else is still refused.
+    assert.equal(
+      operatingNoticeBlockReason(session(), { type, userId: "user-other", roleKey: null }),
+      "signed-in user cannot notify other users",
       type,
     );
   }

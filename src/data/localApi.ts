@@ -166,7 +166,15 @@ import {
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
-import { canReadIndividual, assertCalendarDate } from "./access";
+import {
+  canActAtSite,
+  canReadIndividual,
+  assertCalendarDate,
+  correctiveActionInScope,
+  CORRECTIVE_ACTION_AGENCY_ROLES,
+  dspRecipientCoversIndividual,
+  staffActiveAtSite,
+} from "./access";
 import { assertSiteHasCapacity, countIndividualsAtSite } from "./siteCapacity";
 import type {
   AcknowledgmentPacket,
@@ -176,6 +184,7 @@ import type {
   AssignTrainingInput,
   ChecklistAnswer,
   DelegationFormPatch,
+  DelegationRecipient,
   DelegationTemplateVersion,
   DocumentVersion,
   DoseExceptionKind,
@@ -229,7 +238,7 @@ import type {
   SignatureSettings,
   UserSignature,
 } from "./types";
-import { blankDelegationForm } from "./types";
+import { blankDelegationForm, DELEGATION_ROSTER_ROWS } from "./types";
 import { DEFAULT_MONTHLY_DUE } from "./monthlyChecks";
 import {
   dspRatingChangedPayload,
@@ -379,6 +388,7 @@ import {
   blockForShiftLabel,
   shiftBlocksForSite,
   consecutiveRefusals,
+  marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
   type ScheduledDose,
@@ -913,12 +923,15 @@ export interface ComplyraApi {
     fromDate: string,
     toDate: string,
   ): Promise<import("./types").MedDoseMark[]>;
-  /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold. */
+  /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold.
+   * A first mark recorded after the dose window ends is stamped Late and
+   * requires a brief lateReason. */
   markMedDose(input: {
     medicationId: string;
     doseDate: string;
     doseTime: string;
     status: import("./types").MedDoseMarkStatus;
+    lateReason?: string;
   }): Promise<void>;
   // ===== MEDICATION ORDERS + RECONCILIATION =====
   /** Prescriber orders for one Individual, newest first. */
@@ -938,9 +951,13 @@ export interface ComplyraApi {
     orderId: string,
     patch: import("./types").UpdateMedicationOrderInput,
   ): Promise<import("./types").MedicationOrder>;
-  /** Activate a draft order: project it onto the MAR medication list. */
+  /** Activate a draft order: project it onto the MAR medication list.
+   * When the medication has no count on file yet, an initial count (pills
+   * on hand) is required and is recorded as its first delivery/count
+   * record; when a count already exists the initial count is optional. */
   activateMedicationOrder(
     orderId: string,
+    input?: { initialCount?: number },
   ): Promise<import("./types").MedicationOrder>;
   /** Discontinue an active order and clear its dose from the MAR. */
   discontinueMedicationOrder(
@@ -1020,8 +1037,17 @@ export interface ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    /** Required when the count differs from the expected on-hand figure. */
+    varianceReason?: string;
   }): Promise<void>;
-  logPrnDose(medicationId: string, pills?: number): Promise<void>;
+  logPrnDose(
+    medicationId: string,
+    input: { pills?: number; reason: string; followUp?: string },
+  ): Promise<void>;
+  /** Per-dose PRN administration records for one Individual, newest first. */
+  listPrnDoses(
+    individualId: string,
+  ): Promise<import("./types").PrnDoseLog[]>;
   /** Closes the open PRN follow-up so the repeat reminder stops. */
   recordPrnFollowup(
     medicationId: string,
@@ -1199,7 +1225,11 @@ export interface ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }): Promise<{ id: string }>;
+  /** DSPs whose own scope covers this Individual — the delegation recipient picker. */
+  listDelegationRecipients(individualId: string): Promise<DelegationRecipient[]>;
   /** Patch fields on the delegation form (purpose, procedures, instructing RN, rescind state, …). */
   updateDelegationForm(input: {
     obligationId: string;
@@ -5775,6 +5805,37 @@ export class LocalApi implements ComplyraApi {
     return db.medDoseMarks;
   }
 
+  private prnDoseLogRows(): import("./types").PrnDoseLog[] {
+    const db = this.store.db as LocalDatabase & {
+      prnDoseLogs?: import("./types").PrnDoseLog[];
+    };
+    if (!db.prnDoseLogs) db.prnDoseLogs = [];
+    return db.prnDoseLogs;
+  }
+
+  /** The inventory view for one medication (same construction as getMedInventory). */
+  private async p6viewForMed(
+    med: Medication,
+    today: string,
+  ): Promise<import("./types").MedInventoryView> {
+    const { projectMedInventory } = await this.p6lib();
+    return projectMedInventory({
+      med,
+      inventory:
+        this.p6rows().find((row) => row.medicationId === med.id) ?? null,
+      deliveries: this.store.db.medicationDeliveries.filter(
+        (delivery) => delivery.medicationId === med.id,
+      ),
+      // Local backend: logPrnDose decrements the medication row directly,
+      // so projectMedInventory falls back to the row count for PRN meds.
+      prnDoses: [],
+      doseExceptions: this.p6doseExceptions().filter(
+        (exception) => exception.medicationId === med.id,
+      ),
+      today,
+    });
+  }
+
   /** Assigned house DSPs are the on-duty writers in the no-clock-in v1. */
   private siteRequiredWriters(
     session: SessionUser,
@@ -6281,6 +6342,20 @@ export class LocalApi implements ComplyraApi {
     if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
       throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
     }
+    // A first mark recorded after the dose window ended is stamped Late
+    // and must carry a brief reason; corrections keep the original stamp
+    // (a fresh reason on a correction updates it).
+    const isLate = !existing && marLateRecording({
+      doseDate: day,
+      doseTime: input.doseTime,
+      now: clock.now,
+      windowAfterMinutes: rules.medWindowAfterMinutes,
+      timeZone: clock.timeZone,
+    });
+    const lateReason = (input.lateReason ?? "").trim();
+    if (isLate && !lateReason) {
+      throw new Error("This dose is past its recording window. Add a brief reason for the late entry.");
+    }
     const late = !existing && recordingCostsAPoint({
       doseDate: day,
       doseTime: input.doseTime,
@@ -6293,6 +6368,10 @@ export class LocalApi implements ComplyraApi {
       existing.markedBy = session.userId;
       existing.markedByName = session.fullName;
       existing.markedAt = now;
+      if (lateReason) {
+        existing.late = true;
+        existing.lateReason = lateReason;
+      }
     } else {
       rows.push({
         id: `mm-${crypto.randomUUID().slice(0, 8)}`,
@@ -6305,6 +6384,8 @@ export class LocalApi implements ComplyraApi {
         markedBy: session.userId,
         markedByName: session.fullName,
         markedAt: now,
+        late: isLate,
+        lateReason: isLate ? lateReason : null,
       });
     }
     if (late) {
@@ -6608,7 +6689,10 @@ export class LocalApi implements ComplyraApi {
     return { ...order };
   }
 
-  async activateMedicationOrder(orderId: string): Promise<MedicationOrder> {
+  async activateMedicationOrder(
+    orderId: string,
+    input?: { initialCount?: number },
+  ): Promise<MedicationOrder> {
     const { session, order } = this.medOrderOrThrow(orderId);
     if (!canManageMedicationOrders(session.roleKey)) {
       throw new Error("Only a nurse or Program Manager activates medication orders.");
@@ -6622,6 +6706,23 @@ export class LocalApi implements ComplyraApi {
     const existing = medicationId
       ? this.store.db.medications.find((row) => row.id === medicationId)
       : undefined;
+    // First count at setup: a medication with no count on file cannot go
+    // live at an invented zero — the activator records the pills on hand,
+    // which becomes the first delivery/count record (the existing path,
+    // not a bypass).
+    const hasCount = existing
+      ? this.store.db.medicationDeliveries.some(
+          (delivery) => delivery.medicationId === existing.id,
+        ) || existing.lastDeliveryOn !== null
+      : false;
+    const initialCount = input?.initialCount;
+    if (initialCount !== undefined) {
+      if (!Number.isFinite(initialCount) || initialCount < 0) {
+        throw new Error("Enter the initial count (pills on hand).");
+      }
+    } else if (!hasCount) {
+      throw new Error("Record the initial count (pills on hand) to activate this medication.");
+    }
     if (existing) {
       existing.name = fields.name;
       existing.strength = fields.strength;
@@ -6651,6 +6752,32 @@ export class LocalApi implements ComplyraApi {
         { agencyId: session.agencyId },
         { id: medicationId, individualId: order.individualId },
         { doseTimes: fields.kind === "scheduled" ? fields.doseTimes : [] },
+      );
+    }
+    if (medicationId && initialCount !== undefined) {
+      const med = this.store.db.medications.find((row) => row.id === medicationId)!;
+      const countedOn = todayIso();
+      med.remainingPills = initialCount;
+      med.lastDeliveryOn = countedOn;
+      med.lastCountdownOn = countedOn;
+      this.store.db.medicationDeliveries.push({
+        id: crypto.randomUUID(),
+        medicationId: med.id,
+        countedOn,
+        countedAt: now,
+        remainingPills: initialCount,
+        pillsPerDay: med.pillsPerDay,
+        recordedBy: session.userId,
+        expectedPills: null,
+        varianceReason: null,
+      });
+      log(
+        this.store,
+        session,
+        "medication.delivery",
+        `${session.fullName} counted ${med.name} at ${initialCount} pills`,
+        "medication",
+        med.id,
       );
     }
     order.status = "active";
@@ -7182,6 +7309,7 @@ export class LocalApi implements ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    varianceReason?: string;
   }) {
     const session = assertSession(this.store);
     if (!canRecordDelivery(session.roleKey)) {
@@ -7198,6 +7326,23 @@ export class LocalApi implements ComplyraApi {
     }
     const countedOn = input.countedOn ?? todayIso();
     assertCalendarDate(countedOn, "Use a valid count date.");
+    // Variance guard: a count that disagrees with the countdown's expected
+    // on-hand figure must carry an explanation — never a silent overwrite.
+    const { expectedCountNow, countVarianceProblem } = await this.p6lib();
+    const view = await this.p6viewForMed(med, todayIso());
+    const marks = this.medDoseMarkRows().filter(
+      (mark) => mark.medicationId === med.id,
+    );
+    const expected = expectedCountNow(view, marks, todayIso());
+    const problem = countVarianceProblem(
+      expected,
+      input.remainingPills,
+      input.varianceReason,
+    );
+    if (problem) throw new Error(problem);
+    const differs =
+      expected !== null &&
+      Math.round(expected * 100) !== Math.round(input.remainingPills * 100);
     med.remainingPills = input.remainingPills;
     med.pillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
     med.lastDeliveryOn = countedOn;
@@ -7210,6 +7355,8 @@ export class LocalApi implements ComplyraApi {
       remainingPills: med.remainingPills,
       pillsPerDay: med.pillsPerDay,
       recordedBy: session.userId,
+      expectedPills: expected,
+      varianceReason: differs ? (input.varianceReason?.trim() ?? null) : null,
     });
     log(
       this.store,
@@ -7222,7 +7369,10 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
-  async logPrnDose(medicationId: string, pills = 1) {
+  async logPrnDose(
+    medicationId: string,
+    input: { pills?: number; reason: string; followUp?: string },
+  ) {
     const session = assertSession(this.store);
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
@@ -7232,9 +7382,46 @@ export class LocalApi implements ComplyraApi {
       throw new Error("PRN medication not found.");
     }
     accessibleIndividual(this.store, session, med.individualId);
+    const pills = input.pills ?? 1;
     if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
-    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    const reason = (input.reason ?? "").trim();
+    if (!reason) throw new Error("Say why the PRN was given.");
+    if (pills > med.remainingPills) {
+      // The message names the fix the caller's role can actually take:
+      // counters reconcile it themselves; everyone else asks a counter.
+      const neverCounted =
+        med.lastDeliveryOn === null &&
+        !this.store.db.medicationDeliveries.some(
+          (delivery) => delivery.medicationId === med.id,
+        );
+      if (neverCounted) {
+        throw new Error(
+          canRecordDelivery(session.roleKey)
+            ? "No count has been recorded for this medication yet. Record the first count before logging a dose."
+            : "No count has been recorded for this medication yet. Ask your house manager, RN, or PM to record the first count.",
+        );
+      }
+      throw new Error(
+        canRecordDelivery(session.roleKey)
+          ? "The dose exceeds the recorded stock. Reconcile the count first."
+          : "The dose exceeds the recorded stock. Ask your house manager, RN, or PM to record the count first.",
+      );
+    }
     med.remainingPills = Math.max(0, med.remainingPills - pills);
+    this.prnDoseLogRows().push({
+      id: crypto.randomUUID(),
+      agencyId: med.agencyId,
+      individualId: med.individualId,
+      medicationId: med.id,
+      givenAt: new Date().toISOString(),
+      givenOn: todayIso(),
+      pills,
+      reason,
+      followUp: input.followUp?.trim() ? input.followUp.trim() : null,
+      givenByName: session.fullName,
+      givenByUserId: session.userId,
+      remainingAfter: med.remainingPills,
+    });
     log(
       this.store,
       session,
@@ -7310,6 +7497,23 @@ export class LocalApi implements ComplyraApi {
       med.id,
     );
     await persistMeta(this.store);
+  }
+
+  async listPrnDoses(
+    individualId: string,
+  ): Promise<import("./types").PrnDoseLog[]> {
+    const session = assertSession(this.store);
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    accessibleIndividual(this.store, session, individualId);
+    return this.prnDoseLogRows()
+      .filter(
+        (row) =>
+          row.individualId === individualId && row.agencyId === session.agencyId,
+      )
+      .sort((a, b) => b.givenAt.localeCompare(a.givenAt))
+      .map((row) => ({ ...row }));
   }
 
   async noteLateClockIn(input: {
@@ -9222,6 +9426,87 @@ export class LocalApi implements ComplyraApi {
     }
   }
 
+  /**
+   * DSPs who may receive a delegation for this Individual: active agency
+   * DSP memberships who are at the Individual's site NOW — membership
+   * home site, or an ACTIVE assignment to them or their site
+   * (dspRecipientCoversIndividual). Deliberately stricter than the read
+   * rule (dspScopeCoversIndividual ignores assignment endsOn so former
+   * DSPs can correct their own notes): a NEW delegation never goes to
+   * someone whose assignment has ended or not yet started.
+   */
+  private delegationRecipientsFor(
+    session: SessionUser,
+    person: IndividualRecord,
+  ): DelegationRecipient[] {
+    const today = todayIso();
+    const rows: DelegationRecipient[] = [];
+    for (const m of this.store.db.memberships) {
+      if (m.agencyId !== session.agencyId || m.roleKey !== "dsp") continue;
+      if (m.expiresOn && m.expiresOn < today) continue;
+      const profile = this.store.db.profiles.find((p) => p.id === m.userId);
+      if (!profile) continue;
+      if (
+        !dspRecipientCoversIndividual(
+          { userId: m.userId, agencyId: m.agencyId, siteId: m.siteId },
+          person,
+          this.store.db.assignments,
+          this.store.db.individuals,
+        )
+      ) {
+        continue;
+      }
+      rows.push({
+        userId: m.userId,
+        name: profile.fullName,
+        title: profile.jobTitle || "DSP",
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Validate picker selections against the eligible recipient list. */
+  private resolveDelegationRecipients(
+    session: SessionUser,
+    person: IndividualRecord,
+    recipientUserIds: string[] | undefined,
+  ): DelegationRecipient[] {
+    if (!recipientUserIds || recipientUserIds.length === 0) return [];
+    if (recipientUserIds.length > DELEGATION_ROSTER_ROWS) {
+      throw new Error("A delegation form holds at most 12 staff.");
+    }
+    const eligible = this.delegationRecipientsFor(session, person);
+    return recipientUserIds.map((userId) => {
+      const found = eligible.find((row) => row.userId === userId);
+      if (!found) {
+        throw new Error(
+          "Choose recipients from the staff who work at this individual's site.",
+        );
+      }
+      return found;
+    });
+  }
+
+  async listDelegationRecipients(individualId: string) {
+    const session = assertSession(this.store);
+    this.assertDelegationEditor(session);
+    const person = this.store.db.individuals.find(
+      (row) => row.id === individualId && row.agencyId === session.agencyId,
+    );
+    if (!person) throw new Error("Individual not found.");
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
+      throw new Error("Choose an individual at a site you can manage.");
+    }
+    return this.delegationRecipientsFor(session, person);
+  }
+
   async createDelegation(input: {
     individualId: string;
     taskTitle: string;
@@ -9230,6 +9515,8 @@ export class LocalApi implements ComplyraApi {
     templateVersion?: DelegationTemplateVersion;
     procedures?: string;
     observeReportDo?: string;
+    /** DSPs who receive the delegation; seeded onto the form roster. */
+    recipientUserIds?: string[];
   }) {
     const session = assertSession(this.store);
     this.assertDelegationEditor(session);
@@ -9238,16 +9525,40 @@ export class LocalApi implements ComplyraApi {
     );
     if (!person) throw new Error("Individual not found.");
     accessibleIndividual(this.store, session, person.id);
-    if (!canAccessSite(session, person.siteId)) {
+    // Site scope honors staff assignments, not just the membership home
+    // site (simulation batch 10: an agency-wide nurse whose homes come
+    // from assignments was refused at both of her assigned sites).
+    // Mirrors private.can_read_site via canActAtSite.
+    if (
+      !canActAtSite(
+        session,
+        person.siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
       throw new Error("Choose an individual at a site you can manage.");
     }
     const taskTitle = input.taskTitle.trim();
     if (!taskTitle) throw new Error("Name the delegated task.");
     if (!input.purpose.trim()) throw new Error("Describe the purpose of the task.");
+    const recipients = this.resolveDelegationRecipients(
+      session,
+      person,
+      input.recipientUserIds,
+    );
     const form = blankDelegationForm(input.templateVersion ?? "complyrer_improved");
     form.purpose = input.purpose.trim();
     form.procedures = input.procedures?.trim() ?? "";
     form.observeReportDo = input.observeReportDo?.trim() ?? "";
+    recipients.forEach((recipient, i) => {
+      form.roster[i] = {
+        ...form.roster[i],
+        printName: recipient.name,
+        title: recipient.title,
+        staffUserId: recipient.userId,
+      };
+    });
     const item: ObligationItem = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -9623,6 +9934,13 @@ export class LocalApi implements ComplyraApi {
 
   // ===== AUDIT-READINESS IMPL (corrective actions) =====
   // AUDIT-READINESS: corrective-action workflow (LocalApi, in-memory).
+  // Site scope (reviewer HOLD fix-up, PR #199): every action belongs to
+  // a home. Reads and writes follow correctiveActionInScope — agency
+  // management and auditors see the whole agency; everyone else reaches
+  // an action only through its site (membership home or an active
+  // assignment there); a site-less action is agency-level, management
+  // only. Mirrors private.corrective_action_in_scope in
+  // 20261031170000_hm_corrective_actions_seed.sql.
   private correctiveActionsOf() {
     return (this.store.db.correctiveActions ??= []);
   }
@@ -9631,12 +9949,116 @@ export class LocalApi implements ComplyraApi {
     assertCan(session, "correctiveActions.manage");
   }
 
+  private actionInScope(session: SessionUser, action: CorrectiveAction): boolean {
+    return correctiveActionInScope(
+      session,
+      action,
+      this.store.db.assignments,
+      this.store.db.individuals,
+    );
+  }
+
+  /** Agency-management tier: a record's site never narrows these users. */
+  private isCorrectiveActionManager(session: SessionUser): boolean {
+    return (
+      session.platformAdmin ||
+      (CORRECTIVE_ACTION_AGENCY_ROLES as readonly string[]).includes(session.roleKey)
+    );
+  }
+
   private findCorrectiveAction(session: SessionUser, id: string) {
     const action = this.correctiveActionsOf().find(
-      (row) => row.id === id && row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
+      (row) => row.id === id && this.actionInScope(session, row),
     );
     if (!action) throw new Error("Corrective action not found.");
     return action;
+  }
+
+  /** The assignee must currently work at the action's home: membership
+   *  home site there, or an ACTIVE staff assignment that places them
+   *  there — never an assignment that has ended or not yet started. */
+  private assertCorrectiveActionAssignee(
+    session: SessionUser,
+    assigneeId: string,
+    siteId: string,
+  ) {
+    const member = this.store.db.memberships.find(
+      (row) => row.agencyId === session.agencyId && row.userId === assigneeId,
+    );
+    const today = todayIso();
+    if (
+      !member ||
+      (member.expiresOn && member.expiresOn < today) ||
+      !staffActiveAtSite(
+        { userId: member.userId, agencyId: member.agencyId, siteId: member.siteId },
+        siteId,
+        this.store.db.assignments,
+        this.store.db.individuals,
+      )
+    ) {
+      throw new Error("Assign corrective actions to staff who work at that home.");
+    }
+  }
+
+  /** Validate a resolved (site, assignee) pair for create/update. */
+  private assertCorrectiveActionPlacement(
+    session: SessionUser,
+    siteId: string | null,
+    assigneeId: string | null,
+  ) {
+    if (!siteId) return;
+    const site = this.store.db.sites.find(
+      (row) => row.id === siteId && row.agencyId === session.agencyId,
+    );
+    if (!site) throw new Error("Choose a home in this agency.");
+    if (
+      !this.isCorrectiveActionManager(session) &&
+      !canActAtSite(session, siteId, this.store.db.assignments, this.store.db.individuals)
+    ) {
+      throw new Error("Choose a home you manage.");
+    }
+    if (assigneeId) this.assertCorrectiveActionAssignee(session, assigneeId, siteId);
+  }
+
+  /**
+   * Resolve the home a NEW corrective action belongs to, in order: the
+   * QA audit that raised it, the explicit site, the creator's home
+   * (site-scoped creators' actions belong to their home), then the
+   * assignee's home (so a manager's assignment lands in the assignee's
+   * house). Null survives only for agency-level actions.
+   */
+  private resolveNewCorrectiveActionSite(
+    session: SessionUser,
+    input: {
+      siteId?: string | null;
+      qaAuditId?: string | null;
+      assignedToUserId?: string | null;
+    },
+  ): { siteId: string | null; qaAuditId: string | null } {
+    const db = this.store.db;
+    let siteId = input.siteId ?? null;
+    const qaAuditId = input.qaAuditId ?? null;
+    if (qaAuditId) {
+      const audit = (db.qaAudits ?? []).find(
+        (row) => row.id === qaAuditId && row.agencyId === session.agencyId,
+      );
+      if (!audit) throw new Error("QA review not found.");
+      if (siteId && siteId !== audit.siteId) {
+        throw new Error("The corrective action's home must match its QA review.");
+      }
+      siteId = audit.siteId;
+    }
+    if (!siteId && !this.isCorrectiveActionManager(session) && session.siteId) {
+      siteId = session.siteId;
+    }
+    if (!siteId && input.assignedToUserId) {
+      const member = db.memberships.find(
+        (row) => row.agencyId === session.agencyId && row.userId === input.assignedToUserId,
+      );
+      if (member?.siteId) siteId = member.siteId;
+    }
+    this.assertCorrectiveActionPlacement(session, siteId, input.assignedToUserId ?? null);
+    return { siteId, qaAuditId };
   }
 
   private assigneeName(session: SessionUser, userId: string | null): string | null {
@@ -9653,9 +10075,7 @@ export class LocalApi implements ComplyraApi {
   }): Promise<CorrectiveAction[]> {
     const session = assertSession(this.store);
     const now = new Date();
-    let rows = this.correctiveActionsOf().filter(
-      (row) => row.agencyId === session.agencyId && ((isAgencyWideViewer(session) && session.roleKey !== "hr") || row.createdByUserId === session.userId || row.assignedToUserId === session.userId),
-    );
+    let rows = this.correctiveActionsOf().filter((row) => this.actionInScope(session, row));
     if (input?.assignedToUserId) {
       rows = rows.filter((row) => row.assignedToUserId === input.assignedToUserId);
     }
@@ -9674,6 +10094,7 @@ export class LocalApi implements ComplyraApi {
     if (errors.length > 0) throw new Error(errors[0]);
     const assigneeId = input.assignedToUserId ?? null;
     if (assigneeId) this.requireAgencyProfile(session, assigneeId);
+    const placement = this.resolveNewCorrectiveActionSite(session, input);
     const now = new Date().toISOString();
     const action: CorrectiveAction = {
       id: crypto.randomUUID(),
@@ -9686,6 +10107,8 @@ export class LocalApi implements ComplyraApi {
       storedStatus: "open",
       linkedRiskId: input.linkedRiskId ?? null,
       linkedRiskSource: input.linkedRiskSource ?? null,
+      siteId: placement.siteId,
+      qaAuditId: placement.qaAuditId,
       createdByUserId: session.userId,
       createdAt: now,
       resolvedAt: null,
@@ -9725,6 +10148,16 @@ export class LocalApi implements ComplyraApi {
       });
       if (errors.length > 0) throw new Error(errors[0]);
       action.dueOn = input.dueOn?.trim() || null;
+    }
+    if (input.siteId !== undefined || input.assignedToUserId !== undefined) {
+      const nextSiteId = input.siteId !== undefined ? input.siteId : action.siteId;
+      const nextAssigneeId =
+        input.assignedToUserId !== undefined ? input.assignedToUserId : action.assignedToUserId;
+      if (input.siteId === null && action.siteId && !this.isCorrectiveActionManager(session)) {
+        throw new Error("Only agency management can move an action agency-wide.");
+      }
+      this.assertCorrectiveActionPlacement(session, nextSiteId, nextAssigneeId);
+      if (input.siteId !== undefined) action.siteId = input.siteId;
     }
     if (input.description !== undefined) action.description = input.description?.trim() ?? "";
     if (input.assignedToUserId !== undefined) {
@@ -11211,6 +11644,7 @@ export class LocalApi implements ComplyraApi {
       0,
       Math.round((med.remainingPills + input.quantityDelta) * 100) / 100,
     );
+    const expectedPills = med.remainingPills;
     med.remainingPills = next;
     med.lastDeliveryOn = countedOn;
     med.lastCountdownOn = countedOn;
@@ -11222,6 +11656,8 @@ export class LocalApi implements ComplyraApi {
       remainingPills: next,
       pillsPerDay: med.pillsPerDay,
       recordedBy: session.userId,
+      expectedPills,
+      varianceReason: reason,
     });
     log(
       this.store,

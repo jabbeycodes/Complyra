@@ -144,6 +144,8 @@ test("correctiveActionLine derives overdue from the due date, in words", () => {
     storedStatus: "open",
     linkedRiskId: null,
     linkedRiskSource: null,
+    siteId: null,
+    qaAuditId: null,
     createdByUserId: "u1",
     createdAt: "2019-12-01T00:00:00.000Z",
     resolvedAt: null,

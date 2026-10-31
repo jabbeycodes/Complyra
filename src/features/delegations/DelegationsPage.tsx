@@ -9,6 +9,7 @@ import {
   blankDelegationForm,
   delegationFormStatus,
   delegationReviewState,
+  type DelegationRecipient,
 } from "../../data/types";
 import DelegationFormDetail from "./DelegationFormDetail";
 import DelegationTemplatesSection from "./DelegationTemplatesSection";
@@ -208,9 +209,10 @@ function NewDelegationForm({
     purpose: string;
     procedures?: string;
     observeReportDo?: string;
+    recipientUserIds?: string[];
   }) => void;
 }) {
-  const { session, workspace } = useData();
+  const { api, session, workspace } = useData();
   const sites = workspace?.sites ?? [];
   const lockedSiteId = session ? lockedSiteIdFor(session) : null;
   const [siteId, setSiteId] = useState(lockedSiteId ?? "");
@@ -219,6 +221,9 @@ function NewDelegationForm({
   const [purpose, setPurpose] = useState("");
   const [procedures, setProcedures] = useState("");
   const [observeReportDo, setObserveReportDo] = useState("");
+  const [recipients, setRecipients] = useState<DelegationRecipient[]>([]);
+  const [recipientIds, setRecipientIds] = useState<string[]>([]);
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
   const selectedSite = sites.find((site) => site.id === siteId);
   const people = individualsAtSite(workspace?.individuals ?? [], selectedSite);
   useEffect(() => {
@@ -226,12 +231,43 @@ function NewDelegationForm({
       setIndividualId("");
     }
   }, [individualId, people]);
+  // The recipient list is scoped by the API to DSPs who work with the
+  // chosen Individual (their home site or an assignment) — never typed
+  // by hand, so a delegation can't name staff from another home.
+  useEffect(() => {
+    setRecipientIds([]);
+    setRecipients([]);
+    if (!individualId) return;
+    let cancelled = false;
+    setRecipientsLoading(true);
+    api
+      .listDelegationRecipients(individualId)
+      .then((rows) => {
+        if (!cancelled) setRecipients(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setRecipients([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRecipientsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, individualId]);
   return (
     <form
       className="delegation-editor"
       onSubmit={(e) => {
         e.preventDefault();
-        onCreate({ individualId, taskTitle, purpose, procedures, observeReportDo });
+        onCreate({
+          individualId,
+          taskTitle,
+          purpose,
+          procedures,
+          observeReportDo,
+          recipientUserIds: recipientIds,
+        });
       }}
     >
       <div className="delegation-grid3">
@@ -282,6 +318,36 @@ function NewDelegationForm({
           />
         </label>
       </div>
+      <fieldset className="form-label">
+        <legend>Delegate to (staff at this home)</legend>
+        {!individualId ? (
+          <p className="stack-help">Choose an Individual first — the list shows the DSPs who work with them.</p>
+        ) : recipientsLoading ? (
+          <p className="stack-help">Loading staff…</p>
+        ) : recipients.length === 0 ? (
+          <p className="stack-help">
+            No DSPs are assigned to this Individual's home yet. You can create the
+            delegation now and add names on the form instead.
+          </p>
+        ) : (
+          recipients.map((recipient) => (
+            <label key={recipient.userId} className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={recipientIds.includes(recipient.userId)}
+                onChange={(e) =>
+                  setRecipientIds((ids) =>
+                    e.target.checked
+                      ? [...ids, recipient.userId]
+                      : ids.filter((id) => id !== recipient.userId),
+                  )
+                }
+              />
+              {recipient.name} · {recipient.title}
+            </label>
+          ))
+        )}
+      </fieldset>
       <label className="form-label">
         Purpose of task
         <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={2} required />
