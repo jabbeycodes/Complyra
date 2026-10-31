@@ -64,7 +64,7 @@ export interface ChartOverviewProps {
   }) => Promise<void>;
   onUpdateDiagnosis: (diagnosis: string) => Promise<void>;
   onPrintProfile: () => Promise<void>;
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>) => Promise<boolean>;
 }
 
 const MANAGER_ROLE_KEYS = ["house_manager", "program_manager"];

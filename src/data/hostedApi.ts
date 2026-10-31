@@ -13837,12 +13837,20 @@ export class HostedApi implements ComplyraApi {
 
   async getSignatureImageUrl(path: string): Promise<string> {
     await this.requireSession();
+    // Download the object and return a PNG data URL, exactly like LocalApi.
+    // A storage signed URL is NOT interchangeable here: the shift-note save
+    // path validates the adopted signature with assertAdoptableSignature,
+    // which only accepts PNG data URLs, so handing back a signed URL made
+    // every hosted shift-note save throw "Signature must be a PNG image."
+    // (simulation batch 9, Finding 1). Display callers use the value as an
+    // <img> src, which a data URL serves equally well. Failure contract
+    // matches LocalApi: throw.
     const { data, error } = await this.client.storage
       .from("user-signatures")
-      .createSignedUrl(path, 60 * 60);
+      .download(path);
     throwIf(error, "Could not load the signature image.");
-    if (!data?.signedUrl) throw new Error("Could not load the signature image.");
-    return data.signedUrl;
+    if (!data || data.size === 0) throw new Error("Could not load the signature image.");
+    return blobToDataUrl(data);
   }
 
   async getSignatureSettings(): Promise<SignatureSettings> {
