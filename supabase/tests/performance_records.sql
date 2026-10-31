@@ -25,7 +25,7 @@ insert into auth.users(id,email) values
  ('d4000000-0000-0000-0000-000000000009','perf-admin@example.invalid'),
  ('d4000000-0000-0000-0000-000000000007','perf-auditor@example.invalid'),
  ('d4000000-0000-0000-0000-000000000008','perf-outsider@example.invalid');
-update profiles set must_change_password=<redacted>
+update profiles set must_change_password=false
  where id::text like 'd4000000-%';
 update profiles set home_agency_id='a4000000-0000-0000-0000-000000000001'
  where id::text like 'd4000000-%' and id <> 'd4000000-0000-0000-0000-000000000008';

@@ -26,15 +26,20 @@ insert into auth.users (id, email) values
   ('88888888-8888-8888-8888-888888888888','admin-a@example.com')
 on conflict (id) do nothing;
 
-insert into public.agencies (id, name, provider_number) values
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Agency A','EVERGREEN-MO'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Agency B','OTHER-MO')
+insert into public.agencies (id, name, agency_code, state_code, status) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Agency A','EVERGREEN-MO','MO','active'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Agency B','OTHER-MO','MO','active')
 on conflict (id) do nothing;
 
-insert into public.agency_sites (id, agency_id, name) values
-  ('a1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Home A'),
-  ('a2222222-2222-2222-2222-222222222222','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Home B'),
-  ('b1111111-1111-1111-1111-111111111111','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Home X')
+insert into public.programs (id, agency_id, name) values
+  ('f1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Program A'),
+  ('f2222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Program B')
+on conflict (id) do nothing;
+
+insert into public.sites (id, agency_id, program_id, name) values
+  ('a1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','f1111111-1111-1111-1111-111111111111','Home A'),
+  ('a2222222-2222-2222-2222-222222222222','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','f1111111-1111-1111-1111-111111111111','Home B'),
+  ('b1111111-1111-1111-1111-111111111111','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','f2222222-2222-2222-2222-222222222222','Home X')
 on conflict (id) do nothing;
 
 insert into public.memberships (agency_id, user_id, role, role_key, site_id) values
@@ -42,15 +47,15 @@ insert into public.memberships (agency_id, user_id, role, role_key, site_id) val
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','22222222-2222-2222-2222-222222222222','manager','house_manager','a2222222-2222-2222-2222-222222222222'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','33333333-3333-3333-3333-333333333333','manager','program_manager',null),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','44444444-4444-4444-4444-444444444444','auditor','auditor',null),
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','55555555-5555-5555-5555-555555555555','staff','dsp','a1111111-1111-1111-1111-111111111111'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','55555555-5555-5555-5555-555555555555','dsp','dsp','a1111111-1111-1111-1111-111111111111'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','66666666-6666-6666-6666-666666666666','nurse','nurse',null),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','88888888-8888-8888-8888-888888888888','administrator','administrator',null),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','77777777-7777-7777-7777-777777777777','manager','house_manager','b1111111-1111-1111-1111-111111111111')
 on conflict do nothing;
 
-insert into public.individuals (id, agency_id, site_id, full_name) values
-  ('c1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','a1111111-1111-1111-1111-111111111111','Person A'),
-  ('c2222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','b1111111-1111-1111-1111-111111111111','Person X')
+insert into public.individuals (id, agency_id, site_id, full_name, date_of_birth) values
+  ('c1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','a1111111-1111-1111-1111-111111111111','Person A','1980-01-01'),
+  ('c2222222-2222-2222-2222-222222222222','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','b1111111-1111-1111-1111-111111111111','Person X','1980-01-01')
 on conflict (id) do nothing;
 
 -- One awaiting packet, created by the home HM (seeded directly).
@@ -103,14 +108,17 @@ select lives_ok(
     values ('d2222222-2222-2222-2222-222222222222','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','Dana Hart')$$,
   'home HM starts a packet');
 
--- A future typed date is rejected on completion (9).
+-- A future typed date is rejected on completion (9). The rejection
+-- comes from the completion policy's WITH CHECK (packet_on <=
+-- current_date in migration 20261030170000) — an RLS violation,
+-- SQLSTATE 42501; there is no check constraint on packet_on.
 select throws_ok(
   $$update public.rights_packets
     set status = 'signed', packet_on = '2999-01-01', reviewed_by = 'James Wilson',
         signer = '{"printedName":"Dana Hart","authority":"Guardian","authorityOther":"","signature":"Dana Hart","witness":"Casey Adams","accepted":true}'::jsonb,
         signed_at = now()
     where id = 'd2222222-2222-2222-2222-222222222222'$$,
-  '23514', null, 'future packet date rejected');
+  '42501', null, 'future packet date rejected');
 
 -- ── Completion with a TYPED past date (10–11) ──────────────────────
 select lives_ok(
@@ -138,15 +146,26 @@ select lives_ok(
   'delete attempt on a packet runs');
 select is((select count(*)::int from public.rights_packets), 2, 'both packets survive; prior years stay in history');
 
--- ── Evidence: insert works for the manager, rows are frozen (17–19)
+-- ── Evidence: filed packets only, and rows are frozen (17–19) ─────
+-- Evidence is the filed-on-paper scan, stored as one jsonb payload
+-- (name/mime/contentBase64). The app files it in the same completion
+-- that sets status='filed' (hostedApi completeRightsPacket), and the
+-- insert policy requires a filed packet — so the packet above, which
+-- completed by the in-app 'signed' path, cannot take evidence. The
+-- manager-filed case is exercised in the administrator section below.
+select throws_ok(
+  $$insert into public.rights_packet_evidence (packet_id, agency_id, individual_id, evidence)
+    values ('d1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','{"name":"scan.pdf","mime":"application/pdf","contentBase64":"JVBERi0="}'::jsonb)$$,
+  '42501', null, 'evidence cannot be filed on a signed (not filed) packet');
+-- Immutability, exercised on Agency B's seeded evidence by its own
+-- house manager: no update policy names anyone, so the attempt is a
+-- no-op and the row keeps its payload.
+select set_config('request.jwt.claims', '{"sub":"77777777-7777-7777-7777-777777777777","role":"authenticated"}', true);
 select lives_ok(
-  $$insert into public.rights_packet_evidence (packet_id, agency_id, name, mime, content_base64)
-    values ('d1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','scan.pdf','application/pdf','JVBERi0=')$$,
-  'manager files signed evidence');
-select lives_ok(
-  $$update public.rights_packet_evidence set name = 'other.pdf' where packet_id = 'd1111111-1111-1111-1111-111111111111'$$,
+  $$update public.rights_packet_evidence set evidence = '{"name":"other.pdf","mime":"application/pdf","contentBase64":"JVBERi0="}'::jsonb where packet_id = 'd3333333-3333-3333-3333-333333333333'$$,
   'evidence update attempt runs');
-select is((select name from public.rights_packet_evidence where packet_id = 'd1111111-1111-1111-1111-111111111111'), 'scan.pdf', 'evidence row is unchanged');
+select is((select evidence->>'name' from public.rights_packet_evidence where packet_id = 'd3333333-3333-3333-3333-333333333333'), 'filed-copy.pdf', 'evidence row is unchanged');
+select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 
 -- ── Administrator read access (20–26) ──────────────────────────────
 -- PR #171 put 'administrator' on the consent reader list, and the
