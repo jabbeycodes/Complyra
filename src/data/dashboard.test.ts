@@ -8,7 +8,7 @@ import {
   DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
 } from "./seed";
-import { DEMO_PASSWORD } from "./types";
+import { DEMO_PASSWORD, type SessionUser } from "./types";
 import {
   individualsAtSite,
   isAgencyWideViewer,
@@ -153,4 +153,67 @@ test("site-scoped staff are locked to their home site; admins are not", async ()
   assert.equal(canAccessSite(hm, oakwood.id), true);
   assert.equal(canAccessSite(hm, maple.id), false);
   assert.equal(lockedSiteIdFor(hm), oakwood.id);
+});
+
+function fakeSession(roleKey: string, siteId: string | null): SessionUser {
+  return {
+    userId: `user-${roleKey}`,
+    email: `${roleKey}@example.invalid`,
+    username: roleKey,
+    fullName: `Test ${roleKey}`,
+    jobTitle: roleKey,
+    role: roleKey,
+    roleKey,
+    agencyId: "agency-1",
+    agencyName: "Agency",
+    agencyCode: "AGENCY-MO",
+    siteId,
+    mustChangePassword: false,
+    expiresOn: null,
+    permissions: {},
+    platformAdmin: false,
+    agencyStatus: "active",
+  } as SessionUser;
+}
+
+const fakeSites = [{ id: "site-a" }, { id: "site-b" }];
+
+test("a nurse with no home site (agency-wide) sees and can access every site", () => {
+  const nurse = fakeSession("nurse", null);
+  assert.equal(canAccessSite(nurse, "site-a"), true);
+  assert.equal(canAccessSite(nurse, "site-b"), true);
+  assert.equal(lockedSiteIdFor(nurse), null);
+  assert.deepEqual(
+    sitesVisibleTo(nurse, fakeSites, []).map((site) => site.id),
+    ["site-a", "site-b"],
+  );
+});
+
+test("a nurse assigned to one site is denied the other site", () => {
+  const nurse = fakeSession("nurse", "site-a");
+  assert.equal(canAccessSite(nurse, "site-a"), true);
+  assert.equal(canAccessSite(nurse, "site-b"), false);
+  assert.equal(lockedSiteIdFor(nurse), "site-a");
+  assert.deepEqual(
+    sitesVisibleTo(nurse, fakeSites, []).map((site) => site.id),
+    ["site-a"],
+  );
+});
+
+test("a house manager with no home site (agency-wide) can access every site", () => {
+  const hm = fakeSession("house_manager", null);
+  assert.equal(canAccessSite(hm, "site-a"), true);
+  assert.equal(canAccessSite(hm, "site-b"), true);
+  assert.equal(lockedSiteIdFor(hm), null);
+  assert.deepEqual(
+    sitesVisibleTo(hm, fakeSites, []).map((site) => site.id),
+    ["site-a", "site-b"],
+  );
+});
+
+test("a DSP with no home site is NOT agency-wide", () => {
+  const dsp = fakeSession("dsp", null);
+  assert.equal(canAccessSite(dsp, "site-a"), false);
+  assert.equal(canAccessSite(dsp, "site-b"), false);
+  assert.deepEqual(sitesVisibleTo(dsp, fakeSites, []), []);
 });

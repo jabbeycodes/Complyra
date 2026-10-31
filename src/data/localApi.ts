@@ -4383,6 +4383,20 @@ export class LocalApi implements ComplyraApi {
       siteId: input.siteId ?? null,
       expiresOn: input.expiresOn ?? null,
     });
+    // Staff scope repair (2026-10-31): mirror the invite-member edge
+    // function — a DSP invited with a home site also gets a site
+    // assignment starting today.
+    if (input.siteId && input.roleKey === "dsp") {
+      this.store.db.assignments.push({
+        id: crypto.randomUUID(),
+        agencyId: session.agencyId,
+        userId,
+        individualId: null,
+        siteId: input.siteId,
+        startsOn: todayIso(),
+        endsOn: null,
+      });
+    }
     this.store.db.credentials.push({
       userId,
       email,

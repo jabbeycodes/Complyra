@@ -76,12 +76,29 @@ export function assignedSiteIds(session: SessionUser, staff: StaffSiteRef[]): st
   return [...ids];
 }
 
+/**
+ * Nurses and house managers whose membership names no home site (the
+ * invite form's "Agency-wide" choice) cover every site in the agency.
+ * Mirrors the nurse/house_manager null-site branch of
+ * private.can_read_site. DSPs are deliberately NOT included: a DSP with
+ * no home site still needs a staff assignment.
+ */
+export function isAgencyWideClinicalOrManager(
+  session: Pick<SessionUser, "roleKey" | "siteId">,
+): boolean {
+  return (
+    (session.roleKey === "nurse" || session.roleKey === "house_manager") &&
+    !session.siteId
+  );
+}
+
 export function sitesVisibleTo<T extends { id: string }>(
   session: SessionUser,
   sites: T[],
   staff: StaffSiteRef[],
 ): T[] {
   if (isAgencyWideViewer(session)) return sites;
+  if (isAgencyWideClinicalOrManager(session)) return sites;
   const ids = new Set(assignedSiteIds(session, staff));
   return sites.filter((site) => ids.has(site.id));
 }
@@ -92,6 +109,7 @@ export function canAccessSite(
   siteId: string,
 ): boolean {
   if (isAgencyWideViewer(session as SessionUser)) return true;
+  if (isAgencyWideClinicalOrManager(session)) return true;
   return Boolean(session.siteId && session.siteId === siteId);
 }
 
@@ -114,6 +132,8 @@ export function lockedSiteIdFor(
   session: Pick<SessionUser, "roleKey" | "siteId" | "platformAdmin">,
 ): string | null {
   if (isAgencyWideViewer(session as SessionUser)) return null;
+  // Agency-wide nurse/HM (no home site on the membership) are not locked.
+  if (isAgencyWideClinicalOrManager(session)) return null;
   return session.siteId ?? null;
 }
 

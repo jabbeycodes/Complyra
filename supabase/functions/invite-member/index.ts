@@ -188,6 +188,28 @@ Deno.serve(async (req) => {
     return json({ error: memberError.message }, 400);
   }
 
+  // Staff scope repair (2026-10-31): a DSP invited with a home site also
+  // gets a site staff_assignments row starting today, so their site
+  // coverage exists from day one (the membership site also grants it via
+  // private.dsp_works_at_site; the assignment keeps the record explicit
+  // for scheduling and roster surfaces). A failed insert must not fail
+  // the invite — the membership already carries the scope.
+  if (siteId && roleKey === "dsp") {
+    const { error: assignmentError } = await admin
+      .from("staff_assignments")
+      .insert({
+        agency_id: agency.id,
+        user_id: created.user.id,
+        site_id: siteId,
+        starts_on: new Date().toISOString().slice(0, 10),
+      });
+    if (assignmentError) {
+      console.error(
+        `invite-member: staff_assignments insert failed for user ${created.user.id}: ${assignmentError.message}`,
+      );
+    }
+  }
+
   await admin.from("audit_events").insert({
     agency_id: agency.id,
     actor_id: user.id,

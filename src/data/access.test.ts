@@ -80,6 +80,29 @@ test("another DSP's assignment gives no access", () => {
   assert.equal(canReadIndividual(dsp, people[1], assignments, people, today), false);
 });
 
+test("a DSP reads Individuals at the home site named on their membership, with no assignments", () => {
+  const homeDsp: SessionUser = { ...dsp, siteId: "lawton" };
+  assert.equal(canReadIndividual(homeDsp, people[0], [], people, today), true);
+  assert.equal(canReadIndividual(homeDsp, people[1], [], people, today), true);
+});
+
+test("a DSP cannot read Individuals at another site on membership scope alone", () => {
+  const homeDsp: SessionUser = { ...dsp, siteId: "lawton" };
+  assert.equal(canReadIndividual(homeDsp, people[2], [], people, today), false);
+});
+
+test("a DSP with a membership home can still read an assigned Individual at another site", () => {
+  const homeDsp: SessionUser = { ...dsp, siteId: "lawton" };
+  const assignments = [assignment({ individualId: "casey" })];
+  assert.equal(canReadIndividual(homeDsp, people[2], assignments, people, today), true);
+  assert.equal(canReadIndividual(homeDsp, people[0], assignments, people, today), true);
+});
+
+test("a DSP with no membership home and no assignments reads nobody", () => {
+  assert.equal(canReadIndividual(dsp, people[0], [], people, today), false);
+  assert.equal(canReadIndividual(dsp, people[2], [], people, today), false);
+});
+
 test("DSPs correct only MAR entries they recorded; managers and nurses correct any", async () => {
   const { canCorrectDoseMark } = await import("./chart");
   assert.equal(canCorrectDoseMark("dsp", "dsp-1", { markedBy: "dsp-1" }), true);
