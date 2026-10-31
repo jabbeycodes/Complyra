@@ -92,6 +92,20 @@ function rosterRowKey(printName: string): string {
   return `row:${slug || "unnamed"}:initials`;
 }
 
+/**
+ * Mirrors LocalApi.applySignatureDomain's bare-row parse (client): a roster
+ * row SIGNATURE field is "row:<n>" where <n> is a non-negative integer index
+ * (Number() semantics, so "row:007" addresses row 7). Anything else is not a
+ * row-signature field and the caller falls through to the unknown-field
+ * refusal. The keyed "row:<slug>:initials" form is matched earlier and never
+ * reaches this parse.
+ */
+function rowIndexOf(fieldName: string): number | null {
+  if (!fieldName.startsWith("row:")) return null;
+  const index = Number(fieldName.slice(4));
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 function clientIp(req: Request): string | null {
   const forwarded = req.headers.get("x-forwarded-for");
   const raw =
@@ -506,13 +520,19 @@ Deno.serve(async (req) => {
     ).trim();
   }
 
-  /** Text initials derived from a display name (mirrors suggestInitials). */
-  function textInitials(fullName: string): string {
-    const words = fullName.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return "";
-    const first = words[0][0] ?? "";
-    const last = words.length > 1 ? words[words.length - 1][0] ?? "" : "";
-    return (first + last).toUpperCase();
+  /**
+   * Text initials derived from a display name. Mirrors the client's
+   * suggestInitials (signatureUtils) byte-for-byte: first + SECOND word
+   * initial (a single-word name gives its first two letters). LocalApi
+   * writes these into the roster's legacy initials column on both the
+   * initials stamp and the row signature, so the hosted writes must derive
+   * them the same way.
+   */
+  function suggestInitials(fullName: string): string {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
   async function applyDomainTransition(): Promise<Response | null> {
@@ -578,7 +598,7 @@ Deno.serve(async (req) => {
         }
         // Keep the legacy initials column in sync; the event carries the mark.
         // Initialing is not the row signature and does not lock the form.
-        if (!row.initials) row.initials = textInitials(await signerFullName());
+        if (!row.initials) row.initials = suggestInitials(await signerFullName());
         const { error } = await admin
           .from("obligations")
           .update({ delegation_form: form })
@@ -589,6 +609,56 @@ Deno.serve(async (req) => {
             error.message,
           );
           return fail("Could not record the roster initials.", 500);
+        }
+        return null;
+      }
+      const rowIndex = rowIndexOf(fieldName);
+      if (rowIndex !== null) {
+        const { data: obligation } = await admin
+          .from("obligations")
+          .select("delegation_form")
+          .eq("id", documentId)
+          .maybeSingle();
+        const form = (
+          ((obligation as { delegation_form: unknown } | null)
+            ?.delegation_form ?? {}) as {
+            roster?: Array<{
+              printName?: string;
+              signatureName?: string;
+              staffSignature?: string;
+              initials?: string;
+              signedAt?: string;
+            }>;
+          }
+        );
+        const roster = Array.isArray(form.roster) ? form.roster : [];
+        const row = roster[rowIndex];
+        if (!row) {
+          console.error(
+            "apply-signature: roster row vanished between check and transition",
+          );
+          return fail("Roster row not found.", 400);
+        }
+        // Mirror LocalApi.signDelegationRow's legacy writes: the roster row
+        // carries the signer's name, the adopted-signature mark, the derived
+        // initials, and the timestamp delegationFormStatus counts — without
+        // these the form reads "0/N staff signed" forever. Convergent on
+        // retry: the same signer re-writes the same values.
+        const fullName = await signerFullName();
+        row.signatureName = fullName;
+        row.staffSignature = adopted.signature_path;
+        row.initials = suggestInitials(fullName);
+        row.signedAt = now;
+        const { error } = await admin
+          .from("obligations")
+          .update({ delegation_form: form })
+          .eq("id", documentId);
+        if (error) {
+          console.error(
+            "apply-signature: roster signature transition failed",
+            error.message,
+          );
+          return fail("Could not record the roster signature.", 500);
         }
         return null;
       }
@@ -831,7 +901,7 @@ Deno.serve(async (req) => {
   async function checkDelegationForm(): Promise<Response | null> {
     const { data: obligation } = await admin
       .from("obligations")
-      .select("id,agency_id,kind,delegation_form,rn_signed_at")
+      .select("id,agency_id,kind,delegation_form,rn_signed_at,enabled")
       .eq("id", documentId)
       .maybeSingle();
     const ob = obligation as {
@@ -840,6 +910,7 @@ Deno.serve(async (req) => {
       kind: string;
       delegation_form: { roster?: Array<{ printName?: string }> } | null;
       rn_signed_at: string | null;
+      enabled?: boolean;
     } | null;
     if (!ob || ob.kind !== "delegation" || ob.agency_id !== agencyId) {
       return fail("Delegation not found.", 400);
@@ -856,6 +927,9 @@ Deno.serve(async (req) => {
           "not_nurse",
         );
       }
+      if (ob.enabled === false) {
+        return fail("Turn the delegation on before the RN signs.", 400);
+      }
       return null;
     }
 
@@ -869,24 +943,10 @@ Deno.serve(async (req) => {
         : [];
       const row = roster.find((r) => rosterRowKey(String(r.printName ?? "")) === fieldName);
       if (!row) return fail("Roster row not found.", 400);
-      const printName = String(row.printName ?? "").trim();
-      const { data: profile } = await admin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", user.id)
-        .maybeSingle();
-      const myName = String(
-        (profile as { full_name: string } | null)?.full_name ?? "",
-      ).trim();
-      // Only your own row: the printed name must match the signer's identity.
-      if (!printName || printName.toLowerCase() !== myName.toLowerCase()) {
-        return fail(
-          printName
-            ? `Only ${printName} can initial this row.`
-            : "Only the named staff member can initial this row.",
-          403,
-          "not_line_owner",
-        );
+      // LocalApi order (applySignatureDomain key lookup, then
+      // initialDelegationRow): turned-off, RN-first, named-row, own-row.
+      if (ob.enabled === false) {
+        return fail("This delegation is turned off.", 400);
       }
       // The delegating RN signs first (paper order).
       const { data: rnEvent } = await admin
@@ -898,6 +958,83 @@ Deno.serve(async (req) => {
         .limit(1);
       if (!ob.rn_signed_at && (rnEvent?.length ?? 0) === 0) {
         return fail("The delegating RN must sign first.", 409, "rn_first");
+      }
+      const printName = String(row.printName ?? "").trim();
+      if (!printName) {
+        return fail("Name the staff member on that row first.", 400);
+      }
+      // Only your own row: the printed name must match the signer's identity.
+      const myName = await signerFullName();
+      if (printName.toLowerCase() !== myName.toLowerCase()) {
+        return fail(
+          `Only ${printName} can initial this row.`,
+          403,
+          "not_line_owner",
+        );
+      }
+      return null;
+    }
+
+    const rowIndex = rowIndexOf(fieldName);
+    if (rowIndex !== null) {
+      if (signatureKind !== "signature") {
+        return fail("Roster rows are signed, not initialed.", 400);
+      }
+      const roster = Array.isArray(ob.delegation_form?.roster)
+        ? ob.delegation_form!.roster!
+        : [];
+      const row = roster[rowIndex] as
+        | { printName?: string; signedAt?: string }
+        | undefined;
+      if (!row) return fail("Roster row not found.", 400);
+      // LocalApi order (applySignatureDomain, then signDelegationRow):
+      // own-row, turned-off, RN-first, named-row, already-signed.
+      const printName = String(row.printName ?? "").trim();
+      if (printName) {
+        // Only your own row: the printed name must match the signer's
+        // identity. Unnamed rows pass here and fail the named-row check
+        // below, exactly as LocalApi routes them.
+        const myName = await signerFullName();
+        if (printName.toLowerCase() !== myName.toLowerCase()) {
+          return fail(
+            `Only ${printName} can sign this row.`,
+            403,
+            "not_line_owner",
+          );
+        }
+      }
+      if (ob.enabled === false) {
+        return fail("This delegation is turned off.", 400);
+      }
+      // The delegating RN signs first (paper order).
+      const { data: rnEvent } = await admin
+        .from("signature_events")
+        .select("id")
+        .eq("document_type", documentType)
+        .eq("document_id", documentId)
+        .eq("field_name", "rn_signature")
+        .limit(1);
+      if (!ob.rn_signed_at && (rnEvent?.length ?? 0) === 0) {
+        return fail("The delegating RN must sign first.", 409, "rn_first");
+      }
+      if (!printName) {
+        return fail("Name the staff member on that row first.", 400);
+      }
+      if (row.signedAt) {
+        // A signed row whose event is already recorded is a true
+        // double-sign. A signed row WITHOUT an event is a wedged retry
+        // (the domain transition landed, the event insert did not): let it
+        // through so the convergent transition + insert can complete.
+        const { data: existing } = await admin
+          .from("signature_events")
+          .select("id")
+          .eq("document_type", documentType)
+          .eq("document_id", documentId)
+          .eq("field_name", fieldName)
+          .limit(1);
+        if ((existing?.length ?? 0) > 0) {
+          return fail("That row is already signed.", 409, "already_signed");
+        }
       }
       return null;
     }
