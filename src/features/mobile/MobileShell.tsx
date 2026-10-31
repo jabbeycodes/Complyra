@@ -39,6 +39,7 @@ import { formatCentralTime } from "./mar";
 import { useTodayTracking } from "./useTodayTracking";
 import MobileToday from "./MobileToday";
 import MobileComplianceCard from "./MobileComplianceCard";
+import MobileComplianceBand from "./MobileComplianceBand";
 import type { MobileNav } from "./types";
 import MobileMar from "./MobileMar";
 import MobileHealth from "./MobileHealth";
@@ -52,7 +53,7 @@ import MobilePersonalSpending from "./MobilePersonalSpending";
 import MobileCarePlans from "./MobileCarePlans";
 import MobileConsents from "./MobileConsents";
 import MobileLifeEvents from "./MobileLifeEvents";
-import MobileHub from "./MobileHub";
+import MobileHub, { type HubSection } from "./MobileHub";
 import MobileReports from "./MobileReports";
 import MobileQaReview from "./MobileQaReview";
 import MobileIsp from "./MobileIsp";
@@ -194,6 +195,9 @@ export default function MobileShell({
   // The person whose chart sections (Care Plans / Consents / Life
   // Events) are open — set from the Health person view's rows.
   const [chartPersonId, setChartPersonId] = useState<string | null>(null);
+  // Where the next hub entry should land: the home compliance band
+  // deep-links to My Compliance; the hub tile starts at the hub home.
+  const [hubStartSection, setHubStartSection] = useState<HubSection>("home");
   const staffNames = useMemo(
     () => new Map(workspace.staff.map((member) => [member.id, member.name])),
     [workspace.staff],
@@ -363,6 +367,7 @@ export default function MobileShell({
         nav.openPage("Employee Hub");
         break;
       case "myHub":
+        setHubStartSection("home");
         setView("hub");
         break;
       case "reports":
@@ -615,6 +620,17 @@ export default function MobileShell({
                 onOpenMar={() => setView("mar")}
                 onOpenQueueItem={openQueueItem}
                 yourShift={ownShiftStrip}
+                complianceBand={
+                  <MobileComplianceBand
+                    session={session}
+                    workspace={workspace}
+                    onOpenCompliance={() => {
+                      setHubStartSection("compliance");
+                      setView("hub");
+                    }}
+                    onOpenSite={pickSite}
+                  />
+                }
                 complianceCard={
                   <MobileComplianceCard
                     session={session}
@@ -903,6 +919,7 @@ export default function MobileShell({
             api={api}
             session={session}
             onOpenFullHub={() => nav.openPage("Employee Hub")}
+            startSection={hubStartSection}
           />
         )}
 

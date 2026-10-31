@@ -21,7 +21,7 @@ import MobilePerformance from "./MobilePerformance";
 import MobileDocuments from "./MobileDocuments";
 import type { ComplyraApi } from "../../data/localApi";
 
-type HubSection = "home" | "compliance" | "timeoff" | "binder" | "performance" | "documents";
+export type HubSection = "home" | "compliance" | "timeoff" | "binder" | "performance" | "documents";
 
 /**
  * Mobile Employee Hub — the employee's self-service hub on the phone:
@@ -43,16 +43,23 @@ export default function MobileHub({
   api,
   session,
   onOpenFullHub,
+  startSection,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   onOpenFullHub: () => void;
+  /**
+   * Section to open on — the home compliance band deep-links straight
+   * to My Compliance. Read once at mount; the shell remounts the hub
+   * on every entry, so each arrival honors the latest intent.
+   */
+  startSection?: HubSection;
 }) {
   const store = useMemo(
     () => createHrStore({ agencyId: session.agencyId, userId: session.userId }),
     [session.agencyId, session.userId],
   );
-  const [section, setSection] = useState<HubSection>("home");
+  const [section, setSection] = useState<HubSection>(startSection ?? "home");
   const isAuditor = session.roleKey === "auditor";
 
   if (section === "timeoff" && !isAuditor) {

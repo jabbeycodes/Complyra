@@ -95,6 +95,7 @@ export default function MobileToday({
   onOpenQueueItem,
   complianceCard,
   yourShift,
+  complianceBand,
 }: {
   tracking: TodayTracking;
   queueItems: PersonalWorkItem[];
@@ -108,6 +109,14 @@ export default function MobileToday({
    * day's operations, never merged into the tracking donut.
    */
   complianceCard?: React.ReactNode;
+  /**
+   * The compliance visualization band (personal donut + status bar,
+   * plus the house donuts for house-scope roles), rendered at the very
+   * top of Home — directly after the shell's greeting, above the shift
+   * strip (founder directive, 2026-10-31: the donuts belong on every
+   * homepage, mobile included).
+   */
+  complianceBand?: React.ReactNode;
   /**
    * The "Your shift" strip (the signed-in person's own shift today and
    * its accountability counts, from the Phase 2 engine), rendered above
@@ -155,6 +164,8 @@ export default function MobileToday({
 
   return (
     <>
+      {complianceBand}
+
       {yourShift}
 
       <section className="msh-donut-card" aria-label="Today's tracking">
