@@ -56,7 +56,7 @@ All 25 definitions are in `src/data/rules.ts:RULE_CATALOG`, mirrored by `supabas
 | Onboarding | `onboarding.cpi_pbs_due_days` |
 | Delegations | `delegations.expire` |
 
-The panel header comment claims only overtime is connected; that comment is stale. `src/data/rules.ts:operatingRulesFrom`, `HostedApi.operatingRules`, `LocalApi` rule consumers, and `supabase/functions/sweep-operating-reminders` show wider operational reads. Persistence and consumption are real code paths; a runtime test of each downstream rule is outside this audit. No generic feature-flag rollout/targeting system was found; rule booleans and the AI enable field are narrower domain controls.
+The panel header comment claims only overtime is connected; that comment is stale. `src/data/rules.ts:operatingRulesFrom`, `HostedApi.loadOperatingRules`, `LocalApi` rule consumers, and `supabase/functions/sweep-operating-reminders` show wider operational reads. Persistence and consumption are real code paths; a runtime test of each downstream rule is outside this audit. No generic feature-flag rollout/targeting system was found; rule booleans and the AI enable field are narrower domain controls.
 
 ## 2. Data reality check
 
