@@ -797,6 +797,17 @@ Deno.serve(async (req) => {
           "not_hm",
         );
       }
+      // Attribution discipline (simulation batch 24): a countersignature
+      // is a second person's attestation — the sheet's owner can never
+      // countersign their own sheet, even with a manager role. Mirrors
+      // the signStaffChecklist guards in both APIs.
+      if (user.id === traineeUserId) {
+        return fail(
+          "You can't countersign your own checklist.",
+          403,
+          "self_countersign",
+        );
+      }
       const { data: staffEvent } = await admin
         .from("signature_events")
         .select("id")

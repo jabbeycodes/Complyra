@@ -752,8 +752,10 @@ function ProfilePanel({
           const staffSigned = staffSignedForSite(counter.siteId, counter);
           const staffCanAct = canInitialOwn && gate.allResolved;
           // Paper order: staff signs first, then the HM countersigns — ANDed
-          // with the paper rule that every line is initialed or N/A.
-          const hmCanAct = isHm && staffSigned && gate.allResolved;
+          // with the paper rule that every line is initialed or N/A. A
+          // countersignature is a second person's attestation: the sheet's
+          // owner never countersigns their own sheet (batch 24).
+          const hmCanAct = isHm && !canInitialOwn && staffSigned && gate.allResolved;
           return (
             <li key={counter.id}>
               <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
@@ -782,11 +784,13 @@ function ProfilePanel({
                 actionLabel="Countersign as {name}"
                 canAct={hmCanAct}
                 cantActReason={
-                  !staffSigned
-                    ? "The staffer must sign before the house manager countersigns."
-                    : !gate.allResolved
-                      ? LINES_GATE_MESSAGE
-                      : "Not countersigned yet."
+                  canInitialOwn
+                    ? "You can't countersign your own checklist."
+                    : !staffSigned
+                      ? "The staffer must sign before the house manager countersigns."
+                      : !gate.allResolved
+                        ? LINES_GATE_MESSAGE
+                        : "Not countersigned yet."
                 }
                 legacySigned={
                   counter.hmSignedAt

@@ -7698,6 +7698,11 @@ export class LocalApi implements ComplyraApi {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
       }
+      // Attribution discipline: the checklist owner can never countersign
+      // their own checklist (simulation batch 24).
+      if (row.staffUserId === session.userId) {
+        throw new Error("You can't countersign your own checklist.");
+      }
       if (!row.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
       }
@@ -9382,6 +9387,13 @@ export class LocalApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: a countersignature is a second person's
+      // attestation — the sheet's owner can never countersign their own
+      // sheet, even when they hold a manager role (simulation batch 24:
+      // an HM countersigned her own checklist).
+      if (session.userId === input.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!counter.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
