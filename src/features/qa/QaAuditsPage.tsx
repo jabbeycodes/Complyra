@@ -12,6 +12,7 @@ import {
   type QaRankedSite,
 } from "../../data/qaAudit";
 import QaAuditDetail from "./QaAuditDetail";
+import { loadQaPageData } from "./qaLoad";
 
 function currentQuarter(today = new Date()): { year: number; quarter: 1 | 2 | 3 | 4 } {
   const year = today.getUTCFullYear();
@@ -40,6 +41,7 @@ export default function QaAuditsPage() {
   const [ranking, setRanking] = useState<QaRankedSite[]>([]);
   const [openAudit, setOpenAudit] = useState<QaAudit | null>(null);
   const [error, setError] = useState("");
+  const [sideError, setSideError] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newSiteId, setNewSiteId] = useState("");
@@ -59,18 +61,29 @@ export default function QaAuditsPage() {
     return (id: string) => map.get(id) ?? "Program site";
   }, [workspace]);
 
+  // The Reviews list loads on its own. Schedules and ranking are
+  // heavier, separate reads: under the old Promise.all, a slow or failed
+  // ranking call held the whole page on "Loading…" and then blanked the
+  // Reviews tab behind one error (simulation batch 16 — QA Review read
+  // empty and slow even though reviews existed). Their failures now
+  // degrade only their own tabs.
   async function load() {
     setLoading(true);
     setError("");
+    setSideError("");
     try {
-      const [a, s, r] = await Promise.all([
-        api.listQaAudits(siteFilter ? { siteId: siteFilter } : undefined),
-        api.listQaSchedules(),
-        api.getQaSiteRanking(),
-      ]);
-      setAudits(a);
-      setSchedules(s);
-      setRanking(r);
+      const data = await loadQaPageData({
+        listAudits: () =>
+          api.listQaAudits(siteFilter ? { siteId: siteFilter } : undefined),
+        listSchedules: () => api.listQaSchedules(),
+        getRanking: () => api.getQaSiteRanking(),
+      });
+      setAudits(data.audits);
+      if (data.schedules) setSchedules(data.schedules);
+      if (data.ranking) setRanking(data.ranking);
+      if (!data.schedules || !data.ranking) {
+        setSideError("Schedules or site ranking could not be loaded.");
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -161,6 +174,9 @@ export default function QaAuditsPage() {
         description="Quarterly quality reviews of every program site. Items Complyrer can prove from its own records are pre-filled and locked; the auditor scores the rest."
       />
       {error && <p className="form-error">{error}</p>}
+      {sideError && tab !== "audits" && (
+        <p className="form-error">{sideError}</p>
+      )}
 
       <div className="tabs" role="tablist" aria-label="QA Review views">
         {(["audits", "schedules", "ranking"] as const).map((t) => (
@@ -193,7 +209,7 @@ export default function QaAuditsPage() {
             {canAudit && (
               <div className="qa-new-audit">
                 <label>
-                  <span>Site</span>
+                  <span>Site for new review</span>
                   <select value={newSiteId} onChange={(e) => setNewSiteId(e.target.value)}>
                     <option value="">Choose a site…</option>
                     {sites.map((s) => (

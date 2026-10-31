@@ -7,6 +7,7 @@ import {
   gerMonthStatus,
   healthTodayStatus,
   houseCardStatus,
+  houseCardTileStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthLabel,
@@ -15,6 +16,7 @@ import {
   parseNotificationsText,
   personDayEntries,
   personalSpendingStatus,
+  personalSpendingTileStatus,
   shiftNotesTodayStatus,
 } from "./fieldLogs";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
@@ -656,4 +658,53 @@ test("shift notes status falls back to the plain count with no active programs",
   assert.equal(status.expectedCount, 0);
   assert.equal(status.notesToday, 2);
   assert.equal(status.text, "2 shift notes written today");
+});
+
+/* Batch 15: the Quick Log tiles disagreed with their pages — the House
+ * Card tile stated "Balance $0.00 · Low balance" while the page showed
+ * $454.80, and the Personal Spending tile claimed "No Individuals at
+ * this home" for a home with 3. The tiles' not-loaded state (an empty
+ * array) was being read as a factual empty ledger. */
+
+test("house card tile states no figure before the ledger loads", () => {
+  assert.equal(houseCardTileStatus(null).text, "Loading…");
+});
+
+test("house card tile figure equals the page figure for the same ledger", () => {
+  // The batch-15 home: the page's $454.80.
+  const entries = [
+    houseEntry({ id: "c1", kind: "credit", amountCents: 50000 }),
+    houseEntry({ id: "p1", kind: "purchase", amountCents: 4520 }),
+  ];
+  const page = houseCardStatus(entries);
+  assert.equal(page.balanceCents, 45480);
+  assert.equal(page.text, "Balance $454.80");
+  assert.equal(houseCardTileStatus(entries).text, page.text);
+});
+
+test("house card tile on a loaded empty ledger keeps the factual text", () => {
+  assert.equal(houseCardTileStatus([]).text, "Balance $0.00 · Low balance");
+});
+
+test("personal spending tile states no count before the lists load", () => {
+  assert.equal(personalSpendingTileStatus(null).text, "Loading…");
+});
+
+test("personal spending tile counts a loaded home's Individuals", () => {
+  const lists = [
+    [spendingEntry({ id: "a", kind: "deposit", amountCents: 10000 })],
+    [spendingEntry({ id: "b", kind: "deposit", amountCents: 5000 })],
+    [spendingEntry({ id: "c", kind: "deposit", amountCents: 2500 })],
+  ];
+  const page = personalSpendingStatus(lists);
+  assert.equal(page.personCount, 3);
+  assert.equal(personalSpendingTileStatus(lists).text, page.text);
+  assert.equal(page.text, "$175.00 across 3 Individuals");
+});
+
+test("personal spending tile on a loaded empty home keeps the factual text", () => {
+  assert.equal(
+    personalSpendingTileStatus([]).text,
+    "No Individuals at this home",
+  );
 });

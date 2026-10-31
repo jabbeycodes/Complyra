@@ -70,7 +70,7 @@ import type {
   ShiftSwapInput,
   ShiftSwapStatus,
 } from "./hr";
-import { DEFAULT_PUNCH_RULES } from "./hr";
+import { DEFAULT_PUNCH_RULES, hrShiftSpanProblem } from "./hr";
 import {
   DEFAULT_BINDER_TEMPLATE,
   binderTemplateForRole,
@@ -1293,6 +1293,8 @@ class SupabaseHrStore implements HrStore {
   }
 
   async createShift(input: HrShiftInput): Promise<HrShift> {
+    const spanProblem = hrShiftSpanProblem(input.startsAt, input.endsAt);
+    if (spanProblem) throw new Error(spanProblem);
     const { data, error } = await this.client
       .from("hr_shifts")
       .insert({
@@ -1313,6 +1315,10 @@ class SupabaseHrStore implements HrStore {
   }
 
   async updateShift(id: string, patch: Partial<HrShiftInput>): Promise<HrShift> {
+    if (patch.startsAt !== undefined && patch.endsAt !== undefined) {
+      const spanProblem = hrShiftSpanProblem(patch.startsAt, patch.endsAt);
+      if (spanProblem) throw new Error(spanProblem);
+    }
     const row: Record<string, unknown> = {};
     if (patch.siteId !== undefined) row.site_id = patch.siteId;
     if (patch.staffId !== undefined) row.staff_id = patch.staffId;
@@ -4851,6 +4857,8 @@ class LocalHrStore implements HrStore {
   }
 
   async createShift(input: HrShiftInput): Promise<HrShift> {
+    const spanProblem = hrShiftSpanProblem(input.startsAt, input.endsAt);
+    if (spanProblem) throw new Error(spanProblem);
     return this.mutate((b) => {
       const shift: HrShift = {
         ...input,
@@ -4867,6 +4875,13 @@ class LocalHrStore implements HrStore {
     return this.mutate((b) => {
       const shift = b.shifts.find((s) => s.id === id);
       if (!shift) throw new Error("Shift not found.");
+      if (patch.startsAt !== undefined || patch.endsAt !== undefined) {
+        const spanProblem = hrShiftSpanProblem(
+          patch.startsAt ?? shift.startsAt,
+          patch.endsAt ?? shift.endsAt,
+        );
+        if (spanProblem) throw new Error(spanProblem);
+      }
       Object.assign(shift, patch);
       return shift;
     });

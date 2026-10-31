@@ -34,7 +34,13 @@ import {
 import { mobileTiles, type MobileTileId } from "./tiles";
 import { bottomNavItems, moreSheetTiles, type BottomNavId } from "./bottomNav";
 import BottomNavPill from "./BottomNavPill";
-import { centralHour, greetingForHour, type TrackingCategoryId } from "./today";
+import {
+  centralHour,
+  greetingForHour,
+  pickMobileScopedSite,
+  queueItemsForHome,
+  type TrackingCategoryId,
+} from "./today";
 import { formatCentralTime } from "./mar";
 import { useTodayTracking } from "./useTodayTracking";
 import MobileToday from "./MobileToday";
@@ -177,15 +183,17 @@ export default function MobileShell({
     }
   });
   const storedSite = sites.find((site) => site.id === siteId) ?? null;
-  const scopedSite =
-    storedSite ??
-    sites.find((site) => site.id === session.siteId) ??
-    sites[0] ??
-    null;
+  // Scope resolves from the remembered pick or the membership home —
+  // never from list order. With several visible homes and neither source,
+  // the scope stays unresolved and the picker opens instead of rendering
+  // an arbitrary house's name and data (simulation batch 17).
+  const scopedSite = pickMobileScopedSite(sites, siteId, session.siteId);
   // Multi-home users with no remembered home pick one first (the shell's
   // home-first rule); single-home users skip straight in.
   const [view, setView] = useState<ShellView>(() =>
-    sites.length > 1 && !storedSite ? "sites" : (startView ?? "home"),
+    (sites.length > 1 && !storedSite) || (!scopedSite && sites.length > 0)
+      ? "sites"
+      : (startView ?? "home"),
   );
   const [siteQuery, setSiteQuery] = useState("");
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
@@ -449,6 +457,14 @@ export default function MobileShell({
     (view === "messages" && !messagesInThread) ||
     (view === "isp" && !ispFormActive);
 
+  // The home's "Today at …" surface shows only this home's slice of the
+  // personal queue — the full queue lives in My Tasks (simulation
+  // batch 17: another house's overdue tasks under this house's name).
+  const homeQueueItems = useMemo(
+    () => queueItemsForHome(queueItems, scopedSite?.name ?? null),
+    [queueItems, scopedSite],
+  );
+
   const greeting = greetingForHour(centralHour());
   const firstName = session.fullName.split(" ")[0];
   const summaryParts: string[] = [];
@@ -459,9 +475,9 @@ export default function MobileShell({
         : "All med doses recorded",
     );
   }
-  if (queueItems.length > 0) {
+  if (homeQueueItems.length > 0) {
     summaryParts.push(
-      `${queueItems.length} task${queueItems.length === 1 ? "" : "s"} due for you`,
+      `${homeQueueItems.length} task${homeQueueItems.length === 1 ? "" : "s"} due for you`,
     );
   }
 
@@ -614,7 +630,7 @@ export default function MobileShell({
             {scopedSite && (
               <MobileToday
                 tracking={tracking}
-                queueItems={queueItems}
+                queueItems={homeQueueItems}
                 onOpenCategory={openCategory}
                 onOpenTasks={() => setView("tasks")}
                 onOpenMar={() => setView("mar")}

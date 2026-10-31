@@ -297,6 +297,7 @@ import {
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
 import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -2935,7 +2936,7 @@ export class HostedApi implements ComplyraApi {
       versions.map((version) => [version.id, version.versionLabel]),
     );
     const orderReminderDays = canViewPeople
-      ? (await this.loadOperatingRules(session.agencyId)).orderReminderDays
+      ? (await this.loadOperatingRules(session)).orderReminderDays
       : undefined;
     // The MAR medication list derives from active orders: a medication fed by a
     // discontinued order drops off the board. Fetch the order statuses once.
@@ -4904,7 +4905,7 @@ export class HostedApi implements ComplyraApi {
       .eq("id", row!.obligation_id)
       .maybeSingle();
     const item = itemRow ? mapObligation(itemRow) : null;
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     if (!item || !isObligationActive(item, undefined, { delegationsExpire: rules.delegationsExpire })) {
       throw new Error("This document is not open for signature.");
     }
@@ -5247,7 +5248,7 @@ export class HostedApi implements ComplyraApi {
       p_medication_id: med.id, p_pills: pills,
     });
     throwIf(saveError, "Could not record the PRN dose.");
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     await this.audit(
       session,
       "medication.prn_followup",
@@ -5256,7 +5257,7 @@ export class HostedApi implements ComplyraApi {
       med.id,
     );
     const givenAt = new Date().toISOString();
-    await this.queueOperatingNotice({
+    await this.queueOperatingNotice(session, {
       agencyId: session.agencyId,
       userId: null,
       roleKey: "nurse",
@@ -5302,7 +5303,7 @@ export class HostedApi implements ComplyraApi {
     if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
       throw new Error("You cannot record a clock-in point for someone else.");
     }
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     if (!clockInIsLate(input.scheduledStart, input.punchedAt, rules.lateClockInMinutes)) return;
     const sourceKey = input.sourceKey.trim();
     if (!sourceKey) throw new Error("A clock-in point needs a source.");
@@ -5313,7 +5314,7 @@ export class HostedApi implements ComplyraApi {
       "profile",
       input.staffId,
     );
-    await this.queueOperatingNotice({
+    await this.queueOperatingNotice(session, {
       agencyId: session.agencyId,
       userId: input.staffId,
       roleKey: null,
@@ -5342,7 +5343,7 @@ export class HostedApi implements ComplyraApi {
     const reason = input.reason.trim();
     if (!reason) throw new Error("Say why you are awarding the points.");
     const points = Math.trunc(input.points);
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     const month = new Date().toISOString().slice(0, 7);
     const { data, error } = await this.client
       .from("audit_events")
@@ -5366,7 +5367,7 @@ export class HostedApi implements ComplyraApi {
       "profile",
       input.recipientId,
     );
-    await this.queueOperatingNotice({
+    await this.queueOperatingNotice(session, {
       agencyId: session.agencyId,
       userId: input.recipientId,
       roleKey: null,
@@ -11590,7 +11591,7 @@ export class HostedApi implements ComplyraApi {
       (data as { id: string } | null)?.id,
     );
     if (validated.kind === "refused") {
-      const rules = await this.loadOperatingRules(session.agencyId);
+      const rules = await this.loadOperatingRules(session);
       const { data: recent } = await this.client
         .from("med_dose_exceptions")
         .select("kind, created_at")
@@ -11614,7 +11615,7 @@ export class HostedApi implements ComplyraApi {
           "medication",
           med.id,
         );
-        await this.queueOperatingNotice({
+        await this.queueOperatingNotice(session, {
           agencyId: session.agencyId,
           userId: null,
           roleKey: "nurse",
@@ -11673,9 +11674,14 @@ export class HostedApi implements ComplyraApi {
    * Saved settings from effective_rules. Catalog defaults apply when the
    * migration is not on this database yet, so due items keep working.
    */
-  private async loadOperatingRules(agencyId: string) {
+  private async loadOperatingRules(session: SessionUser) {
+    // private.has_agency is false until the first-sign-in password change
+    // completes, so effective_rules raises 42501 (HTTP 403) for exactly the
+    // sessions that cannot act yet. Serve the catalog defaults quietly
+    // instead of logging a console error on every page load.
+    if (session.mustChangePassword) return operatingRulesFrom(null);
     const { data, error } = await this.client.rpc("effective_rules", {
-      p_agency_id: agencyId,
+      p_agency_id: session.agencyId,
       p_site_id: null,
     });
     if (error || !data) return operatingRulesFrom(null);
@@ -11718,7 +11724,7 @@ export class HostedApi implements ComplyraApi {
       (row) => ({ id: String(row.id), name: String(row.full_name ?? "") }),
     );
     const peopleIds = people.map((p) => p.id);
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     const clock = dueItemClock();
     const today = clock.doseDate;
     const serviceDate = clock.serviceDate;
@@ -12330,7 +12336,7 @@ export class HostedApi implements ComplyraApi {
     if (!/^\d{2}:\d{2}$/.test(input.doseTime)) {
       throw new Error("Use an HH:MM dose time.");
     }
-    const rules = await this.loadOperatingRules(session.agencyId);
+    const rules = await this.loadOperatingRules(session);
     const clock = dueItemClock();
     const early = marRecordingProblem({
       doseDate: input.doseDate,
@@ -12381,7 +12387,7 @@ export class HostedApi implements ComplyraApi {
       lateAfterHours: rules.lateRecordingAfterHours,
     });
     if (late) {
-      await this.queueOperatingNotice({
+      await this.queueOperatingNotice(session, {
         agencyId: session.agencyId,
         userId: session.userId,
         roleKey: null,
@@ -12541,7 +12547,7 @@ export class HostedApi implements ComplyraApi {
           : "Medication order expiring";
       const body = `${view.medicationName} for ${view.individualName} ${phrase} (${when}). Review or renew the order.`;
       for (const roleKey of ["nurse", "program_manager"]) {
-        await this.queueOperatingNotice({
+        await this.queueOperatingNotice(session, {
           agencyId: session.agencyId,
           userId: null,
           roleKey,
@@ -12989,8 +12995,13 @@ export class HostedApi implements ComplyraApi {
    * A failure leaves the existing notices readable.
    */
   private async sweepOperatingReminders(session: SessionUser) {
+    // Until the first-sign-in password change completes, the notice and
+    // rules RPCs refuse this session by design (private.has_agency is
+    // false), so the sweep would only log 4xx noise. It runs again on the
+    // first bell open after the change.
+    if (session.mustChangePassword) return;
     try {
-      const rules = await this.loadOperatingRules(session.agencyId);
+      const rules = await this.loadOperatingRules(session);
       const { data: siteRows, error: siteError } = await this.client
         .from("sites")
         .select("id, name")
@@ -13081,7 +13092,7 @@ export class HostedApi implements ComplyraApi {
         }),
       })) {
         if (!notice.userId) continue;
-        await this.queueOperatingNotice({
+        await this.queueOperatingNotice(session, {
           agencyId: session.agencyId,
           userId: notice.userId,
           roleKey: null,
@@ -13097,7 +13108,7 @@ export class HostedApi implements ComplyraApi {
       const liveIds = sites.flatMap((site) =>
         site.items.filter((item) => item.kind === "shift_note").map((item) => item.id),
       );
-      if (loadedSiteIds.length) {
+      if (loadedSiteIds.length && canRetireStaleMissingNoteNotices(session)) {
         const { data: loadedPeople } = await this.client
           .from("individuals")
           .select("id")
@@ -13115,18 +13126,28 @@ export class HostedApi implements ComplyraApi {
     }
   }
 
-  /** Best-effort notice. A missing database function must not undo the action. */
-  private async queueOperatingNotice(input: {
-    agencyId: string;
-    userId: string | null;
-    roleKey: string | null;
-    type: string;
-    title: string;
-    body: string;
-    deepLink: string;
-    entityId: string;
-    dedupeKey: string;
-  }) {
+  /**
+   * Best-effort notice. A missing database function must not undo the action.
+   * Calls the notice ACL would refuse are skipped client-side (see
+   * operatingNoticeGate): the RPC's P0001 only ever surfaced as console
+   * noise, and a skipped call delivers exactly what the refused call did —
+   * nothing.
+   */
+  private async queueOperatingNotice(
+    session: SessionUser,
+    input: {
+      agencyId: string;
+      userId: string | null;
+      roleKey: string | null;
+      type: string;
+      title: string;
+      body: string;
+      deepLink: string;
+      entityId: string;
+      dedupeKey: string;
+    },
+  ) {
+    if (operatingNoticeBlockReason(session, input)) return;
     const { error } = await this.client.rpc("queue_operating_notice", {
       p_agency_id: input.agencyId,
       p_user_id: input.userId,

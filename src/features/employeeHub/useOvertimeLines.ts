@@ -17,7 +17,7 @@ import {
 import type { SessionUser } from "../../data/types";
 
 export function useOperatingRules(
-  session: Pick<SessionUser, "userId" | "fullName" | "agencyId" | "roleKey" | "platformAdmin"> | null,
+  session: Pick<SessionUser, "userId" | "fullName" | "agencyId" | "roleKey" | "platformAdmin" | "mustChangePassword"> | null,
 ): OperatingRules {
   const store = useMemo(() => {
     if (!session) return null;
@@ -32,7 +32,11 @@ export function useOperatingRules(
   const [rules, setRules] = useState<OperatingRules>(DEFAULT_OPERATING_RULES);
 
   useEffect(() => {
-    if (!session || !store) return;
+    // effective_rules refuses (42501) while the account still owes its
+    // first-sign-in password change — private.has_agency is false then.
+    // The app shows the change-password screen instead of these screens,
+    // so just keep the defaults and skip the call (and its console 403).
+    if (!session || !store || session.mustChangePassword) return;
     let cancelled = false;
     store
       .effectiveRules(session.agencyId)
@@ -51,7 +55,7 @@ export function useOperatingRules(
 }
 
 export function useOvertimeLines(
-  session: Pick<SessionUser, "userId" | "fullName" | "agencyId" | "roleKey" | "platformAdmin">,
+  session: Pick<SessionUser, "userId" | "fullName" | "agencyId" | "roleKey" | "platformAdmin" | "mustChangePassword">,
 ): OvertimeLines {
   const store = useMemo(
     () =>
@@ -67,6 +71,8 @@ export function useOvertimeLines(
   const [lines, setLines] = useState<OvertimeLines>(DEFAULT_OVERTIME_LINES);
 
   useEffect(() => {
+    // Same first-sign-in gate as useOperatingRules above.
+    if (session.mustChangePassword) return;
     let cancelled = false;
     store
       .effectiveRules(session.agencyId)
