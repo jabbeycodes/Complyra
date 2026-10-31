@@ -4383,19 +4383,31 @@ export class LocalApi implements ComplyraApi {
       siteId: input.siteId ?? null,
       expiresOn: input.expiresOn ?? null,
     });
-    // Staff scope repair (2026-10-31): mirror the invite-member edge
-    // function — a DSP invited with a home site also gets a site
-    // assignment starting today.
-    if (input.siteId && input.roleKey === "dsp") {
-      this.store.db.assignments.push({
-        id: crypto.randomUUID(),
-        agencyId: session.agencyId,
-        userId,
-        individualId: null,
-        siteId: input.siteId,
-        startsOn: todayIso(),
-        endsOn: null,
-      });
+    // Staff scope repair (2026-10-31, corrected design): mirror the
+    // invite-member edge function — site coverage for site-scoped
+    // roles is an explicit assignment record. A chosen site becomes
+    // one site assignment starting today (DSP, nurse, house manager);
+    // the "Agency-wide" choice for a nurse or house manager becomes
+    // one site assignment per current site in the agency.
+    if (input.roleKey === "dsp" || input.roleKey === "nurse" || input.roleKey === "house_manager") {
+      const assignmentSiteIds = input.siteId
+        ? [input.siteId]
+        : input.roleKey === "dsp"
+          ? []
+          : this.store.db.sites
+              .filter((row) => row.agencyId === session.agencyId)
+              .map((row) => row.id);
+      for (const assignmentSiteId of assignmentSiteIds) {
+        this.store.db.assignments.push({
+          id: crypto.randomUUID(),
+          agencyId: session.agencyId,
+          userId,
+          individualId: null,
+          siteId: assignmentSiteId,
+          startsOn: todayIso(),
+          endsOn: null,
+        });
+      }
     }
     this.store.db.credentials.push({
       userId,

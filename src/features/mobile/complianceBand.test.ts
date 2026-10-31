@@ -99,20 +99,9 @@ test("a house manager sees only their assigned house", () => {
 });
 
 test("a house-scope role with no house in scope gets an empty list, not null", () => {
-  // Locked to a site that is not in this list: nothing visible.
-  const rows = bandHouseRows(session("house_manager", "site-maple"), SITES, [], ITEMS);
+  // No session site and no staff assignment anywhere: nothing visible.
+  const rows = bandHouseRows(session("house_manager"), SITES, [], ITEMS);
   assert.deepEqual(rows, []);
-});
-
-test("a house manager with no home site is agency-wide and sees every house", () => {
-  // Staff scope repair (2026-10-31): a NULL membership site is the
-  // invite form's "Agency-wide" choice for house managers and nurses,
-  // mirroring private.can_read_site — not an unassigned manager.
-  const rows = bandHouseRows(session("house_manager"), SITES, [], ITEMS)!;
-  assert.deepEqual(
-    rows.map((r) => r.siteName),
-    ["Willow House", "Cedar House"],
-  );
 });
 
 function summary(partial: Partial<PersonalComplianceSummary>): PersonalComplianceSummary {

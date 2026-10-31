@@ -178,37 +178,31 @@ function fakeSession(roleKey: string, siteId: string | null): SessionUser {
 
 const fakeSites = [{ id: "site-a" }, { id: "site-b" }];
 
-test("a nurse with no home site (agency-wide) sees and can access every site", () => {
-  const nurse = fakeSession("nurse", null);
-  assert.equal(canAccessSite(nurse, "site-a"), true);
-  assert.equal(canAccessSite(nurse, "site-b"), true);
-  assert.equal(lockedSiteIdFor(nurse), null);
-  assert.deepEqual(
-    sitesVisibleTo(nurse, fakeSites, []).map((site) => site.id),
-    ["site-a", "site-b"],
-  );
-});
-
-test("a nurse assigned to one site is denied the other site", () => {
+test("a nurse with a home site is denied the other site; site lists route through assignedSiteIds", () => {
+  // Staff scope repair, corrected design (2026-10-31): a NULL membership
+  // site does NOT make a nurse or house manager agency-wide (that
+  // inference broke the therap nurse reviewer model in CI). Coverage
+  // beyond the membership home comes from staff_assignments, enforced
+  // in canReadIndividual / private.can_read_site — sitesVisibleTo keeps
+  // its existing routing through assignedSiteIds (the session's home
+  // site plus the viewer's own staff-row site), pinned here.
   const nurse = fakeSession("nurse", "site-a");
   assert.equal(canAccessSite(nurse, "site-a"), true);
   assert.equal(canAccessSite(nurse, "site-b"), false);
   assert.equal(lockedSiteIdFor(nurse), "site-a");
   assert.deepEqual(
-    sitesVisibleTo(nurse, fakeSites, []).map((site) => site.id),
+    sitesVisibleTo(nurse, fakeSites, [{ id: nurse.userId, siteId: "site-a" }]).map((site) => site.id),
     ["site-a"],
   );
 });
 
-test("a house manager with no home site (agency-wide) can access every site", () => {
-  const hm = fakeSession("house_manager", null);
-  assert.equal(canAccessSite(hm, "site-a"), true);
-  assert.equal(canAccessSite(hm, "site-b"), true);
-  assert.equal(lockedSiteIdFor(hm), null);
-  assert.deepEqual(
-    sitesVisibleTo(hm, fakeSites, []).map((site) => site.id),
-    ["site-a", "site-b"],
-  );
+test("a nurse or house manager with no home site is NOT agency-wide", () => {
+  for (const roleKey of ["nurse", "house_manager"]) {
+    const session = fakeSession(roleKey, null);
+    assert.equal(canAccessSite(session, "site-a"), false);
+    assert.equal(canAccessSite(session, "site-b"), false);
+    assert.deepEqual(sitesVisibleTo(session, fakeSites, []), []);
+  }
 });
 
 test("a DSP with no home site is NOT agency-wide", () => {

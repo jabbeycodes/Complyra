@@ -103,6 +103,55 @@ test("a DSP with no membership home and no assignments reads nobody", () => {
   assert.equal(canReadIndividual(dsp, people[2], [], people, today), false);
 });
 
+const nurse: SessionUser = {
+  ...dsp,
+  userId: "nurse-1",
+  email: "nurse@example.invalid",
+  username: "nurse",
+  fullName: "Nina Nurse",
+  jobTitle: "Nurse",
+  role: "nurse",
+  roleKey: "nurse",
+};
+
+test("a nurse reads Individuals at a site a site assignment places her at, and not the other site", () => {
+  const assignments = [assignment({ userId: "nurse-1", siteId: "lawton" })];
+  assert.equal(canReadIndividual(nurse, people[0], assignments, people, today), true);
+  assert.equal(canReadIndividual(nurse, people[1], assignments, people, today), true);
+  assert.equal(canReadIndividual(nurse, people[2], assignments, people, today), false);
+});
+
+test("a nurse reads Individuals at the site of an Individual assignment, including housemates", () => {
+  const assignments = [assignment({ userId: "nurse-1", individualId: "casey" })];
+  assert.equal(canReadIndividual(nurse, people[2], assignments, people, today), true);
+  assert.equal(canReadIndividual(nurse, people[0], assignments, people, today), false);
+});
+
+test("a nurse with no membership home and no assignments reads nobody", () => {
+  // Pins the therap nurse model: caseload access is never inferred
+  // from a NULL membership site.
+  assert.equal(canReadIndividual(nurse, people[0], [], people, today), false);
+  assert.equal(canReadIndividual(nurse, people[2], [], people, today), false);
+});
+
+test("a house manager reads Individuals at an assigned site beyond their membership home", () => {
+  const hm: SessionUser = {
+    ...nurse,
+    userId: "hm-1",
+    username: "hm",
+    fullName: "Hana Manager",
+    jobTitle: "House Manager",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: "lawton",
+  };
+  const assignments = [assignment({ userId: "hm-1", siteId: "cedar" })];
+  assert.equal(canReadIndividual(hm, people[0], assignments, people, today), true);
+  assert.equal(canReadIndividual(hm, people[2], assignments, people, today), true);
+  const unassigned: SessionUser = { ...hm, siteId: null };
+  assert.equal(canReadIndividual(unassigned, people[0], [], people, today), false);
+});
+
 test("DSPs correct only MAR entries they recorded; managers and nurses correct any", async () => {
   const { canCorrectDoseMark } = await import("./chart");
   assert.equal(canCorrectDoseMark("dsp", "dsp-1", { markedBy: "dsp-1" }), true);

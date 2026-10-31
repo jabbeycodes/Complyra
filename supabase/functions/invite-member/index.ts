@@ -188,21 +188,46 @@ Deno.serve(async (req) => {
     return json({ error: memberError.message }, 400);
   }
 
-  // Staff scope repair (2026-10-31): a DSP invited with a home site also
-  // gets a site staff_assignments row starting today, so their site
-  // coverage exists from day one (the membership site also grants it via
-  // private.dsp_works_at_site; the assignment keeps the record explicit
-  // for scheduling and roster surfaces). A failed insert must not fail
-  // the invite — the membership already carries the scope.
-  if (siteId && roleKey === "dsp") {
+  // Staff scope repair (2026-10-31, corrected design): site coverage
+  // for site-scoped roles is an explicit staff_assignments record,
+  // never an inference from the membership row. A DSP invited with a
+  // home site gets a site assignment starting today (their membership
+  // site also grants DSP coverage via private.dsp_works_at_site; the
+  // assignment keeps the record explicit for scheduling and roster
+  // surfaces). A nurse or house manager gets the same for a single
+  // chosen site — and for the "Agency-wide" choice (no site picked),
+  // one site assignment per CURRENT site in the agency, so their
+  // caseload exists from day one; sites created later need their own
+  // assignment, by design. A failed insert must not fail the invite —
+  // it is logged and the membership is already saved.
+  const assignmentSiteIds: string[] = [];
+  if (roleKey === "dsp" || roleKey === "nurse" || roleKey === "house_manager") {
+    if (siteId) {
+      assignmentSiteIds.push(siteId);
+    } else if (roleKey !== "dsp") {
+      const { data: agencySites, error: sitesError } = await admin
+        .from("sites")
+        .select("id")
+        .eq("agency_id", agency.id);
+      if (sitesError) {
+        console.error(
+          `invite-member: could not list sites for agency-wide ${roleKey} invite: ${sitesError.message}`,
+        );
+      }
+      for (const site of agencySites ?? []) assignmentSiteIds.push(site.id);
+    }
+  }
+  if (assignmentSiteIds.length > 0) {
     const { error: assignmentError } = await admin
       .from("staff_assignments")
-      .insert({
-        agency_id: agency.id,
-        user_id: created.user.id,
-        site_id: siteId,
-        starts_on: new Date().toISOString().slice(0, 10),
-      });
+      .insert(
+        assignmentSiteIds.map((assignmentSiteId) => ({
+          agency_id: agency.id,
+          user_id: created.user.id,
+          site_id: assignmentSiteId,
+          starts_on: new Date().toISOString().slice(0, 10),
+        })),
+      );
     if (assignmentError) {
       console.error(
         `invite-member: staff_assignments insert failed for user ${created.user.id}: ${assignmentError.message}`,
