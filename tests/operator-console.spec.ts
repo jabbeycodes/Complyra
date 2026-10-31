@@ -15,5 +15,10 @@ test('operator overview drills to real seeded agency and audit explorer exports 
 });
 test('agency administrator cannot deep-link any new operator surface',async({page})=>{
  await login(page,false);
- for(const name of ['Operator overview','Operator agencies','Operator audit']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
+ for(const name of ['Operator overview','Operator agencies','Operator audit','Operator people']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
+});
+test('operator people search opens read-only agency support context',async({page})=>{
+ await login(page,true);await page.locator('.sidebar').getByRole('button',{name:'Operator people',exact:true}).click();
+ await page.getByLabel('Search people or provider code',{exact:true}).fill('Sarah Mitchell');await page.getByRole('button',{name:'Sarah Mitchell',exact:true}).click();
+ const context=page.getByRole('region',{name:'Read-only support context'});await expect(context).toBeVisible();await expect(context.getByRole('link',{name:'Agency details & rules'})).toBeVisible();await expect(context.getByRole('link',{name:'Agency recorded activity'})).toBeVisible();
 });

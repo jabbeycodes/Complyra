@@ -95,6 +95,7 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "audit.read")
     );
   }
+  if (page === "Operator people") return Boolean(session.platformAdmin);
   if (page === "Operator audit") return Boolean(session.platformAdmin);
   if (page === "Operator overview") return Boolean(session.platformAdmin);
   if (page === "Operator agencies") return Boolean(session.platformAdmin);

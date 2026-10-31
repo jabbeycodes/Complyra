@@ -43,3 +43,8 @@ export function operatorAuditCsv(rows: OperatorAuditRow[]){
  const cell=(v:string|null)=>'"'+String(v??"").replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
  return [["Event ID","Agency ID","Actor ID","Action","Source","Summary","UTC time"],...rows.map(r=>[r.id,r.agencyId,r.actorId,r.action,r.source,r.summary,r.createdAt])].map(r=>r.map(cell).join(",")).join("\r\n");
 }
+
+export interface OperatorPeopleQuery { query: string; agencyId: string; page: number; }
+export interface OperatorPerson { id:string; fullName:string; username:string; email:string; active:boolean; platformAdmin:boolean; mustChangePassword:boolean; memberships:{agencyId:string;agencyCode:string;roleKey:string;expiresOn:string|null}[]; }
+export interface OperatorPeoplePage { rows:OperatorPerson[];hasMore:boolean; }
+export function validateOperatorPeople(q:OperatorPeopleQuery){if(q.query.length>80||!Number.isInteger(q.page)||q.page<0||q.page>2000)throw new Error("Invalid people search.");}

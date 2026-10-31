@@ -69,6 +69,7 @@ export interface SiteRecord {
 }
 
 export interface Profile {
+  active?: boolean;
   id: string;
   fullName: string;
   email: string;
