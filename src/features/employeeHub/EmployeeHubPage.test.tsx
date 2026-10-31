@@ -696,6 +696,15 @@ describe("EmployeeHubShell", () => {
     }
   });
 
+  it("gates the Kiosk tab on its permAny permissions, not on having no perm", () => {
+    // Regression (role audit 2026-10-30, M2): the manager-tab filter's
+    // leading "!t.perm ||" clause offered the permAny-only Kiosk tab to
+    // every role. PM holds hub.manage_staffing, so the tab shows; the DSP
+    // holds neither kiosk permission, so it must not.
+    assert.ok(render(pmSession).includes("Kiosk"), "kiosk tab for PM (hub.manage_staffing)");
+    assert.ok(!render(dspSession).includes("Kiosk"), "kiosk tab hidden for DSP");
+  });
+
   it("honours initialTab", () => {
     const html = render(pmSession, "payroll");
     assert.ok(html.includes("Export-first payroll"), "payroll tab content");
