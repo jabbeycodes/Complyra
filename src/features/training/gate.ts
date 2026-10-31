@@ -6,7 +6,24 @@
  * in-ratio." Plus: every required (non-N/A) line complete and the checklist
  * countersigned by staff and the House Manager.
  */
+import { canOverseeTraining } from "../../data/chart";
 import type { RequirementLineSignoffInput, TrainingRequirementStatus } from "../../data/types";
+
+/**
+ * Where the Training surface lands (batch 25): oversight roles
+ * (PM/HM/admin) and anyone holding hr.view_staff open on the staff
+ * roster — their own record is reachable from there, never the
+ * default. Everyone else (DSPs, nurses, auditors) lands on their own
+ * record, the only one they may read.
+ */
+export function trainingLandingMode(input: {
+  canViewStaff: boolean;
+  roleKey: string;
+}): "roster" | "own" {
+  return input.canViewStaff || canOverseeTraining(input.roleKey)
+    ? "roster"
+    : "own";
+}
 
 export const IN_RATIO_MIN_HOURS = 20;
 export const IN_RATIO_MIN_HM_HOURS = 8;

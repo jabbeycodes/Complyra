@@ -282,6 +282,7 @@ import {
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
+  canOverseeTraining,
   canSignTrainingAsHm,
   toMedicationView,
   todayIso,
@@ -7776,7 +7777,11 @@ export class HostedApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's needs
+    // hr.view_staff OR a training-oversight role (batch 25).
+    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
+      this.requirePermission(session, "hr.view_staff");
+    }
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7883,7 +7888,7 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
+    if (!canOverseeTraining(session.roleKey)) this.requirePermission(session, "hr.view_staff");
     let query = this.client
       .from("training_requirements")
       .select("user_id")

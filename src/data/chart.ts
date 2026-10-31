@@ -277,6 +277,18 @@ export function canSignTrainingAsHm(roleKey: string) {
   ].includes(roleKey);
 }
 
+/**
+ * Roles that oversee OTHER staff's training: the same trio that can
+ * countersign. Oversight implies readable training records — the
+ * Training surface opens on the staff roster for these roles and the
+ * training read gates accept them alongside hr.view_staff (batch 25:
+ * a program manager, whose stored role template carries no
+ * hr.view_staff, landed on her own uncleared record instead).
+ */
+export function canOverseeTraining(roleKey: string) {
+  return canSignTrainingAsHm(roleKey);
+}
+
 export function applyDailyMedDrop(med: Medication, today = todayIso()): Medication {
   if (med.kind === "prn") return med;
   if (med.pillsPerDay <= 0) return med;

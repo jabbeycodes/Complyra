@@ -165,7 +165,7 @@ import {
   type PersonalSpendingMonthClose,
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { assignedSiteIds, canAccessSite, isAgencyWideViewer } from "./dashboard";
 import {
   canActAtSite,
   canReadIndividual,
@@ -368,6 +368,7 @@ import {
   canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
+  canOverseeTraining,
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
@@ -9020,7 +9021,11 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's needs
+    // hr.view_staff OR a training-oversight role (batch 25).
+    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
+      assertCan(session, "hr.view_staff");
+    }
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9104,14 +9109,33 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
+    if (!canOverseeTraining(session.roleKey)) assertCan(session, "hr.view_staff");
     // Roster comes from the agency's staff memberships — not only from staff
     // who already have training assigned — so "All staff" never renders an
-    // empty table while the agency has people.
+    // empty table while the agency has people. A house manager's roster is
+    // scoped to her own homes (her membership site plus sites she is
+    // assigned to); agency-level viewers (admin, PM, HR) keep the full
+    // roster (batch 25: oversight surfaces are scoped to their sites).
+    let visibleSiteIds: Set<string> | null = null;
+    if (session.roleKey === "house_manager") {
+      const today = todayIso();
+      const assignmentSites = this.store.db.assignments
+        .filter(
+          (row) =>
+            row.agencyId === session.agencyId &&
+            row.userId === session.userId &&
+            row.startsOn <= today &&
+            (!row.endsOn || row.endsOn >= today),
+        )
+        .map((row) => row.siteId)
+        .filter((id): id is string => Boolean(id));
+      visibleSiteIds = new Set(assignedSiteIds(session, [], assignmentSites));
+    }
     const memberships = this.store.db.memberships.filter(
       (row) =>
         row.agencyId === session.agencyId &&
-        (!siteId || row.siteId === siteId),
+        (!siteId || row.siteId === siteId) &&
+        (!visibleSiteIds || (row.siteId !== null && visibleSiteIds.has(row.siteId))),
     );
     const userIds = [...new Set(memberships.map((row) => row.userId))];
     const rows: StaffClearanceRow[] = [];
