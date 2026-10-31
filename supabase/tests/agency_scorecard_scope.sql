@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(10);
+select plan(12);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 insert into agencies(id,name,agency_code,state_code,status) values
  ('a6000000-0000-0000-0000-000000000001','Score A','SCOREA-MO','MO','active'),
@@ -38,11 +38,15 @@ select set_config('request.jwt.claims','{"sub":"d6000000-0000-0000-0000-00000000
 select is((agency_scorecard('a6000000-0000-0000-0000-000000000001')->>'total')::int,2,'auditor reads agency aggregate');
 with changed as (update requirement_definitions set title='Forbidden' where id='f6000000-0000-0000-0000-000000000001' returning id)
 select is(count(*)::int,0,'auditor cannot mutate source') from changed;
--- Switch the JWT as well as the SQL role: protect_profile_identity otherwise
--- preserves active while the auditor is still the claimed actor.
+-- Reproduce the fixture mechanics against PostgreSQL: RESET ROLE alone does
+-- not reset the auditor JWT, so the identity guard preserves the active flag.
 reset role;
+update profiles set active=false where id='d6000000-0000-0000-0000-000000000001';
+select is((select active from profiles where id='d6000000-0000-0000-0000-000000000001'),true,'auditor JWT cannot deactivate fixture profile');
+-- Perform the intended setup with the service-role JWT and prove it persisted.
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 update profiles set active=false where id='d6000000-0000-0000-0000-000000000001';
+select is((select active from profiles where id='d6000000-0000-0000-0000-000000000001'),false,'fixture profile is inactive before the scorecard call');
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"d6000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 select throws_ok($$select agency_scorecard('a6000000-0000-0000-0000-000000000001')$$,'42501','Agency outside your access','inactive profile rejected');

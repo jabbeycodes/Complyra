@@ -58,7 +58,7 @@ test('HR retains aggregate-only access; auditor cannot complete source requireme
   await assert.rejects(() => api.completeRequirement(auditView.requirements[0].id, "Unauthorized"), /access|permission|allowed/i);
 });
 test('scorecard RPC source explicitly checks membership, permission, home and Individual scope',()=>{
-  const sql=readFileSync('supabase/migrations/20261031190000_agency_scorecard_scope.sql','utf8');
+  const sql=readFileSync('supabase/migrations/20261031231000_agency_scorecard_scope.sql','utf8');
   for(const guard of ['private.has_agency(p_agency_id)','private.can_read_site(p_agency_id, r.site_id)','private.can_read_individual(p_agency_id, r.individual_id)',"private.has_permission(p_agency_id, 'individuals.view')", "array['hr']",'r.due_on < current_date']) assert.ok(sql.includes(guard),guard);
 });
 
