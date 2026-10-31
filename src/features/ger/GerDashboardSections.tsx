@@ -16,10 +16,13 @@ import {
  */
 export default function GerDashboardSections({
   onOpenPerson,
+  siteId = null,
 }: {
   onOpenPerson: (name: string) => void;
+  siteId?: string | null;
 }) {
   const { api, session, workspace } = useData();
+  const [error, setError] = useState("");
   const [reports, setReports] = useState<GerReport[] | null>(null);
 
   const visible = canSeeGerDashboardRows(session);
@@ -27,28 +30,33 @@ export default function GerDashboardSections({
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
+    setReports(null);
+    setError("");
     api
       .listAgencyGerReports()
       .then((rows) => {
         if (!cancelled) setReports(rows);
       })
       .catch(() => {
-        if (!cancelled) setReports([]);
+        if (!cancelled) setError("Event reports unavailable. This is not an all-clear result.");
       });
     return () => {
       cancelled = true;
     };
-  }, [api, visible]);
+  }, [api, visible, session?.agencyId, session?.userId, workspace]);
 
-  if (!visible || reports === null) return null;
+  if (!visible) return null;
+  if (error) return <section className="panel" role="alert">{error}</section>;
+  if (reports === null) return <p role="status">Loading event reports…</p>;
+  const scopedReports = reports.filter(row => !siteId || row.siteId === siteId);
 
   const nameOf = (id: string) =>
     workspace?.individuals.find((p) => p.id === id)?.name ?? "An Individual";
   const siteNameOf = (siteId: string) =>
     workspace?.sites.find((s) => s.id === siteId)?.name ?? "";
 
-  const awaitingReview = reports.filter((r) => r.status === "submitted");
-  const followUp = reports.filter((r) => gerNeedsFollowUp(r));
+  const awaitingReview = scopedReports.filter((r) => r.status === "submitted");
+  const followUp = scopedReports.filter((r) => gerNeedsFollowUp(r));
 
   if (awaitingReview.length === 0 && followUp.length === 0) return null;
 

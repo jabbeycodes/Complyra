@@ -1,3 +1,4 @@
+import { requirementPopulation } from "../overview/requirementPopulation";
 /**
  * Mobile home compliance band — the visualization the founder asked
  * never to leave off a homepage (2026-10-31): the personal compliance
@@ -218,7 +219,7 @@ export function MobileComplianceBandHouse({
       type="button"
       className="msh-band-house"
       onClick={() => onOpen(row.siteId)}
-      aria-label={`${row.siteName}: ${row.score}% current, ${row.done} of ${row.total} complete. Switch the mobile view to this home`}
+      aria-label={`${row.siteName}: ${requirementPopulation(row.items).scoreText} in requirement register, ${row.done} of ${row.total} complete. Switch the mobile view to this home`}
     >
       <span className="msh-band-house-name">{row.siteName}</span>
       {houseHasDonut(row) ? (
@@ -229,7 +230,7 @@ export function MobileComplianceBandHouse({
         </span>
       )}
       <span className="msh-band-house-score">
-        <strong>{row.score}%</strong> current
+        <strong>{requirementPopulation(row.items).scoreText}</strong> · requirement register
       </span>
       <small>
         {row.done} of {row.total} complete
@@ -237,7 +238,7 @@ export function MobileComplianceBandHouse({
       <small className="msh-status-text">
         {row.overdue > 0
           ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-          : "Nothing overdue"}
+          : row.total ? "No overdue requirements" : "Not assessed — consents, monthly checks and binders are separate"}
         {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
       </small>
     </button>

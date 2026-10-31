@@ -1,3 +1,4 @@
+import { requirementPopulation } from "./requirementPopulation";
 /**
  * HouseComplianceDonuts — the first content on the manager Overview
  * (founder directive, 2026-10-28: "Manager overview should have the donut
@@ -88,31 +89,31 @@ export default function HouseComplianceDonuts({
               >
                 {row.siteName}
               </button>
-              <Badge status={row.overdue ? "Needs attention" : "On track"} />
+              <Badge status={requirementPopulation(row.items).status} />
             </div>
             <p className="house-compliance-score">
-              <strong>{row.score}%</strong> current · {row.done} of {row.total}{" "}
-              complete
+              <strong>{requirementPopulation(row.items).scoreText}</strong> · {row.done} of {row.total}{" "}
+              active requirements complete
               {row.overdue > 0
                 ? ` · ${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-                : " · nothing overdue"}
+                : row.total ? " · no overdue requirements" : " · no active requirement population"}
               {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
             </p>
             {row.total + row.review > 0 ? (
               <StatusMixDonut items={row.items} />
             ) : (
               <p className="house-compliance-empty">
-                No requirements are tracked for this house yet.
+                No requirements are tracked for this house yet. Consents, monthly checks, binders and DMH readiness are assessed separately.
               </p>
             )}
             {(() => {
               const team = teamBySite.get(row.siteId);
-              if (!team || team.total === 0) return null;
+              if (!team || team.total === 0) return <p>Team readiness unavailable or no staff population in this scope.</p>;
               return (
                 <p className="house-compliance-team">
                   Team compliance: {team.fullyCurrent} of {team.total} staff
-                  fully current · {team.needAttention} need
-                  {team.needAttention === 1 ? "s" : ""} attention
+                  current in assigned readiness checks · {team.needAttention} need
+                  {team.needAttention === 1 ? "s" : ""} attention · {team.unassessed} not assessed
                 </p>
               );
             })()}

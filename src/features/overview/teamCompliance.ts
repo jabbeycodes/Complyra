@@ -17,7 +17,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   rollupCompliance,
-  type ComplianceEvidence,
   type ReadinessResult,
 } from "../../data/hr";
 import { createHrStore } from "../../data/hrStore";
@@ -32,13 +31,6 @@ export interface TeamStaffEntry {
   roleKey: string;
   siteId: string | null;
 }
-
-const EMPTY_EVIDENCE: ComplianceEvidence = {
-  certs: [],
-  trainings: [],
-  delegations: [],
-  docAcks: [],
-};
 
 export function useTeamComplianceBySite(
   session: SessionUser | null,
@@ -79,8 +71,7 @@ export function useTeamComplianceBySite(
           const rollups: ReadinessResult[][] = await Promise.all(
             members.map(async (member) => {
               const evidence = await store
-                .getComplianceEvidence(member.userId)
-                .catch((): ComplianceEvidence => EMPTY_EVIDENCE);
+                .getComplianceEvidence(member.userId);
               return rollupCompliance(
                 member.userId,
                 member.roleKey,
