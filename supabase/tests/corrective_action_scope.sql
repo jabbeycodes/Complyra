@@ -93,7 +93,7 @@ select lives_ok($$insert into corrective_actions(agency_id,title,site_id,created
   'HM-A creates an action at their own home');
 select throws_like($$insert into corrective_actions(agency_id,title,site_id,created_by_user_id)
   values ('a5000000-0000-0000-0000-000000000001','HM-A cross-home action','c5000000-0000-0000-0000-000000000002','d5000000-0000-0000-0000-000000000003')$$,
-  '%row-level security%',
+  '%Choose a home in this agency%',
   'HM-A cannot create an action at another home');
 
 -- HM-A cannot rewrite Home B's action (RLS silently scopes the update
