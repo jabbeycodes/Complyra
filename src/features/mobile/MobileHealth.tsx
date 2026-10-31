@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileHeart, FileSignature, HeartPulse, Pill, Wallet } from "lucide-react";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
+import { canSeeMeds } from "../../data/chart";
 import { canViewPersonalSpending } from "../../data/permissions";
 import { canViewCare } from "../../data/careScreening";
 import { canSeeConsents } from "../../data/consents";
@@ -39,8 +40,37 @@ import type { WorkspaceIndividual } from "./types";
  * shared draft validation, and save through the same API methods, so
  * demo and hosted behave identically. Permissions mirror the chart:
  * health.record records; view-only roles (auditors) get no log actions.
- * Medications deep-link to the MAR — never a second MAR here.
+ *
+ * Medications live UNDER Health on mobile (founder directive,
+ * 2026-10-31): this surface is their only mobile door. The Medications
+ * section — an entry on the Health home and a row in each person's
+ * view — renders only for roles passing canSeeMeds, and opens the one
+ * MAR (passes, med orders, med counts); recording inside the MAR
+ * follows the MAR's own med permissions. Never a second MAR here.
  */
+/**
+ * The Medications section entry — the one door from Health into the
+ * MAR. Callers render it only for roles passing canSeeMeds: on the
+ * Health home above the people picker, and in each person's view
+ * alongside their tracker statuses.
+ */
+function MedicationsEntry({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button type="button" className="msh-row" onClick={onOpen}>
+      <span className="msh-tile-icon" aria-hidden="true">
+        <Pill size={22} />
+      </span>
+      <span className="msh-row-main">
+        <strong>Medications</strong>
+        <small>Pass meds and record doses in the MAR</small>
+      </span>
+      <span className="msh-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  );
+}
+
 export default function MobileHealth({
   api,
   session,
@@ -99,6 +129,7 @@ export default function MobileHealth({
 
   const person = people.find((row) => row.id === personId) ?? null;
   const visible = canViewHealthTrack(session);
+  const medsVisible = canSeeMeds(session.roleKey);
   const canRecord = session.permissions["health.record"] === true;
   const spendingVisible = canViewPersonalSpending(session.roleKey);
 
@@ -159,6 +190,14 @@ export default function MobileHealth({
           <button type="button" className="msh-text-button" onClick={onBack}>
             ‹ {backLabel ?? "Back"}
           </button>
+        )}
+        {medsVisible && (
+          <>
+            <h3 className="msh-pass-title">Medications</h3>
+            <div className="msh-list">
+              <MedicationsEntry onOpen={onOpenMedications} />
+            </div>
+          </>
         )}
         <p className="msh-section-note">
           Pick the Individual whose health you are logging or checking.
@@ -239,22 +278,7 @@ export default function MobileHealth({
                 </div>
               );
             })}
-            <button
-              type="button"
-              className="msh-row"
-              onClick={onOpenMedications}
-            >
-              <span className="msh-tile-icon" aria-hidden="true">
-                <Pill size={22} />
-              </span>
-              <span className="msh-row-main">
-                <strong>Medications</strong>
-                <small>Pass meds and record doses in the MAR</small>
-              </span>
-              <span className="msh-chevron" aria-hidden="true">
-                ›
-              </span>
-            </button>
+            {medsVisible && <MedicationsEntry onOpen={onOpenMedications} />}
             {spendingVisible && onOpenSpending && (
               <button
                 type="button"

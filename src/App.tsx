@@ -276,11 +276,9 @@ export default function App() {
       view:
         id === "tasks"
           ? "tasks"
-          : id === "meds"
-            ? "mar"
-            : id === "people"
-              ? "people"
-              : "home",
+          : id === "people"
+            ? "people"
+            : "home",
       sheet: id === "more",
     });
     if (viewMode === "desktop") pickViewMode("mobile");
