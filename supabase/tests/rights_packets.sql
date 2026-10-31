@@ -143,9 +143,12 @@ select lives_ok(
   $$update public.rights_packets set packet_on = '2025-01-01' where id = 'd1111111-1111-1111-1111-111111111111'$$,
   'update attempt on a completed packet runs');
 select is((select packet_on from public.rights_packets where id = 'd1111111-1111-1111-1111-111111111111'), '2025-11-29'::date, 'completed packet date is unchanged');
-select lives_ok(
+-- No DELETE grant exists on rights_packets at all (the migration
+-- grants select/insert/update), so the attempt is refused outright
+-- with 42501 — the same code the guard raises for visible rows.
+select throws_ok(
   $$delete from public.rights_packets where id = 'd1111111-1111-1111-1111-111111111111'$$,
-  'delete attempt on a packet runs');
+  '42501', null, 'delete attempt on a packet is refused');
 select is((select count(*)::int from public.rights_packets), 2, 'both packets survive; prior years stay in history');
 
 -- ── Evidence: filed packets only, and rows are frozen (17–19) ─────
@@ -160,12 +163,13 @@ select throws_ok(
     values ('d1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','{"name":"scan.pdf","mime":"application/pdf","contentBase64":"JVBERi0="}'::jsonb)$$,
   '42501', null, 'evidence cannot be filed on a signed (not filed) packet');
 -- Immutability, exercised on Agency B's seeded evidence by its own
--- house manager: no update policy names anyone, so the attempt is a
--- no-op and the row keeps its payload.
+-- house manager: the migration grants only select/insert on the
+-- evidence table — there is no UPDATE grant at all — so the attempt
+-- is refused with 42501 and the row keeps its payload.
 select set_config('request.jwt.claims', '{"sub":"77777777-7777-7777-7777-777777777777","role":"authenticated"}', true);
-select lives_ok(
+select throws_ok(
   $$update public.rights_packet_evidence set evidence = '{"name":"other.pdf","mime":"application/pdf","contentBase64":"JVBERi0="}'::jsonb where packet_id = 'd3333333-3333-3333-3333-333333333333'$$,
-  'evidence update attempt runs');
+  '42501', null, 'evidence update is refused');
 select is((select evidence->>'name' from public.rights_packet_evidence where packet_id = 'd3333333-3333-3333-3333-333333333333'), 'filed-copy.pdf', 'evidence row is unchanged');
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 
