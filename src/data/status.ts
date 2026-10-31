@@ -95,6 +95,7 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "audit.read")
     );
   }
+  if (page === "Operator agencies") return Boolean(session.platformAdmin);
   if (page === "Platform") return Boolean(session.platformAdmin);
   if (page === "Activity log") {
     return can(session, "audit.read") || can(session, "individuals.view");
@@ -268,3 +269,4 @@ export function requirementStatusToDb(status: Status) {
   };
   return map[status];
 }
+

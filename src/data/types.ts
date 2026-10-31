@@ -34,6 +34,9 @@ export interface Agency {
   stateCode: string;
   provisionedBy?: AgencyProvisionedBy;
   status: AgencyStatus;
+  createdAt?: string;
+  active?: boolean;
+  reportingCategory?: "customer" | "demo" | "internal";
   monthlyDue?: import("./monthlyChecks").MonthlyDueSettings;
   logoPath?: string | null;
 }

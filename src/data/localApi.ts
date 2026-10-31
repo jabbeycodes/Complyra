@@ -662,6 +662,7 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorDirectory(): Promise<import("./operator").OperatorAgency[]>;
   listPendingAgencies(): Promise<PendingAgency[]>;
   /** Operator only: every agency, any status (for the Rules console). */
   listAgencies(): Promise<PendingAgency[]>;
@@ -4292,6 +4293,7 @@ export class LocalApi implements ComplyraApi {
       stateCode: input.stateCode.trim().toUpperCase(),
       provisionedBy,
       status,
+      createdAt: new Date().toISOString(), active: true, reportingCategory: "customer",
       monthlyDue: normalizeMonthlyDue(),
     });
     this.store.db.profiles.push({
@@ -4514,6 +4516,14 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorDirectory(): Promise<import("./operator").OperatorAgency[]> {
+    const session = assertSession(this.store);
+    if (!session.platformAdmin) throw new Error("Operator access required.");
+    return this.store.db.agencies.map((a) => ({ id: a.id, name: a.name, agencyCode: a.agencyCode, stateCode: a.stateCode,
+      provisionedBy: a.provisionedBy ?? "self", status: a.status, createdAt: a.createdAt ?? null,
+      active: a.active ?? true, reportingCategory: a.reportingCategory ?? "customer" })).sort((a,b) => a.name.localeCompare(b.name));
   }
 
   async listPendingAgencies(): Promise<PendingAgency[]> {

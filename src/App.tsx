@@ -137,6 +137,7 @@ import InactivityGuard from "./security/InactivityGuard";
 import HelpPage from "./features/help/HelpPage";
 import AssignRoleControl from "./features/AssignRoleControl";
 import InviteMemberForm from "./features/InviteMemberForm";
+import OperatorDirectory from "./features/operator/OperatorDirectory";
 import PlatformConsole from "./features/PlatformConsole";
 import ResetPasswordControl from "./features/ResetPasswordControl";
 import RolesAccessPage from "./features/RolesAccessPage";
@@ -753,6 +754,7 @@ export default function App() {
         ["Overview", LayoutDashboard],
         ["Scheduling", CalendarClock],
         ["Platform", ShieldCheck],
+        ["Operator agencies", Building2],
         ["Individuals", Users],
         ["Appointments", CalendarDays],
         ["Consents", FileText],
@@ -1897,6 +1899,7 @@ export default function App() {
                   </p>
                 </>
               )}
+              {page === "Operator agencies" && <OperatorDirectory onSaved={notify} />}
               {page === "Platform" && (
                 <PlatformConsole onSaved={notify} />
               )}
