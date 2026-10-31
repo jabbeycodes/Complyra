@@ -32,8 +32,7 @@ insert into auth.users(id,email) values
  ('d1000000-0000-0000-0000-000000000007','scope-nurse-wide@example.invalid'),
  ('d1000000-0000-0000-0000-000000000008','scope-hm-assign@example.invalid'),
  ('d1000000-0000-0000-0000-000000000009','scope-hm-single@example.invalid');
-update profiles set must_change_password=<redacted>
- where id::text like 'd1000000-%';
+update profiles set must_change_password=false where id::text like 'd1000000-%';
 insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a1000000-0000-0000-0000-000000000001','d1000000-0000-0000-0000-000000000001','dsp','dsp','c1000000-0000-0000-0000-000000000001'),
  ('a1000000-0000-0000-0000-000000000001','d1000000-0000-0000-0000-000000000002','dsp','dsp','c1000000-0000-0000-0000-000000000001'),
