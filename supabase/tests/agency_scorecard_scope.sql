@@ -4,8 +4,8 @@ set local search_path = public, extensions;
 select plan(10);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 insert into agencies(id,name,agency_code,state_code,status) values
- ('a6000000-0000-0000-0000-000000000001','Score A','SCORE-A-MO','MO','active'),
- ('a6000000-0000-0000-0000-000000000002','Score B','SCORE-B-MO','MO','active');
+ ('a6000000-0000-0000-0000-000000000001','Score A','SCOREA-MO','MO','active'),
+ ('a6000000-0000-0000-0000-000000000002','Score B','SCOREB-MO','MO','active');
 insert into programs(id,agency_id,name) values ('b6000000-0000-0000-0000-000000000001','a6000000-0000-0000-0000-000000000001','Program');
 insert into sites(id,agency_id,program_id,name) values
  ('c6000000-0000-0000-0000-000000000001','a6000000-0000-0000-0000-000000000001','b6000000-0000-0000-0000-000000000001','Home A'),
