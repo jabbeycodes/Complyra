@@ -174,3 +174,45 @@ test("the worklist lists drafts and flags an expired active order", async () => 
   assert.equal(row.expiry, "expired");
   assert.equal(row.individualName, "Ellis Hart");
 });
+
+test("the worklist queues one order-expired notice per role, deduped per role", async () => {
+  const s = store();
+  const api = new LocalApi(s);
+  const { ellis } = await nurseOnEllis(api);
+  const draft = await api.createMedicationOrder({
+    individualId: ellis.id,
+    medicationName: "Carbamazepine",
+    dose: "200 mg",
+    route: "By mouth",
+    schedule: "Twice daily",
+    scheduleTimes: ["08:00", "20:00"],
+    prescriberName: "Dr. Rivera",
+    reason: "Seizure control",
+    startDate: "2025-01-01",
+    endReviewDate: "2025-06-01",
+  });
+  await api.activateMedicationOrder(draft.id, { initialCount: 30 });
+
+  const expiredNotices = () =>
+    s.db.notifications.filter(
+      (n) => n.type === "med.order_expired" && n.entityId === draft.id,
+    );
+
+  await api.listMedicationOrderWorklist();
+  // Both audiences get their own copy: the dedupe key is role-scoped, so
+  // the program_manager notice is not swallowed as a duplicate of the
+  // nurse one.
+  assert.deepEqual(
+    expiredNotices().map((n) => n.roleKey).sort(),
+    ["nurse", "program_manager"],
+  );
+  assert.equal(
+    new Set(expiredNotices().map((n) => n.dedupeKey)).size,
+    2,
+    "each role copy carries a distinct dedupe key",
+  );
+
+  // Reopening the worklist queues nothing new for the same review date.
+  await api.listMedicationOrderWorklist();
+  assert.equal(expiredNotices().length, 2);
+});
