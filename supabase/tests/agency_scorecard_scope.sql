@@ -38,7 +38,10 @@ select set_config('request.jwt.claims','{"sub":"d6000000-0000-0000-0000-00000000
 select is((agency_scorecard('a6000000-0000-0000-0000-000000000001')->>'total')::int,2,'auditor reads agency aggregate');
 with changed as (update requirement_definitions set title='Forbidden' where id='f6000000-0000-0000-0000-000000000001' returning id)
 select is(count(*)::int,0,'auditor cannot mutate source') from changed;
+-- Switch the JWT as well as the SQL role: protect_profile_identity otherwise
+-- preserves active while the auditor is still the claimed actor.
 reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 update profiles set active=false where id='d6000000-0000-0000-0000-000000000001';
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"d6000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
