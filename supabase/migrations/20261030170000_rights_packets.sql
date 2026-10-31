@@ -1,17 +1,15 @@
--- Rights packets: the annual rights signoff packet, paperless.
+-- Rights packets: the annual rights signoff packet.
 --
 -- UNAPPLIED — written for review; production application needs Joshua's
 -- explicit go-ahead like every migration. Until it is applied, hosted
 -- mode fails contained inside the Consents surfaces (the section shows
 -- its own error; the Command Center load treats packets as optional).
 --
--- On paper this packet is the rights signoff filed IN FRONT of an
--- Individual's consent forms in the binder, renewed every year. The
--- platform record mirrors that: one packet per signing, prior years
--- kept as history, and the annual renewal countdown anchors on
--- packet_on — the date a manager TYPES when the packet is completed.
--- The date is authoritative as entered: no trigger or default ever
--- re-stamps it, and completing (signing/filing) writes it exactly once.
+-- One packet per signing, prior years kept as history, and the annual
+-- renewal countdown anchors on packet_on — the date a manager TYPES
+-- when the packet is completed. The date is authoritative as entered:
+-- no trigger or default ever re-stamps it, and completing
+-- (signing/filing) writes it exactly once.
 --
 -- Security model mirrors the consent packets family:
 -- - Reads scope through private.can_read_individual AND the consent

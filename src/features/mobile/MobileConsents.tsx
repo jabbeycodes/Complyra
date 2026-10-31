@@ -172,11 +172,6 @@ export default function MobileConsents({
       {packetsVisible && (
         <>
           <h3 className="msh-pass-title">Rights packet</h3>
-          <p className="msh-section-note">
-            The annual rights signoff packet sits in front of the consent
-            forms, renewed every year. The countdown runs from the packet
-            date a manager types when the packet is signed.
-          </p>
           <div className="msh-list">
             <div className="msh-row static">
               <span className="msh-row-main">

@@ -6,10 +6,8 @@ export { AUTHORITY_OPTIONS };
 export type { PacketEvidence };
 
 /**
- * The Rights packet — the paperless front cover of an Individual's
- * consents. On paper it is the rights signoff packet filed in front of
- * the consent forms in the binder; here it is a record on the chart's
- * Consents area, renewed every year. The acknowledgment wording is
+ * The Rights packet — an Individual's annual rights signoff record on
+ * the chart's Consents area. The acknowledgment wording is
  * ComplyRer-original: it covers the same receipts (the state Individual
  * Rights publication, the agency's grievance process, and the agency
  * handbook) without copying any provider's form.

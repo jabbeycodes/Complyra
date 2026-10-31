@@ -6,10 +6,9 @@ import {
 } from '../data/rightsPackets';
 
 /**
- * The platform's own Rights packet document — the printable version of
- * the chart record, generated on demand. Blank signer lines when the
- * packet is still awaiting signature (it can be printed for a paper
- * signing and filed back), the recorded values once completed. Every
+ * The Rights packet document — the printable version of the chart
+ * record, generated on demand. Blank signer lines when the packet is
+ * still awaiting signature; the recorded values once completed. Every
  * page carries the platform's record stamp.
  */
 export function buildRightsPacketPdf(packet: RightsPacket, individualName: string, agencyName: string) {
@@ -37,7 +36,6 @@ export function buildRightsPacketPdf(packet: RightsPacket, individualName: strin
     line('Individual Rights packet', 18);
     line(`Individual: ${individualName}`);
     line(`Agency: ${agencyName}`);
-    line('This packet records that the Individual’s rights materials were received and reviewed. It is renewed every year and filed in front of the Individual’s consent forms.');
     for (const item of RIGHTS_PACKET_ACKNOWLEDGEMENTS) {
         line(item.heading, 13);
         line(item.text);
