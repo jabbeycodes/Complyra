@@ -11576,6 +11576,11 @@ export class LocalApi implements ComplyraApi {
     const rows = this.p6rows();
     const orders = this.medOrderRows();
     const today = todayIso();
+    // Delivery rows store only the recorder's user id; resolve display
+    // names from profiles so count history never prints a raw id.
+    const nameByUserId = new Map(
+      this.store.db.profiles.map((profile) => [profile.id, profile.fullName]),
+    );
     return this.store.db.medications
       .filter(
         (med) =>
@@ -11587,9 +11592,15 @@ export class LocalApi implements ComplyraApi {
         projectMedInventory({
           med,
           inventory: rows.find((row) => row.medicationId === med.id) ?? null,
-          deliveries: this.store.db.medicationDeliveries.filter(
-            (delivery) => delivery.medicationId === med.id,
-          ),
+          deliveries: this.store.db.medicationDeliveries
+            .filter((delivery) => delivery.medicationId === med.id)
+            .map((delivery) => ({
+              ...delivery,
+              recordedByName:
+                delivery.recordedByName ??
+                nameByUserId.get(delivery.recordedBy) ??
+                null,
+            })),
           // Local backend: logPrnDose decrements the medication row directly,
           // so projectMedInventory falls back to the row count for PRN meds.
           prnDoses: [],

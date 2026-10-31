@@ -8,7 +8,12 @@ import {
 } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canLogDoseException, canRecordDelivery } from "../../data/chart";
-import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
+import {
+  deliveryHistoryLabel,
+  doseExceptionKindLabel,
+  inventoryCountdownLabel,
+  medHasCountOnFile,
+} from "../../data/medInventory";
 import type {
   DoseExceptionKind,
   MedInventoryStatus,
@@ -102,7 +107,9 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
         const expanded = openMed === view.medicationId;
         // A medication with no count on file has no supply figure to
         // project: it must not read "0 pills", "Expired", or "Due soon".
-        const neverCounted = view.lastCountedOn === null;
+        // The predicate is the shared one (medHasCountOnFile) — the same
+        // computed source the chart board and the tallies use.
+        const neverCounted = !medHasCountOnFile(view);
         return (
           <article key={view.medicationId} className="obligation-card med-card">
             <header>
@@ -422,14 +429,13 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 {view.deliveries.map((delivery) => (
                   <li key={delivery.id}>
                     <span>
-                      <strong>{formatDate(delivery.countedOn)}</strong> — {delivery.remainingPills}{" "}
-                      pills counted
-                      {view.kind === "scheduled" ? ` · ${delivery.pillsPerDay}/day` : ""}
-                      {delivery.expectedPills !== null &&
-                      delivery.expectedPills !== undefined &&
-                      delivery.expectedPills !== delivery.remainingPills
-                        ? ` · Count variance: expected ${delivery.expectedPills}, counted ${delivery.remainingPills}${delivery.varianceReason ? ` — ${delivery.varianceReason}` : ""}`
-                        : ""}
+                      {deliveryHistoryLabel(delivery, {
+                        medicationName: view.medicationName,
+                        individualName:
+                          workspace?.individuals.find(
+                            (person) => person.id === individualId,
+                          )?.name ?? "Individual",
+                      })}
                     </span>
                   </li>
                 ))}

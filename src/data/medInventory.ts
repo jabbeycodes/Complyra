@@ -7,12 +7,14 @@
  * every render recomputes it on the fly.
  */
 import { daysBetween, todayIso, type Medication, type MedicationDelivery } from "./chart";
-import { medCountdown } from "../features/mobile/medcount";
+import { formatPillCount, medCountdown } from "../features/mobile/medcount";
+import { formatCentralTime, formatIsoDay } from "../features/mobile/mar";
 import type { MedDoseMark } from "./types";
 import {
   DEFAULT_MED_LOW_THRESHOLD_DAYS,
   type AddMedDoseExceptionInput,
   type DoseExceptionKind,
+  type MedDeliverySummary,
   type MedDoseException,
   type MedInventoryRecord,
   type MedInventoryStatus,
@@ -206,6 +208,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
         remainingPills: row.remainingPills,
         pillsPerDay: row.pillsPerDay,
         recordedBy: row.recordedBy,
+        recordedByName: row.recordedByName ?? null,
         expectedPills: row.expectedPills ?? null,
         varianceReason: row.varianceReason ?? null,
       })),
@@ -270,20 +273,32 @@ export function summarizeMedSupply(
   views: MedInventoryView[],
   today = todayIso(),
 ): MedSupplyStatus {
+  // A medication with no count on file (lastCountedOn === null) has no
+  // supply state at all: its projection is a fabricated zero, so it must
+  // never be counted as "out", never appear as a reorder alert, and never
+  // make the home read as stocked or as needing a reorder. It is surfaced
+  // as "No count recorded yet" on the per-med surfaces instead.
+  const counted = views.filter((view) => medHasCountOnFile(view));
+  const uncounted = views.length - counted.length;
   const counts = { ok: 0, low: 0, critical: 0, out: 0 };
-  for (const view of views) {
+  for (const view of counted) {
     if (view.status === "low") counts.low += 1;
     else if (view.status === "critical") counts.critical += 1;
     else if (view.status === "out") counts.out += 1;
     else counts.ok += 1;
   }
-  const alerts = views
+  const alerts = counted
     .filter((view) => view.status !== "ok")
     .sort(compareMedInventory);
   const allClear = alerts.length === 0;
   const summary = allClear
-    ? `${siteName}: all ${views.length} medication${views.length === 1 ? "" : "s"} stocked.`
-    : `${siteName}: ${alerts.length} of ${views.length} medication${views.length === 1 ? "" : "s"} need${alerts.length === 1 ? "s" : ""} reorder` +
+    ? counted.length === 0 && uncounted > 0
+      ? `${siteName}: no medication counts recorded yet (${uncounted} medication${uncounted === 1 ? "" : "s"} not counted).`
+      : `${siteName}: all ${counted.length} medication${counted.length === 1 ? "" : "s"} stocked.` +
+        (uncounted > 0
+          ? ` ${uncounted} medication${uncounted === 1 ? "" : "s"} not counted yet.`
+          : "")
+    : `${siteName}: ${alerts.length} of ${counted.length} medication${counted.length === 1 ? "" : "s"} need${alerts.length === 1 ? "s" : ""} reorder` +
       ` (${counts.out} out, ${counts.critical} critical, ${counts.low} low).`;
   return {
     siteId,
@@ -300,11 +315,86 @@ export function summarizeMedSupply(
   };
 }
 
+/**
+ * THE one computed source for a medication's count state, shared by every
+ * surface that talks about supply (chart board, forecast card, supply
+ * tallies, Audit Me). A med "has a count on file" exactly when its
+ * inventory view carries a count date — from a delivery/count record or
+ * the row's maintained count date. Anything else (the stored row's raw
+ * pill figure, its low flag) is NOT a count state: surfaces that render
+ * those as supply truth disagree with the forecast in steady state
+ * (batch 33: a never-counted med persistently showed "0 pills left" on
+ * the chart board while the forecast said "No count recorded yet").
+ */
+export function medHasCountOnFile(view: MedInventoryView): boolean {
+  // projectMedInventory always sets lastCountedOn (null = never counted);
+  // only hand-built fixtures omit the field, and for those the previous
+  // counted behavior is preserved.
+  return view.lastCountedOn !== null;
+}
+
+export type MedSupplyDisplayState =
+  /** Inventory views have not arrived yet — no supply claim may render. */
+  | { kind: "loading" }
+  /** Inventory views failed to load — still no supply claim may render. */
+  | { kind: "unavailable" }
+  /** Loaded, and the med has no count on file (or no inventory view). */
+  | { kind: "never-counted" }
+  /** Loaded, counted, with the projection's supply status. */
+  | { kind: "counted"; status: MedInventoryView["status"] };
+
+export function medSupplyDisplayState(
+  view: MedInventoryView | null | undefined,
+  loadState: "loading" | "ready" | "failed",
+): MedSupplyDisplayState {
+  if (loadState === "loading") return { kind: "loading" };
+  if (loadState === "failed") return { kind: "unavailable" };
+  if (!view || !medHasCountOnFile(view)) return { kind: "never-counted" };
+  return { kind: "counted", status: view.status };
+}
+
 /** Human-readable countdown, e.g. "24 pills remaining · ~12 days left". */
 export function inventoryCountdownLabel(view: MedInventoryView): string {
   const pills = `${view.currentCount} pill${view.currentCount === 1 ? "" : "s"} remaining`;
   if (view.kind === "prn" || view.daysRemaining === null) return `${pills} · PRN`;
   return `${pills} · ~${view.daysRemaining} day${view.daysRemaining === 1 ? "" : "s"} left`;
+}
+
+/**
+ * The one-line label for a delivery/count record in every count history
+ * (chart supply history, mobile Recent counts). A count is an audit
+ * record, so the line always names the Individual, the medication, what
+ * was expected vs counted when the count disagreed, the variance reason,
+ * who recorded it, and when — in human form. The recorder's raw user id
+ * is NEVER rendered: when no display name was resolved the line falls
+ * back to "Staff member" (the same fallback the hosted name resolution
+ * uses elsewhere). Legacy rows without a recorded timestamp show the
+ * count date only.
+ */
+export function deliveryHistoryLabel(
+  delivery: MedDeliverySummary,
+  context: { medicationName: string; individualName: string },
+): string {
+  const day = formatIsoDay(delivery.countedOn.slice(0, 10));
+  const time = delivery.countedAt ? formatCentralTime(delivery.countedAt) : "";
+  const when = time ? `${day} · ${time}` : day;
+  const counted = formatPillCount(delivery.remainingPills);
+  const hasVariance =
+    delivery.expectedPills !== null &&
+    delivery.expectedPills !== undefined &&
+    Math.round(delivery.expectedPills * 100) !==
+      Math.round(delivery.remainingPills * 100);
+  const figures = hasVariance
+    ? `expected ${formatPillCount(delivery.expectedPills as number)}, counted ${counted}`
+    : `${counted} pill${delivery.remainingPills === 1 ? "" : "s"} counted`;
+  const reason =
+    hasVariance && delivery.varianceReason
+      ? ` — ${delivery.varianceReason}`
+      : "";
+  const perDay =
+    delivery.pillsPerDay > 0 ? ` · ${formatPillCount(delivery.pillsPerDay)}/day` : "";
+  const recorder = delivery.recordedByName?.trim() || "Staff member";
+  return `${when} — ${context.medicationName} for ${context.individualName}: ${figures}${reason}${perDay} · recorded by ${recorder}`;
 }
 
 export interface ValidatedDoseExceptionInput {

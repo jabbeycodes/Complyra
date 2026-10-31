@@ -163,18 +163,45 @@ export function projectOrderToMedication(
 }
 
 /**
- * Whether a medication row still belongs on the MAR. A medication fed by an
- * order drops off the MAR once that order is discontinued; legacy / seed
- * medications with no source order always stay. This is what makes the MAR
- * medication list derive from the active orders.
+ * Whether a medication row still belongs on the MAR (and every other
+ * active-med surface — chart board, inventory, forecasts — which all
+ * funnel through this rule). The order link is written in BOTH directions
+ * at activation (medication.sourceOrderId and order.medicationId), and
+ * either one governs:
+ *
+ *  - Source-order link: a medication fed by an order stays only while
+ *    that order is active (the original rule).
+ *  - Order-claim link: an order that was activated against this row
+ *    claims it via medicationId. If claiming orders exist and none is
+ *    active, the med's course has ended — even when the row's own
+ *    sourceOrderId was never written (rows created before the link
+ *    existed, or by an older build). This was the batch 24 defect: the
+ *    order read "Discontinued" while its claimed row, missing the
+ *    back-link, stayed active on the chart, the board, and both
+ *    forecasts, and kept accepting counts.
+ *
+ * Legacy / seed medications claimed by no order always stay. Draft
+ * orders never claim a row (medicationId is written only at activation),
+ * so a claim is proof the order actually fed the med.
  */
 export function medicationStaysOnMar(
-  med: { sourceOrderId?: string | null },
-  orders: readonly Pick<MedicationOrder, "id" | "status">[] | undefined,
+  med: { id?: string; sourceOrderId?: string | null },
+  orders:
+    | readonly Pick<MedicationOrder, "id" | "status" | "medicationId">[]
+    | undefined,
 ): boolean {
-  if (!med.sourceOrderId) return true;
-  const order = (orders ?? []).find((o) => o.id === med.sourceOrderId);
-  return !order || order.status === "active";
+  const list = orders ?? [];
+  if (med.sourceOrderId) {
+    const source = list.find((o) => o.id === med.sourceOrderId);
+    if (source) return source.status === "active";
+  }
+  if (med.id) {
+    const claims = list.filter((o) => o.medicationId === med.id);
+    if (claims.length > 0) {
+      return claims.some((o) => o.status === "active");
+    }
+  }
+  return true;
 }
 
 export const RECONCILIATION_TRIGGER_LABEL: Record<ReconciliationTrigger, string> = {
