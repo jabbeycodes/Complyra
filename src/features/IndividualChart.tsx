@@ -94,8 +94,11 @@ import {
   canEnterShiftNotes,
   canSeeShiftNotes,
   canSeeMenuEntries,
+  canViewMedicationOrders,
   canViewPersonalSpending,
 } from "../data/permissions";
+import { orderExpiryBoardLabel } from "../data/medicationOrders";
+import type { MedicationOrder } from "../data/types";
 import MenuSection from "./MenuSection";
 import PersonalSpendingCard, {
   PersonalFundsGlance,
@@ -132,6 +135,29 @@ export default function IndividualChart({
   // section lists the per-dose audit records. Loaded here (hooks before
   // the early return); child cards keep their own loads.
   const medsEnabled = session !== null && canSeeMeds(session.roleKey);
+  // The board flags a med whose source order is expiring / expired (the
+  // supply line alone — "10 pills left · 10 days left" — said nothing
+  // about the order running past its review date; simulation wave 4A).
+  // Only roles that may open medication orders load them; everyone else
+  // simply gets no order labels.
+  const ordersEnabled =
+    session !== null && canViewMedicationOrders(session.roleKey);
+  const [medOrders, setMedOrders] = useState<MedicationOrder[]>([]);
+  useEffect(() => {
+    if (!ordersEnabled) return;
+    let live = true;
+    api
+      .listMedicationOrders(individualId)
+      .then((rows) => {
+        if (live) setMedOrders(rows);
+      })
+      .catch(() => {
+        if (live) setMedOrders([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, individualId, ordersEnabled, workspace]);
   const [medViews, setMedViews] = useState<MedInventoryView[] | null>(null);
   const [medMarks, setMedMarks] = useState<MedDoseMark[]>([]);
   const [prnLogs, setPrnLogs] = useState<PrnDoseLog[]>([]);
@@ -638,6 +664,15 @@ export default function IndividualChart({
                   const medLogs = prnLogs.filter(
                     (log) => log.medicationId === med.id,
                   );
+                  // The source order's expiry, when it needs review —
+                  // rendered under the supply line as text (never color
+                  // alone), matching the orders card's wording.
+                  const sourceOrder = med.sourceOrderId
+                    ? medOrders.find((order) => order.id === med.sourceOrderId)
+                    : undefined;
+                  const orderExpiryNote = sourceOrder
+                    ? orderExpiryBoardLabel(sourceOrder, todayIso())
+                    : null;
                   return (
                     <>
                 <header>
@@ -699,6 +734,11 @@ export default function IndividualChart({
                       ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
                       : ""}
                 </p>
+                {orderExpiryNote && (
+                  <p className="form-error" role="status">
+                    {orderExpiryNote} — a prescriber review is needed.
+                  </p>
+                )}
                 {canRecordDelivery(session.roleKey) && (
                   <DeliveryForm
                     defaultRemaining={

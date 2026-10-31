@@ -307,7 +307,7 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, operatingReminderNotices, reminderRecipientIds, type ReminderMembership } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
   accountabilityDates,
@@ -9202,7 +9202,12 @@ export class HostedApi implements ComplyraApi {
 
   async createQaAudit(siteId: string, year: number, quarter: number): Promise<QaAudit> {
     const session = await this.requireSession();
-    this.requirePermission(session, "qa.audit");
+    // Starting a review is a program-management act (qa.schedule — the
+    // Program Manager / administrator side of the QA program). Scoring and
+    // finalizing an existing review stay on qa.audit; gating creation on
+    // qa.audit left the read-only auditor as the only non-admin role that
+    // could start a review while PMs could not (simulation wave 4A).
+    this.requirePermission(session, "qa.schedule");
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== siteId) {
       throw new Error("You do not have permission to do that.");
     }
@@ -12933,11 +12938,13 @@ export class HostedApi implements ComplyraApi {
     );
     const personName = new Map<string, string>();
     const personSite = new Map<string, string>();
+    const personSiteId = new Map<string, string>();
     for (const row of (indRes.data ?? []) as Record<string, unknown>[]) {
       personName.set(String(row.id), String(row.full_name ?? ""));
       personSite.set(String(row.id), siteName.get(String(row.site_id)) ?? "");
+      if (row.site_id) personSiteId.set(String(row.id), String(row.site_id));
     }
-    return { personName, personSite };
+    return { personName, personSite, personSiteId };
   }
 
   private async reconciliationView(
@@ -12992,7 +12999,7 @@ export class HostedApi implements ComplyraApi {
       .eq("agency_id", session.agencyId)
       .in("status", ["draft", "active"]);
     throwIf(error, "Could not load medication orders.");
-    const { personName, personSite } = await this.orderNameMaps(session.agencyId);
+    const { personName, personSite, personSiteId } = await this.orderNameMaps(session.agencyId);
     const views: MedicationOrderView[] = (
       (data ?? []) as Record<string, unknown>[]
     ).map((row) => {
@@ -13005,10 +13012,27 @@ export class HostedApi implements ComplyraApi {
         siteName: personSite.get(order.individualId) ?? "",
       };
     });
-    // No cron: alert the nurse + Program Manager when a reviewer opens the
-    // worklist. The notice RPC dedupes per role + order + review date, so
-    // each role keeps its own copy (one shared key would dedupe the second
-    // role's notice away).
+    // No cron: alert the nurse + Program Manager roles and the house
+    // managers of the order's home when a reviewer opens the worklist.
+    // The notice RPC dedupes per recipient + order + review date, so each
+    // audience keeps its own copy (one shared key would dedupe the second
+    // copy away). House managers are addressed personally, scoped to the
+    // Individual's home: a house_manager role broadcast would reach every
+    // home in the agency (simulation wave 4A follow-up: the HM of the home
+    // previously received nothing at all).
+    let memberships: ReminderMembership[] = [];
+    if (views.some((view) => view.expiry !== "ok")) {
+      const { data: membershipRows } = await this.client
+        .from("memberships")
+        .select("user_id, role_key, role, site_id, expires_on")
+        .eq("agency_id", session.agencyId);
+      memberships = (membershipRows ?? []).map((membership) => ({
+        userId: String(membership.user_id),
+        role: String(membership.role_key ?? membership.role ?? ""),
+        siteId: membership.site_id ? String(membership.site_id) : null,
+        expiresOn: membership.expires_on ? String(membership.expires_on).slice(0, 10) : null,
+      }));
+    }
     for (const view of views) {
       if (view.expiry === "ok") continue;
       const type =
@@ -13034,6 +13058,21 @@ export class HostedApi implements ComplyraApi {
           deepLink: "/medication-orders",
           entityId: view.id,
           dedupeKey: `${type}:${roleKey}:${view.id}:${when}`,
+        });
+      }
+      const homeId = personSiteId.get(view.individualId);
+      if (!homeId) continue;
+      for (const userId of houseManagerRecipientIds(memberships, homeId, today)) {
+        await this.queueOperatingNotice(session, {
+          agencyId: session.agencyId,
+          userId,
+          roleKey: null,
+          type,
+          title,
+          body,
+          deepLink: "/medication-orders",
+          entityId: view.id,
+          dedupeKey: `${type}:house_manager:${userId}:${view.id}:${when}`,
         });
       }
     }
