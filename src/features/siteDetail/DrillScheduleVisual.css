@@ -7,21 +7,21 @@
    signal. */
 
 .dsv {
-  --dsv-ink: #1f2937;
-  --dsv-muted: #5b6472;
-  --dsv-card: #ffffff;
-  --dsv-border: #e2e6ed;
-  --dsv-row: #f7f9fc;
-  --dsv-row-hover: #eef2f7;
+  --dsv-ink: var(--color-ink);
+  --dsv-muted: var(--color-muted);
+  --dsv-card: var(--color-h-ffffff);
+  --dsv-border: var(--color-rule);
+  --dsv-row: var(--color-h-faf6ef);
+  --dsv-row-hover: var(--color-paper-2);
   --dsv-radius: 10px;
-  --dsv-am: #b57f2c;
-  --dsv-am-deep: #7c5620;
-  --dsv-pm: #a55a36;
-  --dsv-pm-deep: #7c4225;
-  --dsv-overnight: #4d5878;
-  --dsv-overnight-deep: #39415c;
-  --dsv-weekend: #3f5c3b;
-  --dsv-weekend-deep: #2f4630;
+  --dsv-am: var(--color-h-b45309);
+  --dsv-am-deep: var(--color-h-7a5a1e);
+  --dsv-pm: var(--color-h-a85a42);
+  --dsv-pm-deep: var(--color-h-7a3e1d);
+  --dsv-overnight: var(--color-h-4b5563);
+  --dsv-overnight-deep: var(--color-h-374151);
+  --dsv-weekend: var(--color-accent);
+  --dsv-weekend-deep: var(--color-h-2f4630);
   display: grid;
   gap: 12px;
   margin-top: 12px;
