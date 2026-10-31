@@ -73,7 +73,14 @@ import {
   metrics,
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
-import { searchRequirements } from "./data/search";
+import { searchDirectory, searchRequirements } from "./data/search";
+import {
+  copilotDisclosure,
+  copilotEmptyText,
+  copilotFallbackText,
+  copilotScopeLabel,
+  copilotSuggestions,
+} from "./data/copilot";
 import AuthEntry from "./auth/AuthEntry";
 import { ComplyRerWordmark } from "./brand/ComplyrerBrand";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
@@ -215,6 +222,10 @@ export default function App() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
+  // Header search dropdown visibility is explicit state: it used to be a
+  // pure function of the query text, so it stayed rendered (over unrelated
+  // pages) until the query was manually cleared (batch 13).
+  const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   // Mobile shell view mode: "auto" follows the viewport width, "mobile" and
@@ -407,6 +418,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
+        setSearchOpen(true);
         searchRef.current?.focus();
       }
       if (e.key === "Escape") {
@@ -429,6 +441,10 @@ export default function App() {
     document.body.classList.toggle("nav-open", mobileOpen);
     return () => document.body.classList.remove("nav-open");
   }, [mobileOpen]);
+  // The search dropdown never follows the user across pages (batch 13).
+  useEffect(() => {
+    setSearchOpen(false);
+  }, [page]);
   // KIOSK-TIME-CLOCK: punch-only standalone page — no session, no app
   // shell, no nav. Renders before every other gate so a kiosk never needs
   // a login. Leaving the hash unmounts the kiosk and restores the app.
@@ -531,6 +547,27 @@ export default function App() {
     (r) => site === "All sites" || r.site === site,
   );
   const searchHits = searchRequirements(scoped, globalQuery);
+  // Directory hits (batch 13): people and homes, drawn only from
+  // collections already scoped to the caller's readable sites —
+  // `individuals` and `sites` are visibility-filtered above; staff are
+  // limited to the visible sites plus agency-wide memberships (no site),
+  // so search can never surface a record from a home the caller cannot
+  // open.
+  const visibleSiteIds = new Set(sites.map((row) => row.id));
+  const directoryHits = searchDirectory(
+    {
+      individuals: individuals.map((p) => ({
+        id: p.id,
+        name: p.name,
+        site: p.site,
+      })),
+      staff: staff
+        .filter((s) => s.siteId === null || visibleSiteIds.has(s.siteId))
+        .map((s) => ({ id: s.id, name: s.name, role: s.role, site: s.site })),
+      sites: sites.map((s) => ({ id: s.id, name: s.name })),
+    },
+    globalQuery,
+  );
   const alertItems = scoped.filter((r) =>
     ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
@@ -736,12 +773,12 @@ export default function App() {
       understood
         ? {
             text: result.length
-              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${site === "All sites" ? "the sample agency" : site}. ${overdueCount} ${overdueCount === 1 ? "is" : "are"} overdue or expired. Open a source below to see the responsible person and next action.`
-              : "There are no matching requirements in the current sample data and site selection. This does not confirm that a care instruction is absent from a real plan.",
+              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${copilotScopeLabel(demoMode, site)}. ${overdueCount} ${overdueCount === 1 ? "is" : "are"} overdue or expired. Open a source below to see the responsible person and next action.`
+              : copilotEmptyText(demoMode),
             items: result.slice(0, 8),
           }
         : {
-            text: "This preview can look up requirements, overdue work, delegations, equipment checks, and plan acknowledgments in the sample records. Try “What should we fix before an audit?”",
+            text: copilotFallbackText(demoMode),
             items: [],
           },
     );
@@ -1009,25 +1046,109 @@ export default function App() {
             <div
               className="global-search"
               onClick={() => searchRef.current?.focus()}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setSearchOpen(false);
+                }
+              }}
             >
               <Search size={16} aria-hidden="true" />
               <input
                 ref={searchRef}
                 value={globalQuery}
-                onChange={(e) => setGlobalQuery(e.target.value)}
+                onChange={(e) => {
+                  setGlobalQuery(e.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setSearchOpen(false);
+                }}
                 placeholder="Search anything…"
-                aria-label="Search all requirements"
+                aria-label="Search people, homes, and requirements"
               />
               <kbd>⌘ K</kbd>
-              {globalQuery && (
+              {searchOpen && globalQuery && (
                 <div className="search-results">
-                  <div className="search-heading">Requirements and records</div>
+                  {directoryHits.some((h) => h.kind === "individual") && (
+                    <div className="search-heading">Individuals</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "individual")
+                    .map((h) => (
+                      <button
+                        key={`individual-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          openPersonChart(h.name);
+                        }}
+                      >
+                        <Users size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>{h.kind === "individual" ? h.site : ""}</small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {directoryHits.some((h) => h.kind === "staff") && (
+                    <div className="search-heading">Staff</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "staff")
+                    .map((h) => (
+                      <button
+                        key={`staff-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          navigate("Staff");
+                          if (h.kind === "staff") setQuery(h.name);
+                        }}
+                      >
+                        <Users size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>
+                            {h.kind === "staff" ? `${h.role}, ${h.site}` : ""}
+                          </small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {directoryHits.some((h) => h.kind === "site") && (
+                    <div className="search-heading">Homes</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "site")
+                    .map((h) => (
+                      <button
+                        key={`site-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          openSiteDetail(h.id);
+                        }}
+                      >
+                        <Building2 size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>Home</small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {searchHits.length > 0 && (
+                    <div className="search-heading">Requirements and records</div>
+                  )}
                   {searchHits.map((r) => (
                       <button
                         key={r.id}
                         onClick={() => {
                           selectRequirement(r);
                           setGlobalQuery("");
+                          setSearchOpen(false);
                         }}
                       >
                         <FileText size={17} />
@@ -1043,7 +1164,7 @@ export default function App() {
                         <ChevronRight size={15} />
                       </button>
                     ))}
-                  {searchHits.length === 0 && (
+                  {searchHits.length === 0 && directoryHits.length === 0 && (
                     <p>No matching records. Try a name or site.</p>
                   )}
                 </div>
@@ -2531,14 +2652,14 @@ export default function App() {
             <h2>Ask about an individual, site, or requirement</h2>
           </div>
           <div className="copilot-disclosure">
-            Preview · Grounded lookups in sample records · {site}
+            {copilotDisclosure(demoMode, site)}
           </div>
           <div className="suggested-questions">
-            {[
-              "What should we fix before an audit?",
-              "Which delegations are expiring?",
-              "Who needs to acknowledge Ellis’s PCSP?",
-            ].map((q) => (
+            {copilotSuggestions({
+              demoMode,
+              individuals,
+              requirements: scoped,
+            }).map((q) => (
               <button key={q} onClick={() => askCopilot(q)}>
                 {q}
                 <ArrowUpRight size={15} />
