@@ -466,10 +466,10 @@ Deno.serve(async (req) => {
     }
     const { data: profile } = await admin
       .from("profiles")
-      .select("platform_admin")
+      .select("platform_admin, active, must_change_password")
       .eq("id", user.id)
       .maybeSingle();
-    if (!profile?.platform_admin) {
+    if (!profile?.platform_admin || !profile.active || profile.must_change_password) {
       return json(
         { error: "Only the Complyrer operator can verify the AI service account." },
         403,
