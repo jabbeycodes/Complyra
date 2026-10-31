@@ -41,6 +41,7 @@ export function canReadIndividual(
     return assignments.some((a) => a.agencyId === session.agencyId &&
       a.userId === session.userId &&
       a.startsOn <= today &&
+      (!a.endsOn || a.endsOn >= today) &&
       (a.siteId ?? siteOfAssigned(a.individualId)) === person.siteId);
   }
   // Membership home: a DSP whose membership names this site works there
