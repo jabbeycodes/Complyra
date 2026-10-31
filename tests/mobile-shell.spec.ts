@@ -39,8 +39,8 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
 
   await pickCedarHouse(page);
 
-  // Role-correct tiles for an administrator; modules that do not exist on
-  // main (Messages, Event Reports, Time Off) render no tile at all.
+  // Role-correct tiles for an administrator; surfaces with no home tile
+  // (Event Reports; Time Off, which lives in My Hub) render no tile.
   for (const label of [
     "Medications",
     "ISP Data",
@@ -63,7 +63,11 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await expect(page.getByRole("button", { name: /Med Count/ })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("button", { name: /Messages/ })).toHaveCount(0);
+  // Messages DOES have a tile: staff messaging shipped on mobile
+  // (PR #154) and an administrator can use it.
+  await expect(
+    page.getByRole("button", { name: /Messages/ }).first(),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /Time Off/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Event Reports/ })).toHaveCount(
     0,

@@ -1,12 +1,25 @@
 import { test, expect, type Page, type Locator } from "./fixtures";
 
 async function signIn(page: Page) {
+  // These specs assert on the desktop layout, including at phone
+  // width. Since PR #134 a phone sign-in lands in the mobile shell;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads
+  // complyrer.viewMode at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("sarah.mitchell");
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
+  // At phone width sign-in lands in the mobile shell (PR #134) — its
+  // header is the banner landmark; the desktop topbar only exists in
+  // the desktop layout. Accept either.
+  await expect(
+    page.getByRole("banner").or(page.locator(".topbar")),
+  ).toBeVisible({ timeout: 10_000 });
   await page
     .getByRole("dialog", { name: "Interactive demo tour" })
     .waitFor({ state: "visible", timeout: 3_000 })

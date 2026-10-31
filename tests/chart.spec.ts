@@ -19,7 +19,9 @@ async function openEllis(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
-  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true })).toBeVisible();
+  // The chart title is the h1; the Consents register section below it
+  // repeats the person's name as its own h3, so pin the title by level.
+  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true, level: 1 })).toBeVisible();
   return chart;
 }
 
@@ -30,7 +32,9 @@ test("Ellis opens as a full chart with widgets, download, and med count", async 
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
   await signIn(page);
   const chart = await openEllis(page);
-  await expect(chart.getByRole("heading", { name: "Care plan" })).toBeVisible();
+  // Exact match: the chart also has a "Care plan document" heading,
+  // which the substring "Care plan" matches as well.
+  await expect(chart.getByRole("heading", { name: "Care plans", exact: true })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Delegations" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Upcoming clinical renewals" })).toBeVisible();
   await expect(chart.getByRole("heading", { name: "Medication board" })).toBeVisible();
