@@ -2975,7 +2975,7 @@ export class HostedApi implements ComplyraApi {
           (
             await this.client
               .from("medication_orders")
-              .select("id,status")
+              .select("id,status,medication_id")
               .eq("agency_id", agencyId)
           ).data ?? []
         ).map((row) => ({
@@ -2983,6 +2983,10 @@ export class HostedApi implements ComplyraApi {
           status: String(
             (row as Record<string, unknown>).status,
           ) as MedicationOrder["status"],
+          medicationId:
+            ((row as Record<string, unknown>).medication_id as
+              | string
+              | null) ?? null,
         }))
       : [];
     const planStacks = canViewPeople
@@ -11744,7 +11748,7 @@ export class HostedApi implements ComplyraApi {
     const allMeds = (medsRes.data ?? []).map(mapMedication);
     const ordersRes = await this.client
       .from("medication_orders")
-      .select("id,status")
+      .select("id,status,medication_id")
       .eq("agency_id", session.agencyId)
       .eq("individual_id", individualId);
     throwIf(ordersRes.error, "Could not load medication orders.");
@@ -11753,6 +11757,9 @@ export class HostedApi implements ComplyraApi {
       status: String(
         (row as Record<string, unknown>).status,
       ) as MedicationOrder["status"],
+      medicationId:
+        ((row as Record<string, unknown>).medication_id as string | null) ??
+        null,
     }));
     const meds = allMeds.filter((med) => medicationStaysOnMar(med, orders));
     const medIds = meds.map((med) => med.id);
@@ -11800,9 +11807,18 @@ export class HostedApi implements ComplyraApi {
       }),
     );
     const { mapMedicationDelivery } = await import("./hostedMappers");
-    const deliveries = (
+    const rawDeliveries = (
       (delRes.data ?? []) as Record<string, unknown>[]
     ).map((row) => mapMedicationDelivery(row));
+    // Delivery rows store only the recorder's user id; resolve display
+    // names from profiles so count history never prints a raw id.
+    const recorderNames = await this.lifeEventNames(
+      rawDeliveries.map((row) => row.recordedBy),
+    );
+    const deliveries = rawDeliveries.map((row) => ({
+      ...row,
+      recordedByName: recorderNames.get(row.recordedBy) ?? null,
+    }));
     const prnByMed = new Map<string, Array<{ date: string; pills: number }>>();
     for (const row of (prnRes.data ?? []) as Record<string, unknown>[]) {
       const medId = row.medication_id as string;

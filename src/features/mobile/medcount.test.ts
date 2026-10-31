@@ -266,7 +266,40 @@ test("the count floors at zero and says so", () => {
   );
   assert.equal(result.pillsLeft, 0);
   assert.equal(result.daysLeft, 0);
-  assert.equal(result.label, "0 pills left · about 0 days at 2 per day");
+  assert.equal(result.outOfStock, true);
+  assert.equal(result.label, "0 pills left · Out of stock · about 0 days at 2 per day");
+});
+
+test("PRN at zero names the out-of-stock state (batch 31: the phone PRN tab showed a bare 0)", () => {
+  const result = computeMedCountdown({
+    kind: "prn",
+    baseline: {
+      countedOn: "2026-09-08",
+      countedAt: "2026-09-08T05:00:00.000Z",
+      pills: 4,
+    },
+    dosesPerDay: 0,
+    doseTimesCount: 0,
+    givenDoses: [],
+    wasted: [],
+    prnCurrentCount: 0,
+    today: TODAY,
+  });
+  assert.equal(result.pillsLeft, 0);
+  assert.equal(result.outOfStock, true);
+  assert.equal(
+    result.label,
+    "0 pills left · Out of stock · as needed — no daily rate",
+  );
+});
+
+test("a never-counted med is never out of stock — it has no stock state", () => {
+  const result = computeMedCountdown(
+    scheduled({ baseline: null, givenDoses: [] }),
+  );
+  assert.equal(result.hasBaseline, false);
+  assert.equal(result.outOfStock, false);
+  assert.equal(result.label, "No count recorded yet");
 });
 
 test("singular wording for one pill and one day", () => {
