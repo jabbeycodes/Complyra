@@ -49,6 +49,7 @@ import Dashboard from "./Dashboard";
 import MobileShell, { type ShellView } from "./features/mobile/MobileShell";
 import PlatformBottomNav from "./features/mobile/PlatformBottomNav";
 import type { BottomNavId } from "./features/mobile/bottomNav";
+import { desktopTargetFor } from "./features/mobile/desktopSwitch";
 import "./features/mobile/mobile.css";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
@@ -818,7 +819,22 @@ export default function App() {
           workspace={workspace}
           queueItems={personalItems}
           onSignOut={() => void signOut()}
-          onDesktopView={() => pickViewMode("desktop")}
+          onDesktopView={({ view, siteId }) => {
+            // Batch 28: preserve the current screen + house scope —
+            // land on the desktop page for the same work in the same
+            // house, not whatever page the desktop hash last held.
+            const target = desktopTargetFor({
+              view,
+              siteId,
+              canPage: (page) => pageVisible(session, page),
+            });
+            pickViewMode("desktop");
+            if (target.page === "Site detail" && target.siteId) {
+              openSiteDetail(target.siteId);
+            } else {
+              navigate(target.page);
+            }
+          }}
           startView={shellStart.view}
           startSheetOpen={shellStart.sheet}
           nav={{

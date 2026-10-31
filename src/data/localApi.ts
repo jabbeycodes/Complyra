@@ -1,6 +1,6 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
-import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlertPairs, consentAlerts, consentStatus, isStaleConsentNotification, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, rightsPacketAlerts, rightsTrackingFor, validateRightsCompletion, validateRightsPacketStart, type RightsPacket, type RightsPacketCompletion } from "./rightsPackets";
 import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
@@ -165,7 +165,7 @@ import {
   type PersonalSpendingMonthClose,
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { assignedSiteIds, canAccessSite, isAgencyWideViewer } from "./dashboard";
 import {
   canActAtSite,
   canReadIndividual,
@@ -368,6 +368,7 @@ import {
   canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
+  canOverseeTraining,
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
@@ -3596,6 +3597,7 @@ export class LocalApi implements ComplyraApi {
             db.consents.push({ ...structuredClone(draft), id, agencyId: session.agencyId, createdBy: session.userId, createdAt: new Date().toISOString(), activatedBy: null, activatedAt: null });
         }
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
         return id;
     }
     async activateConsent(id: string) {
@@ -3607,6 +3609,7 @@ export class LocalApi implements ComplyraApi {
         row.activatedAt = new Date().toISOString();
         row.activatedBy = session.userId;
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async revokeConsent(id: string, revokedOn: string, reason: string) {
         const { row, session } = this.consentForWrite(id);
@@ -3618,6 +3621,7 @@ export class LocalApi implements ComplyraApi {
             throw new Error('This consent is already revoked.');
         this.store.db.consentRevocations.push({ consentId: id, revokedOn, reason: reason.trim(), revokedBy: session.userId, revokedByName: session.fullName });
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async saveConsentTypes(types: ConsentType[]) {
         const session = assertSession(this.store);
@@ -3639,9 +3643,11 @@ export class LocalApi implements ComplyraApi {
         const register = await this.getConsents();
         for (const payload of consentAlerts(register, this.store.db.memberships))
             this.pushRecognitionNotification(payload);
+        const outstandingPacketIds = new Set<string>();
         for (const packet of await this.listConsentPackets()) {
             if (!packetOutstanding(packet))
                 continue;
+            outstandingPacketIds.add(packet.id);
             const person = register.individuals.find(p => p.id === packet.individualId);
             if (!person)
                 continue;
@@ -3656,6 +3662,19 @@ export class LocalApi implements ComplyraApi {
         }));
         for (const payload of rightsPacketAlerts(rightsPeople, this.store.db.memberships))
             this.pushRecognitionNotification(payload);
+        // Retire stale consent alerts (batch 24): a stored consent.missing /
+        // consent.expiring row lives only while its (type, entity) pair is a
+        // current gap, and a consent.packet_outstanding row only while its
+        // packet is outstanding. Recording or renewing the consent — or the
+        // status flipping from "Expiring soon" to "Expired" — drops the old
+        // pair, so the alert clears for every recipient at once: the same
+        // lifecycle as missing-note notices retiring when the note is filed.
+        const livePairs = consentAlertPairs(register);
+        const stored = this.store.db.notifications ?? [];
+        const kept = stored.filter(row => row.agencyId !== session.agencyId ||
+            !isStaleConsentNotification(row, livePairs, outstandingPacketIds));
+        if (kept.length !== stored.length)
+            this.store.db.notifications = kept;
         await persistMeta(this.store);
     }
 
@@ -7700,6 +7719,11 @@ export class LocalApi implements ComplyraApi {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
       }
+      // Attribution discipline: the checklist owner can never countersign
+      // their own checklist (simulation batch 24).
+      if (row.staffUserId === session.userId) {
+        throw new Error("You can't countersign your own checklist.");
+      }
       if (!row.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
       }
@@ -8999,7 +9023,11 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's needs
+    // hr.view_staff OR a training-oversight role (batch 25).
+    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
+      assertCan(session, "hr.view_staff");
+    }
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9083,14 +9111,33 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
+    if (!canOverseeTraining(session.roleKey)) assertCan(session, "hr.view_staff");
     // Roster comes from the agency's staff memberships — not only from staff
     // who already have training assigned — so "All staff" never renders an
-    // empty table while the agency has people.
+    // empty table while the agency has people. A house manager's roster is
+    // scoped to her own homes (her membership site plus sites she is
+    // assigned to); agency-level viewers (admin, PM, HR) keep the full
+    // roster (batch 25: oversight surfaces are scoped to their sites).
+    let visibleSiteIds: Set<string> | null = null;
+    if (session.roleKey === "house_manager") {
+      const today = todayIso();
+      const assignmentSites = this.store.db.assignments
+        .filter(
+          (row) =>
+            row.agencyId === session.agencyId &&
+            row.userId === session.userId &&
+            row.startsOn <= today &&
+            (!row.endsOn || row.endsOn >= today),
+        )
+        .map((row) => row.siteId)
+        .filter((id): id is string => Boolean(id));
+      visibleSiteIds = new Set(assignedSiteIds(session, [], assignmentSites));
+    }
     const memberships = this.store.db.memberships.filter(
       (row) =>
         row.agencyId === session.agencyId &&
-        (!siteId || row.siteId === siteId),
+        (!siteId || row.siteId === siteId) &&
+        (!visibleSiteIds || (row.siteId !== null && visibleSiteIds.has(row.siteId))),
     );
     const userIds = [...new Set(memberships.map((row) => row.userId))];
     const rows: StaffClearanceRow[] = [];
@@ -9384,6 +9431,13 @@ export class LocalApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: a countersignature is a second person's
+      // attestation — the sheet's owner can never countersign their own
+      // sheet, even when they hold a manager role (simulation batch 24:
+      // an HM countersigned her own checklist).
+      if (session.userId === input.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!counter.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");

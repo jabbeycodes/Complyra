@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bottomNavItems, moreSheetTiles } from "./bottomNav";
+import {
+  activeBottomNavFor,
+  bottomNavItems,
+  moreSheetTiles,
+  shellBottomNavVisible,
+} from "./bottomNav";
 import { mobileTiles, type MobileTileContext } from "./tiles";
 
 function ctx(partial: Partial<MobileTileContext>): MobileTileContext {
@@ -37,6 +42,66 @@ test("a role without individuals.view loses People but keeps Meds", () => {
     ctx({ roleKey: "nurse", permissions: { "hub.access": true } }),
   );
   assert.deepEqual(ids, ["home", "tasks", "meds", "more"]);
+});
+
+test("the pill is present on EVERY shell screen (batches 28-30)", () => {
+  // The screens that used to drop it: mar (Meds picker), housecard,
+  // sites (Select your home), notifications, the per-person sections,
+  // yourshift — plus the ISP form and an open message thread.
+  const views = [
+    "home",
+    "tasks",
+    "people",
+    "health",
+    "mar",
+    "isp",
+    "quicklog",
+    "housecard",
+    "spending",
+    "careplans",
+    "consents",
+    "lifeevents",
+    "scheduling",
+    "hub",
+    "reports",
+    "qa",
+    "messages",
+    "sites",
+    "notifications",
+    "yourshift",
+  ];
+  for (const view of views) {
+    assert.equal(shellBottomNavVisible({ view }), true, view);
+  }
+  assert.equal(
+    shellBottomNavVisible({ view: "isp", ispFormActive: true }),
+    true,
+    "ISP entry form open",
+  );
+  assert.equal(
+    shellBottomNavVisible({ view: "messages", messagesInThread: true }),
+    true,
+    "message thread open",
+  );
+  assert.equal(
+    shellBottomNavVisible({ view: "mar" }),
+    true,
+    "Meds picker open (batch 28)",
+  );
+});
+
+test("each shell screen highlights its pill destination", () => {
+  assert.equal(activeBottomNavFor("home"), "home");
+  assert.equal(activeBottomNavFor("tasks"), "tasks");
+  assert.equal(activeBottomNavFor("people"), "people");
+  assert.equal(activeBottomNavFor("health"), "people");
+  assert.equal(activeBottomNavFor("spending"), "people");
+  assert.equal(activeBottomNavFor("mar"), "meds");
+  assert.equal(activeBottomNavFor("quicklog"), "meds");
+  assert.equal(activeBottomNavFor("housecard"), "meds");
+  assert.equal(activeBottomNavFor("scheduling"), "more");
+  assert.equal(activeBottomNavFor("sites"), "more");
+  assert.equal(activeBottomNavFor("notifications"), "more");
 });
 
 test("the More sheet carries the tiles the pill does not", () => {

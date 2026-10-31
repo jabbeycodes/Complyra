@@ -1298,8 +1298,10 @@
   flex: 1;
 }
 
-/* The MAR's own tab bar — a pill segmented control. It owns the bottom
- * of the MAR flow; the shell's floating navigation hides there. */
+/* The MAR's own tab bar — a pill segmented control. Batches 28–30:
+ * the shell's floating navigation is present on the MAR too, so in
+ * the shell the tab bar stacks just above the pill (rule below)
+ * instead of replacing it. */
 .msh-tabbar {
   position: sticky;
   bottom: 8px;
@@ -1324,6 +1326,10 @@
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
+}
+
+.msh-shell.with-mar-tabs .msh-tabbar {
+  bottom: calc(102px + env(safe-area-inset-bottom, 0px));
 }
 
 .msh-tabbar button.active {

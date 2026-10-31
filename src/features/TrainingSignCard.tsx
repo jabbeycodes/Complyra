@@ -1,5 +1,6 @@
 import { Check, Download, Printer } from "lucide-react";
 import { Badge, formatDate } from "../components";
+import { useData } from "../data/DataProvider";
 import {
   allLinesInitialed,
   trainingProgress,
@@ -30,6 +31,11 @@ export default function TrainingSignCard({
 }) {
   const { done, total } = trainingProgress(row.checklist);
   const readyToSign = allLinesInitialed(row.checklist);
+  const { session } = useData();
+  // A countersignature is a second person's attestation: the checklist
+  // owner never countersigns their own checklist (batch 24) — the APIs
+  // refuse it too; here the field simply never offers it.
+  const ownChecklist = session?.userId === row.checklist.staffUserId;
   const documentId = legacyTrainingDocId(row.checklist.id);
   const buildPayload = () =>
     legacyTrainingPayload({
@@ -126,8 +132,12 @@ export default function TrainingSignCard({
         label="House manager signature"
         actionLabel="Countersign as {name}"
         getDocumentPayload={buildPayload}
-        canAct={canSignHm}
-        cantActReason="Not countersigned yet."
+        canAct={canSignHm && !ownChecklist}
+        cantActReason={
+          ownChecklist
+            ? "You can't countersign your own checklist."
+            : "Not countersigned yet."
+        }
         legacySigned={
           row.checklist.hmSignedAt
             ? {

@@ -32,7 +32,13 @@ import {
   type NotificationRow,
 } from "../notifications/notify";
 import { mobileTiles, type MobileTileId } from "./tiles";
-import { bottomNavItems, moreSheetTiles, type BottomNavId } from "./bottomNav";
+import {
+  activeBottomNavFor,
+  bottomNavItems,
+  moreSheetTiles,
+  shellBottomNavVisible,
+  type BottomNavId,
+} from "./bottomNav";
 import BottomNavPill from "./BottomNavPill";
 import { centralHour, greetingForHour, type TrackingCategoryId } from "./today";
 import { formatCentralTime } from "./mar";
@@ -155,7 +161,12 @@ export default function MobileShell({
   workspace: WorkspaceView;
   queueItems: PersonalWorkItem[];
   onSignOut: () => void;
-  onDesktopView: () => void;
+  /**
+   * Switch to the desktop layout, preserving the current screen and
+   * house scope (batch 28): the shell reports where it is, App maps it
+   * to the desktop page for the same work in the same house.
+   */
+  onDesktopView: (target: { view: ShellView; siteId: string | null }) => void;
   nav: MobileNav;
   /**
    * Where the platform bottom navigation (on the desktop-layout pages)
@@ -364,7 +375,11 @@ export default function MobileShell({
         setView("scheduling");
         break;
       case "timeClock":
-        nav.openPage("Employee Hub");
+        // The Time Clock stays in the mobile experience (batches
+        // 29–30: it used to leave the shell for the desktop Employee
+        // Hub and land on My Schedule).
+        setHubStartSection("timeclock");
+        setView("hub");
         break;
       case "myHub":
         setHubStartSection("home");
@@ -422,32 +437,16 @@ export default function MobileShell({
     else if (id === "people") setView("people");
   };
 
-  const activeNav: BottomNavId | null =
-    view === "home"
-      ? "home"
-      : view === "tasks"
-        ? "tasks"
-        : view === "people"
-          ? "people"
-          : null;
+  const activeNav: BottomNavId = activeBottomNavFor(view);
 
-  // The pill shows on the home and list-level screens. It hides on the
-  // home picker, in the MAR flow (the MAR's own Scheduled/PRN/Other bar
-  // owns the bottom there), on the notifications surface, while the
-  // ISP entry form is open, and while a message conversation is open
-  // (the reply composer owns the bottom there) — never two bars stacked.
-  const showBottomNav =
-    view === "home" ||
-    view === "tasks" ||
-    view === "people" ||
-    view === "health" ||
-    view === "quicklog" ||
-    view === "scheduling" ||
-    view === "hub" ||
-    view === "reports" ||
-    view === "qa" ||
-    (view === "messages" && !messagesInThread) ||
-    (view === "isp" && !ispFormActive);
+  // The pill shows on EVERY shell screen (batches 28–30) — see
+  // shellBottomNavVisible. In the MAR the pass tab bar stacks above
+  // the pill (mobile.css, .with-mar-tabs) instead of replacing it.
+  const showBottomNav = shellBottomNavVisible({
+    view,
+    ispFormActive,
+    messagesInThread,
+  });
 
   const greeting = greetingForHour(centralHour());
   const firstName = session.fullName.split(" ")[0];
@@ -466,7 +465,7 @@ export default function MobileShell({
   }
 
   return (
-    <div className="msh-shell">
+    <div className={`msh-shell${view === "mar" ? " with-mar-tabs" : ""}`}>
       <header className="msh-header">
         <div className="msh-brand">
           <ComplyRerWordmark size={26} />
@@ -536,7 +535,7 @@ export default function MobileShell({
                     role="menuitem"
                     onClick={() => {
                       setMenuOpen(false);
-                      onDesktopView();
+                      onDesktopView({ view, siteId: scopedSite?.id ?? null });
                     }}
                   >
                     <Monitor size={17} aria-hidden="true" /> Desktop view
@@ -1094,7 +1093,7 @@ export default function MobileShell({
                 className="msh-row"
                 onClick={() => {
                   setSheetOpen(false);
-                  onDesktopView();
+                  onDesktopView({ view, siteId: scopedSite?.id ?? null });
                 }}
               >
                 <span className="msh-row-main">

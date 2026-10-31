@@ -6,7 +6,41 @@
  * in-ratio." Plus: every required (non-N/A) line complete and the checklist
  * countersigned by staff and the House Manager.
  */
+import { canOverseeTraining } from "../../data/chart";
 import type { RequirementLineSignoffInput, TrainingRequirementStatus } from "../../data/types";
+
+/**
+ * Where the Training surface lands (batch 25): oversight roles
+ * (PM/HM/admin) and anyone holding hr.view_staff open on the staff
+ * roster — their own record is reachable from there, never the
+ * default. Everyone else (DSPs, nurses, auditors) lands on their own
+ * record, the only one they may read.
+ */
+export function trainingLandingMode(input: {
+  canViewStaff: boolean;
+  roleKey: string;
+}): "roster" | "own" {
+  return input.canViewStaff || canOverseeTraining(input.roleKey)
+    ? "roster"
+    : "own";
+}
+
+export type RosterPanelState = "loading" | "empty" | "all-clear" | "attention";
+
+/**
+ * What the Training roster panels may claim (batch 33). "Everyone is
+ * cleared" is a claim about staff: with zero rows loaded it is a
+ * passing banner over no data. An empty roster gets the honest empty
+ * state instead; the all-clear banner requires at least one row and
+ * every row cleared.
+ */
+export function rosterPanelState(
+  rows: readonly { clearedForInRatio: boolean }[] | null,
+): RosterPanelState {
+  if (!rows) return "loading";
+  if (rows.length === 0) return "empty";
+  return rows.every((row) => row.clearedForInRatio) ? "all-clear" : "attention";
+}
 
 export const IN_RATIO_MIN_HOURS = 20;
 export const IN_RATIO_MIN_HM_HOURS = 8;

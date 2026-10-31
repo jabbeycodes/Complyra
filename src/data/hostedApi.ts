@@ -1,6 +1,6 @@
-import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
+import { assertPacketDates, packetOutstanding, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
-import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, canSeeConsents, consentAlertPairs, isStaleConsentNotification, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -282,6 +282,7 @@ import {
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
+  canOverseeTraining,
   canSignTrainingAsHm,
   toMedicationView,
   todayIso,
@@ -1838,9 +1839,55 @@ export class HostedApi implements ComplyraApi {
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);
     throwIf(error, "Could not load notifications.");
-    return (data ?? []).map((row) => ({ ...row,
+    const mapped = (data ?? []).map((row) => ({ ...row,
       read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
     })) as import("../features/notifications/notify").NotificationRow[];
+    return this.filterStaleConsentNotifications(session, mapped);
+  }
+
+  /**
+   * Batch 24: stored consent alerts never retired — the bell kept saying
+   * "Consent needs attention — Missing" for consents the chart already
+   * showed Active, and a consent flipping "Expiring soon" → "Expired"
+   * showed BOTH alerts at once. The notifications RLS grants clients
+   * only update(read_at), so retirement happens at the read boundary:
+   * drop consent.missing / consent.expiring rows whose (type, entity)
+   * pair is no longer a current gap, and consent.packet_outstanding
+   * rows whose packet is no longer outstanding — one consent carries
+   * one current status on every surface. A server-side hard delete
+   * (like retire_stale_missing_note_notices) would need a migration.
+   * Fails open: a register that fails to load never hides alerts.
+   */
+  private async filterStaleConsentNotifications(
+    session: SessionUser,
+    rows: import("../features/notifications/notify").NotificationRow[],
+  ): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    if (
+      !canSeeConsents(session.roleKey) ||
+      !rows.some((row) =>
+        ["consent.missing", "consent.expiring", "consent.packet_outstanding"].includes(row.type),
+      )
+    ) {
+      return rows;
+    }
+    try {
+      const register = await this.getConsents();
+      const livePairs = consentAlertPairs(register);
+      const packets = await this.listConsentPackets().catch(() => [] as ConsentPacket[]);
+      const outstandingPacketIds = new Set(
+        packets.filter((packet) => packetOutstanding(packet)).map((packet) => packet.id),
+      );
+      return rows.filter(
+        (row) =>
+          !isStaleConsentNotification(
+            { type: row.type, entityId: row.entity_id, entityType: row.entity_type },
+            livePairs,
+            outstandingPacketIds,
+          ),
+      );
+    } catch {
+      return rows;
+    }
   }
 
   async markNotificationsRead(ids: string[]) {
@@ -5562,6 +5609,11 @@ export class HostedApi implements ComplyraApi {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
       }
+      // Attribution discipline: the checklist owner can never countersign
+      // their own checklist (simulation batch 24).
+      if (checklist.staffUserId === session.userId) {
+        throw new Error("You can't countersign your own checklist.");
+      }
       if (!checklist.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
       }
@@ -7725,7 +7777,11 @@ export class HostedApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's needs
+    // hr.view_staff OR a training-oversight role (batch 25).
+    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
+      this.requirePermission(session, "hr.view_staff");
+    }
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7832,7 +7888,7 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
+    if (!canOverseeTraining(session.roleKey)) this.requirePermission(session, "hr.view_staff");
     let query = this.client
       .from("training_requirements")
       .select("user_id")
@@ -8188,6 +8244,13 @@ export class HostedApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: a countersignature is a second person's
+      // attestation — the sheet's owner can never countersign their own
+      // sheet, even when they hold a manager role (simulation batch 24:
+      // an HM countersigned her own checklist).
+      if (session.userId === input.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!counter.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
