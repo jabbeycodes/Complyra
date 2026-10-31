@@ -11,6 +11,7 @@ import {
   delegationReviewState,
   type DelegationRecipient,
 } from "../../data/types";
+import { delegationObligationLabel } from "../../data/delegationStatus";
 import DelegationFormDetail from "./DelegationFormDetail";
 import DelegationTemplatesSection from "./DelegationTemplatesSection";
 
@@ -185,7 +186,7 @@ function DelegationRow({
       </td>
       <td>{individualName}</td>
       <td>
-        <Badge status={status.rescinded ? "Off" : status.fullySigned ? "Current" : "Pending"} />
+        <Badge status={delegationObligationLabel(item)} />
         <div className="delegation-small">
           RN {item.rnSignedAt ? `signed ${formatDate(item.rnSignedAt)}` : "not signed"} ·{" "}
           {status.rowsSigned}/{status.rowsNamed} staff signed

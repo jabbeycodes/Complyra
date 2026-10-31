@@ -1060,3 +1060,118 @@ describe("phase-2 pay settings", () => {
     assert.ok(html.includes("Shift swap approvals"), "approvals section");
   });
 });
+
+/* ------------------------- wave 6: HR hub + auditor ------------------------ */
+
+const hrSession = makeSession({
+  userId: "user-hr",
+  fullName: "Harriet HR",
+  role: "hr",
+  roleKey: "hr",
+  jobTitle: "Human Resources",
+  // Stored template WITHOUT the payroll/time keys — and with explicit
+  // false values, as an existing agency's template would carry. The HR
+  // role must still own the three tabs (founder decision 2026-10-31).
+  permissions: {
+    "hub.access": true,
+    "hub.view_team": false,
+    "hub.review_timecards": false,
+    "hub.approve_payroll": false,
+  },
+});
+
+const adminSession = makeSession({
+  userId: "user-admin",
+  fullName: "Ada Admin",
+  role: "administrator",
+  roleKey: "administrator",
+  jobTitle: "Administrator",
+  permissions: { ...PM_PERMISSIONS, "hub.manage_pay_settings": true },
+});
+
+const nurseSession = makeSession({
+  userId: "user-nurse",
+  fullName: "Nina Nurse",
+  role: "nurse",
+  roleKey: "nurse",
+  jobTitle: "Nurse",
+  permissions: { ...PM_PERMISSIONS, "hub.manage_pay_settings": true },
+});
+
+const auditorSession = makeSession({
+  userId: "user-auditor",
+  fullName: "Aubrey Auditor",
+  role: "auditor",
+  roleKey: "auditor",
+  jobTitle: "Auditor",
+  permissions: { "hub.access": true },
+});
+
+describe("wave 6 item 9 — HR owns Payroll, Timecards and Attendance", () => {
+  it("shows all three tabs to HR even when the stored template denies the keys", () => {
+    const html = render(hrSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(html.includes(label), `HR tab "${label}"`);
+    }
+  });
+
+  it("renders the Attendance tab for HR", () => {
+    const html = render(hrSession, "attendance");
+    assert.ok(html.includes('aria-label="Attendance"'), "attendance section");
+    assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+  });
+
+  it("renders the Timecards tab for HR", () => {
+    const html = render(hrSession, "timecards");
+    assert.ok(html.includes("<h2>Timecards</h2>"), "timecards heading");
+  });
+
+  it("renders the Payroll tab for HR", () => {
+    const html = render(hrSession, "payroll");
+    assert.ok(html.includes("Export-first payroll"), "payroll content");
+  });
+
+  it("does not give the DSP any management tab", () => {
+    const html = render(dspSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(!html.includes(`>${label}<`), `DSP must not see "${label}"`);
+    }
+  });
+});
+
+describe("wave 6 item 1 — hub tabs render under admin / nurse / HR sessions", () => {
+  for (const [name, session] of [
+    ["administrator", adminSession],
+    ["nurse", nurseSession],
+    ["hr", hrSession],
+  ] as const) {
+    it(`Attendance renders for ${name}`, () => {
+      const html = render(session, "attendance");
+      assert.ok(html.includes('aria-label="Attendance"'), "attendance section");
+      assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+    });
+    it(`Payroll renders for ${name}`, () => {
+      const html = render(session, "payroll");
+      assert.ok(html.includes("Export-first payroll"), "payroll content");
+      assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+    });
+  }
+});
+
+describe("wave 6 item 3 — auditor swap board is read-only", () => {
+  it("shows the board with a read-only note and no post form for an auditor", () => {
+    const html = render(auditorSession);
+    assert.ok(html.includes("Shift swaps"), "swap board visible");
+    assert.ok(
+      html.includes("Auditors can view the swap board but cannot post, claim, or cancel swaps."),
+      "read-only note",
+    );
+    assert.ok(!html.includes("Post a shift for swap"), "no post form");
+    assert.ok(!html.includes("Post swap"), "no post button");
+  });
+
+  it("keeps the post form for a DSP", () => {
+    const html = render(dspSession);
+    assert.ok(html.includes("Post a shift for swap"), "post form for DSP");
+  });
+});

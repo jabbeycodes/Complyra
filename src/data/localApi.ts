@@ -93,11 +93,13 @@ import {
   canViewPersonalSpending,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
   capabilityForRoleKey,
   canGrantRole,
   checkRoleTemplateUpdate,
   defaultPermissions,
   hasPermission,
+  hasHubTeamPermission,
   isRoleKey,
   type AgencyRole,
   type PermissionKey,
@@ -7525,7 +7527,7 @@ export class LocalApi implements ComplyraApi {
     sourceKey: string;
   }) {
     const session = assertSession(this.store);
-    if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
+    if (input.staffId !== session.userId && !hasHubTeamPermission(session, "hub.view_team")) {
       throw new Error("You cannot record a clock-in point for someone else.");
     }
     const rules = this.agencyOperatingRules();
@@ -12494,6 +12496,14 @@ export class LocalApi implements ComplyraApi {
     );
     if (!row) throw new Error("Personal spending entry not found.");
     accessibleIndividual(this.store, session, row.individualId);
+    // Wave 6 item 3: closers may void any entry; other recorders only
+    // their own (the mobile Undo path) — a DSP must not void entries
+    // recorded by managers or the admin.
+    if (!sessionCanVoidPersonalSpendingEntry(session, row)) {
+      throw new Error(
+        "Only the person who recorded an entry can undo it, or a manager can void it.",
+      );
+    }
     if (row.voidedAt) {
       throw new Error("That entry is already voided.");
     }

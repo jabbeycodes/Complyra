@@ -24,6 +24,7 @@ import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
   canViewPersonalSpending,
+  canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
 import { monthLabel } from "../../data/mileage";
@@ -734,15 +735,20 @@ function PersonalSpendingSection({
                               : formatCents(entry.runningBalanceCents)}
                           </td>
                           <td>
-                            {canRecord && !entry.voided && (
-                              <button
-                                type="button"
-                                className="ps-link-button"
-                                onClick={() => openVoid(entry)}
-                              >
-                                Void
-                              </button>
-                            )}
+                            {canRecord &&
+                              !entry.voided &&
+                              // Wave 6 item 3: Void is a closer action;
+                              // other recorders see it only on their own
+                              // entries (their Undo path).
+                              canVoidPersonalSpendingEntry(session, entry) && (
+                                <button
+                                  type="button"
+                                  className="ps-link-button"
+                                  onClick={() => openVoid(entry)}
+                                >
+                                  Void
+                                </button>
+                              )}
                           </td>
                         </tr>
                       ))}

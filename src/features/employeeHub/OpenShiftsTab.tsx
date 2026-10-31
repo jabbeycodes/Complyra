@@ -139,6 +139,9 @@ export function OpenShiftsTab({
   const [notes, setNotes] = useState("");
 
   const canPost = canPostSite || canPostAgency;
+  // Wave 6 item 3: auditors are read-only — they can see open shifts but
+  // cannot pick up, bid on, or decline them (the store refuses too).
+  const readOnlyAuditor = session.roleKey === "auditor";
   const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? "Program site";
 
   const load = () => {
@@ -236,6 +239,9 @@ export function OpenShiftsTab({
         Pick up or bid on coverage your managers post. {describePickupHours(lines)}
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
+      {readOnlyAuditor && (
+        <p className="hub-sub">Auditors can view open shifts but cannot pick up, bid on, or decline them.</p>
+      )}
       {notice && <div className="hub-status approved" role="status" style={{ marginBottom: 12 }}>{notice}</div>}
 
       <h3>Available to you</h3>
@@ -262,7 +268,7 @@ export function OpenShiftsTab({
                   </span>
                   {status && <span className={`hub-status ${status.cls}`} style={{ marginTop: 6 }}>{status.text}</span>}
                 </div>
-                {!taken && (
+                {!readOnlyAuditor && !taken && (
                   <div className="hub-form-actions" style={{ margin: 0 }}>
                     <button
                       className="hub-btn primary"

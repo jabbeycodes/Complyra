@@ -376,3 +376,64 @@ test("auditor reads and prints but cannot record, void, or close", async () => {
     /permission/i,
   );
 });
+
+test("wave 6 item 3: a DSP cannot void entries recorded by others; closers can void any", async () => {
+  const api = new LocalApi(store());
+  const { ellis } = await people(api);
+
+  // The administrator records an entry on Ellis's ledger.
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const adminEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Pharmacy",
+    purpose: "Admin-recorded spend",
+    amountCents: 500,
+  });
+  await api.signOut();
+
+  // The Cedar DSP can see the ledger but must NOT void the admin's entry
+  // (simulation batch 38: a DSP voided rows recorded by Sim Admin / HM).
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  await assert.rejects(
+    () => api.voidPersonalSpendingEntry(adminEntry.id, "Trying to void it."),
+    /Only the person who recorded an entry can undo it/,
+  );
+
+  // The DSP's own entry can still be undone by the DSP (shipped Undo path).
+  const ownEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Corner store",
+    purpose: "DSP-recorded spend",
+    amountCents: 300,
+  });
+  const undone = await api.voidPersonalSpendingEntry(
+    ownEntry.id,
+    "Undone right after recording",
+    null,
+  );
+  assert.equal(undone.voided.voided, true);
+  await api.signOut();
+
+  // A closer (administrator) may void another recorder's entry.
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Bakery",
+    purpose: "Second DSP-recorded spend",
+    amountCents: 250,
+  });
+  await api.signOut();
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const closed = await api.voidPersonalSpendingEntry(
+    dspEntry.id,
+    "Recorded against the wrong Individual.",
+    null,
+  );
+  assert.equal(closed.voided.voided, true);
+});

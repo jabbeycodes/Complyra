@@ -17,11 +17,22 @@ import {
   type TrainingMaterialContent,
 } from "../../delegation/delegation";
 import SignaturePad from "../SignaturePad";
+import {
+  delegationStatusForActivation,
+  delegationStatusForAssignment,
+  delegationStatusForTemplate,
+  delegationStatusLabel,
+} from "../../data/delegationStatus";
 
 /**
  * Delegation template library UI: common templates -> site activation
- * ("In preparation") -> assignment to an individual -> PM/RN review of the
+ * ("Active") -> assignment to an individual -> PM/RN review of the
  * training draft -> publication -> staff review & electronic acknowledgment.
+ *
+ * Every delegation badge in this section comes from the shared vocabulary
+ * in src/data/delegationStatus.ts (Pending / Active / Completed / Expired)
+ * — the same labels the site list, the Individual chart, and the RN forms
+ * render for the same record.
  *
  * The ComplyraApi methods below are being implemented by a sibling agent; the
  * cast keeps this UI compiling against the agreed contract until they land.
@@ -360,7 +371,7 @@ function TemplateCard({
           <strong>{template.name}</strong>
           <div className="delegation-small">{template.category}</div>
         </div>
-        <Badge status={template.active ? "Active" : "Inactive"} />
+        <Badge status={delegationStatusLabel(delegationStatusForTemplate(template))} />
       </div>
       <div className="delegation-card-actions">
         <button
@@ -403,7 +414,7 @@ function TemplateCard({
             </select>
           </label>
           <p className="form-help">
-            Activated templates are visible to site staff as “In preparation”.
+            Activating makes this template “Active” for the site.
             No notifications are sent.
           </p>
           <button
@@ -540,6 +551,29 @@ function SiteDelegationsTab({
   useEffect(() => {
     if (!siteId && sites[0]) setSiteId(sites[0].id);
   }, [sites, siteId]);
+  // An assignment's canonical status depends on its training material
+  // (published = in effect), so load materials alongside the assignments —
+  // the row badge must match the status the assignment detail derives.
+  const [materials, setMaterials] = useState<
+    Record<string, DelegationTrainingMaterial | null>
+  >({});
+  useEffect(() => {
+    if (!assignments) return;
+    let cancelled = false;
+    Promise.all(
+      assignments.map(async (a) => ({
+        id: a.id,
+        material: await lib.getDelegationTrainingMaterial(a.id).catch(() => null),
+      })),
+    ).then((rows) => {
+      if (!cancelled) {
+        setMaterials(Object.fromEntries(rows.map((r) => [r.id, r.material])));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lib, assignments]);
   const site = sites.find((s) => s.id === siteId);
   const activeActivations = (activations ?? []).filter(
     (a) => a.siteId === siteId && a.status === "active",
@@ -563,7 +597,7 @@ function SiteDelegationsTab({
         <p className="quiet-note">Loading site delegations…</p>
       ) : activeActivations.length === 0 ? (
         <Empty
-          title="No active delegations"
+          title="No delegations"
           text="Activate a template for this site from the template library."
         />
       ) : (
@@ -572,6 +606,7 @@ function SiteDelegationsTab({
             key={activation.id}
             lib={lib}
             activation={activation}
+            materials={materials}
             assignments={(assignments ?? []).filter(
               (a) => a.activationId === activation.id,
             )}
@@ -590,6 +625,7 @@ function ActivationCard({
   lib,
   activation,
   assignments,
+  materials,
   siteName,
   onMutate,
   perms,
@@ -598,6 +634,7 @@ function ActivationCard({
   lib: DelegationLibraryApi;
   activation: SiteDelegationActivation;
   assignments: IndividualDelegationAssignment[];
+  materials: Record<string, DelegationTrainingMaterial | null>;
   siteName: string;
   onMutate: (action: () => Promise<void>) => Promise<void>;
   perms: Perms;
@@ -618,7 +655,7 @@ function ActivationCard({
             {activation.activatedBy}
           </div>
         </div>
-        <Badge status="In preparation" />
+        <Badge status={delegationStatusLabel(delegationStatusForActivation(activation))} />
       </div>
       <div className="delegation-card-actions">
         {perms.canAssign && (
@@ -689,9 +726,12 @@ function ActivationCard({
                   </div>
                 </div>
                 <Badge
-                  status={
-                    assignment.status === "assigned" ? "In preparation" : "Ended"
-                  }
+                  status={delegationStatusLabel(
+                    delegationStatusForAssignment(
+                      assignment,
+                      materials[assignment.id],
+                    ),
+                  )}
                 />
                 <button
                   className="button small"
@@ -778,6 +818,11 @@ function AssignmentDetail({
   return (
     <div className="delegation-detail">
       <div className="delegation-detail-head">
+        <Badge
+          status={delegationStatusLabel(
+            delegationStatusForAssignment(assignment, material),
+          )}
+        />
         {material && (
           <Badge status={trainingMaterialStatusLabel(material.status)} />
         )}

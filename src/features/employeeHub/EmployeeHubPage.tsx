@@ -42,7 +42,11 @@ import {
 import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { createSupabaseBrowserClient } from "../../data/index";
-import { hasPermission, type PermissionKey } from "../../data/permissions";
+import {
+  hasHubTeamPermission,
+  hasPermission,
+  type PermissionKey,
+} from "../../data/permissions";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -132,6 +136,7 @@ import { PunchRulesConfig } from "./PunchRulesConfig";
 import { KioskAdmin } from "./KioskAdmin";
 import { OpenShiftsTab } from "./OpenShiftsTab";
 import { createOpenShiftStore, type OpenShiftStore } from "../../data/openShiftStore";
+import { staffVisibleTo } from "../../data/dashboard";
 import { scheduledVsActual } from "./punchInsights";
 import {
   adaptRemotePunchStore,
@@ -408,11 +413,15 @@ const EMPLOYEE_TABS: TabDef[] = [
 
 const MANAGER_TABS: TabDef[] = [
   { id: "team-schedule", label: "Team Schedule", icon: Users, perm: "hub.manage_schedule" },
-  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team" },
-  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards" },
+  // HR HUB OWNERSHIP (wave 6 item 9; founder decision 2026-10-31): HR
+  // owns Payroll, Timecards and Attendance (Paycor model), so the HR
+  // role opens those three tabs even when the agency's stored template
+  // has not granted the keys yet.
+  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team", roleAny: ["hr"] },
+  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards", roleAny: ["hr"] },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
   { id: "binder-board", label: "Binder Board", icon: ClipboardCheck, perm: "hub.view_team", roleAny: ["hr", "administrator", "auditor"] },
-  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll" },
+  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll", roleAny: ["hr"] },
   { id: "kiosk", label: "Kiosk", icon: MonitorSmartphone, permAny: ["hub.manage_staffing", "hub.manage_pay_settings"] },
 ];
 
@@ -435,6 +444,11 @@ export function EmployeeHubShell({
   onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
+  // Wave 6 item 9: HR owns Attendance / Timecards / Payroll by role
+  // (founder decision 2026-10-31), independent of stored template keys.
+  const canViewTeamHub = hasHubTeamPermission(session, "hub.view_team");
+  const canReviewTimecards = hasHubTeamPermission(session, "hub.review_timecards");
+  const canApprovePayroll = hasHubTeamPermission(session, "hub.approve_payroll");
   const operating = useOperatingRules(session);
   // HMs/PMs post for their sites; HR and administrators also post agency-wide.
   const canPostAgencyWide =
@@ -447,6 +461,7 @@ export function EmployeeHubShell({
         userId: session.userId,
         fullName: session.fullName,
         canManageSchedule: can("hub.manage_schedule"),
+        readOnly: session.roleKey === "auditor",
         canPostAgencyWide,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -491,7 +506,7 @@ export function EmployeeHubShell({
     (async () => {
       const counts: BadgeCounts = { attendance: 0, timecards: 0, timeoff: 0, documents: 0 };
       try {
-        if (can("hub.view_team")) {
+        if (canViewTeamHub) {
           const stamp = dayStamp(new Date());
           const [shiftsToday, perStaff] = await Promise.all([
             store
@@ -516,7 +531,7 @@ export function EmployeeHubShell({
             lateClockInMinutes: operating.lateClockInMinutes,
           }).length;
         }
-        if (can("hub.review_timecards")) {
+        if (canReviewTimecards) {
           const corrections = await store.listPunchCorrections({}).catch(() => []);
           counts.timecards += corrections.filter((c) => c.status === "pending").length;
           const periods = await store.listPayPeriods().catch(() => []);
@@ -679,10 +694,10 @@ export function EmployeeHubShell({
         {tab === "team-schedule" && can("hub.manage_schedule") && (
           <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
-        {tab === "attendance" && can("hub.view_team") && (
+        {tab === "attendance" && canViewTeamHub && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
-        {tab === "timecards" && can("hub.review_timecards") && (
+        {tab === "timecards" && canReviewTimecards && (
           <TimecardsTab session={session} store={store} staffList={staffList} onChanged={refresh} />
         )}
         {tab === "team-compliance" && can("hub.view_team") && (
@@ -693,7 +708,7 @@ export function EmployeeHubShell({
             canManage={can("hub.manage_documents")}
           />
         )}
-        {tab === "payroll" && can("hub.approve_payroll") && (
+        {tab === "payroll" && canApprovePayroll && (
           <PayrollTab session={session} store={store} staffList={staffList} />
         )}
         {tab === "kiosk" && (can("hub.manage_staffing") || can("hub.manage_pay_settings")) && (
@@ -864,6 +879,11 @@ function SwapBoard({
   staffList: HubStaffEntry[];
 }) {
   const notifyClient = useNotifyClient();
+  // Wave 6 item 3: auditors are read-only everywhere (founder rule:
+  // auditors see everything, change nothing) — the board stays visible
+  // but offers them no post / claim / cancel actions, and the HrStore
+  // refuses the same writes if called directly.
+  const readOnlyAuditor = session.roleKey === "auditor";
   const [swaps, setSwaps] = useState<HrShiftSwap[]>([]);
   const [shifts, setShifts] = useState<HrShift[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1058,6 +1078,12 @@ function SwapBoard({
         target a coworker, or propose a direct two-shift exchange.
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
+      {readOnlyAuditor && (
+        <p className="hub-sub">
+          Auditors can view the swap board but cannot post, claim, or cancel swaps.
+        </p>
+      )}
+      {!readOnlyAuditor && (
       <div className="hub-inline-form" style={{ marginBottom: 20 }}>
         <h3>Post a shift for swap</h3>
         <div className="hub-form">
@@ -1114,6 +1140,7 @@ function SwapBoard({
           </button>
         </div>
       </div>
+      )}
       <h3>Open swaps</h3>
       {loading ? (
         <p>Loading swaps…</p>
@@ -1136,7 +1163,7 @@ function SwapBoard({
               </div>
               <div className="hub-row">
                 <span className={statusClass(s.status)}>{s.status}</span>
-                {swapClaimable(s, session.userId) && (
+                {!readOnlyAuditor && swapClaimable(s, session.userId) && (
                   <button className="hub-btn primary" disabled={busy} onClick={() => claim(s)}>
                     <Check size={16} /> Claim
                   </button>
@@ -1170,7 +1197,7 @@ function SwapBoard({
               </div>
               <div className="hub-row">
                 <span className={statusClass(s.status)}>{s.status}</span>
-                {s.status === "pending" && s.requesterId === session.userId && (
+                {!readOnlyAuditor && s.status === "pending" && s.requesterId === session.userId && (
                   <button className="hub-btn" disabled={busy} onClick={() => cancel(s.id)}>
                     <X size={16} /> Cancel
                   </button>
@@ -4491,7 +4518,11 @@ export default function EmployeeHubPage({
   const store = useMemo(
     () =>
       session
-        ? createHrStore({ agencyId: session.agencyId, userId: session.userId })
+        ? createHrStore({
+            agencyId: session.agencyId,
+            userId: session.userId,
+            roleKey: session.roleKey,
+          })
         : null,
     [session],
   );
@@ -4503,14 +4534,22 @@ export default function EmployeeHubPage({
   }, []);
   const staffList: HubStaffEntry[] = useMemo(
     () =>
-      (workspace?.staff ?? []).map((s) => ({
+      // Wave 6 item 4: ONE staff-directory rule (staffVisibleTo) — a
+      // site-scoped viewer (house manager, DSP, nurse) gets the staff of
+      // their visible homes on Timecards / Attendance / Binder /
+      // Certificates, matching Performance Review's scoping; agency-wide
+      // roles keep the full directory.
+      (session
+        ? staffVisibleTo(session, workspace?.staff ?? [], workspace?.assignmentSiteIds ?? [])
+        : []
+      ).map((s) => ({
         userId: s.id,
         fullName: s.name,
         email: s.email,
         roleKey: s.roleKey,
         siteId: s.siteId,
       })),
-    [workspace],
+    [workspace, session],
   );
   const sites: HubSite[] = useMemo(
     () => (workspace?.sites ?? []).map((s) => ({ id: s.id, name: s.name })),

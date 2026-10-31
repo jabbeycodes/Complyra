@@ -6,6 +6,7 @@ import type { SessionUser } from "../../data/types";
 import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
+  canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
 import { monthLabel } from "../../data/mileage";
@@ -679,14 +680,21 @@ export default function MobilePersonalSpending({
                                     onClick={() => openRepeat(entry)}
                                   >
                                     Repeat
-                                  </button>{" "}
-                                  <button
-                                    type="button"
-                                    className="ps-link-button"
-                                    onClick={() => openVoid(entry)}
-                                  >
-                                    Void
                                   </button>
+                                  {/* Wave 6 item 3: Void only for closers,
+                                      or on the recorder's own entry. */}
+                                  {canVoidPersonalSpendingEntry(session, entry) && (
+                                    <>
+                                      {" "}
+                                      <button
+                                        type="button"
+                                        className="ps-link-button"
+                                        onClick={() => openVoid(entry)}
+                                      >
+                                        Void
+                                      </button>
+                                    </>
+                                  )}
                                 </>
                               )}
                             </td>

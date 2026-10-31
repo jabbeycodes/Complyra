@@ -370,6 +370,16 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.templates.view",
       // HR-EMPLOYEE-HUB: every employee opens their own hub.
       "hub.access",
+      // HR HUB OWNERSHIP (founder decision, Joshua 2026-10-31; wave 6
+      // item 9): HR owns payroll/time like Paycor — Payroll, Timecards
+      // and Attendance are HR's tabs. These keys are in the canonical
+      // template for new agencies; hasHubTeamPermission ALSO accepts
+      // the HR role directly so existing agencies, whose stored
+      // templates predate this grant, get the tabs without a template
+      // flip.
+      "hub.view_team",
+      "hub.review_timecards",
+      "hub.approve_payroll",
       // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
       "hub.manage_staffing",
       // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
@@ -587,6 +597,35 @@ export function hasPermission(
     return ROLE_TEMPLATE_BY_KEY[session.role].permissions[key];
   }
   return ROLE_TEMPLATE_BY_KEY.dsp.permissions[key];
+}
+
+/** The Employee Hub team-management permissions (Attendance/Timecards/Payroll). */
+export type HubTeamPermissionKey =
+  | "hub.view_team"
+  | "hub.review_timecards"
+  | "hub.approve_payroll";
+
+/**
+ * Hub team-tool access (wave 6, item 9 — founder decision, Joshua
+ * 2026-10-31: "HR must have Payroll, Timecards, and Attendance in the
+ * Employee Hub... use what other platforms do like Paycor"). HR is a
+ * first-class owner of payroll/time, so the HR ROLE satisfies these
+ * three gates directly — even when the agency's stored role template
+ * still carries an explicit false from before the decision (stored
+ * templates are only rewritten by an admin, and a template flip must
+ * not be what stands between HR and payroll). Every other role goes
+ * through the ordinary permission check, so a DSP gains nothing here.
+ */
+export function hasHubTeamPermission(
+  session: {
+    permissions?: Partial<PermissionMap>;
+    role?: string;
+    roleKey?: string;
+  },
+  key: HubTeamPermissionKey,
+) {
+  if (session.roleKey === "hr" || session.role === "hr") return true;
+  return hasPermission(session, key);
 }
 
 /**
@@ -978,6 +1017,22 @@ export function canRecordPersonalSpending(roleKey: string) {
   return (PERSONAL_SPENDING_RECORDER_ROLE_KEYS as readonly string[]).includes(
     roleKey,
   );
+}
+
+/**
+ * Personal spending — who may void an entry (wave 6, item 3; simulation
+ * batches 37/38: a DSP could void ledger entries recorded by the admin
+ * and by a house manager). Month-closers may void any entry in the
+ * ledger; anyone else who can record may void ONLY their own entry —
+ * that is the shipped mobile "Undo right after recording" path, and it
+ * must never extend to other people's entries.
+ */
+export function canVoidPersonalSpendingEntry(
+  session: { roleKey: string; userId: string },
+  entry: { recordedBy: string },
+) {
+  if (canClosePersonalSpendingMonth(session.roleKey)) return true;
+  return entry.recordedBy === session.userId;
 }
 
 /** Personal spending — who may sign a month closed. */

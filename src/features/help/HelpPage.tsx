@@ -6,6 +6,7 @@
  * and where to get support. Plain Complyrer wording; English only.
  */
 import { PageHeading } from "../../components";
+import { sectionClickHandler } from "../sectionLinks";
 import "./help.css";
 
 const SECTIONS: {
@@ -137,14 +138,25 @@ export default function HelpPage({
         <ul>
           {SECTIONS.map((section) => (
             <li key={section.id}>
-              <a href={`#help-${section.id}`}>{section.title}</a>
+              {/* In-page scroll: a plain hash href would be read by the
+                  app router as a page key and leave Help entirely. */}
+              <a
+                href={`#help-${section.id}`}
+                onClick={sectionClickHandler(`help-${section.id}`)}
+              >
+                {section.title}
+              </a>
             </li>
           ))}
           <li>
-            <a href="#help-faq">Frequently asked questions</a>
+            <a href="#help-faq" onClick={sectionClickHandler("help-faq")}>
+              Frequently asked questions
+            </a>
           </li>
           <li>
-            <a href="#help-support">Where to get support</a>
+            <a href="#help-support" onClick={sectionClickHandler("help-support")}>
+              Where to get support
+            </a>
           </li>
         </ul>
       </nav>

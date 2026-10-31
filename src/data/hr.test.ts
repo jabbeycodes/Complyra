@@ -861,13 +861,9 @@ test("HR-HUB: hub.access defaults on for all 8 roles", () => {
   }
 });
 
-test("HR-HUB: scheduling/timecard/time-off/team grants for managers only", () => {
-  for (const key of [
-    "hub.manage_schedule",
-    "hub.review_timecards",
-    "hub.approve_time_off",
-    "hub.view_team",
-  ] as const) {
+test("HR-HUB: scheduling/time-off grants for managers only; timecard/team-view also HR's", () => {
+  // Managers-only keys (HR does not gain scheduling or time-off approval).
+  for (const key of ["hub.manage_schedule", "hub.approve_time_off"] as const) {
     for (const role of ["administrator", "program_manager", "house_manager"]) {
       assert.equal(defaultPermissions(role)[key], true, `${role}.${key}`);
     }
@@ -875,22 +871,40 @@ test("HR-HUB: scheduling/timecard/time-off/team grants for managers only", () =>
       assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
     }
   }
-});
-
-test("HR-HUB: payroll lock and HR documents for administrator/PM only", () => {
-  for (const key of ["hub.approve_payroll", "hub.manage_documents"] as const) {
-    assert.equal(defaultPermissions("administrator")[key], true);
-    assert.equal(defaultPermissions("program_manager")[key], true);
-    for (const role of [
-      "compliance_admin",
-      "house_manager",
-      "dsp",
-      "nurse",
-      "hr",
-      "auditor",
-    ]) {
+  // HR HUB OWNERSHIP (founder decision, Joshua 2026-10-31; sim wave 6
+  // item 9): HR owns Timecards and Attendance, so hub.review_timecards
+  // and hub.view_team are HR's too — the Paycor model.
+  for (const key of ["hub.review_timecards", "hub.view_team"] as const) {
+    for (const role of ["administrator", "program_manager", "house_manager", "hr"]) {
+      assert.equal(defaultPermissions(role)[key], true, `${role}.${key}`);
+    }
+    for (const role of ["compliance_admin", "dsp", "nurse", "auditor"]) {
       assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
     }
+  }
+});
+
+test("HR-HUB: payroll for administrator/PM/HR; HR documents for administrator/PM only", () => {
+  // HR owns Payroll (founder decision 2026-10-31) — hub.approve_payroll
+  // is HR's as well as administrator/PM.
+  assert.equal(defaultPermissions("administrator")["hub.approve_payroll"], true);
+  assert.equal(defaultPermissions("program_manager")["hub.approve_payroll"], true);
+  assert.equal(defaultPermissions("hr")["hub.approve_payroll"], true);
+  for (const role of ["compliance_admin", "house_manager", "dsp", "nurse", "auditor"]) {
+    assert.equal(defaultPermissions(role)["hub.approve_payroll"], false, `${role}.hub.approve_payroll`);
+  }
+  // HR documents stay administrator/PM only.
+  assert.equal(defaultPermissions("administrator")["hub.manage_documents"], true);
+  assert.equal(defaultPermissions("program_manager")["hub.manage_documents"], true);
+  for (const role of [
+    "compliance_admin",
+    "house_manager",
+    "dsp",
+    "nurse",
+    "hr",
+    "auditor",
+  ]) {
+    assert.equal(defaultPermissions(role)["hub.manage_documents"], false, `${role}.hub.manage_documents`);
   }
 });
 

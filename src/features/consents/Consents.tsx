@@ -4,11 +4,42 @@ import { useEffect, useState } from 'react';
 import { useData } from '../../data/DataProvider';
 import { canManageConsents, canSeeConsents, consentOutcomeLabel, consentGaps, consentOnFile, consentStatus, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
 import { todayStamp } from '../../data/status';
+import { formatDateLong } from '../../components';
 import { jsPDF } from 'jspdf';
 import { openPrintable } from '../../data/openFile';
 import './consents.css';
+/**
+ * Presentation helpers (wave 6, item 7; simulation batch 33: the
+ * consents list showed raw record UUIDs as "versions", the recorder's
+ * raw user id, and ISO timestamps). Versions are numbered per
+ * Individual + consent type, oldest first; dates use the same
+ * human format as the other lists.
+ */
+export function formatConsentTimestamp(iso: string) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+        ? iso
+        : d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+export function consentVersionNumbers(register: ConsentRegister) {
+    const numbers = new Map<string, number>();
+    const groups = new Map<string, typeof register.records>();
+    for (const record of register.records) {
+        const key = `${record.individualId}:${record.typeId}`;
+        const group = groups.get(key) ?? [];
+        group.push(record);
+        groups.set(key, group);
+    }
+    for (const group of groups.values()) {
+        [...group]
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            .forEach((record, index) => numbers.set(record.id, index + 1));
+    }
+    return numbers;
+}
 function printSummary(register: ConsentRegister, individualId: string) {
     const person = register.individuals.find(p => p.id === individualId);
+    const versionNumbers = consentVersionNumbers(register);
     const pdf = new jsPDF();
     let y = 18;
     function line(text: string) {
@@ -29,17 +60,17 @@ function printSummary(register: ConsentRegister, individualId: string) {
         const { status } = consentOnFile(register, individualId, type.id);
         line(`${type.label}: ${status}`);
         for (const r of register.records.filter(r => r.individualId === individualId && r.typeId === type.id)) {
-            line(`Version ${r.id} | ${consentStatus(r, register.records, register.revocations)}`);
+            line(`Version ${versionNumbers.get(r.id) ?? 1} | ${consentStatus(r, register.records, register.revocations)}`);
             line(r.covers);
             if (r.outcome)
                 line(`Recorded choice: ${r.outcome}${['no', 'none'].includes(r.outcome) ? ' - Permission not given' : ''}`);
             line(`Given by ${r.giverName} (${r.giver}; ${r.relationship})`);
-            line(`Signed ${r.signedOn || 'Not signed'}; effective ${r.effectiveOn}; expiry/review ${r.reviewOn}`);
+            line(`Signed ${r.signedOn ? formatDateLong(r.signedOn) : 'Not signed'}; effective ${formatDateLong(r.effectiveOn)}; expiry/review ${formatDateLong(r.reviewOn)}`);
             if (r.supersedesId)
-                line(`Renews version ${r.supersedesId}`);
+                line(`Renews version ${versionNumbers.get(r.supersedesId) ?? ''}`);
             const rev = register.revocations.find(v => v.consentId === r.id);
             if (rev)
-                line(`Revoked ${rev.revokedOn} by ${rev.revokedByName}: ${rev.reason}`);
+                line(`Revoked ${formatDateLong(rev.revokedOn)} by ${rev.revokedByName}: ${rev.reason}`);
         }
     }
     void openPrintable('Consent summary.pdf', pdf.output('blob'), 'print');
@@ -105,6 +136,8 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         setDraft({ individualId: personId, typeId, covers: prior?.covers ?? '', giver: prior?.giver ?? 'individual', giverName: prior?.giverName ?? '', relationship: prior?.relationship ?? 'Self', signedOn: '', effectiveOn: todayStamp(), reviewOn: '', supersedesId: prior?.id ?? null, outcome: prior?.outcome });
     }
     const people = data?.individuals.filter(p => (!individualId || p.id === individualId) && (!site || p.siteId === site)) ?? [];
+    const versionNumbers = data ? consentVersionNumbers(data) : new Map<string, number>();
+    const staffName = (userId: string) => workspace?.staff.find(s => s.id === userId)?.name ?? (userId === session?.userId ? session?.fullName : undefined) ?? 'A team member';
     return <section className="consents" id="chart-consents" aria-label="Consents register">
     <RightsPackets individualId={individualId}/><Packets individualId={individualId} onFiled={async () => setData(await api.getConsents())}/><h2>{individualId ? 'Consents and version history' : 'Consents register'}</h2>
     <p>Signed versions stay on the Individual’s chart. Renewing adds a version; revoking records who, when, and why.</p>
@@ -122,13 +155,13 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         {data.types.map(type => {
                     const { row, status } = consentOnFile(data, person.id, type.id);
                     const history = data.records.filter(r => r.individualId === person.id && r.typeId === type.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-                    return <tr key={type.id}><th scope="row">{type.label}{type.required ? ' (required)' : ''}</th><td>{role === 'dsp' && status === 'Missing' ? 'No active consent available' : status}</td><td>{row ? consentOutcomeLabel(row.outcome) : 'No active permission on file'}</td><td>{row?.reviewOn ?? '—'}</td><td>
+                    return <tr key={type.id}><th scope="row">{type.label}{type.required ? ' (required)' : ''}</th><td>{role === 'dsp' && status === 'Missing' ? 'No active consent available' : status}</td><td>{row ? consentOutcomeLabel(row.outcome) : 'No active permission on file'}</td><td>{row?.reviewOn ? formatDateLong(row.reviewOn) : '—'}</td><td>
             {manage && <button disabled={busy} onClick={() => start(person.id, type.id, row?.activatedAt ? row : undefined)}>{row?.activatedAt ? 'Renew' : 'New draft'}</button>}
             <details><summary>{role === 'dsp' ? 'Active consent details' : `Version history (${history.length})`}</summary>{history.map(r => <div className="consent-version" key={r.id}>
-              <p><strong>{consentStatus(r, data.records, data.revocations)}</strong> · Version {r.id}</p><p>{r.covers}</p>{r.outcome && <p><strong>Recorded choice: {r.outcome}</strong>{["no", "none"].includes(r.outcome) ? " — Permission not given" : ""}</p>}<p>Given by {r.giverName} — {r.giver}; {r.relationship}</p>
-              <p>Signed {r.signedOn || 'Not signed'}; effective {r.effectiveOn}; expiry/review {r.reviewOn}</p><p>Recorded by {r.createdBy}; {r.activatedAt ? `activated ${r.activatedAt} by ${r.activatedBy ?? r.giverName}` : 'Draft'}</p>
-              {r.supersedesId && <p>Renews version {r.supersedesId}</p>}
-              {data.revocations.filter(v => v.consentId === r.id).map(v => <p key={v.consentId}>Revoked {v.revokedOn} by {v.revokedByName}: {v.reason}</p>)}
+              <p><strong>{consentStatus(r, data.records, data.revocations)}</strong> · Version {versionNumbers.get(r.id) ?? 1}</p><p>{r.covers}</p>{r.outcome && <p><strong>Recorded choice: {r.outcome}</strong>{["no", "none"].includes(r.outcome) ? " — Permission not given" : ""}</p>}<p>Given by {r.giverName} — {r.giver}; {r.relationship}</p>
+              <p>Signed {r.signedOn ? formatDateLong(r.signedOn) : 'Not signed'}; effective {formatDateLong(r.effectiveOn)}; expiry/review {formatDateLong(r.reviewOn)}</p><p>Recorded by {staffName(r.createdBy)}; {r.activatedAt ? `activated ${formatConsentTimestamp(r.activatedAt)} by ${r.activatedBy ? staffName(r.activatedBy) : r.giverName}` : 'Draft'}</p>
+              {r.supersedesId && <p>Renews version {versionNumbers.get(r.supersedesId) ?? ''}</p>}
+              {data.revocations.filter(v => v.consentId === r.id).map(v => <p key={v.consentId}>Revoked {formatDateLong(v.revokedOn)} by {v.revokedByName}: {v.reason}</p>)}
               {manage && !r.activatedAt && r.createdBy === session?.userId && <><button disabled={busy} onClick={() => { setEditId(r.id); setDraft({ ...r }); }}>Edit draft</button><button disabled={busy} onClick={() => void run(() => api.activateConsent(r.id))}>Activate signed consent</button></>}
               {manage && r.activatedAt && !data.revocations.some(v => v.consentId === r.id) && <button disabled={busy} onClick={() => { setRevoking(r.id); setReason(''); }}>Record revocation</button>}
             </div>)}</details>
