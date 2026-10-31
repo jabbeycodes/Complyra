@@ -152,14 +152,18 @@ test("assignment instantiates a draft and notifies reviewers, not all staff", as
     (n) => n.type === "delegation.review_ready",
   );
   const notified = new Set(reviewNotes.map((n) => n.userId));
-  // Reviewers: the Maple nurse and the agency admin (agency-scoped).
+  // Reviewers: everyone whose role template holds delegation.training.review
+  // and has an Evergreen account — the Maple nurse, the agency admin, the
+  // program manager, and the compliance administrator (agency-scoped).
   assert.ok(notified.has(userIdFor(s, "Cameron Price")));
   assert.ok(notified.has(userIdFor(s, "Sarah Mitchell")));
+  assert.ok(notified.has(userIdFor(s, "Melissa Grant")));
+  assert.ok(notified.has(userIdFor(s, "Omar Haddad")));
   // DSPs are staff, not reviewers: no review_ready for them.
   assert.ok(!notified.has(userIdFor(s, "Alex Morgan")));
   assert.ok(!notified.has(userIdFor(s, "Taylor Reed")));
   assert.ok(!notified.has(userIdFor(s, "James Wilson")));
-  assert.equal(reviewNotes.length, 2);
+  assert.equal(reviewNotes.length, 4);
 });
 
 test("draft content stays hidden from site staff until published", async () => {
@@ -286,12 +290,13 @@ test("overdue sweep notifies staff and managers idempotently", async () => {
   )!.approvedAt = daysAgo(8.5);
   await api.signIn(login(DEMO_NURSE_USERNAME)); // holds delegation.training.review
   const first = await api.sweepDelegationAckOverdue();
-  // 3 unsigned Maple staff (Alex, Taylor, Cameron) + 1 manager with
-  // delegation.activate (Sarah Mitchell, agency-scoped admin).
-  assert.equal(first, 4);
+  // 3 unsigned Maple staff (Alex, Taylor, Cameron) + the 3 agency-scoped
+  // holders of delegation.activate (Sarah Mitchell, admin; Melissa Grant,
+  // program manager; Omar Haddad, compliance administrator).
+  assert.equal(first, 6);
   const overdueNotes = () =>
     s.db.notifications.filter((n) => n.type === "delegation.ack_overdue");
-  assert.equal(overdueNotes().length, 4);
+  assert.equal(overdueNotes().length, 6);
   assert.ok(
     overdueNotes().some((n) => /overdue/.test(n.body)),
     "expected the overdue body copy",
@@ -317,8 +322,9 @@ test("sweep skips fresh publications and signed staff", async () => {
   await api.signDelegationAcknowledgment(assignment.id, "Alex Morgan", "Alex Morgan");
   await api.signIn(login(DEMO_NURSE_USERNAME));
   const inserted = await api.sweepDelegationAckOverdue();
-  // Taylor + Cameron (unsigned staff) + Sarah (manager); Alex skipped.
-  assert.equal(inserted, 3);
+  // Taylor + Cameron (unsigned staff) + Sarah, Melissa, and Omar (the
+  // agency-scoped delegation.activate holders); Alex skipped.
+  assert.equal(inserted, 5);
   const notified = s.db.notifications
     .filter((n) => n.type === "delegation.ack_overdue")
     .map((n) => n.userId);

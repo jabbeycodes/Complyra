@@ -357,6 +357,64 @@ export function createEvergreenSeed(): LocalDatabase {
       expiresOn: null,
     };
   });
+  // Role-coverage demo accounts (2026-10-30): the house staff list above only
+  // covers administrator / house_manager / dsp / nurse. These four accounts
+  // give the demo one sign-in per remaining role template — program_manager,
+  // hr, compliance_admin, auditor — so every role can be walked and audited.
+  // All four are agency-scoped roles, so their memberships carry no home site
+  // (same as Sarah Mitchell's administrator membership). They hold no
+  // individual assignments; their reach comes from role permissions + scope.
+  const extraDemoUsers: {
+    name: string;
+    jobTitle: string;
+    role: Membership["role"];
+    roleKey: string;
+  }[] = [
+    {
+      name: "Melissa Grant",
+      jobTitle: "Program Manager",
+      role: "manager",
+      roleKey: "program_manager",
+    },
+    {
+      name: "Tanya Brooks",
+      jobTitle: "Human Resources",
+      role: "hr",
+      roleKey: "hr",
+    },
+    {
+      name: "Omar Haddad",
+      jobTitle: "Compliance Administrator",
+      role: "compliance_admin",
+      roleKey: "compliance_admin",
+    },
+    {
+      name: "Mark Delaney",
+      jobTitle: "Auditor",
+      role: "auditor",
+      roleKey: "auditor",
+    },
+  ];
+  extraDemoUsers.forEach((extra, i) => {
+    profiles.push({
+      id: padId(208 + i),
+      fullName: extra.name,
+      email: emailFor(extra.name),
+      jobTitle: extra.jobTitle,
+      username: emailFor(extra.name).split("@")[0],
+      homeAgencyId: AGENCY_ID,
+      mustChangePassword: false,
+    });
+    memberships.push({
+      id: padId(308 + i),
+      agencyId: AGENCY_ID,
+      userId: padId(208 + i),
+      role: extra.role,
+      roleKey: extra.roleKey,
+      siteId: null,
+      expiresOn: null,
+    });
+  });
   const agencyRoles: AgencyRole[] = ROLE_TEMPLATES.map((template) => ({
     ...template,
     agencyId: AGENCY_ID,
