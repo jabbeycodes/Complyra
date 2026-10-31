@@ -86,6 +86,7 @@ select lives_ok($$insert into hm_weekly_checklists(agency_id,site_id,week_of,ass
   'Second house manager can create their own home''s checklist row');
 
 -- Exactly the five allowed rows exist.
+set local role service_role;
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 select is((select count(*)::int from hm_weekly_checklists),5,
   'Only the five in-scope inserts landed');
