@@ -1,6 +1,6 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
-import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlertPairs, consentAlerts, consentStatus, isStaleConsentNotification, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, rightsPacketAlerts, rightsTrackingFor, validateRightsCompletion, validateRightsPacketStart, type RightsPacket, type RightsPacketCompletion } from "./rightsPackets";
 import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
@@ -3596,6 +3596,7 @@ export class LocalApi implements ComplyraApi {
             db.consents.push({ ...structuredClone(draft), id, agencyId: session.agencyId, createdBy: session.userId, createdAt: new Date().toISOString(), activatedBy: null, activatedAt: null });
         }
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
         return id;
     }
     async activateConsent(id: string) {
@@ -3607,6 +3608,7 @@ export class LocalApi implements ComplyraApi {
         row.activatedAt = new Date().toISOString();
         row.activatedBy = session.userId;
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async revokeConsent(id: string, revokedOn: string, reason: string) {
         const { row, session } = this.consentForWrite(id);
@@ -3618,6 +3620,7 @@ export class LocalApi implements ComplyraApi {
             throw new Error('This consent is already revoked.');
         this.store.db.consentRevocations.push({ consentId: id, revokedOn, reason: reason.trim(), revokedBy: session.userId, revokedByName: session.fullName });
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async saveConsentTypes(types: ConsentType[]) {
         const session = assertSession(this.store);
@@ -3639,9 +3642,11 @@ export class LocalApi implements ComplyraApi {
         const register = await this.getConsents();
         for (const payload of consentAlerts(register, this.store.db.memberships))
             this.pushRecognitionNotification(payload);
+        const outstandingPacketIds = new Set<string>();
         for (const packet of await this.listConsentPackets()) {
             if (!packetOutstanding(packet))
                 continue;
+            outstandingPacketIds.add(packet.id);
             const person = register.individuals.find(p => p.id === packet.individualId);
             if (!person)
                 continue;
@@ -3656,6 +3661,19 @@ export class LocalApi implements ComplyraApi {
         }));
         for (const payload of rightsPacketAlerts(rightsPeople, this.store.db.memberships))
             this.pushRecognitionNotification(payload);
+        // Retire stale consent alerts (batch 24): a stored consent.missing /
+        // consent.expiring row lives only while its (type, entity) pair is a
+        // current gap, and a consent.packet_outstanding row only while its
+        // packet is outstanding. Recording or renewing the consent — or the
+        // status flipping from "Expiring soon" to "Expired" — drops the old
+        // pair, so the alert clears for every recipient at once: the same
+        // lifecycle as missing-note notices retiring when the note is filed.
+        const livePairs = consentAlertPairs(register);
+        const stored = this.store.db.notifications ?? [];
+        const kept = stored.filter(row => row.agencyId !== session.agencyId ||
+            !isStaleConsentNotification(row, livePairs, outstandingPacketIds));
+        if (kept.length !== stored.length)
+            this.store.db.notifications = kept;
         await persistMeta(this.store);
     }
 

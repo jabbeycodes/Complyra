@@ -1,6 +1,6 @@
-import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
+import { assertPacketDates, packetOutstanding, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
-import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, canSeeConsents, consentAlertPairs, isStaleConsentNotification, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -1838,9 +1838,55 @@ export class HostedApi implements ComplyraApi {
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);
     throwIf(error, "Could not load notifications.");
-    return (data ?? []).map((row) => ({ ...row,
+    const mapped = (data ?? []).map((row) => ({ ...row,
       read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
     })) as import("../features/notifications/notify").NotificationRow[];
+    return this.filterStaleConsentNotifications(session, mapped);
+  }
+
+  /**
+   * Batch 24: stored consent alerts never retired — the bell kept saying
+   * "Consent needs attention — Missing" for consents the chart already
+   * showed Active, and a consent flipping "Expiring soon" → "Expired"
+   * showed BOTH alerts at once. The notifications RLS grants clients
+   * only update(read_at), so retirement happens at the read boundary:
+   * drop consent.missing / consent.expiring rows whose (type, entity)
+   * pair is no longer a current gap, and consent.packet_outstanding
+   * rows whose packet is no longer outstanding — one consent carries
+   * one current status on every surface. A server-side hard delete
+   * (like retire_stale_missing_note_notices) would need a migration.
+   * Fails open: a register that fails to load never hides alerts.
+   */
+  private async filterStaleConsentNotifications(
+    session: SessionUser,
+    rows: import("../features/notifications/notify").NotificationRow[],
+  ): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    if (
+      !canSeeConsents(session.roleKey) ||
+      !rows.some((row) =>
+        ["consent.missing", "consent.expiring", "consent.packet_outstanding"].includes(row.type),
+      )
+    ) {
+      return rows;
+    }
+    try {
+      const register = await this.getConsents();
+      const livePairs = consentAlertPairs(register);
+      const packets = await this.listConsentPackets().catch(() => [] as ConsentPacket[]);
+      const outstandingPacketIds = new Set(
+        packets.filter((packet) => packetOutstanding(packet)).map((packet) => packet.id),
+      );
+      return rows.filter(
+        (row) =>
+          !isStaleConsentNotification(
+            { type: row.type, entityId: row.entity_id },
+            livePairs,
+            outstandingPacketIds,
+          ),
+      );
+    } catch {
+      return rows;
+    }
   }
 
   async markNotificationsRead(ids: string[]) {
