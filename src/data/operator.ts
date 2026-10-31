@@ -30,3 +30,28 @@ export function validateOperatorAi(input: OperatorAiInput) {
  if(!input.model.trim() || input.model.length>120) throw new Error("Enter a model name of at most 120 characters.");
  if(input.enabled && !input.policyAcknowledged) throw new Error("Confirm authorization and required agreements before enabling AI processing.");
 }
+
+export interface OperatorAuditQuery extends OperatorPeriod { agencyId: string; actorId: string; action: string; source: string; page: number; }
+export interface OperatorAuditRow { id: string; agencyId: string; actorId: string | null; action: string; source: string; summary: string; createdAt: string; }
+export interface OperatorAuditPage { rows: OperatorAuditRow[]; hasMore: boolean; }
+export function validateOperatorAudit(q: OperatorAuditQuery){
+ validateOperatorPeriod(q);
+ if(!Number.isInteger(q.page)||q.page<0||q.page>2000||q.action.length>80||!["all","application","lifecycle","rules","ai"].includes(q.source))throw new Error("Invalid audit filters.");
+ for(const id of [q.agencyId,q.actorId]) if(id&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))throw new Error("Enter a valid agency/actor ID.");
+}
+/** Defensive presentation boundary for old/cached RPC summaries as well as exports. */
+export function operatorAuditSummary(row: Pick<OperatorAuditRow, "source" | "summary">): string {
+ if (row.source === "lifecycle") {
+  const transition = /^(pending|active|rejected|suspended) → (pending|active|rejected|suspended)(?::[\s\S]*)?$/.exec(row.summary);
+  return transition ? `${transition[1]} → ${transition[2]}` : "Lifecycle transition (details omitted)";
+ }
+ if (row.source === "rules") {
+  const key = row.summary.split(":", 1)[0];
+  return /^[a-z_]+(?:\.[a-z_]+)+$/.test(key) ? key : "Rule changed";
+ }
+ return row.summary;
+}
+export function operatorAuditCsv(rows: OperatorAuditRow[]){
+ const cell=(v:string|null)=>'"'+String(v??"").replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"';
+ return [["Event ID","Agency ID","Actor ID","Action","Source","Summary","UTC time"],...rows.map(r=>[r.id,r.agencyId,r.actorId,r.action,r.source,operatorAuditSummary(r),r.createdAt])].map(r=>r.map(cell).join(",")).join("\r\n");
+}

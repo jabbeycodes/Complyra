@@ -504,16 +504,10 @@ Deno.serve(async (req) => {
       // Record the verification timestamp + project — the settings row
       // carries no credential material.
       if (body.agency_id && typeof body.agency_id === "string") {
-        await admin
-          .from("agency_ai_settings")
-          .upsert(
-            {
-              agency_id: body.agency_id,
-              service_account_verified_at: new Date().toISOString(),
-              vertex_project_id: vertex.projectId,
-            },
-            { onConflict: "agency_id" },
-          );
+        const { error: recordError } = await admin.rpc("operator_record_ai_verification", {
+          p_agency_id: body.agency_id, p_actor_id: user.id, p_project: vertex.projectId,
+        });
+        if (recordError) return json({ok:false,error:"Vertex responded, but verification evidence could not be recorded."},502);
       }
       return json({ ok: true, project_id: vertex.projectId });
     } catch (e) {

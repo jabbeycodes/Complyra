@@ -1,4 +1,4 @@
-import { validateOperatorPeriod, validateOperatorAi } from "./operator";
+import { operatorAuditSummary, validateOperatorPeriod, validateOperatorAi, validateOperatorAudit } from "./operator";
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -2700,6 +2700,13 @@ export class HostedApi implements ComplyraApi {
       provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
       status: row.status as AgencyStatus,
     }));
+  }
+
+  async operatorAudit(q: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage> {
+    const session=await this.requireSession();if(!session.platformAdmin)throw new Error("Operator access required.");validateOperatorAudit(q);
+    const {data,error}=await this.client.rpc("operator_audit",{p_start:q.start,p_end:q.end,p_category:q.category,p_agency_id:q.agencyId||null,p_actor_id:q.actorId||null,p_action:q.action,p_source:q.source,p_page:q.page});throwIf(error,"Could not load operator audit events.");
+    const page = data as import("./operator").OperatorAuditPage;
+    return { ...page, rows: page.rows.map(row => ({ ...row, summary: operatorAuditSummary(row) })) };
   }
 
   async operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings> {

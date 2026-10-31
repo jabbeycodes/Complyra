@@ -1,0 +1,37 @@
+import { test, expect, type Page } from "./fixtures";
+async function login(page:Page,operator:boolean){
+ await page.goto('/');await page.getByLabel('Provider code').fill(operator?'COMPLYRER-MO':'EVERGREEN-MO');await page.getByLabel('Username').fill(operator?'platform.owner':'sarah.mitchell');await page.locator('input[autocomplete="current-password"]').fill('Evergreen!demo1');await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.locator('.topbar')).toBeVisible();await page.keyboard.press('Escape');
+}
+test('operator overview drills to real seeded agency and audit explorer exports a bounded page',async({page})=>{
+ await login(page,true);await expect(page.getByRole('heading',{name:'Operator Control Center · Overview',exact:true})).toBeVisible();
+ await page.getByRole('combobox',{name:'Reporting group',exact:true}).selectOption('demo');
+ await expect(page.getByRole('link',{name:/1.*Total agencies/})).toBeVisible();
+ await page.locator('svg a[aria-label="2026-09-01: 1; open registrations"]').first().click();
+ await expect(page.getByRole('heading',{name:'Operator Control Center · Agencies'})).toBeVisible();await expect(page.getByRole('button',{name:'Evergreen Care',exact:true})).toBeVisible();
+ await page.goBack();await expect(page.getByRole('combobox',{name:'Reporting group',exact:true})).toHaveValue('demo');
+ await page.locator('.sidebar').getByRole('button',{name:'Operator audit',exact:true}).click();await expect(page.getByRole('heading',{name:'Operator Control Center · Activity & audit'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Events · page 1'})).toBeVisible();
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export current page (CSV)',exact:true}).click();expect((await download).suggestedFilename()).toBe('operator-audit-current-page.csv');
+});
+test('agency administrator cannot deep-link any new operator surface',async({page})=>{
+ await login(page,false);
+ for(const name of ['Operator overview','Operator agencies','Operator audit']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
+});
+test('sensitive lifecycle reasons never render in the explorer or its downloaded CSV',async({page})=>{
+ const sensitive='LIFECYCLE_SENSITIVE_7f1b_patient_diagnosis_DO_NOT_EXPORT';
+ await login(page,true);
+ await page.locator('.sidebar').getByRole('button',{name:'Operator agencies',exact:true}).click();
+ await page.getByRole('button',{name:'Evergreen Care',exact:true}).click();
+ await page.getByLabel('Reason (required)',{exact:true}).fill(sensitive);
+ await page.getByRole('button',{name:'Confirm suspension',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Reactivate agency',exact:true})).toBeVisible();
+ await page.locator('.sidebar').getByRole('button',{name:'Operator audit',exact:true}).click();
+ await expect(page.getByRole('cell',{name:'active → suspended',exact:true})).toBeVisible();
+ await expect(page.locator('body')).not.toContainText(sensitive);
+ const downloading=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export current page (CSV)',exact:true}).click();
+ const file=await (await downloading).path();
+ expect(file).not.toBeNull();
+ const {readFile}=await import('node:fs/promises');const csv=await readFile(file!,'utf8');
+ expect(csv).toContain('active → suspended');expect(csv).not.toContain(sensitive);
+});

@@ -3,11 +3,13 @@ import { useData } from "../../data/DataProvider";
 import type { OperatorOverviewData } from "../../data/operator";
 import { PageHeading } from "../../components";
 import "./operator.css";
+const param=(key:string)=>typeof window === "undefined" ? null : new URLSearchParams(decodeURIComponent(window.location.hash).split("?")[1]).get(key);
 const today=()=>new Date().toISOString().slice(0,10);
 export default function OperatorOverview(){
  const {api,session,usingHostedBackend}=useData();
- const [start,setStart]=useState(()=>new Date(Date.now()-29*86400000).toISOString().slice(0,10));const [end,setEnd]=useState(today);
- const [category,setCategory]=useState("customer");const [data,setData]=useState<OperatorOverviewData|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(true);
+ const [start,setStart]=useState(()=>param("from")??new Date(Date.now()-29*86400000).toISOString().slice(0,10));const [end,setEnd]=useState(()=>param("to")??today());
+ const [category,setCategory]=useState(()=>param("category")??"customer");const [data,setData]=useState<OperatorOverviewData|null>(null);const [error,setError]=useState("");const [loading,setLoading]=useState(true);
+ useEffect(()=>{window.history.replaceState(null,"",`#Operator%20overview?from=${start}&to=${end}&category=${encodeURIComponent(category)}`);},[start,end,category]);
  useEffect(()=>{let cancelled=false;if(!session?.platformAdmin)return;setLoading(true);setError("");
  api.operatorOverview({start,end,category}).then(d=>{if(!cancelled)setData(d);}).catch(e=>{if(!cancelled){setError((e as Error).message);setData(null);}}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[api,session?.platformAdmin,start,end,category]);
  if(!session?.platformAdmin)return <p role="alert">Operator access required.</p>;

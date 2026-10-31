@@ -96,6 +96,7 @@ export interface RuleValueRow {
   effectiveFrom: string;
   reason: string;
   setByName: string;
+  setById?: string;
   setAsOperator: boolean;
   createdAt: string;
 }
