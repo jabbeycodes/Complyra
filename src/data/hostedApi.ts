@@ -2722,15 +2722,12 @@ export class HostedApi implements ComplyraApi {
     }));
   }
 
-  async setAgencyStatus(agencyId: string, status: AgencyStatus) {
+  async setAgencyStatus(agencyId: string, status: AgencyStatus, reason = "Agency registration reviewed", expectedStatus?: AgencyStatus) {
     const session = await this.requireSession();
-    if (!session.platformAdmin) {
-      throw new Error("Only the Complyrer operator can approve agency setups.");
-    }
-    const { error } = await this.client
-      .from("agencies")
-      .update({ status })
-      .eq("id", agencyId);
+    if (!session.platformAdmin) throw new Error("Only the Complyrer operator can review agencies.");
+    const { error } = await this.client.rpc("operator_transition_agency", {
+      p_agency_id: agencyId, p_status: status, p_reason: reason, p_expected_status: expectedStatus ?? null,
+    });
     throwIf(error, "Could not update that agency.");
   }
 
@@ -15055,3 +15052,4 @@ function mapAckRow(row: Record<string, unknown>): AcknowledgmentRow {
     signatureMark: (row.signature_mark as string) ?? null,
   };
 }
+
