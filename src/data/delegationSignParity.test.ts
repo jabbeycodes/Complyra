@@ -434,6 +434,260 @@ test("edge: the domain transition lands before any signature event is written", 
   );
 });
 
+// ===== Edge contract: authorization race (reviewer HOLD) =====
+//
+// The reviewer's HOLD on the first version of this fix: the delegation
+// transition authorized ONE read of obligations.delegation_form and
+// mutated a SECOND, later read — a concurrent edit that renamed or
+// reassigned the row, or turned the delegation off, between the reads
+// let a user authorized for the old row stamp the newly reassigned or
+// disabled row. The discipline now pinned: the check phase snapshots
+// the authorized state (fingerprint), the transition re-reads and
+// re-runs the FULL predicate set against the fresh state whenever the
+// fingerprint moved, and every delegation write is a conditional
+// update on the verified read's updated_at (the row's version token).
+
+test("edge: the delegation check snapshots the authorized state", () => {
+  const check = section(
+    "async function checkDelegationForm",
+    "async function checkHmChecklist",
+  );
+  // The predicates live in a reusable validator the transition can
+  // re-run against a fresh read; the check stores the authorized state.
+  assert.ok(check.includes("async function validateDelegationForm("));
+  assert.ok(check.includes("await validateDelegationForm(ob)"));
+  assert.ok(check.includes("authorizedDelegation = {"));
+  assert.ok(check.includes("delegationAuthFingerprint(ob)"));
+});
+
+test("edge: the obligation loader reads the version token", () => {
+  assert.ok(edge.includes("delegation_form,rn_signed_at,enabled,updated_at"));
+});
+
+test("edge: the transition re-validates a changed form in full before stamping", () => {
+  const verified = section(
+    "async function verifiedDelegationState",
+    "async function persistDelegationForm",
+  );
+  assert.ok(
+    verified.includes(
+      "delegationAuthFingerprint(fresh) !== authorizedDelegation.fingerprint",
+    ),
+  );
+  assert.ok(verified.includes("await validateDelegationForm(fresh)"));
+});
+
+test("edge: every delegation write is the guarded conditional update", () => {
+  const persist = section(
+    "async function persistDelegationForm",
+    "async function checkDelegationForm",
+  );
+  // The write only lands on the exact state that was verified.
+  assert.ok(persist.includes('.eq("updated_at", verified.updated_at)'));
+  assert.ok(persist.includes("data.length === 0"));
+  assert.ok(persist.includes('"form_changed"'));
+  assert.ok(persist.includes("This form was just changed"));
+  const transition = section(
+    "async function applyDomainTransition",
+    "async function checkDomainRules",
+  );
+  // All three delegation fields (rn_signature, row:<slug>:initials,
+  // row:<n>) stamp the verified state through the guarded write, and no
+  // direct obligations read or write remains in the transition — the
+  // loader and persistDelegationForm own the table.
+  assert.equal(transition.split("await verifiedDelegationState()").length - 1, 3);
+  assert.equal(transition.split("persistDelegationForm(").length - 1, 3);
+  assert.ok(!transition.includes('.from("obligations")'));
+});
+
+// ===== Authorization-race protocol (simulation of the edge handler) =====
+//
+// The edge handler cannot be executed here (no Deno runtime), so this
+// simulation re-implements its delegation protocol — check (validate +
+// fingerprint snapshot) → verified re-read (fingerprint compare; full
+// re-validation on change) → conditional write on the version token →
+// signature event — over an in-memory obligation, with hooks at exactly
+// the two windows the reviewer named: between check and transition, and
+// between the verified read and the write. It pins the protocol's
+// outcomes; the static tests above pin that the edge source implements
+// the same steps.
+
+type SimRow = { printName: string; initials?: string; signedAt?: string };
+type SimObligation = {
+  form: { roster: SimRow[] };
+  enabled: boolean;
+  rnSignedAt: string | null;
+  version: number; // stands in for obligations.updated_at
+};
+type SimStore = { ob: SimObligation; events: string[] };
+
+function simStable(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(simStable).join(",") + "]";
+  const obj = value as Record<string, unknown>;
+  return (
+    "{" +
+    Object.keys(obj)
+      .sort()
+      .map((k) => JSON.stringify(k) + ":" + simStable(obj[k]))
+      .join(",") +
+    "}"
+  );
+}
+
+function simFingerprint(ob: SimObligation): string {
+  return simStable({
+    form: ob.form,
+    enabled: ob.enabled !== false,
+    rnSignedAt: ob.rnSignedAt ?? null,
+  });
+}
+
+/** validateDelegationForm's row:<n> predicates, in the handler's order. */
+function simValidateRow(
+  ob: SimObligation,
+  signerName: string,
+  rowIndex: number,
+  events: string[],
+): string | null {
+  const row = ob.form.roster[rowIndex];
+  if (!row) return "Roster row not found.";
+  const printName = row.printName.trim();
+  if (printName && printName.toLowerCase() !== signerName.toLowerCase()) {
+    return `Only ${printName} can sign this row.`;
+  }
+  if (!ob.enabled) return "This delegation is turned off.";
+  if (!ob.rnSignedAt) return "The delegating RN must sign first.";
+  if (!printName) return "Name the staff member on that row first.";
+  if (row.signedAt && events.includes(`row:${rowIndex}`)) {
+    return "That row is already signed.";
+  }
+  return null;
+}
+
+/**
+ * One row-sign request against the store, mirroring the handler: the
+ * check phase validates and snapshots; the transition re-reads,
+ * re-validates in full on any fingerprint change, and writes only if
+ * the version token is untouched since the verified read; the event is
+ * recorded last, and only when the write landed.
+ */
+function simSignRow(
+  store: SimStore,
+  signerName: string,
+  hooks: { afterCheck?: () => void; afterVerifiedRead?: () => void } = {},
+): { ok: boolean; refusal?: string } {
+  // Check phase: validate the first read and snapshot it.
+  const checked = structuredClone(store.ob);
+  const refusal = simValidateRow(checked, signerName, 0, store.events);
+  if (refusal) return { ok: false, refusal };
+  const checkedFingerprint = simFingerprint(checked);
+  hooks.afterCheck?.();
+  // Transition: verified re-read — re-validate in full on any change.
+  const fresh = structuredClone(store.ob);
+  if (simFingerprint(fresh) !== checkedFingerprint) {
+    const refusal2 = simValidateRow(fresh, signerName, 0, store.events);
+    if (refusal2) return { ok: false, refusal: refusal2 };
+  }
+  hooks.afterVerifiedRead?.();
+  // Conditional write: the version token must still be the verified one.
+  if (store.ob.version !== fresh.version) {
+    return {
+      ok: false,
+      refusal: "This form was just changed — refresh and try signing again.",
+    };
+  }
+  store.ob.form.roster[0].signedAt = "2026-10-31T19:45:00.000Z";
+  store.ob.version += 1;
+  store.events.push("row:0");
+  return { ok: true };
+}
+
+function simStore(): SimStore {
+  return {
+    ob: {
+      form: {
+        roster: [{ printName: "Avery Lane" }, { printName: "Blake Ford" }],
+      },
+      enabled: true,
+      rnSignedAt: "2026-10-31T18:00:00.000Z",
+      version: 1,
+    },
+    events: ["rn_signature"],
+  };
+}
+
+test("race sim: a row reassigned after validation refuses — no write, no event", () => {
+  const store = simStore();
+  const result = simSignRow(store, "Avery Lane", {
+    afterCheck: () => {
+      // A manager reassigns the row to another staff member — a real,
+      // persisted edit: the form changes and the version token bumps.
+      store.ob.form.roster[0].printName = "Blake Ford";
+      store.ob.version += 1;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.refusal, "Only Blake Ford can sign this row.");
+  assert.equal(store.ob.form.roster[0].signedAt, undefined);
+  assert.deepEqual(store.events, ["rn_signature"]);
+});
+
+test("race sim: a delegation disabled after validation refuses — no write, no event", () => {
+  const store = simStore();
+  const result = simSignRow(store, "Avery Lane", {
+    afterCheck: () => {
+      store.ob.enabled = false;
+      store.ob.version += 1;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.refusal, "This delegation is turned off.");
+  assert.equal(store.ob.form.roster[0].signedAt, undefined);
+  assert.deepEqual(store.events, ["rn_signature"]);
+});
+
+test("race sim: a change between the verified read and the write refuses as a conflict", () => {
+  const store = simStore();
+  const result = simSignRow(store, "Avery Lane", {
+    afterVerifiedRead: () => {
+      // Another staff member's initials land in the same window.
+      store.ob.form.roster[1].initials = "BF";
+      store.ob.version += 1;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.refusal ?? "", /just changed/);
+  assert.equal(store.ob.form.roster[0].signedAt, undefined);
+  assert.deepEqual(store.events, ["rn_signature"]);
+  // The concurrent edit itself is untouched by the refused stamp.
+  assert.equal(store.ob.form.roster[1].initials, "BF");
+});
+
+test("race sim: a benign concurrent edit is preserved and the sign still lands", () => {
+  const store = simStore();
+  const result = simSignRow(store, "Avery Lane", {
+    afterCheck: () => {
+      store.ob.form.roster[1].initials = "BF";
+      store.ob.version += 1;
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.ok(store.ob.form.roster[0].signedAt);
+  // The other row's concurrent initials survive — the stamp was applied
+  // to the fresh state, not written back from the stale snapshot.
+  assert.equal(store.ob.form.roster[1].initials, "BF");
+  assert.deepEqual(store.events, ["rn_signature", "row:0"]);
+});
+
+test("race sim: the undisturbed flow signs and records the event last", () => {
+  const store = simStore();
+  const result = simSignRow(store, "Avery Lane");
+  assert.equal(result.ok, true);
+  assert.ok(store.ob.form.roster[0].signedAt);
+  assert.deepEqual(store.events, ["rn_signature", "row:0"]);
+});
+
 test("edge: legacy initials derive like the client's suggestInitials", () => {
   // The old hosted derivation used first + LAST word (and one letter for a
   // single-word name); LocalApi/client use first + SECOND word (two
