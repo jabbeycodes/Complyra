@@ -82,6 +82,8 @@ export interface CommandCenterData {
   requirements: WorkspaceView["requirements"];
   individuals: WorkspaceView["individuals"];
   unavailable?: string[];
+  /** Missed shift notes as named facts for the attention feed (batch 9). */
+  missingShiftNotes?: import("../data/attentionFeed").MissingShiftNoteFact[];
   medications?: MedInventoryView[];
   planStacks?: WorkspaceView["planStacks"];
   rightsPackets?: import("../data/rightsPackets").RightsPacket[];
@@ -368,8 +370,13 @@ export function CommandCenterView({
   const timeline = useMemo(() => buildTimeline(timelineFacts), [timelineFacts]);
   const nextUp = useMemo(() => dueNext(timelineFacts, 5), [timelineFacts]);
   const attention = useMemo(
-    () => buildAttentionFeed({ riskContext, timelineFacts }),
-    [riskContext, timelineFacts],
+    () =>
+      buildAttentionFeed({
+        riskContext,
+        timelineFacts,
+        missingShiftNotes: data.missingShiftNotes ?? [],
+      }),
+    [riskContext, timelineFacts, data.missingShiftNotes],
   );
 
   /* ---------------- DMH readiness (honest evidence) ---------------- */
@@ -954,7 +961,7 @@ export default function CommandCenter() {
       const optional = async <T,>(label: string, request: Promise<T>, fallback: T): Promise<T> => {
         try { return await request; } catch { unavailable.push(label); return fallback; }
       };
-      const [actions, certs, clearance, checklists, snapshots, medicationGroups, rightsPackets] = await Promise.all([
+      const [actions, certs, clearance, checklists, snapshots, medicationGroups, rightsPackets, dueItemGroups] = await Promise.all([
         api.listCorrectiveActions(),
         optional("Certificates", api.certificatesExpiringSoon(36500), []),
         optional("Staff training", api.listStaffNeedingClearance(), [] as StaffClearanceRow[]),
@@ -962,7 +969,29 @@ export default function CommandCenter() {
         optional("Score history", api.listComplianceSnapshots(null, 30), [] as ScoreSnapshot[]),
         optional("Medication supply", Promise.all((workspace?.individuals ?? []).map((person) => api.getMedInventory(person.id))), [] as MedInventoryView[][]),
         optional("Rights packets", api.listRightsPackets(), [] as import("../data/rightsPackets").RightsPacket[]),
+        // Missed shift notes (batch 9): the due-items engine already
+        // knows them by name per site — surface them in the feed.
+        optional("Missing shift notes", Promise.all((workspace?.sites ?? []).map((site) => api.getSiteDueItems(site.id))), [] as import("../data/dueItems").SiteDueItemsResult[]),
       ]);
+      const missingShiftNotes: import("../data/attentionFeed").MissingShiftNoteFact[] =
+        dueItemGroups.flatMap((group, index) =>
+          group.items
+            .filter(
+              (item) =>
+                item.kind === "shift_note" &&
+                item.severity === "overdue" &&
+                item.shift,
+            )
+            .map((item) => ({
+              id: item.id,
+              individualId: item.individualId,
+              individualName: item.individualName,
+              siteName: workspace?.sites[index]?.name ?? "",
+              serviceDate: item.shift!.serviceDate,
+              blockLabel: item.shift!.blockLabel,
+              staffName: item.shift!.staffName,
+            })),
+        );
       if (request !== loadSequence.current) return;
       setData({
         actions: sortCorrectiveActions(actions, new Date()),
@@ -978,6 +1007,7 @@ export default function CommandCenter() {
         medications: medicationGroups.flat(),
         planStacks: workspace?.planStacks ?? [],
         rightsPackets,
+        missingShiftNotes,
       });
     } catch (err) {
       if (request === loadSequence.current) setError(err instanceof Error ? err.message : "Could not load the command center.");

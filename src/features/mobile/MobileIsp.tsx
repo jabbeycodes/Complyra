@@ -5,6 +5,8 @@ import {
   ISP_SHIFTS,
   canEditShiftNoteRow,
   clocksFromShiftLabel,
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
   shiftDurationMinutes,
   waiverServiceNames,
   type IspProgramView,
@@ -65,7 +67,10 @@ export function NoteReadView({
         <h4>Collection details</h4>
         <div className="msh-read-row">
           <span>Date (Central)</span>
-          <strong>{note.noteDate}</strong>
+          <strong>
+            {note.noteDate}
+            {isLateShiftNote(note) ? ` · ${LATE_SHIFT_NOTE_LABEL}` : ""}
+          </strong>
         </div>
         <div className="msh-read-row">
           <span>Shift and time</span>
@@ -699,6 +704,9 @@ export default function MobileIsp({
                       <strong>
                         {note.staffName}
                         {note.staffTitle ? ` · ${note.staffTitle}` : ""}
+                        {isLateShiftNote(note)
+                          ? ` · ${LATE_SHIFT_NOTE_LABEL}`
+                          : ""}
                       </strong>
                       <small>{noteTimeText(note, formatDoseTime)}</small>
                       <small>

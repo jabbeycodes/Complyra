@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(41);
+select plan(44);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -81,6 +81,9 @@ select throws_ok($$insert into personal_spending_entries(agency_id,site_id,indiv
 select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',current_date,'spend','Target','Socks',0,'d4000000-0000-0000-0000-000000000002')$$,
   '23514',null,'A zero amount is rejected');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',current_date,'spend','Target','More than the balance holds',999999,'d4000000-0000-0000-0000-000000000002')$$,
+  'P0001',null,'A spend that would take the balance below $0 is refused (wave 3, batch 7)');
 
 -- Void flow: voiding stamps the actual voider, then the row is final.
 select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
@@ -114,6 +117,8 @@ select lives_ok($$insert into personal_spending_month_closes(agency_id,site_id,i
   'HM signs their Individual''s month closed with the Individual''s sign-off');
 select is((select printed_name from personal_spending_month_closes where individual_id='e4000000-0000-0000-0000-000000000001' and month=to_char(current_date,'YYYY-MM')),'Hannah HM',
   'The printed name on the sign-off is the closer''s account name');
+select is((select closing_balance_cents from personal_spending_month_closes where individual_id='e4000000-0000-0000-0000-000000000001' and month=to_char(current_date,'YYYY-MM')),9851,
+  'The stored closing balance is computed from the ledger (15000 - 4299 - 850), not the caller-supplied 9877 (wave 3, batch 7)');
 select throws_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',to_char(current_date,'YYYY-MM'),9877,'Hannah HM','Hannah HM','d4000000-0000-0000-0000-000000000001','individual_signed')$$,
   '23505',null,'A month can only be signed closed once');
@@ -145,6 +150,15 @@ select lives_ok($$insert into personal_spending_month_closes(agency_id,site_id,i
   'An unable-to-sign close with a second staff member succeeds');
 select is((select second_staff_name from personal_spending_month_closes where individual_id='e4000000-0000-0000-0000-000000000001' and month=to_char(current_date - interval '1 month','YYYY-MM')),'Alex DSP',
   'The second signer''s printed name comes from their own profile');
+
+-- ---------------- House manager, Home B: no negative closes ----------------
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000003"}',true);
+
+-- Person Two's ledger stands at -2210 here (one seeded spend, no funds
+-- recorded yet): the close must refuse, whatever balance is supplied.
+select throws_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',to_char(current_date,'YYYY-MM'),5000,'Henry HM','Henry HM','d4000000-0000-0000-0000-000000000003','individual_signed')$$,
+  'P0001',null,'A month cannot be signed closed while the balance is below $0 (wave 3, batch 7)');
 
 -- ---------------- Program manager: the whole agency ----------------
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000004"}',true);

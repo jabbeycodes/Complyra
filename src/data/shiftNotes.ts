@@ -16,6 +16,7 @@
  */
 
 import { roleLabel } from "./status";
+import { centralTodayIso } from "./menuRecords";
 
 export type IspProgramStatus = "draft" | "approved" | "superseded";
 
@@ -518,3 +519,26 @@ export function shiftNotesForPrint<T extends { noteDate: string }>(notes: T[], t
     coversToday: false as const,
   };
 }
+
+/**
+ * A note is LATE when it was filed on a later Central calendar day than
+ * the shift it documents (simulation batches 9/14: "Bailey's overdue
+ * note isn't marked late"). Derived at render time from the note's
+ * service date and its creation timestamp — nothing is persisted, so
+ * backdated corrections and imports label themselves correctly.
+ * A note filed during the overnight shift that ENDS on its service
+ * date (e.g. written at 2 AM for the shift that began the evening
+ * before) is compared by calendar day, the same rule staff see on the
+ * chart.
+ */
+export function isLateShiftNote(note: {
+  noteDate: string;
+  createdAt: string;
+}): boolean {
+  if (!note.createdAt) return false;
+  const filedOn = centralTodayIso(new Date(note.createdAt));
+  return filedOn > note.noteDate;
+}
+
+/** The text label for a late note — a word, never color alone. */
+export const LATE_SHIFT_NOTE_LABEL = "Late";

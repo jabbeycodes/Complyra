@@ -54,6 +54,42 @@ test("attention: empty feed when nothing is due", () => {
   assert.equal(topAttention(items), null);
 });
 
+test("attention: a missed shift note surfaces as a NAMED overdue item (batch 9)", () => {
+  const items = buildAttentionFeed({
+    riskContext: riskContext(),
+    timelineFacts: timelineFacts(),
+    missingShiftNotes: [
+      {
+        id: "due-1",
+        individualId: "ind-bailey",
+        individualName: "Bailey Northstar",
+        siteName: "Maple House",
+        serviceDate: "2026-09-13",
+        blockLabel: "Day (7a–3p)",
+        staffName: "Dee DSP",
+      },
+    ],
+  });
+  assert.equal(items.length, 1);
+  const item = items[0];
+  assert.equal(item.kind, "overdue");
+  assert.equal(item.title, "Missing Shift note — Bailey Northstar");
+  assert.ok(item.detail.includes("Day (7a–3p)"));
+  assert.ok(item.detail.includes("2026-09-13"));
+  assert.ok(item.detail.includes("Dee DSP"));
+  assert.equal(item.personName, "Bailey Northstar");
+  assert.equal(item.siteName, "Maple House");
+  assert.equal(item.deepLink, "/plans/ind-bailey#chart-shift-notes");
+});
+
+test("attention: without missing-note facts the feed is unchanged", () => {
+  const items = buildAttentionFeed({
+    riskContext: riskContext(),
+    timelineFacts: timelineFacts(),
+  });
+  assert.deepEqual(items, []);
+});
+
 test("attention: kind order is overdue, due-today, escalation", () => {
   const items = buildAttentionFeed({
     riskContext: riskContext(),

@@ -147,8 +147,10 @@ export default function MobilePersonalSpending({
   const [withReplacement, setWithReplacement] = useState(true);
   const [voidError, setVoidError] = useState("");
   const [signature, setSignature] = useState("");
+  // The Individual's sign-off starts UNCHOSEN (simulation batch 7): no
+  // option is pre-selected — the closer must pick deliberately.
   const [signoff, setSignoff] =
-    useState<PersonalSpendingSignoff>("individual_signed");
+    useState<PersonalSpendingSignoff | "">("");
   const [secondStaffId, setSecondStaffId] = useState("");
   const [secondSignature, setSecondSignature] = useState("");
   const [closing, setClosing] = useState(false);
@@ -328,6 +330,12 @@ export default function MobilePersonalSpending({
   const submitClose = async () => {
     setPageError("");
     setNotice("");
+    if (!signoff) {
+      setPageError(
+        "Record how the Individual's sign-off was handled before closing the month.",
+      );
+      return;
+    }
     setClosing(true);
     try {
       await api.closePersonalSpendingMonth({
@@ -341,6 +349,7 @@ export default function MobilePersonalSpending({
           signoff === "unable_second_staff" ? secondSignature : null,
       });
       setSignature("");
+      setSignoff("");
       setSecondStaffId("");
       setSecondSignature("");
       setNotice(`${monthLabel(month)} is closed and signed.`);

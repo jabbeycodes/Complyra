@@ -13,6 +13,8 @@ import {
   clocksFromShiftLabel,
   formatDurationHhmm,
   formatMonthLabel,
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
   monthsWithNotes,
   progressNoteName,
   shiftDurationMinutes,
@@ -388,6 +390,7 @@ function NoteCard({
             {note.noteDate} · {times.beginLabel || note.shift}
             {times.endLabel ? `–${times.endLabel}` : ""}
             {times.durationLabel ? ` · ${times.durationLabel}` : ""}
+            {isLateShiftNote(note) ? ` · ${LATE_SHIFT_NOTE_LABEL}` : ""}
           </strong>
           <span className="muted">
             {" "}
