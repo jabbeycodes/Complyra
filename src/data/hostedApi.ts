@@ -310,6 +310,10 @@ import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./
 import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
+  MED_ADMIN_CLEARANCE_MESSAGE,
+  roleRequiresMedClearance,
+} from "./medClearance";
+import {
   accountabilityDates,
   checklistAccountabilityItems,
   computeShiftAccountability,
@@ -5292,6 +5296,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const { data: row, error } = await this.client
       .from("medications")
       .select("*")
@@ -5365,6 +5370,7 @@ export class HostedApi implements ComplyraApi {
   ) {
     const session = await this.requireSession();
     if (!canLogPrnDose(session.roleKey)) throw new Error("You cannot log a PRN dose.");
+    await this.assertMedAdministrationCleared(session);
     const { data: row, error } = await this.client.from("medications").select("*").eq("id", medicationId).single();
     throwIf(error, "PRN medication not found.");
     const med = mapMedication(row!);
@@ -7724,9 +7730,39 @@ export class HostedApi implements ComplyraApi {
     };
   }
 
+  /**
+   * Medication-administration clearance gate (see ./medClearance): a DSP
+   * whose training is not cleared — including a hire with no training
+   * record at all — cannot record doses. Keys off the same
+   * staffTrainingProfileFor().clearedForInRatio that renders the Training
+   * page's NOT CLEARED state. Oversight roles return at once.
+   */
+  private async assertMedAdministrationCleared(
+    session: SessionUser,
+  ): Promise<void> {
+    if (!roleRequiresMedClearance(session.roleKey)) return;
+    const profile = await this.staffTrainingProfileFor(session, session.userId);
+    if (!profile.clearedForInRatio) {
+      throw new Error(MED_ADMIN_CLEARANCE_MESSAGE);
+    }
+  }
+
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
     if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    return this.staffTrainingProfileFor(session, userId);
+  }
+
+  /**
+   * The profile computation behind getStaffTrainingProfile, split out so
+   * internal gates (medication-administration clearance) can evaluate the
+   * CALLER's own clearance against an already-resolved session instead of
+   * round-tripping requireSession().
+   */
+  private async staffTrainingProfileFor(
+    session: SessionUser,
+    userId: string,
+  ): Promise<StaffTrainingProfile> {
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -12016,6 +12052,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("You cannot log a dose exception.");
     }
+    await this.assertMedAdministrationCleared(session);
     const validated = validateDoseExceptionInput(input);
     // Insert-only: corrections are new rows, never edits — there is no
     // update/delete path for med_dose_exceptions on this API.
@@ -12783,6 +12820,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("Your role cannot mark medications.");
     }
+    await this.assertMedAdministrationCleared(session);
     if (med.kind !== "scheduled") {
       throw new Error("Only scheduled medications are marked on the MAR.");
     }

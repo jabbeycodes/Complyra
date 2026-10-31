@@ -57,6 +57,8 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can, roleLabel } from "../data/status";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
+import { useMedAdminLock } from "./medAdminLock";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import ChartOverview from "./ChartOverview";
@@ -126,6 +128,10 @@ export default function IndividualChart({
   // Issue #80: ISP data (hook must run before the early return below).
   const ispEnabled = session !== null && canSeeShiftNotes(session.roleKey);
   const isp = useIspData(api, individualId, ispEnabled);
+  // Clearance gate: an uncleared DSP keeps the chart but loses the PRN
+  // administration forms (MAR marks live in MarCard, which self-gates;
+  // the APIs refuse these writes too).
+  const medLocked = useMedAdminLock(api, session);
 
   // Med cluster: the board's headline count is the countdown figure (the
   // same baseline-and-burn-down number the mobile MAR shows), and the PRN
@@ -723,7 +729,10 @@ export default function IndividualChart({
                     }
                   />
                 )}
-                {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
+                {med.kind === "prn" && canLogPrnDose(session.roleKey) && medLocked && (
+                  <p className="muted">{MED_ADMIN_CLEARANCE_MESSAGE}.</p>
+                )}
+                {med.kind === "prn" && canLogPrnDose(session.roleKey) && !medLocked && (
                   <div className="stack">
                     <form
                       className="stack"

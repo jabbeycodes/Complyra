@@ -24,6 +24,22 @@ insert into individuals(id,agency_id,site_id,full_name,date_of_birth) values
  ('e2000000-0000-0000-0000-000000000001','a2000000-0000-0000-0000-000000000001','c2000000-0000-0000-0000-000000000001','Person One','1980-01-01');
 insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
  ('a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','e2000000-0000-0000-0000-000000000001','c2000000-0000-0000-0000-000000000001');
+-- Cleared training record for Dev DSP (medication-administration
+-- clearance gate, 20261031240000): three completed checklist lines
+-- (22 hours total, 10 with the HM) plus the staff + HM countersignature,
+-- so the gate lets his reason-bearing PRN dose at the end of this suite
+-- through to the stock checks it exercises. The HM needs no record —
+-- oversight roles are never gated.
+insert into training_requirements(id,agency_id,user_id,topic_id,site_id,source,status) values
+ ('f3200000-0000-0000-0000-000000000001','a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','chk-2-02','c2000000-0000-0000-0000-000000000001','checklist','complete'),
+ ('f3200000-0000-0000-0000-000000000002','a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','chk-2-03','c2000000-0000-0000-0000-000000000001','checklist','complete'),
+ ('f3200000-0000-0000-0000-000000000003','a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','chk-1-01','c2000000-0000-0000-0000-000000000001','checklist','complete');
+insert into training_signoffs(agency_id,requirement_id,initials,signed_on,trainer_name,hours_total,hours_with_hm) values
+ ('a2000000-0000-0000-0000-000000000001','f3200000-0000-0000-0000-000000000001','DD',current_date - 10,'Hana HM',8,8),
+ ('a2000000-0000-0000-0000-000000000001','f3200000-0000-0000-0000-000000000002','DD',current_date - 10,'Hana HM',8,0),
+ ('a2000000-0000-0000-0000-000000000001','f3200000-0000-0000-0000-000000000003','DD',current_date - 10,'Hana HM',6,2);
+insert into training_countersignatures(agency_id,user_id,site_id,staff_signature_name,staff_signed_at,hm_signature_name,hm_signed_at) values
+ ('a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','c2000000-0000-0000-0000-000000000001','Dev DSP',now(),'Hana HM',now());
 insert into medications(id,agency_id,individual_id,name,kind,pills_per_day,remaining_pills,last_delivery_on) values
  ('f2200000-0000-0000-0000-000000000001','a2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001','Sched Med','scheduled',2,30,current_date),
  ('f2200000-0000-0000-0000-000000000002','a2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001','Prn Med','prn',0,5,current_date),

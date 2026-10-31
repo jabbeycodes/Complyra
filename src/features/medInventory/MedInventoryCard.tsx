@@ -8,6 +8,8 @@ import {
 } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canLogDoseException, canRecordDelivery } from "../../data/chart";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
+import { useMedAdminLock } from "../medAdminLock";
 import { doseExceptionKindLabel, inventoryCountdownLabel } from "../../data/medInventory";
 import type {
   DoseExceptionKind,
@@ -63,9 +65,14 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
     };
   }, [api, individualId, workspace]);
 
+  // Clearance gate: an uncleared DSP keeps the forecast but loses the
+  // dose-exception action (the API refuses it too).
+  const medLocked = useMedAdminLock(api, session);
+
   if (!session) return null;
   const canManage = canRecordDelivery(session.roleKey);
-  const canLogException = canLogDoseException(session.roleKey);
+  const roleCanLogException = canLogDoseException(session.roleKey);
+  const canLogException = roleCanLogException && !medLocked;
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -195,6 +202,11 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 <span className="stack-help">
                   Thresholds and corrections are set by the house manager,
                   RN, or PM.
+                </span>
+              )}
+              {medLocked && roleCanLogException && (
+                <span className="stack-help">
+                  {MED_ADMIN_CLEARANCE_MESSAGE}.
                 </span>
               )}
               {canLogException && (

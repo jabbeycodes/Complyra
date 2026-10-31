@@ -5,7 +5,6 @@ import {
   createEvergreenSeed,
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
-  DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
@@ -34,6 +33,13 @@ function login(username: string) {
   return { agencyCode: DEMO_AGENCY_CODE, username, password: DEMO_PASSWORD };
 }
 
+// The sign-off ceremonies exercise a staffer with a BLANK training
+// sheet. Alex Morgan (DEMO_DSP_USERNAME) no longer qualifies: the demo
+// seeds his completed training so the medication-administration
+// clearance gate leaves the demo med pass usable. Taylor Reed is the
+// other Cedar DSP and keeps a blank sheet.
+const TRAINEE_USERNAME = "taylor.reed";
+
 /** 1x1 transparent PNG — valid, tiny, passes adoption validation. */
 const PNG_1X1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -61,7 +67,7 @@ async function fixture(count = 2): Promise<Fixture> {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const ws = await api.loadWorkspace(admin);
-  const dsp = ws.staff.find((person) => person.username === DEMO_DSP_USERNAME)!;
+  const dsp = ws.staff.find((person) => person.username === TRAINEE_USERNAME)!;
   const hm = ws.staff.find((person) => person.roleKey === "house_manager")!;
   assert.ok(dsp && hm, "demo DSP and HM exist");
   const siteId = ws.sites[0].id;
@@ -141,7 +147,7 @@ async function initialAndStamp(
 
 test("signing without a fresh password re-entry is rejected (reauth_required)", async () => {
   const api = new LocalApi(store());
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   // No verifySigningPassword: the second ID component is missing.
   const err = await api
@@ -161,7 +167,7 @@ test("signing without a fresh password re-entry is rejected (reauth_required)", 
 });
 
 test("a stale password re-entry is rejected after the signing window", async () => {
-  const api = await ceremonyApi(DEMO_DSP_USERNAME);
+  const api = await ceremonyApi(TRAINEE_USERNAME);
   const session = (await api.getSession())!;
   const mem = (api as unknown as { store: MemoryStore }).store;
   mem.signingReauthAt.set(
@@ -183,7 +189,7 @@ test("a stale password re-entry is rejected after the signing window", async () 
 
 test("verifySigningPassword rejects a wrong password and logs the failure", async () => {
   const api = new LocalApi(store());
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   await assert.rejects(
     () => api.verifySigningPassword("not-the-password"),
@@ -209,9 +215,9 @@ test("verifySigningPassword rejects a wrong password and logs the failure", asyn
 });
 
 test("signing out clears the password re-entry", async () => {
-  const api = await ceremonyApi(DEMO_DSP_USERNAME);
+  const api = await ceremonyApi(TRAINEE_USERNAME);
   await api.signOut();
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await assert.rejects(
     () =>
       api.applySignature({
@@ -230,7 +236,7 @@ test("signing out clears the password re-entry", async () => {
 test("a stale line version is rejected; the current version stamps", async () => {
   const fx = await fixture(1);
   const { api, dspId, hmId } = fx;
-  const dspSession = await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspSession = await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   await api.verifySigningPassword(DEMO_PASSWORD);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
@@ -280,7 +286,7 @@ test("a stale line version is rejected; the current version stamps", async () =>
 test("HM countersignature before the staff signature is rejected", async () => {
   const fx = await fixture(1);
   const { api, dspId, siteId } = fx;
-  const dspSession = await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspSession = await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   await api.verifySigningPassword(DEMO_PASSWORD);
   await initialAndStamp(fx, fx.requirementIds[0], suggestInitials(dspSession.fullName));
@@ -317,7 +323,7 @@ test("HM countersignature before the staff signature is rejected", async () => {
 test("another user cannot initial someone else's training line", async () => {
   const fx = await fixture(2);
   const { api, dspId, siteId, hmId } = fx;
-  const dspSession = await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspSession = await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   await api.verifySigningPassword(DEMO_PASSWORD);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
@@ -354,7 +360,7 @@ test("another user cannot initial someone else's training line", async () => {
 test("a sign_applied audit row is recorded on sign", async () => {
   const fx = await fixture(1);
   const { api } = fx;
-  const dspSession = await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspSession = await api.signIn(login(TRAINEE_USERNAME));
   await api.adoptSignature(adoptInput());
   await api.verifySigningPassword(DEMO_PASSWORD);
   await initialAndStamp(fx, fx.requirementIds[0], suggestInitials(dspSession.fullName));
@@ -370,17 +376,17 @@ test("a sign_applied audit row is recorded on sign", async () => {
 
 test("login and logout write audit rows", async () => {
   const api = new LocalApi(store());
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   let rows = await api.getSignatureAuditLog();
   assert.ok(rows.some((row) => row.action === "login"), "login row exists");
   await api.signOut();
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   rows = await api.getSignatureAuditLog();
   assert.ok(rows.some((row) => row.action === "logout"), "logout row exists");
 });
 
 test("document_viewed is recorded through logSignatureAudit", async () => {
-  const api = await ceremonyApi(DEMO_DSP_USERNAME);
+  const api = await ceremonyApi(TRAINEE_USERNAME);
   await api.logSignatureAudit({
     action: "document_viewed",
     documentType: "delegation_form",
