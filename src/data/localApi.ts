@@ -4530,10 +4530,10 @@ export class LocalApi implements ComplyraApi {
   async operatorAudit(query: import("./operator").OperatorAuditQuery): Promise<import("./operator").OperatorAuditPage> {
     const agencies=await this.operatorDirectory();validateOperatorAudit(query);const session=assertSession(this.store);
     const ids=new Set(agencies.filter(a=>query.category==="all"||a.reportingCategory===query.category).map(a=>a.id));
-    const rows: import("./operator").OperatorAuditRow[]=(this.store.db.operatorLifecycle??[]).map(e=>({id:`lifecycle:${e.id}`,agencyId:e.agencyId,actorId:e.actorId,action:`agency.${e.toStatus}`,source:"lifecycle",summary:`${e.fromStatus} → ${e.toStatus}: ${e.reason}`,createdAt:e.createdAt}));
+    const rows: import("./operator").OperatorAuditRow[]=(this.store.db.operatorLifecycle??[]).map(e=>({id:`lifecycle:${e.id}`,agencyId:e.agencyId,actorId:e.actorId,action:`agency.${e.toStatus}`,source:"lifecycle",summary:`${e.fromStatus} → ${e.toStatus}`,createdAt:e.createdAt}));
     for(const e of this.store.db.audit.filter(e=>e.action!=="agency.status"))rows.push({id:`application:${e.id}`,agencyId:e.agencyId,actorId:e.actorId,action:e.action,source:e.action.startsWith("ai_")?"ai":"application",summary:e.action.startsWith("ai_")?e.detail:e.targetType,createdAt:e.createdAt});
     const store=new LocalRulesStore({userId:session.userId,fullName:session.fullName,isOperator:true,adminOfAgencyId:null,memberOfAgencyIds:[]});
-    for(const agency of agencies) for(const e of await store.history(agency.id))rows.push({id:`rules:${e.id}`,agencyId:agency.id,actorId:e.setById??null,action:"rule.changed",source:"rules",summary:`${e.key}: ${e.reason}`,createdAt:e.createdAt});
+    for(const agency of agencies) for(const e of await store.history(agency.id))rows.push({id:`rules:${e.id}`,agencyId:agency.id,actorId:e.setById??null,action:"rule.changed",source:"rules",summary:e.key,createdAt:e.createdAt});
     const filtered=rows.filter(e=>ids.has(e.agencyId)&&e.createdAt.slice(0,10)>=query.start&&e.createdAt.slice(0,10)<=query.end&&(!query.agencyId||e.agencyId===query.agencyId)&&(!query.actorId||e.actorId===query.actorId)&&e.action.toLowerCase().includes(query.action.toLowerCase())&&(query.source==="all"||e.source===query.source)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));
     return {rows:structuredClone(filtered.slice(query.page*50,query.page*50+50)),hasMore:filtered.length>(query.page+1)*50};
   }

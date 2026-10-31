@@ -6,8 +6,8 @@ begin
  perform private.require_operator();
  if p_start is null or p_end is null or p_end<p_start or p_end-p_start>365 or p_category is null or p_category not in ('all','customer','demo','internal') or p_page is null or p_page<0 or p_page>2000 or p_action is null or length(p_action)>80 or p_source is null or p_source not in ('all','application','lifecycle','rules','ai') then raise exception 'Invalid audit filters.'; end if;
  return (with events as (
- select 'lifecycle:'||id::text as id,agency_id,actor_id,'agency.'||to_status as action,'lifecycle'::text as source,from_status||' → '||to_status||': '||reason as summary,created_at from operator_agency_lifecycle
- union all select 'rules:'||id::text,agency_id,set_by,'rule.changed','rules',key||': '||reason,created_at from rule_values
+ select 'lifecycle:'||id::text as id,agency_id,actor_id,'agency.'||to_status as action,'lifecycle'::text as source,from_status||' → '||to_status as summary,created_at from operator_agency_lifecycle
+ union all select 'rules:'||id::text,agency_id,set_by,'rule.changed','rules',key,created_at from rule_values
  union all select 'ai:'||id::text,agency_id,actor,action,'ai',coalesce(detail->>'model',action),at from document_audit_log where upload_id is null and action in ('ai_settings_changed','ai_policy_acknowledged','ai_service_verified')
  union all select 'application:'||id::text,agency_id,actor_id,action,'application',target_type,created_at from audit_events where action<>'agency.status'
  ), filtered as (select e.* from events e join agencies a on a.id=e.agency_id where (p_category='all' or a.reporting_category=p_category)

@@ -17,3 +17,21 @@ test('agency administrator cannot deep-link any new operator surface',async({pag
  await login(page,false);
  for(const name of ['Operator overview','Operator agencies','Operator audit']){await page.evaluate(name=>{location.hash=encodeURIComponent(name);},name);await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();await expect(page.locator('.sidebar').getByRole('button',{name,exact:true})).toHaveCount(0);}
 });
+test('sensitive lifecycle reasons never render in the explorer or its downloaded CSV',async({page})=>{
+ const sensitive='LIFECYCLE_SENSITIVE_7f1b_patient_diagnosis_DO_NOT_EXPORT';
+ await login(page,true);
+ await page.locator('.sidebar').getByRole('button',{name:'Operator agencies',exact:true}).click();
+ await page.getByRole('button',{name:'Evergreen Care',exact:true}).click();
+ await page.getByLabel('Reason (required)',{exact:true}).fill(sensitive);
+ await page.getByRole('button',{name:'Confirm suspension',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Reactivate agency',exact:true})).toBeVisible();
+ await page.locator('.sidebar').getByRole('button',{name:'Operator audit',exact:true}).click();
+ await expect(page.getByRole('cell',{name:'active → suspended',exact:true})).toBeVisible();
+ await expect(page.locator('body')).not.toContainText(sensitive);
+ const downloading=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export current page (CSV)',exact:true}).click();
+ const file=await (await downloading).path();
+ expect(file).not.toBeNull();
+ const {readFile}=await import('node:fs/promises');const csv=await readFile(file!,'utf8');
+ expect(csv).toContain('active → suspended');expect(csv).not.toContain(sensitive);
+});

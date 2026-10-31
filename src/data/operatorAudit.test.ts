@@ -4,7 +4,7 @@ import { LocalApi, MemoryStore } from "./localApi";
 import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { ROLE_TEMPLATES } from "./permissions";
-import { operatorAuditCsv, type OperatorAuditQuery } from "./operator";
+import { operatorAuditCsv, operatorAuditSummary, type OperatorAuditQuery } from "./operator";
 const q:OperatorAuditQuery={start:"2026-01-01",end:"2026-12-31",category:"all",agencyId:"",actorId:"",action:"",source:"all",page:0};
 test("operator explorer paginates complete evidence without clinical detail and denies tenant roles",async()=>{
  const store=new MemoryStore(structuredClone(createEvergreenSeed()));const api=new LocalApi(store);
@@ -17,4 +17,21 @@ test("operator explorer paginates complete evidence without clinical detail and 
  assert.equal((await api.operatorAudit({...q,action:"absent"})).rows.length,0);
  assert.match(operatorAuditCsv([{...first.rows[0],summary:'=SUM(1,2)'}]),/"'=SUM/);
  for(const t of ROLE_TEMPLATES){const p=store.db.profiles.find(p=>p.username===DEMO_ADMIN_USERNAME)!;const m=store.db.memberships.find(m=>m.userId===p.id)!;m.roleKey=t.key;m.role=t.capability;await api.signIn({agencyCode:DEMO_AGENCY_CODE,username:DEMO_ADMIN_USERNAME,password:DEMO_PASSWORD});await assert.rejects(api.operatorAudit(q),/Operator access/);}
+});
+
+const SENSITIVE_REASON = "LIFECYCLE_SENSITIVE_7f1b_patient_diagnosis_DO_NOT_EXPORT";
+test("lifecycle reasons never enter local audit output or CSV while transitions remain visible", async () => {
+ const store = new MemoryStore(structuredClone(createEvergreenSeed())); const api = new LocalApi(store);
+ await api.signIn({ agencyCode: "COMPLYRER-MO", username: "platform.owner", password: DEMO_PASSWORD });
+ const agencyId = store.db.agencies[0].id;
+ store.db.operatorLifecycle = [{ id: "sensitive-lifecycle", agencyId, actorId: store.sessionUserId!, fromStatus: "pending", toStatus: "active", reason: SENSITIVE_REASON, createdAt: "2026-09-01T00:00:00.000Z" }];
+ const page = await api.operatorAudit({ ...q, source: "lifecycle" });
+ assert.equal(page.rows.length, 1); assert.equal(page.rows[0].summary, "pending → active");
+ assert.equal(JSON.stringify(page).includes(SENSITIVE_REASON), false);
+ const csv = operatorAuditCsv(page.rows); assert.equal(csv.includes(SENSITIVE_REASON), false); assert.match(csv, /pending → active/);
+ assert.equal(store.db.operatorLifecycle[0].reason, SENSITIVE_REASON, "stored evidence is retained, not deleted");
+ const legacy = { ...page.rows[0], summary: `pending → active: ${SENSITIVE_REASON}\nsecond line` };
+ assert.equal(operatorAuditSummary(legacy), "pending → active");
+ assert.equal(operatorAuditCsv([legacy]).includes(SENSITIVE_REASON), false, "legacy RPC summaries cannot leak through CSV");
+ assert.equal(operatorAuditSummary({ source: "rules", summary: `overtime.weekly_limit_hours: ${SENSITIVE_REASON}` }), "overtime.weekly_limit_hours");
 });
