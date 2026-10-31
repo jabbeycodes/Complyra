@@ -1,6 +1,15 @@
 import { test, expect, type Page } from "./fixtures";
 
 async function signIn(page: Page) {
+  // These specs drive the desktop layout, including at phone width
+  // (mid-test resizes included). Since PR #134 a phone sign-in lands
+  // in the mobile shell and a mid-session narrow resize swaps to it;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads complyrer.viewMode
+  // at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("sarah.mitchell");
@@ -15,8 +24,15 @@ async function signIn(page: Page) {
 }
 
 async function closeMobileNav(page: Page) {
-  const close = page.locator(".sidebar-close");
-  if (await close.count()) await close.click({ force: true });
+  // Only click the close button when the drawer is actually open:
+  // at desktop widths .sidebar-close is display:none with an empty
+  // box at the sidebar's top-left, and a force click there lands on
+  // the brand button and navigates to Overview (the pattern the
+  // mobile / page-edge-spacing helpers already guard against).
+  const open = page.locator(".sidebar.mobile-open");
+  if (await open.count()) {
+    await page.locator(".sidebar-close").click();
+  }
   await expect
     .poll(async () =>
       page.evaluate(() => {
@@ -67,7 +83,9 @@ test("sidebar group is Programs and the header chip says Programs", async ({
     .filter({ hasText: "Cedar House" })
     .getByRole("button", { name: /Open site/ })
     .click();
-  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
+  // The site title is the h1; the coverage board's h2 ("Cedar House
+  // coverage") also matches a bare name lookup.
+  await expect(page.getByRole("heading", { name: "Cedar House", exact: true, level: 1 })).toBeVisible();
   await page.screenshot({ path: shotPath("site_detail_after_1280.png"), fullPage: false });
 });
 

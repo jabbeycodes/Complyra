@@ -175,7 +175,9 @@ test.describe("390 phone", () => {
     await openPage(page, "Individuals");
     await page.getByRole("button", { name: /Ellis Hart/ }).click();
     await expect(
-      page.getByRole("heading", { name: "Ellis Hart", exact: true }),
+      // Chart title is the h1; the Consents register section repeats
+      // the name as an h3, so pin the title by level.
+      page.getByRole("heading", { name: "Ellis Hart", exact: true, level: 1 }),
     ).toBeVisible();
     await assertNoHorizontalOverflow(page);
 

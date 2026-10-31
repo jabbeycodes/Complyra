@@ -214,19 +214,30 @@ test("site scope updates readiness and mobile navigation remains usable", async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  await page.getByLabel("Filter by site").selectOption("Willow House");
+  // Phone width: sign-in lands in the mobile shell (PR #134) and the
+  // home picker IS the site scope. Picking Willow re-scopes the home:
+  // the heading and the compliance band report Willow's readiness.
+  // (The desktop "Filter by site" select and the old "No overdue
+  // items" Overview heading this spec used before no longer exist.)
+  await page.getByRole("button", { name: /Willow House/ }).click();
   await expect(
-    page.getByRole("heading", { name: "No overdue items" }),
+    page.getByRole("heading", { name: "Today at Willow House" }),
   ).toBeVisible();
+  const band = page.locator(".msh-band");
+  await expect(band).toContainText("Willow House");
+  await expect(band).toContainText("8 of 11");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.locator(".person-card")).toHaveCount(2);
-  await page.locator(".person-card").first().click();
+  // Mobile navigation: People lists exactly Willow's two Individuals,
+  // and tapping one bridges into the chart.
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(
+    page.locator(".msh-row", { hasText: /Harper Soto|Reese Lang/ }),
+  ).toHaveCount(2);
+  await page.getByRole("button", { name: /Harper Soto/ }).click();
   await expect(page.locator(".individual-chart")).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to individuals" })).toBeVisible();
   expect(

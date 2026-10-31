@@ -57,7 +57,11 @@ test('manager packet -> account-free signing -> filed register outcomes and clos
     await signIn(page);
     await expect(page.getByRole('heading', { name: /— filed$/ })).toBeVisible();
     await page.locator('.consent-table details').evaluateAll(details => details.forEach(d => (d as HTMLDetailsElement).open = true));
-    await expect(page.getByText('Recorded choice: group', { exact: true })).toBeVisible();
+    // The register also carries seeded records, and one of them (the
+    // media consent) recorded the same 'group' choice — so scope to
+    // the row this test filed, identified by its signer, Jordan Lee.
+    const filedRow = page.locator('.consent-table tr').filter({ hasText: 'Jordan Lee' });
+    await expect(filedRow.getByText('Recorded choice: group', { exact: true })).toBeVisible();
     await expect(page.getByText('Permission not given', { exact: false }).first()).toBeVisible();
     expect(errors).toEqual([]);
 });

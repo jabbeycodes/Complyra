@@ -46,7 +46,9 @@ test("a home's Overview links into the library scoped to that home", async ({ pa
     .filter({ hasText: "Cedar House" })
     .getByRole("button", { name: /Open site/ })
     .click();
-  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
+  // The site title is the h1; the coverage board's h2 ("Cedar House
+  // coverage") also matches a bare name lookup.
+  await expect(page.getByRole("heading", { name: "Cedar House", exact: true, level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Open reports for this home" }).click();
   await expect(page.getByRole("heading", { name: "Report Library" })).toBeVisible();
   const drillCard = card(page, "Drill schedule");

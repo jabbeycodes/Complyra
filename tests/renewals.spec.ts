@@ -52,7 +52,9 @@ async function openEllis(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
-  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true })).toBeVisible();
+  // Chart title is the h1; the Consents register section repeats the
+  // name as an h3, so pin the title by level.
+  await expect(chart.getByRole("heading", { name: "Ellis Hart", exact: true, level: 1 })).toBeVisible();
   return chart;
 }
 

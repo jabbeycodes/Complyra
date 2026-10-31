@@ -1,12 +1,25 @@
 import { test, expect, type Page } from "./fixtures";
 
 async function signIn(page: Page, username = "sarah.mitchell") {
+  // These specs assert on the desktop layout, including at phone
+  // width. Since PR #134 a phone sign-in lands in the mobile shell;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads
+  // complyrer.viewMode at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
+  // At phone width sign-in lands in the mobile shell (PR #134) — its
+  // header is the banner landmark; the desktop topbar only exists in
+  // the desktop layout. Accept either.
+  await expect(
+    page.getByRole("banner").or(page.locator(".topbar")),
+  ).toBeVisible({ timeout: 10_000 });
   await page
     .getByRole("dialog", { name: "Interactive demo tour" })
     .waitFor({ state: "visible", timeout: 3_000 })
@@ -15,8 +28,15 @@ async function signIn(page: Page, username = "sarah.mitchell") {
 }
 
 async function closeMobileNav(page: Page) {
-  const close = page.locator(".sidebar-close");
-  if (await close.count()) await close.click({ force: true });
+  // Only click the close button when the drawer is actually open:
+  // at desktop widths .sidebar-close is display:none with an empty
+  // box at the sidebar's top-left, and a force click there lands on
+  // the brand button and navigates to Overview (the pattern the
+  // mobile / page-edge-spacing helpers already guard against).
+  const open = page.locator(".sidebar.mobile-open");
+  if (await open.count()) {
+    await page.locator(".sidebar-close").click();
+  }
   await expect
     .poll(async () =>
       page.evaluate(() => {
