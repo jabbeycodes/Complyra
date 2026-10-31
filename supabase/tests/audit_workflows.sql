@@ -28,6 +28,22 @@ insert into individuals(id,agency_id,site_id,full_name,date_of_birth) values
  ('e0000000-0000-0000-0000-000000000003','a0000000-0000-0000-0000-000000000001','c0000000-0000-0000-0000-000000000002','Other home','1980-01-01');
 insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
  ('a0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000003','e0000000-0000-0000-0000-000000000001','c0000000-0000-0000-0000-000000000001');
+-- Cleared training record for the assigned DSP (medication-administration
+-- clearance gate, 20261031240000): three completed checklist lines
+-- (22 hours total, 10 with the HM) plus the staff + HM countersignature,
+-- so the gate lets his PRN dose below through to the access and stock
+-- checks this suite exercises. He is an ordinary working DSP; the
+-- uncleared-DSP refusal itself is pinned in med_admin_clearance.sql.
+insert into training_requirements(id,agency_id,user_id,topic_id,site_id,source,status) values
+ ('f2000000-0000-0000-0000-000000000001','a0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000003','chk-2-02','c0000000-0000-0000-0000-000000000001','checklist','complete'),
+ ('f2000000-0000-0000-0000-000000000002','a0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000003','chk-2-03','c0000000-0000-0000-0000-000000000001','checklist','complete'),
+ ('f2000000-0000-0000-0000-000000000003','a0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000003','chk-1-01','c0000000-0000-0000-0000-000000000001','checklist','complete');
+insert into training_signoffs(agency_id,requirement_id,initials,signed_on,trainer_name,hours_total,hours_with_hm) values
+ ('a0000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000001','AD',current_date - 10,'Audit HM',8,8),
+ ('a0000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000002','AD',current_date - 10,'Audit HM',8,0),
+ ('a0000000-0000-0000-0000-000000000001','f2000000-0000-0000-0000-000000000003','AD',current_date - 10,'Audit HM',6,2);
+insert into training_countersignatures(agency_id,user_id,site_id,staff_signature_name,staff_signed_at,hm_signature_name,hm_signed_at) values
+ ('a0000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-000000000003','c0000000-0000-0000-0000-000000000001','Assigned DSP',now(),'Audit HM',now());
 insert into documents(id,agency_id,individual_id,title,kind) values
  ('f0000000-0000-0000-0000-000000000001','a0000000-0000-0000-0000-000000000001','e0000000-0000-0000-0000-000000000003','Private other-home plan','pcsp');
 insert into requirement_definitions(id,agency_id,individual_id,site_id,title,category,owner_user_id,due_on,status) values

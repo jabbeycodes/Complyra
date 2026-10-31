@@ -1,13 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
-import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE, DEMO_DSP_USERNAME, DEMO_HM_USERNAME } from "./seed";
+import { createEvergreenSeed, DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE, DEMO_HM_USERNAME } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { siteChecklistTopics, individualChecklistTopics } from "../features/training/topics";
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));
 }
+
+// The training-engine flows exercise a staffer with a BLANK sheet.
+// Alex Morgan (DEMO_DSP_USERNAME) no longer qualifies: the demo seeds his
+// completed training so the medication-administration clearance gate
+// leaves the demo med pass usable. Taylor Reed is the other Cedar DSP
+// and keeps a blank sheet.
+const TRAINEE_USERNAME = "taylor.reed";
 
 function login(username: string) {
   return { agencyCode: DEMO_AGENCY_CODE, username, password: DEMO_PASSWORD };
@@ -17,7 +24,7 @@ async function adminApi() {
   const api = new LocalApi(store());
   const session = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const workspace = await api.loadWorkspace(session);
-  const dsp = workspace.staff.find((person) => person.username === DEMO_DSP_USERNAME);
+  const dsp = workspace.staff.find((person) => person.username === TRAINEE_USERNAME);
   assert.ok(dsp, "demo DSP exists");
   return { api, session, workspace, dspId: dsp.id };
 }
@@ -95,7 +102,7 @@ test("staff cannot sign the checklist before every line is initialed", async () 
         userId: dspId,
         siteId,
         role: "staff",
-        signatureName: "Alex Morgan",
+        signatureName: "Taylor Reed",
       }),
     /Staff must sign their own training sheet|Initial or N\/A every training line/,
   );
@@ -108,10 +115,10 @@ test("full sign-off flow clears the in-ratio gate", async () => {
   const profile = await api.getStaffTrainingProfile(dspId);
   // Sign in as the DSP to initial their own lines and sign their own sheet.
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
-  await dspApi.signIn(login(DEMO_DSP_USERNAME));
+  await dspApi.signIn(login(TRAINEE_USERNAME));
   for (const line of profile.requirements) {
     await dspApi.initialRequirementLine(line.id, {
-      initials: "AM",
+      initials: "TR",
       trainerUserId: workspace.staff.find((person) => person.username === DEMO_HM_USERNAME)!.id,
       method: "shadowing",
       hoursTotal: 1,
@@ -122,7 +129,7 @@ test("full sign-off flow clears the in-ratio gate", async () => {
     userId: dspId,
     siteId,
     role: "staff",
-    signatureName: "Alex Morgan",
+    signatureName: "Taylor Reed",
   });
   // Sessions are store-level: sign back in as admin before the HM countersign.
   await api.signIn(login(DEMO_ADMIN_USERNAME));
@@ -157,7 +164,7 @@ test("waiveRequirementLine marks a line N/A and excludes it from hours", async (
 
 test("legacy initialTrainingLine still works with and without the extended sign-off", async () => {
   const api = new LocalApi(store());
-  const session = await api.signIn(login(DEMO_DSP_USERNAME));
+  const session = await api.signIn(login(TRAINEE_USERNAME));
   const st = (api as unknown as { store: MemoryStore }).store;
   const dspId = session.userId;
   // Build a legacy checklist row owned by the DSP.

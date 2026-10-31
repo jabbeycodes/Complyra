@@ -5,7 +5,6 @@ import {
   createEvergreenSeed,
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
-  DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
@@ -32,6 +31,13 @@ function store() {
 function login(username: string) {
   return { agencyCode: DEMO_AGENCY_CODE, username, password: DEMO_PASSWORD };
 }
+
+// The sign-off ceremonies exercise a staffer with a BLANK training
+// sheet. Alex Morgan (DEMO_DSP_USERNAME) no longer qualifies: the demo
+// seeds his completed training so the medication-administration
+// clearance gate leaves the demo med pass usable. Taylor Reed is the
+// other Cedar DSP and keeps a blank sheet.
+const TRAINEE_USERNAME = "taylor.reed";
 
 /** 1x1 transparent PNG — valid, tiny, passes adoption validation. */
 const PNG_1X1 =
@@ -65,7 +71,7 @@ async function fixture(count = 2): Promise<Fixture> {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const ws = await api.loadWorkspace(admin);
-  const dsp = ws.staff.find((person) => person.username === DEMO_DSP_USERNAME)!;
+  const dsp = ws.staff.find((person) => person.username === TRAINEE_USERNAME)!;
   const hm = ws.staff.find((person) => person.roleKey === "house_manager")!;
   assert.ok(dsp && hm, "demo DSP and HM exist");
   const siteId = ws.sites[0].id;
@@ -138,7 +144,7 @@ async function initialAndStamp(
 test("per-line initialing stamps the ADOPTED e-initials (never typed)", async () => {
   const fx = await fixture(2);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   // The modal derives this from the adopted signer's name — no text input.
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
   assert.ok(adoptedInitialsText.length > 0);
@@ -173,7 +179,7 @@ test("per-line initialing stamps the ADOPTED e-initials (never typed)", async ()
 test("per-line initials events do not lock sibling lines", async () => {
   const fx = await fixture(2);
   const { api } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
 
   // Stamping line 1 must not freeze line 2 (the old any-event lock did).
@@ -193,7 +199,7 @@ test("per-line initials events do not lock sibling lines", async () => {
 test("end signature blocked while any line is pending; N/A lines count as resolved", async () => {
   const fx = await fixture(3);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
 
   await initialAndStamp(fx, fx.requirementIds[0], adoptedInitialsText);
@@ -202,7 +208,7 @@ test("end signature blocked while any line is pending; N/A lines count as resolv
   await api.waiveRequirementLine(fx.requirementIds[1], "No vehicle used at this site.");
 
   // One line still pending -> staff signature rejected.
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await assert.rejects(
     () =>
       api.signStaffChecklist({
@@ -217,7 +223,7 @@ test("end signature blocked while any line is pending; N/A lines count as resolv
   // N/A lines count as resolved: waiving the last line unlocks the signature.
   await api.signIn(login(DEMO_ADMIN_USERNAME));
   await api.waiveRequirementLine(fx.requirementIds[2], "Covered in orientation packet.");
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.signStaffChecklist({
     userId: dspId,
     siteId,
@@ -231,7 +237,7 @@ test("end signature blocked while any line is pending; N/A lines count as resolv
 test("HM countersign requires the staff signature first (paper order)", async () => {
   const fx = await fixture(1);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
   await initialAndStamp(fx, fx.requirementIds[0], adoptedInitialsText);
 
@@ -249,7 +255,7 @@ test("HM countersign requires the staff signature first (paper order)", async ()
   );
 
   // Staff signs, then the HM countersign succeeds.
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.signStaffChecklist({
     userId: dspId,
     siteId,
@@ -270,7 +276,7 @@ test("HM countersign requires the staff signature first (paper order)", async ()
 test("editing a line bumps the version and requires re-initialing; old stamp stays", async () => {
   const fx = await fixture(1);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
   const [lineId] = fx.requirementIds;
   const docId = trainingChecklistDocId(dspId, siteId);
@@ -313,7 +319,7 @@ test("editing a line bumps the version and requires re-initialing; old stamp sta
   // 13 CSR 65-3.050: only the assigned staff member may initial their own
   // line, so the DSP signs back in (their password re-entry is still fresh)
   // before re-initialling.
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await initialAndStamp(fx, lineId, adoptedInitialsText);
   const restamped = await api.getSignatureEvents("training_checklist", docId);
   const restampedLineEvents = restamped.filter((event) =>
@@ -343,14 +349,14 @@ test("editing a line bumps the version and requires re-initialing; old stamp sta
 test("a correction clears the end signatures but keeps per-line stamps", async () => {
   const fx = await fixture(1);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
   const [lineId] = fx.requirementIds;
   const docId = trainingChecklistDocId(dspId, siteId);
   await initialAndStamp(fx, lineId, adoptedInitialsText);
 
   // Staff signs, then the HM countersigns.
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.signStaffChecklist({
     userId: dspId,
     siteId,
@@ -392,7 +398,7 @@ test("a correction clears the end signatures but keeps per-line stamps", async (
   );
 
   // The sheet can be re-signed without re-initialing the line.
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.signStaffChecklist({
     userId: dspId,
     siteId,
@@ -418,7 +424,7 @@ test("versioned line field names do not collide and parse round-trips", () => {
 test("applySignature rejects line fields with no matching sign-off", async () => {
   const fx = await fixture(2);
   const { api, dspId, siteId } = fx;
-  await adopt(api, DEMO_DSP_USERNAME);
+  await adopt(api, TRAINEE_USERNAME);
   const docId = trainingChecklistDocId(dspId, siteId);
   const payload = { topicId: "t", sealed: true };
 
@@ -451,7 +457,7 @@ test("applySignature rejects line fields with no matching sign-off", async () =>
   // N/A lines are resolved without an initials stamp.
   await api.signIn(login(DEMO_ADMIN_USERNAME));
   await api.waiveRequirementLine(fx.requirementIds[1], "Not applicable here.");
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await assert.rejects(
     () =>
       api.applySignature({
@@ -468,7 +474,7 @@ test("applySignature rejects line fields with no matching sign-off", async () =>
 test("a whole-document end signature still freezes per-line edits", async () => {
   const fx = await fixture(1);
   const { api, dspId, siteId } = fx;
-  const dspSession = await adopt(api, DEMO_DSP_USERNAME);
+  const dspSession = await adopt(api, TRAINEE_USERNAME);
   const adoptedInitialsText = suggestInitials(dspSession.fullName);
   const [lineId] = fx.requirementIds;
   await initialAndStamp(fx, lineId, adoptedInitialsText);
