@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   buildTrackingSummary,
   greetingForHour,
+  pickMobileScopedSite,
+  queueItemsForHome,
   summarizeMedicationDay,
   TRACK_COLOR,
   type TrackingCategory,
 } from "./today";
+import type { PersonalWorkItem } from "../../data/dashboard";
 
 const cat = (partial: Partial<TrackingCategory>): TrackingCategory => ({
   id: "medications",
@@ -148,4 +151,72 @@ test("greeting follows the Central day parts", () => {
   assert.equal(greetingForHour(17), "Evening");
   assert.equal(greetingForHour(23), "Evening");
   assert.equal(greetingForHour(2), "Evening");
+});
+
+/* Batch 17: the nurse's phone home showed one house's tasks under the
+ * other house's name. Scope must come from a real source, never list
+ * order, and the home's task list must match its header. */
+
+const HOUSES = [
+  { id: "site-maple", name: "Maple House" },
+  { id: "site-juniper", name: "Juniper House" },
+];
+
+test("scoped site: remembered pick wins", () => {
+  assert.equal(
+    pickMobileScopedSite(HOUSES, "site-juniper", "site-maple")?.id,
+    "site-juniper",
+  );
+});
+
+test("scoped site: membership home is the default", () => {
+  assert.equal(pickMobileScopedSite(HOUSES, null, "site-maple")?.id, "site-maple");
+});
+
+test("scoped site: a stale remembered pick falls back to the membership home", () => {
+  assert.equal(
+    pickMobileScopedSite(HOUSES, "site-gone", "site-juniper")?.id,
+    "site-juniper",
+  );
+});
+
+test("scoped site: no pick and no membership home (the nurse) stays unresolved", () => {
+  assert.equal(pickMobileScopedSite(HOUSES, null, null), null);
+});
+
+test("scoped site: a single visible home is unambiguous", () => {
+  assert.equal(
+    pickMobileScopedSite([HOUSES[0]], null, null)?.id,
+    "site-maple",
+  );
+  assert.equal(pickMobileScopedSite([], null, null), null);
+});
+
+const queueItem = (partial: Partial<PersonalWorkItem>): PersonalWorkItem => ({
+  id: "item-1",
+  kind: "requirement",
+  title: "Sign plan",
+  detail: "",
+  tone: "overdue",
+  ...partial,
+});
+
+test("home queue keeps this home's items and personal items, drops other homes'", () => {
+  const items = [
+    queueItem({ id: "a", siteName: "Maple House" }),
+    queueItem({ id: "b", siteName: "Juniper House" }),
+    queueItem({ id: "c", siteName: undefined }),
+  ];
+  assert.deepEqual(
+    queueItemsForHome(items, "Maple House").map((item) => item.id),
+    ["a", "c"],
+  );
+  assert.deepEqual(
+    queueItemsForHome(items, "Juniper House").map((item) => item.id),
+    ["b", "c"],
+  );
+});
+
+test("home queue is empty while the scope is unresolved", () => {
+  assert.deepEqual(queueItemsForHome([queueItem({})], null), []);
 });

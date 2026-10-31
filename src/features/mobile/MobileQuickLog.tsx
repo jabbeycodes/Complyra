@@ -62,11 +62,12 @@ import {
   gerMonthStatus,
   healthTodayStatus,
   houseCardStatus,
+  houseCardTileStatus,
   menuTodayStatus,
   mileageMonthStatus,
   monthKeyOf,
   personDayEntries,
-  personalSpendingStatus,
+  personalSpendingTileStatus,
   shiftNotesTodayStatus,
   type FieldLogDomain,
 } from "./fieldLogs";
@@ -205,50 +206,85 @@ export default function MobileQuickLog({
   const [healthEntries, setHealthEntries] = useState<HealthTrackEntry[]>([]);
   const [trips, setTrips] = useState<MileageTripView[]>([]);
   const [reports, setReports] = useState<GerReport[]>([]);
-  const [houseEntries, setHouseEntries] = useState<HouseCardEntryView[]>([]);
+  // Money ledgers start as null = "not loaded yet", never as an empty
+  // ledger: an empty array is a factual $0.00 / "No Individuals" claim,
+  // and the tiles stated exactly that while the pages showed real
+  // figures (simulation batch 15).
+  const [houseEntries, setHouseEntries] = useState<HouseCardEntryView[] | null>(
+    null,
+  );
   const [spendingEntries, setSpendingEntries] = useState<
-    { personId: string; entries: PersonalSpendingEntryView[] }[]
-  >([]);
+    { personId: string; entries: PersonalSpendingEntryView[] }[] | null
+  >(null);
   const [drillRows, setDrillRows] = useState<EmergencyDrill[]>(drills);
   const [statusError, setStatusError] = useState("");
 
   // Chooser statuses, reloaded on entry and after every save (a save
   // bumps refreshKey via onLogged) — no polling.
+  // Each domain loads behind its own guard: one domain's failure must
+  // not starve the rest (the old single try/catch aborted every later
+  // domain, which is how the money tiles stayed stuck on fabricated
+  // figures for a whole session). Failures still surface in the banner.
   const loadStatuses = useCallback(async () => {
-    try {
-      if (access.notesView) {
+    let firstError = "";
+    const guard = async (load: () => Promise<void>) => {
+      try {
+        await load();
+      } catch (err) {
+        if (!firstError) {
+          firstError =
+            err instanceof Error
+              ? err.message
+              : "Could not load today's status.";
+        }
+      }
+    };
+    if (access.notesView) {
+      await guard(async () => {
         const perPerson = await Promise.all(
           people.map((person) => api.getIspData(person.id)),
         );
         setIspPrograms(perPerson.flatMap((data) => data.programs));
         setIspNotes(perPerson.flatMap((data) => data.notes));
-      }
-      if (access.menu) {
+      });
+    }
+    if (access.menu) {
+      await guard(async () => {
         const perPerson = await Promise.all(
           people.map((person) =>
             api.getMenuEntries(person.id, todayIso, todayIso),
           ),
         );
         setMenuEntries(perPerson.flat());
-      }
-      if (access.healthView) {
+      });
+    }
+    if (access.healthView) {
+      await guard(async () => {
         const perPerson = await Promise.all(
           people.map((person) =>
             api.listHealthTrackEntries({ individualId: person.id }),
           ),
         );
         setHealthEntries(perPerson.flat());
-      }
-      if (access.mileage) {
+      });
+    }
+    if (access.mileage) {
+      await guard(async () => {
         setTrips(await api.listMileageTrips(siteId, monthKey));
-      }
-      if (access.gerView) {
+      });
+    }
+    if (access.gerView) {
+      await guard(async () => {
         setReports(await api.listGerReports({ siteId }));
-      }
-      if (access.houseCardView) {
+      });
+    }
+    if (access.houseCardView) {
+      await guard(async () => {
         setHouseEntries(await api.listHouseCardEntries(siteId));
-      }
-      if (access.spendingView) {
+      });
+    }
+    if (access.spendingView) {
+      await guard(async () => {
         const perPerson = await Promise.all(
           people.map(async (person) => ({
             personId: person.id,
@@ -256,13 +292,9 @@ export default function MobileQuickLog({
           })),
         );
         setSpendingEntries(perPerson);
-      }
-      setStatusError("");
-    } catch (err) {
-      setStatusError(
-        err instanceof Error ? err.message : "Could not load today's status.",
-      );
+      });
     }
+    setStatusError(firstError);
   }, [api, access, people, siteId, todayIso, monthKey]);
 
   useEffect(() => {
@@ -289,10 +321,10 @@ export default function MobileQuickLog({
           ? gerMonthStatus(reports, monthKey).text
           : "File a new report";
       case "housecard":
-        return houseCardStatus(houseEntries).text;
+        return houseCardTileStatus(houseEntries).text;
       case "spending":
-        return personalSpendingStatus(
-          spendingEntries.map((row) => row.entries),
+        return personalSpendingTileStatus(
+          spendingEntries?.map((row) => row.entries) ?? null,
         ).text;
     }
   };
@@ -434,7 +466,7 @@ export default function MobileQuickLog({
         siteId={siteId}
         siteName={siteName}
         people={people}
-        entries={houseEntries}
+        entries={houseEntries ?? []}
         todayIso={todayIso}
         onOpenHouseCard={onOpenHouseCard}
         onBack={() => setScreen("chooser")}
@@ -448,7 +480,7 @@ export default function MobileQuickLog({
         api={api}
         session={session}
         people={people}
-        entriesByPerson={spendingEntries}
+        entriesByPerson={spendingEntries ?? []}
         canRecord={access.spendingRecord}
         todayIso={todayIso}
         onOpenChart={onOpenChart}

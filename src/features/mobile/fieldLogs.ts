@@ -469,6 +469,22 @@ export function houseCardStatus(
   return { balanceCents, lowBalance, text };
 }
 
+/**
+ * The Quick Log tile's house card line. Simulation batch 15: the tile
+ * read "Balance $0.00 · Low balance" while the House Card page showed
+ * $454.80 — the tile's state starts as an empty array, which is a VALID
+ * empty ledger, so the tile stated a fabricated $0.00 as fact before (or
+ * unless) the load landed. Null means "not loaded yet": the tile says so
+ * and states no figure. Once loaded, the figure is houseCardStatus —
+ * the same computeBalanceCents the pages use, so tile and page agree.
+ */
+export function houseCardTileStatus(
+  entries: readonly HouseCardEntryView[] | null,
+): { text: string } {
+  if (entries === null) return { text: "Loading…" };
+  return houseCardStatus(entries);
+}
+
 // ────────────────────── Personal spending status ──────────────────────
 
 export interface PersonalSpendingStatus {
@@ -497,6 +513,19 @@ export function personalSpendingStatus(
       ? "No Individuals at this home"
       : `${formatCents(totalCents)} across ${personCount} Individual${personCount === 1 ? "" : "s"}`;
   return { totalCents, personCount, text };
+}
+
+/**
+ * The Quick Log tile's personal spending line — the batch-15 twin of
+ * houseCardTileStatus: "No Individuals at this home" was the not-loaded
+ * state wearing a factual claim. Null (not loaded yet) states no count;
+ * a loaded empty list keeps the factual text.
+ */
+export function personalSpendingTileStatus(
+  entryLists: readonly (readonly PersonalSpendingEntryView[])[] | null,
+): { text: string } {
+  if (entryLists === null) return { text: "Loading…" };
+  return personalSpendingStatus(entryLists);
 }
 
 // ─────────────────── GER notifications (desktop line format) ───────────────────

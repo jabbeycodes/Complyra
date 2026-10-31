@@ -50,6 +50,34 @@ export interface HrShift {
   createdBy: string;
 }
 
+/**
+ * The longest single dated shift the product accepts — the same 16-hour
+ * cap the shift-note schedule windows already enforce
+ * (dueItems MAX_SHIFT_MINUTES). The Employee Hub form used to accept any
+ * end after the start, so a 3:00 PM evening start typed into a 12-hour
+ * time input as 3:00 AM saved a silent 20-hour shift (simulation
+ * batch 24: Blake Ford, 3:00 AM–11:00 PM in production data). The span
+ * check catches that AM/PM slip at entry; display conversion was never
+ * the problem — the stored value really was 03:00.
+ */
+export const MAX_HR_SHIFT_MINUTES = 16 * 60;
+
+export function hrShiftSpanProblem(
+  startsAt: string,
+  endsAt: string,
+): string | null {
+  const start = new Date(startsAt).getTime();
+  const end = new Date(endsAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return "Use a start and end time for the shift.";
+  }
+  if (end <= start) return "The end time must be after the start time.";
+  if (end - start > MAX_HR_SHIFT_MINUTES * 60_000) {
+    return "A shift can run at most 16 hours.";
+  }
+  return null;
+}
+
 export interface HrPunch {
   id: string;
   agencyId: string;

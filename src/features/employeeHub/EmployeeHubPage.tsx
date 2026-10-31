@@ -87,6 +87,7 @@ import {
   DUE_SOON_DAYS,
   buildPayrollCsvExport,
   detectExceptions,
+  hrShiftSpanProblem,
   pairPunches,
   rollupCompliance,
   summarizeTimecard,
@@ -2932,6 +2933,21 @@ function TeamScheduleTab({
       setError("The end time must be after the start time.");
       return;
     }
+    const startsAtIso = new Date(`${form.date}T${form.start}:00`).toISOString();
+    const endsAtIso = new Date(`${form.date}T${form.end}:00`).toISOString();
+    const spanProblem = hrShiftSpanProblem(startsAtIso, endsAtIso);
+    if (spanProblem) {
+      // The usual cause is a 12-hour time input left on AM for an evening
+      // shift (3:00 PM entered as 3:00 AM makes a 20-hour shift) — name
+      // the span so the slip is obvious instead of silently saving it.
+      const hours = Math.round(
+        (new Date(endsAtIso).getTime() - new Date(startsAtIso).getTime()) / 3_600_000,
+      );
+      setError(
+        `${spanProblem} This one runs ${hours} hours (${form.start}–${form.end}) — check the start time if it should be PM.`,
+      );
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -2939,8 +2955,8 @@ function TeamScheduleTab({
         siteId: form.siteId || null,
         staffId: form.staffId || null,
         title: form.title.trim(),
-        startsAt: new Date(`${form.date}T${form.start}:00`).toISOString(),
-        endsAt: new Date(`${form.date}T${form.end}:00`).toISOString(),
+        startsAt: startsAtIso,
+        endsAt: endsAtIso,
         status: form.status,
         notes: form.notes.trim() ? form.notes.trim() : null,
       };

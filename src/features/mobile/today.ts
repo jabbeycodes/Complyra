@@ -12,6 +12,7 @@
  * the ISP Data segment, whose entries are those same shift notes.
  */
 import { MAR_TIME_ZONE } from "./mar";
+import type { PersonalWorkItem } from "../../data/dashboard";
 
 export type TrackingCategoryId = "medications" | "ispData" | "checklists";
 
@@ -181,4 +182,49 @@ export function greetingForHour(hour: number): string {
   if (hour >= 5 && hour < 12) return "Morning";
   if (hour >= 12 && hour < 17) return "Afternoon";
   return "Evening";
+}
+
+/**
+ * Which home the mobile shell is scoped to. Simulation batch 17: the
+ * nurse's phone home briefly listed one house's overdue tasks under the
+ * other house's name. The shell used to fall back to `sites[0]` — an
+ * arbitrary house — whenever the user had no remembered pick and no
+ * membership home (a nurse's membership home is NULL; she is assigned to
+ * both houses). Scope now resolves only from a real source: the
+ * remembered pick, else the membership home, else the ONLY visible home
+ * (one visible house cannot be the wrong house). Otherwise the scope is
+ * unresolved (null) and the shell shows the home picker instead of
+ * rendering another house's name and data, even briefly.
+ */
+export function pickMobileScopedSite<T extends { id: string }>(
+  sites: readonly T[],
+  storedSiteId: string | null,
+  sessionSiteId: string | null,
+): T | null {
+  if (storedSiteId) {
+    const stored = sites.find((site) => site.id === storedSiteId);
+    if (stored) return stored;
+  }
+  if (sessionSiteId) {
+    const home = sites.find((site) => site.id === sessionSiteId);
+    if (home) return home;
+  }
+  return sites.length === 1 ? sites[0] : null;
+}
+
+/**
+ * The slice of the personal work queue that belongs under one home's
+ * "Today at …" header. Queue items are computed app-wide (they are the
+ * signed-in person's obligations across every home they serve), so the
+ * home surface must filter to the scoped home: items that name a
+ * different home stay out; items with no home (the person's own
+ * obligations — their training, their acknowledgments) show on any home.
+ * The dedicated My Tasks view keeps the full personal queue.
+ */
+export function queueItemsForHome(
+  items: readonly PersonalWorkItem[],
+  siteName: string | null,
+): PersonalWorkItem[] {
+  if (!siteName) return [];
+  return items.filter((item) => !item.siteName || item.siteName === siteName);
 }
