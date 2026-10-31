@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   CalendarCheck,
+  Clock,
   FolderCheck,
   FolderOpen,
   Monitor,
@@ -15,24 +16,25 @@ import {
   readinessStatusLabel,
 } from "../personalCompliance/personalCompliance";
 import { usePersonalCompliance } from "../personalCompliance/usePersonalCompliance";
+import MobileTimeClock from "./MobileTimeClock";
 import MobileTimeOff from "./MobileTimeOff";
 import MobileBinder from "./MobileBinder";
 import MobilePerformance from "./MobilePerformance";
 import MobileDocuments from "./MobileDocuments";
 import type { ComplyraApi } from "../../data/localApi";
 
-export type HubSection = "home" | "compliance" | "timeoff" | "binder" | "performance" | "documents";
+export type HubSection = "home" | "compliance" | "timeclock" | "timeoff" | "binder" | "performance" | "documents";
 
 /**
  * Mobile Employee Hub — the employee's self-service hub on the phone:
  * My Compliance (the full readiness list behind the home card's
- * roll-up), Time Off, my New Hire Binder, my Performance file, and
- * Documents with acknowledgment signing. Each section is a dedicated
- * mobile component over the same HrStore the desktop Employee Hub
- * builds from the session — the same construction EmployeeHubPage
- * uses. Manager tabs (Binder Board, team timecards, payroll, the
- * template editor) stay on the desktop hub, as do the punch surfaces;
- * the hub home carries a door to the full hub for those.
+ * roll-up), the Time Clock, Time Off, my New Hire Binder, my
+ * Performance file, and Documents with acknowledgment signing. Each
+ * section is a dedicated mobile component over the same HrStore the
+ * desktop Employee Hub builds from the session — the same
+ * construction EmployeeHubPage uses. Manager tabs (Binder Board,
+ * team timecards, payroll, the template editor) stay on the desktop
+ * hub; the hub home carries a door to the full hub for those.
  *
  * The auditor exclusion mirrors the desktop hub: auditors are kept
  * out of Time Off entirely (employment data, not an Individual's
@@ -62,6 +64,15 @@ export default function MobileHub({
   const [section, setSection] = useState<HubSection>(startSection ?? "home");
   const isAuditor = session.roleKey === "auditor";
 
+  if (section === "timeclock") {
+    return (
+      <MobileTimeClock
+        store={store}
+        session={session}
+        onBack={() => setSection("home")}
+      />
+    );
+  }
   if (section === "timeoff" && !isAuditor) {
     return (
       <MobileTimeOff
@@ -120,6 +131,12 @@ export default function MobileHub({
       icon: ShieldCheck,
       label: "My compliance",
       hint: "Your certifications, training, and requirements",
+    },
+    {
+      id: "timeclock",
+      icon: Clock,
+      label: "Time clock",
+      hint: "Clock in and out, and see today's punches",
     },
     ...(!isAuditor
       ? [
@@ -187,8 +204,7 @@ export default function MobileHub({
           <span className="msh-row-main">
             <strong>Full Employee Hub</strong>
             <small>
-              Time clock, schedule, timecards, and manager tabs on the
-              desktop hub
+              Schedule, timecards, and manager tabs on the desktop hub
             </small>
           </span>
           <span className="msh-chevron" aria-hidden="true">
