@@ -1,4 +1,4 @@
--- QA Review creation gate (migration 20261031230000): starting a review
+-- QA Review creation gate (migration 20261031232000): starting a review
 -- keys on qa.schedule (Program Manager / administrator — the roles that
 -- run the QA program), NOT qa.audit (the scoring permission held by the
 -- read-only auditor). Scoring writes are unchanged: the auditor can
