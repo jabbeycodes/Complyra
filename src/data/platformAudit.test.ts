@@ -35,7 +35,7 @@ test('audit: invalid medication quantities never mutate stored stock', async () 
   for (const count of [NaN, Infinity, -1]) {
     await assert.rejects(() => api.recordMedDelivery({ medicationId: med.id, remainingPills: count, pillsPerDay: 0 }));
   }
-  await assert.rejects(() => api.logPrnDose(med.id, before + 1), /exceeds/);
+  await assert.rejects(() => api.logPrnDose(med.id, { pills: before + 1, reason: "Audit probe" }), /exceeds/);
   assert.equal(med.remainingPills, before);
 });
 test('audit: private corrective actions are visible only to management and assigned staff', async () => {

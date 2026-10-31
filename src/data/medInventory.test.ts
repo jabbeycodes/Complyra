@@ -347,6 +347,7 @@ test("delivery-day count drives the projection; new delivery refreshes it", asyn
     remainingPills: 60,
     pillsPerDay: 2,
     countedOn: today,
+    varianceReason: "Test restock count",
   });
   const after = await client.getMedInventory(ellis.id);
   const view = after.find((v) => v.medicationId === keppra.medicationId)!;
@@ -368,6 +369,7 @@ test("adjustMedInventory corrects the count and requires a reason", async () => 
     remainingPills: 60,
     pillsPerDay: 2,
     countedOn: today,
+    varianceReason: "Test restock count",
   });
   await assert.rejects(
     client.adjustMedInventory({ medicationId: keppra.medicationId, quantityDelta: -5, reason: "  " }),
@@ -400,6 +402,7 @@ test("threshold, acknowledge, and supply status work end to end", async () => {
     remainingPills: 60,
     pillsPerDay: 2,
     countedOn: today,
+    varianceReason: "Test restock count",
   });
   await assert.rejects(
     client.setReorderThreshold({ medicationId: keppra.medicationId, lowThresholdDays: 0 }),

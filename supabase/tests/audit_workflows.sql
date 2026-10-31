@@ -61,10 +61,10 @@ select throws_ok($$update qa_audits set status='finalized' where id='a2000000-00
 select lives_ok($$update qa_audits set status='finalized',auditor_signature_name='Admin',auditor_signature_mark='mark' where id='a2000000-0000-0000-0000-000000000001'$$,'Fully reviewed QA can finalize');
 select throws_ok($$update qa_audits set score='{}',auditor_signature_name='Forged signer' where id='a2000000-0000-0000-0000-000000000001'$$,'P0001',null,'Changing score cannot smuggle a signature edit');
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d0000000-0000-0000-0000-000000000003"}',true);
-select lives_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000001',2)$$,'Assigned DSP records a PRN dose');
+select lives_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000001',2,'Agitation — PRN per care plan',null)$$,'Assigned DSP records a PRN dose');
 select is((select remaining_pills::int from medications where id='a1000000-0000-0000-0000-000000000001'),8,'Successful dose reduces stock');
-select throws_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000001',99)$$,'P0001',null,'Database rejects overdraw');
-select throws_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000002',1)$$,'P0001',null,'Dose RPC rejects another home');
+select throws_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000001',99,'Agitation — PRN per care plan',null)$$,'P0001',null,'Database rejects overdraw');
+select throws_ok($$select record_prn_dose('a1000000-0000-0000-0000-000000000002',1,'Agitation — PRN per care plan',null)$$,'P0001',null,'Dose RPC rejects another home');
 update medications set remaining_pills=100 where id='a1000000-0000-0000-0000-000000000001';
 select is((select remaining_pills::int from medications where id='a1000000-0000-0000-0000-000000000001'),8,'DSP cannot directly replace stock counts');
 select * from finish();

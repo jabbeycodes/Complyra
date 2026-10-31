@@ -300,6 +300,7 @@ import {
   shiftBlocksForSite,
   zonedWallTimeMs,
   consecutiveRefusals,
+  marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
   type ScheduledDose,
@@ -5226,6 +5227,7 @@ export class HostedApi implements ComplyraApi {
     remainingPills: number;
     pillsPerDay: number;
     countedOn?: string;
+    varianceReason?: string;
   }) {
     const session = await this.requireSession();
     if (!canRecordDelivery(session.roleKey)) {
@@ -5248,14 +5250,43 @@ export class HostedApi implements ComplyraApi {
     const countedOn = input.countedOn ?? todayIso();
     assertCalendarDate(countedOn, "Use a valid count date.");
     const nextPillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
+    // Variance guard: a count that disagrees with the expected on-hand
+    // figure must carry an explanation — never a silent overwrite. The
+    // RPC is the enforcement point: it recomputes the authoritative
+    // expected figure from the persisted baseline, MAR marks, PRN doses,
+    // and dose exceptions, rejects a supplied figure that disagrees with
+    // its own (stale or spoofed), and persists its server-computed
+    // figure as evidence. The client-side figure computed here is
+    // advisory only — it is passed so the server can detect a stale
+    // snapshot, and the user's note is forwarded whenever one was given
+    // (the server stores it only when a real variance exists). Server
+    // refusals surface verbatim through throwIf below.
+    const { expectedCountNow } = await this.p6lib();
+    const today = todayIso();
+    const views = await this.p6inventoryViews(session, med.individualId, today);
+    const view = views.find((row) => row.medicationId === med.id);
+    const { data: markRows } = await this.client
+      .from("med_dose_marks")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .eq("medication_id", med.id);
+    const marks = ((markRows ?? []) as Array<Record<string, unknown>>).map(
+      (markRow) => this.mapMedDoseMark(markRow),
+    );
+    const expected = view ? expectedCountNow(view, marks, today) : null;
     const { error: saveError } = await this.client.rpc("record_medication_delivery", {
       p_medication_id: med.id, p_remaining: input.remainingPills,
       p_daily: nextPillsPerDay, p_counted_on: countedOn,
+      p_expected: expected,
+      p_variance_reason: input.varianceReason?.trim() ? input.varianceReason.trim() : null,
     });
     throwIf(saveError, "Could not record the medication count.");
   }
 
-  async logPrnDose(medicationId: string, pills = 1) {
+  async logPrnDose(
+    medicationId: string,
+    input: { pills?: number; reason: string; followUp?: string },
+  ) {
     const session = await this.requireSession();
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
@@ -5270,10 +5301,39 @@ export class HostedApi implements ComplyraApi {
     if (med.agencyId !== session.agencyId || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
     }
+    const pills = input.pills ?? 1;
     if (!Number.isFinite(pills) || pills <= 0) throw new Error("Enter how many pills were given.");
-    if (pills > med.remainingPills) throw new Error("The dose exceeds the recorded stock. Reconcile the count first.");
+    const reason = (input.reason ?? "").trim();
+    if (!reason) throw new Error("Say why the PRN was given.");
+    if (pills > med.remainingPills) {
+      // The message names the fix the caller's role can actually take:
+      // counters reconcile it themselves; everyone else asks a counter.
+      let neverCounted = med.lastDeliveryOn === null;
+      if (neverCounted) {
+        const { data: deliveries } = await this.client
+          .from("medication_deliveries")
+          .select("id")
+          .eq("medication_id", med.id)
+          .limit(1);
+        neverCounted = (deliveries ?? []).length === 0;
+      }
+      if (neverCounted) {
+        throw new Error(
+          canRecordDelivery(session.roleKey)
+            ? "No count has been recorded for this medication yet. Record the first count before logging a dose."
+            : "No count has been recorded for this medication yet. Ask your house manager, RN, or PM to record the first count.",
+        );
+      }
+      throw new Error(
+        canRecordDelivery(session.roleKey)
+          ? "The dose exceeds the recorded stock. Reconcile the count first."
+          : "The dose exceeds the recorded stock. Ask your house manager, RN, or PM to record the count first.",
+      );
+    }
     const { error: saveError } = await this.client.rpc("record_prn_dose", {
       p_medication_id: med.id, p_pills: pills,
+      p_reason: reason,
+      p_follow_up: input.followUp?.trim() ? input.followUp.trim() : null,
     });
     throwIf(saveError, "Could not record the PRN dose.");
     const rules = await this.loadOperatingRules(session.agencyId);
@@ -5319,6 +5379,58 @@ export class HostedApi implements ComplyraApi {
       "medication",
       med.id,
     );
+  }
+
+  async listPrnDoses(
+    individualId: string,
+  ): Promise<import("./types").PrnDoseLog[]> {
+    const session = await this.requireSession();
+    if (!canSeeMeds(session.roleKey)) {
+      throw new Error("You cannot view the medication record.");
+    }
+    const { data: person, error } = await this.client
+      .from("individuals")
+      .select("id,agency_id")
+      .eq("id", individualId)
+      .single();
+    throwIf(error, "Individual not found.");
+    if ((person!.agency_id as string) !== session.agencyId) {
+      throw new Error("Individual not found.");
+    }
+    const { data: medRows, error: medError } = await this.client
+      .from("medications")
+      .select("id")
+      .eq("agency_id", session.agencyId)
+      .eq("individual_id", individualId)
+      .eq("kind", "prn");
+    throwIf(medError, "Could not load PRN dose records.");
+    const medIds = ((medRows ?? []) as Array<Record<string, unknown>>).map(
+      (medRow) => String(medRow.id),
+    );
+    if (medIds.length === 0) return [];
+    const { data, error: logError } = await this.client
+      .from("prn_dose_logs")
+      .select("*")
+      .eq("agency_id", session.agencyId)
+      .in("medication_id", medIds)
+      .order("logged_at", { ascending: false });
+    throwIf(logError, "Could not load PRN dose records.");
+    return ((data ?? []) as Array<Record<string, unknown>>).map((logRow) => ({
+      id: String(logRow.id),
+      agencyId: String(logRow.agency_id),
+      individualId,
+      medicationId: String(logRow.medication_id),
+      givenAt: String(logRow.logged_at ?? ""),
+      givenOn: String(logRow.logged_on ?? "").slice(0, 10),
+      pills: Number(logRow.pills_used ?? 0),
+      reason: String(logRow.reason ?? ""),
+      followUp: logRow.follow_up ? String(logRow.follow_up) : null,
+      givenByName: String(logRow.logged_by ?? ""),
+      givenByUserId: logRow.logged_by_user_id
+        ? String(logRow.logged_by_user_id)
+        : null,
+      remainingAfter: Number(logRow.remaining_after ?? 0),
+    }));
   }
 
   async noteLateClockIn(input: {
@@ -11827,6 +11939,8 @@ export class HostedApi implements ComplyraApi {
         remaining_pills: next,
         pills_per_day: med.pillsPerDay,
         recorded_by: session.userId,
+        expected_pills: med.remainingPills,
+        variance_reason: reason,
       });
     throwIf(deliveryError, "Correction saved, but the count record could not be written.");
     await this.audit(
@@ -12003,6 +12117,8 @@ export class HostedApi implements ComplyraApi {
       markedBy: row.marked_by ? String(row.marked_by) : null,
       markedByName: String(row.marked_by_name ?? ""),
       markedAt: String(row.marked_at ?? ""),
+      late: row.late === true,
+      lateReason: row.late_reason ? String(row.late_reason) : null,
     };
   }
 
@@ -12680,7 +12796,7 @@ export class HostedApi implements ComplyraApi {
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
       .from("med_dose_marks")
-      .select("marked_by")
+      .select("marked_by,late,late_reason")
       .eq("agency_id", session.agencyId)
       .eq("medication_id", med.id)
       .eq("dose_date", input.doseDate.slice(0, 10))
@@ -12695,6 +12811,26 @@ export class HostedApi implements ComplyraApi {
     ) {
       throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
     }
+    // A first mark recorded after the dose window ended is stamped Late
+    // and must carry a brief reason; corrections keep the original stamp
+    // (a fresh reason on a correction updates it).
+    const isLate = !existingMark && marLateRecording({
+      doseDate: input.doseDate.slice(0, 10),
+      doseTime: input.doseTime,
+      now: clock.now,
+      windowAfterMinutes: rules.medWindowAfterMinutes,
+      timeZone: clock.timeZone,
+    });
+    const lateReason = (input.lateReason ?? "").trim();
+    if (isLate && !lateReason) {
+      throw new Error("This dose is past its recording window. Add a brief reason for the late entry.");
+    }
+    const existingLate = existingMark
+      ? ((existingMark as { late: boolean | null }).late ?? false)
+      : false;
+    const existingReason = existingMark
+      ? ((existingMark as { late_reason: string | null }).late_reason ?? null)
+      : null;
     const { error } = await this.client.from("med_dose_marks").upsert(
       {
         agency_id: session.agencyId,
@@ -12706,6 +12842,8 @@ export class HostedApi implements ComplyraApi {
         marked_by: session.userId,
         marked_by_name: session.fullName,
         marked_at: new Date().toISOString(),
+        late: lateReason ? true : existingMark ? existingLate : isLate,
+        late_reason: lateReason || (existingMark ? existingReason : null),
       },
       { onConflict: "agency_id,medication_id,dose_date,dose_time" },
     );
@@ -12986,7 +13124,10 @@ export class HostedApi implements ComplyraApi {
     return mapMedicationOrder(data as Record<string, unknown>);
   }
 
-  async activateMedicationOrder(orderId: string): Promise<MedicationOrder> {
+  async activateMedicationOrder(
+    orderId: string,
+    input?: { initialCount?: number },
+  ): Promise<MedicationOrder> {
     const { session, order } = await this.medOrderOrThrow(orderId);
     if (!canManageMedicationOrders(session.roleKey)) {
       throw new Error("Only a nurse or Program Manager activates medication orders.");
@@ -12997,6 +13138,35 @@ export class HostedApi implements ComplyraApi {
     const fields = projectOrderToMedication(order);
     const now = new Date().toISOString();
     let medicationId = order.medicationId;
+    // First count at setup: a medication with no count on file cannot go
+    // live at an invented zero — the activator records the pills on hand,
+    // which becomes the first delivery/count record (the existing path,
+    // not a bypass).
+    let hasCount = false;
+    if (medicationId) {
+      const { data: countRows } = await this.client
+        .from("medication_deliveries")
+        .select("id")
+        .eq("medication_id", medicationId)
+        .limit(1);
+      const { data: medRow } = await this.client
+        .from("medications")
+        .select("last_delivery_on")
+        .eq("id", medicationId)
+        .single();
+      hasCount =
+        (countRows ?? []).length > 0 ||
+        (medRow as { last_delivery_on: string | null } | null)
+          ?.last_delivery_on != null;
+    }
+    const initialCount = input?.initialCount;
+    if (initialCount !== undefined) {
+      if (!Number.isFinite(initialCount) || initialCount < 0) {
+        throw new Error("Enter the initial count (pills on hand).");
+      }
+    } else if (!hasCount) {
+      throw new Error("Record the initial count (pills on hand) to activate this medication.");
+    }
     if (medicationId) {
       const { error } = await this.client
         .from("medications")
@@ -13039,6 +13209,32 @@ export class HostedApi implements ComplyraApi {
       { onConflict: "agency_id,medication_id" },
     );
     throwIf(invError, "Could not set the dose schedule.");
+    if (initialCount !== undefined) {
+      const countedOn = todayIso();
+      const { error: countError } = await this.client
+        .from("medications")
+        .update({
+          remaining_pills: initialCount,
+          last_delivery_on: countedOn,
+          last_countdown_on: countedOn,
+        })
+        .eq("id", medicationId)
+        .eq("agency_id", session.agencyId);
+      throwIf(countError, "Could not record the initial count.");
+      const { error: deliveryError } = await this.client
+        .from("medication_deliveries")
+        .insert({
+          agency_id: session.agencyId,
+          medication_id: medicationId,
+          counted_on: countedOn,
+          remaining_pills: initialCount,
+          pills_per_day: fields.kind === "prn" ? 0 : fields.pillsPerDay,
+          recorded_by: session.userId,
+          expected_pills: null,
+          variance_reason: null,
+        });
+      throwIf(deliveryError, "Could not record the initial count.");
+    }
     const { data: updated, error: upError } = await this.client
       .from("medication_orders")
       .update({

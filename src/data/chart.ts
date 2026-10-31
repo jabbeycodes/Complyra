@@ -49,6 +49,14 @@ export interface MedicationDelivery {
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;
+  /**
+   * The on-hand figure the countdown expected at count time (baseline −
+   * recorded administrations). Null when the med had never been counted —
+   * a first count cannot disagree with an expectation that does not exist.
+   */
+  expectedPills?: number | null;
+  /** Note explaining a count that differs from expectedPills; required then. */
+  varianceReason?: string | null;
 }
 
 export interface TrainingLine {

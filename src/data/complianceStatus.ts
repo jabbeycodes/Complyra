@@ -203,6 +203,27 @@ export function medSupplyStatusFromInventory(
   }
 }
 
+/**
+ * Label override for med-supply badges (pass to StatusBadge's `label`).
+ *
+ * The shared "expired" band label reads "Expired" — right for documents
+ * and consents with a real expiry date, wrong for medication supply:
+ * medications carry no expiry date in the record, so a supply badge must
+ * never read "Expired". Zero stock is "Out of stock", and a medication
+ * with no count on file is "No count recorded yet" (its computed band is
+ * "out" only because there is no baseline to project from). Every other
+ * band keeps its canonical label (undefined = no override), so a med
+ * carries exactly one supply state on every surface.
+ */
+export function medSupplyBadgeLabel(
+  status: MedInvStatus,
+  lastCountedOn: string | null | undefined,
+): string | undefined {
+  if (lastCountedOn === null) return "No count recorded yet";
+  if (status === "out") return "Out of stock";
+  return undefined;
+}
+
 /* ------------------------------------------------------------------ */
 /* Checklists (HM weekly checklist surfaces, generic signature)        */
 /* ------------------------------------------------------------------ */

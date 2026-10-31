@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { BellRing, TriangleAlert } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
-import { medSupplyStatus } from "../../data/complianceStatus";
+import {
+  medSupplyBadgeLabel,
+  medSupplyStatusFromInventory,
+} from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canRecordDelivery, canSeeMeds } from "../../data/chart";
 import { inventoryCountdownLabel } from "../../data/medInventory";
@@ -107,12 +110,16 @@ export default function MedInventoryPage() {
                 style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
               >
                 <StatusBadge
-                  status={medSupplyStatus(alert.daysRemaining)}
+                  status={medSupplyStatusFromInventory(alert.status)}
+                  label={medSupplyBadgeLabel(alert.status, alert.lastCountedOn)}
                   size="sm"
                 />
                 <span>
                   <strong>{nameById[alert.individualId] ?? "Unknown"}</strong> —{" "}
-                  {alert.medicationName} ({alert.strength}): {inventoryCountdownLabel(alert)}
+                  {alert.medicationName} ({alert.strength}):{" "}
+                  {alert.lastCountedOn === null
+                    ? "No count recorded yet"
+                    : inventoryCountdownLabel(alert)}
                 </span>
                 {alert.alertActive && canManage && (
                   <button className="button" onClick={() => acknowledge(alert.medicationId)}>
