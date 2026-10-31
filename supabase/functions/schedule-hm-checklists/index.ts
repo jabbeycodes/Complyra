@@ -1,3 +1,4 @@
+import { observeJob } from "../_shared/observeJob.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { buildSchedulerChecklistItems } from "./items.ts";
@@ -145,6 +146,7 @@ Deno.serve(async (req) => {
     return fail("Not authorized: service_role or an admin member is required.", 403);
   }
 
+  return observeJob(admin, "schedule-hm-checklists", async () => {
   const warnings: string[] = [];
   const today = toIsoDate(new Date());
   const weekStart = nextMondayIso(today); // upcoming week, Monday-based
@@ -359,5 +361,6 @@ Deno.serve(async (req) => {
     notifications_queued: notificationsQueued,
     week_start: weekStart,
     warnings,
+  });
   });
 });

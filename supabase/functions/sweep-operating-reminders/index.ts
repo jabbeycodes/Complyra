@@ -1,3 +1,4 @@
+import { observeJob } from "../_shared/observeJob.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { zonedWallTimeMs } from "../../../src/data/dueItems.ts";
@@ -334,6 +335,7 @@ Deno.serve(async (req) => {
   }
   if (!authorized) return fail("Not authorized: service_role or an admin member is required.", 403);
 
+  return observeJob(admin, "sweep-operating-reminders", async () => {
   let agencyId: string | null = null;
   if (req.method === "POST") {
     try {
@@ -356,4 +358,5 @@ Deno.serve(async (req) => {
     noticesQueued += Number(careQueued ?? 0);
   }
   return json({ notices_queued: noticesQueued, agencies: agencies.length, actor });
+  });
 });

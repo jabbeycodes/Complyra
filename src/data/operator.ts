@@ -48,3 +48,14 @@ export interface OperatorPeopleQuery { query: string; agencyId: string; page: nu
 export interface OperatorPerson { id:string; fullName:string; username:string; email:string; active:boolean; platformAdmin:boolean; mustChangePassword:boolean; memberships:{agencyId:string;agencyCode:string;roleKey:string;expiresOn:string|null}[]; }
 export interface OperatorPeoplePage { rows:OperatorPerson[];hasMore:boolean; }
 export function validateOperatorPeople(q:OperatorPeopleQuery){if(q.query.length>80||!Number.isInteger(q.page)||q.page<0||q.page>2000)throw new Error("Invalid people search.");}
+
+export const OPERATOR_JOBS = ["sweep-operating-reminders","delegation-ack-sweep","schedule-hm-checklists","select-weekly-winners"] as const;
+export interface OperatorJobRun { id:string;jobKey:string;startedAt:string;finishedAt:string|null;state:"running"|"succeeded"|"failed";errorCode:string|null;durationMs:number|null; }
+export interface OperatorJobHealth { jobKey:string;expectedSeconds:number;latest:OperatorJobRun|null;lastSuccess:string|null;failures24h:number; }
+export interface OperatorHealth { checkedAt:string;jobs:OperatorJobHealth[]; }
+export function jobHealthLabel(job:OperatorJobHealth, now=Date.now()){
+ if(!job.latest)return "Unknown — no observations";
+ if(now-Date.parse(job.latest.startedAt)>job.expectedSeconds*1000)return "Stale — no recent observation";
+ if(job.latest.state==="running"&&now-Date.parse(job.latest.startedAt)>900000)return "Stale — unfinished run";
+ return job.latest.state==="succeeded" ? "Observed success" : job.latest.state==="failed" ? "Observed failure" : "Running";
+}
