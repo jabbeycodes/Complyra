@@ -10,3 +10,17 @@ export function filterOperatorAgencies(rows: OperatorAgency[], query: string, st
 }
 export const OPERATOR_PAGES = ["Operator agencies"] as const;
 export type OperatorStatus = AgencyStatus;
+
+export interface OperatorPeriod { start: string; end: string; category: string; }
+export interface OperatorOverviewData { total: number; active: number; inactive: number; pending: number; registrations: number; activity: number; unknownDates: number; series: { date: string; signups: number; growth: number }[]; }
+export function validateOperatorPeriod(p: OperatorPeriod) {
+ const valid=(s:string)=> /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && new Date(s).toISOString().slice(0,10)===s;
+ const days=(Date.parse(p.end)-Date.parse(p.start))/86400000;
+ if(!valid(p.start)||!valid(p.end)||days<0||days>365||!["customer","demo","internal","all"].includes(p.category)) throw new Error("Choose a valid date range of at most 366 days and reporting group.");
+}
+export function summarizeOperatorAgencies(rows: OperatorAgency[], p: OperatorPeriod, activity: number): OperatorOverviewData {
+ validateOperatorPeriod(p); const selected=rows.filter(a=>p.category==="all"||a.reportingCategory===p.category);
+ const series=[];for(let n=Date.parse(p.start);n<=Date.parse(p.end);n+=86400000){const date=new Date(n).toISOString().slice(0,10);series.push({date,signups:selected.filter(a=>a.createdAt?.slice(0,10)===date).length,growth:selected.filter(a=>a.createdAt && a.createdAt.slice(0,10)<=date).length});}
+ const active=selected.filter(a=>a.status==="active"&&a.active).length;
+ return {total:selected.length,active,inactive:selected.length-active,pending:selected.filter(a=>a.status==="pending").length,registrations:series.reduce((n,d)=>n+d.signups,0),activity,unknownDates:selected.filter(a=>!a.createdAt).length,series};
+}

@@ -5,3 +5,7 @@
 .operator-console table { width:100%; }
 .operator-console th, .operator-console td { text-align:left; padding:12px; border-bottom:1px solid var(--color-rule); }
 .operator-console :focus-visible { outline:2px solid var(--color-accent); outline-offset:3px; }
+.operator-metrics { display:flex; flex-wrap:wrap; gap:24px; }
+.operator-metrics a { display:grid; gap:8px; padding:16px; color:var(--color-ink); border:1px solid var(--color-rule); border-radius:var(--radius-card); }
+.operator-metrics strong { font-size:2rem; }
+.operator-chart { display:block; width:100%; max-height:240px; color:var(--color-accent); }

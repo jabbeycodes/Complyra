@@ -1,3 +1,4 @@
+import { validateOperatorPeriod } from "./operator";
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -2699,6 +2700,14 @@ export class HostedApi implements ComplyraApi {
       provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
       status: row.status as AgencyStatus,
     }));
+  }
+
+  async operatorOverview(period: import("./operator").OperatorPeriod): Promise<import("./operator").OperatorOverviewData> {
+    const session = await this.requireSession(); if (!session.platformAdmin) throw new Error("Operator access required.");
+    validateOperatorPeriod(period);
+    const { data, error } = await this.client.rpc("operator_overview", { p_start: period.start, p_end: period.end, p_category: period.category });
+    throwIf(error, "Could not load operator metrics.");
+    return data as import("./operator").OperatorOverviewData;
   }
 
   async operatorDirectory(): Promise<import("./operator").OperatorAgency[]> {
