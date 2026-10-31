@@ -1,3 +1,5 @@
+import { Modal } from "../components";
+import { auditSourceRecords, selectAuditSources } from "../data/auditSourceRecords";
 /**
  * CommandCenter — the audit-readiness command center.
  *
@@ -205,6 +207,14 @@ export function CommandCenterView({
   const { actions, certs, clearance, checklists, snapshots } = data;
 
   // Corrective-action form state (UI only).
+  const [sourceIds, setSourceIds] = useState<string[] | null>(null);
+  const sourceRecords = useMemo(() => auditSourceRecords(data), [data]);
+  const inspectedRecords = sourceIds ? selectAuditSources(sourceRecords, sourceIds) : [];
+  const openSource = (id: string) => {
+    if (id === "escalation:critical-mass") { setSourceIds(risks.filter(row => row.severity === "critical").map(row => row.id)); return; }
+    if (id.startsWith("escalation:misses:")) { const name = id.slice("escalation:misses:".length); setSourceIds(data.checklists.filter(row => siteNameById.get(row.siteId) === name && (row.late || row.status === "overdue")).map(row => `checklists:${row.id}`)); return; }
+    setSourceIds([id]);
+  };
   const [formTitle, setFormTitle] = useState("");
   const [formAssignee, setFormAssignee] = useState("");
   const [formDue, setFormDue] = useState("");
@@ -515,6 +525,16 @@ export function CommandCenterView({
         </div>
       </header>
 
+      <button type="button" className="cc-button" onClick={() => setSourceIds(sourceRecords.filter(row => row.scoreFact).map(row => row.key))}>View score source records</button>
+      {sourceIds !== null && <Modal title="Source records" onClose={() => setSourceIds(null)} wide>
+        {inspectedRecords.length === 0 ? <p role="alert">This source is unavailable in your current records or access. Reload Audit Me to refresh. No substitute record has been opened.</p> : <>
+          <p>{inspectedRecords.length} source record{inspectedRecords.length === 1 ? "" : "s"}. Read-only evidence from the current authorized workspace.</p>
+          {inspectedRecords.map(record => <section className="panel" key={record.key}>
+            <h3>{record.title}</h3><p>{record.kind} · Record {record.recordId}</p>
+            <dl>{record.fields.map(([label,value]) => <div key={label}><dt>{label}</dt><dd className="audit-source-value">{value}</dd></div>)}</dl>
+          </section>)}
+        </>}
+      </Modal>}
       {/* Management attention feed */}
       <section className="cc-section" aria-labelledby="cc-attention">
         <h2 id="cc-attention" className="cc-section-title">
@@ -534,7 +554,7 @@ export function CommandCenterView({
                     {sev.icon}
                   </span>
                   <div className="cc-item-body">
-                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
+                    <button type="button" className="text-button cc-item-title" onClick={() => openSource((item as { sourceId?: string }).sourceId ?? item.id)}>{item.title}</button>
                     <span className="cc-item-detail">
                       {item.detail} · {meta.label}
                       {item.personName ? ` · ${item.personName}` : ""}
@@ -564,7 +584,7 @@ export function CommandCenterView({
                     {urgencyMeta.icon}
                   </span>
                   <div className="cc-item-body">
-                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
+                    <button type="button" className="text-button cc-item-title" onClick={() => openSource((item as { sourceId?: string }).sourceId ?? item.id)}>{item.title}</button>
                     <span className="cc-item-detail">
                       {item.detail} · {kindMeta.label} ·{" "}
                       <strong className={`cc-urgency-text cc-urgency-${item.urgency}`}>
@@ -591,6 +611,7 @@ export function CommandCenterView({
               return (
                 <article key={site.siteId ?? site.siteName} className="cc-card">
                   <h3 className="cc-card-title">{site.siteName ?? "Unknown site"}</h3>
+                  <button type="button" className="text-button" onClick={() => setSourceIds(sourceRecords.filter(row => row.scoreFact && row.siteId === site.siteId).map(row => row.key))}>View source records for {site.siteName ?? "Unassigned"}</button>
                   <p className="cc-card-score">
                     <span className="cc-score-number cc-score-number-sm">{site.score}</span>
                     <span className={`cc-badge ${meta.className}`}>
@@ -627,10 +648,10 @@ export function CommandCenterView({
                     {sev.icon}
                   </span>
                   <div className="cc-item-body">
-                    <a className="cc-item-title" href={`#${encodeURIComponent(risk.deepLink)}`}>
+                    <button type="button" className="text-button cc-item-title" onClick={() => openSource(risk.id)}>
                       {risk.title}
                       <span className={`cc-sev-label ${sev.className}`}>{risk.severity}</span>
-                    </a>
+                    </button>
                     <span className="cc-item-detail">
                       {risk.detail}
                       {risk.personName ? ` · ${risk.personName}` : ""}
@@ -710,7 +731,7 @@ export function CommandCenterView({
                     <span>{meta.label}</span>
                   </span>
                   <div className="cc-item-body">
-                    <span className="cc-item-title">{action.title}</span>
+                    <button type="button" className="text-button cc-item-title" onClick={() => openSource(`corrective-actions:${action.id}`)}>{action.title}</button>
                     <span className="cc-item-detail">
                       {action.assignedToName ? `Owner: ${action.assignedToName}` : "Unassigned"}
                       {action.dueOn ? ` · Due ${action.dueOn}` : " · No due date"}
@@ -877,7 +898,7 @@ export function CommandCenterView({
               ))}
             </svg>
             <figcaption className="cc-chart-caption">
-              Daily agency score snapshots. Dashed line marks 90 (compliant).
+              Daily agency score snapshots. Dashed line marks 90 (compliant). Historical snapshots retain the score breakdown, not the original source-record versions; current records cannot reconstruct a past snapshot.
             </figcaption>
           </figure>
         ) : (
@@ -905,7 +926,7 @@ export function CommandCenterView({
                 <li key={item.id} className="cc-item">
                   <span className="cc-item-date">{item.dueOn}</span>
                   <div className="cc-item-body">
-                    <a className="cc-item-title" href={`#${encodeURIComponent(item.deepLink)}`}>{item.title}</a>
+                    <button type="button" className="text-button cc-item-title" onClick={() => openSource((item as { sourceId?: string }).sourceId ?? item.id)}>{item.title}</button>
                     <span className="cc-item-detail">
                       {item.detail} · {kindMeta.label} ·{" "}
                       {item.daysRemaining < 0
