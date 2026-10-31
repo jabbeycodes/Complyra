@@ -89,6 +89,7 @@ import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import { AgencyAdminRules } from "./features/AgencyRulesPanel";
 import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
+import BrandLoader from "./components/BrandLoader";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
@@ -439,7 +440,7 @@ export default function App() {
   const consentToken = /^#\/consent-sign\/([0-9a-f]{64})$/.exec(kioskHash)?.[1];
   if (consentToken) return <PublicConsentSigning token={consentToken} />;
   if (loading) {
-    return <div className="login-shell">Loading workspace…</div>;
+    return <BrandLoader status="Loading workspace…" />;
   }
   if (!session) {
     return <AuthEntry />;
@@ -472,7 +473,7 @@ export default function App() {
         </div>
       );
     }
-    return <div className="login-shell">Loading workspace…</div>;
+    return <BrandLoader status="Loading workspace…" />;
   }
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds);
   const individuals = workspace.individuals.filter((person) =>
@@ -1058,7 +1059,7 @@ export default function App() {
           </div>
         </header>
         <main>
-          <Suspense fallback={<p role="status" className="loading-state">Loading workspace page…</p>}>
+          <Suspense fallback={<BrandLoader variant="compact" status="Loading workspace page…" />}>
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
