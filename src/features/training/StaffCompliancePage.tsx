@@ -42,7 +42,7 @@ import {
   canRequestTrainingCorrection,
   canSignTrainingAsHm,
 } from "../../data/chart";
-import { TRAINING_LINE_MAX_HOURS, trainingLandingMode } from "./gate";
+import { TRAINING_LINE_MAX_HOURS, rosterPanelState, trainingLandingMode } from "./gate";
 import AssignTrainingModal from "./AssignTrainingModal";
 import type {
   AdoptedSignature,
@@ -168,6 +168,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   }
 
   const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
+  const rosterState = rosterPanelState(rows);
 
   return (
     <div data-tour="training">
@@ -188,10 +189,20 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canRoster && rows && (
+      {canRoster && (rows || rowsFailed) && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
-          {notCleared.length === 0 ? (
+          {rowsFailed && !rows ? (
+            <Empty
+              title="The staff roster could not be loaded"
+              text="Refresh the page to try again."
+            />
+          ) : rosterState === "empty" ? (
+            <Empty
+              title="No staff to show yet"
+              text="No staff appear on this roster yet. Once staff are added and training is assigned, their clearance status will show here."
+            />
+          ) : notCleared.length === 0 ? (
             <Empty
               title="Everyone is cleared"
               text="Every staff member with training assigned meets the in-ratio gate."
@@ -224,7 +235,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canRoster && rows && (
+      {canRoster && rows && rows.length > 0 && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">

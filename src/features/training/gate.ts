@@ -25,6 +25,23 @@ export function trainingLandingMode(input: {
     : "own";
 }
 
+export type RosterPanelState = "loading" | "empty" | "all-clear" | "attention";
+
+/**
+ * What the Training roster panels may claim (batch 33). "Everyone is
+ * cleared" is a claim about staff: with zero rows loaded it is a
+ * passing banner over no data. An empty roster gets the honest empty
+ * state instead; the all-clear banner requires at least one row and
+ * every row cleared.
+ */
+export function rosterPanelState(
+  rows: readonly { clearedForInRatio: boolean }[] | null,
+): RosterPanelState {
+  if (!rows) return "loading";
+  if (rows.length === 0) return "empty";
+  return rows.every((row) => row.clearedForInRatio) ? "all-clear" : "attention";
+}
+
 export const IN_RATIO_MIN_HOURS = 20;
 export const IN_RATIO_MIN_HM_HOURS = 8;
 
