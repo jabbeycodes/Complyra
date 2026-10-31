@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(41);
+select plan(53);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -188,6 +188,59 @@ select is((select count(*)::int from personal_spending_entries where individual_
 select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '2 months')::date,'spend','CVS','Vitamins',900,'d4000000-0000-0000-0000-000000000006')$$,
   '42501',null,'Nurse cannot record an entry');
+
+-- ---------------- Integrity hardening (20261031150000) ----------------
+-- Back to the program manager, who can write for every Individual.
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000004"}',true);
+
+-- The signed closing balance is computed from the ledger. Person Two
+-- receives a deposit dated two months back, then that month is closed
+-- with a deliberately wrong figure.
+select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '2 months')::date,'deposit','Monthly personal funds','',7000,'d4000000-0000-0000-0000-000000000004')$$,
+  'PM records a backdated deposit for Person Two');
+select lives_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',to_char(current_date - interval '2 months','YYYY-MM'),999999,'Pat PM','Pat PM','d4000000-0000-0000-0000-000000000004','individual_signed')$$,
+  'PM can sign that month closed');
+select is((select closing_balance_cents from personal_spending_month_closes where individual_id='e4000000-0000-0000-0000-000000000002' and month=to_char(current_date - interval '2 months','YYYY-MM')),7000,
+  'A bogus supplied closing balance is replaced by the ledger figure');
+
+-- One replacement per original, in an open month three months back.
+select lives_ok($$insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('f4000000-0000-0000-0000-000000000010','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '3 months')::date,'spend','Target','Socks',1000,'d4000000-0000-0000-0000-000000000004')$$,
+  'PM records the entry the correction chain starts from');
+select lives_ok($$insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('f4000000-0000-0000-0000-000000000011','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '3 months')::date,'spend','Target','Socks',1100,'d4000000-0000-0000-0000-000000000004','f4000000-0000-0000-0000-000000000010')$$,
+  'A same-ledger replacement in an open month is recorded');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '3 months')::date,'spend','Target','Socks',1200,'d4000000-0000-0000-0000-000000000004','f4000000-0000-0000-0000-000000000010')$$,
+  'P0001',null,'An entry cannot be replaced twice');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='Wrong total keyed',
+    replaced_by_entry_id='f4000000-0000-0000-0000-000000000011'
+  where id='f4000000-0000-0000-0000-000000000010'$$,
+  'Voiding the original and linking its replacement succeeds');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '3 months')::date,'spend','Target','Socks',1300,'d4000000-0000-0000-0000-000000000004','f4000000-0000-0000-0000-000000000010')$$,
+  'P0001',null,'A replaced entry stays replaced after the void lands');
+select throws_ok($$update personal_spending_entries set replaced_by_entry_id='f4000000-0000-0000-0000-000000000010'
+  where id='f4000000-0000-0000-0000-000000000011'$$,
+  'P0001',null,'The replacement link cannot be forged from the other side');
+
+-- Person One's current month is signed closed above. Naming Person
+-- Two's same-month entry as the "correction" target must not reopen
+-- it: the replacement link is checked against the Individual.
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',current_date,'spend','Target','Clothing',1000,'d4000000-0000-0000-0000-000000000004','f4000000-0000-0000-0000-000000000003')$$,
+  'P0001',null,'A closed month cannot be written into by replacing another Individual''s entry');
+
+-- Site integrity: a person's money is recorded at their own home,
+-- on entries and on closes alike.
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000001',(current_date - interval '2 months')::date,'deposit','Family','',1000,'d4000000-0000-0000-0000-000000000004')$$,
+  'P0001',null,'An entry cannot pair an Individual with another home');
+select throws_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000001',to_char(current_date - interval '2 months','YYYY-MM'),0,'Pat PM','Pat PM','d4000000-0000-0000-0000-000000000004','individual_signed')$$,
+  'P0001',null,'A month close cannot pair an Individual with another home');
 
 select * from finish();
 rollback;

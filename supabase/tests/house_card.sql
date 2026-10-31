@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(37);
+select plan(48);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -9,10 +9,12 @@ insert into agencies (id, name, agency_code, state_code, status) values
  ('a3000000-0000-0000-0000-000000000001','House card agency A','HCARDA-MO','MO','active'),
  ('a3000000-0000-0000-0000-000000000002','House card agency B','HCARDB-MO','MO','active');
 insert into programs (id,agency_id,name) values
- ('b3000000-0000-0000-0000-000000000001','a3000000-0000-0000-0000-000000000001','Program');
+ ('b3000000-0000-0000-0000-000000000001','a3000000-0000-0000-0000-000000000001','Program'),
+ ('b3000000-0000-0000-0000-000000000002','a3000000-0000-0000-0000-000000000002','Program B');
 insert into sites(id,agency_id,program_id,name) values
  ('c3000000-0000-0000-0000-000000000001','a3000000-0000-0000-0000-000000000001','b3000000-0000-0000-0000-000000000001','Home A'),
- ('c3000000-0000-0000-0000-000000000002','a3000000-0000-0000-0000-000000000001','b3000000-0000-0000-0000-000000000001','Home B');
+ ('c3000000-0000-0000-0000-000000000002','a3000000-0000-0000-0000-000000000001','b3000000-0000-0000-0000-000000000001','Home B'),
+ ('c3000000-0000-0000-0000-000000000003','a3000000-0000-0000-0000-000000000002','b3000000-0000-0000-0000-000000000002','Home C');
 insert into auth.users(id,email) values
  ('d3000000-0000-0000-0000-000000000001','hc-hma@example.invalid'),
  ('d3000000-0000-0000-0000-000000000002','hc-dsp@example.invalid'),
@@ -47,7 +49,8 @@ insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
 insert into house_card_entries(id,agency_id,site_id,entry_date,kind,location,amount_cents,category,individual_id,recorded_by,recorded_by_name,recorded_by_role) values
  ('f3000000-0000-0000-0000-000000000001','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',current_date,'credit','',60000,null,null,'d3000000-0000-0000-0000-000000000001','Hannah HM','house_manager'),
  ('f3000000-0000-0000-0000-000000000002','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',current_date,'purchase','Hy-Vee',5000,'groceries_household',null,'d3000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
- ('f3000000-0000-0000-0000-000000000003','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000002',current_date,'purchase','Hy-Vee',7000,'groceries_household',null,'d3000000-0000-0000-0000-000000000003','Henry HM','house_manager');
+ ('f3000000-0000-0000-0000-000000000003','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000002',current_date,'purchase','Hy-Vee',7000,'groceries_household',null,'d3000000-0000-0000-0000-000000000003','Henry HM','house_manager'),
+ ('f3000000-0000-0000-0000-000000000004','a3000000-0000-0000-0000-000000000002','c3000000-0000-0000-0000-000000000003',current_date,'purchase','Hy-Vee',7000,'groceries_household',null,'d3000000-0000-0000-0000-000000000001','Hannah HM','house_manager');
 
 set local role authenticated;
 
@@ -174,6 +177,52 @@ select is((select count(*)::int from house_card_entries where site_id='c3000000-
 select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by)
   values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '2 months')::date,'credit','',1000,'d3000000-0000-0000-0000-000000000006')$$,
   '42501',null,'Nurse cannot record an entry');
+
+-- ---------------- Integrity hardening (20261031150000) ----------------
+-- Back to the program manager, who can write at every home in Agency A.
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3000000-0000-0000-0000-000000000004"}',true);
+
+-- Home A's current month is signed closed above. Naming another home's
+-- (or another agency's) same-month entry as the "correction" target
+-- must not reopen it: the replacement link is scope-checked.
+select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',current_date,'credit','',1000,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000000003')$$,
+  'P0001',null,'A closed month cannot be written into by replacing another home''s entry');
+select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',current_date,'credit','',1000,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000000004')$$,
+  'P0001',null,'A correction cannot replace an entry from another agency');
+
+-- One replacement per original, in an open month three months back.
+select lives_ok($$insert into house_card_entries(id,agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by)
+  values ('f3000000-0000-0000-0000-000000000010','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '3 months')::date,'credit','County',5000,'d3000000-0000-0000-0000-000000000004')$$,
+  'PM records the entry the correction chain starts from');
+select lives_ok($$insert into house_card_entries(id,agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('f3000000-0000-0000-0000-000000000011','a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '3 months')::date,'credit','County',5500,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000000010')$$,
+  'A same-home replacement in an open month is recorded');
+select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '3 months')::date,'credit','County',5600,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000000010')$$,
+  'P0001',null,'An entry cannot be replaced twice');
+select lives_ok($$update house_card_entries set voided_at=now(), void_reason='Wrong amount credited',
+    replaced_by_entry_id='f3000000-0000-0000-0000-000000000011'
+  where id='f3000000-0000-0000-0000-000000000010'$$,
+  'Voiding the original and linking its replacement succeeds');
+select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '3 months')::date,'credit','County',5700,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000000010')$$,
+  'P0001',null,'A replaced entry stays replaced after the void lands');
+select throws_ok($$update house_card_entries set replaced_by_entry_id='f3000000-0000-0000-0000-000000000010'
+  where id='f3000000-0000-0000-0000-000000000011'$$,
+  'P0001',null,'The replacement link cannot be forged from the other side');
+select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by,replaces_entry_id)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '3 months')::date,'credit','County',1000,'d3000000-0000-0000-0000-000000000004','f3000000-0000-0000-0000-000000009999')$$,
+  'P0001',null,'A correction must name an entry that exists');
+
+-- The signed closing balance is computed from the ledger: the chain
+-- above leaves exactly one live credit of 5500 in that month.
+select lives_ok($$insert into house_card_month_closes(agency_id,site_id,month,closing_balance_cents,printed_name,signature_text,signed_by)
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',to_char(current_date - interval '3 months','YYYY-MM'),999999,'Pat PM','Pat PM','d3000000-0000-0000-0000-000000000004')$$,
+  'PM can sign that month closed');
+select is((select closing_balance_cents from house_card_month_closes where site_id='c3000000-0000-0000-0000-000000000001' and month=to_char(current_date - interval '3 months','YYYY-MM')),5500,
+  'A bogus supplied closing balance is replaced by the ledger figure');
 
 select * from finish();
 rollback;
