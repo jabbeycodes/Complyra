@@ -16,6 +16,7 @@ import {
   type DelegationForm,
   type DelegationRosterRow,
 } from "../../data/types";
+import { delegationObligationLabel } from "../../data/delegationStatus";
 import ImprovedDelegationForm from "./ImprovedDelegationForm";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { InitialsField, SignatureField } from "../signatures/SignatureField";
@@ -94,9 +95,7 @@ export default function DelegationFormDetail({
       {error && <p className="form-error">{error}</p>}
       <div className="delegation-toolbar">
         <div className="chart-actions">
-          <Badge
-            status={status.rescinded ? "Off" : status.fullySigned ? "Current" : "Pending"}
-          />
+          <Badge status={delegationObligationLabel(item)} />
           <span className="delegation-small">
             {status.rowsSigned}/{status.rowsNamed} staff signed
           </span>

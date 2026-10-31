@@ -58,6 +58,11 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can, roleLabel } from "../data/status";
+import {
+  delegationStatusForObligation,
+  delegationStatusLabel,
+  type DelegationStatus,
+} from "../data/delegationStatus";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import ChartOverview from "./ChartOverview";
@@ -485,6 +490,7 @@ export default function IndividualChart({
               <DelegationBlock
                 key={view.item.id}
                 title={view.item.title}
+                delegationStatus={delegationStatusForObligation(view.item)}
                 enabled={view.item.enabled && isObligationActive(view.item)}
                 discontinueTitle={view.item.discontinueTitle}
                 discontinueFileId={view.item.discontinueFileId}
@@ -1042,6 +1048,7 @@ export default function IndividualChart({
 
 function DelegationBlock({
   title,
+  delegationStatus,
   enabled,
   discontinueTitle,
   discontinueFileId,
@@ -1051,6 +1058,8 @@ function DelegationBlock({
   onDiscontinue,
 }: {
   title: string;
+  /** Canonical delegation status (src/data/delegationStatus) — same label as the RN forms. */
+  delegationStatus: DelegationStatus;
   enabled: boolean;
   discontinueTitle: string | null;
   discontinueFileId: string | null;
@@ -1067,7 +1076,7 @@ function DelegationBlock({
       <header>
         <span className="kind-pill delegation">delegation</span>
         <h3>{title}</h3>
-        <Badge status={enabled ? "Current" : "Off"} />
+        <Badge status={delegationStatusLabel(delegationStatus)} />
       </header>
       {discontinueFileId && (
         <p>

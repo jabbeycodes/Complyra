@@ -52,6 +52,10 @@ import type {
   StaffTrainingProfile,
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
+import {
+  delegationStatusForActivation,
+  delegationStatusLabel,
+} from "../../data/delegationStatus";
 import type { SiteShiftNoteView } from "../../data/shiftNotes";
 import {
   getSiteDetailTabs,
@@ -1159,7 +1163,7 @@ export default function SiteDetailPage({
         {activeTab === "training" && !loading.training && (
           <>
             <div className="panel">
-              <h2>Active delegations at this home</h2>
+              <h2>Delegations at this home</h2>
               {!delegations?.length && (
                 <Empty
                   mark="none"
@@ -1178,7 +1182,9 @@ export default function SiteDetailPage({
                           · {d.templateCategory} · activated {formatDate(d.activatedAt)}
                         </span>
                       </div>
-                      <Badge status={d.status === "active" ? "On track" : d.status} />
+                      <Badge
+                        status={delegationStatusLabel(delegationStatusForActivation(d))}
+                      />
                     </li>
                   ))}
                 </ul>
