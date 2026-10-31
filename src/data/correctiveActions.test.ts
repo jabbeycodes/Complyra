@@ -31,6 +31,8 @@ function action(overrides: Partial<CorrectiveAction> = {}): CorrectiveAction {
     storedStatus: "open",
     linkedRiskId: null,
     linkedRiskSource: null,
+    siteId: null,
+    qaAuditId: null,
     createdByUserId: "admin-1",
     createdAt: "2026-09-10T00:00:00Z",
     resolvedAt: null,

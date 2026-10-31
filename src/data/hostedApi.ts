@@ -98,7 +98,10 @@ import {
   assertCalendarDate,
   canActAtSite,
   canReadIndividual,
-  dspScopeCoversIndividual,
+  correctiveActionInScope,
+  CORRECTIVE_ACTION_AGENCY_ROLES,
+  dspRecipientCoversIndividual,
+  staffActiveAtSite,
 } from "./access";
 import {
   sortLifeEvents,
@@ -8126,9 +8129,12 @@ export class HostedApi implements ComplyraApi {
 
   /**
    * DSPs who may receive a delegation for this Individual: active agency
-   * DSP memberships whose own scope covers the Individual (membership
-   * home site, or an assignment to them or their site) — the same rule
-   * that decides what the DSP can read.
+   * DSP memberships who are at the Individual's site NOW — membership
+   * home site, or an ACTIVE assignment to them or their site
+   * (dspRecipientCoversIndividual). Deliberately stricter than the read
+   * rule (dspScopeCoversIndividual ignores assignment endsOn so former
+   * DSPs can correct their own notes): a NEW delegation never goes to
+   * someone whose assignment has ended or not yet started.
    */
   private async delegationRecipientsFor(
     session: SessionUser,
@@ -8171,7 +8177,7 @@ export class HostedApi implements ComplyraApi {
       const profile = profileById.get(userId);
       if (!profile) continue;
       if (
-        !dspScopeCoversIndividual(
+        !dspRecipientCoversIndividual(
           {
             userId,
             agencyId: session.agencyId,
@@ -9844,9 +9850,146 @@ export class HostedApi implements ComplyraApi {
   // ===== AUDIT-READINESS HOSTED (corrective actions) =====
   // AUDIT-READINESS: corrective-action workflow (HostedApi, Supabase).
   // Table: public.corrective_actions (migration 20260914070000_audit_readiness.sql).
+  // Site scope (reviewer HOLD fix-up, PR #199): every action belongs to
+  // a home. Reads and writes follow correctiveActionInScope — agency
+  // management and auditors see the whole agency; everyone else reaches
+  // an action only through its site (membership home or an active
+  // assignment there); a site-less action is agency-level, management
+  // only. The same rule is enforced by RLS
+  // (private.corrective_action_in_scope in
+  // 20261031170000_hm_corrective_actions_seed.sql); this layer mirrors
+  // it so callers get the app's own errors, not raw RLS failures.
 
   private requireCorrectiveActionWrite(session: SessionUser) {
     this.requirePermission(session, "correctiveActions.manage");
+  }
+
+  /** Agency-management tier: a record's site never narrows these users. */
+  private isCorrectiveActionManager(session: SessionUser): boolean {
+    return (
+      session.platformAdmin ||
+      (CORRECTIVE_ACTION_AGENCY_ROLES as readonly string[]).includes(session.roleKey)
+    );
+  }
+
+  /** Assignments + Individual site refs the scope predicates resolve against. */
+  private async correctiveActionScopeData(session: SessionUser) {
+    const [assignments, individuals] = await Promise.all([
+      this.agencyAssignments(session.agencyId),
+      this.agencyIndividualRefs(session.agencyId),
+    ]);
+    return { assignments, individuals };
+  }
+
+  private async correctiveActionMembership(session: SessionUser, userId: string) {
+    const { data } = await this.client
+      .from("memberships")
+      .select("user_id, site_id, expires_on")
+      .eq("agency_id", session.agencyId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!data) return null;
+    const r = data as Record<string, unknown>;
+    return {
+      userId: r.user_id as string,
+      siteId: (r.site_id as string | null) ?? null,
+      expiresOn: (r.expires_on as string | null) ?? null,
+    };
+  }
+
+  /** The assignee must currently work at the action's home: membership
+   *  home site there, or an ACTIVE staff assignment that places them
+   *  there — never an assignment that has ended or not yet started. */
+  private async assertCorrectiveActionPlacement(
+    session: SessionUser,
+    siteId: string | null,
+    assigneeId: string | null,
+    scope: {
+      assignments: StaffAssignment[];
+      individuals: { id: string; siteId: string }[];
+    },
+  ) {
+    if (!siteId) return;
+    const { data: site } = await this.client
+      .from("sites")
+      .select("id")
+      .eq("id", siteId)
+      .eq("agency_id", session.agencyId)
+      .maybeSingle();
+    if (!site) throw new Error("Choose a home in this agency.");
+    if (
+      !this.isCorrectiveActionManager(session) &&
+      !canActAtSite(session, siteId, scope.assignments, scope.individuals)
+    ) {
+      throw new Error("Choose a home you manage.");
+    }
+    if (assigneeId) {
+      const member = await this.correctiveActionMembership(session, assigneeId);
+      const today = new Date().toISOString().slice(0, 10);
+      if (
+        !member ||
+        (member.expiresOn && member.expiresOn < today) ||
+        !staffActiveAtSite(
+          { userId: member.userId, agencyId: session.agencyId, siteId: member.siteId },
+          siteId,
+          scope.assignments,
+          scope.individuals,
+        )
+      ) {
+        throw new Error("Assign corrective actions to staff who work at that home.");
+      }
+    }
+  }
+
+  /**
+   * Resolve the home a NEW corrective action belongs to, in order: the
+   * QA audit that raised it, the explicit site, the creator's home
+   * (site-scoped creators' actions belong to their home), then the
+   * assignee's home (so a manager's assignment lands in the assignee's
+   * house). Null survives only for agency-level actions.
+   */
+  private async resolveNewCorrectiveActionSite(
+    session: SessionUser,
+    input: {
+      siteId?: string | null;
+      qaAuditId?: string | null;
+      assignedToUserId?: string | null;
+    },
+    scope: {
+      assignments: StaffAssignment[];
+      individuals: { id: string; siteId: string }[];
+    },
+  ): Promise<{ siteId: string | null; qaAuditId: string | null }> {
+    let siteId = input.siteId ?? null;
+    const qaAuditId = input.qaAuditId ?? null;
+    if (qaAuditId) {
+      const { data: audit } = await this.client
+        .from("qa_audits")
+        .select("id, site_id")
+        .eq("id", qaAuditId)
+        .eq("agency_id", session.agencyId)
+        .maybeSingle();
+      if (!audit) throw new Error("QA review not found.");
+      const auditSite = (audit as Record<string, unknown>).site_id as string;
+      if (siteId && siteId !== auditSite) {
+        throw new Error("The corrective action's home must match its QA review.");
+      }
+      siteId = auditSite;
+    }
+    if (!siteId && !this.isCorrectiveActionManager(session) && session.siteId) {
+      siteId = session.siteId;
+    }
+    if (!siteId && input.assignedToUserId) {
+      const member = await this.correctiveActionMembership(session, input.assignedToUserId);
+      if (member?.siteId) siteId = member.siteId;
+    }
+    await this.assertCorrectiveActionPlacement(
+      session,
+      siteId,
+      input.assignedToUserId ?? null,
+      scope,
+    );
+    return { siteId, qaAuditId };
   }
 
   private mapCorrectiveActionRow(row: Record<string, unknown>): CorrectiveAction {
@@ -9866,7 +10009,22 @@ export class HostedApi implements ComplyraApi {
     if (!data || (data as Record<string, unknown>).agency_id !== session.agencyId) {
       throw new Error("Corrective action not found.");
     }
-    return data as Record<string, unknown>;
+    const row = data as Record<string, unknown>;
+    const scope = await this.correctiveActionScopeData(session);
+    if (
+      !correctiveActionInScope(
+        session,
+        {
+          agencyId: row.agency_id as string,
+          siteId: (row.site_id as string | null) ?? null,
+        },
+        scope.assignments,
+        scope.individuals,
+      )
+    ) {
+      throw new Error("Corrective action not found.");
+    }
+    return row;
   }
 
   async listCorrectiveActions(input?: {
@@ -9884,9 +10042,12 @@ export class HostedApi implements ComplyraApi {
     }
     const { data, error } = await query;
     throwIf(error, "Could not load corrective actions.");
-    let rows = (data ?? []).map((row) =>
-      this.mapCorrectiveActionRow(row as Record<string, unknown>),
-    );
+    const scope = await this.correctiveActionScopeData(session);
+    let rows = (data ?? [])
+      .map((row) => this.mapCorrectiveActionRow(row as Record<string, unknown>))
+      .filter((row) =>
+        correctiveActionInScope(session, row, scope.assignments, scope.individuals),
+      );
     if (input?.status) {
       rows = rows.filter(
         (row) => deriveCorrectiveActionStatus(row, now) === input.status,
@@ -9910,13 +10071,15 @@ export class HostedApi implements ComplyraApi {
       throwIf(profileError, "Could not verify the staff member.");
       if (!profile) throw new Error("Staff member not found.");
     }
+    const scope = await this.correctiveActionScopeData(session);
+    const placement = await this.resolveNewCorrectiveActionSite(session, input, scope);
     const { data, error } = await this.client
       .from("corrective_actions")
       .insert(
         buildCorrectiveActionRow({
           agencyId: session.agencyId,
           createdByUserId: session.userId,
-          data: input,
+          data: { ...input, siteId: placement.siteId, qaAuditId: placement.qaAuditId },
         }),
       )
       .select("*, profiles!corrective_actions_assigned_to_user_id_fkey(full_name)")
@@ -9954,12 +10117,23 @@ export class HostedApi implements ComplyraApi {
       throwIf(profileError, "Could not verify the staff member.");
       if (!profile) throw new Error("Staff member not found.");
     }
+    if (input.siteId !== undefined || input.assignedToUserId !== undefined) {
+      const scope = await this.correctiveActionScopeData(session);
+      const nextSiteId = input.siteId !== undefined ? input.siteId : current.siteId;
+      const nextAssigneeId =
+        input.assignedToUserId !== undefined ? input.assignedToUserId : current.assignedToUserId;
+      if (input.siteId === null && current.siteId && !this.isCorrectiveActionManager(session)) {
+        throw new Error("Only agency management can move an action agency-wide.");
+      }
+      await this.assertCorrectiveActionPlacement(session, nextSiteId, nextAssigneeId, scope);
+    }
     const patch: Record<string, unknown> = {};
     if (input.title !== undefined) patch.title = title;
     if (input.description !== undefined)
       patch.description = input.description?.trim() ?? "";
     if (input.assignedToUserId !== undefined)
       patch.assigned_to_user_id = input.assignedToUserId;
+    if (input.siteId !== undefined) patch.site_id = input.siteId;
     if (input.dueOn !== undefined) patch.due_on = dueOn;
     if (input.storedStatus !== undefined) patch.status = input.storedStatus;
     if (input.linkedRiskId !== undefined) patch.linked_risk_id = input.linkedRiskId;

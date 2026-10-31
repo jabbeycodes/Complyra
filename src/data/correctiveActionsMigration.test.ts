@@ -1,8 +1,11 @@
 /**
  * Static tests for supabase/migrations/20261031170000_hm_corrective_actions_seed.sql
- * (simulation batch 7): the house_manager pack gains correctiveActions.manage
- * in every layer the seed touches, and the flip is scoped to that one
- * role + key. No live database here — parse the migration text, like
+ * (simulation batch 7 + reviewer HOLD fix-up): the house_manager pack
+ * gains correctiveActions.manage in every layer the seed touches —
+ * seeded ONLY where the key is absent, never overwriting a stored
+ * value — and corrective_actions gains its site scope (columns,
+ * backfill, the in-scope helper, scoped policies, placement guard).
+ * No live database here — parse the migration text, like
  * delegationMigration.test.ts.
  */
 import test from "node:test";
@@ -57,13 +60,77 @@ test("missing keys merge into templates and agency roles; existing choices win",
   );
 });
 
-test("the deliberate flip is scoped to house_manager + this one key", () => {
-  const flips = norm.match(/set permissions = [at]\.permissions \|\| '\{"correctiveactions\.manage":true\}'::jsonb/g);
-  assert.equal(flips?.length, 2, "one flip for role_templates, one for agency_roles");
-  assert.ok(norm.includes("where t.key = 'house_manager'"), "template flip is HM-only");
+test("a stored value is never overwritten (reviewer HOLD point 2)", () => {
+  // The original draft flipped house_manager copies to true even where
+  // an agency had deliberately set the key. The reviewer required:
+  // seed only missing keys, preserve stored values. The only writes to
+  // permissions anywhere in the file are the canonical matrix upsert
+  // and the two missing-key merges (stored side wins per key).
   assert.ok(
-    norm.includes("where a.template_key = 'house_manager'"),
-    "agency_roles flip is HM-only",
+    !norm.includes("|| '{\"correctiveactions.manage\":true}'"),
+    "no per-key overwrite statement remains",
+  );
+  assert.ok(
+    !norm.includes("is distinct from 'true'"),
+    "no flip guard remains",
+  );
+  const writes = norm.match(/set permissions\s*=/g) ?? [];
+  assert.equal(writes.length, 3, "matrix upsert + two merges, nothing else writes permissions");
+});
+
+test("corrective_actions gains site + QA-audit columns with a backfill", () => {
+  assert.ok(norm.includes("add column if not exists site_id uuid null"));
+  assert.ok(norm.includes("add column if not exists qa_audit_id uuid null"));
+  assert.ok(norm.includes("references public.qa_audits (id)"));
+  // Backfill order: the linked audit's site, then the creator's home.
+  const auditFill = norm.indexOf("set site_id = qa.site_id");
+  const creatorFill = norm.indexOf("set site_id = m.site_id");
+  assert.ok(auditFill > -1 && creatorFill > auditFill, "audit backfill precedes creator backfill");
+  assert.ok(
+    norm.includes("m.user_id = ca.created_by_user_id"),
+    "creator backfill keys off the creator's membership",
+  );
+});
+
+test("the site scope is enforced in RLS through one helper (reviewer HOLD point 1)", () => {
+  assert.ok(
+    norm.includes("create or replace function private.corrective_action_in_scope("),
+    "scope helper created",
+  );
+  assert.ok(
+    norm.includes("private.can_read_site(p_agency_id, p_site_id)"),
+    "site reach goes through can_read_site",
+  );
+  for (const policy of [
+    "corrective_actions_select",
+    "corrective_actions_write",
+    "corrective_actions_visible",
+  ]) {
+    assert.ok(norm.includes(`drop policy if exists ${policy}`), `${policy} replaced`);
+    assert.ok(norm.includes(`create policy ${policy}`), `${policy} recreated`);
+  }
+  assert.ok(
+    norm.includes("private.has_permission(agency_id, 'correctiveactions.manage')"),
+    "writes still require the permission",
+  );
+});
+
+test("the identity guard judges assignee placement with ACTIVE assignments", () => {
+  assert.ok(
+    norm.includes("create or replace function private.corrective_action_identity_guard()"),
+    "guard replaced",
+  );
+  assert.ok(
+    norm.includes("assign corrective actions to staff who work at that home."),
+    "cross-site assignee is refused at the database boundary",
+  );
+  assert.ok(
+    norm.includes("a.ends_on is null or a.ends_on >= current_date"),
+    "ended assignments do not place an assignee at a home",
+  );
+  assert.ok(
+    norm.includes("a.starts_on <= current_date"),
+    "future assignments do not place an assignee at a home",
   );
 });
 

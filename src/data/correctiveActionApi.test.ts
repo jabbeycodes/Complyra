@@ -137,6 +137,233 @@ test("actions api: house manager can create and resolve (simulation batch 7)", a
   assert.equal(resolved.storedStatus, "resolved");
 });
 
+// ===== Site scope (reviewer HOLD fix-up, PR #199) =====
+// Corrective actions belong to a home: a house manager reaches only
+// their own home's actions, assignees must currently work at the home,
+// and site-less (agency-level) actions are management-only.
+
+const CEDAR_HM_ID = "00000000-0000-4000-8000-00000000h001";
+const CEDAR_HM_USERNAME = "cedar.hm";
+
+/** Seed a second house manager whose home is Cedar House. */
+function seedCedarHm(mem: MemoryStore, agencyId: string, cedarSiteId: string) {
+  mem.db.profiles.push({
+    id: CEDAR_HM_ID,
+    fullName: "Carol Cedar",
+    email: "cedar.hm@demo.complyrer.user",
+    jobTitle: "House Manager",
+    username: CEDAR_HM_USERNAME,
+    homeAgencyId: agencyId,
+    mustChangePassword: false,
+  });
+  mem.db.memberships.push({
+    id: "00000000-0000-4000-8000-00000000h001m",
+    agencyId,
+    userId: CEDAR_HM_ID,
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: cedarSiteId,
+    expiresOn: null,
+  });
+  mem.db.credentials.push({
+    userId: CEDAR_HM_ID,
+    email: "cedar.hm@demo.complyrer.user",
+    password: DEMO_PASSWORD
+  });
+}
+
+function siteIdByName(mem: MemoryStore, name: string): string {
+  return mem.db.sites.find((row) => row.name === name)!.id;
+}
+
+function userIdByUsername(mem: MemoryStore, username: string): string {
+  return mem.db.profiles.find((row) => row.username === username)!.id;
+}
+
+async function twoHmSetup() {
+  const mem = store();
+  const probe = new LocalApi(mem);
+  const admin = await probe.signIn(adminLogin());
+  seedCedarHm(mem, admin.agencyId, siteIdByName(mem, "Cedar House"));
+  await probe.signOut();
+  return mem;
+}
+
+test("site scope: each HM sees and manages only their own home's actions", async () => {
+  const mem = await twoHmSetup();
+  const api = new LocalApi(mem);
+
+  const cedarSession = await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: CEDAR_HM_USERNAME,
+    password: DEMO_PASSWORD
+  });
+  const cedarAction = await api.addCorrectiveAction({
+    title: "Cedar: fix the drill log",
+    dueOn: "2026-11-15",
+  });
+  assert.equal(cedarAction.siteId, siteIdByName(mem, "Cedar House"), "creator's home is inferred");
+  await api.signOut();
+
+  const willowSession = await api.signIn(hmLogin());
+  const willowAction = await api.addCorrectiveAction({
+    title: "Willow: re-train night shift",
+    dueOn: "2026-11-15",
+  });
+  assert.equal(willowAction.siteId, siteIdByName(mem, "Willow House"));
+  const willowList = await api.listCorrectiveActions();
+  assert.ok(willowList.some((row) => row.id === willowAction.id), "own home's action listed");
+  assert.ok(
+    !willowList.some((row) => row.id === cedarAction.id),
+    "the other home's action is NOT listed for this HM",
+  );
+  await assert.rejects(
+    () => api.resolveCorrectiveAction(cedarAction.id),
+    /not found/i,
+    "an HM cannot resolve another home's action",
+  );
+  await assert.rejects(
+    () => api.updateCorrectiveAction(cedarAction.id, { title: "Hijacked" }),
+    /not found/i,
+    "an HM cannot edit another home's action",
+  );
+  const resolved = await api.resolveCorrectiveAction(willowAction.id);
+  assert.equal(resolved.storedStatus, "resolved", "own home's action still resolves");
+  await api.signOut();
+
+  // A DSP at Willow reads Willow's actions (house team visibility) but
+  // never Cedar's.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "casey.adams",
+    password: DEMO_PASSWORD
+  });
+  const dspList = await api.listCorrectiveActions();
+  assert.ok(dspList.some((row) => row.id === willowAction.id), "Willow DSP sees Willow's action");
+  assert.ok(!dspList.some((row) => row.id === cedarAction.id), "Willow DSP cannot see Cedar's");
+  assert.ok(cedarSession.userId);
+  assert.ok(willowSession.userId);
+});
+
+test("site scope: assignee must currently work at the action's home", async () => {
+  const mem = await twoHmSetup();
+  const api = new LocalApi(mem);
+  const willow = siteIdByName(mem, "Willow House");
+  const willowDsp = userIdByUsername(mem, "jordan.lee");
+  const cedarDsp = userIdByUsername(mem, "alex.morgan");
+
+  await api.signIn(hmLogin()); // Willow HM
+  const ok = await api.addCorrectiveAction({
+    title: "Willow med-count retraining",
+    assignedToUserId: willowDsp,
+  });
+  assert.equal(ok.assignedToUserId, willowDsp);
+  assert.equal(ok.siteId, willow);
+  await assert.rejects(
+    () => api.addCorrectiveAction({ title: "Wrong house", assignedToUserId: cedarDsp }),
+    /work at that home/,
+    "a Cedar DSP cannot be assigned a Willow action",
+  );
+  await api.signOut();
+
+  // The rule binds agency management too.
+  await api.signIn(adminLogin());
+  await assert.rejects(
+    () =>
+      api.addCorrectiveAction({
+        title: "Wrong house, from admin",
+        siteId: willow,
+        assignedToUserId: cedarDsp,
+      }),
+    /work at that home/,
+  );
+  // Reassigning an existing action across homes is refused the same way.
+  await assert.rejects(
+    () => api.updateCorrectiveAction(ok.id, { assignedToUserId: cedarDsp }),
+    /work at that home/,
+  );
+});
+
+test("site scope: an HM cannot create an action at another home", async () => {
+  const mem = await twoHmSetup();
+  const api = new LocalApi(mem);
+  await api.signIn(hmLogin()); // Willow HM
+  await assert.rejects(
+    () =>
+      api.addCorrectiveAction({
+        title: "Cedar action from the Willow HM",
+        siteId: siteIdByName(mem, "Cedar House"),
+      }),
+    /home you manage/,
+  );
+});
+
+test("site scope: site-less actions are agency-level — management and auditors only", async () => {
+  const mem = await twoHmSetup();
+  const api = new LocalApi(mem);
+
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "melissa.grant", // program manager
+    password: DEMO_PASSWORD
+  });
+  const agencyAction = await api.addCorrectiveAction({
+    title: "Agency-wide policy refresh",
+  });
+  assert.equal(agencyAction.siteId, null, "no site inferred for a manager's unassigned action");
+  const pmList = await api.listCorrectiveActions();
+  assert.ok(pmList.some((row) => row.id === agencyAction.id), "PM sees the agency-level action");
+  await api.signOut();
+
+  await api.signIn(hmLogin()); // Willow HM
+  const hmList = await api.listCorrectiveActions();
+  assert.ok(
+    !hmList.some((row) => row.id === agencyAction.id),
+    "an HM does not see agency-level actions",
+  );
+  await assert.rejects(
+    () => api.resolveCorrectiveAction(agencyAction.id),
+    /not found/i,
+    "an HM cannot resolve an agency-level action",
+  );
+  await api.signOut();
+
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "mark.delaney", // auditor: sees everything, read-only
+    password: DEMO_PASSWORD
+  });
+  const auditorList = await api.listCorrectiveActions();
+  assert.ok(
+    auditorList.some((row) => row.id === agencyAction.id),
+    "the auditor reads agency-level actions",
+  );
+});
+
+test("site scope: a QA-audit link stamps the audit's home on the action", async () => {
+  const mem = store();
+  const api = new LocalApi(mem);
+  await api.signIn(adminLogin());
+  const cedarAudit = mem.db.qaAudits.find(
+    (row) => row.siteId === siteIdByName(mem, "Cedar House"),
+  )!;
+  const created = await api.addCorrectiveAction({
+    title: "Follow up the Cedar QA finding",
+    qaAuditId: cedarAudit.id,
+  });
+  assert.equal(created.siteId, cedarAudit.siteId);
+  assert.equal(created.qaAuditId, cedarAudit.id);
+  await assert.rejects(
+    () =>
+      api.addCorrectiveAction({
+        title: "Mismatched link",
+        qaAuditId: cedarAudit.id,
+        siteId: siteIdByName(mem, "Willow House"),
+      }),
+    /must match its QA review/,
+  );
+});
+
 test("actions api: overdue items sort first in listings", async () => {
   const api = new LocalApi(store());
   await api.signIn(adminLogin());

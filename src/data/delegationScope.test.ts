@@ -12,7 +12,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
-import { canActAtSite, dspScopeCoversIndividual } from "./access";
+import {
+  canActAtSite,
+  canReadIndividual,
+  dspRecipientCoversIndividual,
+  dspScopeCoversIndividual,
+} from "./access";
 import {
   createEvergreenSeed,
   DEMO_ADMIN_USERNAME,
@@ -262,6 +267,192 @@ test("canActAtSite mirrors can_read_site's assignment branch", () => {
   );
   // A NULL membership site alone never implies coverage.
   assert.equal(canActAtSite(nurse, "lawton", [], people, today), false);
+});
+
+const FORMER_DSP_ID = "00000000-0000-4000-8000-0000000000f1";
+const ACTIVE_DSP_ID = "00000000-0000-4000-8000-0000000000f2";
+const FUTURE_DSP_ID = "00000000-0000-4000-8000-0000000000f3";
+
+/** Seed a DSP with a NULL membership site (coverage only via assignments). */
+function seedAssignmentDsp(
+  s: MemoryStore,
+  agencyId: string,
+  userId: string,
+  name: string,
+) {
+  s.db.profiles.push({
+    id: userId,
+    fullName: name,
+    email: `${userId}@demo.complyrer.user`,
+    jobTitle: "DSP",
+    username: userId,
+    homeAgencyId: agencyId,
+    mustChangePassword: false,
+  });
+  s.db.memberships.push({
+    id: `m-${userId}`,
+    agencyId,
+    userId,
+    role: "dsp",
+    roleKey: "dsp",
+    siteId: null,
+    expiresOn: null,
+  });
+}
+
+function assignIndividual(
+  s: MemoryStore,
+  agencyId: string,
+  userId: string,
+  individualId: string,
+  overrides: Partial<{ startsOn: string; endsOn: string | null }> = {},
+) {
+  s.db.assignments.push({
+    id: `asg-${userId}-${individualId}`,
+    agencyId,
+    userId,
+    individualId,
+    siteId: null,
+    startsOn: overrides.startsOn ?? "2026-01-01",
+    endsOn: overrides.endsOn ?? null,
+  });
+}
+
+test("recipient eligibility: ended/future assignments are out, read access unchanged (HOLD point 3)", async () => {
+  const s = store();
+  const { api, agencyId } = await nurseApi(s);
+  assignSite(s, agencyId, NURSE_ID, siteId(s, "Cedar House"));
+  const ellis = personId(s, "Ellis Hart");
+
+  // A former DSP: assignment to Ellis ENDED in 2020. An active DSP:
+  // assignment running now. A future DSP: assignment starts in 2999.
+  seedAssignmentDsp(s, agencyId, FORMER_DSP_ID, "Former DSP");
+  assignIndividual(s, agencyId, FORMER_DSP_ID, ellis, {
+    startsOn: "2020-01-01",
+    endsOn: "2020-06-01",
+  });
+  seedAssignmentDsp(s, agencyId, ACTIVE_DSP_ID, "Active DSP");
+  assignIndividual(s, agencyId, ACTIVE_DSP_ID, ellis);
+  seedAssignmentDsp(s, agencyId, FUTURE_DSP_ID, "Future DSP");
+  assignIndividual(s, agencyId, FUTURE_DSP_ID, ellis, { startsOn: "2999-01-01" });
+
+  const recipients = await api.listDelegationRecipients(ellis);
+  const ids = recipients.map((row) => row.userId);
+  assert.ok(ids.includes(ACTIVE_DSP_ID), "active-assignment DSP is offered");
+  assert.ok(!ids.includes(FORMER_DSP_ID), "ended-assignment DSP is NOT offered as a recipient");
+  assert.ok(!ids.includes(FUTURE_DSP_ID), "future-assignment DSP is NOT offered as a recipient");
+
+  await assert.rejects(
+    () =>
+      api.createDelegation({
+        individualId: ellis,
+        taskTitle: "Fall prevention",
+        purpose: "Keep transfers safe.",
+        recipientUserIds: [FORMER_DSP_ID],
+      }),
+    /Choose recipients from the staff who work at this individual's site/,
+    "createDelegation refuses an ended-assignment recipient",
+  );
+  const { id } = await api.createDelegation({
+    individualId: ellis,
+    taskTitle: "Fall prevention",
+    purpose: "Keep transfers safe.",
+    recipientUserIds: [ACTIVE_DSP_ID],
+  });
+  assert.ok(id, "the active-assignment DSP can still receive a delegation");
+
+  // Read access is deliberately unchanged: the former DSP still covers
+  // the Individual under the read rule, so they can correct their own
+  // historical notes — only NEW delegations are gated.
+  const ellisRecord = s.db.individuals.find((row) => row.id === ellis)!;
+  const member = { userId: FORMER_DSP_ID, agencyId, siteId: null };
+  assert.equal(
+    dspScopeCoversIndividual(member, ellisRecord, s.db.assignments, s.db.individuals),
+    true,
+    "read rule still covers the former DSP (endsOn ignored for reads)",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(member, ellisRecord, s.db.assignments, s.db.individuals),
+    false,
+    "recipient rule excludes the former DSP",
+  );
+  const formerSession = {
+    userId: FORMER_DSP_ID,
+    agencyId,
+    siteId: null,
+    roleKey: "dsp",
+    permissions: { "individuals.view": true },
+  } as unknown as SessionUser;
+  assert.equal(
+    canReadIndividual(formerSession, ellisRecord, s.db.assignments, s.db.individuals),
+    true,
+    "canReadIndividual is unchanged for the former DSP",
+  );
+});
+
+test("dspRecipientCoversIndividual: home, active assignment in; ended/future out", () => {
+  const today = "2026-09-25";
+  const person = { id: "maya", agencyId: "agency-1", siteId: "lawton" };
+  const people = [person, { id: "casey", siteId: "cedar" }];
+  const dsp = { userId: "dsp-1", agencyId: "agency-1", siteId: null as string | null };
+  const base = {
+    id: "a-1",
+    agencyId: "agency-1",
+    userId: "dsp-1",
+    individualId: null as string | null,
+    siteId: null as string | null,
+    startsOn: "2026-01-01",
+    endsOn: null as string | null,
+  };
+  assert.equal(dspRecipientCoversIndividual(dsp, person, [], people, today), false);
+  assert.equal(
+    dspRecipientCoversIndividual({ ...dsp, siteId: "lawton" }, person, [], people, today),
+    true,
+    "membership home covers",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(dsp, person, [{ ...base, individualId: "maya" }], people, today),
+    true,
+    "active Individual assignment covers",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(dsp, person, [{ ...base, siteId: "lawton" }], people, today),
+    true,
+    "active site assignment covers",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(
+      dsp,
+      person,
+      [{ ...base, individualId: "maya", endsOn: "2026-09-24" }],
+      people,
+      today,
+    ),
+    false,
+    "an assignment that ended yesterday does not cover",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(
+      dsp,
+      person,
+      [{ ...base, individualId: "maya", startsOn: "2026-10-01" }],
+      people,
+      today,
+    ),
+    false,
+    "an assignment that starts next week does not cover",
+  );
+  assert.equal(
+    dspRecipientCoversIndividual(
+      dsp,
+      person,
+      [{ ...base, individualId: "maya", endsOn: "2026-09-25" }],
+      people,
+      today,
+    ),
+    true,
+    "an assignment ending today still covers today",
+  );
 });
 
 test("dspScopeCoversIndividual: home site, Individual assignment, site assignment", () => {
