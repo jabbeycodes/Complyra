@@ -5221,10 +5221,18 @@ export class HostedApi implements ComplyraApi {
     const countedOn = input.countedOn ?? todayIso();
     assertCalendarDate(countedOn, "Use a valid count date.");
     const nextPillsPerDay = med.kind === "prn" ? 0 : input.pillsPerDay;
-    // Variance guard: a count that disagrees with the countdown's expected
-    // on-hand figure must carry an explanation — never a silent overwrite.
-    // The RPC re-checks and stores the expected figure + note as evidence.
-    const { expectedCountNow, countVarianceProblem } = await this.p6lib();
+    // Variance guard: a count that disagrees with the expected on-hand
+    // figure must carry an explanation — never a silent overwrite. The
+    // RPC is the enforcement point: it recomputes the authoritative
+    // expected figure from the persisted baseline, MAR marks, PRN doses,
+    // and dose exceptions, rejects a supplied figure that disagrees with
+    // its own (stale or spoofed), and persists its server-computed
+    // figure as evidence. The client-side figure computed here is
+    // advisory only — it is passed so the server can detect a stale
+    // snapshot, and the user's note is forwarded whenever one was given
+    // (the server stores it only when a real variance exists). Server
+    // refusals surface verbatim through throwIf below.
+    const { expectedCountNow } = await this.p6lib();
     const today = todayIso();
     const views = await this.p6inventoryViews(session, med.individualId, today);
     const view = views.find((row) => row.medicationId === med.id);
@@ -5237,20 +5245,11 @@ export class HostedApi implements ComplyraApi {
       (markRow) => this.mapMedDoseMark(markRow),
     );
     const expected = view ? expectedCountNow(view, marks, today) : null;
-    const problem = countVarianceProblem(
-      expected,
-      input.remainingPills,
-      input.varianceReason,
-    );
-    if (problem) throw new Error(problem);
-    const differs =
-      expected !== null &&
-      Math.round(expected * 100) !== Math.round(input.remainingPills * 100);
     const { error: saveError } = await this.client.rpc("record_medication_delivery", {
       p_medication_id: med.id, p_remaining: input.remainingPills,
       p_daily: nextPillsPerDay, p_counted_on: countedOn,
       p_expected: expected,
-      p_variance_reason: differs ? (input.varianceReason?.trim() ?? null) : null,
+      p_variance_reason: input.varianceReason?.trim() ? input.varianceReason.trim() : null,
     });
     throwIf(saveError, "Could not record the medication count.");
   }

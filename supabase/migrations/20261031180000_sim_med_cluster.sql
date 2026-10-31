@@ -6,6 +6,14 @@
 --    (expected 30, entered 28, stock simply became 28). The delivery row
 --    now stores the countdown-expected figure and the variance note, and
 --    the RPC refuses a mismatching count that carries no note.
+--    Reviewer HOLD fix-up (2026-10-31): the expected figure is computed
+--    INSIDE the RPC from the persisted baseline (newest delivery/count
+--    row, or the medication row's maintained count) minus the persisted
+--    administrations / PRN doses / dose exceptions since it — the same
+--    definition the clients render (expectedCountNow). The caller's
+--    p_expected is advisory only: a supplied figure that disagrees with
+--    the server's is rejected outright, and the persisted expected_pills
+--    is always the server-computed value.
 -- 2. PRN AUDIT RECORD (batch 11): a PRN dose saved with no reason, no
 --    follow-up, and no per-dose record beyond a counter. prn_dose_logs
 --    gains the reason (required) and an optional follow-up note, and
@@ -31,12 +39,21 @@ alter table public.med_dose_marks
 
 -- The 4-argument delivery RPC is replaced by a 6-argument version that
 -- carries the expected figure + variance note; drop the old signature so
--- PostgREST never sees an ambiguous overload.
+-- PostgREST never sees an ambiguous overload. The 6-argument version
+-- computes the authoritative expected figure server-side (below) and
+-- treats the caller's p_expected as advisory only.
 drop function if exists public.record_medication_delivery(uuid, numeric, numeric, date);
 
 create or replace function public.record_medication_delivery(p_medication_id uuid, p_remaining numeric, p_daily numeric, p_counted_on date, p_expected numeric default null, p_variance_reason text default null)
 returns void language plpgsql security definer set search_path = public, pg_temp as $$
-declare m medications%rowtype; daily numeric; note text := nullif(btrim(coalesce(p_variance_reason, '')), '');
+declare
+  m medications%rowtype;
+  daily numeric;
+  note text := nullif(btrim(coalesce(p_variance_reason, '')), '');
+  base medication_deliveries%rowtype;
+  utc_today date := (now() at time zone 'UTC')::date;
+  expected numeric := null;
+  expected_label text;
 begin
   select * into m from medications where id = p_medication_id for update;
   if m.id is null or not private.can_read_individual(m.agency_id, m.individual_id)
@@ -46,22 +63,107 @@ begin
   if p_remaining is null or p_remaining::text in ('NaN','Infinity','-Infinity') or p_remaining < 0 or p_counted_on is null then
     raise exception 'Enter a valid count and date.';
   end if;
-  if p_expected is not null and p_remaining <> p_expected and note is null then
-    raise exception 'The count differs from the expected % pills on hand. Add a note explaining the variance.', p_expected;
+
+  -- SERVER-AUTHORITATIVE EXPECTED COUNT. Computed here from persisted
+  -- records only; the caller's p_expected is never trusted (see the
+  -- stale/spoofed-expectation rejection below). Mirrors the countdown
+  -- the clients render (expectedCountNow -> medCountdown /
+  -- projectMedInventory), whose "today" is the UTC date (todayIso):
+  --   * Baseline: the newest delivery/count row (counted_on desc, then
+  --     created_at desc). With no delivery row, the medication row's
+  --     maintained count (dated by last_delivery_on) is the baseline;
+  --     with neither, the med was never counted and expected stays null.
+  --   * Scheduled, delivery baseline: baseline pills minus one dose's
+  --     pills (the baseline row's pills_per_day over the med's recorded
+  --     dose times) for every Given MAR mark whose scheduled Central
+  --     moment (dose_date + dose_time in America/Chicago) is strictly
+  --     after the moment the baseline was recorded and whose date is
+  --     not in the future, minus Wasted exception pills recorded after
+  --     the baseline. Missed/LOA/on-hold marks and Refused/Held
+  --     exceptions never move the count.
+  --   * PRN: the projection's current count — baseline pills minus PRN
+  --     doses and dose exceptions of every kind dated inside
+  --     [baseline date, today]. A baseline with no dose logs at all
+  --     falls back to the medication row's lower maintained count (a
+  --     direct count correction), exactly as the projection does.
+  --   * Scheduled, maintained count: the row's count as-is — both
+  --     backends already net recorded doses into it.
+  -- The result is rounded to hundredths and floored at zero, as in the
+  -- client definition.
+  select * into base from medication_deliveries
+    where medication_id = m.id
+    order by counted_on desc, created_at desc, id desc
+    limit 1;
+  if base.id is not null then
+    if m.kind = 'prn' then
+      expected := greatest(0, round((
+        case when not exists (select 1 from prn_dose_logs where medication_id = m.id)
+               and m.remaining_pills < base.remaining_pills
+             then m.remaining_pills else base.remaining_pills end
+        - coalesce((select sum(pills_used) from prn_dose_logs
+                     where medication_id = m.id and pills_used > 0
+                       and logged_on >= base.counted_on and logged_on <= utc_today), 0)
+        - coalesce((select sum(pills_affected) from med_dose_exceptions
+                     where medication_id = m.id and pills_affected > 0
+                       and occurred_on >= base.counted_on and occurred_on <= utc_today), 0)
+      ) * 100) / 100);
+    else
+      expected := greatest(0, round((
+        base.remaining_pills
+        - (select count(*) from med_dose_marks
+            where medication_id = m.id and status = 'given'
+              and dose_date <= utc_today
+              and (dose_date + dose_time::time) at time zone 'America/Chicago' > base.created_at)
+          * (base.pills_per_day / greatest(1, coalesce((select cardinality(dose_times) from med_inventory where medication_id = m.id), 0)))
+        - coalesce((select sum(pills_affected) from med_dose_exceptions
+                     where medication_id = m.id and kind = 'wasted' and pills_affected > 0
+                       and created_at > base.created_at), 0)
+      ) * 100) / 100);
+    end if;
+  elsif m.last_delivery_on is not null then
+    if m.kind = 'prn' then
+      expected := greatest(0, round((
+        m.remaining_pills
+        - coalesce((select sum(pills_used) from prn_dose_logs
+                     where medication_id = m.id and pills_used > 0
+                       and logged_on >= m.last_delivery_on and logged_on <= utc_today), 0)
+        - coalesce((select sum(pills_affected) from med_dose_exceptions
+                     where medication_id = m.id and pills_affected > 0
+                       and occurred_on >= m.last_delivery_on and occurred_on <= utc_today), 0)
+      ) * 100) / 100);
+    else
+      expected := greatest(0, round(m.remaining_pills * 100) / 100);
+    end if;
   end if;
+
+  if expected is not null then
+    expected_label := case when expected = trunc(expected) then trunc(expected)::bigint::text
+                           else rtrim(round(expected, 2)::text, '0') end;
+    -- A supplied expectation that disagrees with the server's figure
+    -- means the caller's snapshot is stale or fabricated. The count is
+    -- refused outright — a variance note cannot launder it — so the
+    -- caller re-reads the medication and counts against fresh figures.
+    if p_expected is not null and round(p_expected * 100) <> round(expected * 100) then
+      raise exception 'The expected count changed on the server: % pills on hand are now expected. Review the medication and record the count again.', expected_label;
+    end if;
+    if round(p_remaining * 100) <> round(expected * 100) and note is null then
+      raise exception 'The count differs from the expected % pills on hand. Add a note explaining the variance.', expected_label;
+    end if;
+  end if;
+
   daily := case when m.kind = 'prn' then 0 else p_daily end;
   if m.kind = 'scheduled' and (daily is null or daily::text in ('NaN','Infinity','-Infinity') or daily <= 0) then
     raise exception 'Set pills per day for a scheduled medication.';
   end if;
   update medications set remaining_pills = p_remaining, pills_per_day = daily, last_delivery_on = p_counted_on, last_countdown_on = p_counted_on where id = m.id;
   insert into medication_deliveries(agency_id, medication_id, counted_on, remaining_pills, pills_per_day, recorded_by, expected_pills, variance_reason)
-    values(m.agency_id, m.id, p_counted_on, p_remaining, daily, auth.uid(), p_expected,
-      case when p_expected is not null and p_remaining <> p_expected then note else null end);
+    values(m.agency_id, m.id, p_counted_on, p_remaining, daily, auth.uid(), expected,
+      case when expected is not null and round(p_remaining * 100) <> round(expected * 100) then note else null end);
   insert into audit_events(agency_id, actor_id, action, target_type, target_id, detail)
     values(m.agency_id, auth.uid(), 'medication.delivery', 'medication', m.id,
       'Recorded count: ' || p_remaining::text ||
-      case when p_expected is not null and p_remaining <> p_expected
-        then ' (expected ' || p_expected::text || ' — variance: ' || note || ')' else '' end);
+      case when expected is not null and round(p_remaining * 100) <> round(expected * 100)
+        then ' (expected ' || expected_label || ' — variance: ' || note || ')' else '' end);
 end $$;
 
 revoke all on function public.record_medication_delivery(uuid, numeric, numeric, date, numeric, text) from public, anon;
