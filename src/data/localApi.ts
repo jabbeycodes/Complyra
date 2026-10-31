@@ -3041,7 +3041,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           : null))
       .filter((id): id is string => Boolean(id)),
   )];
-  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && (canAccessSite(session, row.id) || assignmentSiteIds.includes(row.id)));
   const individuals = canViewPeople
     ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
     : [];
@@ -3051,7 +3051,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     (isAgencyWideViewer(session) || row.userId === session.userId || (row.siteId && siteIds.has(row.siteId))));
   const allRequirements = store.db.requirements.filter(
     (row) => row.agencyId === session.agencyId && canViewPeople &&
-      (row.individualId ? personIds.has(row.individualId) : siteIds.has(row.siteId)),
+      siteIds.has(row.siteId) && (!row.individualId || personIds.has(row.individualId)),
   );
   const scorecard = metrics((session.roleKey === "hr"
     ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)
@@ -16101,3 +16101,4 @@ export function createLocalApi(store?: MemoryStore) {
 }
 
 export { browserStore };
+
