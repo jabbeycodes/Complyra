@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(32);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A + B. Users: DSP subject (…001), DSP peer (…002), HM of the
@@ -25,7 +25,7 @@ insert into auth.users(id,email) values
  ('d4000000-0000-0000-0000-000000000009','perf-admin@example.invalid'),
  ('d4000000-0000-0000-0000-000000000007','perf-auditor@example.invalid'),
  ('d4000000-0000-0000-0000-000000000008','perf-outsider@example.invalid');
-update profiles set must_change_password=<redacted>
+update profiles set must_change_password=false
  where id::text like 'd4000000-%';
 update profiles set home_agency_id='a4000000-0000-0000-0000-000000000001'
  where id::text like 'd4000000-%' and id <> 'd4000000-0000-0000-0000-000000000008';
@@ -167,10 +167,14 @@ select is((select count(*)::int from hr_staff_corrective_actions where staff_id=
   'An administrator reads the subject''s corrective actions');
 
 -- ---------------- No deletion ----------------
+-- The migration grants authenticated select/insert/update only —
+-- there is no DELETE grant at all (20261030150000), so a delete is
+-- refused outright with 42501 rather than silently touching nothing.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000001"}',true);
-delete from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001';
+select throws_ok($$delete from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001'$$,
+  '42501',null,'Performance records cannot be deleted');
 select is((select count(*)::int from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001'),1,
-  'Performance records cannot be deleted');
+  'The record survives the delete attempt');
 
 -- ---------------- Outsider ----------------
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000008"}',true);

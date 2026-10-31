@@ -150,8 +150,11 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3000000-
 
 select is((select count(*)::int from house_card_entries where site_id='c3000000-0000-0000-0000-000000000002'),2,
   'Auditor reads the ledger at every home in the agency');
+-- Dated two months back: this home's current month was signed closed
+-- above, and the closed-month guard (P0001) fires before the RLS
+-- denial this assertion targets. An open month isolates the 42501.
 select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by)
-  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000002',current_date,'credit','',1000,'d3000000-0000-0000-0000-000000000005')$$,
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000002',(current_date - interval '2 months')::date,'credit','',1000,'d3000000-0000-0000-0000-000000000005')$$,
   '42501',null,'Auditor cannot record an entry');
 select lives_ok($$update house_card_entries set location='Auditor edit' where id='f3000000-0000-0000-0000-000000000003'$$,
   'An auditor update runs without error but touches nothing');
@@ -166,8 +169,10 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3000000-
 
 select is((select count(*)::int from house_card_entries where site_id='c3000000-0000-0000-0000-000000000001'),0,
   'Nurse cannot read the house card ledger');
+-- Open month, as with the auditor check above: Home A's current
+-- month is closed, which would mask the RLS denial with P0001.
 select throws_ok($$insert into house_card_entries(agency_id,site_id,entry_date,kind,location,amount_cents,recorded_by)
-  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',current_date,'credit','',1000,'d3000000-0000-0000-0000-000000000006')$$,
+  values ('a3000000-0000-0000-0000-000000000001','c3000000-0000-0000-0000-000000000001',(current_date - interval '2 months')::date,'credit','',1000,'d3000000-0000-0000-0000-000000000006')$$,
   '42501',null,'Nurse cannot record an entry');
 
 select * from finish();

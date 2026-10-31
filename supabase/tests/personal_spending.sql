@@ -163,8 +163,11 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-
 
 select is((select count(*)::int from personal_spending_entries where individual_id='e4000000-0000-0000-0000-000000000002'),2,
   'Auditor reads the ledger of every Individual in the agency');
+-- Dated two months back: this Individual's current month was signed
+-- closed above, and the closed-month guard (P0001) fires before the
+-- RLS denial this assertion targets. An open month isolates the 42501.
 select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
-  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',current_date,'spend','Walmart','Socks',500,'d4000000-0000-0000-0000-000000000005')$$,
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000002',(current_date - interval '2 months')::date,'spend','Walmart','Socks',500,'d4000000-0000-0000-0000-000000000005')$$,
   '42501',null,'Auditor cannot record an entry');
 select lives_ok($$update personal_spending_entries set location='Auditor edit' where id='f4000000-0000-0000-0000-000000000003'$$,
   'An auditor update runs without error but touches nothing');
@@ -179,8 +182,11 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-
 
 select is((select count(*)::int from personal_spending_entries where individual_id='e4000000-0000-0000-0000-000000000001'),0,
   'Nurse cannot read a personal spending ledger');
+-- Open month, as with the auditor check above: this Individual has
+-- both the current and previous months closed in this file, which
+-- would mask the RLS denial with P0001.
 select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
-  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',current_date,'spend','CVS','Vitamins',900,'d4000000-0000-0000-0000-000000000006')$$,
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '2 months')::date,'spend','CVS','Vitamins',900,'d4000000-0000-0000-0000-000000000006')$$,
   '42501',null,'Nurse cannot record an entry');
 
 select * from finish();

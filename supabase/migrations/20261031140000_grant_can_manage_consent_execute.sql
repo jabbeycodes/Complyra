@@ -1,0 +1,27 @@
+-- 20261031140000 - Repair: rights packet writes are broken for every
+-- role in the hosted app.
+--
+-- private.can_manage_consent(uuid, uuid) had its EXECUTE revoked from
+-- public/anon/authenticated in 20261027140000 (line 342), when the
+-- helper was only ever called inside other security-definer
+-- functions (consent guards and RPCs - those calls run as the
+-- function owner, so they never needed the caller's grant).
+--
+-- Migration 20261030170000 then used the helper DIRECTLY in the
+-- rights_packets and rights_packet_evidence RLS policies (insert,
+-- completion update, evidence insert). Policy expressions evaluate
+-- with the querying user's privileges, so every manager write -
+-- starting a packet, completing one, filing evidence - has failed
+-- with 42501 'permission denied for function can_manage_consent'
+-- since the rights packet store shipped.
+--
+-- The predicate only answers whether the CALLER's own memberships
+-- let them manage consents for one Individual (it is security
+-- definer and keyed to auth.uid()), the same shape as
+-- private.role_key_in and private.can_read_individual, which
+-- policies call directly. Grant EXECUTE to authenticated only;
+-- anon stays revoked. Caught by supabase/tests/rights_packets.sql
+-- in CI (the read paths always worked - the read policies use
+-- can_read_individual, which was never revoked).
+
+grant execute on function private.can_manage_consent(uuid, uuid) to authenticated;
