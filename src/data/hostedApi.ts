@@ -1,4 +1,4 @@
-import { validateOperatorPeriod } from "./operator";
+import { validateOperatorPeriod, validateOperatorAi } from "./operator";
 import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -2700,6 +2700,21 @@ export class HostedApi implements ComplyraApi {
       provisionedBy: row.provisioned_by === "platform" ? "platform" : "self",
       status: row.status as AgencyStatus,
     }));
+  }
+
+  async operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings> {
+    const session=await this.requireSession(); if(!session.platformAdmin) throw new Error("Operator access required.");
+    const {data,error}=await this.client.rpc("operator_ai_settings",{p_agency_id:agencyId}); throwIf(error,"Could not load agency AI settings.");
+    return data as import("./seed").LocalAgencyAiSettings;
+  }
+  async operatorSaveAi(input: import("./operator").OperatorAiInput) {
+    const session=await this.requireSession(); if(!session.platformAdmin) throw new Error("Operator access required."); validateOperatorAi(input);
+    const {error}=await this.client.rpc("operator_save_ai",{p_agency_id:input.agencyId,p_model:input.model,p_enabled:input.enabled,p_acknowledged:input.policyAcknowledged}); throwIf(error,"Could not save agency AI settings.");
+  }
+  async operatorVerifyAi(agencyId: string): Promise<{ok:boolean;error?:string}> {
+    await this.operatorAi(agencyId);
+    const result=await invokeEdgeFunction<{ok?:boolean;error?:string}>(this.client,"extract-pcsp",{action:"verify",agency_id:agencyId});
+    return {ok:result.ok===true,error:result.error};
   }
 
   async operatorOverview(period: import("./operator").OperatorPeriod): Promise<import("./operator").OperatorOverviewData> {

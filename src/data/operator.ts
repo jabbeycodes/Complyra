@@ -24,3 +24,9 @@ export function summarizeOperatorAgencies(rows: OperatorAgency[], p: OperatorPer
  const active=selected.filter(a=>a.status==="active"&&a.active).length;
  return {total:selected.length,active,inactive:selected.length-active,pending:selected.filter(a=>a.status==="pending").length,registrations:series.reduce((n,d)=>n+d.signups,0),activity,unknownDates:selected.filter(a=>!a.createdAt).length,series};
 }
+
+export interface OperatorAiInput { agencyId: string; model: string; enabled: boolean; policyAcknowledged: boolean; }
+export function validateOperatorAi(input: OperatorAiInput) {
+ if(!input.model.trim() || input.model.length>120) throw new Error("Enter a model name of at most 120 characters.");
+ if(input.enabled && !input.policyAcknowledged) throw new Error("Confirm authorization and required agreements before enabling AI processing.");
+}

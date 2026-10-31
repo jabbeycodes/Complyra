@@ -93,7 +93,6 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
 import AiSettingsPage from "./features/documents/AiSettingsPage";
-import { canManageAiSettings } from "./features/documents/documents";
 import { downloadBlob } from "./data/openFile";
 import {
   buildComplianceReportPdf,
@@ -754,14 +753,12 @@ export default function App() {
     );
   }
   const navItems = [
+    { title: "Operator Control Center", items: [["Operator overview", LayoutDashboard], ["Operator agencies", Building2], ["Platform", ShieldCheck], ["AI settings", ServerCog]] },
     {
       title: "Programs",
       items: [
         ["Overview", LayoutDashboard],
         ["Scheduling", CalendarClock],
-        ["Platform", ShieldCheck],
-        ["Operator overview", LayoutDashboard],
-        ["Operator agencies", Building2],
         ["Individuals", Users],
         ["Appointments", CalendarDays],
         ["Consents", FileText],
@@ -785,7 +782,6 @@ export default function App() {
         ["Report Library", LibraryBig],
         ["Acknowledgments", PenLine],
         ["Activity log", History],
-        ["AI settings", ServerCog],
       ],
     },
     {
@@ -1900,9 +1896,7 @@ export default function App() {
                     ))}
                   </section>
                   <p className="quiet-note">
-                    This local demonstration timeline is editable browser data.
-                    A tamper-resistant server audit trail is part of the
-                    production architecture.
+                    {usingHostedBackend ? "Recorded agency audit events; coverage varies by workflow. Operator events are available in the operator explorer." : "This local demonstration timeline is editable browser data."}
                   </p>
                 </>
               )}
@@ -2067,7 +2061,7 @@ export default function App() {
                       )}
                     </Disclosure>
                   </section>
-                  {canManageAiSettings(session) && <AiSettingsPage />}
+
                 </>
               )}
               {page === "Help" && (

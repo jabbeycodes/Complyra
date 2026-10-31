@@ -6,7 +6,7 @@ import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApprove
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { Activity, Plan, Requirement } from "../domain";
 import { SHOWCASE_REVISION } from "./demoShowcase";
-import { summarizeOperatorAgencies } from "./operator";
+import { summarizeOperatorAgencies, validateOperatorAi } from "./operator";
 import { AGENCY_ID, createEvergreenSeed, type LocalDatabase } from "./seed";
 import type {
   LocalAgencyAiSettings,
@@ -663,6 +663,9 @@ export interface ComplyraApi {
   ): Promise<void>;
   updateAgencyRole(roleKey: string, permissions: PermissionMap): Promise<void>;
   resetMemberPassword(userId: string): Promise<{ tempPassword: string }>;
+  operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings>;
+  operatorSaveAi(input: import("./operator").OperatorAiInput): Promise<void>;
+  operatorVerifyAi(agencyId: string): Promise<{ok:boolean; error?:string}>;
   operatorOverview(period: import("./operator").OperatorPeriod): Promise<import("./operator").OperatorOverviewData>;
   operatorDirectory(): Promise<import("./operator").OperatorAgency[]>;
   listPendingAgencies(): Promise<PendingAgency[]>;
@@ -4521,6 +4524,26 @@ export class LocalApi implements ComplyraApi {
         status: row.status,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async operatorAi(agencyId: string): Promise<import("./seed").LocalAgencyAiSettings> {
+    const session = assertSession(this.store); if (!session.platformAdmin) throw new Error("Operator access required.");
+    if (!this.store.db.agencies.some(a=>a.id===agencyId)) throw new Error("Agency not found.");
+    return structuredClone((this.store.db.agencyAiSettings ?? []).find(a=>a.agencyId===agencyId) ?? {agencyId, aiProcessingEnabled:false, model:"gemini-2.5-flash",serviceAccountVerifiedAt:null,vertexProjectId:null});
+  }
+  async operatorSaveAi(input: import("./operator").OperatorAiInput) {
+    await this.operatorAi(input.agencyId); validateOperatorAi(input);
+    const rows=this.store.db.agencyAiSettings ??= []; const current=await this.operatorAi(input.agencyId);
+    const updated={...current,model:input.model.trim(),aiProcessingEnabled:input.enabled};
+    const index=rows.findIndex(a=>a.agencyId===input.agencyId); if(index<0) rows.push(updated); else rows[index]=updated;
+    const session=assertSession(this.store);
+    this.store.db.audit.push({id:crypto.randomUUID(),agencyId:input.agencyId,actorId:session.userId,action:"ai_settings_changed",targetType:"agency",targetId:input.agencyId,detail:`Model ${input.model.trim()}; processing ${input.enabled ? "enabled" : "disabled"}; authorization acknowledged: ${input.policyAcknowledged}`,createdAt:new Date().toISOString()});
+    await persistMeta(this.store);
+  }
+  async operatorVerifyAi(agencyId: string) {
+    await this.operatorAi(agencyId);
+    // Local mode never contacts Vertex or fabricates a production verification.
+    return {ok:false,error:"Local demo: no Vertex service account is connected. Hosted verification is required."};
   }
 
   async operatorOverview(period: import("./operator").OperatorPeriod) {

@@ -40,7 +40,7 @@ test("agency admin cannot see or open AI settings", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "AI settings" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Verify service account" })).toHaveCount(0);
-  await expect(page.getByLabel("AI model name")).toHaveCount(0);
+  await expect(page.getByLabel("AI model", { exact: true })).toHaveCount(0);
 
   await page.evaluate(() => {
     location.hash = "AI settings";
@@ -54,11 +54,11 @@ test("platform operator can open and use AI settings", async ({ page }) => {
   await signIn(page, "COMPLYRER-MO", "platform.owner");
 
   await openNavPage(page, "AI settings");
-  await expect(page.getByRole("heading", { name: "AI settings" })).toBeVisible();
-  await expect(page.getByLabel("AI model name")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save model" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operator Control Center · AI extraction" })).toBeVisible();
+  await expect(page.getByLabel("AI model", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save agency policy" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Verify service account" })).toBeVisible();
 
   await openNavPage(page, "Settings");
-  await expect(page.getByRole("heading", { name: "AI settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operator Control Center · AI extraction" })).toHaveCount(0);
 });

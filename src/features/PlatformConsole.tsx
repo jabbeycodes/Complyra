@@ -5,8 +5,6 @@ import { useData } from "../data/DataProvider";
 import { buildAgencyCode, suggestAgencySlug } from "../data/agencyCode";
 import { US_STATES } from "../data/usStates";
 import type { PendingAgency } from "../data/types";
-import { createRulesStore } from "../data/rulesStore";
-import { AgencyRulesPanel } from "./AgencyRulesPanel";
 
 export default function PlatformConsole({
   onSaved,
@@ -15,18 +13,6 @@ export default function PlatformConsole({
 }) {
   const { api, refresh, session } = useData();
   const [pending, setPending] = useState<PendingAgency[]>([]);
-  const [allAgencies, setAllAgencies] = useState<PendingAgency[]>([]);
-  const rulesStore = useMemo(
-    () =>
-      createRulesStore({
-        userId: session?.userId ?? "",
-        fullName: session?.fullName ?? "",
-        isOperator: Boolean(session?.platformAdmin),
-        adminOfAgencyId: null,
-        memberOfAgencyIds: session ? [session.agencyId] : [],
-      }),
-    [session],
-  );
   const [reviewReason, setReviewReason] = useState("");
   const [busyAgency, setBusyAgency] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,12 +34,8 @@ export default function PlatformConsole({
   );
 
   async function load() {
-    const [pendingRows, everyAgency] = await Promise.all([
-      api.listPendingAgencies(),
-      api.listAgencies(),
-    ]);
+    const pendingRows = await api.listPendingAgencies();
     setPending(pendingRows);
-    setAllAgencies(everyAgency.filter((a) => a.status === "active"));
   }
 
   useEffect(() => {
@@ -75,7 +57,7 @@ export default function PlatformConsole({
   return (
     <>
       <PageHeading
-        title="Agencies"
+        title="Agency reviews & provisioning"
         description="Provider codes are always ALL CAPS."
       />
       {error && (
@@ -265,7 +247,7 @@ export default function PlatformConsole({
           </form>
         )}
       </section>
-      <AgencyRulesPanel agencies={allAgencies} store={rulesStore} onSaved={onSaved} />
+
     </>
   );
 }
