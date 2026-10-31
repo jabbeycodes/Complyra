@@ -61,15 +61,15 @@ insert into public.individuals (id, agency_id, site_id, full_name, date_of_birth
 on conflict (id) do nothing;
 
 -- One awaiting packet, created by the home HM (seeded directly).
-insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name) values
-  ('d1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','Dana Hart');
+insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name, copy_version) values
+  ('d1111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','Dana Hart','complyrer-rights-2026-10-v1');
 
 -- Cross-agency control: an Agency B packet + its evidence (seeded
 -- directly, evidence in the migration's jsonb shape), readable by
 -- Agency B's own HM — so the administrator's zero counts in the
 -- admin section below are meaningful, not vacuous.
-insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name) values
-  ('d3333333-3333-3333-3333-333333333333','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','c2222222-2222-2222-2222-222222222222','77777777-7777-7777-7777-777777777777','Pat Hart');
+insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name, copy_version) values
+  ('d3333333-3333-3333-3333-333333333333','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','c2222222-2222-2222-2222-222222222222','77777777-7777-7777-7777-777777777777','Pat Hart','complyrer-rights-2026-10-v1');
 insert into public.rights_packet_evidence (packet_id, agency_id, individual_id, evidence) values
   ('d3333333-3333-3333-3333-333333333333','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','c2222222-2222-2222-2222-222222222222','{"name":"filed-copy.pdf","mime":"application/pdf","contentBase64":"JVBERi0="}'::jsonb);
 
@@ -93,21 +93,21 @@ select is((select count(*)::int from public.rights_packets where agency_id = 'aa
 -- ── Writes: DSP and auditor cannot start packets (6–7) ─────────────
 select set_config('request.jwt.claims', '{"sub":"55555555-5555-5555-5555-555555555555","role":"authenticated"}', true);
 select throws_ok(
-  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name)
-    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','55555555-5555-5555-5555-555555555555','X')$$,
+  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name, copy_version)
+    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','55555555-5555-5555-5555-555555555555','X','complyrer-rights-2026-10-v1')$$,
   '42501', null, 'DSP cannot start a packet');
 
 select set_config('request.jwt.claims', '{"sub":"44444444-4444-4444-4444-444444444444","role":"authenticated"}', true);
 select throws_ok(
-  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name)
-    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','44444444-4444-4444-4444-444444444444','X')$$,
+  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name, copy_version)
+    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','44444444-4444-4444-4444-444444444444','X','complyrer-rights-2026-10-v1')$$,
   '42501', null, 'auditor cannot start a packet');
 
 -- ── The home HM starts a second (next-year) packet (8) ─────────────
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 select lives_ok(
-  $$insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name)
-    values ('d2222222-2222-2222-2222-222222222222','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','Dana Hart')$$,
+  $$insert into public.rights_packets (id, agency_id, individual_id, created_by, signer_name, copy_version)
+    values ('d2222222-2222-2222-2222-222222222222','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','Dana Hart','complyrer-rights-2026-10-v1')$$,
   'home HM starts a packet');
 
 -- A future typed date is rejected on completion (9). The rejection
@@ -134,8 +134,8 @@ select is((select packet_on from public.rights_packets where id = 'd1111111-1111
 
 -- A pre-completed insert is refused by the insert policy (12).
 select throws_ok(
-  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name, status, packet_on, signer)
-    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','X','signed','2025-01-01','{}'::jsonb)$$,
+  $$insert into public.rights_packets (agency_id, individual_id, created_by, signer_name, status, packet_on, signer, copy_version)
+    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','c1111111-1111-1111-1111-111111111111','11111111-1111-1111-1111-111111111111','X','signed','2025-01-01','{}'::jsonb,'complyrer-rights-2026-10-v1')$$,
   '42501', null, 'cannot insert a pre-completed packet');
 
 -- ── Immutability: completed rows ignore later writes (13–16) ───────

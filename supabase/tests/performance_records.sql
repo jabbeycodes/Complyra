@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(32);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A + B. Users: DSP subject (…001), DSP peer (…002), HM of the
