@@ -201,16 +201,9 @@ export default function App() {
     setHubFocusTab("compliance");
     navigate("Employee Hub");
   };
-  // Wave 6 item 6: the Overview site filter starts scoped to the
-  // viewer's single home when they have exactly one (a house manager
-  // should not land on an agency-wide "All sites" preset).
-  const [site, setSite] = useState(() =>
-    defaultOverviewSiteFilter(
-      sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds).map(
-        (row) => row.name,
-      ),
-    ),
-  );
+  const [site, setSite] = useState("All sites");
+  // Wave 6 item 6: the Overview site filter preset lives in an effect
+  // below (after the session-change reset, so the preset wins).
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -346,6 +339,25 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
+  // Wave 6 item 6: once the workspace loads, the Overview site filter
+  // starts scoped to the viewer's single home when they have exactly
+  // one (a house manager should not land on an agency-wide "All sites"
+  // preset). Declared AFTER the session-change reset above so the
+  // preset wins on sign-in; applied once per user, and any later
+  // manual change is left alone.
+  const sitePresetFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || !workspace) return;
+    if (sitePresetFor.current === session.userId) return;
+    sitePresetFor.current = session.userId;
+    setSite(
+      defaultOverviewSiteFilter(
+        sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds).map(
+          (row) => row.name,
+        ),
+      ),
+    );
+  }, [session, workspace]);
   // Only the explicit demo action starts a tour; ordinary sign-in stays direct.
   useEffect(() => {
     if (!demoMode) return;
