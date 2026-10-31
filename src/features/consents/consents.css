@@ -1,16 +1,16 @@
-.consents { color: #17202a; background: #fff; border: 1px solid #697586; border-radius: 8px; padding: 20px; margin: 20px 0; }
-.consents h2, .consents h3 { color: #17202a; }
+.consents { color: var(--color-ink); background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-card); padding: 20px; margin: 20px 0; }
+.consents h2, .consents h3 { color: var(--color-ink); }
 .consents article { margin: 20px 0; }
-.consents button, .consents input, .consents select, .consents textarea { min-height: 44px; font: inherit; border: 1px solid #697586; border-radius: 4px; background: #fff; color: #17202a; padding: 8px; }
+.consents button, .consents input, .consents select, .consents textarea { min-height: 44px; font: inherit; border: 1px solid var(--color-rule); border-radius: 4px; background: var(--color-h-faf6ef); color: var(--color-ink); padding: 8px; }
 .consents button { cursor: pointer; margin: 4px; }
 .consents button:disabled { opacity: .6; cursor: wait; }
-.consents :focus-visible { outline: 3px solid #174ea6; outline-offset: 3px; }
+.consents :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 3px; }
 .consents label { display: grid; gap: 6px; margin: 12px 0; }
-.consents form { max-width: 720px; padding: 16px; border: 1px solid #697586; }
+.consents form { max-width: 720px; padding: 16px; border: 1px solid var(--color-rule); }
 .consents table { border-collapse: collapse; width: 100%; text-align: left; }
-.consents th, .consents td { padding: 12px; border-bottom: 1px solid #697586; vertical-align: top; }
+.consents th, .consents td { padding: 12px; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
 .consents summary { cursor: pointer; padding: 12px 0; }
-.consent-version { margin: 12px 0; padding: 12px; border: 1px solid #697586; overflow-wrap: anywhere; }
+.consent-version { margin: 12px 0; padding: 12px; border: 1px solid var(--color-rule); overflow-wrap: anywhere; }
 .consent-table { overflow-x: auto; }
-.consents a { color: #174ea6; text-decoration: underline; }
-.consents [role=alert] { color: #8f1111; font-weight: 600; }
+.consents a { color: var(--color-accent); text-decoration: underline; }
+.consents [role=alert] { color: var(--color-h-8a5340); font-weight: 600; }
