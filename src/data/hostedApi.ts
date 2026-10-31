@@ -1811,21 +1811,55 @@ export class HostedApi implements ComplyraApi {
                 supersedesId: r.supersedes_id, createdBy: r.created_by, createdAt: r.created_at, activatedBy: r.activated_by, activatedAt: r.activated_at })),
             revocations: (revoked.data ?? []).map(r => ({ consentId: r.consent_id, revokedOn: r.revoked_on, reason: r.reason, revokedBy: r.revoked_by, revokedByName: r.revoked_by_name })) };
     }
+    /**
+     * Best-effort hard-retire of stale consent notices for one
+     * Individual (retire_stale_consent_notices, sim wave 6 item 8 —
+     * the consent mirror of the missing-note retire in the reminder
+     * sweep below). The RPC only marks a consent.missing /
+     * consent.expiring / consent.packet_outstanding notice read when
+     * a current consent now covers that type (or the packet is no
+     * longer outstanding), and it always exempts rights-packet rows.
+     * A missing database function must not undo the consent action
+     * that triggered this, so every failure is swallowed.
+     */
+    private async retireStaleConsentNotices(session: SessionUser, individualId: string | null | undefined) {
+        if (!individualId) return;
+        try {
+            await this.client.rpc('retire_stale_consent_notices', {
+                p_agency_id: session.agencyId,
+                p_individual_id: individualId,
+            });
+        } catch {
+            // The consent action already succeeded; retirement is cleanup.
+        }
+    }
+    /** The Individual a consent record belongs to, for notice retirement. */
+    private async consentIndividualId(id: string): Promise<string | null> {
+        const { data } = await this.client.from('individual_consents')
+            .select('individual_id').eq('id', id).maybeSingle();
+        return (data as { individual_id?: string } | null)?.individual_id ?? null;
+    }
     async saveConsent(draft: ConsentDraft, id?: string): Promise<string> {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { data, error } = await this.client.rpc('save_consent', { p_id: id ?? null, p_draft: draft });
         throwIf(error, 'Could not save consent.');
+        await this.retireStaleConsentNotices(session, draft.individualId);
         return data as string;
     }
     async activateConsent(id: string) {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { error } = await this.client.rpc('activate_consent', { p_id: id });
         throwIf(error, 'Could not activate consent.');
+        await this.retireStaleConsentNotices(session, await this.consentIndividualId(id));
     }
     async revokeConsent(id: string, revokedOn: string, reason: string) {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { error } = await this.client.rpc('revoke_consent', { p_id: id, p_revoked_on: revokedOn, p_reason: reason });
         throwIf(error, 'Could not revoke consent.');
+        await this.retireStaleConsentNotices(session, await this.consentIndividualId(id));
     }
     async saveConsentTypes(types: ConsentType[]) {
         const session = await this.requireSession();
@@ -1843,6 +1877,17 @@ export class HostedApi implements ComplyraApi {
     if (canManageConsents(session.roleKey)) {
       const { error } = await this.client.rpc('sweep_consent_alerts', { p_agency_id: session.agencyId });
       throwIf(error, 'Could not check consent alerts.');
+      // The sweep only ever raises consent notices; hard-retire the
+      // ones whose state has since resolved (a current consent now
+      // covers the type, or the packet was signed/filed — including
+      // packets signed through the public signing link, which never
+      // pass through save/activate above). Best-effort per Individual,
+      // mirroring how the reminder sweep retires stale missing-note
+      // notices after queueing its own.
+      const { data: people } = await this.client.from("individuals")
+        .select("id").eq("agency_id", session.agencyId);
+      for (const person of people ?? [])
+        await this.retireStaleConsentNotices(session, (person as { id: string }).id);
     }
     const { data, error } = await this.client.from("notifications")
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
