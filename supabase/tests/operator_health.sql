@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=public,extensions;
-select plan(5);
+select plan(8);
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 insert into agencies(id,name,agency_code,state_code,status) values('a3100000-0000-0000-0000-000000000001','Operator test','OPTEST-MO','MO','pending');
 insert into auth.users(id,email) values('d3100000-0000-0000-0000-000000000001','optest-admin@example.invalid'),('d3100000-0000-0000-0000-000000000002','optest-operator@example.invalid');
@@ -16,4 +16,12 @@ select is((select count(*)::int from operator_job_runs),0,'tenant cannot read ob
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3100000-0000-0000-0000-000000000002"}',true);
 select is(jsonb_array_length(operator_health()->'jobs'),4,'operator sees known job catalog');
 select ok((operator_health()->'jobs'->0->'latest')='null'::jsonb,'missing telemetry stays unknown');
+reset role;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
+select set_config('test.operator_run',operator_job_start('sweep-operating-reminders')::text,true);
+select lives_ok($$select operator_job_finish(current_setting('test.operator_run')::uuid,'failed','http_500')$$,'trusted worker records failed outcome');
+select throws_ok($$select operator_job_finish(current_setting('test.operator_run')::uuid,'succeeded',null)$$,'P0001','Running observation not found.','completed observation cannot be rewritten');
+set local role authenticated;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d3100000-0000-0000-0000-000000000002"}',true);
+select is((select j->'latest'->>'state' from jsonb_array_elements(operator_health()->'jobs') j where j->>'jobKey'='sweep-operating-reminders'),'failed','health carries actual worker outcome');
 select * from finish(); rollback;
