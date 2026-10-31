@@ -167,10 +167,14 @@ select is((select count(*)::int from hr_staff_corrective_actions where staff_id=
   'An administrator reads the subject''s corrective actions');
 
 -- ---------------- No deletion ----------------
+-- The migration grants authenticated select/insert/update only —
+-- there is no DELETE grant at all (20261030150000), so a delete is
+-- refused outright with 42501 rather than silently touching nothing.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000001"}',true);
-delete from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001';
+select throws_ok($$delete from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001'$$,
+  '42501',null,'Performance records cannot be deleted');
 select is((select count(*)::int from hr_performance_reviews where id='f4000000-0000-0000-0000-000000000001'),1,
-  'Performance records cannot be deleted');
+  'The record survives the delete attempt');
 
 -- ---------------- Outsider ----------------
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000008"}',true);

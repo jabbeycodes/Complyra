@@ -26,9 +26,11 @@ insert into auth.users (id, email) values
   ('88888888-8888-8888-8888-888888888888','admin-a@example.com')
 on conflict (id) do nothing;
 
+-- Agency codes are unique platform-wide and supabase/seed.sql already
+-- owns 'EVERGREEN-MO', so this fixture uses its own codes.
 insert into public.agencies (id, name, agency_code, state_code, status) values
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Agency A','EVERGREEN-MO','MO','active'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Agency B','OTHER-MO','MO','active')
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Agency A','RIGHTSA-MO','MO','active'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Agency B','RIGHTSB-MO','MO','active')
 on conflict (id) do nothing;
 
 insert into public.programs (id, agency_id, name) values
