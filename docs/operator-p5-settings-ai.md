@@ -1,0 +1,7 @@
+# Operator phase 5: settings and AI consolidation
+
+Depends on phase 4's operator landing/navigation and phase 2 directory. AI settings now have one canonical operator screen, explicit agency selection, model/processing controls, acknowledgment when enabling and hosted verification. The acknowledgment records operator confirmation; it does not create or certify a BAA. Secrets remain outside the client. Local verification honestly reports no connected hosted service account. Operator reads/saves require server platform-flag checks; verification additionally checks active profile/password-change state.
+
+Rules now live in agency detail, not provisioning; unlocked tenant rule edits are preserved. Operator navigation is separated from tenant groups, and activity timeline copy distinguishes hosted/local mode. Legacy AI component import re-exports the canonical screen; no duplicate Settings embed remains.
+
+Validation: npm test PASS (156 file-level entries, zero failures); npm run build PASS (existing bundle warning); npx tsc -b PASS; git diff --check PASS. Chromium: ai-settings-operator.spec.ts, 2 PASS (agency admin denial and operator screen, no Settings embed). Browser tests used system Chromium and local-only Vite server. Added pgTAP scope/acknowledgment checks, NOT RUN (Supabase CLI absent, Docker unavailable). Migration included, UNAPPLIED. Deferred: general rollout flags/provider registry and security policy administration require separately defined requirements; no credential editor added.
