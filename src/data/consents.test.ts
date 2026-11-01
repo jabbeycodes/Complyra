@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DEFAULT_CONSENT_TYPES, canManageConsents, canSeeConsents, consentAlerts, consentGaps, consentOnFile, consentStatus, validateConsentDraft, type ConsentDraft, type ConsentRecord, type ConsentRegister } from './consents';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
-import { todayStamp } from './status';
+import { centralTodayIso } from './menuRecords';
 import { notificationPage } from '../features/notifications/notify';
 const draft: ConsentDraft = { individualId: 'i1', typeId: 'media', covers: 'Taking and sharing photographs for the agency newsletter.', giver: 'guardian', giverName: 'Sam Rivera', relationship: 'Parent and guardian', signedOn: '2026-10-01', effectiveOn: '2026-10-01', reviewOn: '2027-10-01', supersedesId: null };
 const record: ConsentRecord = { ...draft, id: 'c1', agencyId: 'a1', createdBy: 'hm', createdAt: '2026-10-01T10:00:00Z', activatedAt: '2026-10-01T11:00:00Z', activatedBy: 'hm' };
@@ -63,7 +63,10 @@ function localFixture() {
     const hm = db.memberships.find(m => m.roleKey === 'house_manager')!;
     store.sessionUserId = hm.userId;
     const person = db.individuals.find(p => p.siteId === hm.siteId)!;
-    return { db, store, api, hm, person, draft: { ...draft, individualId: person.id, signedOn: todayStamp(), effectiveOn: todayStamp(), reviewOn: '2099-12-31' } };
+    // The fixture consent must be CURRENT on the day the status family
+    // judges — the Central calendar day (wave 7J) — not the device day,
+    // which runs ahead of Central every evening in UTC environments.
+    return { db, store, api, hm, person, draft: { ...draft, individualId: person.id, signedOn: centralTodayIso(), effectiveOn: centralTodayIso(), reviewOn: '2099-12-31' } };
 }
 test('local lifecycle rejects cross-user draft tampering, forged metadata, signed edits and retains version history', async () => {
     const f = localFixture();
@@ -78,9 +81,9 @@ test('local lifecycle rejects cross-user draft tampering, forged metadata, signe
     f.store.sessionUserId = f.hm.userId;
     await f.api.activateConsent(id);
     await assert.rejects(() => f.api.saveConsent({ ...f.draft, covers: 'Tampered' }, id), /own draft/);
-    await f.api.revokeConsent(id, todayStamp(), 'Individual withdrew permission.');
+    await f.api.revokeConsent(id, centralTodayIso(), 'Individual withdrew permission.');
     assert.equal(f.db.consentRevocations?.[0].revokedBy, f.hm.userId);
-    await assert.rejects(() => f.api.revokeConsent(id, todayStamp(), 'Again'), /already revoked/);
+    await assert.rejects(() => f.api.revokeConsent(id, centralTodayIso(), 'Again'), /already revoked/);
     const renewed = await f.api.saveConsent({ ...f.draft, supersedesId: id });
     await f.api.activateConsent(renewed);
     const history = await f.api.getConsents();
@@ -100,9 +103,9 @@ test('local scoped access, DSP active-only and auditor read-only, HR excluded', 
     f.store.sessionUserId = dsp.userId;
     // Scoped to the record under test: the demo seed carries other consents.
     assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 1);
-    await assert.rejects(() => f.api.revokeConsent(id, todayStamp(), 'Forged'), /permission/);
+    await assert.rejects(() => f.api.revokeConsent(id, centralTodayIso(), 'Forged'), /permission/);
     f.store.sessionUserId = f.hm.userId;
-    await f.api.revokeConsent(id, todayStamp(), 'Withdrawn');
+    await f.api.revokeConsent(id, centralTodayIso(), 'Withdrawn');
     f.store.sessionUserId = dsp.userId;
     assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 0);
     for (const role of ['auditor', 'hr'] as const) {
@@ -112,7 +115,7 @@ test('local scoped access, DSP active-only and auditor read-only, HR excluded', 
         member.siteId = null;
         f.store.sessionUserId = member.userId;
         await assert.rejects(() => f.api.saveConsent(f.draft), /permission/);
-        await assert.rejects(() => f.api.revokeConsent(id, todayStamp(), 'Forged'), /permission/);
+        await assert.rejects(() => f.api.revokeConsent(id, centralTodayIso(), 'Forged'), /permission/);
         if (role === 'auditor')
             assert.equal((await f.api.getConsents()).records.filter(r => r.id === id).length, 1);
         else
