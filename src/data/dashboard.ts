@@ -2,13 +2,14 @@ import type { Requirement } from "../domain";
 import type { PacketDetail, SessionUser } from "./types";
 import type { PlanStackView } from "./planStack";
 import { staffCanSignDelegation } from "./planStack";
-import { todayIso } from "./chart";
+import { centralTodayIso } from "./menuRecords";
 import {
   asMonthlyCollections,
   drillComplete,
   equipmentViewForPerson,
   monthDueOn,
   monthKeyFrom,
+  monthLabel,
   safetyComplete,
   DEFAULT_MONTHLY_DUE,
   type MonthlyDueSettings,
@@ -146,6 +147,29 @@ function obligationLabel(kind: string, title: string) {
   return title;
 }
 
+/**
+ * The canonical "my open tasks" selector. Every surface that counts or
+ * lists the signed-in person's open work — the desktop Overview "Your
+ * work" panel, the mobile Tasks badge, the platform bottom-nav badge,
+ * and the mobile My Tasks list — renders THIS array (App computes it
+ * once and passes it down), so the counts cannot disagree. A surface
+ * that intentionally shows a subset (the mobile home's per-home slice,
+ * the Up next cap) must label the subset in words; it never presents a
+ * smaller number as the total.
+ *
+ * Two counting rules are load-bearing:
+ *  - "Today" is the agency's Central date (menuRecords.centralTodayIso),
+ *    never the UTC date: at 7 p.m. Central the UTC clock has already
+ *    rolled into the next month, and the October monthly checks vanished
+ *    from the queue mid-evening (simulation batch 61: badge 5 → 3 with
+ *    nothing completed).
+ *  - A monthly check is an open obligation until it is completed, so the
+ *    scan covers every cycle month the workspace holds up to the current
+ *    month — a month rollover can only ADD the new month's items, never
+ *    silently drop last month's overdue ones.
+ * The list is never silently capped: `limit` exists only for callers
+ * that explicitly ask for a cap and label it themselves.
+ */
 export function personalQueue(input: {
   session: SessionUser;
   items: Requirement[];
@@ -157,9 +181,10 @@ export function personalQueue(input: {
   sites?: Array<{ id: string; name: string } & Partial<SiteFacts>>;
   monthlyDue?: MonthlyDueSettings;
   siteReviews?: SiteReview[];
+  /** Agency-local (Central) date to judge due/overdue against. */
+  today?: string;
   limit?: number;
 }): PersonalWorkItem[] {
-  const limit = input.limit ?? 12;
   const out: PersonalWorkItem[] = [];
   const seen = new Set<string>();
 
@@ -185,7 +210,7 @@ export function personalQueue(input: {
     });
   }
 
-  const today = todayIso();
+  const today = input.today ?? centralTodayIso();
   const key = monthKeyFrom(today);
   const due = input.monthlyDue ?? DEFAULT_MONTHLY_DUE;
 
@@ -207,49 +232,80 @@ export function personalQueue(input: {
 
   if (input.monthly && input.individuals && input.sites) {
     const collections = asMonthlyCollections(input.monthly);
+    // Every cycle month the workspace holds, oldest first, never past the
+    // current month: an incomplete cycle stays an open task in its own
+    // month until it is completed, and a future month's cycle is not a
+    // task yet.
+    const monthsThrough = (monthKeys: Iterable<string>): string[] =>
+      [...new Set([...monthKeys].filter((monthKey) => monthKey <= key))].sort();
     for (const person of input.individuals) {
-      const view = equipmentViewForPerson(
-        collections,
-        person.id,
-        key,
-        today,
-        due.equipmentDay,
+      const equipmentIds = new Set(
+        collections.adaptiveEquipment
+          .filter((row) => row.individualId === person.id && row.active)
+          .map((row) => row.id),
       );
-      if (!view.items.length || view.complete) continue;
-      const dueOn = monthDueOn(key, due.equipmentDay);
-      push({
-        id: `eq-${person.id}-${key}`,
-        kind: "monthly",
-        title: "Check adaptive equipment",
-        detail: `${person.name} · due ${dueOn}`,
-        tone: today <= dueOn ? "due" : "overdue",
-        personName: person.name,
-      });
+      const equipmentMonths = monthsThrough(
+        collections.equipmentMonthLogs
+          .filter((log) => equipmentIds.has(log.equipmentId))
+          .map((log) => log.monthKey),
+      );
+      for (const monthKey of equipmentMonths) {
+        const view = equipmentViewForPerson(
+          collections,
+          person.id,
+          monthKey,
+          today,
+          due.equipmentDay,
+        );
+        if (!view.items.length || view.complete) continue;
+        const dueOn = monthDueOn(monthKey, due.equipmentDay);
+        push({
+          id: `eq-${person.id}-${monthKey}`,
+          kind: "monthly",
+          title: "Check adaptive equipment",
+          detail: `${person.name} · due ${dueOn}`,
+          tone: today <= dueOn ? "due" : "overdue",
+          personName: person.name,
+        });
+      }
     }
     for (const site of input.sites) {
-      const drills = collections.emergencyDrills.filter(
-        (row) => row.siteId === site.id && row.monthKey === key,
+      const drillMonths = monthsThrough(
+        collections.emergencyDrills
+          .filter((row) => row.siteId === site.id)
+          .map((row) => row.monthKey),
       );
-      if (drills.length && !drills.every(drillComplete)) {
-        const dueOn = monthDueOn(key, due.drillDay);
+      for (const monthKey of drillMonths) {
+        const drills = collections.emergencyDrills.filter(
+          (row) => row.siteId === site.id && row.monthKey === monthKey,
+        );
+        if (!drills.length || drills.every(drillComplete)) continue;
+        const dueOn = monthDueOn(monthKey, due.drillDay);
         push({
-          id: `drill-${site.id}-${key}`,
+          id: `drill-${site.id}-${monthKey}`,
           kind: "monthly",
-          title: "Record this month’s emergency drills",
+          title:
+            monthKey === key
+              ? "Record this month’s emergency drills"
+              : `Record ${monthLabel(monthKey)}’s emergency drills`,
           detail: `${site.name} · due ${dueOn}`,
           tone: today <= dueOn ? "due" : "overdue",
           siteName: site.name,
         });
       }
-      const safety = collections.homeSafetyReports.find(
-        (row) => row.siteId === site.id && row.monthKey === key,
-      );
-      if (safety && !safetyComplete(safety)) {
-        const dueOn = monthDueOn(key, due.safetyDay);
+      const safetyReports = collections.homeSafetyReports
+        .filter((row) => row.siteId === site.id && row.monthKey <= key)
+        .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+      for (const safety of safetyReports) {
+        if (safetyComplete(safety)) continue;
+        const dueOn = monthDueOn(safety.monthKey, due.safetyDay);
         push({
-          id: `safety-${site.id}-${key}`,
+          id: `safety-${site.id}-${safety.monthKey}`,
           kind: "monthly",
-          title: "Complete the home safety report",
+          title:
+            safety.monthKey === key
+              ? "Complete the home safety report"
+              : `Complete ${monthLabel(safety.monthKey)}’s home safety report`,
           detail: `${site.name} · due ${dueOn}`,
           tone: today <= dueOn ? "due" : "overdue",
           siteName: site.name,
@@ -319,5 +375,11 @@ export function personalQueue(input: {
   }
 
   const rank = { overdue: 0, due: 1, review: 2 };
-  return out.sort((a, b) => rank[a.tone] - rank[b.tone]).slice(0, limit);
+  const sorted = out.sort((a, b) => rank[a.tone] - rank[b.tone]);
+  // No silent cap: the surfaces that render this list present its length
+  // as the person's total open-task count, so truncating here would make
+  // the badge, the home count, and the task list all lie together.
+  return input.limit === undefined
+    ? sorted
+    : sorted.slice(0, Math.max(0, input.limit));
 }

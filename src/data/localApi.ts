@@ -3023,7 +3023,10 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensurePlanCollections(store);
   ensureClinicalRenewals(store);
   ensureTrainingChecklists(store);
-  ensureMonthlyCycles(store.db, todayIso());
+  // Monthly cycles open on the agency's Central date, never the UTC
+  // date — a UTC-month cycle created at 7 p.m. Central would displace
+  // the still-open previous month in the personal task queue.
+  ensureMonthlyCycles(store.db, centralTodayIso());
   ensureSiteReviews(store.db);
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");

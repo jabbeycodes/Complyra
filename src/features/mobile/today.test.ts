@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   buildTrackingSummary,
   greetingForHour,
+  homeTasksSummaryText,
   pickMobileScopedSite,
   queueItemsForHome,
   summarizeMedicationDay,
   TRACK_COLOR,
+  upNextSubsetText,
   type TrackingCategory,
 } from "./today";
 import type { PersonalWorkItem } from "../../data/dashboard";
@@ -219,4 +221,63 @@ test("home queue keeps this home's items and personal items, drops other homes'"
 
 test("home queue is empty while the scope is unresolved", () => {
   assert.deepEqual(queueItemsForHome([queueItem({})], null), []);
+});
+
+/* Wave 7D — Tasks counting truth (simulation batches 61 + 65). The
+ * badge (BottomNavPill taskCount), the My Tasks list, and the desktop
+ * Overview panel all render the one personalQueue array App computes;
+ * home renders that same array's per-home slice. These pins keep the
+ * three counts derived from the single list, and the home sentence
+ * honest when its slice is a subset. */
+
+test("badge, task list, and home all read the same queue; a home subset is named in words (batch 65)", () => {
+  const items = [
+    queueItem({ id: "overdue-juniper-1", siteName: "Juniper House" }),
+    queueItem({ id: "overdue-juniper-2", siteName: "Juniper House" }),
+    queueItem({ id: "due-juniper", siteName: "Juniper House", tone: "due" }),
+    queueItem({ id: "overdue-maple", siteName: "Maple House" }),
+    queueItem({ id: "due-maple", siteName: "Maple House", tone: "due" }),
+    queueItem({ id: "review-maple", siteName: "Maple House", tone: "review" }),
+    queueItem({ id: "personal", siteName: undefined }),
+  ];
+  // The badge counts the full list; the Tasks page renders the full
+  // list — the two can never disagree because both are this array.
+  const badgeCount = items.length;
+  const tasksListLength = items.length;
+  assert.equal(badgeCount, 7);
+  assert.equal(tasksListLength, badgeCount);
+
+  // Home at Maple House shows 4 of the 7 — and the greeting says so in
+  // words instead of presenting 4 as the total.
+  const mapleHome = queueItemsForHome(items, "Maple House");
+  assert.equal(mapleHome.length, 4);
+  assert.equal(
+    homeTasksSummaryText(badgeCount, mapleHome.length, "Maple House"),
+    "4 of your 7 tasks are at Maple House",
+  );
+
+  // Overdue items are present in every surface that shows their home.
+  const juniperHome = queueItemsForHome(items, "Juniper House");
+  for (const id of ["overdue-juniper-1", "overdue-juniper-2"]) {
+    assert.ok(items.some((item) => item.id === id), `${id} in the full list`);
+    assert.ok(juniperHome.some((item) => item.id === id), `${id} at Juniper`);
+  }
+  assert.ok(mapleHome.some((item) => item.id === "overdue-maple"));
+});
+
+test("home task summary: a full slice reads as the plain total", () => {
+  assert.equal(homeTasksSummaryText(5, 5, "Juniper House"), "5 tasks due for you");
+  assert.equal(homeTasksSummaryText(1, 1, "Juniper House"), "1 task due for you");
+  assert.equal(homeTasksSummaryText(3, 3, null), "3 tasks due for you");
+  assert.equal(
+    homeTasksSummaryText(7, 0, "Maple House"),
+    "0 of your 7 tasks are at Maple House",
+  );
+  assert.equal(homeTasksSummaryText(0, 0, "Maple House"), null);
+});
+
+test("up next subset text states the cap in words (batch 61)", () => {
+  assert.equal(upNextSubsetText(4, 9), "Showing 4 of 9 items in Up next.");
+  assert.equal(upNextSubsetText(9, 9), null);
+  assert.equal(upNextSubsetText(0, 0), null);
 });

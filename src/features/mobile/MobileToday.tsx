@@ -9,7 +9,11 @@
 import { useMemo, useState } from "react";
 import type { PersonalWorkItem } from "../../data/dashboard";
 import { formatDoseTime } from "./mar";
-import { TRACK_COLOR, type TrackingCategoryId } from "./today";
+import {
+  TRACK_COLOR,
+  upNextSubsetText,
+  type TrackingCategoryId,
+} from "./today";
 import type { TodayTracking } from "./useTodayTracking";
 
 const TONE_LABELS: Record<PersonalWorkItem["tone"], string> = {
@@ -161,6 +165,12 @@ export default function MobileToday({
   const visibleItems = items
     .filter((item) => filter === "all" || item.state === filter)
     .slice(0, 4);
+  // The cap is intentional, so it is stated in words: an item past the
+  // cap is "not shown here", never silently gone (simulation batch 61).
+  const subsetText =
+    filter === "all"
+      ? upNextSubsetText(visibleItems.length, items.length)
+      : null;
 
   return (
     <>
@@ -273,6 +283,7 @@ export default function MobileToday({
             </button>
           ))}
         </div>
+        {subsetText && <p className="msh-section-note">{subsetText}</p>}
       </section>
     </>
   );
