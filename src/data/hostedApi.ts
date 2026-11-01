@@ -7834,21 +7834,33 @@ export class HostedApi implements ComplyraApi {
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
     this.requirePermission(session, "hr.view_staff");
-    let query = this.client
-      .from("training_requirements")
-      .select("user_id")
+    // Roster comes from the agency's staff memberships — not only from
+    // staff who already have training assigned (parity with LocalApi).
+    // The old requirements-derived roster hid exactly the people this
+    // page exists to flag: a new hire with no training rows yet was
+    // invisible, and an agency with no requirement rows at all rendered
+    // an empty table under an "Everyone is cleared" verdict
+    // (simulation batches 75/76).
+    const { data: memberRows, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
       .eq("agency_id", session.agencyId);
-    if (siteId) query = query.eq("site_id", siteId);
-    const { data, error } = await query;
-    throwIf(error, "Could not load staff training.");
-    const userIds = [...new Set((data ?? []).map((row) => String(row.user_id)))];
+    throwIf(memberError, "Could not load staff training.");
+    const userIds = [
+      ...new Set(
+        ((memberRows ?? []) as Record<string, unknown>[])
+          .filter((row) => !siteId || (row.site_id as string | null) === siteId)
+          .map((row) => String(row.user_id)),
+      ),
+    ];
+    const siteName = siteId ? await this.siteName(siteId) : null;
     const rows: StaffClearanceRow[] = [];
     for (const userId of userIds) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        siteName: siteId ? (profile.siteNames[0] ?? "Unknown site") : profile.siteNames.join(", ") || "—",
+        siteName: siteId ? (siteName ?? "Unknown site") : profile.siteNames.join(", ") || "—",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,
