@@ -94,7 +94,9 @@ export default function MobileConsents({
   });
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [openAudit, setOpenAudit] = useState<string | null>(null);
-  const [rights, setRights] = useState<RightsPacket[]>([]);
+  // null until the packet list has loaded: an unloaded list must never
+  // render as "Not yet signed" (the batch-41 contradiction).
+  const [rights, setRights] = useState<RightsPacket[] | null>(null);
   const [rightsCompleting, setRightsCompleting] = useState<{
     packet: RightsPacket;
     paper: boolean;
@@ -175,7 +177,7 @@ export default function MobileConsents({
           <div className="msh-list">
             <div className="msh-row static">
               <span className="msh-row-main">
-                <strong>{rightsSummary.trackingText}</strong>
+                <strong>{rightsSummary.trackingText ?? (error ? "Rights packet unavailable" : "Loading rights packet…")}</strong>
                 {rightsSummary.latest ? (
                   <>
                     <small>
@@ -200,7 +202,7 @@ export default function MobileConsents({
                       .
                     </small>
                   </>
-                ) : (
+                ) : rights === null ? null : (
                   <small>
                     {rightsSummary.awaiting
                       ? `A packet is started and awaiting signature. Expected signer ${rightsSummary.awaiting.signerName}.`
@@ -265,7 +267,7 @@ export default function MobileConsents({
                       Download filed signed evidence
                     </button>
                   )}
-                  {manage && rightsSummary.awaiting && (
+                  {manage && rights !== null && rightsSummary.awaiting && (
                     <>
                       <button
                         type="button"
@@ -285,7 +287,7 @@ export default function MobileConsents({
                       </button>
                     </>
                   )}
-                  {manage && !rightsSummary.awaiting && (
+                  {manage && rights !== null && !rightsSummary.awaiting && (
                     <button
                       type="button"
                       className="msh-chip-button"
