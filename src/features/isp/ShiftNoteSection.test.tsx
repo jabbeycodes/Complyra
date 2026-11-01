@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import type { ComplyraApi } from "../../data/localApi";
 import type { IspProgramView } from "../../data/shiftNotes";
 import type { IspChartData } from "./useIspData";
+import { addDaysIso, centralTodayIso } from "../../data/menuRecords";
 
 /**
  * Finding 1 (simulation batch 9), Fix 3: the shift-note form closed even
@@ -163,6 +164,21 @@ describe("ShiftNoteSection submit gating", () => {
       setter?.call(textarea, "Supported practice of the community goal.");
       textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
+    // Pin the begin time to midnight: a note dated today cannot begin in
+    // the future (wave 7F), and the seeded 6:00 a.m. begin would block
+    // the save on an early-morning test run.
+    const beginInput = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Begin time"]',
+    );
+    assert.ok(beginInput, "begin time field rendered");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        dom.window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(beginInput, "00:00");
+      beginInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
     const saveButton = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Save note",
     ) as HTMLButtonElement | undefined;
@@ -203,6 +219,36 @@ describe("ShiftNoteSection submit gating", () => {
       "Supported practice of the community goal.",
       "the note text is still there to retry",
     );
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("blocks saving and explains when the note date is in the future (wave 7F)", async () => {
+    const { act, container, root } = await renderSection(async () => "note-1");
+    await openFilledForm(container, act);
+    const dateInput = container.querySelector<HTMLInputElement>(
+      'input[type="date"]',
+    );
+    assert.ok(dateInput, "date field rendered");
+    const tomorrow = addDaysIso(centralTodayIso(), 1);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        dom.window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(dateInput, tomorrow);
+      dateInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    const form = container.querySelector("form");
+    assert.ok(
+      form?.textContent?.includes("A shift note cannot be dated in the future."),
+      "the future-date message shows at the point of entry",
+    );
+    const saveButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Save note",
+    ) as HTMLButtonElement | undefined;
+    assert.ok(saveButton, "Save note button rendered");
+    assert.equal(saveButton.disabled, true, "save is blocked for a future date");
     await act(async () => root.unmount());
     container.remove();
   });

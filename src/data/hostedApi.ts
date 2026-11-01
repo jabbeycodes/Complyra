@@ -226,6 +226,7 @@ import {
   normalizeTaskTitle,
   progressNoteProblem,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -4247,6 +4248,7 @@ export class HostedApi implements ComplyraApi {
     if (!ispProgramVisibleToStaff(program)) {
       throw new Error("Notes can only be entered against an approved ISP program.");
     }
+    assertCalendarDate(input.noteDate, "Use a valid note date.");
     const shift = input.shift.trim().slice(0, 80);
     if (!shift) throw new Error("Choose the shift for this note.");
     const beginTime = input.beginTime?.trim().slice(0, 5) ?? "";
@@ -4284,6 +4286,8 @@ export class HostedApi implements ComplyraApi {
         signatureDataUrl,
       });
       if (problem) throw new Error(problem);
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
     }
     const { data: taskRows, error: taskError } = await this.client
       .from("isp_program_tasks")
@@ -4339,6 +4343,34 @@ export class HostedApi implements ComplyraApi {
       );
       if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: existingUserId })) {
         throw new Error("You can only edit your own shift notes.");
+      }
+      // An edit re-saves the note, so it must meet the same integrity
+      // rules as a new note (batch 37): a body, a timeframe that is not
+      // in the future, and a signature on the finished record.
+      if (!input.summary.trim()) {
+        throw new Error(
+          "Describe what the person did and how you supported a goal in the current PCSP.",
+        );
+      }
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
+      const existingSignature = String(
+        (existing as Record<string, unknown>).signature_data_url ?? "",
+      );
+      if (!existingSignature && !signatureDataUrl) {
+        const adopted = await this.getMySignature();
+        if (adopted) {
+          try {
+            signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+          } catch {
+            signatureDataUrl = "";
+          }
+        }
+      }
+      if (!existingSignature && !signatureDataUrl) {
+        throw new Error(
+          "Adopt your signature before saving a progress note. A printed name is not a signature.",
+        );
       }
       const hrShiftId = await this.linkedHrShiftId({
         agencyId: session.agencyId,
