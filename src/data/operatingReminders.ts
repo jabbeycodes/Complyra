@@ -191,6 +191,25 @@ export function operatingReminderNotices(input: {
   return notices;
 }
 
+/** True when a site's freshly computed due items include an overdue dose. */
+export function siteHasOverdueMedDose(items: SiteDueItem[]): boolean {
+  return items.some((item) => item.kind === "medication" && item.severity === "overdue");
+}
+
+/**
+ * Wave 7M — a queued "Unmarked medication" bell row retires once the sweep
+ * has verified the site it names currently has no overdue unmarked dose
+ * (the dose was marked, by anyone). Rows for sites the sweep could not
+ * load are never retired on a guess: the site id must be in the verified
+ * clear set the same listNotifications call computed.
+ */
+export function medUnrecordedRowRetired(
+  row: { type: string; entityId: string | null },
+  clearSiteIds: ReadonlySet<string>,
+): boolean {
+  return row.type === "med.unrecorded" && row.entityId != null && clearSiteIds.has(row.entityId);
+}
+
 export interface UnattendedAgencyInput {
   now: Date;
   timeZone?: string;

@@ -300,6 +300,7 @@ import {
   shiftBlocksForSite,
   zonedWallTimeMs,
   consecutiveRefusals,
+  alreadyMarkedDoseMessage,
   marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
@@ -307,7 +308,7 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, medUnrecordedRowRetired, operatingReminderNotices, reminderRecipientIds, siteHasOverdueMedDose } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
   accountabilityDates,
@@ -574,6 +575,19 @@ const ASSETS_BUCKET = "agency-assets";
 
 function throwIf(error: { message: string } | null | undefined, fallback: string) {
   if (error) throw new Error(error.message || fallback);
+}
+
+/**
+ * The correct_med_dose_mark RPC raises DOSE_MARK_CONFLICT (errcode
+ * P0001) when its compare-and-set matches zero rows — another corrector
+ * wrote first. PostgREST surfaces the exception text in `message` and
+ * the DETAIL in `details`; accept the token in either.
+ */
+function isDoseMarkConflict(error: unknown): boolean {
+  const parts = error as { message?: unknown; details?: unknown } | null;
+  return [parts?.message, parts?.details].some(
+    (part) => typeof part === "string" && part.includes("DOSE_MARK_CONFLICT"),
+  );
 }
 
 function asRole(value: string): AppRole {
@@ -1830,7 +1844,7 @@ export class HostedApi implements ComplyraApi {
 
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();
-    await this.sweepOperatingReminders(session);
+    const medClearSiteIds = await this.sweepOperatingReminders(session);
     if (canManageConsents(session.roleKey)) {
       const { error } = await this.client.rpc('sweep_consent_alerts', { p_agency_id: session.agencyId });
       throwIf(error, 'Could not check consent alerts.');
@@ -1839,9 +1853,16 @@ export class HostedApi implements ComplyraApi {
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);
     throwIf(error, "Could not load notifications.");
-    return (data ?? []).map((row) => ({ ...row,
-      read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
-    })) as import("../features/notifications/notify").NotificationRow[];
+    return (data ?? [])
+      // Wave 7M: an "Unmarked medication" row retires once the sweep in
+      // this same call verified the site has no overdue unmarked dose.
+      .filter((row) => !medUnrecordedRowRetired(
+        { type: String(row.type ?? ""), entityId: row.entity_id ? String(row.entity_id) : null },
+        medClearSiteIds,
+      ))
+      .map((row) => ({ ...row,
+        read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
+      })) as import("../features/notifications/notify").NotificationRow[];
   }
 
   async markNotificationsRead(ids: string[]) {
@@ -12802,20 +12823,43 @@ export class HostedApi implements ComplyraApi {
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
       .from("med_dose_marks")
-      .select("marked_by,late,late_reason")
+      .select("id,marked_by,marked_by_name,marked_at,status,late,late_reason")
       .eq("agency_id", session.agencyId)
       .eq("medication_id", med.id)
       .eq("dose_date", input.doseDate.slice(0, 10))
       .eq("dose_time", input.doseTime)
       .maybeSingle();
     throwIf(existingError, "Could not load the MAR entry.");
-    if (
-      existingMark &&
-      !canCorrectDoseMark(session.roleKey, session.userId, {
-        markedBy: (existingMark as { marked_by: string | null }).marked_by,
-      })
-    ) {
-      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+    if (existingMark) {
+      // Wave 7M: a mark attempt that is not based on the stored mark (no
+      // base, or a base from a mark that has since changed) is a stale
+      // second attempt, not a correction — refuse it gracefully instead
+      // of silently overwriting the original giver and time via upsert.
+      // Only a caller who passes the exact markedAt they saw is
+      // correcting deliberately.
+      const stored = existingMark as {
+        id: string;
+        marked_by: string | null;
+        marked_by_name: string | null;
+        marked_at: string;
+        status: string;
+      };
+      if (!input.baseMarkedAt || input.baseMarkedAt !== String(stored.marked_at)) {
+        throw new Error(
+          alreadyMarkedDoseMessage({
+            status: stored.status as import("./types").MedDoseMarkStatus,
+            markedByName: String(stored.marked_by_name ?? ""),
+            markedAt: String(stored.marked_at),
+          }),
+        );
+      }
+      if (
+        !canCorrectDoseMark(session.roleKey, session.userId, {
+          markedBy: stored.marked_by,
+        })
+      ) {
+        throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+      }
     }
     // A first mark recorded after the dose window ended is stamped Late
     // and must carry a brief reason; corrections keep the original stamp
@@ -12837,8 +12881,50 @@ export class HostedApi implements ComplyraApi {
     const existingReason = existingMark
       ? ((existingMark as { late_reason: string | null }).late_reason ?? null)
       : null;
-    const { error } = await this.client.from("med_dose_marks").upsert(
-      {
+    const correctedLate = lateReason ? true : existingLate;
+    const correctedLateReason = lateReason || existingReason;
+    if (existingMark) {
+      // Deliberate correction (base verified above): the write goes
+      // through the correct_med_dose_mark RPC, which re-checks the base
+      // inside the UPDATE statement itself — an atomic compare-and-set
+      // at the database boundary (PR #228 reviewer HOLD fix). The
+      // browser-side check above is only a fast path: if another
+      // corrector writes between that read and this call, the RPC
+      // updates zero rows and raises DOSE_MARK_CONFLICT instead of
+      // letting this correction silently overwrite theirs. The
+      // identity-guard trigger archives the prior version in
+      // med_dose_mark_history and re-stamps marked_by/marked_at.
+      const { error } = await this.client.rpc("correct_med_dose_mark", {
+        p_mark_id: (existingMark as { id: string }).id,
+        p_base_marked_at: input.baseMarkedAt,
+        p_status: input.status,
+        p_late: correctedLate,
+        p_late_reason: correctedLateReason,
+      });
+      if (error && isDoseMarkConflict(error)) {
+        // The race was lost: name the mark that is stored now.
+        const { data: current } = await this.client
+          .from("med_dose_marks")
+          .select("marked_by_name,marked_at,status")
+          .eq("agency_id", session.agencyId)
+          .eq("medication_id", med.id)
+          .eq("dose_date", input.doseDate.slice(0, 10))
+          .eq("dose_time", input.doseTime)
+          .maybeSingle();
+        if (current) {
+          const row = current as { marked_by_name: string | null; marked_at: string; status: string };
+          throw new Error(
+            alreadyMarkedDoseMessage({
+              status: row.status as import("./types").MedDoseMarkStatus,
+              markedByName: String(row.marked_by_name ?? ""),
+              markedAt: String(row.marked_at),
+            }),
+          );
+        }
+      }
+      throwIf(error, "Could not mark the dose.");
+    } else {
+      const markRow = {
         agency_id: session.agencyId,
         individual_id: med.individualId,
         medication_id: med.id,
@@ -12848,12 +12934,35 @@ export class HostedApi implements ComplyraApi {
         marked_by: session.userId,
         marked_by_name: session.fullName,
         marked_at: new Date().toISOString(),
-        late: lateReason ? true : existingMark ? existingLate : isLate,
-        late_reason: lateReason || (existingMark ? existingReason : null),
-      },
-      { onConflict: "agency_id,medication_id,dose_date,dose_time" },
-    );
-    throwIf(error, "Could not mark the dose.");
+        late: lateReason ? true : isLate,
+        late_reason: lateReason || null,
+      };
+      // First mark: a plain INSERT, never an upsert — if another session
+      // marked the dose after the check above, the unique index refuses
+      // (23505) and the winner's mark is what the refusal names.
+      const { error } = await this.client.from("med_dose_marks").insert(markRow);
+      if (error && (error as { code?: string }).code === "23505") {
+        const { data: winner } = await this.client
+          .from("med_dose_marks")
+          .select("marked_by_name,marked_at,status")
+          .eq("agency_id", session.agencyId)
+          .eq("medication_id", med.id)
+          .eq("dose_date", input.doseDate.slice(0, 10))
+          .eq("dose_time", input.doseTime)
+          .maybeSingle();
+        if (winner) {
+          const row = winner as { marked_by_name: string | null; marked_at: string; status: string };
+          throw new Error(
+            alreadyMarkedDoseMessage({
+              status: row.status as import("./types").MedDoseMarkStatus,
+              markedByName: String(row.marked_by_name ?? ""),
+              markedAt: String(row.marked_at),
+            }),
+          );
+        }
+      }
+      throwIf(error, "Could not mark the dose.");
+    }
     const late = !existingMark && recordingCostsAPoint({
       doseDate: input.doseDate.slice(0, 10),
       doseTime: input.doseTime,
@@ -13529,19 +13638,22 @@ export class HostedApi implements ComplyraApi {
    * Opening the bell queues the same gaps the unattended sweep writes.
    * A failure leaves the existing notices readable.
    */
-  private async sweepOperatingReminders(session: SessionUser) {
+  /** Returns the ids of sites this pass verified clear of overdue
+   * unmarked doses (Wave 7M bell retirement); unloaded sites are absent. */
+  private async sweepOperatingReminders(session: SessionUser): Promise<Set<string>> {
+    const medClearSiteIds = new Set<string>();
     // Until the first-sign-in password change completes, the notice and
     // rules RPCs refuse this session by design (private.has_agency is
     // false), so the sweep would only log 4xx noise. It runs again on the
     // first bell open after the change.
-    if (session.mustChangePassword) return;
+    if (session.mustChangePassword) return medClearSiteIds;
     try {
       const rules = await this.loadOperatingRules(session);
       const { data: siteRows, error: siteError } = await this.client
         .from("sites")
         .select("id, name")
         .eq("agency_id", session.agencyId);
-      if (siteError || !siteRows) return;
+      if (siteError || !siteRows) return medClearSiteIds;
       const { data: membershipRows } = await this.client
         .from("memberships")
         .select("user_id, role_key, role, site_id, expires_on")
@@ -13561,6 +13673,7 @@ export class HostedApi implements ComplyraApi {
         if (!canAccessSite(session, siteId)) continue;
         try {
           const due = await this.getSiteDueItems(siteId);
+          if (!siteHasOverdueMedDose(due.items)) medClearSiteIds.add(siteId);
           sites.push({
             id: siteId,
             name: String(site.name),
@@ -13659,6 +13772,7 @@ export class HostedApi implements ComplyraApi {
     } catch {
       // The bell still opens if a reminder cannot be queued.
     }
+    return medClearSiteIds;
   }
 
   /**

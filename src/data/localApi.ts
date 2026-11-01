@@ -388,6 +388,7 @@ import {
   blockForShiftLabel,
   shiftBlocksForSite,
   consecutiveRefusals,
+  alreadyMarkedDoseMessage,
   marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
@@ -407,7 +408,7 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import { agencyClock, dueItemClock, medUnrecordedRowRetired, operatingReminderNotices, siteHasOverdueMedDose } from "./operatingReminders";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -925,13 +926,18 @@ export interface ComplyraApi {
   ): Promise<import("./types").MedDoseMark[]>;
   /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold.
    * A first mark recorded after the dose window ends is stamped Late and
-   * requires a brief lateReason. */
+   * requires a brief lateReason.
+   * Wave 7M: a dose that already has a mark refuses a further mark attempt
+   * ("Already given by …") unless the caller passes baseMarkedAt equal to
+   * the stored mark's markedAt — the deliberate-correction signal that the
+   * caller saw the current mark and means to change it. */
   markMedDose(input: {
     medicationId: string;
     doseDate: string;
     doseTime: string;
     status: import("./types").MedDoseMarkStatus;
     lateReason?: string;
+    baseMarkedAt?: string;
   }): Promise<void>;
   // ===== MEDICATION ORDERS + RECONCILIATION =====
   /** Prescriber orders for one Individual, newest first. */
@@ -3806,10 +3812,14 @@ export class LocalApi implements ComplyraApi {
 
   async listNotifications() {
     const session = assertSession(this.store);
-    await this.sweepOperatingReminders();
+    const medClearSiteIds = await this.sweepOperatingReminders();
     await this.sweepConsentAlerts();
     if (canViewCare(session.roleKey)) await this.sweepCareScreening();
-    return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey)).filter((row) => row.agencyId === session.agencyId &&
+    return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey))
+      // Wave 7M: an "Unmarked medication" row retires once the sweep in
+      // this same call verified the site has no overdue unmarked dose.
+      .filter((row) => !medUnrecordedRowRetired({ type: row.type, entityId: row.entityId }, medClearSiteIds))
+      .filter((row) => row.agencyId === session.agencyId &&
       (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
       .map((row) => ({
         id: row.id, agency_id: row.agencyId, user_id: row.userId, role_key: row.roleKey,
@@ -6339,8 +6349,18 @@ export class LocalApi implements ComplyraApi {
         m.doseTime === input.doseTime,
     );
     const now = new Date().toISOString();
-    if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
-      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+    if (existing) {
+      // Wave 7M: a mark attempt that is not based on the stored mark (no
+      // base, or a base from a mark that has since changed) is a stale
+      // second attempt, not a correction — refuse it gracefully instead of
+      // silently overwriting the original giver and time. Only a caller
+      // who passes the exact markedAt they saw is correcting deliberately.
+      if (!input.baseMarkedAt || input.baseMarkedAt !== existing.markedAt) {
+        throw new Error(alreadyMarkedDoseMessage(existing));
+      }
+      if (!canCorrectDoseMark(session.roleKey, session.userId, existing)) {
+        throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+      }
     }
     // A first mark recorded after the dose window ended is stamped Late
     // and must carry a brief reason; corrections keep the original stamp
@@ -13402,16 +13422,20 @@ export class LocalApi implements ComplyraApi {
    * sweep writes when nobody has the app open. Each interval sends one notice
    * per person. A missing note is one notice per day.
    */
-  private async sweepOperatingReminders() {
+  /** Returns the ids of sites this pass verified clear of overdue
+   * unmarked doses (Wave 7M bell retirement); unloaded sites are absent. */
+  private async sweepOperatingReminders(): Promise<Set<string>> {
     const session = assertSession(this.store);
     const rules = this.agencyOperatingRules();
     const now = new Date();
     let added = false;
     const sites = [];
+    const medClearSiteIds = new Set<string>();
     for (const site of this.store.db.sites) {
       if (site.agencyId !== session.agencyId || !canAccessSite(session, site.id)) continue;
       try {
         const due = await this.getSiteDueItems(site.id);
+        if (!siteHasOverdueMedDose(due.items)) medClearSiteIds.add(site.id);
         sites.push({
           id: site.id,
           name: site.name,
@@ -13476,6 +13500,7 @@ export class LocalApi implements ComplyraApi {
       added = true;
     }
     if (added) await persistMeta(this.store);
+    return medClearSiteIds;
   }
 
   private notifyRole(input: {
