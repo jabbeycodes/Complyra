@@ -3,6 +3,52 @@ import { useData } from "../data/DataProvider";
 import { ROLE_TEMPLATES, grantableRoleTemplates, type RoleKey } from "../data/permissions";
 import type { InviteMemberResult } from "../data/types";
 import { USERNAME_PATTERN, normalizeUsername } from "../data/types";
+import PasswordField from "../components/PasswordField";
+import OneTimeSecret from "../components/OneTimeSecret";
+
+export type CreatedMemberCredentials = InviteMemberResult & {
+  tempPassword: string;
+};
+
+/**
+ * The post-creation handover. The temporary password renders only
+ * through OneTimeSecret (masked by default, explicit Show/Copy) and is
+ * gone when this view unmounts — never echoed in plain text.
+ */
+export function InviteCreatedView({
+  created,
+}: {
+  created: CreatedMemberCredentials;
+}) {
+  return (
+    <div className="invite-success">
+      <p>
+        Give these credentials to {created.fullName} once. They will sign in
+        and must change the temporary password immediately.
+      </p>
+      <dl className="ack-meta">
+        <div>
+          <dt>Provider code</dt>
+          <dd>
+            <strong>{created.agencyCode}</strong>
+          </dd>
+        </div>
+        <div>
+          <dt>Username</dt>
+          <dd>
+            <strong>{created.username}</strong>
+          </dd>
+        </div>
+        <div>
+          <dt>Temporary password</dt>
+          <dd>
+            <OneTimeSecret value={created.tempPassword} />
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
 
 export default function InviteMemberForm({
   onCreated,
@@ -31,34 +77,7 @@ export default function InviteMemberForm({
   const grantableRoles = grantableRoleTemplates(session?.roleKey);
 
   if (created) {
-    return (
-      <div className="invite-success">
-        <p>
-          Give these credentials to {created.fullName} once. They will sign in
-          and must change the temporary password immediately.
-        </p>
-        <dl className="ack-meta">
-          <div>
-            <dt>Provider code</dt>
-            <dd>
-              <strong>{created.agencyCode}</strong>
-            </dd>
-          </div>
-          <div>
-            <dt>Username</dt>
-            <dd>
-              <strong>{created.username}</strong>
-            </dd>
-          </div>
-          <div>
-            <dt>Temporary password</dt>
-            <dd>
-              <strong>{created.tempPassword}</strong>
-            </dd>
-          </div>
-        </dl>
-      </div>
-    );
+    return <InviteCreatedView created={created} />;
   }
 
   return (
@@ -89,7 +108,10 @@ export default function InviteMemberForm({
           await refresh();
           const payload = { ...result, tempPassword };
           setCreated(payload);
-          onCreated?.(result, tempPassword);
+          // The success view holds the only copy now; clear the form
+          // field so the password does not linger in the form state.
+          setTempPassword("");
+          onCreated?.(result, payload.tempPassword);
         } catch (err) {
           setError((err as Error).message);
         } finally {
@@ -127,17 +149,13 @@ export default function InviteMemberForm({
           required
         />
       </label>
-      <label className="form-label">
-        Temporary password
-        <input
-          type="text"
-          autoComplete="off"
-          value={tempPassword}
-          onChange={(e) => setTempPassword(e.target.value)}
-          minLength={8}
-          required
-        />
-      </label>
+      <PasswordField
+        label="Temporary password"
+        value={tempPassword}
+        onChange={setTempPassword}
+        minLength={8}
+        required
+      />
       <label className="form-label">
         Role
         <select

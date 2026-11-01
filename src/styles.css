@@ -6948,6 +6948,28 @@ body.nav-open {
   outline-offset: -2px;
 }
 
+/* ---------- One-time credential reveal ---------- */
+.onetime-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onetime-secret-mask {
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+.onetime-secret-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.onetime-secret-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ---------- Interactive demo ---------- */
 .login-demo-copy {
   margin: 0;
