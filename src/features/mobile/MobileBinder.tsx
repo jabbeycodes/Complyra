@@ -92,6 +92,7 @@ export default function MobileBinder({
         libraryDocuments: docs.map((doc) => ({
           title: doc.title,
           hasContent: documentHasReadableContent(doc),
+          active: doc.active,
         })),
         walletDocuments: wallet,
         emergencyContact: contactRow,

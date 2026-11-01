@@ -146,6 +146,7 @@ export function BinderBoardTab({
               libraryDocuments: docs.map((d) => ({
                 title: d.title,
                 hasContent: documentHasReadableContent(d),
+                active: d.active,
               })),
               walletDocuments: wallet,
               emergencyContact: contactRow,

@@ -236,3 +236,7 @@ export const DOCUMENT_NOT_READABLE_NOTE =
 /** Store refusal when someone tries to sign a content-less document. */
 export const DOCUMENT_NOT_READABLE_ERROR =
   "This document has no readable copy yet — ask HR to add the document text or a file before you sign it.";
+
+/** Store refusal when someone tries to sign a deactivated document. */
+export const DOCUMENT_INACTIVE_ERROR =
+  "This document has been deactivated by your agency — it can't be signed. Ask HR to reactivate it if you still need to sign it.";

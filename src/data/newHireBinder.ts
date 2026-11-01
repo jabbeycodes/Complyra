@@ -654,11 +654,13 @@ export interface DerivedBinderItem {
    * For "acknowledgment" items, whether the signature link resolves —
    * computed only when the evidence bundle carries the agency's library
    * (all live callers do; bundles assembled without it keep null):
-   *  - "signable"   — a matching document exists AND has readable
-   *                   content the signer can open before signing;
-   *  - "missing"    — no matching document in the library at all;
-   *  - "unreadable" — a matching document exists but carries no
-   *                   readable content (title-only shell).
+   *  - "signable"   — a matching ACTIVE document exists AND has
+   *                   readable content the signer can open before
+   *                   signing;
+   *  - "missing"    — no matching active document in the library at
+   *                   all (never added, or deactivated since);
+   *  - "unreadable" — a matching active document exists but carries
+   *                   no readable content (title-only shell).
    * Null for every other kind. A binder must never offer a sign action
    * for a "missing" or "unreadable" item (wave 7I).
    */
@@ -707,15 +709,20 @@ export interface BinderEvidence {
   /** Document acknowledgments for this staff member: library title + when signed. */
   documentAcks: Array<{ docKey: string; ackedAt: string }>;
   /**
-   * The agency's HR library as the binder needs it: each ACTIVE
-   * document's title + whether it carries readable content (wave 7I).
-   * Optional so evidence bundles assembled before 7I keep deriving the
-   * legacy note; every live caller passes it, and with it an unsigned
-   * acknowledgment item reports whether its document is signable,
-   * missing, or an unreadable shell instead of always claiming the
-   * signature is merely pending.
+   * The agency's HR library as the binder needs it: each document's
+   * title + whether it carries readable content + whether it is active
+   * (wave 7I). Optional so evidence bundles assembled before 7I keep
+   * deriving the legacy note; every live caller passes it, and with it
+   * an unsigned acknowledgment item reports whether its document is
+   * signable, missing, or an unreadable shell instead of always
+   * claiming the signature is merely pending. A document flagged
+   * `active: false` is excluded from matching entirely — a deactivated
+   * document is not a signable target, so an item whose only matches
+   * are deactivated derives "missing", the same honest surface as a
+   * document the agency never added. Entries without the flag
+   * (pre-fix-up bundles) count as active.
    */
-  libraryDocuments?: Array<{ title: string; hasContent: boolean }>;
+  libraryDocuments?: Array<{ title: string; hasContent: boolean; active?: boolean }>;
   walletDocuments: BinderDocument[];
   emergencyContact: StaffEmergencyContact | null;
   /**
@@ -853,7 +860,14 @@ export function acknowledgmentDocumentState(
 ): BinderDocumentLinkState | null {
   const library = evidence.libraryDocuments;
   if (!library) return null;
-  const matches = library.filter((doc) => binderKeyMatches(item.matchKeys, doc.title));
+  // Deactivated documents are excluded before matching: they are not
+  // in the signable library anymore, so they can neither make an item
+  // signable nor turn it "unreadable" — an item left with no active
+  // match is "missing", exactly as if the document had never been
+  // added.
+  const matches = library.filter(
+    (doc) => doc.active !== false && binderKeyMatches(item.matchKeys, doc.title),
+  );
   if (matches.length === 0) return "missing";
   return matches.some((doc) => doc.hasContent) ? "signable" : "unreadable";
 }

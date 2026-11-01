@@ -102,6 +102,7 @@ import {
 } from "./performanceRecords";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
 import {
+  DOCUMENT_INACTIVE_ERROR,
   DOCUMENT_NOT_READABLE_ERROR,
   STARTER_POLICY_DOCUMENTS,
   documentHasReadableContent,
@@ -1277,7 +1278,7 @@ function validateMissedPunchInput(input: MissedPunchReportInput): void {
   if (!input.reason.trim()) throw new Error("A reason is required.");
 }
 
-class SupabaseHrStore implements HrStore {
+export class SupabaseHrStore implements HrStore {
   constructor(
     private client: SupabaseClient,
     private agencyId: string,
@@ -1661,16 +1662,22 @@ class SupabaseHrStore implements HrStore {
     if (!signatureName.trim()) throw new Error("Type your full name to acknowledge.");
     // Wave 7I: never record a signature on a document the signer could
     // not read — the document must exist in this agency's library and
-    // carry readable content (body text or a file link).
+    // carry readable content (body text or a file link). It must also
+    // be ACTIVE: a deactivated document is not a signable target, even
+    // for a caller who reaches this method directly (the lists hide
+    // inactive documents, but the guard cannot rely on the lists).
     const { data: doc, error: docError } = await this.client
       .from("hr_documents")
-      .select("body, file_url")
+      .select("body, file_url, active")
       .eq("id", docId)
       .eq("agency_id", this.agencyId)
       .maybeSingle();
     if (docError) throwIf(docError, "Could not load the document");
     if (!doc) throw new Error("Document not found.");
     const row = doc as Record<string, unknown>;
+    if (row.active != null && !Boolean(row.active)) {
+      throw new Error(DOCUMENT_INACTIVE_ERROR);
+    }
     if (
       !documentHasReadableContent({
         body: row.body == null ? null : String(row.body),
@@ -5218,9 +5225,15 @@ class LocalHrStore implements HrStore {
     return this.mutate((b) => {
       // Wave 7I: never record a signature on a document the signer
       // could not read — it must exist in the library with readable
-      // content (body text or a file link).
+      // content (body text or a file link). It must also be ACTIVE:
+      // a deactivated document is not a signable target, even for a
+      // caller who reaches this method directly (listDocuments hides
+      // inactive documents, but the guard cannot rely on the lists).
       const doc = b.documents.find((d) => d.id === docId);
       if (!doc) throw new Error("Document not found.");
+      if (!doc.active) {
+        throw new Error(DOCUMENT_INACTIVE_ERROR);
+      }
       if (!documentHasReadableContent(doc)) {
         throw new Error(DOCUMENT_NOT_READABLE_ERROR);
       }

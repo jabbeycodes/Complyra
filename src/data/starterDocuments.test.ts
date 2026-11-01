@@ -37,11 +37,13 @@ import {
 import {
   BINDER_DOCUMENT_MISSING_NOTE,
   BINDER_DOCUMENT_UNREADABLE_NOTE,
+  DOCUMENT_INACTIVE_ERROR,
   STARTER_POLICY_DOCUMENTS,
   documentHasReadableContent,
   starterHrDocuments,
 } from "./starterDocuments";
-import { createHrStore } from "./hrStore";
+import { SupabaseHrStore, createHrStore } from "./hrStore";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { AGENCY_ID as EVERGREEN_AGENCY_ID } from "./seed";
 
 const TODAY = "2026-10-31";
@@ -260,6 +262,236 @@ describe("local store provisioning + signature guard", () => {
     await assert.rejects(
       () => store.acknowledgeDocument("doc-does-not-exist", "New Hire"),
       /Document not found/,
+    );
+  });
+});
+
+describe("deactivated documents are not signable targets (PR #224 fix-up)", () => {
+  test("a library of only deactivated documents derives every item 'missing'", () => {
+    const library = STARTER_POLICY_DOCUMENTS.map((d) => ({
+      title: d.title,
+      hasContent: true,
+      active: false,
+    }));
+    const items = derivedAckItems(evidence({ libraryDocuments: library }));
+    assert.equal(items.length, 12);
+    for (const row of items) {
+      assert.equal(row.documentState, "missing", row.item.key);
+      assert.equal(row.note, BINDER_DOCUMENT_MISSING_NOTE, row.item.key);
+      assert.equal(row.satisfied, false, row.item.key);
+    }
+  });
+
+  test("one deactivated starter: its item is 'missing', the rest stay signable", () => {
+    const library = STARTER_POLICY_DOCUMENTS.map((d) => ({
+      title: d.title,
+      hasContent: true,
+      active: d.title !== "HIPAA 107",
+    }));
+    const items = derivedAckItems(evidence({ libraryDocuments: library }));
+    const hipaa = items.find((i) => i.item.key === "hipaa-107");
+    assert.ok(hipaa);
+    assert.equal(hipaa.documentState, "missing");
+    assert.equal(hipaa.note, BINDER_DOCUMENT_MISSING_NOTE);
+    for (const row of items.filter((i) => i.item.key !== "hipaa-107")) {
+      assert.equal(row.documentState, "signable", row.item.key);
+    }
+  });
+
+  test("an inactive readable copy does not rescue an active title-only shell", () => {
+    const library = [
+      ...STARTER_POLICY_DOCUMENTS.filter((d) => d.title !== "HIPAA 107").map(
+        (d) => ({ title: d.title, hasContent: true, active: true }),
+      ),
+      { title: "HIPAA 107", hasContent: false, active: true },
+      { title: "HIPAA 107", hasContent: true, active: false },
+    ];
+    const items = derivedAckItems(evidence({ libraryDocuments: library }));
+    const hipaa = items.find((i) => i.item.key === "hipaa-107");
+    assert.ok(hipaa);
+    assert.equal(hipaa.documentState, "unreadable");
+    assert.equal(hipaa.note, BINDER_DOCUMENT_UNREADABLE_NOTE);
+  });
+
+  test("local store: a deactivated document refuses direct signing; reactivating restores it", async () => {
+    const store = createHrStore({
+      agencyId: "agency-wave7i-inactive-1",
+      userId: "hire-9",
+    });
+    const docs = await store.listDocuments();
+    const hipaa = docs.find((d) => d.title === "HIPAA 107");
+    assert.ok(hipaa);
+
+    await store.updateDocument(hipaa.id, { active: false });
+    await assert.rejects(
+      () => store.acknowledgeDocument(hipaa.id, "New Hire"),
+      /deactivated/,
+    );
+    assert.equal((await store.listDocumentAcks()).length, 0);
+    // The binder evidence no longer offers it: the library list drops
+    // to eleven and the HIPAA item derives "missing", not signable.
+    const remaining = await store.listDocuments();
+    assert.equal(remaining.length, 11);
+    const binder = await store.getBinder("hire-9", "dsp");
+    const derived = deriveBinder(
+      binder,
+      evidence({
+        libraryDocuments: remaining.map((d) => ({
+          title: d.title,
+          hasContent: documentHasReadableContent(d),
+          active: d.active,
+        })),
+      }),
+      TODAY,
+    );
+    const row = derived.sections
+      .flatMap((s) => s.items)
+      .find((i) => i.item.key === "hipaa-107");
+    assert.ok(row);
+    assert.equal(row.documentState, "missing");
+    assert.equal(row.note, BINDER_DOCUMENT_MISSING_NOTE);
+
+    // Reactivation makes the same document a signable target again.
+    await store.updateDocument(hipaa.id, { active: true });
+    const ack = await store.acknowledgeDocument(hipaa.id, "New Hire");
+    assert.equal(ack.docId, hipaa.id);
+    assert.equal((await store.listDocuments()).length, 12);
+  });
+
+  test("the inactive refusal is the shared plain-language error", () => {
+    assert.match(DOCUMENT_INACTIVE_ERROR, /deactivated/);
+    assert.match(DOCUMENT_INACTIVE_ERROR, /can't be signed/);
+  });
+});
+
+/* ------------------------- hosted store stub ------------------------- */
+
+interface HostedStubCtx {
+  inserts: { table: string; payload: Record<string, unknown> }[];
+  filters: { table: string; column: string; value: unknown }[];
+  docRow: Record<string, unknown> | null;
+  docRows: Record<string, unknown>[];
+}
+
+type HostedStubResult = { data: unknown; error: unknown };
+
+/** Minimal chainable stand-in for the supabase-js query builder,
+ *  covering the chains the HR document methods use. */
+class HostedStubQuery implements PromiseLike<HostedStubResult> {
+  constructor(
+    private readonly table: string,
+    private readonly ctx: HostedStubCtx,
+  ) {}
+  select() {
+    return this;
+  }
+  eq(column: string, value: unknown) {
+    this.ctx.filters.push({ table: this.table, column, value });
+    return this;
+  }
+  order() {
+    return this;
+  }
+  insert(payload: Record<string, unknown>) {
+    this.ctx.inserts.push({ table: this.table, payload });
+    return this;
+  }
+  async single(): Promise<HostedStubResult> {
+    return this.result();
+  }
+  async maybeSingle(): Promise<HostedStubResult> {
+    return this.result();
+  }
+  private result(): HostedStubResult {
+    if (this.table === "hr_documents") {
+      return { data: this.ctx.docRow, error: null };
+    }
+    if (this.table === "hr_document_acks") {
+      const ins = this.ctx.inserts.find((i) => i.table === "hr_document_acks");
+      return {
+        data: {
+          id: "ack-1",
+          acked_at: "2026-10-31T12:00:00.000Z",
+          ...(ins?.payload ?? {}),
+        },
+        error: null,
+      };
+    }
+    return { data: null, error: null };
+  }
+  then<TResult1 = HostedStubResult, TResult2 = never>(
+    onfulfilled?:
+      | ((value: HostedStubResult) => TResult1 | PromiseLike<TResult1>)
+      | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    const value: HostedStubResult =
+      this.table === "hr_documents"
+        ? { data: this.ctx.docRows, error: null }
+        : { data: [], error: null };
+    return Promise.resolve(value).then(onfulfilled, onrejected);
+  }
+}
+
+function hostedStubStore(
+  docRow: Record<string, unknown> | null,
+  docRows: Record<string, unknown>[] = [],
+) {
+  const ctx: HostedStubCtx = { inserts: [], filters: [], docRow, docRows };
+  const client = {
+    from: (table: string) => new HostedStubQuery(table, ctx),
+  } as unknown as SupabaseClient;
+  return { ctx, store: new SupabaseHrStore(client, "agency-1", "hire-1") };
+}
+
+describe("hosted store: the acknowledgment guard requires an active document", () => {
+  test("acknowledging a deactivated document is refused before any insert", async () => {
+    const { ctx, store } = hostedStubStore({
+      body: "A readable policy body.",
+      file_url: null,
+      active: false,
+    });
+    await assert.rejects(
+      () => store.acknowledgeDocument("doc-1", "New Hire"),
+      /deactivated/,
+    );
+    assert.equal(ctx.inserts.length, 0);
+  });
+
+  test("an active readable document still acknowledges", async () => {
+    const { ctx, store } = hostedStubStore({
+      body: "A readable policy body.",
+      file_url: null,
+      active: true,
+    });
+    const ack = await store.acknowledgeDocument("doc-1", "New Hire");
+    assert.equal(ack.docId, "doc-1");
+    assert.equal(ack.signatureName, "New Hire");
+    assert.equal(ctx.inserts.length, 1);
+    assert.equal(ctx.inserts[0].table, "hr_document_acks");
+  });
+
+  test("the document list query requires active = true", async () => {
+    const { ctx, store } = hostedStubStore(null, [
+      {
+        id: "doc-1",
+        agency_id: "agency-1",
+        title: "HIPAA 107",
+        category: "policy",
+        body: "A readable policy body.",
+        file_url: null,
+        requires_ack: true,
+        active: true,
+      },
+    ]);
+    const docs = await store.listDocuments();
+    assert.equal(docs.length, 1);
+    assert.equal(docs[0].title, "HIPAA 107");
+    assert.ok(
+      ctx.filters.some(
+        (f) => f.table === "hr_documents" && f.column === "active" && f.value === true,
+      ),
+      "listDocuments filters hr_documents on active = true",
     );
   });
 });
