@@ -1,4 +1,8 @@
-.consents { color: var(--color-ink); background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-card); padding: 20px; margin: 20px 0; }
+/* min-width: 0: as a chart-grid item the section must be allowed to shrink
+   below its content's min-content — otherwise the register table below
+   (global nowrap cells) forces the whole chart column wider than the phone
+   viewport and every widget on the chart is clipped (chart tabs repair). */
+.consents { color: var(--color-ink); background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-card); padding: 20px; margin: 20px 0; min-width: 0; }
 .consents h2, .consents h3 { color: var(--color-ink); }
 .consents article { margin: 20px 0; }
 .consents button, .consents input, .consents select, .consents textarea { min-height: 44px; font: inherit; border: 1px solid var(--color-rule); border-radius: 4px; background: var(--color-h-faf6ef); color: var(--color-ink); padding: 8px; }
@@ -11,6 +15,6 @@
 .consents th, .consents td { padding: 12px; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
 .consents summary { cursor: pointer; padding: 12px 0; }
 .consent-version { margin: 12px 0; padding: 12px; border: 1px solid var(--color-rule); overflow-wrap: anywhere; }
-.consent-table { overflow-x: auto; }
+.consent-table { overflow-x: auto; max-width: 100%; }
 .consents a { color: var(--color-accent); text-decoration: underline; }
 .consents [role=alert] { color: var(--color-h-8a5340); font-weight: 600; }
