@@ -225,6 +225,51 @@ test("newest delivery anchors the projection; history is newest-first", () => {
   assert.equal(view.lowThresholdDays, 7);
 });
 
+test("same-day counts anchor on the later-recorded row, in either input order", () => {
+  // Two counts on one day (a morning count and an evening recount):
+  // the projection anchor must be the later-recorded row no matter
+  // what order the backend returned the rows in — otherwise the
+  // forecast figure flips between loads with no count event between.
+  const morning = { id: "d-am", medicationId: "med-1", countedOn: "2026-09-08", countedAt: "2026-09-08T14:00:00Z", remainingPills: 30, pillsPerDay: 2, recordedBy: "u" };
+  const evening = { id: "d-pm", medicationId: "med-1", countedOn: "2026-09-08", countedAt: "2026-09-08T23:00:00Z", remainingPills: 26, pillsPerDay: 2, recordedBy: "u" };
+  for (const deliveries of [[morning, evening], [evening, morning]]) {
+    const view = projectMedInventory({
+      med: med(),
+      inventory: null,
+      deliveries,
+      prnDoses: [],
+      doseExceptions: [],
+      today: "2026-09-10",
+    });
+    assert.equal(view.quantityOnDelivery, 26);
+    assert.equal(view.deliveredOn, "2026-09-08");
+    assert.equal(view.lastCountedOn, "2026-09-08");
+    // 26 pills, 2 elapsed days at 2/day.
+    assert.equal(view.currentCount, 22);
+    assert.deepEqual(view.deliveries.map((row) => row.id), ["d-pm", "d-am"]);
+  }
+});
+
+test("a legacy same-day count (no timestamp) never outranks a timestamped one", () => {
+  // The countdown's baseline pick has always ordered timestamped rows
+  // ahead of legacy rows on the same day; the projection anchor is
+  // the same pick, so the two lenses share one baseline.
+  const legacy = { id: "d-legacy", medicationId: "med-1", countedOn: "2026-09-08", remainingPills: 40, pillsPerDay: 2, recordedBy: "u" };
+  const stamped = { id: "d-stamped", medicationId: "med-1", countedOn: "2026-09-08", countedAt: "2026-09-08T14:00:00Z", remainingPills: 26, pillsPerDay: 2, recordedBy: "u" };
+  for (const deliveries of [[legacy, stamped], [stamped, legacy]]) {
+    const view = projectMedInventory({
+      med: med(),
+      inventory: null,
+      deliveries,
+      prnDoses: [],
+      doseExceptions: [],
+      today: "2026-09-10",
+    });
+    assert.equal(view.quantityOnDelivery, 26);
+    assert.equal(view.deliveries[0].id, "d-stamped");
+  }
+});
+
 test("stored threshold and acknowledgment flow into the view", () => {
   const view = projectMedInventory({
     med: med(),
