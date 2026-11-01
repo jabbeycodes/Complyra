@@ -143,7 +143,7 @@ import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { furthestReminderDay } from "./data/rules";
 import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
-import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { individualsAtSite, packetsVisibleTo, personalQueue, requirementsVisibleTo, sitesVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
 import { can, defaultLandingPage, pageVisible, roleLabel } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
@@ -524,9 +524,16 @@ export default function App() {
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
   const visibleSiteNames = new Set(sites.map((row) => row.name));
-  const visibleRequirements = data.requirements.filter((r) =>
-    visibleSiteNames.has(r.site),
+  // DSP-ASSIGNED-SCOPE: a DSP's Requirements surface (list, category
+  // pages, search, counts) holds only requirements they own — see
+  // requirementsVisibleTo. Other roles keep the site-scoped list.
+  const visibleRequirements = requirementsVisibleTo(
+    session,
+    data.requirements.filter((r) => visibleSiteNames.has(r.site)),
   );
+  // DSP-ASSIGNED-SCOPE: the Acknowledgments page and its nav badge
+  // show a DSP only sheets carrying their own signature row.
+  const visiblePackets = packetsVisibleTo(session, workspace.packets);
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
@@ -907,12 +914,12 @@ export default function App() {
                     <span className="nav-count">{messageUnread}</span>
                   )}
                   {name === "Acknowledgments" &&
-                    workspace.packets.some((p) =>
+                    visiblePackets.some((p) =>
                       p.rows.some((row) => !row.signedAt && p.packet.status === "open"),
                     ) && (
                       <span className="nav-count">
                         {
-                          workspace.packets.filter((p) =>
+                          visiblePackets.filter((p) =>
                             p.rows.some((row) => !row.signedAt),
                           ).length
                         }
@@ -1787,7 +1794,7 @@ export default function App() {
                     description="One sheet per person. Export includes anyone who has not signed."
                   />
                   <section className="panel">
-                    {workspace.packets.length ? (
+                    {visiblePackets.length ? (
                       <div className="table-scroll">
                         <table>
                           <thead>
@@ -1801,7 +1808,7 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {workspace.packets
+                            {visiblePackets
                               .filter(
                                 (item) =>
                                   site === "All sites" ||
@@ -1852,7 +1859,11 @@ export default function App() {
                     ) : (
                       <Empty
                         title="No acknowledgment sheets yet"
-                        text="Approve an uploaded PCSP to build a roster from assigned staff."
+                        text={
+                          session.roleKey === "dsp"
+                            ? "No acknowledgment sheets are assigned to you."
+                            : "Approve an uploaded PCSP to build a roster from assigned staff."
+                        }
                       />
                     )}
                   </section>

@@ -59,6 +59,25 @@ export interface ConsentRegister {
         fullName: string;
     }[];
 }
+/**
+ * DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31: "DSPs only see what
+ * they are assigned"): narrow a consent register to a set of
+ * Individuals — the ones the caller may read. Records and revocations
+ * follow their Individual, so nothing about anyone outside the set
+ * survives in the result. The Consents view applies this for DSPs with
+ * the workspace's readable Individuals, so the register they see holds
+ * only consents for Individuals at their assigned homes.
+ */
+export function scopeConsentRegister(
+    register: ConsentRegister,
+    individualIds: ReadonlySet<string>,
+): ConsentRegister {
+    const individuals = register.individuals.filter(p => individualIds.has(p.id));
+    const records = register.records.filter(r => individualIds.has(r.individualId));
+    const recordIds = new Set(records.map(r => r.id));
+    const revocations = register.revocations.filter(v => recordIds.has(v.consentId));
+    return { ...register, individuals, records, revocations };
+}
 export type ConsentStatus = 'Draft' | 'Scheduled' | 'Active' | 'Expiring soon' | 'Expired' | 'Revoked' | 'Superseded' | 'Missing';
 export function canSeeConsents(roleKey: string) {
     return ['house_manager', 'program_manager', 'nurse', 'dsp', 'auditor', 'administrator'].includes(roleKey);
