@@ -29,6 +29,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  *     to the function logs and never blocks a legitimate signing, so a
  *     logging outage cannot lock staff out of critical sign-offs. The audit
  *     table itself is append-only (no client write policies).
+ *   - Delegation forms are stamped against the exact state that was
+ *     authorized: the check phase snapshots the form, the transition
+ *     re-validates any change against the full predicate set and persists
+ *     through a conditional update on obligations.updated_at, so a
+ *     concurrent reassignment or disable can never be signed over (a lost
+ *     race is refused as 409 `form_changed`, before any event is written).
  */
 
 const cors = {
@@ -91,6 +97,37 @@ function rosterRowKey(printName: string): string {
     .slice(0, 60);
   return `row:${slug || "unnamed"}:initials`;
 }
+
+/**
+ * Mirrors LocalApi.applySignatureDomain's bare-row parse (client): a roster
+ * row SIGNATURE field is "row:<n>" where <n> is a non-negative integer index
+ * (Number() semantics, so "row:007" addresses row 7). Anything else is not a
+ * row-signature field and the caller falls through to the unknown-field
+ * refusal. The keyed "row:<slug>:initials" form is matched earlier and never
+ * reaches this parse.
+ */
+function rowIndexOf(fieldName: string): number | null {
+  if (!fieldName.startsWith("row:")) return null;
+  const index = Number(fieldName.slice(4));
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+/**
+ * The obligations row for a delegation_form document, as read by the
+ * delegation checks below. `updated_at` doubles as the row's optimistic-
+ * concurrency token: the obligations_updated_at trigger bumps it on every
+ * write, so a conditional update on it proves the form did not change
+ * between the verified read and the write.
+ */
+type DelegationObligation = {
+  id: string;
+  agency_id: string;
+  kind: string;
+  delegation_form: Record<string, unknown> | null;
+  rn_signed_at: string | null;
+  enabled?: boolean;
+  updated_at: string;
+};
 
 function clientIp(req: Request): string | null {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -482,6 +519,15 @@ Deno.serve(async (req) => {
     return fail("No active agency membership found for this account.", 403);
   }
 
+  // The delegation_form state the check phase authorized, kept so the
+  // domain transition can prove it is stamping the state that was actually
+  // authorized (see verifiedDelegationState). Set only by a successful
+  // delegation check; null for every other document type.
+  let authorizedDelegation: {
+    obligation: DelegationObligation;
+    fingerprint: string;
+  } | null = null;
+
   // -- Domain rules: every client-side signing rule, enforced here --------------
   const domainError = await checkDomainRules();
   if (domainError) return domainError;
@@ -506,29 +552,29 @@ Deno.serve(async (req) => {
     ).trim();
   }
 
-  /** Text initials derived from a display name (mirrors suggestInitials). */
-  function textInitials(fullName: string): string {
-    const words = fullName.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return "";
-    const first = words[0][0] ?? "";
-    const last = words.length > 1 ? words[words.length - 1][0] ?? "" : "";
-    return (first + last).toUpperCase();
+  /**
+   * Text initials derived from a display name. Mirrors the client's
+   * suggestInitials (signatureUtils) byte-for-byte: first + SECOND word
+   * initial (a single-word name gives its first two letters). LocalApi
+   * writes these into the roster's legacy initials column on both the
+   * initials stamp and the row signature, so the hosted writes must derive
+   * them the same way.
+   */
+  function suggestInitials(fullName: string): string {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
   async function applyDomainTransition(): Promise<Response | null> {
     const now = new Date().toISOString();
     if (documentType === "delegation_form") {
       if (fieldName === "rn_signature") {
+        const verified = await verifiedDelegationState();
+        if (verified instanceof Response) return verified;
         const fullName = await signerFullName();
-        const { data: obligation } = await admin
-          .from("obligations")
-          .select("delegation_form")
-          .eq("id", documentId)
-          .maybeSingle();
-        const form = (
-          ((obligation as { delegation_form: unknown } | null)
-            ?.delegation_form ?? {}) as Record<string, unknown>
-        );
+        const form = (verified.delegation_form ?? {}) as Record<string, unknown>;
         const delegatingRn =
           typeof form.delegatingRn === "object" && form.delegatingRn !== null
             ? (form.delegatingRn as Record<string, string>)
@@ -537,60 +583,84 @@ Deno.serve(async (req) => {
         delegatingRn.dateSigned = now.slice(0, 10);
         if (!String(delegatingRn.name ?? "").trim()) delegatingRn.name = fullName;
         form.delegatingRn = delegatingRn;
-        const { error } = await admin
-          .from("obligations")
-          .update({
+        return persistDelegationForm(
+          verified,
+          {
             delegating_rn_user_id: user.id,
             rn_signed_at: now,
             rn_signature_name: fullName,
             rn_signature_mark: adopted.signature_path,
             delegation_form: form,
-          })
-          .eq("id", documentId);
-        if (error) {
-          console.error("apply-signature: RN domain transition failed", error.message);
-          return fail("Could not record the RN signature.", 500);
-        }
-        return null;
+          },
+          "Could not record the RN signature.",
+        );
       }
       const rowMatch = /^row:(.+):initials$/.exec(fieldName);
       if (rowMatch) {
-        const { data: obligation } = await admin
-          .from("obligations")
-          .select("delegation_form")
-          .eq("id", documentId)
-          .maybeSingle();
-        const form = (
-          ((obligation as { delegation_form: unknown } | null)
-            ?.delegation_form ?? {}) as {
-            roster?: Array<{ printName?: string; initials?: string }>;
-          }
-        );
+        const verified = await verifiedDelegationState();
+        if (verified instanceof Response) return verified;
+        const form = (verified.delegation_form ?? {}) as {
+          roster?: Array<{ printName?: string; initials?: string }>;
+        };
         const roster = Array.isArray(form.roster) ? form.roster : [];
         const row = roster.find(
           (r) => rosterRowKey(String(r.printName ?? "")) === fieldName,
         );
         if (!row) {
+          // verifiedDelegationState re-ran the authorization predicates on
+          // this exact form, so the row is present; fail closed regardless.
           console.error(
-            "apply-signature: roster row vanished between check and transition",
+            "apply-signature: roster row missing from the verified form",
           );
           return fail("Roster row not found.", 400);
         }
         // Keep the legacy initials column in sync; the event carries the mark.
         // Initialing is not the row signature and does not lock the form.
-        if (!row.initials) row.initials = textInitials(await signerFullName());
-        const { error } = await admin
-          .from("obligations")
-          .update({ delegation_form: form })
-          .eq("id", documentId);
-        if (error) {
+        if (!row.initials) row.initials = suggestInitials(await signerFullName());
+        return persistDelegationForm(
+          verified,
+          { delegation_form: form },
+          "Could not record the roster initials.",
+        );
+      }
+      const rowIndex = rowIndexOf(fieldName);
+      if (rowIndex !== null) {
+        const verified = await verifiedDelegationState();
+        if (verified instanceof Response) return verified;
+        const form = (verified.delegation_form ?? {}) as {
+          roster?: Array<{
+            printName?: string;
+            signatureName?: string;
+            staffSignature?: string;
+            initials?: string;
+            signedAt?: string;
+          }>;
+        };
+        const roster = Array.isArray(form.roster) ? form.roster : [];
+        const row = roster[rowIndex];
+        if (!row) {
+          // verifiedDelegationState re-ran the authorization predicates on
+          // this exact form, so the row is present; fail closed regardless.
           console.error(
-            "apply-signature: roster initials transition failed",
-            error.message,
+            "apply-signature: roster row missing from the verified form",
           );
-          return fail("Could not record the roster initials.", 500);
+          return fail("Roster row not found.", 400);
         }
-        return null;
+        // Mirror LocalApi.signDelegationRow's legacy writes: the roster row
+        // carries the signer's name, the adopted-signature mark, the derived
+        // initials, and the timestamp delegationFormStatus counts — without
+        // these the form reads "0/N staff signed" forever. Convergent on
+        // retry: the same signer re-writes the same values.
+        const fullName = await signerFullName();
+        row.signatureName = fullName;
+        row.staffSignature = adopted.signature_path;
+        row.initials = suggestInitials(fullName);
+        row.signedAt = now;
+        return persistDelegationForm(
+          verified,
+          { delegation_form: form },
+          "Could not record the roster signature.",
+        );
       }
       return null;
     }
@@ -828,23 +898,130 @@ Deno.serve(async (req) => {
     return fail("Unknown signature field.", 400);
   }
 
-  async function checkDelegationForm(): Promise<Response | null> {
+  async function loadDelegationObligation(): Promise<DelegationObligation | null> {
     const { data: obligation } = await admin
       .from("obligations")
-      .select("id,agency_id,kind,delegation_form,rn_signed_at")
+      .select("id,agency_id,kind,delegation_form,rn_signed_at,enabled,updated_at")
       .eq("id", documentId)
       .maybeSingle();
-    const ob = obligation as {
-      id: string;
-      agency_id: string;
-      kind: string;
-      delegation_form: { roster?: Array<{ printName?: string }> } | null;
-      rn_signed_at: string | null;
-    } | null;
+    const ob = obligation as DelegationObligation | null;
     if (!ob || ob.kind !== "delegation" || ob.agency_id !== agencyId) {
+      return null;
+    }
+    return ob;
+  }
+
+  /**
+   * Fingerprint of the exact delegation state an authorization decision
+   * rests on: the whole form (roster names and assignments, signed
+   * markers, the RN block), the enabled flag, and the RN-signed
+   * timestamp. Nothing outside these fields can change whether this
+   * signer may stamp this field, so any difference between the check
+   * phase's fingerprint and the transition's means the authorization's
+   * basis moved and the predicates must be re-run.
+   */
+  function delegationAuthFingerprint(ob: DelegationObligation): string {
+    return stableStringify({
+      form: ob.delegation_form ?? {},
+      enabled: ob.enabled !== false,
+      rnSignedAt: ob.rn_signed_at ?? null,
+    });
+  }
+
+  /**
+   * The delegation state the domain transition may stamp. Re-reads the
+   * obligation and reconciles it with the state the check phase
+   * authorized:
+   *   - unchanged → the fresh read (the same state);
+   *   - changed → the FULL authorization predicates are re-run against
+   *     the fresh state, and any refusal is the answer: a row reassigned
+   *     to someone else refuses as not_line_owner, a delegation turned
+   *     off refuses as turned off, a row signed meanwhile refuses as
+   *     already signed. If the predicates still hold for THIS signer,
+   *     the fresh state is what gets stamped, so unrelated concurrent
+   *     edits (another staff member initialing their own row meanwhile)
+   *     are preserved rather than clobbered by a stale snapshot.
+   * The caller persists through persistDelegationForm, whose conditional
+   * update closes the remaining read-to-write window — a stamp can never
+   * land on a form state this signer was not authorized for.
+   */
+  async function verifiedDelegationState(): Promise<DelegationObligation | Response> {
+    const fresh = await loadDelegationObligation();
+    if (!fresh) return fail("Delegation not found.", 400);
+    if (!authorizedDelegation) {
+      // The sign flow always runs the delegation check first; fail closed.
       return fail("Delegation not found.", 400);
     }
+    if (delegationAuthFingerprint(fresh) !== authorizedDelegation.fingerprint) {
+      const refusal = await validateDelegationForm(fresh);
+      if (refusal) return refusal;
+    }
+    return fresh;
+  }
 
+  /**
+   * Persist a delegation write guarded by the exact state it was
+   * verified against: the UPDATE only lands while obligations.updated_at
+   * is still the verified read's value (every write bumps it via the
+   * obligations_updated_at trigger). Zero rows updated means the form
+   * changed between verification and write — refuse as a conflict and let
+   * the caller retry against the fresh form. The refusal returns before
+   * the handler's event insert, so no signature_events row (and no
+   * Activity-log mirror of one) is ever written for a stamp that did not
+   * land.
+   */
+  async function persistDelegationForm(
+    verified: DelegationObligation,
+    patch: Record<string, unknown>,
+    failureMessage: string,
+  ): Promise<Response | null> {
+    const { data, error } = await admin
+      .from("obligations")
+      .update(patch)
+      .eq("id", documentId)
+      .eq("updated_at", verified.updated_at)
+      .select("id");
+    if (error) {
+      console.error("apply-signature: delegation transition failed", error.message);
+      return fail(failureMessage, 500);
+    }
+    if (!data || data.length === 0) {
+      return fail(
+        "This form was just changed \u2014 refresh and try signing again.",
+        409,
+        "form_changed",
+      );
+    }
+    return null;
+  }
+
+  async function checkDelegationForm(): Promise<Response | null> {
+    const ob = await loadDelegationObligation();
+    if (!ob) {
+      return fail("Delegation not found.", 400);
+    }
+    const refusal = await validateDelegationForm(ob);
+    if (refusal) return refusal;
+    // Remember the exact authorized state: the domain transition must
+    // prove it is stamping THIS state, not whatever the form has become
+    // since (see verifiedDelegationState).
+    authorizedDelegation = {
+      obligation: ob,
+      fingerprint: delegationAuthFingerprint(ob),
+    };
+    return null;
+  }
+
+  /**
+   * Every delegation signing predicate, evaluated against a GIVEN read of
+   * the obligation — the check phase runs it against the first read, and
+   * verifiedDelegationState re-runs it against the transition's re-read
+   * whenever the form changed in between, so an authorization can never
+   * be spent on a state it was not granted for.
+   */
+  async function validateDelegationForm(
+    ob: DelegationObligation,
+  ): Promise<Response | null> {
     if (fieldName === "rn_signature") {
       if (signatureKind !== "signature") {
         return fail("The delegating RN attestation needs a full signature.", 400);
@@ -855,6 +1032,9 @@ Deno.serve(async (req) => {
           403,
           "not_nurse",
         );
+      }
+      if (ob.enabled === false) {
+        return fail("Turn the delegation on before the RN signs.", 400);
       }
       return null;
     }
@@ -869,24 +1049,10 @@ Deno.serve(async (req) => {
         : [];
       const row = roster.find((r) => rosterRowKey(String(r.printName ?? "")) === fieldName);
       if (!row) return fail("Roster row not found.", 400);
-      const printName = String(row.printName ?? "").trim();
-      const { data: profile } = await admin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", user.id)
-        .maybeSingle();
-      const myName = String(
-        (profile as { full_name: string } | null)?.full_name ?? "",
-      ).trim();
-      // Only your own row: the printed name must match the signer's identity.
-      if (!printName || printName.toLowerCase() !== myName.toLowerCase()) {
-        return fail(
-          printName
-            ? `Only ${printName} can initial this row.`
-            : "Only the named staff member can initial this row.",
-          403,
-          "not_line_owner",
-        );
+      // LocalApi order (applySignatureDomain key lookup, then
+      // initialDelegationRow): turned-off, RN-first, named-row, own-row.
+      if (ob.enabled === false) {
+        return fail("This delegation is turned off.", 400);
       }
       // The delegating RN signs first (paper order).
       const { data: rnEvent } = await admin
@@ -898,6 +1064,83 @@ Deno.serve(async (req) => {
         .limit(1);
       if (!ob.rn_signed_at && (rnEvent?.length ?? 0) === 0) {
         return fail("The delegating RN must sign first.", 409, "rn_first");
+      }
+      const printName = String(row.printName ?? "").trim();
+      if (!printName) {
+        return fail("Name the staff member on that row first.", 400);
+      }
+      // Only your own row: the printed name must match the signer's identity.
+      const myName = await signerFullName();
+      if (printName.toLowerCase() !== myName.toLowerCase()) {
+        return fail(
+          `Only ${printName} can initial this row.`,
+          403,
+          "not_line_owner",
+        );
+      }
+      return null;
+    }
+
+    const rowIndex = rowIndexOf(fieldName);
+    if (rowIndex !== null) {
+      if (signatureKind !== "signature") {
+        return fail("Roster rows are signed, not initialed.", 400);
+      }
+      const roster = Array.isArray(ob.delegation_form?.roster)
+        ? ob.delegation_form!.roster!
+        : [];
+      const row = roster[rowIndex] as
+        | { printName?: string; signedAt?: string }
+        | undefined;
+      if (!row) return fail("Roster row not found.", 400);
+      // LocalApi order (applySignatureDomain, then signDelegationRow):
+      // own-row, turned-off, RN-first, named-row, already-signed.
+      const printName = String(row.printName ?? "").trim();
+      if (printName) {
+        // Only your own row: the printed name must match the signer's
+        // identity. Unnamed rows pass here and fail the named-row check
+        // below, exactly as LocalApi routes them.
+        const myName = await signerFullName();
+        if (printName.toLowerCase() !== myName.toLowerCase()) {
+          return fail(
+            `Only ${printName} can sign this row.`,
+            403,
+            "not_line_owner",
+          );
+        }
+      }
+      if (ob.enabled === false) {
+        return fail("This delegation is turned off.", 400);
+      }
+      // The delegating RN signs first (paper order).
+      const { data: rnEvent } = await admin
+        .from("signature_events")
+        .select("id")
+        .eq("document_type", documentType)
+        .eq("document_id", documentId)
+        .eq("field_name", "rn_signature")
+        .limit(1);
+      if (!ob.rn_signed_at && (rnEvent?.length ?? 0) === 0) {
+        return fail("The delegating RN must sign first.", 409, "rn_first");
+      }
+      if (!printName) {
+        return fail("Name the staff member on that row first.", 400);
+      }
+      if (row.signedAt) {
+        // A signed row whose event is already recorded is a true
+        // double-sign. A signed row WITHOUT an event is a wedged retry
+        // (the domain transition landed, the event insert did not): let it
+        // through so the convergent transition + insert can complete.
+        const { data: existing } = await admin
+          .from("signature_events")
+          .select("id")
+          .eq("document_type", documentType)
+          .eq("document_id", documentId)
+          .eq("field_name", fieldName)
+          .limit(1);
+        if ((existing?.length ?? 0) > 0) {
+          return fail("That row is already signed.", 409, "already_signed");
+        }
       }
       return null;
     }
