@@ -20,6 +20,7 @@ import type {
   HrTimeOffRequest,
 } from "../../data/hr";
 import type { HrOpenShift } from "../../data/openShifts";
+import { chicagoShiftInstants } from "../coverage/coverageWeek";
 
 const CEDAR = "site-cedar";
 const WILLOW = "site-willow";
@@ -363,4 +364,154 @@ test("all clear only when every segment is empty", () => {
     inputs({ openPunches: [punch({})] }),
   );
   assert.equal(busy.allClear, false);
+});
+
+/* --------------------- Tonight's overnight coverage -------------------- */
+
+const JUNIPER = "site-juniper";
+const JUNIPER_SITE = {
+  siteId: JUNIPER,
+  siteName: "Juniper House",
+  overnightStartMin: 1380, // 11:00 p.m. — the sim house's own cadence
+  overnightEndMin: 1860, // 7:00 a.m. next day
+};
+const TONIGHT_STAFF = [
+  { userId: "u-casey", fullName: "Casey Dunn", siteId: JUNIPER, roleKey: "dsp" },
+  { userId: "u-drew", fullName: "Drew Ellis", siteId: JUNIPER, roleKey: "dsp" },
+  { userId: "u-quinn", fullName: "Quinn Newhire", siteId: JUNIPER, roleKey: "dsp" },
+];
+// 00:09 CDT on 2026-11-01 — the batch 80 moment, inside the overnight
+// instance that started on Oct 31.
+const AFTER_MIDNIGHT = "2026-11-01T05:09:00Z";
+
+function tonightInputs(partial: Partial<RightNowInputs>): RightNowInputs {
+  return inputs({
+    nowIso: AFTER_MIDNIGHT,
+    today: "2026-11-01",
+    siteIds: [JUNIPER],
+    staff: TONIGHT_STAFF,
+    tonightSites: [JUNIPER_SITE],
+    tonightShifts: [],
+    clearanceByStaffId: new Map<string, boolean>(),
+    ...partial,
+  });
+}
+
+test("tonight: an overnight with nobody assigned is uncovered and breaks all clear (batch 80)", () => {
+  const model = buildRightNowModel(
+    tonightInputs({
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-casey",
+          ...chicagoShiftInstants("2026-11-01", "07:00", "15:00"),
+        }),
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-drew",
+          ...chicagoShiftInstants("2026-11-01", "15:00", "23:00"),
+        }),
+      ],
+    }),
+  );
+  assert.equal(model.tonight.length, 1);
+  assert.equal(model.tonight[0].state, "uncovered");
+  assert.deepEqual(model.tonight[0].coveringNames, []);
+  assert.equal(model.allClear, false);
+});
+
+test("tonight: an overnight covered only by an uncleared DSP is an attention state, never all clear", () => {
+  const model = buildRightNowModel(
+    tonightInputs({
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-quinn",
+          ...chicagoShiftInstants("2026-10-31", "23:00", "07:00"),
+        }),
+      ],
+      clearanceByStaffId: new Map([["u-quinn", false]]),
+    }),
+  );
+  assert.equal(model.tonight[0].state, "uncleared_only");
+  assert.deepEqual(model.tonight[0].coveringNames, ["Quinn Newhire"]);
+  assert.deepEqual(model.tonight[0].unclearedNames, ["Quinn Newhire"]);
+  assert.equal(model.allClear, false);
+});
+
+test("tonight: a cleared DSP on the overnight keeps all clear", () => {
+  const model = buildRightNowModel(
+    tonightInputs({
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-quinn",
+          ...chicagoShiftInstants("2026-10-31", "23:00", "07:00"),
+        }),
+      ],
+      clearanceByStaffId: new Map([["u-quinn", true]]),
+    }),
+  );
+  assert.equal(model.tonight[0].state, "covered");
+  assert.equal(model.allClear, true);
+});
+
+test("tonight: an unreadable clearance never fabricates a flag", () => {
+  const model = buildRightNowModel(
+    tonightInputs({
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-quinn",
+          ...chicagoShiftInstants("2026-10-31", "23:00", "07:00"),
+        }),
+      ],
+      clearanceByStaffId: new Map<string, boolean>(),
+    }),
+  );
+  assert.equal(model.tonight[0].state, "covered");
+  assert.deepEqual(model.tonight[0].unclearedNames, []);
+});
+
+test("tonight: the clearance flag applies to DSPs only, not to a nurse on the overnight", () => {
+  const model = buildRightNowModel(
+    tonightInputs({
+      staff: [
+        { userId: "u-nurse", fullName: "Morgan Quinn", siteId: JUNIPER, roleKey: "nurse" },
+      ],
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-nurse",
+          ...chicagoShiftInstants("2026-10-31", "23:00", "07:00"),
+        }),
+      ],
+      clearanceByStaffId: new Map([["u-nurse", false]]),
+    }),
+  );
+  assert.equal(model.tonight[0].state, "covered");
+  assert.deepEqual(model.tonight[0].unclearedNames, []);
+});
+
+test("tonight: during the day the strip judges the overnight that starts tonight", () => {
+  const dayInputs = {
+    nowIso: "2026-11-01T12:00:00",
+    today: "2026-11-01",
+  };
+  const uncovered = buildRightNowModel(tonightInputs({ ...dayInputs }));
+  assert.equal(uncovered.tonight[0].state, "uncovered");
+  const covered = buildRightNowModel(
+    tonightInputs({
+      ...dayInputs,
+      tonightShifts: [
+        shift({
+          siteId: JUNIPER,
+          staffId: "u-casey",
+          ...chicagoShiftInstants("2026-11-01", "23:00", "07:00"),
+        }),
+      ],
+      clearanceByStaffId: new Map([["u-casey", true]]),
+    }),
+  );
+  assert.equal(covered.tonight[0].state, "covered");
 });

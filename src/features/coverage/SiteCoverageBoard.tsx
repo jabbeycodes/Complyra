@@ -107,6 +107,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   const { api, session, workspace, refresh } = useData();
   const [weekStart, setWeekStart] = useState(currentWeekStart);
   const [shifts, setShifts] = useState<HrShift[]>([]);
+  const [unclearedIds, setUnclearedIds] = useState<ReadonlySet<string>>(new Set());
   const [accountability, setAccountability] = useState<Map<string, ShiftAccountability>>(new Map());
   const [openShifts, setOpenShifts] = useState<HrOpenShift[]>([]);
   const [error, setError] = useState("");
@@ -156,6 +157,21 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     const dates = weekDates(start);
     if (ticket !== loadTicket.current) return;
     setShifts(rows.filter((row) => row.status !== "cancelled"));
+    // Clearance flags for the owed lines: only a DSP positively read as not
+    // cleared is flagged. A failed read leaves the set empty — the board
+    // never guesses a flag it could not read.
+    const clearance = await api.listStaffNeedingClearance(siteId).catch(() => null);
+    if (ticket !== loadTicket.current) return;
+    if (clearance) {
+      const dspIds = new Set(people.filter((person) => person.roleKey === "dsp").map((person) => person.id));
+      setUnclearedIds(
+        new Set(
+          clearance
+            .filter((row) => !row.clearedForInRatio && dspIds.has(row.userId))
+            .map((row) => row.userId),
+        ),
+      );
+    }
     // Accountability reads the same local coverage buckets the shift list
     // just loaded (the demo seed lands with that load), so it runs after.
     // A failed read leaves the board usable without the lines — the board
@@ -223,6 +239,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
           writers: houseWriters.map((person) => ({ userId: person.id, name: person.name })),
           graceMinutes: operating.noteGraceMinutes,
           weekHasSchedule: planShifts.length > 0,
+          unclearedStaffIds: unclearedIds,
         })
       : [],
     shifts: shifts
