@@ -124,6 +124,20 @@ export function validateConsentTypes(types: ConsentType[]) {
     if (!types.some(t => t.id === 'medication' && t.medication))
         throw new Error('Keep the medication administration consent type.');
 }
+/**
+ * The entity ids under which one consent gap's alerts can appear: the
+ * consent record id once a record exists, and the person:type form used
+ * before any record exists. A fresh alert for a gap retires the gap's
+ * other UNREAD incarnations for the same recipient (LocalApi sweep +
+ * private.sweep_consents, migration 20261031250000), so the bell never
+ * shows one consent as both "missing" and "expiring" (batches 51/52/58).
+ */
+export function consentAlertEntityIds(register: ConsentRegister, entityId: string): string[] {
+    const record = register.records.find((row) => row.id === entityId);
+    if (!record)
+        return [entityId];
+    return [record.id, `${record.individualId}:${record.typeId}`];
+}
 // Missing/expiring notices fire once per consent and target on entering the window.
 // Repeated sweeps dedupe permanently; there is no repeating alert cadence.
 export function consentAlerts(register: ConsentRegister, memberships: Membership[], today = todayStamp()) {

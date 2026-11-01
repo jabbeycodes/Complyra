@@ -298,6 +298,18 @@
   font-weight: 600;
 }
 
+/* Batch 59: scheduling clearance warning — a caution, not an error. */
+.hub-clearance-warning {
+  background: var(--color-h-f6f8f4);
+  border: 1px solid var(--color-h-c9b48a);
+  color: var(--color-h-4a4036);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .hub-table-scroll {
   overflow-x: auto;
 }
