@@ -8,6 +8,7 @@ import {
   DEMO_AGENCY_CODE,
   DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
+  DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { canSeeMeds, todayIso } from "./chart";
@@ -29,7 +30,13 @@ import { medUnrecordedRowRetired } from "./operatingReminders";
  *     overwrote the original giver/time for anyone allowed to correct.
  *     A plain attempt now refuses with "Already given by …"; only a
  *     deliberate correction (baseMarkedAt = the mark the caller saw)
- *     proceeds, under the unchanged canCorrectDoseMark rules.
+ *     proceeds, under the unchanged canCorrectDoseMark rules. The
+ *     correction compare-and-set is atomic at the database boundary
+ *     (correct_med_dose_mark RPC, migration 20261031280000): two
+ *     correctors racing on the same base cannot both write — the loser
+ *     gets DOSE_MARK_CONFLICT, mapped to the same named refusal. In
+ *     LocalApi the check-and-write is one synchronous stretch of a
+ *     single process, so the same semantics hold without an RPC.
  *  3. The bell's "Unmarked medication" rows never retired. A row now
  *     retires for every viewer once a sweep verifies the site has no
  *     overdue unmarked dose left.
@@ -230,6 +237,84 @@ test("a stale second attempt refuses and never overwrites the original mark", as
   );
 });
 
+test("two correctors racing on one base: exactly one wins, the loser is refused", async () => {
+  // The reviewer-HOLD scenario (PR #228). LocalApi runs the check and
+  // the write in one synchronous stretch of a single process, so the
+  // sequential form below is the whole race: both correctors hold the
+  // same base; the first correction re-stamps the mark, and the second
+  // corrector's base no longer matches anything stored. (The hosted
+  // path enforces the same rule atomically inside the
+  // correct_med_dose_mark RPC — see supabase/tests/
+  // med_dose_mark_cas.sql for the database-level proof, including the
+  // med_dose_mark_history chain.)
+  const st = store();
+  const api = new LocalApi(st);
+  const { ellis } = await hmOnEllis(api, st);
+  const medId = `${ellis.id}-med-keppra`;
+  const day = centralYesterdayIso();
+
+  const dspSession = await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.markMedDose({
+    medicationId: medId,
+    doseDate: day,
+    doseTime: "08:00",
+    status: "given",
+    lateReason: "Entered from the paper MAR",
+  });
+  const original = (await api.getMedDoseMarks(ellis.id, day)).find((m) => m.doseTime === "08:00")!;
+  assert.equal(original.markedByName, dspSession.fullName);
+
+  // Both correctors loaded the chart before either wrote: same base.
+  const hmSession = await api.signIn(login(DEMO_HM_USERNAME));
+  const base = original.markedAt;
+
+  // Corrector 1 (the HM) wins.
+  await api.markMedDose({
+    medicationId: medId,
+    doseDate: day,
+    doseTime: "08:00",
+    status: "missed",
+    baseMarkedAt: base,
+  });
+  const winning = (await api.getMedDoseMarks(ellis.id, day)).find((m) => m.doseTime === "08:00")!;
+  assert.equal(winning.status, "missed");
+  assert.equal(winning.markedByName, hmSession.fullName);
+  assert.notEqual(winning.markedAt, base, "the winning correction re-stamps the mark");
+
+  // Corrector 2 (the nurse) attempts the same correction from the same
+  // stale base: refused, naming the winner — and the stored row stays
+  // exactly the winner's.
+  const nurseSession = await api.signIn(login(DEMO_NURSE_USERNAME));
+  await assert.rejects(
+    () =>
+      api.markMedDose({
+        medicationId: medId,
+        doseDate: day,
+        doseTime: "08:00",
+        status: "given",
+        baseMarkedAt: base,
+      }),
+    { message: new RegExp(`^Already marked missed by ${hmSession.fullName} · `) },
+  );
+  const after = (await api.getMedDoseMarks(ellis.id, day)).find((m) => m.doseTime === "08:00")!;
+  assert.equal(after.status, "missed");
+  assert.equal(after.markedByName, hmSession.fullName);
+  assert.equal(after.markedAt, winning.markedAt);
+
+  // After reloading (fresh base), the nurse's deliberate correction
+  // still lands — losing a race is a refusal, not a lockout.
+  await api.markMedDose({
+    medicationId: medId,
+    doseDate: day,
+    doseTime: "08:00",
+    status: "given",
+    baseMarkedAt: after.markedAt,
+  });
+  const final = (await api.getMedDoseMarks(ellis.id, day)).find((m) => m.doseTime === "08:00")!;
+  assert.equal(final.status, "given");
+  assert.equal(final.markedByName, nurseSession.fullName);
+});
+
 // ─── (c) Bell retirement (LocalApi) ────────────────────────────────────────
 
 test("the bell's unmarked-dose row retires once anyone marks the dose", async () => {
@@ -327,8 +412,11 @@ type StubResult = { data: unknown; error: unknown };
 
 interface HostedStubCtx {
   writes: { table: string; op: string; payload: unknown }[];
+  rpcCalls: { name: string; args: Record<string, unknown> }[];
   markSingles: StubResult[];
   insertError: unknown;
+  /** When set, the correct_med_dose_mark RPC returns this error. */
+  correctionError: unknown;
   single(table: string): StubResult;
   list(table: string): StubResult;
 }
@@ -371,6 +459,7 @@ class StubQuery implements PromiseLike<StubResult> {
 
 const HOSTED_AGENCY = "agency-1";
 const AVERY_MARK = {
+  id: "mark-1",
   marked_by: "user-avery",
   marked_by_name: "Avery Cole",
   marked_at: "2026-11-01T03:40:43.000Z",
@@ -378,12 +467,24 @@ const AVERY_MARK = {
   late: true,
   late_reason: "Recorded after the pass",
 };
+/** The mark a competing corrector stored while our caller was deciding. */
+const WINNER_MARK = {
+  id: "mark-1",
+  marked_by: "user-nina",
+  marked_by_name: "Nina Nurse",
+  marked_at: "2026-11-01T03:41:02.000Z",
+  status: "missed",
+  late: true,
+  late_reason: "Corrected first",
+};
 
 function stubbedHostedApi() {
   const ctx: HostedStubCtx = {
     writes: [],
+    rpcCalls: [],
     markSingles: [{ data: AVERY_MARK, error: null }],
     insertError: null,
+    correctionError: null,
     single(table: string): StubResult {
       switch (table) {
         case "agency_roles":
@@ -422,8 +523,14 @@ function stubbedHostedApi() {
         data: { user: { id: "user-harper", email: "hm@example.invalid" } },
       }),
     },
-    rpc: async (name: string) =>
-      name === "login_context"
+    rpc: async (name: string, args?: Record<string, unknown>) => {
+      ctx.rpcCalls.push({ name, args: args ?? {} });
+      if (name === "correct_med_dose_mark") {
+        return ctx.correctionError
+          ? { data: null, error: ctx.correctionError }
+          : { data: null, error: null };
+      }
+      return name === "login_context"
         ? {
             data: {
               profile: {
@@ -451,7 +558,8 @@ function stubbedHostedApi() {
             },
             error: null,
           }
-        : { data: [], error: null },
+        : { data: [], error: null };
+    },
     from: (table: string) => new StubQuery(table, ctx),
   };
   return { api: new HostedApi(client as unknown as SupabaseClient), ctx };
@@ -476,9 +584,14 @@ test("hosted: a plain second attempt refuses naming the giver and writes nothing
     [],
     "the refusal must happen before any write — no upsert overwrite",
   );
+  assert.equal(
+    ctx.rpcCalls.filter((c) => c.name === "correct_med_dose_mark").length,
+    0,
+    "a plain attempt never reaches the correction RPC",
+  );
 });
 
-test("hosted: a deliberate correction with the seen markedAt still lands", async () => {
+test("hosted: a deliberate correction goes through the CAS RPC, never an upsert", async () => {
   const { api, ctx } = stubbedHostedApi();
   const day = centralYesterdayIso();
   await api.markMedDose({
@@ -488,12 +601,63 @@ test("hosted: a deliberate correction with the seen markedAt still lands", async
     status: "missed",
     baseMarkedAt: AVERY_MARK.marked_at,
   });
-  const writes = ctx.writes.filter((w) => w.table === "med_dose_marks");
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0].op, "upsert");
-  const payload = writes[0].payload as Record<string, unknown>;
-  assert.equal(payload.status, "missed");
-  assert.equal(payload.marked_by_name, "Harper Lane");
+  // The table itself is never written directly for a correction: the
+  // compare-and-set lives in the correct_med_dose_mark RPC, keyed on
+  // the exact markedAt the caller saw.
+  assert.deepEqual(
+    ctx.writes.filter((w) => w.table === "med_dose_marks"),
+    [],
+    "corrections must not upsert — the RPC owns the write",
+  );
+  const cas = ctx.rpcCalls.filter((c) => c.name === "correct_med_dose_mark");
+  assert.equal(cas.length, 1);
+  assert.equal(cas[0].args.p_mark_id, AVERY_MARK.id);
+  assert.equal(cas[0].args.p_base_marked_at, AVERY_MARK.marked_at);
+  assert.equal(cas[0].args.p_status, "missed");
+  assert.equal(cas[0].args.p_late, true, "the original Late stamp is kept");
+  assert.equal(cas[0].args.p_late_reason, AVERY_MARK.late_reason);
+});
+
+test("hosted: a correction that loses the CAS race refuses naming the winner", async () => {
+  const { api, ctx } = stubbedHostedApi();
+  const day = centralYesterdayIso();
+  // The pre-check read still shows Avery's mark, so the caller's base
+  // passes the browser-side check — but by the time the RPC runs,
+  // another corrector (Nina) has already written. The RPC's CAS matches
+  // zero rows and raises DOSE_MARK_CONFLICT; the re-read then finds
+  // Nina's mark, which is what the refusal must name.
+  ctx.markSingles = [
+    { data: AVERY_MARK, error: null },
+    { data: WINNER_MARK, error: null },
+  ];
+  ctx.correctionError = {
+    code: "P0001",
+    message: "DOSE_MARK_CONFLICT",
+    details: "The MAR entry changed after it was loaded; reload before correcting.",
+  };
+  await assert.rejects(
+    () =>
+      api.markMedDose({
+        medicationId: "med-1",
+        doseDate: day,
+        doseTime: "20:00",
+        status: "given",
+        baseMarkedAt: AVERY_MARK.marked_at,
+      }),
+    {
+      message: alreadyMarkedDoseMessage({
+        status: "missed",
+        markedByName: WINNER_MARK.marked_by_name,
+        markedAt: WINNER_MARK.marked_at,
+      }),
+    },
+  );
+  assert.equal(ctx.rpcCalls.filter((c) => c.name === "correct_med_dose_mark").length, 1);
+  assert.deepEqual(
+    ctx.writes.filter((w) => w.table === "med_dose_marks"),
+    [],
+    "a lost race must not fall back to a direct write",
+  );
 });
 
 test("hosted: a first mark inserts, and a lost race refuses with the winner's name", async () => {

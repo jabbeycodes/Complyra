@@ -577,6 +577,19 @@ function throwIf(error: { message: string } | null | undefined, fallback: string
   if (error) throw new Error(error.message || fallback);
 }
 
+/**
+ * The correct_med_dose_mark RPC raises DOSE_MARK_CONFLICT (errcode
+ * P0001) when its compare-and-set matches zero rows — another corrector
+ * wrote first. PostgREST surfaces the exception text in `message` and
+ * the DETAIL in `details`; accept the token in either.
+ */
+function isDoseMarkConflict(error: unknown): boolean {
+  const parts = error as { message?: unknown; details?: unknown } | null;
+  return [parts?.message, parts?.details].some(
+    (part) => typeof part === "string" && part.includes("DOSE_MARK_CONFLICT"),
+  );
+}
+
 function asRole(value: string): AppRole {
   if (
     value === "administrator" ||
@@ -12810,7 +12823,7 @@ export class HostedApi implements ComplyraApi {
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
       .from("med_dose_marks")
-      .select("marked_by,marked_by_name,marked_at,status,late,late_reason")
+      .select("id,marked_by,marked_by_name,marked_at,status,late,late_reason")
       .eq("agency_id", session.agencyId)
       .eq("medication_id", med.id)
       .eq("dose_date", input.doseDate.slice(0, 10))
@@ -12825,6 +12838,7 @@ export class HostedApi implements ComplyraApi {
       // Only a caller who passes the exact markedAt they saw is
       // correcting deliberately.
       const stored = existingMark as {
+        id: string;
         marked_by: string | null;
         marked_by_name: string | null;
         marked_at: string;
@@ -12867,29 +12881,62 @@ export class HostedApi implements ComplyraApi {
     const existingReason = existingMark
       ? ((existingMark as { late_reason: string | null }).late_reason ?? null)
       : null;
-    const markRow = {
-      agency_id: session.agencyId,
-      individual_id: med.individualId,
-      medication_id: med.id,
-      dose_date: input.doseDate.slice(0, 10),
-      dose_time: input.doseTime,
-      status: input.status,
-      marked_by: session.userId,
-      marked_by_name: session.fullName,
-      marked_at: new Date().toISOString(),
-      late: lateReason ? true : existingMark ? existingLate : isLate,
-      late_reason: lateReason || (existingMark ? existingReason : null),
-    };
+    const correctedLate = lateReason ? true : existingLate;
+    const correctedLateReason = lateReason || existingReason;
     if (existingMark) {
-      // Deliberate correction (base verified above): the upsert replaces
-      // the row, and the identity-guard trigger archives the prior
-      // version in med_dose_mark_history.
-      const { error } = await this.client.from("med_dose_marks").upsert(
-        markRow,
-        { onConflict: "agency_id,medication_id,dose_date,dose_time" },
-      );
+      // Deliberate correction (base verified above): the write goes
+      // through the correct_med_dose_mark RPC, which re-checks the base
+      // inside the UPDATE statement itself — an atomic compare-and-set
+      // at the database boundary (PR #228 reviewer HOLD fix). The
+      // browser-side check above is only a fast path: if another
+      // corrector writes between that read and this call, the RPC
+      // updates zero rows and raises DOSE_MARK_CONFLICT instead of
+      // letting this correction silently overwrite theirs. The
+      // identity-guard trigger archives the prior version in
+      // med_dose_mark_history and re-stamps marked_by/marked_at.
+      const { error } = await this.client.rpc("correct_med_dose_mark", {
+        p_mark_id: (existingMark as { id: string }).id,
+        p_base_marked_at: input.baseMarkedAt,
+        p_status: input.status,
+        p_late: correctedLate,
+        p_late_reason: correctedLateReason,
+      });
+      if (error && isDoseMarkConflict(error)) {
+        // The race was lost: name the mark that is stored now.
+        const { data: current } = await this.client
+          .from("med_dose_marks")
+          .select("marked_by_name,marked_at,status")
+          .eq("agency_id", session.agencyId)
+          .eq("medication_id", med.id)
+          .eq("dose_date", input.doseDate.slice(0, 10))
+          .eq("dose_time", input.doseTime)
+          .maybeSingle();
+        if (current) {
+          const row = current as { marked_by_name: string | null; marked_at: string; status: string };
+          throw new Error(
+            alreadyMarkedDoseMessage({
+              status: row.status as import("./types").MedDoseMarkStatus,
+              markedByName: String(row.marked_by_name ?? ""),
+              markedAt: String(row.marked_at),
+            }),
+          );
+        }
+      }
       throwIf(error, "Could not mark the dose.");
     } else {
+      const markRow = {
+        agency_id: session.agencyId,
+        individual_id: med.individualId,
+        medication_id: med.id,
+        dose_date: input.doseDate.slice(0, 10),
+        dose_time: input.doseTime,
+        status: input.status,
+        marked_by: session.userId,
+        marked_by_name: session.fullName,
+        marked_at: new Date().toISOString(),
+        late: lateReason ? true : isLate,
+        late_reason: lateReason || null,
+      };
       // First mark: a plain INSERT, never an upsert — if another session
       // marked the dose after the check above, the unique index refuses
       // (23505) and the winner's mark is what the refusal names.
