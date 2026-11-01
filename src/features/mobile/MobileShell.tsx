@@ -537,6 +537,9 @@ export default function MobileShell({
                       {session.agencyName}
                     </small>
                   </p>
+                  {/* Batch 59: no Switch home when there is only one
+                      home to switch to. */}
+                  {sites.length > 1 && (
                   <button
                     type="button"
                     role="menuitem"
@@ -547,6 +550,7 @@ export default function MobileShell({
                   >
                     Switch home
                   </button>
+                  )}
                   <button
                     type="button"
                     role="menuitem"
@@ -609,7 +613,7 @@ export default function MobileShell({
               </p>
             </section>
 
-            {scopedSite && (
+            {scopedSite && sites.length > 1 && (
               <button
                 type="button"
                 className="msh-site-chip"
@@ -625,6 +629,17 @@ export default function MobileShell({
                 </span>
                 <ChevronDown size={20} aria-hidden="true" />
               </button>
+            )}
+            {scopedSite && sites.length <= 1 && (
+              <div className="msh-site-chip" aria-label={`Current home ${scopedSite.name}`}>
+                <span className="msh-row-main">
+                  <strong>{scopedSite.name}</strong>
+                  <small>
+                    {scopedSite.program} · {people.length} Individual
+                    {people.length === 1 ? "" : "s"}
+                  </small>
+                </span>
+              </div>
             )}
 
             {scopedSite && (
@@ -1089,6 +1104,7 @@ export default function MobileShell({
                   </button>
                 );
               })}
+              {sites.length > 1 && (
               <button
                 type="button"
                 className="msh-row"
@@ -1105,6 +1121,7 @@ export default function MobileShell({
                   ›
                 </span>
               </button>
+              )}
               <button
                 type="button"
                 className="msh-row"

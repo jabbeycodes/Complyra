@@ -18,6 +18,7 @@
  */
 import { scheduledStartIso } from "./lateness";
 import { claimedCoverageShifts } from "./localSchedule";
+import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -1271,12 +1272,91 @@ function validateMissedPunchInput(input: MissedPunchReportInput): void {
   if (!input.reason.trim()) throw new Error("A reason is required.");
 }
 
+/**
+ * Who the signed-in user may target with a shift swap (simulation batch 47).
+ * Callers that know the session pass the full staff directory plus the
+ * viewer's role/home; createShiftSwap then applies the same staffVisibleTo
+ * rule the coworker picker uses, so a crafted request cannot offer a swap
+ * to a coworker at another home. When no scope is supplied, the Supabase
+ * store falls back to a memberships lookup; the local store skips the
+ * check (single-user demo data).
+ */
+export interface HrSwapScope {
+  roleKey: string;
+  siteId: string | null;
+  staffDirectory: StaffSiteRef[];
+  assignmentSiteIds?: string[];
+}
+
+const SWAP_TARGET_OUT_OF_SCOPE =
+  "You can only offer a shift swap to a coworker at your own home.";
+
+function swapTargetVisible(
+  scope: HrSwapScope,
+  actorUserId: string,
+  targetStaffId: string,
+): boolean {
+  const visible = staffVisibleTo(
+    { userId: actorUserId, roleKey: scope.roleKey, siteId: scope.siteId, platformAdmin: false },
+    scope.staffDirectory,
+    scope.assignmentSiteIds ?? [],
+  );
+  return visible.some((row) => row.id === targetStaffId);
+}
+
 class SupabaseHrStore implements HrStore {
   constructor(
     private client: SupabaseClient,
     private agencyId: string,
     private userId: string,
+    private swapScope?: HrSwapScope,
   ) {}
+
+  /**
+   * Batch 47 enforcement for createShiftSwap. With an injected scope this
+   * is a pure check; without one, resolve both memberships (plus the
+   * actor's assignment homes) and apply the same visibility rule. If the
+   * membership rows cannot be read, the check is skipped rather than
+   * blocking a legitimate swap on missing data.
+   */
+  private async assertSwapTargetInScope(targetStaffId: string): Promise<void> {
+    if (this.swapScope) {
+      if (!swapTargetVisible(this.swapScope, this.userId, targetStaffId)) {
+        throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
+      }
+      return;
+    }
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("user_id, role_key, site_id")
+      .eq("agency_id", this.agencyId)
+      .in("user_id", [this.userId, targetStaffId]);
+    if (error || !data) return;
+    const rows = data as Record<string, unknown>[];
+    const actor = rows.find((r) => String(r.user_id) === this.userId);
+    const target = rows.find((r) => String(r.user_id) === targetStaffId);
+    if (!actor || !target) return;
+    const { data: assignmentRows } = await this.client
+      .from("staff_assignments")
+      .select("site_id")
+      .eq("agency_id", this.agencyId)
+      .eq("user_id", this.userId);
+    const directory: StaffSiteRef[] = rows.map((r) => ({
+      id: String(r.user_id),
+      siteId: r.site_id == null ? null : String(r.site_id),
+    }));
+    const scope: HrSwapScope = {
+      roleKey: String(actor.role_key ?? ""),
+      siteId: actor.site_id == null ? null : String(actor.site_id),
+      staffDirectory: directory,
+      assignmentSiteIds: (assignmentRows ?? []).map((r) =>
+        String((r as Record<string, unknown>).site_id),
+      ),
+    };
+    if (!swapTargetVisible(scope, this.userId, targetStaffId)) {
+      throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
+    }
+  }
 
   async listShifts(fromIso: string, toIso: string, siteId?: string): Promise<HrShift[]> {
     let q = this.client
@@ -2883,6 +2963,7 @@ class SupabaseHrStore implements HrStore {
     if (targetId !== null && targetId === this.userId) {
       throw new Error("You can't offer a shift swap to yourself.");
     }
+    if (targetId !== null) await this.assertSwapTargetInScope(targetId);
     const claimerShifts = targetId
       ? await this.shiftsOverlappingWindow(targetId, offered.startsAt, offered.endsAt)
       : [];
@@ -4641,6 +4722,7 @@ class LocalHrStore implements HrStore {
     private agencyId: string,
     private userId: string,
     private kioskTestSeed?: KioskTestSeed,
+    private swapScope?: HrSwapScope,
   ) {}
 
   private storageAvailable(): boolean {
@@ -6143,6 +6225,15 @@ class LocalHrStore implements HrStore {
       if (targetId !== null && targetId === this.userId) {
         throw new Error("You can't offer a shift swap to yourself.");
       }
+      // Batch 47: same staffVisibleTo rule as the picker and the hosted
+      // store — an out-of-scope target is refused, not just hidden.
+      if (
+        targetId !== null &&
+        this.swapScope &&
+        !swapTargetVisible(this.swapScope, this.userId, targetId)
+      ) {
+        throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
+      }
       let claimedShift: HrShift | null = null;
       if (input.requestedShiftId) {
         claimedShift = this.getShiftLocal(b, input.requestedShiftId);
@@ -6922,10 +7013,12 @@ export function createHrStore(opts: {
   userId: string;
   /** Test-only: seeds a known kiosk token + PIN credential in the local impl. */
   kioskTestSeed?: KioskTestSeed;
+  /** Batch 47: swap-target visibility context for createShiftSwap. */
+  swapScope?: HrSwapScope;
 }): HrStore {
   const client = createSupabaseBrowserClient();
-  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId);
-  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed);
+  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId, opts.swapScope);
+  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed, opts.swapScope);
 }
 
 /** CSV export is pure domain logic; re-exported here for page convenience. */

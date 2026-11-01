@@ -1,6 +1,6 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
-import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlertEntityIds, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, rightsPacketAlerts, rightsTrackingFor, validateRightsCompletion, validateRightsPacketStart, type RightsPacket, type RightsPacketCompletion } from "./rightsPackets";
 import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
@@ -3637,8 +3637,14 @@ export class LocalApi implements ComplyraApi {
         if (!canManageConsents(session.roleKey))
             return;
         const register = await this.getConsents();
-        for (const payload of consentAlerts(register, this.store.db.memberships))
+        for (const payload of consentAlerts(register, this.store.db.memberships)) {
+            // Wave 7B: before the fresh alert lands, retire the same gap's
+            // unread sibling alerts for this recipient (a consent must not
+            // sit in the bell as both "missing" and "expiring").
+            if (payload.entityType === 'consent' && payload.entityId)
+                this.retireConsentAlertSiblings(payload, consentAlertEntityIds(register, payload.entityId));
             this.pushRecognitionNotification(payload);
+        }
         for (const packet of await this.listConsentPackets()) {
             if (!packetOutstanding(packet))
                 continue;
@@ -13502,6 +13508,34 @@ export class LocalApi implements ComplyraApi {
       entityType: input.entityType ?? "medication",
       entityId: input.entityId,
       dedupeKey: input.dedupeKey,
+    });
+  }
+
+  /**
+   * Wave 7B (batches 51/52/58): retire the UNREAD sibling alerts of the
+   * consent gap a fresh alert is about to represent — the gap's other
+   * incarnation (person:type before a record exists, consent id after)
+   * or other flavor — for the SAME recipient only. A row anyone has read
+   * is history and stays. Mirrors the delete inside private.sweep_consents
+   * (migration 20261031250000).
+   */
+  private retireConsentAlertSiblings(
+    payload: { agencyId: string; userId: string | null; roleKey: string | null; dedupeKey: string },
+    entityIds: string[],
+  ) {
+    const db = this.store.db;
+    if (!db.notifications?.length) return;
+    const reads = db.notificationReads ?? {};
+    db.notifications = db.notifications.filter((row) => {
+      if (row.agencyId !== payload.agencyId) return true;
+      if (row.type !== 'consent.missing' && row.type !== 'consent.expiring') return true;
+      if (row.entityType !== 'consent' || !row.entityId || !entityIds.includes(row.entityId)) return true;
+      if (row.userId !== payload.userId || row.roleKey !== payload.roleKey) return true;
+      if (row.dedupeKey === payload.dedupeKey) return true;
+      const read = row.userId
+        ? row.readAt != null
+        : Object.keys(reads).some((key) => key.endsWith(`:${row.id}`));
+      return read;
     });
   }
 

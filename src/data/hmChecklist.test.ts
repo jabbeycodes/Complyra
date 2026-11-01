@@ -15,9 +15,11 @@ import {
   applyItem21,
   blankItemNumbers,
   buildChecklistItems,
+  checklistSiteOptions,
   computeItem21,
   deadlineMondayIso,
   deadlinePassed,
+  resolveChecklistSiteId,
   weekOfSundayIso,
 } from "./hmChecklist";
 
@@ -276,4 +278,50 @@ test("assign reuses the open instance for a site/week (idempotent)", async () =>
   assert.equal(first.id, second.id);
   const rows = await api.listWeeklyChecklists({ weekOf: input.weekOf });
   assert.equal(rows.filter((c) => c.siteId === site.id).length, 1);
+});
+
+test("checklistSiteOptions lists only houses that have lists, in name order (batch 55)", () => {
+  const options = checklistSiteOptions(
+    [{ siteId: "site-j" }, { siteId: "site-m" }, { siteId: "site-j" }],
+    [
+      { id: "site-m", name: "Maple House" },
+      { id: "site-j", name: "Juniper House" },
+      { id: "site-x", name: "No Lists House" },
+    ],
+  );
+  assert.deepEqual(options, [
+    { id: "site-j", name: "Juniper House" },
+    { id: "site-m", name: "Maple House" },
+  ]);
+});
+
+test("resolveChecklistSiteId honors pick, stored shell pick, then membership home — never list order (batch 55)", () => {
+  const options = [
+    { id: "site-j", name: "Juniper House" },
+    { id: "site-m", name: "Maple House" },
+  ];
+  // The viewer's explicit pick wins while that house still has lists.
+  assert.equal(
+    resolveChecklistSiteId({ options, chosenSiteId: "site-m", storedSiteId: "site-j", sessionSiteId: "site-j" }),
+    "site-m",
+  );
+  // A stale pick falls back to the phone shell's remembered home.
+  assert.equal(
+    resolveChecklistSiteId({ options, chosenSiteId: "site-gone", storedSiteId: "site-m", sessionSiteId: "site-j" }),
+    "site-m",
+  );
+  // Then the membership home.
+  assert.equal(
+    resolveChecklistSiteId({ options, chosenSiteId: null, storedSiteId: null, sessionSiteId: "site-m" }),
+    "site-m",
+  );
+  // No signals: the deterministic first option by name, not array order.
+  assert.equal(
+    resolveChecklistSiteId({ options, chosenSiteId: null, storedSiteId: null, sessionSiteId: null }),
+    "site-j",
+  );
+  assert.equal(
+    resolveChecklistSiteId({ options: [], chosenSiteId: "site-m", storedSiteId: null, sessionSiteId: null }),
+    null,
+  );
 });

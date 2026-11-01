@@ -12,6 +12,7 @@ import {
   delegationAckOverduePayload,
   delegationPublishedPayload,
   delegationReviewReadyPayload,
+  groupNotifications,
   isNotificationType,
   isUnread,
   isWellFormedDeepLink,
@@ -527,4 +528,40 @@ test("approaching-overtime notices reach the staff member and managers separatel
   assert.ok(self.body.startsWith("You're at 37.5h"));
   assert.ok(hm.body.startsWith("Alex is at 37.5h"));
   assert.notEqual(self.dedupeKey, hm.dedupeKey);
+});
+
+test("groupNotifications collapses same-type/same-entity repeats into one counted group (batches 51/52/58)", () => {
+  const flood = Array.from({ length: 12 }, (_, i) =>
+    row({
+      id: `prn-${i}`,
+      type: "med.prn_repeat",
+      title: "PRN follow-up still open",
+      entity_type: "medication",
+      entity_id: MED,
+      read_at: i < 2 ? "2026-10-31T10:00:00.000Z" : null,
+    }),
+  );
+  const other = row({ id: "other", type: "training.assigned", entity_type: "training", entity_id: TRAINING });
+  const noEntity = row({ id: "plain", type: "message.received", entity_type: null, entity_id: null });
+  const noEntity2 = row({ id: "plain-2", type: "message.received", entity_type: null, entity_id: null });
+  const groups = groupNotifications([...flood, other, noEntity, noEntity2]);
+  assert.equal(groups.length, 4);
+  const prn = groups[0];
+  assert.equal(prn.rows.length, 12);
+  assert.equal(prn.head.id, "prn-0");
+  assert.equal(prn.unreadCount, 10);
+  // Every member survives grouping — read state stays per-notice.
+  assert.deepEqual(
+    groups.flatMap((g) => g.rows.map((r) => r.id)).sort(),
+    [...flood, other, noEntity, noEntity2].map((r) => r.id).sort(),
+  );
+  // Different entity or different type never merges.
+  const twoMeds = groupNotifications([
+    row({ id: "m1", type: "med.prn_repeat", entity_type: "medication", entity_id: MED }),
+    row({ id: "m2", type: "med.prn_repeat", entity_type: "medication", entity_id: "another-med" }),
+    row({ id: "m3", type: "med.unrecorded", entity_type: "medication", entity_id: MED }),
+  ]);
+  assert.equal(twoMeds.length, 3);
+  // Singletons keep their own row identity.
+  assert.equal(groupNotifications([other])[0].rows.length, 1);
 });

@@ -1440,6 +1440,20 @@
   margin: 0;
 }
 
+/* Batch 59 (544px): the floating bottom navigation pill is position:fixed
+   at z-index 35 and paints after the app shell's sidebar drawer (also
+   z-index 35, earlier in the tree), so it covered the open drawer's
+   footer — the Settings and Help links — and the foot of the drawer
+   list. While the drawer is open it is modal (backdrop + close button):
+   it now paints above the pill, and its scroll content gets enough
+   bottom room for the last links to clear the pill entirely. The
+   desktop-layout main column already carries its own bottom padding
+   (.app-shell.mobile-context .main-shell in styles.css). */
+.app-shell.mobile-context .sidebar.mobile-open {
+  z-index: 45;
+  padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+}
+
 /* Floating bottom navigation */
 .msh-bottomnav {
   position: fixed;
