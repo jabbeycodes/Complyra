@@ -16,6 +16,8 @@ import {
   personalRepeatValues,
   personalSignedAmount,
   signedAmountText,
+  spendingChooserBalanceCents,
+  spendingEntriesFor,
 } from "./money";
 import type {
   HouseCardEntryView,
@@ -152,6 +154,59 @@ test("today rows keep ledger order and totals exclude voided entries", () => {
     spentCents: 2000,
     receivedCents: 10000,
   });
+});
+
+/* Batch 49: the Quick log's Personal Spending surface disagreed by
+ * user — one DSP saw per-person amounts, others saw the picker with
+ * no amounts at all. The chooser carried no amounts, and the person
+ * view collapsed "not loaded yet" into a factual $0.00 / empty
+ * ledger. These helpers keep the two states distinct. */
+
+test("spending entries are null (not an empty ledger) before the lists load", () => {
+  assert.equal(spendingEntriesFor(null, "ellis"), null);
+  assert.equal(spendingChooserBalanceCents(null, "ellis"), null);
+});
+
+test("spending entries resolve per person once the lists load", () => {
+  const lists = [
+    {
+      personId: "ellis",
+      entries: [
+        personalEntry({ id: "p1", kind: "deposit", amountCents: 10000 }),
+        personalEntry({ id: "p2", kind: "spend", amountCents: 4599 }),
+      ],
+    },
+    { personId: "morgan", entries: [] },
+  ];
+  assert.deepEqual(
+    spendingEntriesFor(lists, "ellis")?.map((row) => row.id),
+    ["p1", "p2"],
+  );
+  // A loaded home with no row for the person is a factual empty
+  // ledger — an empty list, never the not-loaded null.
+  assert.deepEqual(spendingEntriesFor(lists, "morgan"), []);
+  assert.deepEqual(spendingEntriesFor(lists, "unknown-person"), []);
+});
+
+test("chooser balance is the person's derived balance, voided entries excluded", () => {
+  const lists = [
+    {
+      personId: "ellis",
+      entries: [
+        personalEntry({ id: "p1", kind: "deposit", amountCents: 10000 }),
+        personalEntry({ id: "p2", kind: "spend", amountCents: 4599 }),
+        personalEntry({
+          id: "p3",
+          kind: "spend",
+          amountCents: 1200,
+          voided: true,
+          voidedAt: "2026-10-30T15:00:00.000Z",
+        }),
+      ],
+    },
+  ];
+  assert.equal(spendingChooserBalanceCents(lists, "ellis"), 5401);
+  assert.equal(spendingChooserBalanceCents(lists, "morgan"), 0);
 });
 
 test("personal recent rows are newest first and honor the limit", () => {
