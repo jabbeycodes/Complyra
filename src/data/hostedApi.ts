@@ -6820,7 +6820,10 @@ export class HostedApi implements ComplyraApi {
     session: SessionUser,
     input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
   ) {
-    const monthKey = monthKeyFrom(todayIso());
+    // Monthly cycles open on the agency's Central date, never the UTC
+    // date — a UTC-month cycle created at 7 p.m. Central would displace
+    // the still-open previous month in the personal task queue.
+    const monthKey = monthKeyFrom(centralTodayIso());
     const writableSites = input.sites.filter((site) => canAccessSite(session, site.id));
     if (canCompleteMonthly(session.roleKey)) {
       const drillsPayload = writableSites.flatMap((site) =>

@@ -37,6 +37,7 @@ import BottomNavPill from "./BottomNavPill";
 import {
   centralHour,
   greetingForHour,
+  homeTasksSummaryText,
   pickMobileScopedSite,
   queueItemsForHome,
   type TrackingCategoryId,
@@ -475,10 +476,17 @@ export default function MobileShell({
         : "All med doses recorded",
     );
   }
-  if (homeQueueItems.length > 0) {
-    summaryParts.push(
-      `${homeQueueItems.length} task${homeQueueItems.length === 1 ? "" : "s"} due for you`,
-    );
+  // The greeting counts this home's slice of the queue; the badge and
+  // My Tasks count the whole queue. When the slice is a subset, the
+  // sentence names both numbers so the two surfaces never look broken
+  // against each other (simulation batch 65).
+  const tasksSummary = homeTasksSummaryText(
+    queueItems.length,
+    homeQueueItems.length,
+    scopedSite?.name ?? null,
+  );
+  if (tasksSummary) {
+    summaryParts.push(tasksSummary);
   }
 
   return (

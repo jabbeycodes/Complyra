@@ -10,6 +10,8 @@ import {
   DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD, type SessionUser } from "./types";
+import type { Requirement } from "../domain";
+import { blankSafetyLines, type MonthlyWorkspace } from "./monthlyChecks";
 import {
   individualsAtSite,
   isAgencyWideViewer,
@@ -312,4 +314,183 @@ test("a DSP with no home site is NOT agency-wide", () => {
   assert.equal(canAccessSite(dsp, "site-a"), false);
   assert.equal(canAccessSite(dsp, "site-b"), false);
   assert.deepEqual(sitesVisibleTo(dsp, fakeSites, []), []);
+});
+
+/* Wave 7D — Tasks counting truth (simulation batches 61 + 65).
+ * Batch 61: Drew's badge fell 5 → 3 mid-session when the UTC clock
+ * rolled into November at 7 p.m. Central — the two October monthly
+ * checks (emergency drills, home safety report, both due Oct 7) fell
+ * out of the queue with nothing completed. The queue now judges "today"
+ * on the Central date and keeps every unfinished monthly cycle open
+ * until it is completed, so a rollover can only add items. */
+
+const queueRequirement = (partial: Partial<Requirement>): Requirement => ({
+  id: "req-1",
+  title: "Task",
+  person: "Dana Juniper",
+  site: "Juniper House",
+  category: "Required forms",
+  owner: "Test dsp",
+  role: "DSP",
+  due: "2026-10-07",
+  status: "Overdue",
+  source: "Test",
+  page: 1,
+  frequency: "Monthly",
+  evidence: "",
+  ...partial,
+});
+
+const monthlyFixture = (months: string[]): MonthlyWorkspace => ({
+  equipment: [
+    {
+      id: "eq-1",
+      agencyId: "agency-1",
+      individualId: "person-1",
+      name: "Wheelchair",
+      source: "manual",
+      active: true,
+    },
+  ],
+  equipmentLogs: months.map((monthKey) => ({
+    id: `log-${monthKey}`,
+    equipmentId: "eq-1",
+    monthKey,
+    checkedOn: null,
+    initials: null,
+    checkedByUserId: null,
+    comments: "",
+  })),
+  drills: months.map((monthKey) => ({
+    id: `drill-row-${monthKey}`,
+    agencyId: "agency-1",
+    siteId: "site-juniper",
+    monthKey,
+    drillType: "fire" as const,
+    date: null,
+    time: null,
+    evacTime: null,
+    leaderName: null,
+    participants: "",
+    awakeOrSleep: "" as const,
+  })),
+  safetyReports: months.map((monthKey) => ({
+    id: `safety-row-${monthKey}`,
+    agencyId: "agency-1",
+    siteId: "site-juniper",
+    monthKey,
+    lines: blankSafetyLines(),
+  })),
+});
+
+test("personal queue: unfinished monthly checks survive the month rollover (batch 61)", () => {
+  const session = fakeSession("dsp", "site-juniper");
+  const base = {
+    session,
+    items: [] as Requirement[],
+    packets: [],
+    planStacks: [],
+    canApprove: false,
+    individuals: [{ id: "person-1", name: "Dana Juniper", site: "Juniper House" }],
+    sites: [{ id: "site-juniper", name: "Juniper House" }],
+  };
+  const monthly = monthlyFixture(["2026-10", "2026-11"]);
+
+  const october = personalQueue({ ...base, monthly, today: "2026-10-31" });
+  assert.deepEqual(
+    october.map((item) => item.id).sort(),
+    [
+      "drill-site-juniper-2026-10",
+      "eq-person-1-2026-10",
+      "safety-site-juniper-2026-10",
+    ],
+  );
+  assert.ok(october.every((item) => item.tone === "overdue"));
+
+  const november = personalQueue({ ...base, monthly, today: "2026-11-01" });
+  // Nothing was completed, so nothing may leave the list: October's
+  // three checks are still there as overdue, and November's three
+  // arrive as due. The count grows 3 → 6; it never drops.
+  assert.equal(november.length, 6);
+  assert.deepEqual(
+    november
+      .filter((item) => item.tone === "overdue")
+      .map((item) => item.id)
+      .sort(),
+    october.map((item) => item.id).sort(),
+  );
+  assert.deepEqual(
+    november
+      .filter((item) => item.tone === "due")
+      .map((item) => item.id)
+      .sort(),
+    [
+      "drill-site-juniper-2026-11",
+      "eq-person-1-2026-11",
+      "safety-site-juniper-2026-11",
+    ],
+  );
+  // The overdue pair the Bot watched vanish is named, not just counted.
+  assert.ok(
+    november.some(
+      (item) =>
+        item.id === "drill-site-juniper-2026-10" &&
+        item.title === "Record October 2026’s emergency drills",
+    ),
+  );
+  assert.ok(
+    november.some(
+      (item) =>
+        item.id === "safety-site-juniper-2026-10" &&
+        item.title === "Complete October 2026’s home safety report",
+    ),
+  );
+});
+
+test("personal queue: the one list behind badge, home, and tasks is never silently capped", () => {
+  const session = fakeSession("dsp", "site-juniper");
+  const items: Requirement[] = [];
+  for (let i = 1; i <= 15; i += 1) {
+    items.push(
+      queueRequirement({
+        id: `overdue-${i}`,
+        title: `Overdue task ${i}`,
+        status: "Overdue",
+      }),
+    );
+  }
+  items.push(queueRequirement({ id: "due-soon", status: "Due soon", due: "2026-11-03" }));
+  items.push(queueRequirement({ id: "future", status: "Upcoming", due: "2027-01-15" }));
+  items.push(queueRequirement({ id: "done", status: "Compliant" }));
+  items.push(queueRequirement({ id: "not-mine", owner: "Someone Else", status: "Overdue" }));
+
+  const queue = personalQueue({
+    session,
+    items,
+    packets: [],
+    planStacks: [],
+    canApprove: false,
+    today: "2026-10-31",
+  });
+  // 15 overdue + 1 due-soon survive whole — the old silent cap cut the
+  // canonical list at 12. Not-yet-due, completed, and other people's
+  // work stay out.
+  assert.equal(queue.length, 16);
+  assert.equal(queue.filter((item) => item.tone === "overdue").length, 15);
+  assert.ok(queue.some((item) => item.id === "req-due-soon"));
+  assert.ok(!queue.some((item) => item.id === "req-future"));
+  assert.ok(!queue.some((item) => item.id === "req-done"));
+  assert.ok(!queue.some((item) => item.id === "req-not-mine"));
+
+  // A cap applies only when a caller explicitly asks for one.
+  const capped = personalQueue({
+    session,
+    items,
+    packets: [],
+    planStacks: [],
+    canApprove: false,
+    today: "2026-10-31",
+    limit: 5,
+  });
+  assert.equal(capped.length, 5);
 });

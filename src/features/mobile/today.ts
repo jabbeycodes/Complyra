@@ -228,3 +228,39 @@ export function queueItemsForHome(
   if (!siteName) return [];
   return items.filter((item) => !item.siteName || item.siteName === siteName);
 }
+
+/**
+ * The words for the home greeting's task count. The badge and My Tasks
+ * show the WHOLE personal queue; home shows one home's slice of it. When
+ * the slice is the whole queue the sentence is the plain total; when it
+ * is a subset the sentence must say so ("4 of your 7 tasks are at Maple
+ * House") — a bare smaller number reads as the total and makes the
+ * surfaces look broken (simulation batch 65: home said 4, Tasks said 7,
+ * both from the same queue). Returns null when there is nothing to say
+ * (no open tasks at all).
+ */
+export function homeTasksSummaryText(
+  totalCount: number,
+  homeCount: number,
+  siteName: string | null,
+): string | null {
+  if (totalCount <= 0) return null;
+  if (!siteName || homeCount >= totalCount) {
+    return `${totalCount} task${totalCount === 1 ? "" : "s"} due for you`;
+  }
+  return `${homeCount} of your ${totalCount} tasks are at ${siteName}`;
+}
+
+/**
+ * The words for a truncated Up next list. Up next intentionally shows
+ * only the first few items; when it does, it says how many it is showing
+ * out of how many there are, so an item past the cap never reads as
+ * having vanished (simulation batch 61).
+ */
+export function upNextSubsetText(
+  shownCount: number,
+  totalCount: number,
+): string | null {
+  if (totalCount <= shownCount) return null;
+  return `Showing ${shownCount} of ${totalCount} items in Up next.`;
+}
