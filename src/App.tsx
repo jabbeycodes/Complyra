@@ -145,6 +145,7 @@ import { furthestReminderDay } from "./data/rules";
 import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
 import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
+import { canResetSampleWorkspace } from "./data/workspaceReset";
 import { can, defaultLandingPage, pageVisible, roleLabel } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -523,6 +524,10 @@ export default function App() {
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
+  // Wave 7N (batches 76/78): the sample-workspace reset is destructive
+  // and workspace-level — administrator + local/demo mode only; hosted
+  // mode and every other role do not render it (or its Settings section).
+  const canResetWorkspace = canResetSampleWorkspace(session, usingHostedBackend);
   const visibleSiteNames = new Set(sites.map((row) => row.name));
   const visibleRequirements = data.requirements.filter((r) =>
     visibleSiteNames.has(r.site),
@@ -2034,27 +2039,42 @@ export default function App() {
                     )}
                     <SignatureSettingsSection onSaved={notify} />
                     {/* Secondary/destructive chrome collapses by default so
-                        Settings reads as sections, not one long list (#110 Cut A). */}
-                    <Disclosure label="Advanced &amp; data" summary="Data handling · workspace reset">
-                      <div className="settings-row">
-                        <span>
-                          <strong>Data handling</strong>
-                          <small>
-                            Use fictional records only. This preview is not
-                            configured to store sensitive care data.
-                          </small>
-                        </span>
-                        <ShieldCheck size={20} />
-                      </div>
-                      {!usingHostedBackend && (
-                        <button
-                          className="button danger"
-                          onClick={() => setModal("reset")}
-                        >
-                          <RotateCcw size={16} /> Reset sample workspace
-                        </button>
-                      )}
-                    </Disclosure>
+                        Settings reads as sections, not one long list (#110 Cut A).
+                        Wave 7N (batches 76/78): this section carries the
+                        local sample workspace's reset — in the hosted app
+                        there is no reset to offer, so the section (and its
+                        "workspace reset" label) does not render for
+                        anyone; in local mode the reset itself is
+                        administrator-only (canResetSampleWorkspace). */}
+                    {!usingHostedBackend && (
+                      <Disclosure
+                        label="Advanced &amp; data"
+                        summary={
+                          canResetWorkspace
+                            ? "Data handling · workspace reset"
+                            : "Data handling"
+                        }
+                      >
+                        <div className="settings-row">
+                          <span>
+                            <strong>Data handling</strong>
+                            <small>
+                              Use fictional records only. This preview is not
+                              configured to store sensitive care data.
+                            </small>
+                          </span>
+                          <ShieldCheck size={20} />
+                        </div>
+                        {canResetWorkspace && (
+                          <button
+                            className="button danger"
+                            onClick={() => setModal("reset")}
+                          >
+                            <RotateCcw size={16} /> Reset sample workspace
+                          </button>
+                        )}
+                      </Disclosure>
+                    )}
                   </section>
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
@@ -2731,7 +2751,7 @@ export default function App() {
           />
         </Modal>
       )}
-      {modal === "reset" && (
+      {modal === "reset" && canResetWorkspace && (
         <Modal title="Reset sample workspace?" onClose={() => setModal(null)}>
           <p>
             This removes your local demo changes, including draft requirements

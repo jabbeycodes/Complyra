@@ -32,6 +32,7 @@ import {
   trainingLinePayloadFromView,
 } from "../signatures/documentPayloads";
 import { can } from "../../data/status";
+import { trainingRosterView } from "./rosterState";
 import { downloadBlob } from "../../data/openFile";
 import {
   buildStaffTrainingChecklistPdf,
@@ -106,6 +107,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
 
   async function loadRows() {
+    setRowsFailed(false);
     try {
       setRows(await api.listStaffNeedingClearance());
     } catch {
@@ -158,7 +160,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     }
   }
 
-  const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
+  // Wave 7N (batches 75/76): the verdict comes from the roster selector —
+  // loading, failed, and loaded-empty rosters get honest states, and
+  // "Everyone is cleared" exists only for a loaded roster whose every
+  // displayed row is cleared.
+  const roster = trainingRosterView(rows, rowsFailed);
 
   return (
     <div data-tour="training">
@@ -174,17 +180,56 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canManage && rows && (
+      {canManage && roster.kind === "loading" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <p className="muted">Loading staff training…</p>
+        </section>
+      )}
+
+      {canManage && roster.kind === "error" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <Empty
+            title="Staff training couldn't be loaded"
+            text="Clearance can't be judged until the roster loads — a failed load never means everyone is cleared."
+          />
+          <button className="button" onClick={() => void loadRows()}>
+            Try again
+          </button>
+        </section>
+      )}
+
+      {canManage && roster.kind === "empty" && (
+        <>
+          <section className="panel" aria-label="Not cleared to work alone">
+            <h2>Not cleared to work alone</h2>
+            <Empty
+              title="No staff in scope"
+              text="No staff members are in scope for this view, so there is no clearance verdict to show."
+            />
+          </section>
+          <section className="panel" aria-label="All staff training status">
+            <h2>All staff</h2>
+            <Empty
+              title="No staff in scope"
+              text="Staff appear here as they join the agency."
+            />
+          </section>
+        </>
+      )}
+
+      {canManage && roster.kind === "ready" && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
-          {notCleared.length === 0 ? (
+          {roster.allCleared ? (
             <Empty
               title="Everyone is cleared"
-              text="Every staff member with training assigned meets the in-ratio gate."
+              text="Every staff member in the roster meets the in-ratio gate."
             />
           ) : (
             <ul className="clearance-list">
-              {notCleared.map((row) => (
+              {roster.notCleared.map((row) => (
                 <li key={row.userId}>
                   <div>
                     <strong>{row.fullName}</strong>
@@ -210,7 +255,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canManage && rows && (
+      {canManage && roster.kind === "ready" && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">
@@ -225,7 +270,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {roster.rows.map((row) => (
                 <tr key={row.userId}>
                   <td>{row.fullName}</td>
                   <td>{row.siteName}</td>

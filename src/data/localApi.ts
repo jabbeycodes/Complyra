@@ -8710,6 +8710,14 @@ export class LocalApi implements ComplyraApi {
   }
 
   async resetWorkspace() {
+    // Wave 7N (batches 76/78): the reset is destructive and
+    // workspace-level — administrators only, enforced here at the data
+    // boundary as well as in the Settings UI (canResetSampleWorkspace).
+    // HostedApi refuses it for everyone.
+    const session = assertSession(this.store);
+    if (session.roleKey !== "administrator") {
+      throw new Error("Only an administrator can reset the sample workspace.");
+    }
     this.store.db = cloneSeed();
     this.store.files.clear();
     this.store.sessionUserId = null;
