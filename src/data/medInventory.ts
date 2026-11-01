@@ -113,6 +113,30 @@ export function projectInventory(input: ProjectInventoryInput): InventoryProject
   return { currentCount, daysRemaining, reorderPointPills, status, alertActive };
 }
 
+/**
+ * Total order over delivery/count rows, newest first: count date, then
+ * the moment the count was recorded (timestamped rows before legacy
+ * rows that carry none), then row id. The countdown's baseline pick
+ * (medCountdown) and the server's expected-count RPC order rows this
+ * way; the projection must agree. Two counts recorded on the same day
+ * otherwise leave the anchor — and with it the forecast figure, the
+ * status, and the days-left — to the caller's row order, which the
+ * hosted backend does not guarantee between loads, so the same med's
+ * forecast could flip between two values with no count event in
+ * between (sim batches 82–86).
+ */
+export function compareDeliveryRecency(
+  a: MedicationDelivery,
+  b: MedicationDelivery,
+): number {
+  const byDay = b.countedOn.localeCompare(a.countedOn);
+  if (byDay !== 0) return byDay;
+  const aAt = a.countedAt ?? "";
+  const bAt = b.countedAt ?? "";
+  if (aAt !== bAt) return bAt.localeCompare(aAt);
+  return b.id.localeCompare(a.id);
+}
+
 export interface ProjectMedInventoryInput {
   med: Medication;
   /** Stored Phase-6 row, if one exists for this medication. */
@@ -137,9 +161,7 @@ export interface ProjectMedInventoryInput {
 export function projectMedInventory(input: ProjectMedInventoryInput): MedInventoryView {
   const today = input.today ?? todayIso();
   const { med } = input;
-  const latest = [...input.deliveries].sort((a, b) =>
-    a.countedOn < b.countedOn ? 1 : -1,
-  )[0];
+  const latest = [...input.deliveries].sort(compareDeliveryRecency)[0];
   const anchorQty = latest ? latest.remainingPills : med.remainingPills;
   const anchorDate = latest ? latest.countedOn || today : med.lastDeliveryOn || today;
   const anchorPerDay = latest ? latest.pillsPerDay : med.pillsPerDay;
@@ -197,7 +219,7 @@ export function projectMedInventory(input: ProjectMedInventoryInput): MedInvento
     ...projection,
     prnDosesSinceDelivery: inWindow.length,
     deliveries: [...input.deliveries]
-      .sort((a, b) => (a.countedOn < b.countedOn ? 1 : -1))
+      .sort(compareDeliveryRecency)
       .slice(0, 8)
       .map((row) => ({
         id: row.id,

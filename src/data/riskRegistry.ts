@@ -77,6 +77,9 @@ export interface RiskContext {
   medications: Array<{
     id: string;
     medName: string;
+    /** The Individual the med belongs to — med names repeat across
+     * people, so a stock claim without the person is unidentifiable. */
+    personName?: string;
     siteName: string;
     siteId: string;
     daysRemaining: number | null;
@@ -207,12 +210,13 @@ const medicationsSource: RiskSource = {
       source: "medications",
       sourceLabel: "Medication supply",
       severity: (row.status === "out" ? "critical" : "warning") as RiskSeverity,
-      title: `${row.medName} — ${row.status === "out" ? "out of stock" : "low stock"} (${row.siteName})`,
+      title: `${row.medName} — ${row.status === "out" ? "out of stock" : "low stock"} (${row.personName ? `${row.personName} · ` : ""}${row.siteName})`,
       detail:
         row.daysRemaining == null
           ? "No supply projection available. Count the stock to get a forecast."
           : `About ${row.daysRemaining}d of supply left. Reorder now.`,
       daysRemaining: row.daysRemaining,
+      personName: row.personName,
       siteId: row.siteId,
       siteName: row.siteName,
       deepLink: "/meds",

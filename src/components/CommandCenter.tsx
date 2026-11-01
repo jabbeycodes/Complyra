@@ -270,9 +270,19 @@ export function CommandCenterView({
             | "incomplete",
           dueOn: null,
         })),
-      medications: (data.medications ?? []).filter((med) => med.status !== "ok").map((med) => {
+      // A med with no count on file (lastCountedOn === null) has no
+      // stock state: the projection behind `status` is a fabricated
+      // zero, so calling it "out of stock" contradicts the chart and
+      // the forecast, which both report "No count recorded yet"
+      // (batch 86: Audit Me declared a never-counted med out of stock
+      // at a home where the same-named counted med read 28 pills).
+      // Only counted meds make stock claims — the same rule the
+      // supply tallies use. Rows name the Individual: med names repeat
+      // across people, so a site-only label is not identifiable.
+      medications: (data.medications ?? []).filter((med) => med.lastCountedOn !== null && med.status !== "ok").map((med) => {
         const person = data.individuals.find((row) => row.id === med.individualId);
         return { id: med.medicationId, medName: med.medicationName,
+          personName: person?.name,
           siteId: person?.siteId ?? "", siteName: person?.site ?? "Unknown site",
           daysRemaining: med.daysRemaining, status: med.status as "low" | "critical" | "out" };
       }),
@@ -322,7 +332,10 @@ export function CommandCenterView({
           dueOn: (list.dueAt as string).slice(0, 10),
           submitted: false,
         })),
-      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null).map((med) => {
+      // Never-counted meds are excluded for the same reason as the
+      // risk rows above: their projected daysRemaining is 0 from a
+      // fabricated zero, which would invent a run-out date today.
+      medications: (data.medications ?? []).filter((med) => med.lastCountedOn !== null && med.daysRemaining !== null).map((med) => {
         const end = new Date();
         end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));
         return { id: med.medicationId, medName: med.medicationName,
