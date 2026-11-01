@@ -3,6 +3,7 @@ import test from "node:test";
 import type { CareScreeningData } from "../../data/careScreening";
 import type { ConsentRegister } from "../../data/consents";
 import type { LifeEventView } from "../../data/lifeEvents";
+import { rightsPacketStatusFor } from "../../data/rightsPackets";
 import {
   chartPlans,
   consentRecordStatus,
@@ -172,4 +173,32 @@ test("rightsPacketSummary mirrors the shared derivation: latest packet, countdow
   assert.equal(unsigned.trackingText, "Not yet signed");
   assert.equal(unsigned.awaiting?.id, "next");
   assert.equal(rightsPacketSummary([], "2026-10-30").trackingText, "Not yet signed");
+});
+
+test("rightsPacketSummary: unloaded list is unknown with NO tracking line (batch 41)", () => {
+  // The mobile card must never present a not-yet-loaded packet list as
+  // "Not yet signed" — null in, 'unknown' out, no verdict text.
+  const summary = rightsPacketSummary(null, "2026-10-30");
+  assert.equal(summary.state, "unknown");
+  assert.equal(summary.trackingText, null);
+  assert.equal(summary.latest, null);
+  assert.equal(summary.awaiting, null);
+  assert.deepEqual(summary.history, []);
+});
+
+test("rightsPacketSummary agrees with the shared selector on the batch-41 signed shape", () => {
+  const signer = { printedName: "Sim Guardian", authority: "Guardian", authorityOther: "", signature: "Sim Guardian", witness: "Harper Lane", accepted: true };
+  const signed = {
+    id: "261c21b9-8391-40b9-b55f-c1f0ee51b009", agencyId: "f9cbbba2-a9b1-4ed2-b3e3-f92dfe1367bf",
+    individualId: "56d265ca-a767-461f-bc7b-9a890df4bdba", createdBy: "hm",
+    createdAt: "2026-10-31T08:12:07.847725+00:00", signerName: "Sim Guardian",
+    reviewedBy: "Harper Lane (house manager)", packetOn: "2026-10-31", status: "signed" as const,
+    signer, signedAt: "2026-10-31T08:13:16.992+00:00", filedAt: null, evidenceName: null,
+    copyVersion: "complyrer-rights-2026-10-v1",
+  };
+  const summary = rightsPacketSummary([signed], "2026-10-31");
+  assert.equal(summary.trackingText, rightsPacketStatusFor([signed], "2026-10-31").text);
+  assert.equal(summary.trackingText, "Renews in 365 days");
+  assert.equal(summary.state, "current");
+  assert.equal(summary.latest?.id, signed.id);
 });
