@@ -16,6 +16,7 @@ import {
   monthsWithNotes,
   progressNoteName,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   shiftNotesForMonth,
   waiverServiceNames,
   waiverServiceWriteAbout,
@@ -23,6 +24,7 @@ import {
   type IspProgramView,
   type ShiftNoteView,
 } from "../../data/shiftNotes";
+import { centralTodayIso } from "../../data/menuRecords";
 import { currentPlanYear, type IspChartData } from "./useIspData";
 
 /**
@@ -75,7 +77,7 @@ function NoteForm({
     ? [initial.shift, ...shiftOptions]
     : shiftOptions;
   const seededClock = clocksFromShiftLabel(initial?.shift ?? choices[0] ?? "");
-  const [noteDate, setNoteDate] = useState(initial?.noteDate ?? new Date().toISOString().slice(0, 10));
+  const [noteDate, setNoteDate] = useState(initial?.noteDate ?? centralTodayIso());
   const [shift, setShift] = useState(initial?.shift ?? choices[0] ?? "");
   const [beginTime, setBeginTime] = useState(initial?.beginTime || seededClock?.begin || "");
   const [endTime, setEndTime] = useState(initial?.endTime || seededClock?.end || "");
@@ -94,10 +96,12 @@ function NoteForm({
   const duration = shiftDurationMinutes(beginTime, endTime);
   const goal = program.goalService?.trim() ?? "";
   const signed = Boolean(signatureUrl || initial?.signatureDataUrl);
+  const timingProblem = shiftNoteTimingProblem({ noteDate, beginTime });
   const canSave =
     noteDate.length > 0 &&
     shift.trim().length > 0 &&
     duration !== null &&
+    !timingProblem &&
     waiverServiceNames().includes(waiverService) &&
     summary.trim().length > 0 &&
     (Boolean(initial) || (signed && goal.length > 0));
@@ -248,6 +252,7 @@ function NoteForm({
           </select>
         </label>
       </div>
+      {timingProblem && <p className="muted">{timingProblem}</p>}
       {waiverServiceWriteAbout(waiverService) && (
         <p className="muted">{waiverServiceWriteAbout(waiverService)}</p>
       )}

@@ -285,8 +285,10 @@ test("saving the Shift note stops that shift's missing-note reminder", async () 
     programId: program.id,
     noteDate: due.serviceDate,
     shift: "Other",
-    beginTime: "14:00",
-    endTime: "14:15",
+    // Midnight clocks keep the save valid at any wall-clock time (a note
+    // dated today cannot begin in the future — wave 7F).
+    beginTime: "00:00",
+    endTime: "00:15",
     waiverService: "Individualized Supported Living",
     staffTitle: "Direct support professional",
     signatureDataUrl:
@@ -307,8 +309,8 @@ test("saving the Shift note stops that shift's missing-note reminder", async () 
     programId: program.id,
     noteDate: due.serviceDate,
     shift: eveningNote.shift,
-    beginTime: "14:00",
-    endTime: "22:00",
+    beginTime: "00:00",
+    endTime: "08:00",
     waiverService: "Individualized Supported Living",
     staffTitle: "Direct support professional",
     signatureDataUrl:
