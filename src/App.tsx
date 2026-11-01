@@ -74,6 +74,7 @@ import {
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
 import { searchRequirements } from "./data/search";
+import { siteFilterForCreatedRecord } from "./data/siteFilterReveal";
 import AuthEntry from "./auth/AuthEntry";
 import { ComplyRerWordmark } from "./brand/ComplyrerBrand";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
@@ -597,6 +598,16 @@ export default function App() {
     setQuery("");
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  // Create-flow completion (simulation batches 2/3): the global site filter
+  // survives page changes, so a record created for a different house than
+  // the filtered one stays hidden in its list until a full page reload —
+  // the create looks like it failed. When a create lands, move the filter
+  // to the record's house, but only in that case: an unfiltered view and a
+  // same-house view are left exactly as the user set them.
+  function revealCreatedSite(siteName: string) {
+    const next = siteFilterForCreatedRecord(site, siteName);
+    if (next !== site) setSite(next);
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
@@ -1293,6 +1304,7 @@ export default function App() {
                   <section className="panel intake-panel">
                     <AddIndividualForm
                       onCreated={(name, _uploaded, siteName) => {
+                        revealCreatedSite(siteName);
                         openPersonChart(name);
                         notify(`Individual added to ${siteName}.`);
                       }}
@@ -2438,6 +2450,7 @@ export default function App() {
             onCreated={(name, uploaded, siteName) => {
               setAddPersonSiteId(null);
               setModal(null);
+              revealCreatedSite(siteName);
               openPersonChart(name);
               notify(
                 uploaded
@@ -2485,6 +2498,12 @@ export default function App() {
             }
             await refresh();
             setModal(null);
+            // The Review queue is scoped by the same global site filter:
+            // reveal the draft's house or the new draft is hidden there.
+            const draftPerson = individuals.find(
+              (p) => p.id === payload.individualId,
+            );
+            if (draftPerson) revealCreatedSite(draftPerson.site);
             navigate("Review queue");
             notify(
               "Draft created. Review and approve it before it becomes active.",
@@ -2725,9 +2744,16 @@ export default function App() {
       {modal === "invite" && (
         <Modal title="Add a member" onClose={() => setModal(null)}>
           <InviteMemberForm
-            onCreated={() =>
-              notify("Member account created. Share the credentials only once.")
-            }
+            onCreated={() => {
+              // The Staff directory is agency-wide: a member created while
+              // a house filter or a search is active would stay hidden in
+              // the list until a full reload (simulation batch 2). Reset
+              // both so the new member is in the list when the dialog
+              // closes.
+              setSite("All sites");
+              setQuery("");
+              notify("Member account created. Share the credentials only once.");
+            }}
           />
         </Modal>
       )}
