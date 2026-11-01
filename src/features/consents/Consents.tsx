@@ -2,7 +2,7 @@ import Packets from "./Packets";
 import RightsPackets from "./RightsPackets";
 import { useEffect, useState } from 'react';
 import { useData } from '../../data/DataProvider';
-import { canManageConsents, canSeeConsents, consentOutcomeLabel, consentGaps, consentOnFile, consentStatus, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
+import { canManageConsents, canSeeConsents, consentDisplayText, consentOutcomeLabel, consentGaps, consentStatus, consentStatusFor, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
 import { todayStamp } from '../../data/status';
 import { jsPDF } from 'jspdf';
 import { openPrintable } from '../../data/openFile';
@@ -26,7 +26,7 @@ function printSummary(register: ConsentRegister, individualId: string) {
     line(`Consent summary: ${person?.fullName ?? 'Individual'}`);
     line(`Generated ${new Date().toISOString()}`);
     for (const type of register.types) {
-        const { status } = consentOnFile(register, individualId, type.id);
+        const { text: status } = consentStatusFor(register, individualId, type.id);
         line(`${type.label}: ${status}`);
         for (const r of register.records.filter(r => r.individualId === individualId && r.typeId === type.id)) {
             line(`Version ${r.id} | ${consentStatus(r, register.records, register.revocations)}`);
@@ -120,10 +120,11 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
       {people.map(person => <article key={person.id}><h3>{person.fullName}</h3><button onClick={() => printSummary(data, person.id)}>Print consent summary</button>
         <div className="consent-table"><table><caption>Consent status for {person.fullName}</caption><thead><tr><th>Consent type</th><th>Status</th><th>Decision</th><th>Expiry/review</th><th>Actions and history</th></tr></thead><tbody>
         {data.types.map(type => {
-                    const { row, status } = consentOnFile(data, person.id, type.id);
+                    const status = consentStatusFor(data, person.id, type.id);
+                    const row = status.row;
                     const history = data.records.filter(r => r.individualId === person.id && r.typeId === type.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-                    return <tr key={type.id}><th scope="row">{type.label}{type.required ? ' (required)' : ''}</th><td>{role === 'dsp' && status === 'Missing' ? 'No active consent available' : status}</td><td>{row ? consentOutcomeLabel(row.outcome) : 'No active permission on file'}</td><td>{row?.reviewOn ?? '—'}</td><td>
-            {manage && <button disabled={busy} onClick={() => start(person.id, type.id, row?.activatedAt ? row : undefined)}>{row?.activatedAt ? 'Renew' : 'New draft'}</button>}
+                    return <tr key={type.id}><th scope="row">{type.label}{type.required ? ' (required)' : ''}</th><td>{consentDisplayText(status, role)}</td><td>{row ? consentOutcomeLabel(row.outcome) : 'No active permission on file'}</td><td>{row?.reviewOn ?? '—'}</td><td>
+            {manage && <button disabled={busy} onClick={() => start(person.id, type.id, row && row.activatedAt ? row : undefined)}>{row?.activatedAt ? 'Renew' : 'New draft'}</button>}
             <details><summary>{role === 'dsp' ? 'Active consent details' : `Version history (${history.length})`}</summary>{history.map(r => <div className="consent-version" key={r.id}>
               <p><strong>{consentStatus(r, data.records, data.revocations)}</strong> · Version {r.id}</p><p>{r.covers}</p>{r.outcome && <p><strong>Recorded choice: {r.outcome}</strong>{["no", "none"].includes(r.outcome) ? " — Permission not given" : ""}</p>}<p>Given by {r.giverName} — {r.giver}; {r.relationship}</p>
               <p>Signed {r.signedOn || 'Not signed'}; effective {r.effectiveOn}; expiry/review {r.reviewOn}</p><p>Recorded by {r.createdBy}; {r.activatedAt ? `activated ${r.activatedAt} by ${r.activatedBy ?? r.giverName}` : 'Draft'}</p>

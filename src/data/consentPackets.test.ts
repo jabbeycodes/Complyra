@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
 import { PACKET_ITEMS, validatePacketSubmission, packetStatus, packetOutstanding, tokenHash, type PacketChoices, type PacketSignature } from './consentPackets';
+import { centralTodayIso } from './menuRecords';
 import { todayStamp } from './status';
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 const choices: PacketChoices = Object.fromEntries(PACKET_ITEMS.map(i => [i.key, i.key === 'media' ? 'group' : i.key === 'photograph' ? 'no' : 'yes']));
@@ -14,7 +15,7 @@ function setup() {
     const hm = db.memberships.find(m => m.roleKey === 'house_manager')!;
     store.sessionUserId = hm.userId;
     const person = db.individuals.find(p => p.siteId === hm.siteId)!;
-    return { db, store, api, hm, person, input: { individualId: person.id, signerName: 'Jordan Lee', effectiveOn: todayStamp(), reviewOn: '2099-12-31', outstandingAfterDays: 1 } };
+    return { db, store, api, hm, person, input: { individualId: person.id, signerName: 'Jordan Lee', effectiveOn: centralTodayIso(), reviewOn: '2099-12-31', outstandingAfterDays: 1 } };
 }
 test('packet token isolates one packet, hashes at rest, records open/sign trail and refuses replay', async () => {
     const f = setup();
@@ -99,7 +100,7 @@ test('packet signing needs every explicit choice, authority and witness; PDF car
 
 test('packet filing supersedes an existing standalone decision and DSPs receive only the replacement', async () => {
     const f = setup();
-    const previous = await f.api.saveConsent({individualId:f.person.id,typeId:'media',covers:'No media permission.',giver:'individual',giverName:f.person.fullName,relationship:'Self',outcome:'none',signedOn:todayStamp(),effectiveOn:todayStamp(),reviewOn:'2099-12-31',supersedesId:null});
+    const previous = await f.api.saveConsent({individualId:f.person.id,typeId:'media',covers:'No media permission.',giver:'individual',giverName:f.person.fullName,relationship:'Self',outcome:'none',signedOn:centralTodayIso(),effectiveOn:centralTodayIso(),reviewOn:'2099-12-31',supersedesId:null});
     await f.api.activateConsent(previous);
     const id = await f.api.createConsentPacket(f.input);
     await f.api.generateConsentPacket(id);

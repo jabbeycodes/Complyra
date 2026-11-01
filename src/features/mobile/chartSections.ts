@@ -11,9 +11,10 @@ import {
   type CareScreeningData,
 } from "../../data/careScreening";
 import {
-  consentOnFile,
+  consentDisplayText,
   consentOutcomeLabel,
   consentStatus,
+  consentStatusFor,
   type ConsentRecord,
   type ConsentRegister,
   type ConsentType,
@@ -84,9 +85,13 @@ export interface ConsentTypeRow {
 
 /**
  * One row per consent type for one Individual, mirroring the desktop
- * register cell for cell — including the DSP masking rule: a DSP never
- * sees the word "Missing" (it reads "No active consent available") and
- * their history disclosure is titled "Active consent details".
+ * register cell for cell. The status comes from the shared
+ * consentStatusFor selector and the shared consentDisplayText rule —
+ * including the DSP masking rule: a DSP never sees the word "Missing"
+ * (it reads "No active consent available") and their history
+ * disclosure is titled "Active consent details". The register here is
+ * always loaded (the caller renders a loading state without one), so
+ * the status text is never the selector's unknown null.
  */
 export function consentTypeRows(
   register: ConsentRegister,
@@ -94,7 +99,8 @@ export function consentTypeRows(
   roleKey: string,
 ): ConsentTypeRow[] {
   return register.types.map((type) => {
-    const { row, status } = consentOnFile(register, individualId, type.id);
+    const status = consentStatusFor(register, individualId, type.id);
+    const row = status.row;
     const history = register.records
       .filter(
         (record) => record.individualId === individualId && record.typeId === type.id,
@@ -102,7 +108,7 @@ export function consentTypeRows(
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return {
       type,
-      status: roleKey === "dsp" && status === "Missing" ? "No active consent available" : status,
+      status: consentDisplayText(status, roleKey)!,
       decision: row ? consentOutcomeLabel(row.outcome) : "No active permission on file",
       reviewOn: row?.reviewOn ?? null,
       history,
