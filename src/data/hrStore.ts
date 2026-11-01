@@ -101,6 +101,12 @@ import {
   type StaffCorrectiveActionInput,
 } from "./performanceRecords";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
+import {
+  DOCUMENT_NOT_READABLE_ERROR,
+  STARTER_POLICY_DOCUMENTS,
+  documentHasReadableContent,
+  starterHrDocuments,
+} from "./starterDocuments";
 
 /* ------------------------------ input types ------------------------------ */
 /* (the domain module exports entities only; inputs are a store concern) */
@@ -1653,6 +1659,26 @@ class SupabaseHrStore implements HrStore {
 
   async acknowledgeDocument(docId: string, signatureName: string): Promise<HrDocumentAck> {
     if (!signatureName.trim()) throw new Error("Type your full name to acknowledge.");
+    // Wave 7I: never record a signature on a document the signer could
+    // not read — the document must exist in this agency's library and
+    // carry readable content (body text or a file link).
+    const { data: doc, error: docError } = await this.client
+      .from("hr_documents")
+      .select("body, file_url")
+      .eq("id", docId)
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    if (docError) throwIf(docError, "Could not load the document");
+    if (!doc) throw new Error("Document not found.");
+    const row = doc as Record<string, unknown>;
+    if (
+      !documentHasReadableContent({
+        body: row.body == null ? null : String(row.body),
+        fileUrl: row.file_url == null ? null : String(row.file_url),
+      })
+    ) {
+      throw new Error(DOCUMENT_NOT_READABLE_ERROR);
+    }
     const { data, error } = await this.client
       .from("hr_document_acks")
       .insert({
@@ -3752,6 +3778,12 @@ interface LocalBucket {
   emergencyContacts: Record<string, StaffEmergencyContact>;
   /** True once the Evergreen demo binder seed has been written. */
   demoBinderSeeded?: boolean;
+  /** Wave 7I: true once pre-7I demo policy shells got their starter bodies. */
+  demoBinderBodiesFilled?: boolean;
+  /** Wave 7I: true once the starter policy library seed has run for
+   *  this (non-demo) agency bucket — seeded once, only into an empty
+   *  library, so an agency's own document choices are never undone. */
+  starterDocumentsSeeded?: boolean;
   /* PERFORMANCE (build 3): per-staff reviews + corrective actions.
    * Reads merge across buckets like the binder; newest updatedAt wins. */
   performanceReviews: PerformanceReview[];
@@ -4342,20 +4374,16 @@ const DEMO_STAFF_NAMES: Record<string, string> = {
   [DEMO_STAFF_IDS.cameron]: "Cameron Price",
 };
 
-const DEMO_POLICY_DOCS: Array<{ key: string; title: string }> = [
-  { key: "onboarding-packet", title: "Onboarding Packet" },
-  { key: "hipaa-107", title: "HIPAA 107" },
-  { key: "help-protocol-207", title: "HELP Protocol 207" },
-  { key: "abuse-neglect-200", title: "Abuse & Neglect 200" },
-  { key: "event-reporting-205", title: "Event Reporting 205" },
-  { key: "infection-control-210", title: "Infection Control 210" },
-  { key: "emergency-preparedness-204", title: "Emergency Preparedness 204" },
-  { key: "dress-code-203", title: "Dress Code 203" },
-  { key: "vehicle-use-agreement", title: "Vehicle Use Agreement" },
-  { key: "hcbs", title: "HCBS" },
-  { key: "individual-rights", title: "Individual Rights Cover Page" },
-  { key: "isp-acknowledgment", title: "ISP Acknowledgment" },
-];
+/* The demo library IS the starter library (wave 7I): same twelve
+ * titles, same readable bodies — the demo used to seed title-only
+ * shells a signer could not read. Keys/titles come from
+ * STARTER_POLICY_DOCUMENTS so the demo and a provisioned agency agree. */
+const DEMO_POLICY_DOCS: Array<{ key: string; title: string; body: string }> =
+  STARTER_POLICY_DOCUMENTS.map((doc) => ({
+    key: doc.key,
+    title: doc.title,
+    body: doc.body,
+  }));
 
 /** Wallet ("document") item keys from the default template, in order. */
 const DEMO_WALLET_ITEMS = [
@@ -4393,7 +4421,7 @@ function seedDemoBinderData(): {
     agencyId,
     title: doc.title,
     category: "policy",
-    body: null,
+    body: doc.body,
     fileUrl: null,
     requiresAck: true,
     active: true,
@@ -4783,6 +4811,41 @@ class LocalHrStore implements HrStore {
       this.memory.demoBinderSeeded = true;
       this.save(this.memory);
     }
+    // Wave 7I repair: demo buckets seeded before the starter bodies
+    // existed hold title-only policy shells a signer cannot read. Fill
+    // each shell's body once from the starter library; a document that
+    // already has a body or a file (agency-edited) is never touched.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoBinderBodiesFilled
+    ) {
+      const bodies = new Map(
+        STARTER_POLICY_DOCUMENTS.map((d) => [`doc-demo-policy-${d.key}`, d.body]),
+      );
+      for (const doc of this.memory.documents) {
+        const body = bodies.get(doc.id);
+        if (body && !doc.body && !doc.fileUrl) doc.body = body;
+      }
+      this.memory.demoBinderBodiesFilled = true;
+      this.save(this.memory);
+    }
+    // Wave 7I: the starter policy library for every non-demo agency,
+    // seeded once and only into an empty library. Hosted agencies get
+    // the same twelve documents from migration 20261031270000; this is
+    // the local-mode half of that provisioning, so a new agency's
+    // binder signature links resolve from the first day. Running once
+    // (and only when the library is empty) means an agency that later
+    // removes or replaces documents never gets the starters back.
+    if (
+      this.agencyId !== EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.starterDocumentsSeeded
+    ) {
+      if (this.memory.documents.length === 0) {
+        this.memory.documents.push(...starterHrDocuments(this.agencyId));
+      }
+      this.memory.starterDocumentsSeeded = true;
+      this.save(this.memory);
+    }
     // One-time fictional performance-records seed for the Evergreen demo
     // agency (build 3): one review awaiting its subject's acknowledgment,
     // one acknowledged review with a response note, one signed written
@@ -5153,6 +5216,14 @@ class LocalHrStore implements HrStore {
   async acknowledgeDocument(docId: string, signatureName: string): Promise<HrDocumentAck> {
     if (!signatureName.trim()) throw new Error("Type your full name to acknowledge.");
     return this.mutate((b) => {
+      // Wave 7I: never record a signature on a document the signer
+      // could not read — it must exist in the library with readable
+      // content (body text or a file link).
+      const doc = b.documents.find((d) => d.id === docId);
+      if (!doc) throw new Error("Document not found.");
+      if (!documentHasReadableContent(doc)) {
+        throw new Error(DOCUMENT_NOT_READABLE_ERROR);
+      }
       const ack: HrDocumentAck = {
         id: newId(),
         docId,

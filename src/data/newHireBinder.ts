@@ -14,6 +14,12 @@
  *                      engine's own in-ratio gate rule.
  *  - "acknowledgment"— LINKED to the HR document library: satisfied when
  *                      the staff member has signed the matching document.
+ *                      Wave 7I: derivation also resolves the signature
+ *                      LINK (documentState) — signable only when a
+ *                      matching document exists with readable content;
+ *                      a missing or content-less document is reported
+ *                      plainly as the agency's gap, never as a pending
+ *                      signature with a dead sign path behind it.
  *  - "document"      — a WALLET file: the staff member (or HR on their
  *                      behalf) uploads it; HR verifies it or returns it
  *                      with a note. States: missing → on file → verified,
@@ -41,6 +47,10 @@
  * alone.
  */
 import { daysRemaining } from "./certificates";
+import {
+  BINDER_DOCUMENT_MISSING_NOTE,
+  BINDER_DOCUMENT_UNREADABLE_NOTE,
+} from "./starterDocuments";
 import type { PerformanceRecordsSummary } from "./performanceRecords";
 import type { StaffTrainingProfile } from "./types";
 
@@ -640,7 +650,23 @@ export interface DerivedBinderItem {
   document: BinderDocument | null;
   /** The certificate of record, for "certificate" items that matched. */
   certificate: BinderCertEvidence | null;
+  /**
+   * For "acknowledgment" items, whether the signature link resolves —
+   * computed only when the evidence bundle carries the agency's library
+   * (all live callers do; bundles assembled without it keep null):
+   *  - "signable"   — a matching document exists AND has readable
+   *                   content the signer can open before signing;
+   *  - "missing"    — no matching document in the library at all;
+   *  - "unreadable" — a matching document exists but carries no
+   *                   readable content (title-only shell).
+   * Null for every other kind. A binder must never offer a sign action
+   * for a "missing" or "unreadable" item (wave 7I).
+   */
+  documentState: BinderDocumentLinkState | null;
 }
+
+/** Whether an acknowledgment item's signature link resolves (wave 7I). */
+export type BinderDocumentLinkState = "signable" | "missing" | "unreadable";
 
 export interface DerivedBinderSection {
   section: BinderTemplateSection;
@@ -680,6 +706,16 @@ export interface BinderEvidence {
   trainingProfile: StaffTrainingProfile | null;
   /** Document acknowledgments for this staff member: library title + when signed. */
   documentAcks: Array<{ docKey: string; ackedAt: string }>;
+  /**
+   * The agency's HR library as the binder needs it: each ACTIVE
+   * document's title + whether it carries readable content (wave 7I).
+   * Optional so evidence bundles assembled before 7I keep deriving the
+   * legacy note; every live caller passes it, and with it an unsigned
+   * acknowledgment item reports whether its document is signable,
+   * missing, or an unreadable shell instead of always claiming the
+   * signature is merely pending.
+   */
+  libraryDocuments?: Array<{ title: string; hasContent: boolean }>;
   walletDocuments: BinderDocument[];
   emergencyContact: StaffEmergencyContact | null;
   /**
@@ -716,7 +752,7 @@ function deriveCertificateItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
   today: string,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const matches = evidence.certificates.filter((cert) =>
     binderKeyMatches(item.matchKeys, cert.certName),
   );
@@ -768,7 +804,7 @@ function deriveCertificateItem(
 function deriveTrainingItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const profile = evidence.trainingProfile;
   if (!profile || profile.counts.required === 0) {
     return {
@@ -805,19 +841,47 @@ function deriveTrainingItem(
   };
 }
 
+/**
+ * Whether an acknowledgment item's signature link resolves, from the
+ * evidence bundle's library projection (wave 7I). Null when the bundle
+ * carries no library (pre-7I callers) — the item then derives exactly
+ * as it did before.
+ */
+export function acknowledgmentDocumentState(
+  item: BinderTemplateItem,
+  evidence: BinderEvidence,
+): BinderDocumentLinkState | null {
+  const library = evidence.libraryDocuments;
+  if (!library) return null;
+  const matches = library.filter((doc) => binderKeyMatches(item.matchKeys, doc.title));
+  if (matches.length === 0) return "missing";
+  return matches.some((doc) => doc.hasContent) ? "signable" : "unreadable";
+}
+
 function deriveAcknowledgmentItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const ack = evidence.documentAcks
     .filter((a) => binderKeyMatches(item.matchKeys, a.docKey))
     .sort((a, b) => (a.ackedAt < b.ackedAt ? 1 : -1))[0];
   if (!ack) {
+    // Wave 7I: when the library is known, say plainly WHY there is
+    // nothing to sign instead of always claiming a signature is
+    // pending — a document the agency never added (or added without
+    // readable text) is the agency's gap, not the new hire's.
+    const linkState = acknowledgmentDocumentState(item, evidence);
+    const note =
+      linkState === "missing"
+        ? BINDER_DOCUMENT_MISSING_NOTE
+        : linkState === "unreadable"
+          ? BINDER_DOCUMENT_UNREADABLE_NOTE
+          : "Waiting for the staff member's signature";
     return {
       item,
       status: "missing",
       satisfied: false,
-      note: "Waiting for the staff member's signature",
+      note,
       document: null,
       certificate: null,
     };
@@ -835,7 +899,7 @@ function deriveAcknowledgmentItem(
 function deriveDocumentItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const doc = evidence.walletDocuments.find((d) => d.itemKey === item.key) ?? null;
   if (!doc) {
     return {
@@ -883,7 +947,7 @@ function deriveDocumentItem(
 function deriveProfileItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const contact = evidence.emergencyContact;
   if (!contact) {
     return {
@@ -914,7 +978,7 @@ function deriveProfileItem(
 function deriveRecordsItem(
   item: BinderTemplateItem,
   evidence: BinderEvidence,
-): Omit<DerivedBinderItem, "required"> {
+): Omit<DerivedBinderItem, "required" | "documentState"> {
   const summary = evidence.performance;
   const describe = (
     count: number,
@@ -961,7 +1025,7 @@ export function deriveBinderItem(
   today: string,
 ): DerivedBinderItem {
   void staffId; // identity only — the evidence bundle is pre-scoped per staff.
-  const derived = ((): Omit<DerivedBinderItem, "required"> => {
+  const derived = ((): Omit<DerivedBinderItem, "required" | "documentState"> => {
     switch (item.kind) {
       case "certificate":
         return deriveCertificateItem(item, evidence, today);
@@ -982,6 +1046,10 @@ export function deriveBinderItem(
   return {
     ...derived,
     required: item.kind === "records" ? false : isRequiredBinderItem(item),
+    documentState:
+      item.kind === "acknowledgment"
+        ? acknowledgmentDocumentState(item, evidence)
+        : null,
   };
 }
 

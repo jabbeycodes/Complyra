@@ -12,6 +12,7 @@ import {
   type StaffEmergencyContact,
 } from "../../data/newHireBinder";
 import { summarizePerformanceRecords } from "../../data/performanceRecords";
+import { documentHasReadableContent } from "../../data/starterDocuments";
 import { todayIso } from "../../data/chart";
 
 /**
@@ -88,6 +89,10 @@ export default function MobileBinder({
             docKey: titleById.get(ack.docId) ?? ack.docId,
             ackedAt: ack.ackedAt,
           })),
+        libraryDocuments: docs.map((doc) => ({
+          title: doc.title,
+          hasContent: documentHasReadableContent(doc),
+        })),
         walletDocuments: wallet,
         emergencyContact: contactRow,
         performance: summarizePerformanceRecords(perfReviews, perfActions),

@@ -34,6 +34,7 @@ import {
   type StaffEmergencyContact,
 } from "../../data/newHireBinder";
 import { summarizePerformanceRecords } from "../../data/performanceRecords";
+import { documentHasReadableContent } from "../../data/starterDocuments";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
 import BinderDonut from "./BinderDonut";
 import {
@@ -168,6 +169,10 @@ export function BinderTab({
               docKey: titleById.get(a.docId) ?? a.docId,
               ackedAt: a.ackedAt,
             })),
+          libraryDocuments: docs.map((d) => ({
+            title: d.title,
+            hasContent: documentHasReadableContent(d),
+          })),
           walletDocuments: wallet,
           emergencyContact: contactRow,
           performance: summarizePerformanceRecords(perfReviews, perfActions),
@@ -334,6 +339,13 @@ export function BinderTab({
       );
     }
     if (item.kind === "acknowledgment" && !row.satisfied && isSelf && !readOnly) {
+      // Wave 7I: offer the sign path only when it resolves to a real,
+      // readable document. For a missing or content-less document the
+      // row's note already says plainly that the agency hasn't added
+      // it — a button here would be a dead sign link.
+      if (row.documentState === "missing" || row.documentState === "unreadable") {
+        return null;
+      }
       return (
         <div className="binder-actions">
           <button className="hub-btn" onClick={() => onJumpToTab("documents")}>

@@ -30,6 +30,7 @@ import { todayIso } from "../../data/chart";
 import type { ComplianceEvidence } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
 import { hasPermission, ROLE_TEMPLATE_BY_KEY } from "../../data/permissions";
+import { documentHasReadableContent } from "../../data/starterDocuments";
 import type { SessionUser } from "../../data/types";
 import {
   BINDER_STATUS_LABELS,
@@ -142,6 +143,10 @@ export function BinderBoardTab({
                   docKey: titleById.get(a.docId) ?? a.docId,
                   ackedAt: a.ackedAt,
                 })),
+              libraryDocuments: docs.map((d) => ({
+                title: d.title,
+                hasContent: documentHasReadableContent(d),
+              })),
               walletDocuments: wallet,
               emergencyContact: contactRow,
             };
