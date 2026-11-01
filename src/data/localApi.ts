@@ -3041,7 +3041,15 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           : null))
       .filter((id): id is string => Boolean(id)),
   )];
-  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
+  // A site-scoped viewer's workspace sites are their membership home
+  // PLUS any home an active staff assignment places them at — parity
+  // with hosted RLS (private.can_read_site's assignment branch) and
+  // with canReadIndividual. Membership-home-only here hid assigned
+  // homes from the Sites page and left their Individuals with an
+  // "Unknown site" name, which then dropped them from site-filtered
+  // lists (DSP-ASSIGNED-SCOPE, 2026-10-31).
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId &&
+    (canAccessSite(session, row.id) || assignmentSiteIds.includes(row.id)));
   const individuals = canViewPeople
     ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
     : [];

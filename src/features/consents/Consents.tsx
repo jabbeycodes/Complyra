@@ -2,7 +2,7 @@ import Packets from "./Packets";
 import RightsPackets from "./RightsPackets";
 import { useEffect, useState } from 'react';
 import { useData } from '../../data/DataProvider';
-import { canManageConsents, canSeeConsents, consentOutcomeLabel, consentGaps, consentOnFile, consentStatus, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
+import { canManageConsents, canSeeConsents, consentOutcomeLabel, consentGaps, consentOnFile, consentStatus, scopeConsentRegister, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
 import { todayStamp } from '../../data/status';
 import { jsPDF } from 'jspdf';
 import { openPrintable } from '../../data/openFile';
@@ -62,6 +62,14 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
     const [config, setConfig] = useState<ConsentType[] | null>(null);
     const role = session?.roleKey ?? '';
     const manage = canManageConsents(role);
+    // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP's register
+    // holds only consents for Individuals they may read — the ones at
+    // their assigned homes, which is the workspace's Individual list.
+    // Applied here at the view so LocalApi- and HostedApi-fed registers
+    // are narrowed identically.
+    const applyScope = (register: ConsentRegister) => role === 'dsp'
+        ? scopeConsentRegister(register, new Set((workspace?.individuals ?? []).map(p => p.id)))
+        : register;
     useEffect(() => {
         if (!canSeeConsents(role))
             return;
@@ -69,7 +77,7 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         setData(null);
         setError('');
         api.getConsents().then(r => { if (live)
-            setData(r); }).catch(e => { if (live)
+            setData(applyScope(r)); }).catch(e => { if (live)
             setError(e.message); });
         return () => { live = false; };
     }, [api, role, session?.userId, individualId]);
@@ -78,7 +86,7 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         setError('');
         try {
             await action();
-            setData(await api.getConsents());
+            setData(applyScope(await api.getConsents()));
             setDraft(null);
             setRevoking(null);
             setConfig(null);
@@ -106,7 +114,7 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
     }
     const people = data?.individuals.filter(p => (!individualId || p.id === individualId) && (!site || p.siteId === site)) ?? [];
     return <section className="consents" id="chart-consents" aria-label="Consents register">
-    <RightsPackets individualId={individualId}/><Packets individualId={individualId} onFiled={async () => setData(await api.getConsents())}/><h2>{individualId ? 'Consents and version history' : 'Consents register'}</h2>
+    <RightsPackets individualId={individualId}/><Packets individualId={individualId} onFiled={async () => setData(applyScope(await api.getConsents()))}/><h2>{individualId ? 'Consents and version history' : 'Consents register'}</h2>
     <p>Signed versions stay on the Individual’s chart. Renewing adds a version; revoking records who, when, and why.</p>
     {error && <p role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading consents…</p>}

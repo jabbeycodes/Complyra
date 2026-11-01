@@ -174,7 +174,15 @@ export default function MobileShell({
   /** Open the More sheet on arrival (the pill's More destination). */
   startSheetOpen?: boolean;
 }) {
-  const sites = workspace.sites;
+  // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP's home
+  // picker and scoped home come only from their assigned homes —
+  // membership home plus active assignment sites (sitesVisibleTo, the
+  // same rule the desktop applies). Other roles keep the workspace
+  // list as delivered.
+  const sites =
+    session.roleKey === "dsp"
+      ? sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds)
+      : workspace.sites;
   const [siteId, setSiteId] = useState<string | null>(() => {
     try {
       return window.localStorage.getItem(siteStorageKey(session.userId));

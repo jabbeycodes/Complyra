@@ -97,6 +97,12 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   if (page === "Platform") return Boolean(session.platformAdmin);
   if (page === "Activity log") {
+    // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): workspace
+    // activity rows carry no actor, so the log cannot be narrowed to a
+    // DSP's own activity honestly — DSPs do not get the surface at
+    // all (nav hidden and direct navigation refused, like every other
+    // pageVisible gate).
+    if (session.roleKey === "dsp") return false;
     return can(session, "audit.read") || can(session, "individuals.view");
   }
   // HR-ROLES (2026-09-13): editing role templates is roles.manage, separate
