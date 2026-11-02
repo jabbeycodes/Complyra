@@ -324,7 +324,6 @@ test("training lines come from required obligations", () => {
 test("issue #81: Overview visibility and edit gates", () => {
   for (const role of [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -338,14 +337,14 @@ test("issue #81: Overview visibility and edit gates", () => {
   for (const role of ["administrator", "house_manager", "program_manager"]) {
     assert.equal(canEditIndividualContacts(role), true, role);
   }
-  for (const role of ["nurse", "dsp", "auditor", "compliance_admin", "hr"]) {
+  for (const role of ["nurse", "dsp", "auditor", "hr"]) {
     assert.equal(canEditIndividualContacts(role), false, role);
   }
 
   for (const role of ["administrator", "program_manager", "nurse"]) {
     assert.equal(canEditDiagnoses(role), true, role);
   }
-  for (const role of ["house_manager", "dsp", "auditor", "compliance_admin", "hr"]) {
+  for (const role of ["house_manager", "dsp", "auditor", "hr"]) {
     assert.equal(canEditDiagnoses(role), false, role);
   }
 });

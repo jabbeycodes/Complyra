@@ -158,9 +158,10 @@ test("the quick log tile opens when the role records in any field-log domain or 
   assert.ok(
     ids(ctx({ roleKey: "hr", permissions: { "mileage.manage": true } })).includes("quickLog"),
   );
-  // GER filing alone opens it.
+  // GER filing alone opens it (HR records nothing else in the field log
+  // without a mileage grant, so the GER grant is the only door here).
   assert.ok(
-    ids(ctx({ roleKey: "compliance_admin", permissions: { "ger.create": true } })).includes("quickLog"),
+    ids(ctx({ roleKey: "hr", permissions: { "ger.create": true } })).includes("quickLog"),
   );
   // Health viewing alone opens it: an auditor records in NO domain, but
   // health statuses (and filed GERs) are read surfaces for them, so the

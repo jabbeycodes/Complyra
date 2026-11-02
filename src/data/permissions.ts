@@ -99,7 +99,6 @@ export type PermissionMap = Record<PermissionKey, boolean>;
 export type RoleScope = "agency" | "program" | "site" | "assigned";
 export type RoleKey =
   | "administrator"
-  | "compliance_admin"
   | "house_manager"
   | "program_manager"
   | "dsp"
@@ -140,28 +139,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     // LIFEPATH-P4 (certificates): certificates.manage is NOT in the
     // administrator default set — it is grantable explicitly via Roles & access.
     permissions: pack(ALL.filter((key) => key !== "certificates.manage")),
-  },
-  {
-    key: "compliance_admin",
-    name: "Compliance administrator",
-    shortCode: "CA",
-    description: "Owns the compliance loop: plans, approvals, acknowledgments, and audit exports.",
-    defaultScope: "agency",
-    capability: "compliance_admin",
-    // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
-    // the compliance_admin defaults — the auditor role owns scoring, PM/HM
-    // own disputes and schedules. Grantable explicitly via Roles & access.
-    // HR-EMPLOYEE-HUB: hub.access only — scheduling, timecard review,
-    // time-off approval, team view, payroll lock, and HR documents stay with
-    // the operational managers (administrator / program_manager / house_manager).
-    permissions: pack(
-      ALL.filter(
-        (key) =>
-          key !== "hr.view_staff" &&
-          !key.startsWith("qa.") &&
-          (key === "hub.access" || !key.startsWith("hub.")),
-      ),
-    ),
   },
   {
     key: "house_manager",
@@ -408,13 +385,12 @@ export const ROLE_TEMPLATE_BY_KEY = Object.fromEntries(
   ROLE_TEMPLATES.map((row) => [row.key, row]),
 ) as Record<RoleKey, RoleTemplate>;
 
-/** All nine role keys, in template order. */
+/** All role keys, in template order. */
 export const ROLE_KEYS = ROLE_TEMPLATES.map((row) => row.key);
 
 /** Roles whose grant must stay with privileged granters — never HR / line staff. */
 export const PRIVILEGED_ROLE_KEYS = [
   "administrator",
-  "compliance_admin",
 ] as const satisfies readonly RoleKey[];
 
 /**
@@ -423,15 +399,13 @@ export const PRIVILEGED_ROLE_KEYS = [
  * `"any"` marks operational roles: any caller may be evaluated for them and
  * the permission gates (members.invite / members.assign_roles) live in the
  * API layer. Explicit granter lists restrict privileged targets:
- *  - only `administrator` may grant `administrator`;
- *  - `administrator` and `compliance_admin` may grant `compliance_admin`.
+ *  - only `administrator` may grant `administrator`.
  *
  * This mirrors the Postgres backstop private.can_grant_role_key() in
  * 20260913191500_phase0_security.sql — keep both in sync.
  */
 export const GRANT_RULES: Record<RoleKey, readonly RoleKey[] | "any"> = {
   administrator: ["administrator"],
-  compliance_admin: ["administrator", "compliance_admin"],
   house_manager: "any",
   program_manager: "any",
   dsp: "any",
@@ -549,7 +523,6 @@ export const PERMISSION_REGISTRY: Record<PermissionKey, PermissionRegistryEntry>
  */
 export const TEMPLATE_LOCKED_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
   administrator: ["members.assign_roles", "roles.manage"],
-  compliance_admin: [],
   house_manager: [],
   program_manager: [],
   dsp: [],
@@ -583,7 +556,7 @@ export function hasPermission(
   if (session.role === "manager") {
     return ROLE_TEMPLATE_BY_KEY.house_manager.permissions[key];
   }
-  if (session.role === "administrator" || session.role === "compliance_admin") {
+  if (session.role === "administrator") {
     return ROLE_TEMPLATE_BY_KEY[session.role].permissions[key];
   }
   return ROLE_TEMPLATE_BY_KEY.dsp.permissions[key];
@@ -592,8 +565,8 @@ export function hasPermission(
 /**
  * Who may grant which role — derived from GRANT_RULES.
  *
- * HR can grant operational roles (invite + assign), but the administrator and
- * compliance-administrator roles can only be granted by someone who already
+ * HR can grant operational roles (invite + assign), but the administrator
+ * role can only be granted by someone who already
  * holds equivalent-or-higher standing — otherwise HR could silently promote
  * anyone (including themselves) to full administrator.
  *
@@ -621,7 +594,7 @@ export function grantableRoleTemplates(
 /**
  * May this role assign operational (non-privileged) roles to staff?
  * HR's members.assign_roles path: operational targets are always grantable;
- * administrator / compliance_admin are never in reach through this function.
+ * administrator is never in reach through this function.
  */
 export function canAssignOperationalRole(
   granterRoleKey: string | undefined,
@@ -636,9 +609,9 @@ export function canAssignOperationalRole(
 
 /**
  * May this role edit role templates (the roles.manage permission)?
- * Derived from the default templates: only administrator and
- * compliance_admin hold it. HR (members.assign_roles) may assign roles to
- * people but may NOT redefine templates.
+ * Derived from the default templates: only administrator holds it.
+ * HR (members.assign_roles) may assign roles to people but may NOT
+ * redefine templates.
  */
 export function canEditRoleTemplates(roleKey: string | undefined): boolean {
   return (
@@ -737,7 +710,7 @@ export function canEnterShiftNotes(roleKey: string) {
 /**
  * Medication Orders — who may open the orders + reconciliation surfaces.
  *
- * Nurses, Program Managers, administrators, and compliance administrators own
+ * Nurses, Program Managers, and administrators own
  * the workflow. House managers may view (and start a reconciliation) for their
  * homes. Auditors read everything, read-only. Direct support professionals are
  * deliberately excluded here — they continue to see only the MAR check-off.
@@ -746,7 +719,6 @@ export function canEnterShiftNotes(roleKey: string) {
 export function canViewMedicationOrders(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
     "house_manager",
@@ -761,7 +733,6 @@ export function canViewMedicationOrders(roleKey: string) {
 export function canManageMedicationOrders(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -775,7 +746,6 @@ export function canManageMedicationOrders(roleKey: string) {
 export function canStartReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
     "house_manager",
@@ -790,7 +760,6 @@ export function canStartReconciliation(roleKey: string) {
 export function canSignReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -805,7 +774,6 @@ export function canSignReconciliation(roleKey: string) {
  */
 export const MESSAGING_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "nurse",
@@ -832,7 +800,6 @@ export function canUseMessaging(session: {
 export function canSeeShiftNotes(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",
@@ -853,7 +820,6 @@ export function canSeeShiftNotes(roleKey: string) {
  */
 export const LIFE_EVENT_EDITOR_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "nurse",
@@ -883,7 +849,7 @@ export function canRecordLifeEvents(session: {
  * program_manager template trap does not apply): DSPs and house managers
  * record for their own home; program managers and administrators reach
  * every home in the agency; house managers, PMs, and administrators sign
- * months closed. Auditors and compliance administrators read only.
+ * months closed. Auditors read only.
  * Nurses are deliberately absent from every list — the house card is not
  * their workflow, so the site tab stays hidden for them. Site scoping
  * itself is enforced by the API layers (canAccessSite locally,
@@ -892,7 +858,6 @@ export function canRecordLifeEvents(session: {
  */
 export const HOUSE_CARD_VIEWER_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "dsp",
@@ -935,8 +900,8 @@ export function canCloseHouseCardMonth(roleKey: string) {
  * house card): DSPs and house managers record for the Individuals at
  * their own site; program managers and administrators reach the whole
  * agency; house managers, PMs, and administrators sign months closed
- * (with the Individual's own sign-off recorded alongside). Auditors and
- * compliance administrators read only. Nurses are deliberately absent
+ * (with the Individual's own sign-off recorded alongside). Auditors
+ * read only. Nurses are deliberately absent
  * from every list — an Individual's money is not their workflow, so the
  * chart section stays hidden for them. Person scoping itself is
  * enforced by the API layers (canReadIndividual locally,
@@ -946,7 +911,6 @@ export function canCloseHouseCardMonth(roleKey: string) {
  */
 export const PERSONAL_SPENDING_VIEWER_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "dsp",
@@ -1002,7 +966,6 @@ export function canEnterMenuEntries(roleKey: string) {
 export function canSeeMenuEntries(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",

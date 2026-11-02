@@ -183,7 +183,7 @@ const TILE_DEFS: {
     // REPORT LIBRARY (Phase 4b): the manager read/run surface. The
     // gate is the desktop page gate itself (pageVisible "Report
     // Library" — the REPORT_LIBRARY_ROLES list: administrator,
-    // compliance_admin, PM, HM, nurse, auditor; DSP and HR never see
+    // PM, HM, nurse, auditor; DSP and HR never see
     // it). Inside, each entry keeps its own per-report role list via
     // reportsForRole, exactly as the desktop page filters.
     id: "reports",

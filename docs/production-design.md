@@ -50,7 +50,7 @@ Store the source requirement version with each obligation instance. When a plan 
 
 ## Permission model
 
-Agency and compliance administrators manage agency-wide requirements within configured permissions. Program and house managers manage assigned scopes. DSPs see only assigned individuals and obligations. Nurses control authorized clinical delegation actions. HR can access relevant employee records without automatically receiving clinical records. Auditors receive explicitly scoped, time-limited read access with no general agency membership escalation.
+Agency administrators manage agency-wide requirements within configured permissions. Program and house managers manage assigned scopes. DSPs see only assigned individuals and obligations. Nurses control authorized clinical delegation actions. HR can access relevant employee records without automatically receiving clinical records. Auditors receive explicitly scoped, time-limited read access with no general agency membership escalation.
 
 Use deny-by-default policies. Check authorization on every mutation and download. Test cross-agency and cross-site access using fabricated identifiers, file references, search terms, and expired auditor links.
 

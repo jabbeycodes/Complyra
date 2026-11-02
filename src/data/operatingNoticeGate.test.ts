@@ -183,7 +183,7 @@ test("retire_stale_missing_note_notices: eligible roles only", () => {
   for (const role of ["administrator", "program_manager", "house_manager", "nurse", "dsp"]) {
     assert.equal(canRetireStaleMissingNoteNotices(asRole(role)), true, role);
   }
-  for (const role of ["hr", "compliance_admin", "auditor", "degreed_professional_manager"]) {
+  for (const role of ["hr", "auditor", "degreed_professional_manager"]) {
     assert.equal(canRetireStaleMissingNoteNotices(asRole(role)), false, role);
   }
   assert.equal(canRetireStaleMissingNoteNotices(asRole("dsp", true)), false);

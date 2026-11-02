@@ -17,8 +17,7 @@ export default function AssignRoleControl({
 }) {
   const { api, workspace, refresh, session } = useData();
   // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
-  // HR can assign operational roles but never sees administrator /
-  // compliance-administrator.
+  // HR can assign operational roles but never sees administrator.
   const grantableRoles = grantableRoleTemplates(session?.roleKey);
   const [nextRole, setNextRole] = useState(
     canGrantRole(session?.roleKey, roleKey) ? roleKey : "dsp",

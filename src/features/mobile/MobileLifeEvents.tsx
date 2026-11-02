@@ -15,7 +15,7 @@ import type { WorkspaceIndividual } from "./types";
  * Mobile Life Events — the chart's significant-events timeline as a
  * phone view over the same records (listLifeEvents). Anyone who can
  * read the Individual sees the timeline (auditors read-only); the
- * editor roles the desktop admits (administrator, compliance_admin,
+ * editor roles the desktop admits (administrator,
  * program manager, house manager, nurse) can add an event here through
  * the same createLifeEvent call. Corrections and voids stay on the
  * desktop chart — a void is never a delete, there or here.

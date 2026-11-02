@@ -1201,7 +1201,7 @@ export interface ComplyraApi {
   /** Mark a requirement line N/A with a written reason (no blanks allowed). */
   waiveRequirementLine(requirementId: string, reason: string): Promise<void>;
   /**
-   * Correction flow: an administrator, compliance admin, or PM deletes the
+   * Correction flow: an administrator or PM deletes the
    * house manager's countersignature (with a written reason) to unlock a
    * signed sheet so bad lines can be fixed. The reason is written to the
    * audit trail. The sheet must be re-signed and re-countersigned after.
@@ -1599,7 +1599,7 @@ export interface ComplyraApi {
   logSignatureAudit(input: LogSignatureAuditInput): Promise<void>;
   /**
    * 13 CSR 65-3.050 audit rows visible to the session user (their own rows;
-   * hosted additionally exposes them to administrator/compliance_admin
+   * hosted additionally exposes them to administrator
    * verifiers via RLS).
    */
   getSignatureAuditLog(input?: {
@@ -4495,7 +4495,7 @@ export class LocalApi implements ComplyraApi {
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
     // HR-ROLES (2026-09-13): HR can assign operational roles, but granting
-    // administrator / compliance-administrator stays with administrators.
+    // administrator stays with administrators.
     if (!canGrantRole(session.roleKey, roleKey)) {
       throw new Error("Only an administrator can grant that role.");
     }
@@ -5035,7 +5035,7 @@ export class LocalApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = assertSession(this.store);
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or administrator can edit cover-page fields.");
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
@@ -9147,7 +9147,7 @@ export class LocalApi implements ComplyraApi {
         session.userId !== requirement.userId
       ) {
         throw new Error(
-          "Only the assigned staff member, an administrator, compliance admin, house manager, or PM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, house manager, or PM can edit a completed training line.",
         );
       }
       Object.assign(existing, {
@@ -9282,7 +9282,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     if (!canRequestTrainingCorrection(session.roleKey)) {
       throw new Error(
-        "Only an administrator, compliance admin, or PM can request a training correction.",
+        "Only an administrator or PM can request a training correction.",
       );
     }
     const coll = this.p2Collections();
@@ -11080,7 +11080,6 @@ export class LocalApi implements ComplyraApi {
     const ok =
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin;
     if (!ok) {
       throw new Error(
@@ -11093,7 +11092,6 @@ export class LocalApi implements ComplyraApi {
     return (
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin
     );
   }
@@ -11138,7 +11136,6 @@ export class LocalApi implements ComplyraApi {
     const today = todayIso();
     const oversightKeys = [
       "administrator",
-      "compliance_admin",
       "program_manager",
     ];
     return this.store.db.memberships
@@ -11969,8 +11966,8 @@ export class LocalApi implements ComplyraApi {
   }
 
   /**
-   * Resolve the backfill request on a trip write: only administrators,
-   * compliance administrators, and house managers may bypass continuity.
+   * Resolve the backfill request on a trip write: only administrators and
+   * house managers may bypass continuity.
    * Returns whether this write is a backfill.
    */
   private async resolveBackfill(
@@ -13792,8 +13789,7 @@ export class LocalApi implements ComplyraApi {
     // "Appropriate managers": administrators see the whole agency; other
     // managers see only pairs they share an active site with.
     const isAgencyAdmin =
-      session.roleKey === "administrator" ||
-      session.roleKey === "compliance_admin";
+      session.roleKey === "administrator"
     const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
       a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
     const sitesOf = (userId: string): Set<string> => {

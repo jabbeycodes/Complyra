@@ -42,13 +42,12 @@ export function computeRequirementStatus(
 export function isPrivileged(role: string) {
   return (
     role === "administrator" ||
-    role === "compliance_admin" ||
     role === "manager"
   );
 }
 
 export function isAgencyAdmin(role: string) {
-  return role === "administrator" || role === "compliance_admin";
+  return role === "administrator";
 }
 
 export function can(session: SessionUser, key: PermissionKey) {
@@ -173,7 +172,6 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Report Library")
     return [
       "administrator",
-      "compliance_admin",
       "program_manager",
       "house_manager",
       "nurse",
@@ -233,7 +231,6 @@ export function roleLabel(role: string, jobTitle?: string) {
   if (isRoleKey(role)) return ROLE_TEMPLATE_BY_KEY[role].name;
   if (role === "manager") return ROLE_TEMPLATE_BY_KEY.house_manager.name;
   if (role === "administrator") return ROLE_TEMPLATE_BY_KEY.administrator.name;
-  if (role === "compliance_admin") return ROLE_TEMPLATE_BY_KEY.compliance_admin.name;
   return jobTitle || ROLE_TEMPLATE_BY_KEY.dsp.name;
 }
 

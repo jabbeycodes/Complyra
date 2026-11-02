@@ -300,7 +300,7 @@ where agency_id='a2700000-0000-0000-0000-000000000099' and template_key='dsp';
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('ger.create', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', true), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)
@@ -308,7 +308,7 @@ where a.template_key = d.role_key and not (a.permissions ? 'ger.create');
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('ger.review', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', false), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)
@@ -316,7 +316,7 @@ where a.template_key = d.role_key and not (a.permissions ? 'ger.review');
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('ger.resolve', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', false), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)
@@ -324,7 +324,7 @@ where a.template_key = d.role_key and not (a.permissions ? 'ger.resolve');
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('behavior.record', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', true), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)
@@ -332,7 +332,7 @@ where a.template_key = d.role_key and not (a.permissions ? 'behavior.record');
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('behavior.plan', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', false), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)
@@ -340,7 +340,7 @@ where a.template_key = d.role_key and not (a.permissions ? 'behavior.plan');
 update public.agency_roles a
 set permissions = a.permissions || jsonb_build_object('health.record', d.enabled)
 from (values
-  ('administrator', true), ('compliance_admin', true),
+  ('administrator', true),
   ('program_manager', true), ('house_manager', true), ('nurse', true),
   ('dsp', true), ('hr', false), ('auditor', false)
 ) as d(role_key, enabled)

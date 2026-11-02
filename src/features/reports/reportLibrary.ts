@@ -58,7 +58,6 @@ export interface ReportDefinition {
  */
 export const REPORT_LIBRARY_ROLES: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "nurse",
@@ -100,7 +99,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
     module: "Agency & compliance",
     scopes: ["record"],
     recordKind: "packet",
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager", "auditor"],
+    roles: ["administrator", "program_manager", "house_manager", "auditor"],
   },
 
   // ----- Home checks & safety -----
@@ -111,7 +110,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
       "Every weekly house-manager checklist on file for a home, one month or all months.",
     module: "Home checks & safety",
     scopes: ["site", "month"],
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "service-logs",
@@ -120,7 +119,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
       "The service-log entries recorded on a home's weekly checklists, one month or all months.",
     module: "Home checks & safety",
     scopes: ["site", "month"],
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "weekly-checklist",
@@ -129,7 +128,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
     module: "Home checks & safety",
     scopes: ["site", "record"],
     recordKind: "weeklyChecklist",
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "weekly-service-log",
@@ -138,7 +137,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
     module: "Home checks & safety",
     scopes: ["site", "record"],
     recordKind: "weeklyChecklist",
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "drill-schedule",
@@ -155,7 +154,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
       "One month's completed emergency drills for a home. The month must be fully recorded before it downloads.",
     module: "Home checks & safety",
     scopes: ["site", "month"],
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "monthly-safety",
@@ -164,7 +163,7 @@ export const REPORT_LIBRARY: ReportDefinition[] = [
       "One month's home safety check for a home. The month must be fully recorded before it downloads.",
     module: "Home checks & safety",
     scopes: ["site", "month"],
-    roles: ["administrator", "compliance_admin", "program_manager", "house_manager"],
+    roles: ["administrator", "program_manager", "house_manager"],
   },
   {
     id: "site-review",

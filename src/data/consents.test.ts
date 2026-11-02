@@ -51,7 +51,7 @@ test('role gates and invalid signed/date inputs', () => {
         assert.ok(canSeeConsents(role));
         assert.equal(canManageConsents(role), false);
     }
-    for (const role of ['hr', 'compliance_admin'])
+    for (const role of ['hr'])
         assert.equal(canSeeConsents(role), false);
     assert.throws(() => validateConsentDraft({ ...draft, signedOn: '' }, DEFAULT_CONSENT_TYPES, true, '2026-10-27'), /signed date/);
     assert.throws(() => validateConsentDraft({ ...draft, reviewOn: '2026-02-30' }, DEFAULT_CONSENT_TYPES), /valid date/);

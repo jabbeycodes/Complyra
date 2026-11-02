@@ -121,7 +121,6 @@ export function countdownLabel(nextDueOn: string, today = todayIso()) {
 export function canSeeChartWidgets(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -138,7 +137,6 @@ export function canSeeChartWidgets(roleKey: string) {
 export function canSeeChartOverview(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -213,13 +211,12 @@ export function canLogPrnDose(roleKey: string) {
 /**
  * Who may log a refused / held / wasted dose exception. Matches the
  * med_dose_exceptions RLS insert policy: DSPs record exceptions during the
- * med pass, alongside administrators, compliance admins, house managers,
+ * med pass, alongside administrators, house managers,
  * PMs, and nurses.
  */
 export function canLogDoseException(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -250,7 +247,6 @@ export function canCorrectDoseMark(
 export function canEditTrainingLine(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
   ].includes(roleKey);
@@ -260,11 +256,11 @@ export function canEditTrainingLine(roleKey: string) {
  * Who may void a locked training sheet via the correction flow (delete the
  * HM countersignature with a written reason). Matches the
  * training_countersignatures_delete RLS policy — house managers are
- * deliberately excluded; they ask an administrator, compliance admin, or
+ * deliberately excluded; they ask an administrator or
  * PM instead.
  */
 export function canRequestTrainingCorrection(roleKey: string) {
-  return ["administrator", "compliance_admin", "program_manager"].includes(
+  return ["administrator", "program_manager"].includes(
     roleKey,
   );
 }

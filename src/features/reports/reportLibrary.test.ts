@@ -110,7 +110,7 @@ test("extension points are marked follow-ups, never runnable entries", () => {
 });
 
 test("library access is limited to management, nurse, and auditor roles", () => {
-  for (const role of ["administrator", "compliance_admin", "program_manager", "house_manager", "nurse", "auditor"]) {
+  for (const role of ["administrator", "program_manager", "house_manager", "nurse", "auditor"]) {
     assert.equal(canAccessReportLibrary(role), true, `${role} should have library access`);
   }
   for (const role of ["dsp", "hr", "manager", ""]) {

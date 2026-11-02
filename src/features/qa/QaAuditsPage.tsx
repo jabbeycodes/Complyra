@@ -139,7 +139,7 @@ export default function QaAuditsPage() {
   if (!session) return null;
   const sites = workspace?.sites ?? [];
   const auditors = (workspace?.staff ?? []).filter((s) =>
-    ["auditor", "administrator", "compliance_admin"].includes(s.roleKey),
+    ["auditor", "administrator"].includes(s.roleKey),
   );
 
   async function startAudit() {

@@ -24,9 +24,6 @@ function tempPassword() {
 // and take over the account.
 function canResetPasswordFor(callerRoleKey: string, targetRoleKey: string): boolean {
   if (targetRoleKey === "administrator") return callerRoleKey === "administrator";
-  if (targetRoleKey === "compliance_admin") {
-    return callerRoleKey === "administrator" || callerRoleKey === "compliance_admin";
-  }
   return true;
 }
 

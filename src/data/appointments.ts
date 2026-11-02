@@ -79,7 +79,6 @@ export function canSeeAppointments(roleKey: string) {
 export function canManageAppointments(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",

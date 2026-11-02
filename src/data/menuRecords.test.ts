@@ -118,8 +118,6 @@ test("role gates: daily-care staff enter, auditors only read", () => {
   }
   assert.equal(canSeeMenuEntries("auditor"), true);
   assert.equal(canEnterMenuEntries("auditor"), false);
-  assert.equal(canSeeMenuEntries("compliance_admin"), true);
-  assert.equal(canEnterMenuEntries("compliance_admin"), false);
 });
 
 test("edit gate: the author always, managers in scope, other staff never", () => {

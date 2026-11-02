@@ -579,7 +579,6 @@ function throwIf(error: { message: string } | null | undefined, fallback: string
 function asRole(value: string): AppRole {
   if (
     value === "administrator" ||
-    value === "compliance_admin" ||
     value === "manager" ||
     value === "dsp" ||
     value === "nurse" ||
@@ -2623,7 +2622,7 @@ export class HostedApi implements ComplyraApi {
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
     // HR-ROLES (2026-09-13): HR can assign operational roles, but granting
-    // administrator / compliance-administrator stays with administrators.
+    // administrator stays with administrators.
     if (!canGrantRole(session.roleKey, roleKey)) {
       throw new Error("Only an administrator can grant that role.");
     }
@@ -3694,7 +3693,7 @@ export class HostedApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = await this.requireSession();
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or administrator can edit cover-page fields.");
     }
     const { data: person, error: personError } = await this.client
       .from("individuals")
@@ -6786,7 +6785,6 @@ export class HostedApi implements ComplyraApi {
   private canSetupChartRows(roleKey: string) {
     return [
       "administrator",
-      "compliance_admin",
       "house_manager",
       "program_manager",
       "nurse",
@@ -7966,7 +7964,7 @@ export class HostedApi implements ComplyraApi {
       // out of the re-initial the stamp path demands.
       if (!canEditTrainingLine(session.roleKey) && session.userId !== mapped.userId) {
         throw new Error(
-          "Only the assigned staff member, an administrator, compliance admin, house manager, or PM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, house manager, or PM can edit a completed training line.",
         );
       }
       // Void-and-redo: the edit voids the previous initialing — the line must
@@ -8080,7 +8078,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!canRequestTrainingCorrection(session.roleKey)) {
       throw new Error(
-        "Only an administrator, compliance admin, or PM can request a training correction.",
+        "Only an administrator or PM can request a training correction.",
       );
     }
     const reason = input.reason.trim();
@@ -11170,7 +11168,6 @@ export class HostedApi implements ComplyraApi {
     return (
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin
     );
   }
@@ -11252,7 +11249,7 @@ export class HostedApi implements ComplyraApi {
       .not(
         "role_key",
         "in",
-        "(administrator,compliance_admin,program_manager)",
+        "(administrator,program_manager)",
       );
     throwIf(memberError, "Could not load site staff.");
     const active = (memberships ?? []).filter(
@@ -13976,8 +13973,8 @@ export class HostedApi implements ComplyraApi {
   }
 
   /**
-   * Resolve the backfill request on a trip write: only administrators,
-   * compliance administrators, and house managers may bypass continuity.
+   * Resolve the backfill request on a trip write: only administrators and
+   * house managers may bypass continuity.
    * Returns whether this write is a backfill.
    */
   private async resolveBackfill(
@@ -14504,7 +14501,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   /**
-   * Manager feedback scope: administrators (administrator/compliance_admin)
+   * Manager feedback scope: administrators
    * see the whole agency (null); other recognition.manage holders see only
    * pairs at sites they are actively assigned to. Mirrors
    * private.recognition_manager_view in the recognition migration.
@@ -14513,8 +14510,7 @@ export class HostedApi implements ComplyraApi {
     session: SessionUser,
   ): Promise<Set<string> | null> {
     if (
-      session.roleKey === "administrator" ||
-      session.roleKey === "compliance_admin"
+      session.roleKey === "administrator"
     ) {
       return null;
     }

@@ -24,7 +24,6 @@ import {
 
 export const AGENCY_WIDE_ROLE_KEYS = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "auditor",
   "hr",
@@ -60,7 +59,6 @@ export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
   if (session.platformAdmin) return true;
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "auditor",
     "house_manager",

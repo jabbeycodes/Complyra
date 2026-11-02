@@ -131,7 +131,6 @@ export function staffActiveAtSite(
  */
 export const CORRECTIVE_ACTION_AGENCY_ROLES = [
   "administrator",
-  "compliance_admin",
   "degreed_professional_manager",
   "program_manager",
 ] as const;

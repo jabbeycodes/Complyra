@@ -86,7 +86,7 @@ export function operatingNoticeBlockReason(
 /**
  * Roles the retire_stale_missing_note_notices RPC accepts for a
  * non-service-role caller (migration 20261025120000): membership roles
- * outside this set (hr, compliance_admin, auditor,
+ * outside this set (hr, auditor,
  * degreed_professional_manager) are refused with a 400, so the client
  * must not call it for them. Retiring still happens whenever an eligible
  * role runs the sweep.

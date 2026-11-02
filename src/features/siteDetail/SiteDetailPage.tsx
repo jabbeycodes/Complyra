@@ -103,7 +103,6 @@ export function auditPeriodLabel(
 
 const DUE_ITEM_MANAGER_ROLES = [
   "administrator",
-  "compliance_admin",
   "house_manager",
   "program_manager",
 ];
