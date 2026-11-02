@@ -828,6 +828,23 @@ export function canUseMessaging(session: {
   return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
 }
 
+/**
+ * TRAINING-ROSTER (simulation batches 195/196/197): who may read the Training
+ * roster and open another staffer's training profile. Every hr.view_staff
+ * holder, plus the program manager: an agency-wide role whose template does
+ * not carry hr.view_staff (and should not — that key also unlocks staff
+ * records and the assign/waive controls). Read only: every write on the page
+ * stays keyed on hr.view_staff. Which rows a viewer gets is decided by
+ * trainingRosterEntries; a DSP holds neither key and keeps own-record only.
+ */
+export function canViewTrainingRoster(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return hasPermission(session, "hr.view_staff") || session.roleKey === "program_manager";
+}
+
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
 export function canSeeShiftNotes(roleKey: string) {
   return [

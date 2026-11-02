@@ -92,7 +92,8 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import { portraitSrc } from "./personPortrait";
 import {
   assertCalendarDate,
@@ -209,6 +210,7 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
   defaultPermissions,
@@ -7726,7 +7728,9 @@ export class HostedApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    if (session.userId !== userId && !canViewTrainingRoster(session)) {
+      this.requirePermission(session, "hr.view_staff");
+    }
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7833,22 +7837,53 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
-    let query = this.client
-      .from("training_requirements")
-      .select("user_id")
+    if (!canViewTrainingRoster(session)) this.requirePermission(session, "hr.view_staff");
+    const { data: memberRows, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
       .eq("agency_id", session.agencyId);
-    if (siteId) query = query.eq("site_id", siteId);
-    const { data, error } = await query;
-    throwIf(error, "Could not load staff training.");
-    const userIds = [...new Set((data ?? []).map((row) => String(row.user_id)))];
+    throwIf(memberError, "Could not load staff training.");
+    // Assignments only decide house membership for a site-scoped view; an
+    // agency-wide viewer with no site filter gets everyone regardless.
+    const needsAssignments = Boolean(siteId) || !isAgencyWideViewer(session);
+    const [assignments, individualRefs] = needsAssignments
+      ? await Promise.all([
+          this.agencyAssignments(session.agencyId),
+          this.agencyIndividualRefs(session.agencyId),
+        ])
+      : [[], []];
+    const entries = trainingRosterEntries({
+      session,
+      memberships: ((memberRows ?? []) as Record<string, unknown>[]).map((row) => ({
+        userId: String(row.user_id),
+        siteId: (row.site_id as string | null) ?? null,
+      })),
+      assignments,
+      individualSiteById: new Map(individualRefs.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const labelSiteIds = [...new Set(entries.flatMap((entry) => entry.siteIds))];
+    const { data: siteRows } = labelSiteIds.length
+      ? await this.client.from("sites").select("id, name").in("id", labelSiteIds)
+      : { data: [] as { id: string; name: string }[] };
+    const siteNameById = new Map(
+      ((siteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+    );
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        siteName: siteId ? (profile.siteNames[0] ?? "Unknown site") : profile.siteNames.join(", ") || "—",
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
+        siteName: siteId
+          ? (siteNameById.get(siteId) ?? "Unknown site")
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : siteIds.map((id) => siteNameById.get(id) ?? "Unknown site").join(", ") ||
+              "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,

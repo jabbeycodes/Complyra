@@ -13,7 +13,7 @@ import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
-import { hasPermission } from "../../data/permissions";
+import { canViewTrainingRoster, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -44,6 +44,7 @@ import {
 } from "../../data/chart";
 import { TRAINING_LINE_MAX_HOURS } from "./gate";
 import AssignTrainingModal from "./AssignTrainingModal";
+import { trainingRosterView } from "./rosterState";
 import type {
   AdoptedSignature,
   SignatureEvent,
@@ -103,9 +104,13 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
+  // The program manager reads the roster without the hr.view_staff writes:
+  // Assign training, N/A waivers and line edits stay on canManage.
+  const canViewRoster = session ? canViewTrainingRoster(session) : false;
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
 
   async function loadRows() {
+    setRowsFailed(false);
     try {
       setRows(await api.listStaffNeedingClearance());
     } catch {
@@ -124,7 +129,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 
   useEffect(() => {
     if (!session) return;
-    if (can(session, "hr.view_staff")) {
+    if (canViewTrainingRoster(session)) {
       loadRows();
     } else {
       setRowsFailed(true);
@@ -147,7 +152,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       await action();
       await refresh();
       if (selected) await loadProfile(selected);
-      if (canManage) await loadRows();
+      if (canViewRoster) await loadRows();
       setModal(null);
       setSignatureTick((tick) => tick + 1);
       onSaved(savedMessage);
@@ -158,7 +163,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     }
   }
 
-  const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
+  const roster = trainingRosterView(rows, rowsFailed);
 
   return (
     <div data-tour="training">
@@ -174,17 +179,47 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canManage && rows && (
+      {canViewRoster && roster.kind === "loading" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <p className="muted">Loading staff training…</p>
+        </section>
+      )}
+
+      {canViewRoster && roster.kind === "error" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <Empty
+            title="Staff training couldn't be loaded"
+            text="Clearance can't be judged until the roster loads — a failed load never means everyone is cleared."
+          />
+          <button className="button" onClick={() => void loadRows()}>
+            Try again
+          </button>
+        </section>
+      )}
+
+      {canViewRoster && roster.kind === "empty" && (
+        <section className="panel" aria-label="All staff training status">
+          <h2>All staff</h2>
+          <Empty
+            title="No staff in scope"
+            text="No staff members are in scope for this view, so there is no clearance verdict to show."
+          />
+        </section>
+      )}
+
+      {canViewRoster && roster.kind === "ready" && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
-          {notCleared.length === 0 ? (
+          {roster.allCleared ? (
             <Empty
               title="Everyone is cleared"
-              text="Every staff member with training assigned meets the in-ratio gate."
+              text="Every staff member in the roster meets the in-ratio gate."
             />
           ) : (
             <ul className="clearance-list">
-              {notCleared.map((row) => (
+              {roster.notCleared.map((row) => (
                 <li key={row.userId}>
                   <div>
                     <strong>{row.fullName}</strong>
@@ -210,7 +245,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canManage && rows && (
+      {canViewRoster && roster.kind === "ready" && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">
@@ -225,7 +260,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {roster.rows.map((row) => (
                 <tr key={row.userId}>
                   <td>{row.fullName}</td>
                   <td>{row.siteName}</td>
@@ -372,7 +407,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
-      {rowsFailed && !canManage && !profile && (
+      {rowsFailed && !canViewRoster && !profile && (
         <Empty
           title="No training profile"
           text="Your training profile could not be loaded. Ask your house manager to assign your in-home checklist."

@@ -91,6 +91,7 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
   capabilityForRoleKey,
@@ -166,6 +167,7 @@ import {
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import {
   canActAtSite,
   canReadIndividual,
@@ -8999,7 +9001,9 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    if (session.userId !== userId && !canViewTrainingRoster(session)) {
+      assertCan(session, "hr.view_staff");
+    }
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9083,25 +9087,30 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
-    // Roster comes from the agency's staff memberships — not only from staff
-    // who already have training assigned — so "All staff" never renders an
-    // empty table while the agency has people.
-    const memberships = this.store.db.memberships.filter(
-      (row) =>
-        row.agencyId === session.agencyId &&
-        (!siteId || row.siteId === siteId),
-    );
-    const userIds = [...new Set(memberships.map((row) => row.userId))];
+    if (!canViewTrainingRoster(session)) assertCan(session, "hr.view_staff");
+    const entries = trainingRosterEntries({
+      session,
+      memberships: this.store.db.memberships.filter((row) => row.agencyId === session.agencyId),
+      assignments: this.store.db.assignments.filter((row) => row.agencyId === session.agencyId),
+      individualSiteById: new Map(this.store.db.individuals.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const siteNameOf = (id: string) =>
+      this.store.db.sites.find((row) => row.id === id)?.name ?? "Unknown site";
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
         siteName: siteId
-          ? (this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site")
-          : profile.siteNames.join(", ") || "—",
+          ? siteNameOf(siteId)
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : siteIds.map(siteNameOf).join(", ") || "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,
