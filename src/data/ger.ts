@@ -16,6 +16,7 @@
  * a text label, never by color alone.
  */
 
+import { centralTodayIso } from "./menuRecords";
 import type { SessionUser } from "./types";
 
 export const GER_EVENT_TYPES = [
@@ -271,8 +272,8 @@ export function deriveGerResolutionDisplay(
   if (report.status === "draft" || report.status === "returned") return "unaddressed";
   if (report.resolutionStatus === "resolved") return "resolved";
   if (report.resolutionDueOn) {
-    const todayIso = now.toISOString().slice(0, 10);
-    if (daysBetweenIso(todayIso, report.resolutionDueOn) < 0) return "overdue";
+    const today = centralTodayIso(now);
+    if (daysBetweenIso(today, report.resolutionDueOn) < 0) return "overdue";
   }
   return report.resolutionStatus;
 }

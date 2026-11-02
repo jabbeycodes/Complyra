@@ -27,7 +27,7 @@ import {
   type AppointmentStatus,
   type CaseloadAppointment,
 } from "../../data/appointments";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import {
   AppointmentActions,
   AppointmentStatusPill,
@@ -42,7 +42,7 @@ export default function AppointmentsPage({
 }) {
   const { api, session, workspace, refresh } = useData();
   const [error, setError] = useState("");
-  const today = todayIso();
+  const today = centralTodayIso();
   const range = thirtyDayRange(today);
   const [individualQuery, setIndividualQuery] = useState("");
   const [from, setFrom] = useState(range.from);

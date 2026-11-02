@@ -6,7 +6,7 @@ import { useData } from "../../data/DataProvider";
 import "./hmChecklist.css";
 import "./scheduler.css";
 import { downloadBlob } from "../../data/openFile";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import type { HmWeeklyChecklist } from "../../data/types";
 import {
   CHECKLIST_DEADLINE_TEXT,
@@ -30,7 +30,7 @@ function statusBadge(status: HmWeeklyChecklist["status"]) {
 
 /** Sundays for the week picker: 3 past, current, 1 future. */
 function weekOptions(): string[] {
-  const current = weekOfSundayIso(todayIso());
+  const current = weekOfSundayIso(centralTodayIso());
   const [y, m, d] = current.split("-").map(Number);
   const base = new Date(Date.UTC(y, m - 1, d));
   return [-3, -2, -1, 0, 1].map((offset) => {
@@ -43,7 +43,7 @@ function weekOptions(): string[] {
 export default function ChecklistAssigner() {
   const { api, session, workspace, refresh } = useData();
   const [lists, setLists] = useState<HmWeeklyChecklist[]>([]);
-  const [week, setWeek] = useState(weekOfSundayIso(todayIso()));
+  const [week, setWeek] = useState(weekOfSundayIso(centralTodayIso()));
   const [siteId, setSiteId] = useState("");
   const [hmUserId, setHmUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ export default function ChecklistAssigner() {
     workspace?.staff.find((s) => s.id === userId)?.name ?? "—";
   const pastDue = deadlinePassed(week);
   // Next Sunday-scheduler run target (Monday-based week anchor).
-  const nextRunWeekOf = addDaysIso(nextMondayIso(todayIso()), -1);
+  const nextRunWeekOf = addDaysIso(nextMondayIso(centralTodayIso()), -1);
 
   async function load(nextWeek = week) {
     setError("");
