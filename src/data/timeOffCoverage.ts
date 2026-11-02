@@ -17,6 +17,7 @@
  * assigned, annotated with the marker, and counted as flagged so the
  * approver sees it in the outcome.
  */
+import { centralTodayIso } from "./menuRecords";
 import type { HrShift, HrTimeOffRequest } from "./hr";
 import type { HrStore } from "./hrStore";
 import type { OpenShiftStore } from "./openShiftStore";
@@ -55,7 +56,7 @@ function appendNote(existing: string | null, addition: string): string {
 }
 
 function todayStamp(): string {
-  return new Date().toISOString().slice(0, 10);
+  return centralTodayIso();
 }
 
 /** The requester's still-active shifts that start on one of the request's days. */

@@ -16,6 +16,7 @@ import {
 } from "./dmhRequirements";
 import type { CorrectiveAction } from "./correctiveActions";
 import { deriveCorrectiveActionStatus } from "./correctiveActions";
+import { centralTodayIso } from "./menuRecords";
 
 export type ReadinessItemStatus = "met" | "at-risk" | "unmet" | "unknown";
 
@@ -112,7 +113,7 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 function daysUntil(dateIso: string | null, now: Date): number | null {
   if (!dateIso) return null;
-  return daysBetween(now.toISOString().slice(0, 10), dateIso);
+  return daysBetween(centralTodayIso(now), dateIso);
 }
 
 /**
@@ -130,7 +131,7 @@ function nextBusinessDayIso(dateIso: string): string {
 
 function withinLast(dateIso: string | null, days: number, now: Date): boolean {
   if (!dateIso) return false;
-  const age = daysBetween(dateIso, now.toISOString().slice(0, 10));
+  const age = daysBetween(dateIso, centralTodayIso(now));
   return age >= 0 && age <= days;
 }
 
@@ -204,7 +205,7 @@ export const CHECK_RULES: Record<string, CheckRule> = {
   },
 
   abuseNeglectTrainingCurrent(evidence, now) {
-    const today = now.toISOString().slice(0, 10);
+    const today = centralTodayIso(now);
     return allOrNothing(
       evidence.staffTraining.map((row) => {
         if (!row.abuseNeglectOn) return { ok: false, atRisk: false, name: row.name };
@@ -320,7 +321,7 @@ export const CHECK_RULES: Record<string, CheckRule> = {
   planOfCorrectionOnTrack(evidence, now) {
     if (!evidence.pocSurveyExitOn)
       return { status: "unknown", detail: "No survey exit on file — no plan of correction in flight." };
-    const sinceExit = daysBetween(evidence.pocSurveyExitOn, now.toISOString().slice(0, 10));
+    const sinceExit = daysBetween(evidence.pocSurveyExitOn, centralTodayIso(now));
     if (evidence.pocFinalCorrectionOn)
       return { status: "met", detail: `Final correction recorded ${evidence.pocFinalCorrectionOn}.` };
     if (sinceExit > 180)

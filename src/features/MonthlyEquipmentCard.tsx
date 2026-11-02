@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Download, Plus } from "lucide-react";
 import { Badge, DueChip } from "../components";
-import { todayIso } from "../data/chart";
+import { centralTodayIso } from "../data/menuRecords";
 import {
   asMonthlyCollections,
   availableMonths,
@@ -29,7 +29,7 @@ export default function MonthlyEquipmentCard({
   individualId: string;
 }) {
   const { api, session, workspace, refresh } = useData();
-  const today = todayIso();
+  const today = centralTodayIso();
   const [monthKey, setMonthKey] = useState(monthKeyFrom(today));
   const [name, setName] = useState("");
   const [error, setError] = useState("");

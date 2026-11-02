@@ -28,6 +28,7 @@
  * validation, gates, alert targets, range math, row mappers.
  */
 
+import { centralTodayIso } from "./menuRecords";
 import type { SessionUser } from "./types";
 
 export const HEALTH_TRACK_KINDS = [
@@ -786,7 +787,7 @@ export function dailyIntakeTotals(
  */
 export function lowFluidDays(
   entries: Array<Pick<HealthTrackEntry, "kind" | "occurredOn" | "details">>,
-  today: string = new Date().toISOString().slice(0, 10),
+  today: string = centralTodayIso(),
 ): Array<{ date: string; fluidOz: number }> {
   return dailyIntakeTotals(entries)
     .filter((row) => row.date < today && row.fluidOz < LOW_FLUID_DAILY_OZ)
@@ -832,7 +833,7 @@ export function isImmunizationOverdue(
   if (entry.kind !== "immunization") return false;
   const due = entry.details.nextDueOn;
   if (!due) return false;
-  if (due >= now.toISOString().slice(0, 10)) return false;
+  if (due >= centralTodayIso(now)) return false;
   // A later dose of the same vaccine supersedes this row's next-due date, so
   // an older entry is no longer overdue once a newer dose has been recorded.
   const vaccine = entry.details.vaccineName?.trim().toLowerCase();

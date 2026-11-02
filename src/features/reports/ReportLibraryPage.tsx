@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Download, Printer, Search } from "lucide-react";
 import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import { monthKeyFrom } from "../../data/monthlyChecks";
 import { Empty, PageHeading } from "../../components";
 import {
@@ -26,7 +26,7 @@ import {
  */
 
 function daysAgoIso(days: number): string {
-  const date = new Date(`${todayIso()}T12:00:00Z`);
+  const date = new Date(`${centralTodayIso()}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
 }
@@ -171,11 +171,11 @@ function ReportEntryCard({
   const [recordId, setRecordId] = useState<string>("");
   const [recordOptions, setRecordOptions] = useState<ReportRecordOption[]>([]);
   const [staffUserId, setStaffUserId] = useState<string>("");
-  const [monthKey, setMonthKey] = useState<string>(() => monthKeyFrom(todayIso()));
+  const [monthKey, setMonthKey] = useState<string>(() => monthKeyFrom(centralTodayIso()));
   const [allMonths, setAllMonths] = useState(false);
-  const [year, setYear] = useState<number>(() => Number(todayIso().slice(0, 4)));
+  const [year, setYear] = useState<number>(() => Number(centralTodayIso().slice(0, 4)));
   const [from, setFrom] = useState<string>(() => daysAgoIso(13));
-  const [to, setTo] = useState<string>(() => todayIso());
+  const [to, setTo] = useState<string>(() => centralTodayIso());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");

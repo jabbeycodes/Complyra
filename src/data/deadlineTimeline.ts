@@ -1,3 +1,4 @@
+import { centralTodayIso } from "./menuRecords";
 /**
  * Deadline timeline — every compliance deadline in one chronological list,
  * answering "What is due next?"
@@ -138,7 +139,7 @@ function urgencyFor(daysRemaining: number): TimelineUrgency {
 }
 
 export function buildTimeline(facts: TimelineFacts): TimelineItem[] {
-  const today = facts.now.toISOString().slice(0, 10);
+  const today = centralTodayIso(facts.now);
   const items: TimelineItem[] = [];
 
   for (const cert of facts.certificates) {

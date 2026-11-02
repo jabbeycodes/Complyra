@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { CalendarClock, Plus, Trash2 } from "lucide-react";
 import { Empty } from "../components";
 import { useData } from "../data/DataProvider";
+import { centralTodayIso } from "../data/menuRecords";
 import { canEditAloneTime, formatClock, hhmmToMinutes } from "../data/dueItems";
 import type { AloneTimeRecurrence, AloneTimeWindow } from "../data/types";
 
@@ -47,14 +48,16 @@ interface DraftState {
   note: string;
 }
 
-const EMPTY_DRAFT: DraftState = {
-  recurrence: "weekly",
-  weekday: 1,
-  onDate: new Date().toISOString().slice(0, 10),
-  startTime: "14:00",
-  endTime: "16:00",
-  note: "",
-};
+function emptyDraft(): DraftState {
+  return {
+    recurrence: "weekly",
+    weekday: 1,
+    onDate: centralTodayIso(),
+    startTime: "14:00",
+    endTime: "16:00",
+    note: "",
+  };
+}
 
 export default function AloneTimeCard({
   individualId,
@@ -67,7 +70,7 @@ export default function AloneTimeCard({
   const [windows, setWindows] = useState<AloneTimeWindow[] | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<DraftState>(emptyDraft);
   const [busy, setBusy] = useState(false);
 
   async function reload() {
@@ -108,7 +111,7 @@ export default function AloneTimeCard({
         note: draft.note,
       });
       setAdding(false);
-      setDraft(EMPTY_DRAFT);
+      setDraft(emptyDraft());
       await reload();
     } catch (err) {
       setError((err as Error).message);
@@ -244,7 +247,7 @@ export default function AloneTimeCard({
               disabled={busy}
               onClick={() => {
                 setAdding(false);
-                setDraft(EMPTY_DRAFT);
+                setDraft(emptyDraft());
               }}
             >
               Cancel

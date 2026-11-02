@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
 import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
 import {
@@ -43,7 +44,7 @@ export default function HealthTrackSection({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   const [occurredOn, setOccurredOn] = useState(today);
   const [details, setDetails] = useState<Record<string, string>>({});
   const [flaggedAbnormal, setFlaggedAbnormal] = useState(false);

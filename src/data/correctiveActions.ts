@@ -1,3 +1,4 @@
+import { centralTodayIso } from "./menuRecords";
 /**
  * Corrective actions — create, assign, track to resolution. A corrective
  * action links an owner, a due date, and (optionally) the risk item that
@@ -113,8 +114,8 @@ export function deriveCorrectiveActionStatus(
 ): CorrectiveActionStatus {
   if (action.storedStatus === "resolved") return "resolved";
   if (action.dueOn) {
-    const todayIso = now.toISOString().slice(0, 10);
-    if (daysBetween(todayIso, action.dueOn) < 0) return "overdue";
+    const today = centralTodayIso(now);
+    if (daysBetween(today, action.dueOn) < 0) return "overdue";
   }
   return action.storedStatus;
 }
