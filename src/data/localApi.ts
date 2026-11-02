@@ -118,6 +118,7 @@ import {
   normalizeTaskTitle,
   progressNoteProblem,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -5436,6 +5437,8 @@ export class LocalApi implements ComplyraApi {
         signatureDataUrl,
       });
       if (problem) throw new Error(problem);
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
     }
     const timeSpent =
       clockDuration !== null
@@ -5475,6 +5478,31 @@ export class LocalApi implements ComplyraApi {
       }
       if (!canEditShiftNoteRow(session.roleKey, session.userId, existing)) {
         throw new Error("You can only edit your own shift notes.");
+      }
+      // An edit re-saves the note, so it must meet the same integrity
+      // rules as a new note (batch 37): a body, a timeframe that is not
+      // in the future, and a signature on the finished record.
+      if (!input.summary.trim()) {
+        throw new Error(
+          "Describe what the person did and how you supported a goal in the current PCSP.",
+        );
+      }
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
+      if (!existing.signatureDataUrl && !signatureDataUrl) {
+        const adopted = await this.getMySignature();
+        if (adopted) {
+          try {
+            signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+          } catch {
+            signatureDataUrl = "";
+          }
+        }
+      }
+      if (!existing.signatureDataUrl && !signatureDataUrl) {
+        throw new Error(
+          "Adopt your signature before saving a progress note. A printed name is not a signature.",
+        );
       }
       existing.noteDate = input.noteDate;
       existing.shift = shift;
