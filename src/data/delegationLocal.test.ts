@@ -153,17 +153,20 @@ test("assignment instantiates a draft and notifies reviewers, not all staff", as
   );
   const notified = new Set(reviewNotes.map((n) => n.userId));
   // Reviewers: everyone whose role template holds delegation.training.review
-  // and has an Evergreen account — the Maple nurse, the agency admin, the
-  // program manager, and the compliance administrator (agency-scoped).
+  // and has an Evergreen account — the Maple nurse, the agency admin, and
+  // the program manager.
   assert.ok(notified.has(userIdFor(s, "Cameron Price")));
   assert.ok(notified.has(userIdFor(s, "Sarah Mitchell")));
   assert.ok(notified.has(userIdFor(s, "Melissa Grant")));
-  assert.ok(notified.has(userIdFor(s, "Omar Haddad")));
+  // WAVE-7V (founder decision, 2026-11-02): the compliance administrator
+  // lost delegation.training.review in the read-and-audit narrowing (it
+  // keeps delegation.templates.view only), so it is no longer a reviewer.
+  assert.ok(!notified.has(userIdFor(s, "Omar Haddad")));
   // DSPs are staff, not reviewers: no review_ready for them.
   assert.ok(!notified.has(userIdFor(s, "Alex Morgan")));
   assert.ok(!notified.has(userIdFor(s, "Taylor Reed")));
   assert.ok(!notified.has(userIdFor(s, "James Wilson")));
-  assert.equal(reviewNotes.length, 4);
+  assert.equal(reviewNotes.length, 3);
 });
 
 test("draft content stays hidden from site staff until published", async () => {
@@ -290,13 +293,14 @@ test("overdue sweep notifies staff and managers idempotently", async () => {
   )!.approvedAt = daysAgo(8.5);
   await api.signIn(login(DEMO_NURSE_USERNAME)); // holds delegation.training.review
   const first = await api.sweepDelegationAckOverdue();
-  // 3 unsigned Maple staff (Alex, Taylor, Cameron) + the 3 agency-scoped
+  // 3 unsigned Maple staff (Alex, Taylor, Cameron) + the 2 agency-scoped
   // holders of delegation.activate (Sarah Mitchell, admin; Melissa Grant,
-  // program manager; Omar Haddad, compliance administrator).
-  assert.equal(first, 6);
+  // program manager). WAVE-7V: compliance lost delegation.activate in the
+  // read-and-audit narrowing, so Omar Haddad is no longer copied.
+  assert.equal(first, 5);
   const overdueNotes = () =>
     s.db.notifications.filter((n) => n.type === "delegation.ack_overdue");
-  assert.equal(overdueNotes().length, 6);
+  assert.equal(overdueNotes().length, 5);
   assert.ok(
     overdueNotes().some((n) => /overdue/.test(n.body)),
     "expected the overdue body copy",
@@ -322,9 +326,10 @@ test("sweep skips fresh publications and signed staff", async () => {
   await api.signDelegationAcknowledgment(assignment.id, "Alex Morgan", "Alex Morgan");
   await api.signIn(login(DEMO_NURSE_USERNAME));
   const inserted = await api.sweepDelegationAckOverdue();
-  // Taylor + Cameron (unsigned staff) + Sarah, Melissa, and Omar (the
-  // agency-scoped delegation.activate holders); Alex skipped.
-  assert.equal(inserted, 5);
+  // Taylor + Cameron (unsigned staff) + Sarah and Melissa (the
+  // agency-scoped delegation.activate holders; WAVE-7V removed compliance
+  // from that set); Alex skipped.
+  assert.equal(inserted, 4);
   const notified = s.db.notifications
     .filter((n) => n.type === "delegation.ack_overdue")
     .map((n) => n.userId);

@@ -117,15 +117,16 @@ export interface GerResolutionPatch {
 
 // ───────────────────────────── Permission gates ─────────────────────────────
 
-/** DSP/HM/PM/nurse (and admins) may file reports. Auditors and HR may not. */
+/** DSP/HM/PM/nurse (and admins) may file reports. Auditors and HR may not.
+ * WAVE-7V: compliance_admin removed — it reviews/resolves (kept powers),
+ * it does not file. */
 export function canCreateGerReport(roleKey: string | null | undefined): boolean {
   return (
     roleKey === "dsp" ||
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 

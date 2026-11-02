@@ -98,26 +98,24 @@ export interface BehaviorEntryHistory {
 
 // ───────────────────────────── Permission gates ─────────────────────────────
 
-/** DSP/HM/PM/nurse record behavior data. */
+/** DSP/HM/PM/nurse record behavior data. WAVE-7V: compliance_admin removed — read-and-audit by default. */
 export function canRecordBehavior(roleKey: string | null | undefined): boolean {
   return (
     roleKey === "dsp" ||
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 
-/** Oversight roles may correct another recorder's entry (with a rationale). */
+/** Oversight roles may correct another recorder's entry (with a rationale). WAVE-7V: compliance_admin removed — read-and-audit by default. */
 export function canCorrectBehaviorEntry(roleKey: string | null | undefined): boolean {
   return (
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 

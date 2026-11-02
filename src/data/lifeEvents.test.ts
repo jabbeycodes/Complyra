@@ -111,10 +111,14 @@ test("a void always needs a reason", () => {
   assert.throws(() => validateVoidReason("   "), /voided/);
 });
 
-test("the editor gate: five roles in, DSP/auditor/HR out", () => {
+test("the editor gate: four roles in, DSP/auditor/HR/compliance out", () => {
+  // WAVE-7V (founder decision, 2026-11-02): compliance_admin lost the
+  // lifeEvents.record permission in the read-and-audit narrowing, so the
+  // permission half of the gate excludes it even though the role list
+  // (a mirror of the frozen SQL helper private.can_record_life_event)
+  // still names it — see the wave 7V PR's flagged items.
   for (const roleKey of [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",
@@ -125,7 +129,7 @@ test("the editor gate: five roles in, DSP/auditor/HR out", () => {
       `${roleKey} records life events`,
     );
   }
-  for (const roleKey of ["dsp", "auditor", "hr"]) {
+  for (const roleKey of ["dsp", "auditor", "hr", "compliance_admin"]) {
     assert.equal(
       canRecordLifeEvents({ roleKey, permissions: defaultPermissions(roleKey) }),
       false,

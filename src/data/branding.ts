@@ -17,9 +17,9 @@ export function agencyLogoPath(agencyId: string) {
 }
 
 export function canManageAgencyLogo(roleKey: string) {
+  // WAVE-7V: compliance_admin removed — read-and-audit by default.
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }

@@ -3,6 +3,7 @@ import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
+  canReadAsCompliance,
   canSeeShiftNotes,
   canViewHouseCard,
   canViewMedicationOrders,
@@ -80,13 +81,19 @@ export function pageVisible(session: SessionUser, page: string) {
     return (
       can(session, "hr.view_staff") ||
       can(session, "members.invite") ||
-      can(session, "members.assign_roles")
+      can(session, "members.assign_roles") ||
+      // WAVE-7V: compliance reads the roster read-only on its audit path;
+      // every member-admin control on the page stays keyed on members.*.
+      canReadAsCompliance(session)
     );
   }
   if (page === "Documents") return can(session, "documents.view");
   // Issue #80: the site-detail "Shift notes" tab mirrors chart visibility.
   if (page === "ShiftNotes") return canSeeShiftNotes(session.roleKey);
-  if (page === "Review queue") return can(session, "requirements.approve");
+  // WAVE-7V: the approve path stays requirements.approve; compliance reads
+  // the queue read-only on its audit path (drawer actions stay keyed).
+  if (page === "Review queue")
+    return can(session, "requirements.approve") || canReadAsCompliance(session);
   if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {
     return (
@@ -103,13 +110,25 @@ export function pageVisible(session: SessionUser, page: string) {
   // from assigning roles to people (members.assign_roles).
   if (page === "Roles & access") return can(session, "roles.manage");
   // LIFEPATH-P2-PAGEVIS (training engine)
+  // WAVE-7V: + compliance's read path (roster renders read-only; assign /
+  // waive / edit stay keyed on hr.view_staff and the write role lists).
   if (page === "Training")
-    return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
+    return (
+      can(session, "hr.view_staff") ||
+      can(session, "acknowledgments.sign_own") ||
+      canReadAsCompliance(session)
+    );
   // LIFEPATH-P3-PAGEVIS (delegation forms)
   if (page === "Delegations") return can(session, "clinical.view");
   // LIFEPATH-P4-PAGEVIS (certificates)
+  // WAVE-7V: + compliance's read path (add/edit/delete stay keyed on
+  // certificates.manage in the page and both APIs).
   if (page === "Certificates") {
-    return can(session, "certificates.manage") || can(session, "hr.view_staff");
+    return (
+      can(session, "certificates.manage") ||
+      can(session, "hr.view_staff") ||
+      canReadAsCompliance(session)
+    );
   }
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
   if (page === "Weekly checklist") {
@@ -120,9 +139,13 @@ export function pageVisible(session: SessionUser, page: string) {
     );
   }
   if (page === "Checklist assignments") {
+    // WAVE-7V (founder decision, 2026-11-02): checklist ASSIGNERS are the
+    // administrator and the PM only. This branch deliberately stops using
+    // isAgencyAdmin() — compliance_admin keeps the "Weekly checklist" page
+    // above (oversight read) but no longer assigns or rolls over.
     return (
       session.roleKey === "program_manager" ||
-      isAgencyAdmin(session.role) ||
+      session.role === "administrator" ||
       Boolean(session.platformAdmin)
     );
   }

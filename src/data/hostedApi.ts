@@ -195,6 +195,7 @@ import {
   canConfigureIspTasks,
   canCreateIndividual,
   canEnterShiftNotes,
+  canReadAsCompliance,
   canRecordLifeEvents,
   canGrantRole,
   canManageMedicationOrders,
@@ -3694,7 +3695,7 @@ export class HostedApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = await this.requireSession();
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or agency administrator can edit cover-page fields.");
     }
     const { data: person, error: personError } = await this.client
       .from("individuals")
@@ -7726,7 +7727,10 @@ export class HostedApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    // WAVE-7V: cross-profile training reads follow the roster rule —
+    // hr.view_staff, or compliance on its read-and-audit path.
+    if (session.userId !== userId && !canReadAsCompliance(session))
+      this.requirePermission(session, "hr.view_staff");
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7833,7 +7837,9 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
+    // WAVE-7V: roster read — hr.view_staff or compliance's audit path.
+    if (!canReadAsCompliance(session))
+      this.requirePermission(session, "hr.view_staff");
     let query = this.client
       .from("training_requirements")
       .select("user_id")
@@ -9749,7 +9755,10 @@ export class HostedApi implements ComplyraApi {
   private requireCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // WAVE-7V: compliance reads certificates read-only on its audit
+      // path; writes stay behind requireCertificateWrite.
+      !canReadAsCompliance(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }
@@ -11167,6 +11176,18 @@ export class HostedApi implements ComplyraApi {
   // ===== LIFEPATH-P5 HOSTED (HM weekly checklist) =====
 
   private checklistCanAssign(session: SessionUser): boolean {
+    // WAVE-7V (founder decision, 2026-11-02): assigners are the
+    // administrator and the PM only — compliance_admin was removed.
+    // checklistCanOversee() below deliberately keeps the wider set:
+    // reading submitted checklists is oversight, assigning is a write.
+    return (
+      session.roleKey === "program_manager" ||
+      session.role === "administrator" ||
+      session.platformAdmin
+    );
+  }
+
+  private checklistCanOversee(session: SessionUser): boolean {
     return (
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
@@ -11175,8 +11196,16 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
-  private checklistCanOversee(session: SessionUser): boolean {
-    return this.checklistCanAssign(session);
+  /**
+   * WAVE-7V: who may trigger the weekly rollover — the assigners plus
+   * house managers (the rollover is the idempotent week-advancer the
+   * HM checklist page fires on load; there is no backend cron).
+   * compliance_admin no longer runs it.
+   */
+  private checklistCanRollOver(session: SessionUser): boolean {
+    return (
+      this.checklistCanAssign(session) || session.roleKey === "house_manager"
+    );
   }
 
   private mapChecklistRow(row: Record<string, unknown>): HmWeeklyChecklist {
@@ -11572,6 +11601,11 @@ export class HostedApi implements ComplyraApi {
     locked: number;
   }> {
     const session = await this.requireSession();
+    if (!this.checklistCanRollOver(session)) {
+      throw new Error(
+        "Only a PM or agency administrator can run the weekly rollover.",
+      );
+    }
     const today = new Date().toISOString().slice(0, 10);
     const currentWeek = weekOfSundayIso(today);
     const { data: stale, error: staleError } = await this.client

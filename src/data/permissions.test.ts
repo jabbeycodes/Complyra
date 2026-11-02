@@ -72,7 +72,9 @@ test("HR-ROLES: HR can assign roles to staff but cannot manage role templates", 
   assert.equal(defaultPermissions("hr")["roles.manage"], false);
   assert.equal(defaultPermissions("hr")["members.invite"], true);
   assert.equal(defaultPermissions("administrator")["roles.manage"], true);
-  assert.equal(defaultPermissions("compliance_admin")["roles.manage"], true);
+  // WAVE-7V (founder decision, 2026-11-02): compliance_admin lost
+  // roles.manage in the read-and-audit narrowing.
+  assert.equal(defaultPermissions("compliance_admin")["roles.manage"], false);
   assert.equal(defaultPermissions("administrator")["members.assign_roles"], true);
 });
 
@@ -128,15 +130,14 @@ test("WS4: registry covers every permission key with description + derived defau
     );
     assert.deepEqual(entry.defaultRoles, expected, `defaultRoles for ${key}`);
   }
-  // Spot-checks: certificates.manage defaults to HR + compliance_admin;
-  // roles.manage to administrator + compliance_admin.
+  // Spot-checks (WAVE-7V, founder decision 2026-11-02 — compliance_admin
+  // narrowed to read-and-audit): certificates.manage defaults to HR alone;
+  // roles.manage to the administrator alone.
   assert.deepEqual(PERMISSION_REGISTRY["certificates.manage"].defaultRoles, [
-    "compliance_admin",
     "hr",
   ]);
   assert.deepEqual(PERMISSION_REGISTRY["roles.manage"].defaultRoles, [
     "administrator",
-    "compliance_admin",
   ]);
   // Descriptions mirror PERMISSION_LABELS.
   for (const key of PERMISSION_KEYS) {
@@ -176,9 +177,9 @@ test("WS4: grant rules — the required truth table", () => {
   assert.equal(canGrantRole("administrator", "nope"), false);
 });
 
-test("WS4: canEditRoleTemplates — only administrator / compliance_admin", () => {
+test("WS4: canEditRoleTemplates — only administrator (WAVE-7V: compliance_admin narrowed)", () => {
   assert.equal(canEditRoleTemplates("administrator"), true);
-  assert.equal(canEditRoleTemplates("compliance_admin"), true);
+  assert.equal(canEditRoleTemplates("compliance_admin"), false);
   assert.equal(canEditRoleTemplates("hr"), false);
   assert.equal(canEditRoleTemplates("house_manager"), false);
   assert.equal(canEditRoleTemplates("dsp"), false);
@@ -258,12 +259,15 @@ test("WS4: assertNoDrift catches undeclared permission strings", () => {
 test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field staff off", () => {
   assert.ok(PERMISSION_KEYS.includes("correctiveActions.manage"));
   assert.equal(PERMISSION_LABELS["correctiveActions.manage"], "Manage corrective actions");
-  // Granted: administrator, compliance_admin, program_manager, house_manager.
+  // Granted: administrator, program_manager, house_manager.
   // House manager joined the granted set with the simulation batch-7 fix:
   // HMs own house-level QA follow-up, and with the key off for HM the QA
   // corrective-action entity had no creator at the houses at all.
+  // WAVE-7V (founder decision, 2026-11-02): compliance_admin lost the key
+  // in the read-and-audit narrowing — it reviews corrective actions
+  // read-only now.
   assert.equal(defaultPermissions("administrator")["correctiveActions.manage"], true);
-  assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], true);
+  assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], false);
   assert.equal(
     defaultPermissions("program_manager")["correctiveActions.manage"],
     true,

@@ -51,9 +51,9 @@ export function dayOrdinal(day: number) {
 }
 
 export function canConfigureMonthlyDue(roleKey: string) {
+  // WAVE-7V: compliance_admin removed — read-and-audit by default.
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }
@@ -288,9 +288,10 @@ export function isAdaptiveEquipmentObligation(item: ObligationItem) {
 }
 
 export function canManageEquipment(roleKey: string) {
+  // WAVE-7V: compliance_admin removed — read-and-audit by default
+  // (monthly completion via canCompleteMonthly goes with it).
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
   ].includes(roleKey);

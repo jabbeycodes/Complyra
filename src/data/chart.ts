@@ -213,13 +213,13 @@ export function canLogPrnDose(roleKey: string) {
 /**
  * Who may log a refused / held / wasted dose exception. Matches the
  * med_dose_exceptions RLS insert policy: DSPs record exceptions during the
- * med pass, alongside administrators, compliance admins, house managers,
- * PMs, and nurses.
+ * med pass, alongside administrators, house managers, PMs, and nurses.
+ * WAVE-7V: compliance_admin removed — read-and-audit by default (its MAR
+ * mark-correction power via canCorrectDoseMark goes with it).
  */
 export function canLogDoseException(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -246,11 +246,11 @@ export function canCorrectDoseMark(
  * Who may edit a completed (but unlocked) training signoff line. Mirrors the
  * training_signoffs RLS update policy; the app enforces it before the API
  * so staff get a clear message instead of a database error.
+ * WAVE-7V: compliance_admin removed — read-and-audit by default.
  */
 export function canEditTrainingLine(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
   ].includes(roleKey);
@@ -260,11 +260,11 @@ export function canEditTrainingLine(roleKey: string) {
  * Who may void a locked training sheet via the correction flow (delete the
  * HM countersignature with a written reason). Matches the
  * training_countersignatures_delete RLS policy — house managers are
- * deliberately excluded; they ask an administrator, compliance admin, or
- * PM instead.
+ * deliberately excluded; they ask an administrator or PM instead.
+ * WAVE-7V: compliance_admin removed — read-and-audit by default.
  */
 export function canRequestTrainingCorrection(roleKey: string) {
-  return ["administrator", "compliance_admin", "program_manager"].includes(
+  return ["administrator", "program_manager"].includes(
     roleKey,
   );
 }

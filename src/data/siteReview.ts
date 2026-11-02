@@ -278,9 +278,9 @@ export const SITE_REVIEW_SECTIONS: { id: SiteReviewSectionId; title: string; hel
 ];
 
 export function canEditSiteReview(roleKey: string) {
+  // WAVE-7V: compliance_admin removed — read-and-audit by default.
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
   ].includes(roleKey);

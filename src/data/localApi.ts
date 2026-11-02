@@ -78,6 +78,7 @@ import {
   canCreateIndividual,
   canCreateSite,
   canEnterShiftNotes,
+  canReadAsCompliance,
   canRecordLifeEvents,
   canManageMedicationOrders,
   canSeeShiftNotes,
@@ -2264,6 +2265,18 @@ function assertPrivileged(session: SessionUser) {
 
 function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/**
+ * WAVE-7V: training-roster READS (clearance list + another staffer's
+ * training profile) — hr.view_staff holders, or compliance on its
+ * read-and-audit path. Writes (initial/waive/assign/correct) keep their
+ * own gates.
+ */
+function assertTrainingRosterRead(session: SessionUser) {
+  if (!hasPermission(session, "hr.view_staff") && !canReadAsCompliance(session)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -5035,7 +5048,7 @@ export class LocalApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = assertSession(this.store);
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or agency administrator can edit cover-page fields.");
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
@@ -8999,7 +9012,7 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    if (session.userId !== userId) assertTrainingRosterRead(session);
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9083,7 +9096,7 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
+    assertTrainingRosterRead(session);
     // Roster comes from the agency's staff memberships — not only from staff
     // who already have training assigned — so "All staff" never renders an
     // empty table while the agency has people.
@@ -9765,7 +9778,10 @@ export class LocalApi implements ComplyraApi {
   private assertCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // WAVE-7V: compliance reads certificates read-only on its audit
+      // path; writes stay behind assertCertificateWrite.
+      !canReadAsCompliance(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }
@@ -11077,14 +11093,37 @@ export class LocalApi implements ComplyraApi {
   }
 
   private assertChecklistAssigner(session: SessionUser) {
+    // WAVE-7V (founder decision, 2026-11-02): assigners are the
+    // administrator and the PM only — compliance_admin was removed from
+    // this check. checklistOversight() below deliberately keeps the
+    // wider set: reading submitted checklists is oversight, assigning
+    // them is a write.
     const ok =
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin;
     if (!ok) {
       throw new Error(
         "Only a PM or agency administrator can assign weekly checklists.",
+      );
+    }
+  }
+
+  /**
+   * WAVE-7V: who may trigger the weekly rollover. The rollover is also
+   * the idempotent week-advancer the house managers' own checklist page
+   * fires on load (no backend cron), so the trigger set is the assigners
+   * plus house managers — but compliance_admin no longer runs it.
+   */
+  private assertChecklistRollover(session: SessionUser) {
+    const ok =
+      session.roleKey === "program_manager" ||
+      session.roleKey === "house_manager" ||
+      session.role === "administrator" ||
+      session.platformAdmin;
+    if (!ok) {
+      throw new Error(
+        "Only a PM or agency administrator can run the weekly rollover.",
       );
     }
   }
@@ -11397,6 +11436,7 @@ export class LocalApi implements ComplyraApi {
     locked: number;
   }> {
     const session = assertSession(this.store);
+    this.assertChecklistRollover(session);
     const currentWeek = weekOfSundayIso(todayIso());
     const now = new Date().toISOString();
     let locked = 0;

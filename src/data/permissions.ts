@@ -145,23 +145,41 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: "compliance_admin",
     name: "Compliance administrator",
     shortCode: "CA",
-    description: "Owns the compliance loop: plans, approvals, acknowledgments, and audit exports.",
+    description: "Read-and-audit oversight: reads every record, reviews event reports, completes own requirements, and exports audit evidence. Changes nothing by default.",
     defaultScope: "agency",
     capability: "compliance_admin",
-    // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
-    // the compliance_admin defaults — the auditor role owns scoring, PM/HM
-    // own disputes and schedules. Grantable explicitly via Roles & access.
-    // HR-EMPLOYEE-HUB: hub.access only — scheduling, timecard review,
-    // time-off approval, team view, payroll lock, and HR documents stay with
-    // the operational managers (administrator / program_manager / house_manager).
-    permissions: pack(
-      ALL.filter(
-        (key) =>
-          key !== "hr.view_staff" &&
-          !key.startsWith("qa.") &&
-          (key === "hub.access" || !key.startsWith("hub.")),
-      ),
-    ),
+    // WAVE-7V (founder decision, 2026-11-02; simulation batches
+    // 157/158/171/184): compliance_admin is READ-AND-AUDIT by default.
+    // The old pack granted nearly every key — member administration,
+    // roles.manage (it could re-grant itself anything), certificates,
+    // corrective actions, delegation writes, clinical writes — which made
+    // the oversight role a second administrator. The narrowed pack below
+    // is the founder's exact keep list: audit/read/export surfaces, chart
+    // and document reads, GER review/resolve, its own acknowledgment
+    // signature and requirement completions, messaging, mileage, and its
+    // own Employee Hub. Everything else is grantable explicitly via
+    // Roles & access by an agency administrator. Read surfaces that were
+    // gated on the removed write keys stay reachable through
+    // canReadAsCompliance (below) — never through a write key.
+    // QA-AUDIT (2026-09-14) still holds: qa.* stays out — the auditor
+    // role owns scoring, PM/HM own disputes and schedules.
+    permissions: pack([
+      "audit.read",
+      "audit.export",
+      "individuals.view",
+      "documents.view",
+      "documents.review",
+      "clinical.view",
+      "delegation.templates.view",
+      "hub.access",
+      "messages.use",
+      "mileage.manage",
+      "acknowledgments.sign_own",
+      "recognition.view_winners",
+      "ger.review",
+      "ger.resolve",
+      "requirements.complete",
+    ]),
   },
   {
     key: "house_manager",
@@ -756,12 +774,13 @@ export function canViewMedicationOrders(roleKey: string) {
 
 /**
  * Who may create, edit, activate, or discontinue orders. Mirrors the
- * medication_orders RLS write policy (nurse / PM / admin / compliance).
+ * medication_orders RLS write policy (nurse / PM / admin).
+ * WAVE-7V: compliance_admin removed — read-and-audit by default; it keeps
+ * the read side via canViewMedicationOrders.
  */
 export function canManageMedicationOrders(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -771,11 +790,11 @@ export function canManageMedicationOrders(roleKey: string) {
  * Who may start a reconciliation + save its decisions. House managers may run
  * one for their homes; nurses / PMs / admins may too. Mirrors the
  * medication_reconciliations RLS write policy.
+ * WAVE-7V: compliance_admin removed — read-and-audit by default.
  */
 export function canStartReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
     "house_manager",
@@ -786,11 +805,11 @@ export function canStartReconciliation(roleKey: string) {
  * Who may sign off a reconciliation. A nurse sign-off is required; PMs and
  * administrators may also sign. House managers run the checklist but cannot
  * provide the clinical sign-off.
+ * WAVE-7V: compliance_admin removed — read-and-audit by default.
  */
 export function canSignReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -826,6 +845,29 @@ export function canUseMessaging(session: {
   permissions?: Partial<PermissionMap>;
 }): boolean {
   return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
+}
+
+/**
+ * WAVE-7V (founder decision, 2026-11-02): the compliance administrator's
+ * READ path. Compliance is read-and-audit by default, so its template no
+ * longer carries the write keys several read surfaces were gated on
+ * (members.* for the Staff page, certificates.manage for Certificates,
+ * requirements.approve for the Review queue, hr.view_staff for the
+ * Training roster and certificate reads). This predicate is the single
+ * place that read path is granted: the compliance_admin role holding its
+ * audit.read key. It never widens any other role and grants no write
+ * power — every write control on the surfaces it opens stays keyed on
+ * its own write key, which compliance no longer holds by default.
+ */
+export function canReadAsCompliance(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return (
+    session.roleKey === "compliance_admin" &&
+    hasPermission(session, "audit.read")
+  );
 }
 
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */

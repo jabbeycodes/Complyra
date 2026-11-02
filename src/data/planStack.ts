@@ -540,9 +540,10 @@ export function proposeFromPcsp(input: {
 }
 
 export function canEditCover(roleKey: string) {
+  // WAVE-7V: compliance_admin removed — read-and-audit by default; the
+  // chart cover (plan/profile fields) is edited by PMs and administrators.
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }
