@@ -26,6 +26,10 @@ import {
 } from "../../data/rightsPackets";
 import { PersonHeader } from "./MobileMar";
 import {
+  consentProblemsText,
+  individualConsentStanding,
+} from "../overview/consentCompliance";
+import {
   consentRecordStatus,
   consentTypeRows,
   rightsHistoryLine,
@@ -356,6 +360,22 @@ export default function MobileConsents({
         </p>
       )}
       {!register && !error && <p className="msh-empty">Loading consents…</p>}
+      {register &&
+        (() => {
+          // The chart's per-Individual verdict — the same standing the
+          // compliance scores are built from (consentCompliance.ts), so
+          // the phone and the desktop chart cannot disagree.
+          const standing = individualConsentStanding(register, person.id);
+          return (
+            <p className="msh-section-note" role="status">
+              {standing.required === 0
+                ? "No required consent types are configured for this agency."
+                : standing.compliant
+                  ? `✓ Compliant — all ${standing.required} required consents are current.`
+                  : `Not compliant — required consents not current: ${consentProblemsText(standing, session.roleKey === "dsp")}.`}
+            </p>
+          );
+        })()}
       {register && (
         <div className="msh-list">
           {rows.map((row) => (

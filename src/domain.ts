@@ -11,7 +11,13 @@ export type Category =
   | "Equipment checks"
   | "Behavior plan training"
   | "Emergency drills"
-  | "Required forms";
+  | "Required forms"
+  // Scored consent items (features/overview/consentCompliance.ts) carry
+  // this category. It is deliberately NOT added to the `categories`
+  // list below: that list drives requirement-category pages, and a
+  // "Consents" page already exists (the register) — the scored items
+  // live only inside compliance-score pools, never in requirement lists.
+  | "Consents";
 export interface Requirement {
   id: string;
   title: string;

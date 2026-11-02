@@ -35,6 +35,8 @@ import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { openPrintable } from "../../data/openFile";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
+import { useConsentScoreInput } from "../consents/useConsentRegister";
+import { consentTalliesFromItems } from "../overview/consentCompliance";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
@@ -158,6 +160,9 @@ export default function SiteDetailPage({
   onOpenReports,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
+  // Consent currency counts in this house's score (founder decision,
+  // 2026-11-02): scored consent items join the site's requirement pool.
+  const consentScore = useConsentScoreInput(workspace?.sites ?? []);
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
   const [tab, setTab] = useState<SiteDetailTabId>("overview");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
@@ -221,11 +226,17 @@ export default function SiteDetailPage({
     [workspace, siteId],
   );
   const openRequirements = useMemo(
-    () =>
-      (workspace?.requirements ?? []).filter(
+    () => [
+      ...(workspace?.requirements ?? []).filter(
         (r) => r.site === siteName && r.status !== "Compliant",
       ),
-    [workspace, siteName],
+      ...(consentScore.kind === "ready"
+        ? consentScore.items.filter(
+            (r) => r.site === siteName && r.status !== "Compliant",
+          )
+        : []),
+    ],
+    [workspace, siteName, consentScore],
   );
   const siteDrills = useMemo(
     () =>
@@ -387,10 +398,15 @@ export default function SiteDetailPage({
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
   const latestQaPct = latestQaScore?.pct;
-  const siteRequirements = (workspace.requirements ?? []).filter(
-    (r) => r.site === siteName,
-  );
+  const siteRequirements = [
+    ...(workspace.requirements ?? []).filter((r) => r.site === siteName),
+    ...(consentScore.kind === "ready"
+      ? consentScore.items.filter((r) => r.site === siteName)
+      : []),
+  ];
   const siteReqMetrics = metrics(siteRequirements);
+  const consentUnknown = consentScore.kind === "unknown";
+  const siteConsentTallies = consentTalliesFromItems(siteRequirements);
   // The same monthly site-review status the Overview site card summarizes as
   // "Review in place / Review open", carried here inside the home itself.
   const reviewInPlace = site
@@ -521,7 +537,9 @@ export default function SiteDetailPage({
             status={
               openRequirements.length || (dueItems?.items.length ?? 0)
                 ? "Needs attention"
-                : "On track"
+                : consentUnknown
+                  ? "Checking consents"
+                  : "On track"
             }
           />
         </div>
@@ -530,18 +548,42 @@ export default function SiteDetailPage({
           <div className="site-hero-scores site-hero-kpis" aria-label={`${site.name} status`}>
             <div className="site-hero-score">
               <strong>
-                {siteReqMetrics.score}
-                <small>%</small>
+                {consentUnknown ? (
+                  "—"
+                ) : (
+                  <>
+                    {siteReqMetrics.score}
+                    <small>%</small>
+                  </>
+                )}
               </strong>
               <span>Ready</span>
               <div className="progress-track" aria-hidden="true">
-                <span style={{ width: `${siteReqMetrics.score}%` }} />
+                <span
+                  style={{
+                    width: `${consentUnknown ? 0 : siteReqMetrics.score}%`,
+                  }}
+                />
               </div>
+              {consentUnknown && (
+                <p className="stack-help">
+                  Consent records are still loading — this score does not
+                  include consents yet.
+                </p>
+              )}
             </div>
             <div className="site-hero-stat">
               <strong>{siteIndividuals.length}</strong>
               <span>Individuals</span>
             </div>
+            {siteConsentTallies.total > 0 && (
+              <div className="site-hero-stat">
+                <strong>
+                  {siteConsentTallies.current} of {siteConsentTallies.total}
+                </strong>
+                <span>Consents current</span>
+              </div>
+            )}
             <div className="site-hero-stat">
               <strong>{siteStaff.length}</strong>
               <span>Staff</span>

@@ -24,6 +24,10 @@ import {
   type PersonalComplianceSummary,
 } from "../personalCompliance/personalCompliance";
 import {
+  CONSENT_SCORE_EXCLUDED,
+  type ConsentScoreInput,
+} from "../overview/consentCompliance";
+import {
   houseComplianceRows,
   type HouseComplianceRow,
 } from "../overview/houseCompliance";
@@ -46,6 +50,7 @@ export function bandHouseRows(
   staff: StaffSiteRef[],
   requirements: Requirement[],
   assignmentSiteIds: string[] = [],
+  consent: ConsentScoreInput = CONSENT_SCORE_EXCLUDED,
 ): HouseComplianceRow[] | null {
   if (!HOUSE_DONUT_ROLES.has(session.roleKey)) return null;
   const visibleSites = sitesVisibleTo(session, sites, staff, assignmentSiteIds);
@@ -53,7 +58,21 @@ export function bandHouseRows(
   const visibleRequirements = requirements.filter((r) =>
     visibleNames.has(r.site),
   );
-  return houseComplianceRows(visibleSites, visibleRequirements, "All sites");
+  // Scored consent items narrow to the same visible houses, so the band
+  // and the desktop donuts read identical rows (consentCompliance.ts).
+  const scopedConsent: ConsentScoreInput =
+    consent.kind === "ready"
+      ? {
+          kind: "ready",
+          items: consent.items.filter((r) => visibleNames.has(r.site)),
+        }
+      : consent;
+  return houseComplianceRows(
+    visibleSites,
+    visibleRequirements,
+    "All sites",
+    scopedConsent,
+  );
 }
 
 /* ------------------------- personal status bar ------------------------- */
