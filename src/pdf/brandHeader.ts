@@ -1,10 +1,36 @@
 import { jsPDF } from "jspdf";
 import { imageFormatFromDataUrl } from "../data/branding";
+import { COMPLYRER_LOCKUP_PNG_DATA_URL } from "../brand/complyrerLockup";
 
 export type ReportBrand = {
   agencyName: string;
   logoDataUrl?: string | null;
 };
+
+/**
+ * Draw the ComplyRer logo lockup at the right of the header, aspect
+ * preserved. Founder direction (2026-11-02): the platform brand on
+ * generated forms is the real logo graphic, not typed text. Returns false
+ * when the image cannot be embedded — callers fall back to the text brand,
+ * so branding never breaks document generation.
+ */
+function drawComplyrerLockup(
+  doc: jsPDF,
+  margin: number,
+  top: number,
+  height: number,
+): boolean {
+  try {
+    const props = doc.getImageProperties(COMPLYRER_LOCKUP_PNG_DATA_URL);
+    if (props.width <= 0 || props.height <= 0) return false;
+    const width = (height * props.width) / props.height;
+    const right = doc.internal.pageSize.getWidth() - margin;
+    doc.addImage(COMPLYRER_LOCKUP_PNG_DATA_URL, "PNG", right - width, top, width, height);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function drawTextBrand(doc: jsPDF, brand: ReportBrand, margin: number, y: number) {
   doc.setFont("helvetica", "bold");
@@ -18,10 +44,12 @@ function drawTextBrand(doc: jsPDF, brand: ReportBrand, margin: number, y: number
 }
 
 /**
- * Draw the brand header (agency logo when set + agency name + "Prepared
- * with Complyrer", or the COMPLYRER text brand when no logo is set) onto an
- * existing document at the given baseline y. For builders that manage their
- * own page geometry (e.g. the landscape mileage sheets) instead of going
+ * Draw the brand header onto an existing document at the given baseline y:
+ * the agency side at the left (agency logo when set + agency name +
+ * "Prepared with Complyrer" caption) and the ComplyRer logo lockup at the
+ * right. When the agency has no logo, the header is the agency name at the
+ * left with the lockup at the right. For builders that manage their own
+ * page geometry (e.g. the landscape mileage sheets) instead of going
  * through startBrandedDoc. A logo that fails to embed falls back to the
  * text brand — branding must never break document generation. Returns the
  * y just below the header block.
@@ -45,10 +73,19 @@ export function drawBrandHeader(
       doc.setTextColor(95, 81, 69);
       doc.text("Prepared with Complyrer", margin + 52, y + 24);
       doc.setTextColor(36, 30, 24);
+      drawComplyrerLockup(doc, margin, y - 8, 26);
       return y + 48;
     } catch {
       return drawTextBrand(doc, brand, margin, y);
     }
+  }
+  if (drawComplyrerLockup(doc, margin, y - 8, 30)) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(36, 30, 24);
+    doc.text(brand.agencyName, margin, y + 8, { maxWidth: 400 });
+    doc.setTextColor(36, 30, 24);
+    return y + 28;
   }
   return drawTextBrand(doc, brand, margin, y);
 }

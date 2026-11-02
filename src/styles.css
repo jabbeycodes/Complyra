@@ -6930,6 +6930,17 @@ body.nav-open {
   font-size: 11px;
   color: var(--color-h-a89c8c);
 }
+.print-brand-lockup {
+  height: 30px;
+  width: auto;
+  margin-left: auto;
+}
+.print-brand-complyrer {
+  margin: 0 0 0 auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: #3f5c3b;
+}
 
 /* Complyrer record mark — discreet provenance line on generated documents. */
 .record-mark {
