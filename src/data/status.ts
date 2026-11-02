@@ -4,6 +4,7 @@ import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
   canSeeShiftNotes,
+  canViewStaffAsProgramManager,
   canViewHouseCard,
   canViewMedicationOrders,
   canUseMessaging,
@@ -80,7 +81,11 @@ export function pageVisible(session: SessionUser, page: string) {
     return (
       can(session, "hr.view_staff") ||
       can(session, "members.invite") ||
-      can(session, "members.assign_roles")
+      can(session, "members.assign_roles") ||
+      // PM-STAFF-NAV (wave 7U-2): the program manager's path — keyed on the
+      // team/reset keys its template actually holds; every member-admin
+      // control on the page stays keyed on the members.* keys above.
+      canViewStaffAsProgramManager(session)
     );
   }
   if (page === "Documents") return can(session, "documents.view");
