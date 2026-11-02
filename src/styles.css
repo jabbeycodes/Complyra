@@ -1453,6 +1453,12 @@ h1 {
   color: var(--color-h-2f4630);
   font-weight: 550;
 }
+.right-now-attention {
+  padding: 4px var(--panel-inline) 12px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-h-b91c1c);
+}
 .right-now-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
