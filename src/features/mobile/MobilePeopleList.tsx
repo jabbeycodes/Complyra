@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 import type { WorkspaceIndividual } from "./types";
 
@@ -41,10 +41,17 @@ export default function MobilePeopleList({
   people,
   onPick,
   emptyText = "No Individuals at this home.",
+  trailingFor,
 }: {
   people: WorkspaceIndividual[];
   onPick: (person: WorkspaceIndividual) => void;
   emptyText?: string;
+  /**
+   * Optional right-hand content per row (the Personal Spending
+   * chooser's per-person balance). Callers own its styling; money
+   * amounts must use a non-truncating class (see .msh-row-amount).
+   */
+  trailingFor?: (person: WorkspaceIndividual) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
@@ -81,6 +88,7 @@ export default function MobilePeopleList({
               <strong>{person.name}</strong>
               <small>{person.site}</small>
             </span>
+            {trailingFor?.(person)}
             <span className="msh-chevron" aria-hidden="true">
               ›
             </span>
