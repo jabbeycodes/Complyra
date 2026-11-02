@@ -4,8 +4,8 @@ import { canManageConsents, canSeeConsents } from '../../data/consents';
 import { evidenceBlob } from '../../data/consentPackets';
 import {
     isCompletedRightsPacket,
-    rightsTrackingFor,
-    rightsTrackingText,
+    rightsPacketNeedsAttention,
+    rightsPacketStatusFor,
     type RightsPacket,
     type RightsPacketCompletion,
 } from '../../data/rightsPackets';
@@ -32,7 +32,11 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
     siteId?: string | null;
 }) {
     const { api, session, workspace } = useData();
-    const [packets, setPackets] = useState<RightsPacket[]>([]);
+    // null until the packet list has actually loaded. An empty array is
+    // a LOADED answer (no packets on file) — never a pre-load default:
+    // rendering a status from the pre-load state is what made the
+    // Overview attention section call signed packets "Not yet signed".
+    const [packets, setPackets] = useState<RightsPacket[] | null>(null);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const [startingFor, setStartingFor] = useState<string | null>(null);
@@ -76,18 +80,29 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
 
     const people = (workspace?.individuals ?? []).filter(p => (!individualId || p.id === individualId) && (!siteId || p.siteId === siteId));
     const byPerson = new Map<string, RightsPacket[]>();
-    for (const packet of packets) {
+    for (const packet of packets ?? []) {
         const list = byPerson.get(packet.individualId) ?? [];
         list.push(packet);
         byPerson.set(packet.individualId, list);
     }
-    const tracked = people.map(person => ({ person, packets: byPerson.get(person.id) ?? [], tracking: rightsTrackingFor(byPerson.get(person.id) ?? []) }));
-    const needsAttention = (t: (typeof tracked)[number]['tracking']) =>
-        t.kind === 'not_signed' || t.renewal.state !== 'current';
+    // One shared selector for every packet status on every surface.
+    // Until the list loads, each person's status is 'unknown' and no
+    // verdict renders anywhere.
+    const tracked = people.map(person => {
+        const mine = packets === null ? null : (byPerson.get(person.id) ?? []);
+        return { person, packets: mine ?? [], status: rightsPacketStatusFor(mine) };
+    });
 
     if (attentionOnly) {
-        const shown = tracked.filter(t => needsAttention(t.tracking));
-        return manage && shown.length > 0 ? <section className="consents"><h2>Rights packets needing attention</h2><ul>{shown.map(({ person, tracking }) => <li key={person.id}><a href="#/consents">{person.name} — Rights packet: {rightsTrackingText(tracking)}</a></li>)}</ul></section> : null;
+        const shown = tracked.filter(t => rightsPacketNeedsAttention(t.status));
+        return manage && shown.length > 0 ? <section className="consents"><h2>Rights packets needing attention</h2><ul>{shown.map(({ person, status }) => <li key={person.id}><a href="#/consents">{person.name} — Rights packet: {status.text}</a></li>)}</ul></section> : null;
+    }
+
+    if (packets === null) {
+        return <section className="rights-packets" aria-label="Rights packet">
+    <h2>Rights packet</h2>
+    {error ? <p role="alert">{error}</p> : <p role="status">Loading rights packets…</p>}
+  </section>;
     }
 
     const beginComplete = (packet: RightsPacket, paper: boolean) => {
@@ -100,16 +115,16 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
     <h2>Rights packet</h2>
     {error && <p role="alert">{error}</p>}
     {people.length === 0 && <p>No Individuals in your scope.</p>}
-    {tracked.map(({ person, packets: mine, tracking }) => {
-        const latest = tracking.kind === 'tracked' ? tracking.packet : null;
+    {tracked.map(({ person, packets: mine, status }) => {
+        const latest = status.kind === 'signed_current' || status.kind === 'signed_renewal_due' || status.kind === 'signed_overdue' ? status.packet : null;
         const awaiting = mine.filter(p => p.status === 'awaiting_signature').sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
         const history = mine.filter(p => p.id !== latest?.id && p.id !== awaiting?.id)
             .sort((a, b) => (b.packetOn ?? b.createdAt).localeCompare(a.packetOn ?? a.createdAt));
         const printable = latest ?? awaiting;
         return <article key={person.id}>
-      <h3>{person.name} — Rights packet: {rightsTrackingText(tracking)}</h3>
-      {tracking.kind === 'tracked' && <p>Packet date {tracking.packet.packetOn} · Renews {tracking.renewal.renewalOn} · {tracking.renewal.text}</p>}
-      {tracking.kind === 'not_signed' && <p>{awaiting ? 'A packet is started and awaiting signature.' : 'No completed rights packet on file.'}</p>}
+      <h3>{person.name} — Rights packet: {status.text}</h3>
+      {latest && status.renewal && <p>Packet date {latest.packetOn} · Renews {status.renewal.renewalOn} · {status.renewal.text}</p>}
+      {status.kind === 'never_signed' && <p>{awaiting ? 'A packet is started and awaiting signature.' : 'No completed rights packet on file.'}</p>}
       {latest && <>
         <p>Rights reviewed with the signer by {latest.reviewedBy}. Signed by {latest.signer?.printedName}; authority {latest.signer?.authority}{latest.signer?.authorityOther ? `: ${latest.signer.authorityOther}` : ''}; witness {latest.signer?.witness}; date {latest.packetOn}. Status: {latest.status === 'filed' ? 'Signed paper copy filed' : 'Signed'}.</p>
       </>}

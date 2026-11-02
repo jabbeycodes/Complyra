@@ -21,8 +21,7 @@ import {
 import type { LifeEventView } from "../../data/lifeEvents";
 import {
   isCompletedRightsPacket,
-  rightsTrackingFor,
-  rightsTrackingText,
+  rightsPacketStatusFor,
   type RightsPacket,
 } from "../../data/rightsPackets";
 import { todayStamp } from "../../data/status";
@@ -122,8 +121,11 @@ export function consentRecordStatus(
 /* ---------------------------- Rights packet ---------------------------- */
 
 export interface RightsPacketSummary {
-  /** The shared tracking line: a countdown or "Not yet signed". */
-  trackingText: string;
+  /**
+   * The shared tracking line: a countdown or "Not yet signed".
+   * Null while the packet list has not loaded — no verdict exists yet.
+   */
+  trackingText: string | null;
   state: string;
   packetOn: string | null;
   renewalOn: string | null;
@@ -136,30 +138,40 @@ export interface RightsPacketSummary {
 }
 
 /**
- * The mobile Rights packet card, projected from the same derivation
- * the desktop chart uses (rightsTrackingFor) — the countdown figure
- * is identical on both surfaces because it is computed in one place.
+ * The mobile Rights packet card, projected from the same shared
+ * selector the desktop chart and the Overview use
+ * (rightsPacketStatusFor) — the status is identical on every surface
+ * because it is computed in one place. Pass null until the packet
+ * list has loaded: the summary is then 'unknown' and carries no
+ * tracking line, so the card can never present an unloaded list as
+ * "Not yet signed".
  */
 export function rightsPacketSummary(
-  packets: RightsPacket[],
+  packets: RightsPacket[] | null,
   today = todayStamp(),
 ): RightsPacketSummary {
-  const tracking = rightsTrackingFor(packets, today);
-  const latest = tracking.kind === "tracked" ? tracking.packet : null;
+  const status = rightsPacketStatusFor(packets, today);
+  const list = packets ?? [];
+  const latest =
+    status.kind === "signed_current" ||
+    status.kind === "signed_renewal_due" ||
+    status.kind === "signed_overdue"
+      ? status.packet
+      : null;
   const awaiting =
-    [...packets]
+    [...list]
       .filter((packet) => packet.status === "awaiting_signature")
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
-  const history = packets
+  const history = list
     .filter((packet) => packet.id !== latest?.id && packet.id !== awaiting?.id)
     .sort((a, b) =>
       (b.packetOn ?? b.createdAt).localeCompare(a.packetOn ?? a.createdAt),
     );
   return {
-    trackingText: rightsTrackingText(tracking),
-    state: tracking.kind === "tracked" ? tracking.renewal.state : "not_signed",
+    trackingText: status.text,
+    state: status.renewal ? status.renewal.state : status.kind === "never_signed" ? "not_signed" : "unknown",
     packetOn: latest?.packetOn ?? null,
-    renewalOn: tracking.kind === "tracked" ? tracking.renewal.renewalOn : null,
+    renewalOn: status.renewal?.renewalOn ?? null,
     latest,
     awaiting,
     history,
