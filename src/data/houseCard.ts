@@ -622,6 +622,25 @@ export function closeForMonth(
 }
 
 /**
+ * Wave 7R (simulation batch 105): the open-month note under the House
+ * Card ledger. Roles that record entries get the working copy — new
+ * entries can be recorded until a manager signs the month closed.
+ * Read-only viewers (the auditor above all: canViewHouseCard without
+ * canRecordHouseCard) get the neutral statement instead — a surface
+ * that can never record must not invite recording. Both ledger panels
+ * (desktop HouseCardPanel, phone MobileHouseCard) render this note
+ * through here so the wording can never drift apart again.
+ */
+export function houseCardOpenMonthNote(
+  canRecord: boolean,
+  monthName: string,
+): string {
+  return canRecord
+    ? `${monthName} is still open. New entries can be recorded for this month until a manager signs it closed.`
+    : `${monthName} is still open. It has not been signed closed yet.`;
+}
+
+/**
  * Whether an entry (or its void) post-dates the signing of its month —
  * the marker that keeps a signed statement honest when corrections land
  * afterwards.

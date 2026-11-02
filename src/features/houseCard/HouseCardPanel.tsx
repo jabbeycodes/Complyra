@@ -19,6 +19,7 @@ import {
   computeBalanceCents,
   formatCents,
   houseCardCategoryLabel,
+  houseCardOpenMonthNote,
   isLowBalance,
   recentHouseCardLocations,
   summarizeHouseCardMonth,
@@ -529,8 +530,7 @@ export default function HouseCardPanel({
           </p>
         ) : (
           <p className="hc-close-note">
-            {monthLabel(month)} is still open. New entries can be recorded
-            for this month until a manager signs it closed.
+            {houseCardOpenMonthNote(canRecord, monthLabel(month))}
           </p>
         )}
 
