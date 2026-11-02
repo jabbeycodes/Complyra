@@ -3,7 +3,7 @@ import { Printer } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
-import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
+import { brandedPrintHtml } from "../../data/printHtml";
 import {
   BEHAVIOR_INTENSITIES,
   canCorrectBehaviorEntry,
@@ -28,7 +28,7 @@ export default function BehaviorSection({
   individualId: string;
   individualName: string;
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [plan, setPlan] = useState<BehaviorPlan | null>(null);
   const [entries, setEntries] = useState<BehaviorEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -141,7 +141,12 @@ export default function BehaviorSection({
           `<tr><td>${esc(e.occurredOn)} ${esc(e.occurredAtTime)}</td><td>${esc(e.behavior)}</td><td>${esc(e.antecedent)}</td><td>${e.durationMinutes ?? "—"}</td><td>${esc(e.intensity)}</td><td>${esc(e.interventionUsed)}</td><td>${esc(e.outcome)}</td></tr>`,
       )
       .join("");
-    const html = `<!doctype html><html><head><title>Behavior log — ${esc(individualName)}</title><style>body{font-family:Arial,sans-serif;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 7px;text-align:left}</style></head><body><h1>Behavior log — ${esc(individualName)}</h1><table><tr><th>When</th><th>Behavior</th><th>Antecedent</th><th>Minutes</th><th>Intensity</th><th>Intervention</th><th>Outcome</th></tr>${rows}</table><p><em>${DIGITAL_RECORD_MARK}</em></p></body></html>`;
+    const html = brandedPrintHtml({
+      brand: { agencyName: session?.agencyName ?? "Agency", logoDataUrl: workspace?.branding.logoUrl ?? null },
+      title: `Behavior log — ${individualName}`,
+      styles: `table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 7px;text-align:left}`,
+      bodyHtml: `<h1>Behavior log — ${esc(individualName)}</h1><table><tr><th>When</th><th>Behavior</th><th>Antecedent</th><th>Minutes</th><th>Intensity</th><th>Intervention</th><th>Outcome</th></tr>${rows}</table>`,
+    });
     void openPrintable(
       `behavior-log-${individualId}.html`,
       new Blob([html], { type: "text/html" }),

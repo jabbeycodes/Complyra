@@ -478,6 +478,7 @@ export default function QaAuditDetail({
       const liveSite = workspace?.sites.find((row) => row.name === siteName || row.id === audit.siteId);
       const doc = buildQaAuditPdf({
         agencyName: session!.agencyName,
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName,
         audit,
         items,

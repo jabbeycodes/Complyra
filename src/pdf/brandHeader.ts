@@ -17,13 +17,21 @@ function drawTextBrand(doc: jsPDF, brand: ReportBrand, margin: number, y: number
   return y + 28;
 }
 
-export function startBrandedDoc(
-  title: string,
+/**
+ * Draw the brand header (agency logo when set + agency name + "Prepared
+ * with Complyrer", or the COMPLYRER text brand when no logo is set) onto an
+ * existing document at the given baseline y. For builders that manage their
+ * own page geometry (e.g. the landscape mileage sheets) instead of going
+ * through startBrandedDoc. A logo that fails to embed falls back to the
+ * text brand — branding must never break document generation. Returns the
+ * y just below the header block.
+ */
+export function drawBrandHeader(
+  doc: jsPDF,
   brand: ReportBrand,
-  margin = 48,
+  margin: number,
+  y: number,
 ) {
-  const doc = new jsPDF({ unit: "pt", format: "letter" });
-  let y = 52;
   const logo = brand.logoDataUrl;
   if (logo) {
     try {
@@ -36,13 +44,22 @@ export function startBrandedDoc(
       doc.setFontSize(8);
       doc.setTextColor(95, 81, 69);
       doc.text("Prepared with Complyrer", margin + 52, y + 24);
-      y += 48;
+      doc.setTextColor(36, 30, 24);
+      return y + 48;
     } catch {
-      y = drawTextBrand(doc, brand, margin, y);
+      return drawTextBrand(doc, brand, margin, y);
     }
-  } else {
-    y = drawTextBrand(doc, brand, margin, y);
   }
+  return drawTextBrand(doc, brand, margin, y);
+}
+
+export function startBrandedDoc(
+  title: string,
+  brand: ReportBrand,
+  margin = 48,
+) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  let y = drawBrandHeader(doc, brand, margin, 52);
   doc.setTextColor(36, 30, 24);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);

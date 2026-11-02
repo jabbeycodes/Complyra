@@ -3,7 +3,7 @@ import { Printer, Plus } from "lucide-react";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
-import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
+import { brandedPrintHtml, type PrintHtmlBrand } from "../../data/printHtml";
 import {
   GER_EVENT_TYPES,
   GER_SEVERITIES,
@@ -73,7 +73,7 @@ function reportToDraft(report: GerReport): GerReportDraft {
   };
 }
 
-function gerPrintHtml(report: GerReport, individualName: string): string {
+function gerPrintHtml(report: GerReport, individualName: string, brand: PrintHtmlBrand): string {
   const esc = (value: string) =>
     value
       .replaceAll("&", "&amp;")
@@ -84,10 +84,11 @@ function gerPrintHtml(report: GerReport, individualName: string): string {
         .map((n) => `${esc(n.party)} — ${esc(n.name)} (${esc(n.atTime)})`)
         .join("<br>")
     : "None recorded";
-  return `<!doctype html><html><head><title>Event report — ${esc(individualName)}</title>
-<style>body{font-family:Arial,sans-serif;color:#111;line-height:1.45}h1{font-size:20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:6px 8px;text-align:left;vertical-align:top}th{width:200px;background:#eee}</style>
-</head><body>
-<h1>Event report</h1>
+  return brandedPrintHtml({
+    brand,
+    title: `Event report — ${individualName}`,
+    styles: `body{line-height:1.45}h1{font-size:20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:6px 8px;text-align:left;vertical-align:top}th{width:200px;background:#eee}`,
+    bodyHtml: `<h1>Event report</h1>
 <p><strong>${esc(individualName)}</strong> · ${esc(report.eventType)} · Severity: ${esc(report.severity)}</p>
 <table>
 <tr><th>Event date / time</th><td>${esc(report.eventDate)} ${esc(report.eventTime)}</td></tr>
@@ -99,9 +100,8 @@ function gerPrintHtml(report: GerReport, individualName: string): string {
 <tr><th>Reported by</th><td>${esc(report.reporterName)} — signed ${esc(report.reporterSignature)} on ${esc(report.reporterDate)}</td></tr>
 <tr><th>Status</th><td>${esc(report.status)}</td></tr>
 <tr><th>Follow-up</th><td>${esc(RESOLUTION_LABELS[deriveGerResolutionDisplay(report)] ?? report.resolutionStatus)}${report.closureNote ? ` — ${esc(report.closureNote)}` : ""}</td></tr>
-</table>
-<p><em>${DIGITAL_RECORD_MARK}</em></p>
-</body></html>`;
+</table>`,
+  });
 }
 
 export default function GerTab({
@@ -115,7 +115,7 @@ export default function GerTab({
   individuals: SitePerson[];
   staff: SiteStaffMember[];
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [reports, setReports] = useState<GerReport[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -523,7 +523,7 @@ export default function GerTab({
               onClick={() =>
                 void openPrintable(
                   `event-report-${selected.id}.html`,
-                  new Blob([gerPrintHtml(selected, nameOf(selected.individualId))], {
+                  new Blob([gerPrintHtml(selected, nameOf(selected.individualId), { agencyName: session?.agencyName ?? "Agency", logoDataUrl: workspace?.branding.logoUrl ?? null })], {
                     type: "text/html",
                   }),
                   "print",

@@ -414,7 +414,7 @@ function ProfilePanel({
   onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [showCertificates, setShowCertificates] = useState(false);
   const sessionAgencyName = session?.agencyName ?? "Agency";
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
@@ -689,6 +689,7 @@ function ProfilePanel({
           onClick={() => {
             const doc = buildStaffTrainingChecklistPdf({
               agencyName: sessionAgencyName,
+              logoDataUrl: workspace?.branding.logoUrl ?? null,
               staffName: profile.fullName,
               siteNames: profile.siteNames,
               hoursTotal: profile.hoursTotal,

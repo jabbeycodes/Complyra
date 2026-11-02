@@ -92,6 +92,7 @@ import {
   rollupCompliance,
   summarizeTimecard,
 } from "../../data/hr";
+import { agencyFileSlug } from "../../domain";
 import { useOperatingRules } from "./useOvertimeLines";
 import type {
   ComplianceEvidence,
@@ -157,6 +158,8 @@ interface EmployeeHubShellProps {
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Agency logo (data URL) for printout headers, from the page's workspace branding. */
+  logoDataUrl?: string | null;
   initialTab?: string;
   /** Injected in tests; defaults to the hosted/local open-shift store. */
   openShiftStore?: OpenShiftStore;
@@ -430,6 +433,7 @@ export function EmployeeHubShell({
   store,
   staffList,
   sites,
+  logoDataUrl,
   initialTab,
   openShiftStore,
   onLateClockIn,
@@ -640,6 +644,7 @@ export function EmployeeHubShell({
             store={store}
             staffList={staffList}
             initialSubjectId={performanceFocusId ?? undefined}
+            logoDataUrl={logoDataUrl}
           />
         )}
         {tab === "binder-board" &&
@@ -3956,7 +3961,9 @@ function PayrollTab({
       );
       const approved = rows.filter((r) => r.approvalStatus === "approved");
       downloadText(
-        `payroll-${period.startsOn}-to-${period.endsOn}.csv`,
+        // Filename-level agency attribution only: the CSV body is a strict
+        // vendor-import format and must not gain rows.
+        `${agencyFileSlug(session.agencyName)}-payroll-${period.startsOn}-to-${period.endsOn}.csv`,
         buildPayrollCsvExport(approved),
         "text/csv;charset=utf-8",
       );
@@ -4531,6 +4538,7 @@ export default function EmployeeHubPage({
       store={store}
       staffList={staffList}
       sites={sites}
+      logoDataUrl={workspace?.branding.logoUrl ?? null}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

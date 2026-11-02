@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Check, PenLine, Printer, Scale, Star } from "lucide-react";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import { todayIso } from "../../data/chart";
 import type { HrStore } from "../../data/hrStore";
 import { hasPermission } from "../../data/permissions";
@@ -60,12 +61,15 @@ export function PerformanceTab({
   store,
   staffList,
   initialSubjectId,
+  logoDataUrl,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   /** Open on this staff member (the binder's Performance jump). */
   initialSubjectId?: string;
+  /** Agency logo (data URL) for the printout header, threaded from the hub page's workspace. */
+  logoDataUrl?: string | null;
 }) {
   const isAuditor = session.roleKey === "auditor";
   const viewer: PerformanceViewer = useMemo(
@@ -968,6 +972,7 @@ export function PerformanceTab({
 
       {printEntry && (
         <article className="performance-print" aria-hidden="true">
+          <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
           {printEntry.kind === "review" ? (
             <>
               <h1>Performance Review</h1>

@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import { useData } from "../../data/DataProvider";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
@@ -269,12 +270,13 @@ export default function PersonalSpendingCard({
   siteName: string;
   staffOptions: PersonalSpendingStaffOption[];
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   if (!session) return null;
   return (
     <PersonalSpendingSection
       api={api}
       session={session}
+      logoDataUrl={workspace?.branding.logoUrl ?? null}
       individualId={individualId}
       individualName={individualName}
       dmhId={dmhId}
@@ -288,6 +290,7 @@ export default function PersonalSpendingCard({
 function PersonalSpendingSection({
   api,
   session,
+  logoDataUrl,
   individualId,
   individualName,
   dmhId,
@@ -297,6 +300,8 @@ function PersonalSpendingSection({
 }: {
   api: ComplyraApi;
   session: SessionUser;
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
   individualId: string;
   individualName: string;
   dmhId: string;
@@ -900,6 +905,7 @@ function PersonalSpendingSection({
       {/* Printed monthly statement — screen-hidden, print-only. */}
       {entries && summary && (
         <div className="personal-spending-printout" aria-hidden="true">
+          <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
           <h1>Personal spending statement</h1>
           <p>
             {individualName}
