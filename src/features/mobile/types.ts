@@ -11,6 +11,9 @@ export interface MobileNav {
   openSite: (siteId: string) => void;
   /** Opens the Employee Hub with the My Compliance tab selected. */
   openMyCompliance?: () => void;
+  /** Opens the Employee Hub with the named tab selected (e.g.
+   *  "payroll" from the phone hub's HR doors). */
+  openHubTab?: (tab: string) => void;
 }
 
 export type { SessionUser };

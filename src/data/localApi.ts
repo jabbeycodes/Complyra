@@ -9093,15 +9093,32 @@ export class LocalApi implements ComplyraApi {
         (!siteId || row.siteId === siteId),
     );
     const userIds = [...new Set(memberships.map((row) => row.userId))];
+    // Wave 7S (batch 103): membership homes per staffer, for rows whose
+    // training profile carries no checklist sites yet.
+    const membershipSiteNames = new Map<string, string[]>();
+    for (const row of memberships) {
+      if (!row.siteId) continue;
+      const name =
+        this.store.db.sites.find((site) => site.id === row.siteId)?.name ?? "Unknown site";
+      const list = membershipSiteNames.get(row.userId) ?? [];
+      if (!list.includes(name)) list.push(name);
+      membershipSiteNames.set(row.userId, list);
+    }
     const rows: StaffClearanceRow[] = [];
     for (const userId of userIds) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
+        // The row's site label never goes blank: checklist sites first,
+        // then the staffer's membership homes, and a staffer with neither
+        // is named as what they are — "No site assigned" — instead of a
+        // bare dash that hides the unassigned group (batch 103).
         siteName: siteId
           ? (this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site")
-          : profile.siteNames.join(", ") || "—",
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : (membershipSiteNames.get(userId) ?? []).join(", ") || "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,

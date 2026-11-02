@@ -7834,21 +7834,56 @@ export class HostedApi implements ComplyraApi {
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
     this.requirePermission(session, "hr.view_staff");
-    let query = this.client
-      .from("training_requirements")
-      .select("user_id")
+    // Wave 7S (simulation batch 103 + Pass 7 roll-up): the roster comes
+    // from the agency's staff memberships — not from training_requirements.
+    // The old requirements-derived roster hid exactly the people this page
+    // exists to flag: a new hire with no training rows yet was invisible,
+    // so the Training page printed "Everyone is cleared" over an empty
+    // table while that staffer's own page said NOT CLEARED (parity with
+    // LocalApi; the same roster fix as PR #229, carried here so the
+    // verdict surfaces agree whichever lands first).
+    const { data: memberRows, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
       .eq("agency_id", session.agencyId);
-    if (siteId) query = query.eq("site_id", siteId);
-    const { data, error } = await query;
-    throwIf(error, "Could not load staff training.");
-    const userIds = [...new Set((data ?? []).map((row) => String(row.user_id)))];
+    throwIf(memberError, "Could not load staff training.");
+    const memberSiteIds = new Map<string, string[]>();
+    for (const row of (memberRows ?? []) as Record<string, unknown>[]) {
+      const userId = String(row.user_id);
+      const memberSiteId = (row.site_id as string | null) ?? null;
+      if (siteId && memberSiteId !== siteId) continue;
+      const list = memberSiteIds.get(userId) ?? [];
+      if (memberSiteId && !list.includes(memberSiteId)) list.push(memberSiteId);
+      memberSiteIds.set(userId, list);
+    }
+    const userIds = [...memberSiteIds.keys()];
+    // Names for membership homes, used by rows whose training profile
+    // carries no checklist sites yet (training not assigned).
+    const homeSiteIds = [...new Set([...memberSiteIds.values()].flat())];
+    const { data: homeSiteRows } = homeSiteIds.length
+      ? await this.client.from("sites").select("id, name").in("id", homeSiteIds)
+      : { data: [] as { id: string; name: string }[] };
+    const homeSiteNameById = new Map(
+      ((homeSiteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+    );
+    const filteredSiteName = siteId ? await this.siteName(siteId) : null;
     const rows: StaffClearanceRow[] = [];
     for (const userId of userIds) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        siteName: siteId ? (profile.siteNames[0] ?? "Unknown site") : profile.siteNames.join(", ") || "—",
+        // The row's site label never goes blank: checklist sites first,
+        // then the staffer's membership homes, and a staffer with neither
+        // is named as what they are — "No site assigned" — instead of a
+        // bare dash that hides the unassigned group (batch 103).
+        siteName: siteId
+          ? (filteredSiteName ?? "Unknown site")
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : (memberSiteIds.get(userId) ?? [])
+                .map((id) => homeSiteNameById.get(id) ?? "Unknown site")
+                .join(", ") || "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,

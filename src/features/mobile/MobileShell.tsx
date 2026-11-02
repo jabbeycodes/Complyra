@@ -935,6 +935,7 @@ export default function MobileShell({
             api={api}
             session={session}
             onOpenFullHub={() => nav.openPage("Employee Hub")}
+            onOpenHubTab={nav.openHubTab}
             startSection={hubStartSection}
           />
         )}
