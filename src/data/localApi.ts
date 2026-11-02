@@ -1961,6 +1961,14 @@ export interface WorkspaceView {
     role: string;
     site: string;
     siteId: string | null;
+    /**
+     * The staff member's membership-home site NAME, resolved against the
+     * full agency site set (not the viewer's access-scoped site list) —
+     * directory information the Binder Board uses to label a colleague's
+     * home. Null when the member has no home site, or (hosted) when the
+     * site's row is not readable by this viewer.
+     */
+    siteName: string | null;
     email: string;
     username: string;
     appRole: AppRole;
@@ -3135,6 +3143,16 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         role: roleLabel(membership.roleKey ?? membership.role, profile.jobTitle),
         site: site?.name ?? "Agency-wide",
         siteId: membership.siteId,
+        // Home-site NAME from the full agency site set: the viewer's
+        // access-scoped `sites` list above must not decide whether a
+        // colleague "has" a home (the Binder Board's "No home assigned"
+        // defect — a colleague at a house the viewer cannot open still
+        // has that home).
+        siteName: membership.siteId
+          ? (store.db.sites.find(
+              (s) => s.id === membership.siteId && s.agencyId === session.agencyId,
+            )?.name ?? null)
+          : null,
         email: profile.email,
         username: profile.username,
         appRole: membership.role,

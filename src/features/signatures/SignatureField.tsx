@@ -17,6 +17,9 @@ interface BaseFieldProps {
   documentId: string;
   fieldName: string;
   label: string;
+  /** The document's display title — the tamper seal names it when the
+   *  signature no longer verifies, so the alert is actionable. */
+  documentTitle?: string;
   /** Builds the canonical signable CONTENT of the document (no signature fields). */
   getDocumentPayload: () => object;
   /** Hide the sign action entirely (e.g. the viewer may never sign this field). */
@@ -48,6 +51,7 @@ function BaseSignatureField({
   documentId,
   fieldName,
   label,
+  documentTitle,
   getDocumentPayload,
   canAct = true,
   cantActReason,
@@ -143,6 +147,7 @@ function BaseSignatureField({
           documentId={documentId}
           fieldName={fieldName}
           getDocumentPayload={getDocumentPayload}
+          documentTitle={documentTitle}
         />
       ) : legacySigned ? (
         <div className="sig-stamp">
@@ -212,6 +217,7 @@ function SigStamp({
   documentId,
   fieldName,
   getDocumentPayload,
+  documentTitle,
 }: {
   event: SignatureEvent;
   kind: "signature" | "initials";
@@ -219,6 +225,7 @@ function SigStamp({
   documentId: string;
   fieldName: string;
   getDocumentPayload: () => object;
+  documentTitle?: string;
 }) {
   const { api } = useData();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -263,6 +270,7 @@ function SigStamp({
         documentId={documentId}
         fieldName={fieldName}
         getDocumentPayload={getDocumentPayload}
+        documentTitle={documentTitle}
       />
     </div>
   );

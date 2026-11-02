@@ -35,6 +35,48 @@ import {
 
 const ANSWERS: ChecklistAnswer[] = ["Y", "N", "N/A"];
 
+/**
+ * Raw database / runtime error fragments. The hosted API passes PostgREST
+ * messages through verbatim (e.g. `new row violates row-level security
+ * policy for table "hm_weekly_checklists"` — simulation pass 16, batch
+ * 213), and this page used to print them straight to the house manager.
+ * A message carrying any of these fragments is an internal fault, not
+ * something the HM can act on, so the surface shows its own human
+ * wording instead. Deliberate app messages (the API's own validation
+ * sentences) contain none of these and pass through untouched.
+ */
+const RAW_ERROR_FRAGMENTS = [
+  "row-level security",
+  "permission denied",
+  "violates row-level",
+  "violates foreign key",
+  "violates check constraint",
+  "duplicate key",
+  "null value in column",
+  "pgrst",
+  "jwt",
+  "relation \"",
+  "column \"",
+  "cannot read properties",
+  "is not a function",
+  "undefined is not",
+];
+
+/** Human wording for a checklist failure — never the raw error text. */
+export function checklistErrorMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : "";
+  if (!message) return fallback;
+  const lower = message.toLowerCase();
+  if (RAW_ERROR_FRAGMENTS.some((fragment) => lower.includes(fragment))) {
+    return fallback;
+  }
+  return message;
+}
+
+const LOAD_ERROR_TEXT =
+  "Could not load your weekly checklist. Reload the page, and tell your program manager if it keeps happening.";
+const SAVE_ERROR_TEXT = "That change could not be saved. Try again.";
+
 function statusBadge(status: HmWeeklyChecklist["status"]) {
   if (status === "open") return "Open";
   if (status === "submitted") return "Submitted";
@@ -116,7 +158,7 @@ export default function HmWeeklyChecklistPage() {
         setLists(rows);
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(checklistErrorMessage(err, LOAD_ERROR_TEXT));
     } finally {
       setLoading(false);
     }
@@ -136,7 +178,7 @@ export default function HmWeeklyChecklistPage() {
       await refresh();
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(checklistErrorMessage(err, SAVE_ERROR_TEXT));
     }
   }
 
@@ -174,7 +216,9 @@ export default function HmWeeklyChecklistPage() {
         </p>
       )}
       {loading && <p>Loading your checklist…</p>}
-      {!loading && !openList && (
+      {/* A failed load must not claim there is no checklist — the page
+          does not know that; it only knows the load failed (error above). */}
+      {!loading && !openList && !error && (
         <section className="panel">
           <h2>No open checklist for this week</h2>
           <p>
@@ -375,6 +419,7 @@ export default function HmWeeklyChecklistPage() {
             documentId={openList.id}
             fieldName="hm_signature"
             label="HM signature"
+            documentTitle={`Weekly checklist — week of ${weekRangeLabel(openList.weekOf)}`}
             actionLabel="Sign & submit as {name}"
             getDocumentPayload={() => hmChecklistPayload(openList)}
             canAct={session?.userId === openList.assignedToUserId}

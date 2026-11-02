@@ -15,6 +15,13 @@
  * only (certificates.manage or the administrator/HR roles — the same
  * gate the template table's RLS write policy uses).
  *
+ * Totals grammar (pass 16 fix): the card grid renders the staff list
+ * the hub passed in (house-scoped for house-scoped viewers), but the
+ * headline totals pool over EVERY issued binder in the agency
+ * (store.listBinders), so the board's denominator is one population
+ * computed identically for every viewer — never a function of which
+ * houses the current viewer happens to see.
+ *
  * Visual restyle (2026-10-30): the board leads with the platform's
  * compliance-donut grammar — an agency donut, pressure-point stat
  * tiles, section completion bars, and a gap breakdown — over the same
@@ -98,6 +105,12 @@ export function BinderBoardTab({
 
   const [view, setView] = useState<"board" | "templates">("board");
   const [rows, setRows] = useState<BoardRow[] | null>(null);
+  // Derived binders for agency staff NOT in the card rows (the totals
+  // population — see the load effect). Cards never render for these;
+  // they exist so the headline totals describe the agency.
+  const [populationExtras, setPopulationExtras] = useState<
+    { derived: DerivedBinder; gaps: DerivedBinderItem[] }[]
+  >([]);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -111,41 +124,47 @@ export function BinderBoardTab({
           store.listDocumentAcks().catch(() => []),
         ]);
         const titleById = new Map(docs.map((d) => [d.id, d.title]));
+        const deriveFor = async (
+          staffId: string,
+          binderRow: Parameters<typeof deriveBinder>[0],
+        ): Promise<DerivedBinder> => {
+          const [wallet, contactRow, evidence, profile] = await Promise.all([
+            store.listBinderDocuments(staffId),
+            store.getEmergencyContact(staffId),
+            store.getComplianceEvidence(staffId).catch(
+              (): ComplianceEvidence => ({
+                certs: [],
+                trainings: [],
+                delegations: [],
+                docAcks: [],
+              }),
+            ),
+            api.getStaffTrainingProfile(staffId).catch(() => null),
+          ]);
+          const bundle: BinderEvidence = {
+            certificates: evidence.certs.map((c) => ({
+              certName: c.name,
+              expiresOn: c.expiresOn,
+            })),
+            trainingProfile: profile,
+            documentAcks: acks
+              .filter((a) => a.staffId === staffId)
+              .map((a) => ({
+                docKey: titleById.get(a.docId) ?? a.docId,
+                ackedAt: a.ackedAt,
+              })),
+            walletDocuments: wallet,
+            emergencyContact: contactRow,
+          };
+          return deriveBinder(binderRow, bundle, todayIso());
+        };
         const loaded = await Promise.all(
           staffList.map(async (entry) => {
-            const [binderRow, wallet, contactRow, evidence, profile] =
-              await Promise.all([
-                store.getBinder(entry.userId, entry.roleKey),
-                store.listBinderDocuments(entry.userId),
-                store.getEmergencyContact(entry.userId),
-                store
-                  .getComplianceEvidence(entry.userId)
-                  .catch(
-                    (): ComplianceEvidence => ({
-                      certs: [],
-                      trainings: [],
-                      delegations: [],
-                      docAcks: [],
-                    }),
-                  ),
-                api.getStaffTrainingProfile(entry.userId).catch(() => null),
-              ]);
-            const bundle: BinderEvidence = {
-              certificates: evidence.certs.map((c) => ({
-                certName: c.name,
-                expiresOn: c.expiresOn,
-              })),
-              trainingProfile: profile,
-              documentAcks: acks
-                .filter((a) => a.staffId === entry.userId)
-                .map((a) => ({
-                  docKey: titleById.get(a.docId) ?? a.docId,
-                  ackedAt: a.ackedAt,
-                })),
-              walletDocuments: wallet,
-              emergencyContact: contactRow,
-            };
-            const derived = deriveBinder(binderRow, bundle, todayIso());
+            const binderRow = await store.getBinder(
+              entry.userId,
+              entry.roleKey,
+            );
+            const derived = await deriveFor(entry.userId, binderRow);
             return {
               entry,
               derived,
@@ -154,6 +173,28 @@ export function BinderBoardTab({
             } satisfies BoardRow;
           }),
         );
+        // Totals population: EVERY issued binder in the agency, not just
+        // the binders of the staff list this viewer was handed. That list
+        // is scoped to the viewer's houses, so pooling the totals over it
+        // made the board's denominator a function of who was looking —
+        // the whole agency for an agency-wide viewer, one house's slice
+        // for a house manager (simulation pass 16, batch 212). The card
+        // rows below stay scoped exactly as before; only the totals
+        // grammar is population-wide. (Test doubles that predate
+        // listBinders simply contribute no extras.)
+        const rowIds = new Set(staffList.map((e) => e.userId));
+        const issued =
+          typeof store.listBinders === "function"
+            ? await store.listBinders()
+            : [];
+        const extras = await Promise.all(
+          issued
+            .filter((binderRow) => !rowIds.has(binderRow.staffId))
+            .map(async (binderRow) => {
+              const derived = await deriveFor(binderRow.staffId, binderRow);
+              return { derived, gaps: binderGaps(derived) };
+            }),
+        );
         if (cancelled) return;
         loaded.sort(
           (a, b) =>
@@ -161,6 +202,7 @@ export function BinderBoardTab({
             b.gaps.length - a.gaps.length ||
             a.entry.fullName.localeCompare(b.entry.fullName),
         );
+        setPopulationExtras(extras);
         setRows(loaded);
       } catch (err) {
         if (cancelled) return;
@@ -180,34 +222,66 @@ export function BinderBoardTab({
     return rows;
   }, [rows, filter]);
 
+  // The board's totals population: card rows + every other issued binder
+  // in the agency. One population, computed identically for every viewer.
+  const population = useMemo(() => {
+    if (!rows) return null;
+    return [
+      ...rows.map((r) => ({ derived: r.derived, gaps: r.gaps })),
+      ...populationExtras,
+    ];
+  }, [rows, populationExtras]);
+
   const totals = useMemo(() => {
-    if (!rows) return { incomplete: 0, awaiting: 0 };
+    if (!population) return { incomplete: 0, awaiting: 0 };
     return {
-      incomplete: rows.filter((r) => r.gaps.length > 0).length,
-      awaiting: rows.reduce((n, r) => n + r.derived.awaitingVerification, 0),
+      incomplete: population.filter((r) => r.gaps.length > 0).length,
+      awaiting: population.reduce(
+        (n, r) => n + r.derived.awaitingVerification,
+        0,
+      ),
     };
-  }, [rows]);
+  }, [population]);
 
   // Dashboard aggregates over EVERY in-scope binder (the filters below
   // narrow only the card grid, exactly as the summary line always did).
   const summary = useMemo(
-    () => (rows ? summarizeBinderBoard(rows.map((r) => r.derived)) : null),
-    [rows],
+    () =>
+      population
+        ? summarizeBinderBoard(population.map((r) => r.derived))
+        : null,
+    [population],
   );
   const sectionRows = useMemo(
-    () => (rows ? binderSectionCompletion(rows.map((r) => r.derived)) : []),
-    [rows],
+    () =>
+      population
+        ? binderSectionCompletion(population.map((r) => r.derived))
+        : [],
+    [population],
   );
   const gapData = useMemo(
     () =>
-      rows
-        ? binderGapBreakdown(rows.map((r) => r.derived))
+      population
+        ? binderGapBreakdown(population.map((r) => r.derived))
         : { slices: [], totalGaps: 0 },
-    [rows],
+    [population],
   );
 
-  const siteName = (siteId: string | null) =>
-    sites.find((s) => s.id === siteId)?.name ?? "No home assigned";
+  // A person's home is their MEMBERSHIP home site (the platform's rule:
+  // membership home counts, exactly like an assignment). The label comes
+  // from the person's own staff record first — never from the viewer's
+  // site list alone: a colleague whose home house the viewer cannot open
+  // still HAS that home, so the old fallback ("No home assigned" whenever
+  // the site was missing from the viewer's list) branded every
+  // out-of-house colleague unassigned (pass 16, batches 212–213).
+  const homeLabel = (entry: HubStaffEntry) => {
+    if (!entry.siteId) return "No home assigned";
+    return (
+      entry.siteName ??
+      sites.find((s) => s.id === entry.siteId)?.name ??
+      "Another home"
+    );
+  };
   const roleName = (roleKey: string) =>
     ROLE_TEMPLATE_BY_KEY[roleKey as keyof typeof ROLE_TEMPLATE_BY_KEY]?.name ??
     roleKey;
@@ -255,7 +329,7 @@ export function BinderBoardTab({
           {rows && (
             <>
               <p className="binder-board-summary">
-                {rows.length} staff · {totals.incomplete} incomplete ·{" "}
+                {population?.length ?? rows.length} staff · {totals.incomplete} incomplete ·{" "}
                 {totals.awaiting} document{totals.awaiting === 1 ? "" : "s"}{" "}
                 awaiting verification
               </p>
@@ -385,7 +459,7 @@ export function BinderBoardTab({
                       row={row}
                       expanded={expanded}
                       roleLabel={roleName(row.entry.roleKey)}
-                      homeLabel={siteName(row.entry.siteId)}
+                      homeLabel={homeLabel(row.entry)}
                       onToggle={() =>
                         setExpandedId(expanded ? null : row.entry.userId)
                       }

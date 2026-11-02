@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { createApi, isSupabaseConfigured, type ComplyraApi, type WorkspaceView } from "./index";
 import type { LoginInput, SessionUser } from "./types";
 
-interface DataContextValue {
+export interface DataContextValue {
   api: ComplyraApi;
   session: SessionUser | null;
   workspace: WorkspaceView | null;
@@ -16,7 +16,8 @@ interface DataContextValue {
   refresh: () => Promise<void>;
 }
 
-const DataContext = createContext<DataContextValue | null>(null);
+/** Exported so component tests can stub the data layer (jsdom harnesses). */
+export const DataContext = createContext<DataContextValue | null>(null);
 
 function asErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;

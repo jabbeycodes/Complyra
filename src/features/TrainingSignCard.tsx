@@ -102,6 +102,7 @@ export default function TrainingSignCard({
         documentId={documentId}
         fieldName="staff_sign"
         label="Staff signature"
+        documentTitle={`Training checklist — ${row.checklist.staffName}`}
         getDocumentPayload={buildPayload}
         canAct={canSignStaff && readyToSign}
         cantActReason={

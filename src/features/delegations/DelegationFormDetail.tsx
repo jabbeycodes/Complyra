@@ -144,6 +144,7 @@ export default function DelegationFormDetail({
         documentId={item.id}
         fieldName="rn_signature"
         label="Delegating RN signature (signs first)"
+        documentTitle={item.title}
         getDocumentPayload={() =>
           delegationFormPayload({
             obligationId: item.id,

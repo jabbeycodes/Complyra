@@ -524,6 +524,11 @@ export interface HrStore {
    *  template for their role (preset when one exists, else the agency
    *  default). Existing binders return their own snapshot untouched. */
   getBinder(staffId: string, roleKey?: string): Promise<StaffBinder>;
+  /** Every issued binder in the agency (no creation on read). The Binder
+   *  Board pools its headline totals over this population so the totals
+   *  describe the agency, not whichever staff list the current viewer's
+   *  hub happened to pass in. */
+  listBinders(): Promise<StaffBinder[]>;
   /** Wallet documents filed against a staff member's binder. */
   listBinderDocuments(staffId: string): Promise<BinderDocument[]>;
   /** Upload (or replace) the wallet file for one document item. A fresh
@@ -1796,6 +1801,15 @@ class SupabaseHrStore implements HrStore {
       .single();
     throwIf(insertError, "Could not open the binder");
     return mapBinder(created as Record<string, unknown>);
+  }
+
+  async listBinders(): Promise<StaffBinder[]> {
+    const { data, error } = await this.client
+      .from("hr_binders")
+      .select("*")
+      .eq("agency_id", this.agencyId);
+    throwIf(error, "Could not load binders");
+    return (data ?? []).map((r) => mapBinder(r as Record<string, unknown>));
   }
 
   async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {
@@ -5295,6 +5309,12 @@ class LocalHrStore implements HrStore {
       b.binders[staffId] = binder;
     });
     return binder;
+  }
+
+  async listBinders(): Promise<StaffBinder[]> {
+    return Object.values(this.mergedBinders()).filter(
+      (b) => b.agencyId === this.agencyId,
+    );
   }
 
   async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {

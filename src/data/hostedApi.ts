@@ -3114,6 +3114,9 @@ export class HostedApi implements ComplyraApi {
           appRole: asRole(membership.role as string),
           roleKey: String(membership.role_key ?? membership.role),
           siteId: (membership.site_id as string | null) ?? null,
+          siteName: membership.site_id
+            ? (siteById[membership.site_id as string]?.name ?? null)
+            : null,
           expiresOn: membership.expires_on
             ? String(membership.expires_on).slice(0, 10)
             : null,

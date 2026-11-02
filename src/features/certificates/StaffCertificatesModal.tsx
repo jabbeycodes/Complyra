@@ -102,6 +102,7 @@ export default function StaffCertificatesModal({
                   documentId={cert.id}
                   fieldName="staff_ack"
                   label="Staff acknowledgment"
+                  documentTitle={cert.certName}
                   getDocumentPayload={() => certificatePayload(cert)}
                   canAct={session?.userId === cert.userId}
                 />

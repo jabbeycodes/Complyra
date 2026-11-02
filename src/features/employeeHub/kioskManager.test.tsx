@@ -476,6 +476,62 @@ describe("PunchRulesConfig", () => {
     await assert.rejects(() => kiosk.getPunchRules(), /still being set up/);
   });
 
+  it("adaptKioskStore binds class-store methods so `this.client` resolves (pass 16 batch 212)", async () => {
+    // SupabaseHrStore / LocalHrStore are CLASSES whose kiosk methods read
+    // `this.client` / `this.load()`. The adapter used to hand the bare
+    // method to components, so the call ran with `this` undefined and the
+    // Missed-punch review rendered the raw exception "Cannot read
+    // properties of undefined (reading 'client')" (batches 33–35, 212).
+    class ClassStore {
+      private client = {
+        marker: "supabase-client",
+        reports: [
+          {
+            id: "mpr-1",
+            agency_id: "agency-1",
+            staff_id: "staff-1",
+            site_id: "site-1",
+            work_date: "2026-10-30",
+            claimed_in_at: "2026-10-30T13:05:00Z",
+            claimed_out_at: null,
+            reason: "Forgot to clock in",
+            status: "pending",
+            reviewed_by: null,
+            reviewed_at: null,
+            review_note: null,
+            created_at: "2026-10-30T15:00:00Z",
+          },
+        ],
+      };
+      async listMissedPunchReports() {
+        // Reading through `this` is the whole point: unbound, this line
+        // throws TypeError "Cannot read properties of undefined".
+        return this.client.reports;
+      }
+      async getPunchRules() {
+        throw new TypeError(
+          "Cannot read properties of undefined (reading 'client')",
+        );
+      }
+    }
+    const kiosk = adaptKioskStore(new ClassStore() as unknown as HrStore);
+    const reports = await kiosk.listMissedPunchReports({});
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].id, "mpr-1");
+    assert.equal(reports[0].staffId, "staff-1");
+    // A genuine store-layer TypeError must surface as plain language,
+    // never as the raw exception text the sections used to render.
+    await assert.rejects(
+      () => kiosk.getPunchRules(),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /could not be loaded/i);
+        assert.doesNotMatch(err.message, /Cannot read properties/);
+        return true;
+      },
+    );
+  });
+
   it("hr.ts DEFAULT_PUNCH_RULES carries the migration defaults", () => {
     assert.equal(DEFAULT_PUNCH_RULES.roundingMinutes, 0);
     assert.equal(DEFAULT_PUNCH_RULES.roundingApplies, "payroll");
