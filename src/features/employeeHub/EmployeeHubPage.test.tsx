@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
+import { EmployeeHubShell, defaultTimecardStaffId, describeOvertimeRules, hubRowActionScope, rowActionAllowed, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
 import {
   DEFAULT_BINDER_TEMPLATE,
@@ -822,6 +822,89 @@ describe("Staffing tab", () => {
     const readOnlyHtml = renderBoard(false);
     assert.ok(!readOnlyHtml.includes("Deactivate"), "no deactivate control");
     assert.ok(!readOnlyHtml.includes("Edit staffing pattern for"), "no edit control");
+  });
+});
+
+describe("wave 7T-3 row-action scope (batches 174/187)", () => {
+  const hm = makeSession({
+    userId: "user-alex",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: "site-1",
+    permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.manage_staffing": true },
+  });
+
+  it("an HM's row actions cover only their own house", () => {
+    const scope = hubRowActionScope(hm, staffList);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-1"), true, "own house row actionable");
+    assert.equal(rowActionAllowed(scope, "site-2"), false, "other house row read-only");
+    assert.equal(rowActionAllowed(scope, null), false, "unassigned/agency row reserved for agency-wide roles");
+  });
+
+  it("an HM's assignment sites join the row-action scope", () => {
+    const scope = hubRowActionScope(hm, staffList, ["site-2"]);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-2"), true, "assigned house row actionable");
+  });
+
+  it("a DSP is site-scoped the same way", () => {
+    const scope = hubRowActionScope(dspSession, staffList);
+    assert.ok(scope, "DSP is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-1"), true);
+    assert.equal(rowActionAllowed(scope, "site-2"), false);
+  });
+
+  it("agency-wide roles keep row actions on every row", () => {
+    for (const [roleKey, perms] of [
+      ["program_manager", PM_PERMISSIONS],
+      ["administrator", { "hub.access": true }],
+      ["hr", { "hub.access": true }],
+      ["nurse", { "hub.access": true }],
+      ["auditor", { "hub.access": true }],
+      ["compliance_admin", { "hub.access": true }],
+    ] as const) {
+      const s = makeSession({ roleKey, permissions: perms });
+      const scope = hubRowActionScope(s, staffList);
+      assert.equal(scope, null, `${roleKey} unscoped`);
+      assert.equal(rowActionAllowed(scope, "site-2"), true, `${roleKey} acts on any house`);
+      assert.equal(rowActionAllowed(scope, null), true, `${roleKey} acts on agency rows`);
+    }
+  });
+
+  it("the staffing board gates row controls per pattern when canActOnPattern is given", () => {
+    const html = renderToStaticMarkup(
+      <StaffingBoard
+        patterns={BOARD_PATTERNS}
+        staffList={staffList}
+        sites={sites}
+        editable={true}
+        canActOnPattern={(p) => rowActionAllowed(new Set(["site-1"]), p.siteId)}
+        loading={false}
+        error=""
+        onEdit={() => {}}
+        onToggleActive={() => {}}
+      />,
+    );
+    // pat-2 sits at site-1 (actionable); pat-1 is unassigned (agency row).
+    assert.ok(html.includes("Edit staffing pattern for Sam Chen"), "in-scope pattern keeps edit");
+    assert.ok(!html.includes("Edit staffing pattern for Alex Rivera"), "out-of-scope pattern loses edit");
+    assert.equal(html.split("Deactivate").length - 1, 1, "only the in-scope pattern keeps deactivate");
+    // Rows themselves stay visible either way (display scoping is #213's concern).
+    assert.ok(html.includes("Demo Individual A"), "out-of-scope row still renders");
+  });
+});
+
+describe("wave 7T-3 timecards picker default (batch 187)", () => {
+  it("defaults to the viewer themselves, not the first roster row", () => {
+    const sam = makeSession({ userId: "user-sam", roleKey: "dsp", role: "dsp" });
+    assert.equal(staffList[0].userId, "user-pat", "fixture: viewer is not the first row");
+    assert.equal(defaultTimecardStaffId(sam, staffList), "user-sam", "own timecard by default");
+  });
+
+  it("a viewer who is not on the roster gets no preselection", () => {
+    const outsider = makeSession({ userId: "user-outsider", roleKey: "administrator", role: "administrator" });
+    assert.equal(defaultTimecardStaffId(outsider, staffList), "", "never silently the first roster row");
   });
 });
 
