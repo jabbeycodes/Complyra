@@ -26,7 +26,6 @@ test("a DSP sees the daily-driver tiles and nothing they cannot use", () => {
     }),
   );
   assert.deepEqual(tiles, [
-    "medications",
     "ispData",
     "health",
     "quickLog",
@@ -56,14 +55,18 @@ test("an auditor gets read surfaces but no time clock without hub access", () =>
       canPage: (page) => page === "Appointments" || page === "Supply forecast",
     }),
   );
-  assert.ok(tiles.includes("medications"));
+  // No standalone Medications tile for ANY role (founder directive,
+  // 2026-10-31): medications live under Health — the auditor reaches
+  // the MAR through the Health tile's Medications section, read-only.
+  assert.ok(!(tiles as string[]).includes("medications"));
   assert.ok(!(tiles as string[]).includes("shiftNotes"));
   assert.ok(tiles.includes("ispData"));
   // Health is a read surface for auditors too (statuses, no log actions) —
   // the tile gate mirrors the chart's canViewHealthTrack.
   assert.ok(tiles.includes("health"));
   assert.ok(tiles.includes("appointments"));
-  // No separate Med Count tile: the count lives under Medications.
+  // No separate Med Count tile either: the count lives in the MAR,
+  // under Medications, under Health.
   assert.ok(!tiles.includes("medCount" as never));
   assert.ok(!tiles.includes("timeClock"));
   // Messaging is staff communication, not a record surface: no tile.
@@ -171,7 +174,7 @@ test("the quick log tile opens when the role records in any field-log domain or 
   assert.ok(!ids(ctx({ roleKey: "hr", permissions: {} })).includes("quickLog"));
 });
 
-test("tile order is daily-driver order, medications first", () => {
+test("tile order is daily-driver order, ISP data first, no medications tile", () => {
   const tiles = mobileTiles(
     ctx({
       roleKey: "administrator",
@@ -183,11 +186,10 @@ test("tile order is daily-driver order, medications first", () => {
       canPage: () => true,
     }),
   );
-  assert.equal(tiles[0].id, "medications");
+  assert.equal(tiles[0].id, "ispData");
   assert.deepEqual(
     tiles.map((t) => t.id),
     [
-      "medications",
       "ispData",
       "health",
       "quickLog",
@@ -208,6 +210,43 @@ test("tile order is daily-driver order, medications first", () => {
     assert.ok(tile.label.length > 0);
     assert.ok(tile.hint.length > 0);
   }
+});
+
+test("no role gets a standalone medications tile — Health is the meds door", () => {
+  // Founder directive (2026-10-31): medications live UNDER Health.
+  // Every role that can see meds (canSeeMeds — all but HR) reaches the
+  // MAR through the Health tile's Medications section instead.
+  for (const roleKey of [
+    "administrator",
+    "compliance_admin",
+    "program_manager",
+    "house_manager",
+    "dsp",
+    "nurse",
+    "hr",
+    "auditor",
+  ]) {
+    const tiles = ids(
+      ctx({
+        roleKey,
+        permissions: {
+          "hub.access": true,
+          "individuals.view": true,
+          "messages.use": true,
+        },
+        canPage: () => true,
+      }),
+    );
+    assert.ok(
+      !(tiles as string[]).includes("medications"),
+      `${roleKey} must not get a medications tile`,
+    );
+  }
+  // The Health tile's hint says it covers medications.
+  const health = mobileTiles(
+    ctx({ roleKey: "dsp", permissions: { "individuals.view": true } }),
+  ).find((tile) => tile.id === "health");
+  assert.ok(health && /medications/i.test(health.hint));
 });
 
 test("phase 4b tiles follow their desktop gates exactly", () => {

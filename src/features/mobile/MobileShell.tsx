@@ -14,7 +14,6 @@ import {
   LogOut,
   MessageSquare,
   Monitor,
-  Pill,
   Search,
   Users,
   Wallet,
@@ -89,7 +88,6 @@ export type ShellView =
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
-  medications: Pill,
   ispData: ClipboardList,
   health: HeartPulse,
   quickLog: Zap,
@@ -359,9 +357,6 @@ export default function MobileShell({
 
   const openTile = (id: MobileTileId) => {
     switch (id) {
-      case "medications":
-        setView("mar");
-        break;
       case "ispData":
         setIspPersonId(null);
         setIspKey((value) => value + 1);
@@ -417,7 +412,11 @@ export default function MobileShell({
   };
 
   const openCategory = (id: TrackingCategoryId) => {
-    if (id === "medications") setView("mar");
+    // Medications live under Health (founder directive, 2026-10-31):
+    // the tracking card's Medications door lands on the Health surface,
+    // whose Medications section opens the MAR. The MAR itself is only
+    // ever entered from within Health (or Quick log's Health flow).
+    if (id === "medications") setView("health");
     else if (id === "ispData") openTile("ispData");
     else if (id === "checklists") nav.openPage("Weekly checklist");
   };
@@ -434,7 +433,6 @@ export default function MobileShell({
     }
     if (id === "home") setView("home");
     else if (id === "tasks") setView("tasks");
-    else if (id === "meds") setView("mar");
     else if (id === "people") setView("people");
   };
 
@@ -641,7 +639,7 @@ export default function MobileShell({
                 queueItems={homeQueueItems}
                 onOpenCategory={openCategory}
                 onOpenTasks={() => setView("tasks")}
-                onOpenMar={() => setView("mar")}
+                onOpenMedications={() => setView("health")}
                 onOpenQueueItem={openQueueItem}
                 yourShift={ownShiftStrip}
                 complianceBand={
