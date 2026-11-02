@@ -213,33 +213,40 @@ export function MobileComplianceBandHouse({
   row: HouseComplianceRow;
   onOpen: (siteId: string) => void;
 }) {
+  const hasDonut = houseHasDonut(row);
   return (
     <button
       type="button"
       className="msh-band-house"
       onClick={() => onOpen(row.siteId)}
-      aria-label={`${row.siteName}: ${row.score}% current, ${row.done} of ${row.total} complete. Switch the mobile view to this home`}
+      aria-label={
+        hasDonut
+          ? `${row.siteName}: ${row.score}% current, ${row.done} of ${row.total} complete. Switch the mobile view to this home`
+          : `${row.siteName}: no requirements tracked yet. Switch the mobile view to this home`
+      }
     >
       <span className="msh-band-house-name">{row.siteName}</span>
-      {houseHasDonut(row) ? (
-        <HouseMiniDonut slices={houseSlices(row)} />
+      {hasDonut ? (
+        <>
+          <HouseMiniDonut slices={houseSlices(row)} />
+          <span className="msh-band-house-score">
+            <strong>{row.score}%</strong> current
+          </span>
+          <small>
+            {row.done} of {row.total} complete
+          </small>
+          <small className="msh-status-text">
+            {row.overdue > 0
+              ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
+              : "Nothing overdue"}
+            {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
+          </small>
+        </>
       ) : (
         <span className="msh-band-house-empty">
           No requirements are tracked for this house yet.
         </span>
       )}
-      <span className="msh-band-house-score">
-        <strong>{row.score}%</strong> current
-      </span>
-      <small>
-        {row.done} of {row.total} complete
-      </small>
-      <small className="msh-status-text">
-        {row.overdue > 0
-          ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-          : "Nothing overdue"}
-        {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
-      </small>
     </button>
   );
 }

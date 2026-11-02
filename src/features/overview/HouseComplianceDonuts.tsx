@@ -88,18 +88,22 @@ export default function HouseComplianceDonuts({
               >
                 {row.siteName}
               </button>
-              <Badge status={row.overdue ? "Needs attention" : "On track"} />
+              {row.total + row.review > 0 && (
+                <Badge status={row.overdue ? "Needs attention" : "On track"} />
+              )}
             </div>
-            <p className="house-compliance-score">
-              <strong>{row.score}%</strong> current · {row.done} of {row.total}{" "}
-              complete
-              {row.overdue > 0
-                ? ` · ${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-                : " · nothing overdue"}
-              {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
-            </p>
             {row.total + row.review > 0 ? (
-              <StatusMixDonut items={row.items} />
+              <>
+                <p className="house-compliance-score">
+                  <strong>{row.score}%</strong> current · {row.done} of{" "}
+                  {row.total} complete
+                  {row.overdue > 0
+                    ? ` · ${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
+                    : " · nothing overdue"}
+                  {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
+                </p>
+                <StatusMixDonut items={row.items} />
+              </>
             ) : (
               <p className="house-compliance-empty">
                 No requirements are tracked for this house yet.
