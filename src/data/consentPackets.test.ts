@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
-import { PACKET_ITEMS, validatePacketSubmission, packetStatus, packetOutstanding, tokenHash, type PacketChoices, type PacketSignature } from './consentPackets';
+import { PACKET_ITEMS, validatePacketSubmission, packetStatus, packetOutstanding, tokenHash, packetFile, PACKET_EVIDENCE_MAX_BYTES, type PacketChoices, type PacketSignature } from './consentPackets';
 import { todayStamp } from './status';
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 const choices: PacketChoices = Object.fromEntries(PACKET_ITEMS.map(i => [i.key, i.key === 'media' ? 'group' : i.key === 'photograph' ? 'no' : 'yes']));
@@ -97,6 +97,29 @@ test('packet signing needs every explicit choice, authority and witness; PDF car
     assert.equal(PACKET_ITEMS.length, 9);
 });
 
+test('packetFile caps signed evidence at 4 MB and checks content against type', async () => {
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], 'scan.pdf', { type: 'application/pdf' });
+    const png = new File([new Uint8Array([137, 80, 78, 71, 13])], 'scan.png', { type: 'image/png' });
+    const jpg = new File([new Uint8Array([255, 216, 255, 224])], 'scan.jpg', { type: 'image/jpeg' });
+    for (const file of [pdf, png, jpg]) {
+        const evidence = await packetFile(file);
+        assert.equal(evidence.name, file.name);
+        assert.equal(evidence.mime, file.type);
+        assert.ok(evidence.base64.length > 0);
+    }
+    // Exactly at the cap is accepted (PDF header plus padding).
+    const atCap = new Uint8Array(PACKET_EVIDENCE_MAX_BYTES);
+    atCap.set([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    assert.equal((await packetFile(new File([atCap], 'full.pdf', { type: 'application/pdf' }))).name, 'full.pdf');
+    // One byte over the cap is refused with the 4 MB message.
+    await assert.rejects(() => packetFile(new File([new Uint8Array(PACKET_EVIDENCE_MAX_BYTES + 1)], 'big.pdf', { type: 'application/pdf' })), /up to 4 MB/);
+    // Wrong types and empty files are refused with the same message.
+    await assert.rejects(() => packetFile(new File(['hello'], 'notes.txt', { type: 'text/plain' })), /up to 4 MB/);
+    await assert.rejects(() => packetFile(new File([], 'empty.pdf', { type: 'application/pdf' })), /up to 4 MB/);
+    // Content must match the declared type.
+    await assert.rejects(() => packetFile(new File(['fake'], 'bad.pdf', { type: 'application/pdf' })), /content must match/);
+    await assert.rejects(() => packetFile(new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], 'bad.png', { type: 'image/png' })), /content must match/);
+});
 test('packet filing supersedes an existing standalone decision and DSPs receive only the replacement', async () => {
     const f = setup();
     const previous = await f.api.saveConsent({individualId:f.person.id,typeId:'media',covers:'No media permission.',giver:'individual',giverName:f.person.fullName,relationship:'Self',outcome:'none',signedOn:todayStamp(),effectiveOn:todayStamp(),reviewOn:'2099-12-31',supersedesId:null});

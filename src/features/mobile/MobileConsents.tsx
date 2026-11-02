@@ -687,7 +687,7 @@ export default function MobileConsents({
                 onSigner={setSigner}
               />
               <label className="msh-field">
-                <span>Signed copy (PDF, PNG, JPEG; up to 10 MB)</span>
+                <span>Signed copy (PDF, PNG, JPEG; up to 4 MB)</span>
                 <input
                   required
                   type="file"
@@ -765,7 +765,7 @@ export default function MobileConsents({
               />
               {rightsCompleting.paper && (
                 <label className="msh-field">
-                  <span>Signed copy (PDF, PNG, JPEG; up to 10 MB)</span>
+                  <span>Signed copy (PDF, PNG, JPEG; up to 4 MB)</span>
                   <input
                     required
                     type="file"
