@@ -145,8 +145,16 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
   for (const row of data.clearance) {
     const site = staffSite.get(row.userId);
     const facts = get(site?.siteId ?? null, site?.siteName ?? "Unassigned");
+    // The verdict keys off clearedForInRatio, not the raw counts: a staffer
+    // with no training assigned has 0 pending / 0 overdue yet is NOT cleared.
+    // The roster now lists those people, so counts alone would score them
+    // "complete" and raise the Overview over staff who are not cleared.
     facts.training.push(
-      row.overdueCount > 0 ? "overdue" : row.pendingCount > 0 ? "incomplete" : "complete",
+      row.clearedForInRatio
+        ? "complete"
+        : row.overdueCount > 0
+          ? "overdue"
+          : "incomplete",
     );
   }
 
@@ -260,7 +268,7 @@ export function CommandCenterView({
         late: list.late ?? list.status === "overdue",
       })),
       training: clearance
-        .filter((row) => row.overdueCount > 0 || row.pendingCount > 0)
+        .filter((row) => !row.clearedForInRatio)
         .map((row) => ({
           id: row.userId,
           staffName: row.fullName,
