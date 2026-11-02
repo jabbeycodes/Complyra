@@ -185,6 +185,18 @@ export function greetingForHour(hour: number): string {
 }
 
 /**
+ * Roles whose membership home IS their working home on the phone: a
+ * house manager runs one home and a DSP works their assigned home, so
+ * landing scoped to the membership home matches the job. Everyone else
+ * who can see several homes (nurse, program manager, administrator,
+ * compliance, HR, auditor) works ACROSS homes — a membership home on
+ * their record is a home base at most, never a silent scope.
+ */
+export function mobileMembershipHomeScopes(roleKey: string): boolean {
+  return roleKey === "house_manager" || roleKey === "dsp";
+}
+
+/**
  * Which home the mobile shell is scoped to. Simulation batch 17: the
  * nurse's phone home briefly listed one house's overdue tasks under the
  * other house's name. The shell used to fall back to `sites[0]` — an
@@ -195,17 +207,28 @@ export function greetingForHour(hour: number): string {
  * (one visible house cannot be the wrong house). Otherwise the scope is
  * unresolved (null) and the shell shows the home picker instead of
  * rendering another house's name and data, even briefly.
+ *
+ * Wave 4A retest (2026-10-31, item 3 FAIL): a nurse whose membership
+ * record DOES carry a home-base site still landed scoped to that house
+ * (Maple) before picking anything — the picker badged it "Current
+ * home", the header named it, and leaving the picker without choosing
+ * rendered that house's data. For multi-home roles the membership home
+ * is not a choice the user made, so it no longer scopes them: only a
+ * remembered pick (or a single visible home) resolves their scope.
+ * Home-anchored roles (house manager, DSP) keep the membership-home
+ * default — that home is the job, not a preselection.
  */
 export function pickMobileScopedSite<T extends { id: string }>(
   sites: readonly T[],
   storedSiteId: string | null,
   sessionSiteId: string | null,
+  roleKey: string,
 ): T | null {
   if (storedSiteId) {
     const stored = sites.find((site) => site.id === storedSiteId);
     if (stored) return stored;
   }
-  if (sessionSiteId) {
+  if (sessionSiteId && mobileMembershipHomeScopes(roleKey)) {
     const home = sites.find((site) => site.id === sessionSiteId);
     if (home) return home;
   }

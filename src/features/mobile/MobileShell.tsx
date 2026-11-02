@@ -184,10 +184,18 @@ export default function MobileShell({
   });
   const storedSite = sites.find((site) => site.id === siteId) ?? null;
   // Scope resolves from the remembered pick or the membership home —
-  // never from list order. With several visible homes and neither source,
-  // the scope stays unresolved and the picker opens instead of rendering
-  // an arbitrary house's name and data (simulation batch 17).
-  const scopedSite = pickMobileScopedSite(sites, siteId, session.siteId);
+  // never from list order. The membership home only scopes home-anchored
+  // roles (house manager, DSP); for multi-home roles (nurse, program
+  // manager, …) it is a home base, not a pick, so with several visible
+  // homes and no remembered pick the scope stays unresolved and the
+  // picker opens instead of rendering an arbitrary house's name and
+  // data (simulation batch 17; wave 4A retest item 3, 2026-10-31).
+  const scopedSite = pickMobileScopedSite(
+    sites,
+    siteId,
+    session.siteId,
+    session.roleKey,
+  );
   // Multi-home users with no remembered home pick one first (the shell's
   // home-first rule); single-home users skip straight in.
   const [view, setView] = useState<ShellView>(() =>
