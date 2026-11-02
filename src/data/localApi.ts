@@ -3454,7 +3454,9 @@ export class LocalApi implements ComplyraApi {
     async signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature) {
         const packet = await this.packetFromToken(token);
         validatePacketSubmission(choices, signer);
-        const pdf = buildConsentPacketPdf(packet.snapshot, choices, signer);
+        const pdf = buildConsentPacketPdf(packet.snapshot, choices, signer, {
+            logoDataUrl: await logoDataUrlFor(this.store, packet.agencyId),
+        });
         const base64 = pdf.output('datauristring').split(',')[1];
         const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
         this.completeLocalPacket(packet, choices, signer, evidence, true);

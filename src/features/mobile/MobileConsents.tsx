@@ -65,12 +65,15 @@ export default function MobileConsents({
   api,
   session,
   person,
+  logoDataUrl,
   onOpenChart,
   onBack,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   person: WorkspaceIndividual;
+  /** Agency logo for the packet PDF headers, when one is configured. */
+  logoDataUrl?: string | null;
   onOpenChart: (name: string) => void;
   onBack: () => void;
 }) {
@@ -223,6 +226,7 @@ export default function MobileConsents({
                               rightsPrintable,
                               person.name,
                               session.agencyName,
+                              { logoDataUrl: logoDataUrl ?? null },
                             ).output("blob") as Blob,
                           )
                         }
@@ -239,6 +243,7 @@ export default function MobileConsents({
                               rightsPrintable,
                               person.name,
                               session.agencyName,
+                              { logoDataUrl: logoDataUrl ?? null },
                             ).output("blob") as Blob,
                             "print",
                           )
@@ -553,6 +558,7 @@ export default function MobileConsents({
                                 packet.snapshot,
                                 packet.choices,
                                 packet.signer,
+                                { logoDataUrl: logoDataUrl ?? null },
                               ).output("blob") as Blob,
                             )
                           }
@@ -569,6 +575,7 @@ export default function MobileConsents({
                                 packet.snapshot,
                                 packet.choices,
                                 packet.signer,
+                                { logoDataUrl: logoDataUrl ?? null },
                               ).output("blob") as Blob,
                               "print",
                             )

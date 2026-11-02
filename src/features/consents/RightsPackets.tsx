@@ -116,8 +116,8 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
       {awaiting && <p>Expected signer {awaiting.signerName}. Started {awaiting.createdAt.slice(0, 10)}.</p>}
       <p>
         {printable && <>
-          <button onClick={() => downloadBlob('Rights packet.pdf', buildRightsPacketPdf(printable, person.name, session?.agencyName ?? '').output('blob'))}>Download packet</button>
-          <button onClick={() => void openPrintable('Rights packet.pdf', buildRightsPacketPdf(printable, person.name, session?.agencyName ?? '').output('blob'), 'print')}>Print packet</button>
+          <button onClick={() => downloadBlob('Rights packet.pdf', buildRightsPacketPdf(printable, person.name, session?.agencyName ?? '', { logoDataUrl: workspace?.branding?.logoUrl ?? null }).output('blob'))}>Download packet</button>
+          <button onClick={() => void openPrintable('Rights packet.pdf', buildRightsPacketPdf(printable, person.name, session?.agencyName ?? '', { logoDataUrl: workspace?.branding?.logoUrl ?? null }).output('blob'), 'print')}>Print packet</button>
         </>}
         {latest?.status === 'filed' && <button disabled={busy} onClick={() => void run(async () => { const evidence = await api.getRightsPacketEvidence(latest.id); downloadBlob(evidence.name, evidenceBlob(evidence)); })}>Download filed signed evidence</button>}
         {manage && awaiting && <>

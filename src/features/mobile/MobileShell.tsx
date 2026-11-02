@@ -816,6 +816,7 @@ export default function MobileShell({
                   api={api}
                   session={session}
                   person={person}
+                  logoDataUrl={workspace.branding?.logoUrl ?? null}
                   onOpenChart={nav.openPersonChart}
                   onBack={() => setView("health")}
                 />
