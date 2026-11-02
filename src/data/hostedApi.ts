@@ -307,7 +307,7 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, operatingReminderNotices, prnNoticeKeys, reminderRecipientIds } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
   accountabilityDates,
@@ -13603,7 +13603,7 @@ export class HostedApi implements ComplyraApi {
         : { data: [] };
       const siteByPerson = new Map((people ?? []).map((row) => [String(row.id), row.site_id ? String(row.site_id) : null]));
       const medById = new Map((medRows ?? []).map((row) => [String(row.id), row]));
-      for (const notice of operatingReminderNotices({
+      const reminderNotices = operatingReminderNotices({
         now,
         noteDay: clock.noteDay,
         unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
@@ -13625,7 +13625,8 @@ export class HostedApi implements ComplyraApi {
               : [],
           }];
         }),
-      })) {
+      });
+      for (const notice of reminderNotices) {
         if (!notice.userId) continue;
         await this.queueOperatingNotice(session, {
           agencyId: session.agencyId,
@@ -13637,6 +13638,14 @@ export class HostedApi implements ComplyraApi {
           deepLink: notice.deepLink,
           entityId: notice.entityId,
           dedupeKey: notice.dedupeKey,
+        });
+      }
+      const prnKeys = prnNoticeKeys(reminderNotices);
+      if (prnKeys.length && !session.mustChangePassword) {
+        await this.client.rpc("rearm_prn_repeat_notices", {
+          p_agency_id: session.agencyId,
+          p_dedupe_keys: prnKeys,
+          p_repeat_minutes: rules.prnReminderRepeatMinutes,
         });
       }
       const loadedSiteIds = sites.map((site) => site.id);

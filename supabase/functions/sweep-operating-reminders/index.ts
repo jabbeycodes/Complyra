@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { zonedWallTimeMs } from "../../../src/data/dueItems.ts";
-import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency } from "../../../src/data/operatingReminders.ts";
+import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency, prnNoticeKeys } from "../../../src/data/operatingReminders.ts";
 import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.ts";
 
 /**
@@ -270,6 +270,14 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
       p_dedupe_key: notice.dedupeKey,
     });
     if (!error) queued += Number(data ?? 0);
+  }
+  const prnKeys = prnNoticeKeys(notices);
+  if (prnKeys.length) {
+    await admin.rpc("rearm_prn_repeat_notices", {
+      p_agency_id: agencyId,
+      p_dedupe_keys: prnKeys,
+      p_repeat_minutes: rules.prnReminderRepeatMinutes,
+    });
   }
   if (!shiftError) {
     const liveIds = [...new Set(
