@@ -16,7 +16,7 @@ interface DataContextValue {
   refresh: () => Promise<void>;
 }
 
-const DataContext = createContext<DataContextValue | null>(null);
+export const DataContext = createContext<DataContextValue | null>(null);
 
 function asErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;

@@ -179,7 +179,7 @@ export interface LocalOpenShiftActor {
   fullName: string;
   /** Mirrors hub.manage_schedule (site postings, decisions). */
   canManageSchedule: boolean;
-  /** HR or administrator with hub.manage_staffing (agency-wide postings). */
+  /** Administrator with hub.manage_schedule (agency-wide postings). */
   canPostAgencyWide: boolean;
 }
 

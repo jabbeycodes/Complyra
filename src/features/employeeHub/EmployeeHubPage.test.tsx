@@ -16,6 +16,7 @@ import {
   defaultBinderTemplateLibrary,
 } from "../../data/newHireBinder";
 import type { SessionUser } from "../../data/types";
+import { defaultPermissions } from "../../data/permissions";
 import type {
   ComplianceEvidence,
   HrDocument,
@@ -822,6 +823,54 @@ describe("Staffing tab", () => {
     const readOnlyHtml = renderBoard(false);
     assert.ok(!readOnlyHtml.includes("Deactivate"), "no deactivate control");
     assert.ok(!readOnlyHtml.includes("Edit staffing pattern for"), "no edit control");
+  });
+});
+
+describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
+  // Sessions carry the roles' real default templates so the pins track the
+  // permission model, not a hand-picked subset.
+  const hrSession = makeSession({
+    userId: "user-riley",
+    fullName: "Riley Hart",
+    role: "hr",
+    roleKey: "hr",
+    jobTitle: "Human Resources",
+    permissions: defaultPermissions("hr"),
+  });
+  const adminSession = makeSession({
+    userId: "user-admin",
+    fullName: "Sim Admin",
+    role: "administrator",
+    roleKey: "administrator",
+    jobTitle: "Agency Administrator",
+    permissions: defaultPermissions("administrator"),
+  });
+
+  it("HR no longer gets the Post coverage / Post shift form", () => {
+    const html = render(hrSession, "open-shifts");
+    assert.ok(!html.includes("Post coverage"), "no post-coverage form for HR");
+    assert.ok(!html.includes("Post shift"), "no post-shift button for HR");
+  });
+
+  it("a program manager keeps site coverage posting", () => {
+    const html = render(pmSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for PM");
+    assert.ok(html.includes("Post shift"), "post-shift button for PM");
+  });
+
+  it("an administrator keeps coverage posting", () => {
+    const html = render(adminSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for administrator");
+    assert.ok(html.includes("Post shift"), "post-shift button for administrator");
+  });
+
+  it("HR keeps its staffing-pattern power (hub.manage_staffing, a deliberate template grant)", () => {
+    // Wave 7T flags rather than changes this: the Staffing tab's Add pattern
+    // is gated on hub.manage_staffing, the same key HM/PM use there, and the
+    // HR template grants that key by design (HR-STAFFING, 2026-09-16).
+    // Removing it is a role-template change, out of this wave's scope.
+    const html = render(hrSession, "staffing");
+    assert.ok(html.includes("Add pattern"), "add-pattern button for HR under current templates");
   });
 });
 

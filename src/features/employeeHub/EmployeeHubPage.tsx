@@ -436,9 +436,14 @@ export function EmployeeHubShell({
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
   const operating = useOperatingRules(session);
-  // HMs/PMs post for their sites; HR and administrators also post agency-wide.
+  // HMs/PMs post for their sites on hub.manage_schedule; agency-wide posting
+  // is the administrator's, on the same key. WAVE-7T (simulation batch 157):
+  // HR previously qualified for agency-wide posting through
+  // hub.manage_staffing, which put a scheduling write in HR's hands —
+  // scheduling writes belong to HM/PM and the administrator, so HR no longer
+  // qualifies (HR does not hold hub.manage_schedule).
   const canPostAgencyWide =
-    can("hub.manage_staffing") && ["hr", "administrator"].includes(session.roleKey);
+    can("hub.manage_schedule") && session.roleKey === "administrator";
   const shiftStore = useMemo(
     () =>
       openShiftStore ??
