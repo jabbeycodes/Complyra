@@ -95,6 +95,7 @@ import {
   canClosePersonalSpendingMonth,
   capabilityForRoleKey,
   canGrantRole,
+  canReadAsAuditor,
   checkRoleTemplateUpdate,
   defaultPermissions,
   hasPermission,
@@ -2264,6 +2265,17 @@ function assertPrivileged(session: SessionUser) {
 
 function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/**
+ * AUDITOR-NAV (wave 7U): training-roster READS (clearance list + another
+ * staffer's training profile) — hr.view_staff holders, or the auditor on
+ * its read path. Writes (initial/waive/assign/correct) keep their own gates.
+ */
+function assertTrainingRosterRead(session: SessionUser) {
+  if (!hasPermission(session, "hr.view_staff") && !canReadAsAuditor(session)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -8999,7 +9011,7 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    if (session.userId !== userId) assertTrainingRosterRead(session);
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9083,7 +9095,7 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
+    assertTrainingRosterRead(session);
     // Roster comes from the agency's staff memberships — not only from staff
     // who already have training assigned — so "All staff" never renders an
     // empty table while the agency has people.
@@ -9765,7 +9777,10 @@ export class LocalApi implements ComplyraApi {
   private assertCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind assertCertificateWrite (certificates.manage).
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }

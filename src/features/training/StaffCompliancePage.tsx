@@ -13,7 +13,7 @@ import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
-import { hasPermission } from "../../data/permissions";
+import { canReadAsAuditor, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -103,6 +103,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
+  // AUDITOR-NAV (wave 7U): the auditor reads the same roster read-only.
+  // canManage stays hr.view_staff-only, so Assign training, N/A waivers and
+  // line edits never render for the auditor (ProfilePanel gates them on
+  // canManage / canInitialOwn / role lists the auditor is not on).
+  const canViewRoster = canManage || (session ? canReadAsAuditor(session) : false);
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
 
   async function loadRows() {
@@ -124,7 +129,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 
   useEffect(() => {
     if (!session) return;
-    if (can(session, "hr.view_staff")) {
+    if (can(session, "hr.view_staff") || canReadAsAuditor(session)) {
       loadRows();
     } else {
       setRowsFailed(true);
@@ -174,7 +179,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canManage && rows && (
+      {canViewRoster && rows && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
           {notCleared.length === 0 ? (
@@ -210,7 +215,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canManage && rows && (
+      {canViewRoster && rows && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">
@@ -372,7 +377,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
-      {rowsFailed && !canManage && !profile && (
+      {rowsFailed && !canViewRoster && !profile && (
         <Empty
           title="No training profile"
           text="Your training profile could not be loaded. Ask your house manager to assign your in-home checklist."

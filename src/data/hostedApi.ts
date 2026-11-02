@@ -211,6 +211,7 @@ import {
   canViewPersonalSpending,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canReadAsAuditor,
   defaultPermissions,
   hasPermission,
   isRoleKey,
@@ -7726,7 +7727,9 @@ export class HostedApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    // AUDITOR-NAV (wave 7U): cross-profile training reads follow the roster rule.
+    if (session.userId !== userId && !canReadAsAuditor(session))
+      this.requirePermission(session, "hr.view_staff");
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7833,7 +7836,8 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
+    // AUDITOR-NAV (wave 7U): roster read — hr.view_staff or the auditor path.
+    if (!canReadAsAuditor(session)) this.requirePermission(session, "hr.view_staff");
     let query = this.client
       .from("training_requirements")
       .select("user_id")
@@ -9749,7 +9753,10 @@ export class HostedApi implements ComplyraApi {
   private requireCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind the certificates.manage write gate.
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }

@@ -828,6 +828,27 @@ export function canUseMessaging(session: {
   return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
 }
 
+/**
+ * AUDITOR-NAV (wave 7U, sim batches 159/172): the auditor's READ path.
+ * The founder's rule is that auditors see everything read-only (the only
+ * designed exceptions are Internal Messaging and Time-Off). Several read
+ * surfaces are gated on write-ish keys the auditor template deliberately
+ * never holds — hr.view_staff, certificates.manage, requirements.approve,
+ * and clinical.view (absent from the stored auditor template, which carries
+ * isp.view instead) — so keying those surfaces on the write keys alone made
+ * whole pages unreachable for a read-only role. This predicate is the single
+ * place the read path is granted: the auditor role holding its audit.read
+ * key. It never widens any other role, and it grants no write power: every
+ * write control on the surfaces it opens stays keyed on its own write key.
+ */
+export function canReadAsAuditor(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return session.roleKey === "auditor" && hasPermission(session, "audit.read");
+}
+
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
 export function canSeeShiftNotes(roleKey: string) {
   return [
