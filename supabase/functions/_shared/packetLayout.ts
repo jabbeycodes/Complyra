@@ -3,7 +3,7 @@
  * the consent choices packet).
  *
  * Both packets print on white paper in black ink: a branded header (agency
- * logo + name at the left, the ComplyRer wordmark at the right, a rule under
+ * logo + name at the left, the ComplyRer logo at the right, a rule under
  * it), a two-column fact block, headed sections with wrapped body copy at a
  * comfortable measure, drawn checkbox squares for unanswered choices, a
  * bordered "Signatures" box with ruled lines and real signing height, and a
@@ -18,6 +18,8 @@
  *
  * Geometry: A4 portrait, millimetres, origin top-left (jsPDF default).
  */
+
+import { COMPLYRER_LOCKUP_PNG_DATA_URL } from './complyrerLockup.ts';
 
 export interface PacketPdfDocument {
   setFontSize(size: number): unknown;
@@ -58,6 +60,12 @@ export interface PacketBrand {
    * back to the agency name alone, silently.
    */
   logoDataUrl?: string | null;
+  /**
+   * The ComplyRer logo as a PNG/JPEG data URL. When omitted, the bundled
+   * brand lockup is drawn; pass null to force the typed wordmark instead.
+   * An unreadable image falls back to the typed wordmark, silently.
+   */
+  complyrerLogoDataUrl?: string | null;
   /** Packet copy version, carried into the footer. */
   copyVersion: string;
 }
@@ -105,8 +113,44 @@ export class PacketLayout {
   /* ------------------------------------------------------------------ */
 
   /**
+   * The ComplyRer brand at the right of a header: the real logo lockup,
+   * aspect-preserved at `height` mm with its top at `top`. Falls back to
+   * the typed wordmark at `textBaseline` when the logo is disabled (null)
+   * or cannot be embedded — silently, so generation never fails over
+   * branding.
+   */
+  private drawComplyrerBrand(top: number, height: number, textBaseline: number): void {
+    const doc = this.doc;
+    const data =
+      this.brand.complyrerLogoDataUrl === undefined
+        ? COMPLYRER_LOCKUP_PNG_DATA_URL
+        : this.brand.complyrerLogoDataUrl;
+    if (data && data.startsWith('data:image/')) {
+      try {
+        const props = doc.getImageProperties(data);
+        if (props.width > 0 && props.height > 0) {
+          const w = height * (props.width / props.height);
+          doc.addImage(
+            data,
+            imageFormatFor(data),
+            CONTENT_RIGHT - w,
+            top,
+            w,
+            height,
+          );
+          return;
+        }
+      } catch {
+        // Unreadable logo: typed wordmark below, by design.
+      }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.text('ComplyRer', CONTENT_RIGHT, textBaseline, { align: 'right' });
+  }
+
+  /**
    * Page-one header: agency logo (when configured and readable) with the
-   * agency name beside it, the ComplyRer wordmark at the right, and a thin
+   * agency name beside it, the ComplyRer logo at the right, and a thin
    * rule underneath. A logo that cannot be embedded falls back to the
    * name-only header — silently, so generation never fails over branding.
    */
@@ -135,7 +179,7 @@ export class PacketLayout {
     doc.setFontSize(nameX === MARGIN ? 15 : 13);
     doc.text(this.brand.agencyName, nameX, 21);
     doc.setFontSize(13);
-    doc.text('ComplyRer', CONTENT_RIGHT, 21, { align: 'right' });
+    this.drawComplyrerBrand(10.5, 13, 21);
     doc.setDrawColor(...INK);
     doc.setLineWidth(0.5);
     doc.line(MARGIN, 29, CONTENT_RIGHT, 29);
@@ -149,8 +193,8 @@ export class PacketLayout {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.text(this.brand.agencyName, MARGIN, 13.5);
-    doc.setFont('helvetica', 'bold');
-    doc.text('ComplyRer', CONTENT_RIGHT, 13.5, { align: 'right' });
+    doc.setFontSize(8.5);
+    this.drawComplyrerBrand(7.3, 7, 13.5);
     doc.setDrawColor(...SOFT_RULE);
     doc.setLineWidth(0.3);
     doc.line(MARGIN, 16.5, CONTENT_RIGHT, 16.5);

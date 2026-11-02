@@ -52,8 +52,8 @@ const signedRights: RightsPacket = {
 test('blank rights packet is a complete signable form: branding, facts, signature box, footer', () => {
   const pdf = buildRightsPacketPdf(awaitingRights, 'Harper Soto', 'Evergreen Care');
   const output = pdf.output();
+  assert.ok(output.includes('/XObject'), 'ComplyRer logo lockup is embedded as an image');
   for (const text of [
-    'ComplyRer',
     'Evergreen Care',
     'Individual Rights packet',
     'Harper Soto',
@@ -159,8 +159,8 @@ test('blank consent packet draws checkbox rows and a signature box per section, 
   const output = pdf.output();
   const pages = pdf.getNumberOfPages();
   assert.ok(pages >= 5, `expected cover + 4 sections, got ${pages} pages`);
+  assert.ok(output.includes('/XObject'), 'ComplyRer logo lockup is embedded as an image');
   for (const text of [
-    'ComplyRer',
     'Consent choices and signature record',
     'Expected signer',
     'Expiry/review',
@@ -209,4 +209,24 @@ test('consent packet header embeds the agency logo when configured; a bad logo n
     }),
   );
   assert.doesNotThrow(() => buildConsentPacketPdf(snapshot, null, null));
+});
+
+test('ComplyRer logo falls back to the typed wordmark when disabled or unreadable', () => {
+  const disabled = buildRightsPacketPdf(awaitingRights, 'Harper Soto', 'Evergreen Care', {
+    complyrerLogoDataUrl: null,
+  });
+  assert.ok(disabled.output().includes('ComplyRer'), 'null logo draws the typed wordmark');
+  assert.doesNotThrow(() =>
+    buildRightsPacketPdf(awaitingRights, 'Harper Soto', 'Evergreen Care', {
+      complyrerLogoDataUrl: 'data:image/png;base64,not-a-real-image',
+    }),
+  );
+  const corrupt = buildRightsPacketPdf(awaitingRights, 'Harper Soto', 'Evergreen Care', {
+    complyrerLogoDataUrl: 'data:image/png;base64,not-a-real-image',
+  });
+  assert.ok(corrupt.output().includes('ComplyRer'), 'unreadable logo falls back to the wordmark');
+  const consentDisabled = buildConsentPacketPdf(snapshot, null, null, {
+    complyrerLogoDataUrl: null,
+  });
+  assert.ok(consentDisabled.output().includes('ComplyRer'), 'consent packet falls back too');
 });

@@ -28,7 +28,7 @@ const SECTIONS: Array<{ title: string; keys: string[] }> = [
 
 /**
  * Draw the consent choices packet as a formatted print document: branded
- * header (agency logo + name, ComplyRer wordmark), a two-column fact block,
+ * header (agency logo + name, ComplyRer logo), a two-column fact block,
  * one headed section per page with drawn checkbox squares for unrecorded
  * choices, a bordered Signatures box per section, and the Complyrer record
  * footer — mark, copy version, and "Page X of Y" — on every page.
@@ -45,12 +45,13 @@ export function drawConsentPacket(
   snapshot: PacketSnapshot,
   choices?: PacketChoices | null,
   signer?: PacketSignature | null,
-  brand?: Pick<PacketBrand, 'logoDataUrl'> | null,
+  brand?: Pick<PacketBrand, 'logoDataUrl' | 'complyrerLogoDataUrl'> | null,
 ) {
   const layout = new PacketLayout(pdf, {
     agencyName: snapshot.agencyName,
     copyVersion: snapshot.copyVersion,
     logoDataUrl: brand?.logoDataUrl ?? null,
+    complyrerLogoDataUrl: brand?.complyrerLogoDataUrl,
   });
 
   layout.firstPageHeader();

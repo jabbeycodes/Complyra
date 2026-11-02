@@ -17,7 +17,7 @@ export function buildConsentPacketPdf(
   snapshot: PacketSnapshot,
   choices?: PacketChoices | null,
   signer?: PacketSignature | null,
-  brand?: Pick<PacketBrand, 'logoDataUrl'> | null,
+  brand?: Pick<PacketBrand, 'logoDataUrl' | 'complyrerLogoDataUrl'> | null,
 ) {
   const pdf = new jsPDF();
   drawConsentPacket(pdf, snapshot, choices, signer, brand);

@@ -26,13 +26,14 @@ export function buildRightsPacketPdf(
   packet: RightsPacket,
   individualName: string,
   agencyName: string,
-  brand?: Pick<PacketBrand, 'logoDataUrl'> | null,
+  brand?: Pick<PacketBrand, 'logoDataUrl' | 'complyrerLogoDataUrl'> | null,
 ) {
   const pdf = new jsPDF();
   const layout = new PacketLayout(pdf, {
     agencyName,
     copyVersion: packet.copyVersion,
     logoDataUrl: brand?.logoDataUrl ?? null,
+    complyrerLogoDataUrl: brand?.complyrerLogoDataUrl,
   });
   const signer = packet.signer;
 
