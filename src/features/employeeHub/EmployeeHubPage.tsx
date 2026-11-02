@@ -42,7 +42,7 @@ import {
 import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { createSupabaseBrowserClient } from "../../data/index";
-import { hasPermission, type PermissionKey } from "../../data/permissions";
+import { hasHubTeamPermission, hasPermission, type PermissionKey } from "../../data/permissions";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -408,11 +408,17 @@ const EMPLOYEE_TABS: TabDef[] = [
 
 const MANAGER_TABS: TabDef[] = [
   { id: "team-schedule", label: "Team Schedule", icon: Users, perm: "hub.manage_schedule" },
-  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team" },
-  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards" },
+  // HR HUB OWNERSHIP (founder decision 2026-10-31): HR owns Payroll,
+  // Timecards and Attendance (Paycor model), so the HR role opens those
+  // three tabs even when the agency's stored template has not granted
+  // the keys yet. Same gate change as PR #213 item 9 — wave 7S carries
+  // it so the phone hub's HR doors land on tabs that actually open
+  // (batch 103); the two waves converge on the same lines.
+  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team", roleAny: ["hr"] },
+  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards", roleAny: ["hr"] },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
   { id: "binder-board", label: "Binder Board", icon: ClipboardCheck, perm: "hub.view_team", roleAny: ["hr", "administrator", "auditor"] },
-  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll" },
+  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll", roleAny: ["hr"] },
   { id: "kiosk", label: "Kiosk", icon: MonitorSmartphone, permAny: ["hub.manage_staffing", "hub.manage_pay_settings"] },
 ];
 
@@ -435,6 +441,12 @@ export function EmployeeHubShell({
   onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
+  // HR owns Attendance / Timecards / Payroll by role (founder decision
+  // 2026-10-31), independent of stored template keys — the render and
+  // badge gates below use the same helper as the tab registry's roleAny.
+  const canViewTeamHub = hasHubTeamPermission(session, "hub.view_team");
+  const canReviewTimecards = hasHubTeamPermission(session, "hub.review_timecards");
+  const canApprovePayroll = hasHubTeamPermission(session, "hub.approve_payroll");
   const operating = useOperatingRules(session);
   // HMs/PMs post for their sites; HR and administrators also post agency-wide.
   const canPostAgencyWide =
@@ -491,7 +503,7 @@ export function EmployeeHubShell({
     (async () => {
       const counts: BadgeCounts = { attendance: 0, timecards: 0, timeoff: 0, documents: 0 };
       try {
-        if (can("hub.view_team")) {
+        if (canViewTeamHub) {
           const stamp = dayStamp(new Date());
           const [shiftsToday, perStaff] = await Promise.all([
             store
@@ -516,7 +528,7 @@ export function EmployeeHubShell({
             lateClockInMinutes: operating.lateClockInMinutes,
           }).length;
         }
-        if (can("hub.review_timecards")) {
+        if (canReviewTimecards) {
           const corrections = await store.listPunchCorrections({}).catch(() => []);
           counts.timecards += corrections.filter((c) => c.status === "pending").length;
           const periods = await store.listPayPeriods().catch(() => []);
@@ -679,10 +691,10 @@ export function EmployeeHubShell({
         {tab === "team-schedule" && can("hub.manage_schedule") && (
           <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
-        {tab === "attendance" && can("hub.view_team") && (
+        {tab === "attendance" && canViewTeamHub && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
-        {tab === "timecards" && can("hub.review_timecards") && (
+        {tab === "timecards" && canReviewTimecards && (
           <TimecardsTab session={session} store={store} staffList={staffList} onChanged={refresh} />
         )}
         {tab === "team-compliance" && can("hub.view_team") && (
@@ -693,7 +705,7 @@ export function EmployeeHubShell({
             canManage={can("hub.manage_documents")}
           />
         )}
-        {tab === "payroll" && can("hub.approve_payroll") && (
+        {tab === "payroll" && canApprovePayroll && (
           <PayrollTab session={session} store={store} staffList={staffList} />
         )}
         {tab === "kiosk" && (can("hub.manage_staffing") || can("hub.manage_pay_settings")) && (

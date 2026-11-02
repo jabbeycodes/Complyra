@@ -103,6 +103,24 @@ const dspSession = makeSession({
   permissions: { "hub.access": true },
 });
 
+// Wave 7S (batch 103): HR with a stored template that still denies the
+// hub team keys outright — the HR role must own Attendance / Timecards
+// / Payroll anyway (HR hub rule, Joshua 2026-10-31; PR #213 item 9's
+// gate, carried here so the phone hub's doors land on open tabs).
+const hrDeniedTemplateSession = makeSession({
+  userId: "user-riley",
+  fullName: "Riley Hart",
+  role: "hr",
+  roleKey: "hr",
+  jobTitle: "Human Resources",
+  permissions: {
+    "hub.access": true,
+    "hub.view_team": false,
+    "hub.review_timecards": false,
+    "hub.approve_payroll": false,
+  },
+});
+
 const staffList: HubStaffEntry[] = [
   { userId: "user-pat", fullName: "Pat Morgan", email: "pat@example.com", roleKey: "program_manager", siteId: "site-1" },
   { userId: "user-alex", fullName: "Alex Rivera", email: "alex.rivera@example.com", roleKey: "dsp", siteId: "site-1" },
@@ -715,6 +733,22 @@ describe("EmployeeHubShell", () => {
     const html = render(pmSession);
     // "My Schedule" is the first tab and its content renders by default.
     assert.ok(html.includes("My Schedule"), "default tab label");
+  });
+
+  it("opens Attendance, Timecards and Payroll for HR even when the stored template denies the keys", () => {
+    const html = render(hrDeniedTemplateSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(html.includes(label), `HR tab "${label}"`);
+    }
+    // The ownership is exactly those three tabs: Team Schedule and
+    // Team Compliance keep their permission-only gates.
+    assert.ok(!html.includes("Team Schedule"), "Team Schedule stays permission-gated");
+    assert.ok(!html.includes("Team Compliance"), "Team Compliance stays permission-gated");
+  });
+
+  it("renders the Payroll tab content for HR, not just the tab chip", () => {
+    const html = render(hrDeniedTemplateSession, "payroll");
+    assert.ok(html.includes("Export-first payroll"), "payroll tab content for HR");
   });
 });
 

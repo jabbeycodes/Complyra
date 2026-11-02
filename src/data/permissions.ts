@@ -589,6 +589,39 @@ export function hasPermission(
   return ROLE_TEMPLATE_BY_KEY.dsp.permissions[key];
 }
 
+/** The Employee Hub team-management permissions (Attendance/Timecards/Payroll). */
+export type HubTeamPermissionKey =
+  | "hub.view_team"
+  | "hub.review_timecards"
+  | "hub.approve_payroll";
+
+/**
+ * Hub team-tool access (HR hub rule — founder decision, Joshua
+ * 2026-10-31: "HR must have Payroll, Timecards, and Attendance in the
+ * Employee Hub... use what other platforms do like Paycor"). HR is a
+ * first-class owner of payroll/time, so the HR ROLE satisfies these
+ * three gates directly — even when the agency's stored role template
+ * still carries an explicit false from before the decision (stored
+ * templates are only rewritten by an admin, and a template flip must
+ * not be what stands between HR and payroll). Every other role goes
+ * through the ordinary permission check, so a DSP gains nothing here.
+ *
+ * This is the gate PR #213 item 9 defines for the desktop hub; wave 7S
+ * carries the same helper so the phone hub's HR doors (batch 103) use
+ * the identical rule, and the two waves converge on one implementation.
+ */
+export function hasHubTeamPermission(
+  session: {
+    permissions?: Partial<PermissionMap>;
+    role?: string;
+    roleKey?: string;
+  },
+  key: HubTeamPermissionKey,
+) {
+  if (session.roleKey === "hr" || session.role === "hr") return true;
+  return hasPermission(session, key);
+}
+
 /**
  * Who may grant which role — derived from GRANT_RULES.
  *

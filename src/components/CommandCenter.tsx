@@ -145,8 +145,18 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
   for (const row of data.clearance) {
     const site = staffSite.get(row.userId);
     const facts = get(site?.siteId ?? null, site?.siteName ?? "Unassigned");
+    // Wave 7S (batches 75/76 + 103): the verdict keys off
+    // clearedForInRatio — the canonical gate verdict — not the raw
+    // counts. A staffer with no training assigned has 0 pending /
+    // 0 overdue yet is NOT cleared, and the counts alone scored them
+    // "complete", which is how the Overview could read 100% over staff
+    // whose own Training pages said NOT CLEARED.
     facts.training.push(
-      row.overdueCount > 0 ? "overdue" : row.pendingCount > 0 ? "incomplete" : "complete",
+      row.clearedForInRatio
+        ? "complete"
+        : row.overdueCount > 0
+          ? "overdue"
+          : "incomplete",
     );
   }
 
@@ -260,7 +270,7 @@ export function CommandCenterView({
         late: list.late ?? list.status === "overdue",
       })),
       training: clearance
-        .filter((row) => row.overdueCount > 0 || row.pendingCount > 0)
+        .filter((row) => !row.clearedForInRatio)
         .map((row) => ({
           id: row.userId,
           staffName: row.fullName,
