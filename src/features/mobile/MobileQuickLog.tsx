@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Car,
   ClipboardList,
@@ -466,7 +466,7 @@ export default function MobileQuickLog({
         siteId={siteId}
         siteName={siteName}
         people={people}
-        entries={houseEntries ?? []}
+        entries={houseEntries}
         todayIso={todayIso}
         onOpenHouseCard={onOpenHouseCard}
         onBack={() => setScreen("chooser")}
@@ -1269,14 +1269,24 @@ function DrillLogSheet({
  * line reloads. The full view (month totals, close, print) is one row
  * away via "Open house card". Only recording roles reach this screen;
  * the chooser sends view-only roles straight to the full view.
+ *
+ * Load honesty: the chooser hands over its ledger only once it has
+ * actually loaded — null means "not loaded yet" (its load may still
+ * be running, or it failed behind the chooser's per-domain guard),
+ * never an empty ledger. An empty array is a factual claim ($0.00 in
+ * the pin, "Nothing recorded today yet"), so while no ledger is in
+ * hand this screen loads it itself and says so — "Loading…" first,
+ * and on failure the error with a Try again — the same nullable
+ * load state the full House Card view (MobileHouseCard) keeps.
+ * Exported for the load-state render tests.
  */
-function HouseCardLogScreen({
+export function HouseCardLogScreen({
   api,
   session,
   siteId,
   siteName,
   people,
-  entries,
+  entries: handedEntries,
   todayIso,
   onOpenHouseCard,
   onBack,
@@ -1287,17 +1297,46 @@ function HouseCardLogScreen({
   siteId: string;
   siteName: string;
   people: WorkspaceIndividual[];
-  entries: HouseCardEntryView[];
+  entries: HouseCardEntryView[] | null;
   todayIso: string;
   onOpenHouseCard: () => void;
   onBack: () => void;
   onLogged: () => void;
 }) {
+  const [entries, setEntries] = useState<HouseCardEntryView[] | null>(
+    handedEntries,
+  );
+  const [loadError, setLoadError] = useState("");
+  const loadAttempted = useRef(handedEntries !== null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState("");
   const [saving, setSaving] = useState(false);
-  const status = houseCardStatus(entries);
-  const ledger = useMemo(() => buildHouseCardLedger(entries), [entries]);
+
+  const load = useCallback(async () => {
+    loadAttempted.current = true;
+    setLoadError("");
+    try {
+      setEntries(await api.listHouseCardEntries(siteId));
+    } catch (err) {
+      setLoadError(
+        err instanceof Error
+          ? err.message
+          : "Could not load the house card ledger.",
+      );
+    }
+  }, [api, siteId]);
+
+  useEffect(() => {
+    if (entries === null && !loadAttempted.current) {
+      void load();
+    }
+  }, [entries, load]);
+
+  const status = entries ? houseCardStatus(entries) : null;
+  const ledger = useMemo(
+    () => (entries ? buildHouseCardLedger(entries) : []),
+    [entries],
+  );
   const todayRows = useMemo(
     () => houseTodayRows(ledger, todayIso),
     [ledger, todayIso],
@@ -1308,7 +1347,7 @@ function HouseCardLogScreen({
   );
   const categories = useMemo(
     () =>
-      orderCategoriesByUse(entries).map((category) => ({
+      orderCategoriesByUse(entries ?? []).map((category) => ({
         value: category,
         label: HOUSE_CARD_CATEGORY_LABELS[category],
         icon: HOUSE_CATEGORY_ICONS[category],
@@ -1338,6 +1377,37 @@ function HouseCardLogScreen({
       setSaving(false);
     }
   };
+
+  if (loadError) {
+    return (
+      <div>
+        <button type="button" className="msh-text-button" onClick={onBack}>
+          ‹ Quick log
+        </button>
+        <p className="msh-alert" role="alert">
+          The house card ledger could not be loaded. {loadError}
+        </p>
+        <button
+          type="button"
+          className="msh-button secondary block"
+          onClick={() => void load()}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!entries || !status) {
+    return (
+      <div>
+        <button type="button" className="msh-text-button" onClick={onBack}>
+          ‹ Quick log
+        </button>
+        <p className="msh-empty">Loading the house card ledger…</p>
+      </div>
+    );
+  }
 
   return (
     <div>
