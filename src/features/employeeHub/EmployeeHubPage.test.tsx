@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
+import { EmployeeHubShell, describeOvertimeRules, hubSchedulingFormScope, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
 import {
   DEFAULT_BINDER_TEMPLATE,
@@ -862,6 +862,65 @@ describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
     const html = render(adminSession, "open-shifts");
     assert.ok(html.includes("Post coverage"), "post-coverage form for administrator");
     assert.ok(html.includes("Post shift"), "post-shift button for administrator");
+  });
+
+  it("item 5: a house manager's scheduling-form scope covers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites);
+    assert.ok(scope, "HM is site-scoped");
+    assert.deepEqual(
+      scope.staffList.map((s) => s.userId).sort(),
+      ["user-alex", "user-pat"],
+      "only Maple House staff (site-1) are offered",
+    );
+    assert.deepEqual(scope.sites.map((s) => s.id), ["site-1"], "only Maple House is offered");
+  });
+
+  it("item 5: an HM's assignment sites join the form scope", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites, ["site-2"]);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(scope.sites.length, 2, "both houses offered with an active assignment");
+    assert.equal(scope.staffList.length, 3, "both houses' staff offered");
+  });
+
+  it("item 5: agency-wide roles get no form scoping (full lists kept)", () => {
+    for (const [roleKey, perms] of [
+      ["program_manager", PM_PERMISSIONS],
+      ["administrator", defaultPermissions("administrator")],
+      ["hr", defaultPermissions("hr")],
+    ] as const) {
+      const s = makeSession({ roleKey, permissions: perms });
+      assert.equal(hubSchedulingFormScope(s, staffList, sites), null, `${roleKey} unscoped`);
+    }
+  });
+
+  it("item 5: the HM's Team Schedule site filter offers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-hm",
+      fullName: "Jordan Reyes",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.view_team": true },
+    });
+    const html = render(hm, "team-schedule");
+    assert.ok(html.includes("Maple House"), "own house in the site filter");
+    assert.ok(!html.includes("Oak House"), "the other house is not offered");
+    const pmHtml = render(pmSession, "team-schedule");
+    assert.ok(pmHtml.includes("Oak House"), "PM keeps every house in the filter");
   });
 
   it("HR keeps its staffing-pattern power (hub.manage_staffing, a deliberate template grant)", () => {
