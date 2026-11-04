@@ -12,16 +12,17 @@
  * saveShiftNote), so ISP Data is the single door for both reading and
  * writing a home's shift notes on mobile.
  *
- * There is likewise no separate "Med Count" tile: the count belongs
- * under Medications — every medication row in the MAR carries its own
- * supply countdown, and managers reset it there when a refill comes in.
+ * There is likewise no separate "Medications" or "Med Count" tile
+ * (founder directive, 2026-10-31: medications live UNDER Health on
+ * mobile). The Health tile is the single door: the Health surface
+ * carries a first-class Medications section (shown only to roles
+ * passing canSeeMeds) that opens the MAR — passes, med orders, and
+ * the per-medication supply countdowns managers reset on a refill.
  */
-import { canSeeMeds } from "../../data/chart";
 import { canSeeShiftNotes } from "../../data/permissions";
 import { fieldLogAccess } from "./fieldLogs";
 
 export type MobileTileId =
-  | "medications"
   | "ispData"
   | "health"
   | "quickLog"
@@ -57,12 +58,6 @@ const TILE_DEFS: {
   visible: (ctx: MobileTileContext) => boolean;
 }[] = [
   {
-    id: "medications",
-    label: "Medications",
-    hint: "Pass meds and record doses",
-    visible: (ctx) => canSeeMeds(ctx.roleKey),
-  },
-  {
     id: "ispData",
     label: "ISP Data",
     hint: "Collect data on plan tasks",
@@ -71,13 +66,16 @@ const TILE_DEFS: {
   {
     // HEALTH: the seven day-to-day trackers (intake, elimination, vitals,
     // glucose, skin, seizures, menses) as a phone view over the chart's
-    // health-entry store. The gate mirrors canViewHealthTrack in
-    // data/healthTrack (chart read access: individuals.view, and never
-    // HR); recording inside follows the chart's health.record permission,
-    // so view-only roles such as auditors see statuses with no log actions.
+    // health-entry store — and, under the same door, the Medications
+    // section that opens the MAR (that section follows its own gate,
+    // canSeeMeds, inside the Health surface). The tile gate mirrors
+    // canViewHealthTrack in data/healthTrack (chart read access:
+    // individuals.view, and never HR); recording inside follows the
+    // chart's health.record permission, so view-only roles such as
+    // auditors see statuses with no log actions.
     id: "health",
     label: "Health",
-    hint: "Vitals, intake, seizures & more",
+    hint: "Medications, vitals, intake & more",
     visible: (ctx) =>
       ctx.permissions["individuals.view"] === true && ctx.roleKey !== "hr",
   },
