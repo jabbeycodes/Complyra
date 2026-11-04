@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Plus } from "lucide-react";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
 import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
 import {
@@ -33,7 +34,7 @@ const RESOLUTION_LABELS: Record<string, string> = {
 };
 
 function emptyDraft(siteId: string, individualId: string): GerReportDraft {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   return {
     siteId,
     individualId,

@@ -8,6 +8,7 @@ import {
   type Appointment,
   type AppointmentDraft,
 } from "../data/appointments";
+import { centralTodayIso } from "../data/menuRecords";
 import type { Allergy, AllergiesStamp, IndividualProfile } from "../data/planStack";
 import {
   AppointmentActions,
@@ -334,7 +335,7 @@ function AllergyForm({
 
 function blankDraft(visitAddress: string): AppointmentDraft {
   return {
-    startsOn: new Date().toISOString().slice(0, 10),
+    startsOn: centralTodayIso(),
     startTime: "09:00",
     endTime: "10:00",
     timezone: DEFAULT_APPOINTMENT_TIMEZONE,

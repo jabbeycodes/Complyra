@@ -29,7 +29,7 @@ import {
 import type { MileageYearlySummary, MileageAgencyYearlySummary } from "../../data/mileage";
 import type { MileageTrip, MileageTripView } from "../../data/types";
 import { individualsAtSite } from "../../data/dashboard";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import { agencyStateCode, siteLocationFrom } from "../../data/siteAddress";
 import "./mileage.css";
 
@@ -47,7 +47,7 @@ interface FormState {
 
 function emptyForm(): FormState {
   return {
-    tripDate: todayIso(),
+    tripDate: centralTodayIso(),
     odometerStart: "",
     odometerEnd: "",
     riderIds: [],
@@ -81,7 +81,7 @@ function canDownloadMonthly(
 export default function MileagePage() {
   const { api, session, workspace, refresh } = useData();
   const [siteId, setSiteId] = useState("");
-  const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
+  const [month, setMonth] = useState(() => monthKeyOf(centralTodayIso()));
   const [tab, setTab] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [trips, setTrips] = useState<MileageTripView[]>([]);
