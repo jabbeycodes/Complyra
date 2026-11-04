@@ -938,6 +938,11 @@ export default function App() {
               setForceDesktop(true);
               openMyCompliance();
             },
+            openHubTab: (tab) => {
+              setForceDesktop(true);
+              setHubFocusTab(tab);
+              navigate("Employee Hub");
+            },
             openPersonChart: (name, sectionId) => {
               setForceDesktop(true);
               openPersonChart(name, sectionId);

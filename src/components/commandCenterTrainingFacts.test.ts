@@ -1,23 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildScoreFactsForData,
+  CommandCenterView,
   type CommandCenterData,
 } from "./CommandCenter";
 import type { StaffClearanceRow } from "../data/types";
 
 /**
- * Wave 7N, defect 2 (simulation batches 75/76): the Overview's training
- * score fact must key off clearedForInRatio. A staffer with NO training
- * assigned has 0 pending / 0 overdue lines, and the old counts-only
- * mapping scored them "complete" — one of the ways the Overview could
- * read 100% while the same people's Training pages said NOT CLEARED.
+ * Wave 7S pins (simulation batches 75/76 + batch 103 / Pass 7 roll-up):
+ * the Overview's training verdict must be the canonical gate verdict,
+ * clearedForInRatio. A staffer with NO training assigned has 0 pending
+ * / 0 overdue lines, and the old counts-only mapping scored them
+ * "complete" and hid them from the risk list — one of the ways the
+ * Overview could read 100% while the same people's Training pages
+ * said NOT CLEARED.
  */
 function clearanceRow(overrides: Partial<StaffClearanceRow>): StaffClearanceRow {
   return {
     userId: "user-quinn",
     fullName: "Quinn Newhire",
-    siteName: "Maple House",
+    siteName: "No site assigned",
     clearedForInRatio: false,
     gateReasons: ["No training assigned yet"],
     pendingCount: 0,
@@ -68,4 +73,33 @@ test("a cleared staffer is 'complete'; an overdue not-cleared staffer is 'overdu
     trainingFacts([clearanceRow({ userId: "user-casey", pendingCount: 3 })]),
     ["incomplete"],
   );
+});
+
+test("the Overview risk list names a not-cleared staffer even with zero open lines", () => {
+  const noopAsync = async () => {};
+  const html = renderToStaticMarkup(
+    React.createElement(CommandCenterView, {
+      data: dataWith([clearanceRow({})]),
+      canManage: false,
+      onAddAction: noopAsync,
+      onResolveAction: noopAsync,
+    }),
+  );
+  assert.ok(html.includes("Quinn Newhire"), "the risk list names Quinn");
+  assert.ok(html.includes("Training clearance"), "as a training clearance risk");
+});
+
+test("a cleared staffer appears in no training risk row", () => {
+  const noopAsync = async () => {};
+  const html = renderToStaticMarkup(
+    React.createElement(CommandCenterView, {
+      data: dataWith([
+        clearanceRow({ clearedForInRatio: true, gateReasons: [] }),
+      ]),
+      canManage: false,
+      onAddAction: noopAsync,
+      onResolveAction: noopAsync,
+    }),
+  );
+  assert.ok(!html.includes("Training clearance"), "no training risk rows");
 });

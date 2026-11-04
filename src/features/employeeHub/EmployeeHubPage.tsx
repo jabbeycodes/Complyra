@@ -425,10 +425,12 @@ const EMPLOYEE_TABS: TabDef[] = [
 
 const MANAGER_TABS: TabDef[] = [
   { id: "team-schedule", label: "Team Schedule", icon: Users, perm: "hub.manage_schedule" },
-  // HR HUB OWNERSHIP (wave 6 item 9; founder decision 2026-10-31): HR
-  // owns Payroll, Timecards and Attendance (Paycor model), so the HR
-  // role opens those three tabs even when the agency's stored template
-  // has not granted the keys yet.
+  // HR HUB OWNERSHIP (founder decision 2026-10-31): HR owns Payroll,
+  // Timecards and Attendance (Paycor model), so the HR role opens those
+  // three tabs even when the agency's stored template has not granted
+  // the keys yet. Same gate change as PR #213 item 9 — wave 7S carries
+  // it so the phone hub's HR doors land on tabs that actually open
+  // (batch 103); the two waves converge on the same lines.
   { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team", roleAny: ["hr"] },
   { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards", roleAny: ["hr"] },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
@@ -500,8 +502,9 @@ export function EmployeeHubShell({
   onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
-  // Wave 6 item 9: HR owns Attendance / Timecards / Payroll by role
-  // (founder decision 2026-10-31), independent of stored template keys.
+  // HR owns Attendance / Timecards / Payroll by role (founder decision
+  // 2026-10-31), independent of stored template keys — the render and
+  // badge gates below use the same helper as the tab registry's roleAny.
   const canViewTeamHub = hasHubTeamPermission(session, "hub.view_team");
   const canReviewTimecards = hasHubTeamPermission(session, "hub.review_timecards");
   const canApprovePayroll = hasHubTeamPermission(session, "hub.approve_payroll");

@@ -1,10 +1,11 @@
 import type { StaffClearanceRow } from "../../data/types";
 
 /**
- * Wave 7N (simulation batches 75/76): the Training page's clearance
- * verdict is derived from the staff roster through this one selector, so
- * no surface can print a verdict the roster doesn't support — the same
- * honest-state pattern as rights packets (#219) and consents (#226):
+ * Wave 7S (simulation batches 75/76 + batch 103 / Pass 7 roll-up): the
+ * Training page's clearance verdict is derived from the staff roster
+ * through this one selector, so no surface can print a verdict the
+ * roster doesn't support — the same honest-state pattern as rights
+ * packets (#219) and consents (#226):
  *
  * - load failed       → "error"   (no verdict; the page offers a retry)
  * - not loaded yet    → "loading" (no verdict, no counts)
@@ -13,6 +14,12 @@ import type { StaffClearanceRow } from "../../data/types";
  *                                  proves nothing about clearance)
  * - loaded, rows      → "ready"   (the verdict and the counts come from
  *                                  exactly the rows the page displays)
+ *
+ * Every row's own verdict is the canonical profile verdict
+ * (getStaffTrainingProfile().clearedForInRatio — evaluateInRatioGate);
+ * this selector only decides what the PAGE may claim from the rows it
+ * was actually handed. Same selector shape as PR #229 so the two
+ * training waves converge on one implementation.
  */
 export type TrainingRosterView =
   | { kind: "loading" }

@@ -1,19 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { StaffClearanceRow } from "../../data/types";
 import { trainingRosterView } from "./rosterState";
+import type { StaffClearanceRow } from "../../data/types";
 
 /**
- * Wave 7N, defect 2 (simulation batches 75/76): the Training page said
- * "Everyone is cleared" over an EMPTY staff table. Pin the honest-state
- * contract: a clearance verdict exists only for a loaded, non-empty
- * roster, and it is computed from the very rows the page displays.
+ * Wave 7S pins: the Training page may only print a clearance verdict
+ * the loaded roster supports. "Everyone is cleared" requires a loaded,
+ * non-empty roster whose every row carries the canonical profile
+ * verdict (clearedForInRatio) — loading, failed, and empty rosters get
+ * honest states instead (batches 75/76 + 103).
  */
 function row(overrides: Partial<StaffClearanceRow>): StaffClearanceRow {
   return {
-    userId: "user-1",
+    userId: "user-quinn",
     fullName: "Quinn Newhire",
-    siteName: "Maple House",
+    siteName: "No site assigned",
     clearedForInRatio: false,
     gateReasons: ["No training assigned yet"],
     pendingCount: 0,
@@ -24,42 +25,40 @@ function row(overrides: Partial<StaffClearanceRow>): StaffClearanceRow {
   };
 }
 
-test("unloaded roster is an explicit loading state, never a verdict", () => {
+test("not loaded yet → loading, no verdict", () => {
   assert.deepEqual(trainingRosterView(null, false), { kind: "loading" });
 });
 
-test("failed load is an error state, never a verdict", () => {
+test("failed load → error, even if stale rows are around", () => {
   assert.deepEqual(trainingRosterView(null, true), { kind: "error" });
   assert.deepEqual(trainingRosterView([row({})], true), { kind: "error" });
 });
 
-test("loaded-empty roster is 'empty' — not 'everyone is cleared'", () => {
-  assert.deepEqual(trainingRosterView([], false), { kind: "empty" });
+test("loaded but empty → empty state, NEVER an all-cleared verdict", () => {
+  const view = trainingRosterView([], false);
+  assert.equal(view.kind, "empty");
+  assert.ok(!("allCleared" in view), "an empty roster carries no clearance verdict");
 });
 
-test("ready roster derives its verdict from the displayed rows", () => {
-  const uncleared = row({ userId: "user-quinn" });
-  const cleared = row({
-    userId: "user-avery",
-    fullName: "Avery Cole",
-    clearedForInRatio: true,
-    gateReasons: [],
-    pendingCount: 0,
-  });
-  const view = trainingRosterView([uncleared, cleared], false);
+test("loaded rows → the verdict is computed over exactly those rows", () => {
+  const view = trainingRosterView(
+    [row({}), row({ userId: "user-avery", fullName: "Avery Cole", clearedForInRatio: true, gateReasons: [] })],
+    false,
+  );
   assert.equal(view.kind, "ready");
   if (view.kind !== "ready") return;
   assert.equal(view.allCleared, false);
   assert.deepEqual(
-    view.notCleared.map((r) => r.userId),
+    view.notCleared.map((entry) => entry.userId),
     ["user-quinn"],
   );
-  assert.equal(view.rows.length, 2);
 });
 
-test("'all cleared' requires at least one row and zero uncleared", () => {
-  const cleared = row({ clearedForInRatio: true, gateReasons: [] });
-  const view = trainingRosterView([cleared], false);
+test("a loaded roster of only cleared rows → allCleared", () => {
+  const view = trainingRosterView(
+    [row({ clearedForInRatio: true, gateReasons: [] })],
+    false,
+  );
   assert.equal(view.kind, "ready");
   if (view.kind !== "ready") return;
   assert.equal(view.allCleared, true);

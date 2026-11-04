@@ -169,10 +169,10 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     }
   }
 
-  // Wave 7N (batches 75/76): the verdict comes from the roster selector —
-  // loading, failed, and loaded-empty rosters get honest states, and
-  // "Everyone is cleared" exists only for a loaded roster whose every
-  // displayed row is cleared.
+  // Wave 7S (batches 75/76 + 103): the verdict comes from the roster
+  // selector — loading, failed, and loaded-empty rosters get honest
+  // states, and "Everyone is cleared" exists only for a loaded roster
+  // whose every displayed row carries the canonical profile verdict.
   const roster = trainingRosterView(rows, rowsFailed);
 
   return (
