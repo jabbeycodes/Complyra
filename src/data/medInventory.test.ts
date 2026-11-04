@@ -10,12 +10,16 @@ import {
 import { DEMO_PASSWORD } from "./types";
 import { todayIso, type Medication } from "./chart";
 import {
+  deliveryHistoryLabel,
   inventoryCountdownLabel,
+  medHasCountOnFile,
+  medSupplyDisplayState,
   projectInventory,
   projectMedInventory,
   summarizeMedSupply,
 } from "./medInventory";
-import type { MedInventoryView } from "./types";
+import { medCountdown } from "../features/mobile/medcount";
+import type { MedDeliverySummary, MedInventoryView } from "./types";
 
 function hmLogin() {
   return {
@@ -318,6 +322,222 @@ test("all-clear summary reads clean", () => {
   const summary = summarizeMedSupply("s1", "Cedar House", [viewWithStatus("ok")]);
   assert.equal(summary.allClear, true);
   assert.match(summary.summary, /all 1 medication stocked/);
+});
+
+test("never-counted meds are not tallied as out of stock (batch 31: forecast counted 9 no-count meds as '9 out')", () => {
+  const neverCounted: MedInventoryView = {
+    ...viewWithStatus("out", "i2"),
+    medicationId: "med-never",
+    medicationName: "Simulamine",
+    lastCountedOn: null,
+  };
+  const summary = summarizeMedSupply("s1", "Cedar House", [
+    viewWithStatus("ok"),
+    neverCounted,
+  ]);
+  assert.equal(summary.totalMeds, 2);
+  assert.equal(summary.outCount, 0);
+  assert.equal(summary.alerts.length, 0);
+  assert.equal(summary.allClear, true);
+  assert.match(summary.summary, /1 medication not counted yet/);
+});
+
+test("a home whose meds are all uncounted reads as uncounted, not stocked or out", () => {
+  const neverCounted: MedInventoryView = {
+    ...viewWithStatus("out"),
+    lastCountedOn: null,
+  };
+  const summary = summarizeMedSupply("s1", "Cedar House", [neverCounted]);
+  assert.equal(summary.outCount, 0);
+  assert.equal(summary.okCount, 0);
+  assert.match(summary.summary, /no medication counts recorded yet/);
+});
+
+// ---------- deliveryHistoryLabel (wave 5A item 1) ----------
+
+const RECORDER_UUID = "89c8764a-0f4e-4ef9-8158-e815154f927a";
+
+function deliveryFixture(
+  overrides: Partial<MedDeliverySummary> = {},
+): MedDeliverySummary {
+  return {
+    id: "d1",
+    countedOn: "2026-10-30",
+    countedAt: "2026-10-30T19:42:00.000Z",
+    remainingPills: 28,
+    pillsPerDay: 2,
+    recordedBy: RECORDER_UUID,
+    recordedByName: "Harper Lane",
+    expectedPills: 30,
+    varianceReason: "One tablet dropped and discarded",
+    ...overrides,
+  };
+}
+
+const LABEL_CONTEXT = {
+  medicationName: "Levetiracetam 500 mg tablet",
+  individualName: "Ellis Hart",
+};
+
+test("variance history label names the person, med, figures, reason, recorder and time — never the raw id", () => {
+  const label = deliveryHistoryLabel(deliveryFixture(), LABEL_CONTEXT);
+  assert.match(label, /Levetiracetam 500 mg tablet for Ellis Hart/);
+  assert.match(label, /expected 30, counted 28/);
+  assert.match(label, /One tablet dropped and discarded/);
+  assert.match(label, /recorded by Harper Lane/);
+  assert.match(label, /Fri, Oct 30/);
+  assert.match(label, /2:42 PM/);
+  assert.ok(!label.includes(RECORDER_UUID), "the raw user id must never render");
+});
+
+test("a count that matches expectation renders the plain counted figure", () => {
+  const label = deliveryHistoryLabel(
+    deliveryFixture({ expectedPills: 28, varianceReason: null }),
+    LABEL_CONTEXT,
+  );
+  assert.match(label, /28 pills counted/);
+  assert.doesNotMatch(label, /expected/);
+});
+
+test("an unresolved recorder name falls back to 'Staff member', never the id", () => {
+  const label = deliveryHistoryLabel(
+    deliveryFixture({ recordedByName: null }),
+    LABEL_CONTEXT,
+  );
+  assert.match(label, /recorded by Staff member/);
+  assert.ok(!label.includes(RECORDER_UUID));
+});
+
+test("legacy rows without a recorded timestamp show the count date only", () => {
+  const label = deliveryHistoryLabel(
+    deliveryFixture({ countedAt: null }),
+    LABEL_CONTEXT,
+  );
+  assert.match(label, /^Fri, Oct 30 — /);
+  assert.doesNotMatch(label, /PM|AM/);
+});
+
+// ---------- one count state: board and forecast agree (wave 5A item 2) ----------
+
+test("medSupplyDisplayState gates every supply claim on the views having loaded", () => {
+  const counted = { ...viewWithStatus("ok"), lastCountedOn: "2026-09-01" };
+  assert.deepEqual(medSupplyDisplayState(undefined, "loading"), {
+    kind: "loading",
+  });
+  assert.deepEqual(medSupplyDisplayState(counted, "loading"), {
+    kind: "loading",
+  });
+  assert.deepEqual(medSupplyDisplayState(counted, "failed"), {
+    kind: "unavailable",
+  });
+  assert.deepEqual(medSupplyDisplayState(undefined, "ready"), {
+    kind: "never-counted",
+  });
+  assert.deepEqual(medSupplyDisplayState(counted, "ready"), {
+    kind: "counted",
+    status: "ok",
+  });
+});
+
+test("board countdown and forecast predicate agree on every count state (batch 33 steady state)", () => {
+  const today = "2026-09-10";
+  const cases: Array<{
+    name: string;
+    view: MedInventoryView;
+    counted: boolean;
+  }> = [
+    {
+      name: "never counted (row at zero, no count date)",
+      view: projectMedInventory({
+        med: med({ remainingPills: 0, lastDeliveryOn: null, lastCountdownOn: null }),
+        inventory: null,
+        deliveries: [],
+        prnDoses: [],
+        doseExceptions: [],
+        today,
+      }),
+      counted: false,
+    },
+    {
+      name: "counted via a delivery record",
+      view: projectMedInventory({
+        med: med(),
+        inventory: null,
+        deliveries: [
+          { id: "d1", medicationId: "med-1", countedOn: "2026-09-08", remainingPills: 40, pillsPerDay: 2, recordedBy: "u" },
+        ],
+        prnDoses: [],
+        doseExceptions: [],
+        today,
+      }),
+      counted: true,
+    },
+    {
+      name: "maintained row count (date set, no delivery rows)",
+      view: projectMedInventory({
+        med: med(),
+        inventory: null,
+        deliveries: [],
+        prnDoses: [],
+        doseExceptions: [],
+        today,
+      }),
+      counted: true,
+    },
+    {
+      name: "counted down to zero is still counted — not never-counted",
+      view: projectMedInventory({
+        med: med(),
+        inventory: null,
+        deliveries: [
+          { id: "d1", medicationId: "med-1", countedOn: "2026-09-01", remainingPills: 2, pillsPerDay: 2, recordedBy: "u" },
+        ],
+        prnDoses: [],
+        doseExceptions: [],
+        today,
+      }),
+      counted: true,
+    },
+  ];
+  for (const fixture of cases) {
+    assert.equal(
+      medHasCountOnFile(fixture.view),
+      fixture.counted,
+      `${fixture.name}: forecast predicate`,
+    );
+    assert.equal(
+      medCountdown(fixture.view, [], today).hasBaseline,
+      fixture.counted,
+      `${fixture.name}: board countdown baseline`,
+    );
+    assert.equal(
+      medSupplyDisplayState(fixture.view, "ready").kind,
+      fixture.counted ? "counted" : "never-counted",
+      `${fixture.name}: shared display state`,
+    );
+  }
+});
+
+test("projectMedInventory carries the resolved recorder name into delivery summaries", () => {
+  const view = projectMedInventory({
+    med: med(),
+    inventory: null,
+    deliveries: [
+      {
+        id: "d1",
+        medicationId: "med-1",
+        countedOn: "2026-09-01",
+        remainingPills: 30,
+        pillsPerDay: 2,
+        recordedBy: RECORDER_UUID,
+        recordedByName: "Harper Lane",
+      },
+    ],
+    prnDoses: [],
+    doseExceptions: [],
+    today: "2026-09-10",
+  });
+  assert.equal(view.deliveries[0].recordedByName, "Harper Lane");
 });
 
 // ---------- LocalApi integration ----------

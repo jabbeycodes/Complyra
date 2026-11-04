@@ -50,6 +50,13 @@ export interface MedicationDelivery {
   pillsPerDay: number;
   recordedBy: string;
   /**
+   * Display name of the recorder, resolved at read time from the agency's
+   * profiles (the stored row carries only the user id). Null when the
+   * profile cannot be resolved — history labels must fall back to a
+   * generic "Staff member", never print the raw user id.
+   */
+  recordedByName?: string | null;
+  /**
    * The on-hand figure the countdown expected at count time (baseline −
    * recorded administrations). Null when the med had never been counted —
    * a first count cannot disagree with an expectation that does not exist.
