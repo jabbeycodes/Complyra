@@ -8,6 +8,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommandCenterView, type CommandCenterData } from "./CommandCenter";
 import { DMH_SOURCE_CAVEAT } from "../data/dmhRequirements";
+import type { MedInventoryView } from "../data/types";
 
 const noopAsync = async () => {};
 
@@ -272,6 +273,60 @@ describe("CommandCenterView", () => {
     assert.ok(
       html.includes("No corrective actions on record."),
       "honest empty actions state",
+    );
+  });
+
+  it("never calls a never-counted med out of stock, and names the person on stock claims", () => {
+    const medView = (overrides: Partial<MedInventoryView>): MedInventoryView => ({
+      id: "inv-1",
+      agencyId: "agency-1",
+      individualId: "i1",
+      medicationId: "med-1",
+      lowThresholdDays: 7,
+      doseTimes: ["08:00"],
+      reorderAcknowledgedOn: null,
+      updatedAt: null,
+      medicationName: "Testoprofen",
+      strength: "10 mg",
+      kind: "scheduled",
+      dosesPerDay: 2,
+      quantityOnDelivery: 0,
+      deliveredOn: null,
+      currentCount: 0,
+      daysRemaining: 0,
+      reorderPointPills: 14,
+      status: "out",
+      alertActive: true,
+      prnDosesSinceDelivery: 0,
+      deliveries: [],
+      doseExceptions: [],
+      lastCountedOn: null,
+      ...overrides,
+    });
+    const html = render({
+      ...baseData,
+      medications: [
+        // Never counted: the projection behind status "out" is a
+        // fabricated zero — Audit Me must make no stock claim for it
+        // (batch 86), even beside a counted med with the same profile.
+        medView({ medicationId: "med-never", medicationName: "Testoprofen" }),
+        medView({
+          id: "inv-2",
+          medicationId: "med-counted",
+          medicationName: "Placebocet",
+          quantityOnDelivery: 20,
+          deliveredOn: "2026-09-01",
+          lastCountedOn: "2026-09-01",
+        }),
+      ],
+    });
+    assert.ok(
+      !html.includes("Testoprofen — out of stock"),
+      "no out-of-stock claim for a never-counted med",
+    );
+    assert.ok(
+      html.includes("Placebocet — out of stock (Alex Doe · Cedar House)"),
+      "counted med's claim names the Individual and the home",
     );
   });
 

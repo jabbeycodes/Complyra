@@ -7,7 +7,7 @@ import {
   medSupplyStatusFromInventory,
 } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
-import { canLogDoseException, canRecordDelivery } from "../../data/chart";
+import { canLogDoseException, canRecordDelivery, todayIso } from "../../data/chart";
 import {
   deliveryHistoryLabel,
   doseExceptionKindLabel,
@@ -16,8 +16,10 @@ import {
 } from "../../data/medInventory";
 import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
 import { useMedAdminLock } from "../medAdminLock";
+import { medCountdown } from "../mobile/medcount";
 import type {
   DoseExceptionKind,
+  MedDoseMark,
   MedInventoryStatus,
   MedInventoryView,
 } from "../../data/types";
@@ -73,6 +75,46 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
   // Clearance gate: an uncleared DSP keeps the forecast but loses the
   // dose-exception action (the API refuses it too).
   const medLocked = useMedAdminLock(api, session);
+  // The recorded count beside the projection: the countdown (newest
+  // count baseline minus the doses actually recorded Given since) is
+  // the figure the MAR and the chart board headline, so the forecast
+  // shows it next to its projection — the two figures answer different
+  // questions and a reader must never have to guess which one a bare
+  // number is (sim batches 82–86: the projection charged a day's doses
+  // at the day boundary and read as if a dose had been recorded). The
+  // range read mirrors MobileMar: from the earliest baseline through
+  // today. A failed read hides the recorded line entirely — never
+  // substitute an empty range and invent a count.
+  const [marksRange, setMarksRange] = useState<MedDoseMark[] | null>(null);
+  const [countsUnavailable, setCountsUnavailable] = useState(false);
+  useEffect(() => {
+    if (!views) {
+      setMarksRange(null);
+      setCountsUnavailable(false);
+      return;
+    }
+    let live = true;
+    const today = todayIso();
+    const baselines = views
+      .map((view) => (view.lastCountedOn ?? view.deliveredOn ?? today).slice(0, 10))
+      .sort();
+    const earliest = baselines[0] ?? today;
+    api
+      .getMedDoseMarksInRange(individualId, earliest, today)
+      .then((rows) => {
+        if (!live) return;
+        setMarksRange(rows);
+        setCountsUnavailable(false);
+      })
+      .catch(() => {
+        if (!live) return;
+        setMarksRange(null);
+        setCountsUnavailable(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, individualId, views]);
 
   if (!session) return null;
   const canManage = canRecordDelivery(session.roleKey);
@@ -117,6 +159,13 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
         // The predicate is the shared one (medHasCountOnFile) — the same
         // computed source the chart board and the tallies use.
         const neverCounted = !medHasCountOnFile(view);
+        // The recorded count for scheduled meds (PRN counts already
+        // net their dose logs into the projection, so the two figures
+        // are one there). Null until the dose records load.
+        const countdown =
+          marksRange && view.kind === "scheduled"
+            ? medCountdown(view, marksRange, todayIso())
+            : null;
         return (
           <article key={view.medicationId} className="obligation-card med-card">
             <header>
@@ -140,7 +189,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             ) : (
               <>
             <p>
-              {view.strength} · {inventoryCountdownLabel(view)}
+              {view.strength} · Projection: {inventoryCountdownLabel(view)}
               {view.deliveredOn ? ` · Counted ${formatDate(view.deliveredOn)}` : ""}
               {view.kind === "prn" && view.prnDosesSinceDelivery > 0
                 ? ` · ${view.prnDosesSinceDelivery} PRN dose${view.prnDosesSinceDelivery === 1 ? "" : "s"} since`
@@ -149,6 +198,16 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 ? ` · ${view.doseExceptions.length} dose exception${view.doseExceptions.length === 1 ? "" : "s"} logged`
                 : ""}
             </p>
+            {countdown?.hasBaseline ? (
+              <p style={{ marginTop: 2 }}>
+                Recorded count: {countdown.label}
+              </p>
+            ) : countsUnavailable && view.kind === "scheduled" ? (
+              <p className="stack-help" style={{ marginTop: 2 }}>
+                Recorded count unavailable — the projection above is the
+                only figure right now.
+              </p>
+            ) : null}
             <div
               role="progressbar"
               aria-label={`${view.medicationName} supply: ${STATUS_LABEL[view.status]}`}

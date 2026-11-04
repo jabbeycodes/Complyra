@@ -1314,7 +1314,7 @@ export default function SiteDetailPage({
                             </strong>
                             <span className="muted">
                               {" "}
-                              · {alert.strength} · {inventoryCountdownLabel(alert)}
+                              · {alert.strength} · Projected: {inventoryCountdownLabel(alert)}
                             </span>
                           </div>
                           <Badge
