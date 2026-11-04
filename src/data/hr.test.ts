@@ -1551,25 +1551,27 @@ const KIOSK_NOW = "2026-09-16T12:00:00.000Z";
 
 test("KIOSK: rounding 0 minutes leaves the punch untouched", () => {
   assert.equal(
-    applyPunchRounding("2026-09-16T08:07:00", punchRules({ roundingMinutes: 0 })),
-    "2026-09-16T08:07:00",
+    applyPunchRounding("2026-09-16T08:07:00Z", punchRules({ roundingMinutes: 0 })),
+    "2026-09-16T08:07:00Z",
   );
 });
 
 test("KIOSK: 15-minute rounding snaps to the nearest bucket", () => {
+  // Punch stamps are UTC ISO strings; a zone-less literal would be read in
+  // the machine's local zone and only pass on a UTC host.
   const rules = punchRules({ roundingMinutes: 15 });
-  assert.equal(applyPunchRounding("2026-09-16T08:07:00", rules), "2026-09-16T08:00:00.000Z");
-  assert.equal(applyPunchRounding("2026-09-16T08:08:00", rules), "2026-09-16T08:15:00.000Z");
-  assert.equal(applyPunchRounding("2026-09-16T08:00:00", rules), "2026-09-16T08:00:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:07:00Z", rules), "2026-09-16T08:00:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:08:00Z", rules), "2026-09-16T08:15:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:00:00Z", rules), "2026-09-16T08:00:00.000Z");
 });
 
 test("KIOSK: rounding supports 5 and 10 minute buckets, ties round up", () => {
   assert.equal(
-    applyPunchRounding("2026-09-16T08:02:30", punchRules({ roundingMinutes: 5 })),
+    applyPunchRounding("2026-09-16T08:02:30Z", punchRules({ roundingMinutes: 5 })),
     "2026-09-16T08:05:00.000Z",
   );
   assert.equal(
-    applyPunchRounding("2026-09-16T08:06:00", punchRules({ roundingMinutes: 10 })),
+    applyPunchRounding("2026-09-16T08:06:00Z", punchRules({ roundingMinutes: 10 })),
     "2026-09-16T08:10:00.000Z",
   );
 });
