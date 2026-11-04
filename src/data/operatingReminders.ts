@@ -144,7 +144,6 @@ export function operatingReminderNotices(input: {
 }): OperatingNotice[] {
   const notices: OperatingNotice[] = [];
   const medSlot = reminderSlot(input.now.getTime(), input.unrecordedReminderMinutes);
-  const prnSlot = reminderSlot(input.now.getTime(), input.prnReminderRepeatMinutes);
   const noteDay = input.noteDay ?? input.now.toISOString().slice(0, 10);
   for (const site of input.sites) {
     const overdue = site.items.filter((item) => item.kind === "medication" && item.severity === "overdue");
@@ -208,7 +207,7 @@ export function operatingReminderNotices(input: {
         deepLink: "/meds",
         entityId: followup.medicationId,
         entityType: "medication",
-        dedupeKey: `med.prn_repeat:${followup.medicationId}:${userId}:${prnSlot}`,
+        dedupeKey: prnRepeatDedupeKey(followup.medicationId, userId, followup.createdAt),
       });
     }
   }
@@ -232,6 +231,27 @@ export function medUnrecordedRowRetired(
   clearSiteIds: ReadonlySet<string>,
 ): boolean {
   return row.type === "med.unrecorded" && row.entityId != null && clearSiteIds.has(row.entityId);
+}
+
+/**
+ * Simulation batch 199: one notice per PRN dose per recipient. The key names
+ * the dose event, not the reminder slot: a slot-keyed notice minted a fresh
+ * row for every recipient every interval while a follow-up stayed open.
+ */
+export function prnRepeatDedupeKey(medicationId: string, userId: string, givenAt: string): string {
+  return `med.prn_repeat:${medicationId}:${userId}:${new Date(givenAt).toISOString()}`;
+}
+
+/**
+ * The repeat reminder lives on that one row: if the recipient read it and the
+ * follow-up is still open a full interval later, the same row goes unread again.
+ */
+export function prnNoticeRearmDue(readAt: string | null | undefined, now: Date, repeatMinutes: number): boolean {
+  return Boolean(readAt) && now.getTime() >= Date.parse(readAt as string) + repeatMinutes * 60_000;
+}
+
+export function prnNoticeKeys(notices: OperatingNotice[]): string[] {
+  return notices.filter((notice) => notice.type === "med.prn_repeat").map((notice) => notice.dedupeKey);
 }
 
 export interface UnattendedAgencyInput {

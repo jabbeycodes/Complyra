@@ -421,7 +421,7 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeRearmDue, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -13679,7 +13679,9 @@ export class LocalApi implements ComplyraApi {
    * Opening notifications repeats an unmarked-dose reminder, an open PRN
    * follow-up, and a missing Shift note. The same list is what the unattended
    * sweep writes when nobody has the app open. Each interval sends one notice
-   * per person. A missing note is one notice per day.
+   * per person, except an open PRN follow-up, which is one notice per dose per
+   * person that goes unread again each interval. A missing note is one notice
+   * per day.
    */
   /** Returns the ids of sites this pass verified clear of overdue
    * unmarked doses (Wave 7M bell retirement); unloaded sites are absent. */
@@ -13744,7 +13746,16 @@ export class LocalApi implements ComplyraApi {
         }];
       }),
     })) {
-      if (!notice.userId || (this.store.db.notifications ?? []).some((row) => row.dedupeKey === notice.dedupeKey)) continue;
+      if (!notice.userId) continue;
+      const existing = (this.store.db.notifications ?? []).find((row) => row.dedupeKey === notice.dedupeKey);
+      if (existing) {
+        if (notice.type === "med.prn_repeat" && prnNoticeRearmDue(existing.readAt, now, rules.prnReminderRepeatMinutes)) {
+          existing.readAt = null;
+          existing.createdAt = now.toISOString();
+          added = true;
+        }
+        continue;
+      }
       this.notifyRole({
         userId: notice.userId,
         roleKey: null,
