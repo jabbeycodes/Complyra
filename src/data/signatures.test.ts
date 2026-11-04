@@ -385,6 +385,12 @@ test("a roster row can only be signed by the staff member named on it", async ()
 
 // ===== Training locks + correction flow =====
 
+// The trainee here needs a BLANK training sheet. Alex Morgan
+// (DEMO_DSP_USERNAME) no longer qualifies: the demo seeds his completed
+// training so the medication-administration clearance gate leaves the
+// demo med pass usable. Taylor Reed is the other Cedar DSP.
+const TRAINEE_USERNAME = "taylor.reed";
+
 test("a signed training sheet locks line edits until a correction is requested", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
@@ -392,19 +398,19 @@ test("a signed training sheet locks line edits until a correction is requested",
   await api.verifySigningPassword(DEMO_PASSWORD);
   const ws = await api.loadWorkspace(admin);
   const siteId = ws.sites[0].id;
-  const dsp = ws.staff.find((s) => s.username === DEMO_DSP_USERNAME)!;
+  const dsp = ws.staff.find((s) => s.username === TRAINEE_USERNAME)!;
   await api.assignTraining({ userId: dsp.id, siteId, source: "checklist" });
   const profile = await api.getStaffTrainingProfile(dsp.id);
   const hm = ws.staff.find((s) => s.username === DEMO_HM_USERNAME)!;
 
   // DSP initials every line, then signs the sheet as themselves.
   const dspApi = new LocalApi((api as unknown as { store: MemoryStore }).store);
-  await dspApi.signIn(login(DEMO_DSP_USERNAME));
+  await dspApi.signIn(login(TRAINEE_USERNAME));
   await dspApi.adoptSignature(adoptInput());
   await dspApi.verifySigningPassword(DEMO_PASSWORD);
   for (const line of profile.requirements) {
     await dspApi.initialRequirementLine(line.id, {
-      initials: "AM",
+      initials: "TR",
       trainerUserId: hm.id,
       method: "shadowing",
       hoursTotal: 1,
@@ -435,7 +441,7 @@ test("a signed training sheet locks line edits until a correction is requested",
   await assert.rejects(
     () =>
       api.initialRequirementLine(lineId, {
-        initials: "AM",
+        initials: "TR",
         trainerUserId: hm.id,
         method: "shadowing",
         hoursTotal: 2,
@@ -461,7 +467,7 @@ test("a signed training sheet locks line edits until a correction is requested",
   assert.deepEqual(await api.getSignatureEvents("training_checklist", docId), []);
   // The correction edit now succeeds.
   await api.initialRequirementLine(lineId, {
-    initials: "AM",
+    initials: "TR",
     trainerUserId: hm.id,
     method: "shadowing",
     hoursTotal: 2,

@@ -69,6 +69,9 @@ import type {
   MedicationOrder,
   MedicationReconciliation,
   MedicationReconciliationItem,
+  TrainingCountersignature,
+  TrainingRequirement,
+  TrainingSignoff,
 } from "./types";
 
 /** hmChecklist.test.ts assigns this Sunday as an open prior week. Don't occupy it. */
@@ -78,7 +81,7 @@ const CHECKLIST_TEST_WEEK = "2026-09-06";
  * Bump when the walkthrough seed changes. A browser that saved an older
  * Evergreen workspace reloads this seed once so the demo is actually visible.
  */
-export const SHOWCASE_REVISION = 12;
+export const SHOWCASE_REVISION = 13;
 
 const DAY_SHIFT = "7a–3p";
 const EVENING_SHIFT = "3p–11p";
@@ -96,6 +99,7 @@ export function applyAgencyDemo(db: LocalDatabase): void {
   addCurrentMonthChecks(db);
   completeOpenSiteReviews(db);
   signTrainingExample(db);
+  completeDspTraining(db);
   addQaAudits(db);
   addReeseDelegation(db);
   addDemoSurfaces(db);
@@ -1260,6 +1264,121 @@ function signTrainingExample(db: LocalDatabase) {
   row.staffSignatureName = "Taylor Reed";
   row.hmSignedAt = signedAt;
   row.hmSignatureName = "Sarah Mitchell";
+}
+
+/**
+ * Medication-administration clearance gate (medClearance.ts): a DSP whose
+ * training is not cleared can no longer record doses, so the demo's
+ * med-pass DSP — Alex Morgan, the DEMO_DSP_USERNAME account the
+ * walkthrough signs in with — carries a completed in-ratio training
+ * record: three signed-off checklist lines (22 hours total, 10 of them
+ * with the house manager, over the 20h / 8h gate) plus the staff + HM
+ * countersignatures for the home site. Without this the walkthrough's
+ * own med pass would be locked. The other demo DSPs keep blank sheets,
+ * so the Training page still demonstrates NOT CLEARED staff, and every
+ * oversight role keeps no training record (they are not subject to the
+ * gate and read as "No training assigned yet").
+ */
+function completeDspTraining(db: LocalDatabase) {
+  const ext = db as unknown as {
+    trainingRequirements?: TrainingRequirement[];
+    trainingSignoffs?: TrainingSignoff[];
+    trainingCountersignatures?: TrainingCountersignature[];
+  };
+  ext.trainingRequirements ??= [];
+  ext.trainingSignoffs ??= [];
+  ext.trainingCountersignatures ??= [];
+  const agency = agencyId(db);
+  const signedOn = addDaysIso(todayIso(), -45);
+  const signedAt = `${signedOn}T15:30:00.000Z`;
+  // Checklist lines with hours that clear the gate (20 total / 8 with HM),
+  // each line within the 8-hour per-line cap.
+  const lines: { topicId: string; hoursTotal: number; hoursWithHm: number }[] = [
+    { topicId: "chk-2-02", hoursTotal: 8, hoursWithHm: 8 },
+    { topicId: "chk-2-03", hoursTotal: 8, hoursWithHm: 0 },
+    { topicId: "chk-1-01", hoursTotal: 6, hoursWithHm: 2 },
+  ];
+  for (const membership of db.memberships) {
+    if (membership.agencyId !== agency || membership.roleKey !== "dsp") continue;
+    const memberProfile = db.profiles.find((row) => row.id === membership.userId);
+    if (memberProfile?.fullName !== "Alex Morgan") continue;
+    const userId = membership.userId;
+    if (ext.trainingRequirements.some((row) => row.userId === userId)) continue;
+    const profile = db.profiles.find((row) => row.id === userId);
+    const siteId = membership.siteId;
+    if (!profile || !siteId) continue;
+    // The trainer is the home's house manager where the demo has one;
+    // Cedar's HM sign-in is the agency administrator (Sarah Mitchell).
+    const hmMembership = db.memberships.find(
+      (row) =>
+        row.agencyId === agency &&
+        row.siteId === siteId &&
+        row.roleKey === "house_manager",
+    );
+    const trainer =
+      (hmMembership
+        ? db.profiles.find((row) => row.id === hmMembership.userId)
+        : undefined) ??
+      db.profiles.find((row) => row.fullName === "Sarah Mitchell");
+    if (!trainer) continue;
+    const initials = profile.fullName
+      .split(/\s+/)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase();
+    lines.forEach((line, i) => {
+      const requirementId = `demo-training-${userId}-${i + 1}`;
+      ext.trainingRequirements!.push({
+        id: requirementId,
+        agencyId: agency,
+        userId,
+        topicId: line.topicId,
+        individualId: null,
+        siteId,
+        source: "checklist",
+        planVersionId: null,
+        delegationId: null,
+        status: "complete",
+        dueOn: null,
+        createdAt: signedAt,
+      });
+      ext.trainingSignoffs!.push({
+        id: `demo-training-signoff-${userId}-${i + 1}`,
+        requirementId,
+        initials,
+        signedOn,
+        signoffVersion: 1,
+        na: false,
+        naReason: null,
+        trainerName: trainer.fullName,
+        trainerUserId: trainer.id,
+        signedByUserId: userId,
+        selfTraining: false,
+        method: "shadowing",
+        hoursTotal: line.hoursTotal,
+        hoursWithHm: line.hoursWithHm,
+        competencyText: null,
+        observerName: null,
+        observerSignature: null,
+        evidenceRef: null,
+        renewalRule: null,
+        nextDueOn: null,
+        createdAt: signedAt,
+      });
+    });
+    ext.trainingCountersignatures!.push({
+      id: `demo-training-counter-${userId}`,
+      agencyId: agency,
+      userId,
+      siteId,
+      staffSignatureName: profile.fullName,
+      staffSignatureMark: profile.fullName,
+      staffSignedAt: signedAt,
+      hmSignatureName: trainer.fullName,
+      hmSignatureMark: trainer.fullName,
+      hmSignedAt: signedAt,
+    });
+  }
 }
 
 function addQaAudits(db: LocalDatabase) {

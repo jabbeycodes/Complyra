@@ -369,6 +369,7 @@ import {
   canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
+
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
@@ -396,6 +397,10 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { readLocalCoverage } from "./localSchedule";
+import {
+  MED_ADMIN_CLEARANCE_MESSAGE,
+  roleRequiresMedClearance,
+} from "./medClearance";
 import {
   applyLatenessPoint,
   clockInIsLate,
@@ -6333,6 +6338,23 @@ export class LocalApi implements ComplyraApi {
       );
   }
 
+  /**
+   * Medication-administration clearance gate (see ./medClearance): a DSP
+   * whose training is not cleared — including a hire with no training
+   * record at all — cannot record doses. Keys off the same
+   * getStaffTrainingProfile().clearedForInRatio that renders the
+   * Training page's NOT CLEARED state. Oversight roles return at once.
+   */
+  private async assertMedAdministrationCleared(
+    session: SessionUser,
+  ): Promise<void> {
+    if (!roleRequiresMedClearance(session.roleKey)) return;
+    const profile = await this.getStaffTrainingProfile(session.userId);
+    if (!profile.clearedForInRatio) {
+      throw new Error(MED_ADMIN_CLEARANCE_MESSAGE);
+    }
+  }
+
   async markMedDose(
     input: Parameters<ComplyraApi["markMedDose"]>[0],
   ): Promise<void> {
@@ -6340,6 +6362,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("Your role cannot mark medications.");
     }
+    await this.assertMedAdministrationCleared(session);
     if (med.kind !== "scheduled") {
       throw new Error("Only scheduled medications are marked on the MAR.");
     }
@@ -7440,6 +7463,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const med = this.store.db.medications.find((row) => row.id === medicationId);
     if (!med || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
@@ -7544,6 +7568,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const med = this.store.db.medications.find((row) => row.id === medicationId);
     if (!med || med.kind !== "prn") throw new Error("PRN medication not found.");
     accessibleIndividual(this.store, session, med.individualId);
@@ -11799,6 +11824,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("You cannot log a dose exception.");
     }
+    await this.assertMedAdministrationCleared(session);
     const validated = validateDoseExceptionInput(input);
     const now = new Date().toISOString();
     const row: MedDoseException = {
