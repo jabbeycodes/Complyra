@@ -19,12 +19,19 @@ insert into auth.users(id,email) values
 update profiles set must_change_password=false,home_agency_id='a9100000-0000-0000-0000-000000000001'
  where id in ('d9100000-0000-0000-0000-000000000001','d9100000-0000-0000-0000-000000000002','d9100000-0000-0000-0000-000000000003');
 -- Agency roles are provisioned from the seeded templates on agency insert:
--- nurse and program_manager hold clinical.view; hr holds none of the
--- clinical / hub / recognition permissions the notify-other rule accepts.
+-- nurse and program_manager hold clinical.view. The HR template now holds
+-- hub.view_team (HR hub ownership, founder decision 2026-10-31, PR #213),
+-- one of the keys the notify-other rule accepts — so this agency's HR role
+-- is narrowed to hold none of the clinical / hub / recognition keys, which
+-- keeps test 4 about what it pins: a member with none of them gets no
+-- exemption for the new notice types.
 insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a9100000-0000-0000-0000-000000000001','d9100000-0000-0000-0000-000000000001','nurse','nurse',null),
  ('a9100000-0000-0000-0000-000000000001','d9100000-0000-0000-0000-000000000002','manager','program_manager',null),
  ('a9100000-0000-0000-0000-000000000001','d9100000-0000-0000-0000-000000000003','hr','hr',null);
+update agency_roles
+   set permissions = permissions || '{"clinical.view":false,"hub.view_team":false,"recognition.manage":false,"recognition.review_dsp":false}'::jsonb
+ where agency_id = 'a9100000-0000-0000-0000-000000000001' and template_key = 'hr';
 
 set local role authenticated;
 
@@ -72,7 +79,8 @@ select lives_ok($$select queue_operating_notice(
   'med.order_expiring:nurse:order-1:2026-11-15'
 )$$, 'Re-queueing the same order notice is a deduped no-op');
 
--- 4: an unprivileged caller (HR holds none of the guard permissions) still
+-- 4: an unprivileged caller (this agency's HR role holds none of the guard
+-- permissions — see the setup above) still
 -- cannot notify someone else with a new type — no exemption was added.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-0000-0000-0000-000000000003"}',true);
 select throws_ok($$select queue_operating_notice(

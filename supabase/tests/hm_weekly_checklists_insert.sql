@@ -5,7 +5,7 @@ select plan(9);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Checklist insert scope (20261031200000, simulation batch 19):
---  * management roles (administrator, compliance_admin, program_manager)
+--  * management roles (administrator, program_manager)
 --    create a weekly checklist row for any home in their agency — the
 --    assign flow and the oversight rollover;
 --  * a house manager creates ONLY the row assigned to themselves at a
@@ -35,7 +35,9 @@ insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a6000000-0000-0000-0000-000000000001','d6000000-0000-0000-0000-000000000003','manager','house_manager','c6000000-0000-0000-0000-000000000001'),
  ('a6000000-0000-0000-0000-000000000001','d6000000-0000-0000-0000-000000000004','manager','house_manager','c6000000-0000-0000-0000-000000000002'),
  ('a6000000-0000-0000-0000-000000000001','d6000000-0000-0000-0000-000000000005','dsp','dsp','c6000000-0000-0000-0000-000000000001'),
- ('a6000000-0000-0000-0000-000000000001','d6000000-0000-0000-0000-000000000006','compliance_admin','compliance_admin',null);
+ -- A former compliance administrator: the role was removed 2026-11-02 (PR
+ -- #246) and its holders became administrators.
+ ('a6000000-0000-0000-0000-000000000001','d6000000-0000-0000-0000-000000000006','administrator','administrator',null);
 
 set local role authenticated;
 
@@ -51,11 +53,11 @@ select lives_ok($$insert into hm_weekly_checklists(agency_id,site_id,week_of,ass
   values ('a6000000-0000-0000-0000-000000000001','c6000000-0000-0000-0000-000000000002','2026-10-04','d6000000-0000-0000-0000-000000000004','d6000000-0000-0000-0000-000000000002')$$,
   'Program manager can create a checklist row for a home');
 
--- Compliance admin creates a row for Home A.
+-- A former compliance administrator (now an administrator) creates a row for Home A.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d6000000-0000-0000-0000-000000000006"}',true);
 select lives_ok($$insert into hm_weekly_checklists(agency_id,site_id,week_of,assigned_to_user_id,assigned_by_user_id)
   values ('a6000000-0000-0000-0000-000000000001','c6000000-0000-0000-0000-000000000001','2026-10-11','d6000000-0000-0000-0000-000000000003','d6000000-0000-0000-0000-000000000006')$$,
-  'Compliance admin can create a checklist row for a home');
+  'A former compliance administrator (now administrator) can create a checklist row for a home');
 
 -- House manager A opens their OWN home's week (the batch-19 rollover path).
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d6000000-0000-0000-0000-000000000003"}',true);
