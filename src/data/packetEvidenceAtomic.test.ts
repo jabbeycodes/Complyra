@@ -129,3 +129,69 @@ test('rights signing writes no evidence, so a failing file store cannot block it
     assert.equal(saved.status, 'signed');
     assert.equal(f.db.rightsPacketEvidence?.[id], undefined);
 });
+
+/**
+ * Two packets for the SAME Individual across the evidence-write await (PR
+ * #252 review): A prepares, then waits on the file store; B completes in
+ * full; A resumes. A must be re-validated against the register as it is
+ * NOW — exactly one active version per consent type, A superseding B.
+ */
+function deferredFirstWrite() {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let first = true;
+    packetEvidenceWriter.write = async (path, file) => {
+        if (first) {
+            first = false;
+            await gate;
+        }
+        return realWrite(path, file);
+    };
+    return () => release();
+}
+
+function currentVersions(db: ReturnType<typeof createEvergreenSeed>, individualId: string, typeId: string) {
+    const rows = (db.consents ?? []).filter(c => c.individualId === individualId && c.typeId === typeId && c.activatedAt);
+    return rows.filter(r => !rows.some(n => n.supersedesId === r.id));
+}
+
+test('two packets for one Individual interleaved across the write: one active version per type, A supersedes B', async () => {
+    const f = fixture();
+    const make = async () => {
+        const id = await f.api.createConsentPacket({ individualId: f.person.id, signerName: 'Jordan Lee', effectiveOn: centralTodayIso(), reviewOn: '2099-12-31', outstandingAfterDays: 1 });
+        await f.api.generateConsentPacket(id);
+        const pdf = buildConsentPacketPdf(f.db.consentPackets!.find(p => p.id === id)!.snapshot, choices, consentSigner);
+        return { id, file: new File([pdf.output('arraybuffer')], `${id}.pdf`, { type: 'application/pdf' }) };
+    };
+    const a = await make();
+    const b = await make();
+    const releaseA = deferredFirstWrite();
+    const pendingA = f.api.filePaperConsentPacket(a.id, choices, consentSigner, a.file);
+    // Let A run up to its (blocked) evidence write.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await f.api.filePaperConsentPacket(b.id, choices, consentSigner, b.file);
+    releaseA();
+    await pendingA;
+    for (const item of PACKET_ITEMS) {
+        const current = currentVersions(f.db, f.person.id, item.typeId);
+        assert.equal(current.length, 1, `${item.typeId}: exactly one current version`);
+        assert.equal(current[0].packetId, a.id, `${item.typeId}: the later completion (A) is current`);
+        const bVersion = (f.db.consents ?? []).find(c => c.packetId === b.id && c.typeId === item.typeId)!;
+        assert.equal(current[0].supersedesId, bVersion.id, `${item.typeId}: A supersedes B, not a stale predecessor`);
+    }
+});
+
+test('a signing link revoked during the evidence write is refused, and the packet is untouched', async () => {
+    const f = fixture();
+    const id = await f.api.createConsentPacket({ individualId: f.person.id, signerName: 'Jordan Lee', effectiveOn: centralTodayIso(), reviewOn: '2099-12-31', outstandingAfterDays: 1 });
+    await f.api.generateConsentPacket(id);
+    const token = await f.api.sendConsentPacket(id, 7);
+    const releaseWrite = deferredFirstWrite();
+    const pending = f.api.signConsentPacket(token, choices, consentSigner);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    delete f.db.consentPacketTokens![id];
+    const before = consentState(f.db, id);
+    releaseWrite();
+    await assert.rejects(() => pending, /unavailable or expired/);
+    assert.deepEqual(consentState(f.db, id), before);
+});

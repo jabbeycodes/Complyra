@@ -3563,15 +3563,24 @@ export class LocalApi implements ComplyraApi {
         for (const version of versions) assertSingleConsentActivation(version, [...consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
         return { versions, now };
     }
-    /** The packet transition — run only after the evidence bytes are stored. */
-    private applyLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, prepared: { versions: import("./consents").ConsentRecord[]; now: string }) {
-        // Re-checked: another completion may have landed while the bytes
-        // were being stored.
-        if (packet.signedAt)
-            throw new Error('Signed packets are immutable.');
+    /**
+     * The packet transition — run only after the evidence bytes are stored.
+     *
+     * Everything is RE-PREPARED here against the current register (PR #252
+     * review): while the bytes were being written, another packet for the
+     * same Individual may have completed, so the predecessor links and the
+     * single-active-version check computed before the await are stale.
+     * prepareLocalPacket + the writes below run with no await between them,
+     * so nothing can interleave with this commit.
+     */
+    private applyLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, external: boolean) {
+        // An external signer's link must still be live after the await (a
+        // manager may have revoked it, or another tab signed through it).
+        if (external && !this.store.db.consentPacketTokens?.[packet.id])
+            throw new Error('Signing link is unavailable or expired.');
+        const { versions, now } = this.prepareLocalPacket(packet, choices, signer, external);
         const db = this.store.db;
         db.consents ??= [];
-        const { versions, now } = prepared;
         db.consents.push(...versions);
         packet.choices = structuredClone(choices);
         packet.signer = structuredClone(signer);
@@ -3596,9 +3605,10 @@ export class LocalApi implements ComplyraApi {
         });
         const base64 = pdf.output('datauristring').split(',')[1];
         const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
-        const prepared = this.prepareLocalPacket(packet, choices, signer, true);
+        // Fail fast before any write; apply re-prepares after the await.
+        this.prepareLocalPacket(packet, choices, signer, true);
         await storePacketEvidenceBytes('consent', packet.id, evidence);
-        this.applyLocalPacket(packet, choices, signer, evidence, prepared);
+        this.applyLocalPacket(packet, choices, signer, evidence, true);
         await persistMeta(this.store);
         return evidence;
     }
@@ -3607,9 +3617,10 @@ export class LocalApi implements ComplyraApi {
         const { packet } = this.packetForWrite(id);
         if (packet.status === 'draft')
             throw new Error('Generate the packet before filing.');
-        const prepared = this.prepareLocalPacket(packet, choices, signer, false);
+        // Fail fast before any write; apply re-prepares after the await.
+        this.prepareLocalPacket(packet, choices, signer, false);
         await storePacketEvidenceBytes('consent', packet.id, evidence);
-        this.applyLocalPacket(packet, choices, signer, evidence, prepared);
+        this.applyLocalPacket(packet, choices, signer, evidence, false);
         await persistMeta(this.store);
     }
     async getConsentPacketEvidence(id: string) {
@@ -3656,8 +3667,12 @@ export class LocalApi implements ComplyraApi {
         validateRightsCompletion(fields);
         // Store the evidence bytes BEFORE any packet change: a failed file
         // write must leave the packet awaiting signature and retryable.
-        if (evidence)
+        if (evidence) {
             await storePacketEvidenceBytes('rights', packet.id, evidence);
+            // Re-checked after the await: another completion may have landed.
+            if (packet.status !== 'awaiting_signature')
+                throw new Error('Completed rights packets are immutable. Start a new packet for the next year.');
+        }
         const now = new Date().toISOString();
         packet.reviewedBy = fields.reviewedBy.trim();
         // The manager-typed date is authoritative: stored exactly as
