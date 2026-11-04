@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(56);
+select plan(60);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -255,6 +255,46 @@ select throws_ok($$insert into personal_spending_entries(agency_id,site_id,indiv
 select throws_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000002','e4000000-0000-0000-0000-000000000001',to_char(current_date - interval '2 months','YYYY-MM'),0,'Pat PM','Pat PM','d4000000-0000-0000-0000-000000000004','individual_signed')$$,
   'P0001',null,'A month close cannot pair an Individual with another home');
+
+-- Cross-staff voids (PR #252 review): a recorder voids only their own
+-- entry; voiding a coworker's entry is a manager action (HM / PM / admin),
+-- enforced in the trigger, not only in the app.
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+insert into auth.users(id,email) values
+ ('d4000000-0000-0000-0000-000000000007','ps-dsp2@example.invalid');
+update profiles set must_change_password=false,
+  home_agency_id='a4000000-0000-0000-0000-000000000001', full_name='Dana DSP'
+ where id='d4000000-0000-0000-0000-000000000007';
+insert into memberships(agency_id,user_id,role,role_key,site_id) values
+ ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000007','dsp','dsp','c4000000-0000-0000-0000-000000000001');
+insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
+ ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000007','e4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001');
+-- Deposits in an open month (no close four months back), one by each DSP
+-- plus a second by Dana for the manager case.
+insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,recorded_by_name,recorded_by_role) values
+ ('f4000000-0000-0000-0000-000000000101','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope A',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000102','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope B',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000103','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope C',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp');
+set local role authenticated;
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000007"}',true);
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='My own typo'
+  where id='f4000000-0000-0000-0000-000000000102'$$,
+  'A recorder may void their own entry');
+select throws_ok($$update personal_spending_entries set voided_at=now(), void_reason='Not mine'
+  where id='f4000000-0000-0000-0000-000000000101'$$,
+  'P0001',null,'A non-manager cannot void another staff member''s entry');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000001"}',true);
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='HM correction'
+  where id='f4000000-0000-0000-0000-000000000103'$$,
+  'A house manager may void another staff member''s entry');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000004"}',true);
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='PM correction'
+  where id='f4000000-0000-0000-0000-000000000101'$$,
+  'A program manager may void another staff member''s entry');
 
 select * from finish();
 rollback;

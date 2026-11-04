@@ -8,9 +8,17 @@
 --     and month closes are pinned to the Individual's own home; the
 --     closing balance is the ledger's figure.
 --   * PR #201 (20261031190000_money_isp_integrity): only a manager may void
---     another staff member's house card or personal spending entry; a
---     spend may not take an Individual's balance below $0; a month cannot
---     be closed with a negative balance.
+--     another staff member's HOUSE CARD entry; a spend may not take an
+--     Individual's balance below $0; a month cannot be closed with a
+--     negative balance.
+--
+-- Plus one rule neither PR enforced in the database (PR #252 review):
+--   * Personal spending voids follow the same cross-staff rule as the House
+--     Card. The app already allows it only for a closer (administrator,
+--     program manager, house manager — PERSONAL_SPENDING_CLOSER_ROLE_KEYS,
+--     canVoidPersonalSpendingEntry) or the entry's own recorder, but the
+--     table's update policy admits every DSP who can read the Individual,
+--     so a direct API call could void a coworker's entry.
 --
 -- #201's migration runs later and CREATE OR REPLACEs those functions from
 -- a copy that predates #194, which silently dropped every #194 check
@@ -343,6 +351,18 @@ begin
   end if;
 
   if new.voided_at is not null then
+    -- PR #252 review: voiding another staff member's entry is a manager
+    -- action (the closers); a recorder may void only their OWN entry. The
+    -- same rule as the House Card and as canVoidPersonalSpendingEntry.
+    if v_uid is not null
+       and old.recorded_by is distinct from v_uid
+       and not private.role_key_in(
+             new.agency_id,
+             array['administrator', 'program_manager', 'house_manager']
+           ) then
+      raise exception 'Only a manager can void another staff member''s entry.'
+        using errcode = 'P0001';
+    end if;
     -- The void transition: a reason is mandatory and the stamp is ours.
     if length(btrim(coalesce(new.void_reason, ''))) = 0 then
       raise exception 'A reason is required to void a personal spending entry.'
