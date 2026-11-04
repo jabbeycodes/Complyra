@@ -55,6 +55,9 @@ test("Ellis opens as a full chart with widgets, download, and med count", async 
   const keppra = chart.locator(".med-card").filter({ has: page.getByLabel("Pills remaining") }).filter({ hasText: "Levetiracetam" });
   await keppra.getByLabel("Pills remaining").fill("40");
   await keppra.getByLabel("Pills per day").fill("2");
+  // 40 differs from the expected 28 on hand, so the delivery count carries
+  // a variance reason (PR #207 — the API refuses an unexplained one).
+  await keppra.getByLabel(/Count variance/).fill("Pharmacy delivery of 12 arrived");
   await keppra.getByRole("button", { name: "Record delivery count" }).click();
   await expect(keppra).toContainText("40 pills left");
 
