@@ -41,6 +41,10 @@ async function fillLoginForm(page: Page) {
   await page.addStyleTag({
     content: ".sidebar,.mobile-backdrop{transition:none!important}",
   });
+  // The Desktop switch keeps the screen + house (batch 28, PR #206): from
+  // Cedar's shell home it lands on Cedar's Site detail. These specs start
+  // their tour from the Overview, so go there through the drawer.
+  await openPage(page, "Overview");
 }
 
 async function signIn(page: Page) {

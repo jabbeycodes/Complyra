@@ -96,8 +96,18 @@ async function backHome(page: Page) {
 test("deep-linked pages lay out at phone width", async ({ page }) => {
   await signInToShell(page);
 
-  // Employee Hub (Time Clock tile): landing + the tabs with forms/tables.
-  await openTile(page, /Time Clock/);
+  // Employee Hub: landing + the tabs with forms/tables. The Time Clock tile
+  // now stays in the mobile shell (batches 29-30, PR #206); the desktop
+  // hub this tour checks is reached through My Hub's "Full Employee Hub"
+  // door.
+  // (The first "My Hub" match is the compliance band's door, which opens
+  // My Hub at My Compliance; its back link returns to the hub home.)
+  await page.getByRole("button", { name: /My Hub/ }).first().click();
+  const toHubHome = page.getByRole("button", { name: "‹ My Hub" });
+  const fullHub = page.getByRole("button", { name: /Full Employee Hub/ });
+  await toHubHome.or(fullHub).first().waitFor();
+  if (await toHubHome.isVisible()) await toHubHome.click();
+  await openTile(page, /Full Employee Hub/);
   await expectNoOverflow(page, "employee hub");
   await page.screenshot({ path: shot("after-employee-hub.png"), fullPage: true });
   for (const [tab, name] of [
