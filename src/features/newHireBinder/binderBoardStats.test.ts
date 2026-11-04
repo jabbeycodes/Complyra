@@ -53,6 +53,7 @@ function makeItem(spec: ItemSpec): DerivedBinderItem {
     note: "",
     document: null,
     certificate: null,
+    documentState: null,
   };
 }
 
