@@ -135,6 +135,34 @@ export function orderNeedsReview(
   return orderExpiry(order, today, leadDays) !== "ok";
 }
 
+const BOARD_LABEL_DATE = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/**
+ * The order-expiry line for a MAR medication fed by an order, worded the
+ * way the expiry notice describes it: "Order expires Nov 2, 2026" while
+ * the review date is approaching, "Order expired Oct 30, 2026" once it has
+ * passed. Null when the order needs no review attention (or the med has
+ * no dated active order) — the medication board renders this next to the
+ * supply line so an expiring order is visible where doses are worked, not
+ * only on the orders worklist. Text, never color alone.
+ */
+export function orderExpiryBoardLabel(
+  order: Pick<MedicationOrder, "status" | "endReviewDate">,
+  today = todayIso(),
+): string | null {
+  const expiry = orderExpiry(order, today);
+  if (expiry === "ok" || !order.endReviewDate) return null;
+  const when = BOARD_LABEL_DATE.format(
+    new Date(`${order.endReviewDate.slice(0, 10)}T12:00:00Z`),
+  );
+  return expiry === "expired" ? `Order expired ${when}` : `Order expires ${when}`;
+}
+
 /**
  * The medication-row shape an activated scheduled order projects onto the MAR.
  * PRN orders project a PRN medication (no auto-countdown, no dose times); a

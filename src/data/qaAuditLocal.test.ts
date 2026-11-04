@@ -71,6 +71,46 @@ test("QA audit: DSP cannot create or score audits", async () => {
   await assert.rejects(() => api.createQaAudit(maple, 2026, 3), /permission/);
 });
 
+test("QA audit: starting a review belongs to qa.schedule roles — PM yes, auditor / HM / compliance no", async () => {
+  const api = new LocalApi(store());
+  const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const maple = await siteId(api, admin, "Cedar House");
+  const oakwood = await siteId(api, admin, "Willow House");
+
+  // The Program Manager runs the QA program (qa.schedule) and can start
+  // a review — before this fix the create gate read qa.audit and the PM
+  // was refused.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "melissa.grant",
+    password: DEMO_PASSWORD,
+  });
+  const audit = await api.createQaAudit(maple, 2026, 3);
+  assert.equal(audit.status, "in_progress");
+
+  // The read-only auditor holds qa.audit (scoring) but must not start a
+  // review — before this fix the auditor was the ONLY non-admin role
+  // that could.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "mark.delaney",
+    password: DEMO_PASSWORD,
+  });
+  await assert.rejects(() => api.createQaAudit(oakwood, 2026, 3), /permission/);
+
+  // House managers hold qa.dispute only — no start control either.
+  await api.signIn(login(DEMO_HM_USERNAME));
+  await assert.rejects(() => api.createQaAudit(oakwood, 2026, 3), /permission/);
+
+  // Compliance administrators hold no qa.* permissions.
+  await api.signIn({
+    agencyCode: DEMO_AGENCY_CODE,
+    username: "omar.haddad",
+    password: DEMO_PASSWORD,
+  });
+  await assert.rejects(() => api.createQaAudit(oakwood, 2026, 3), /permission/);
+});
+
 test("QA audit: scoring, locked enforcement, and finalize gate", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));

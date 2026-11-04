@@ -53,6 +53,30 @@ export function reminderRecipientIds(
 }
 
 /**
+ * The house managers of ONE home: active house_manager memberships anchored
+ * to that site. Unlike reminderRecipientIds, a house_manager membership
+ * with no home site does NOT count — a house manager's reach is their home,
+ * so a site-less HM membership receives nothing here rather than every
+ * home's notices. Used where a notice belongs to a home's own managers
+ * (medication order expiry), addressed per user because a house_manager
+ * role broadcast would reach every home in the agency.
+ */
+export function houseManagerRecipientIds(
+  memberships: ReminderMembership[],
+  siteId: string,
+  today: string,
+): string[] {
+  const ids = new Set<string>();
+  for (const membership of memberships) {
+    if (membership.role !== "house_manager") continue;
+    if (membership.siteId !== siteId) continue;
+    if (membership.expiresOn && membership.expiresOn < today) continue;
+    ids.add(membership.userId);
+  }
+  return [...ids];
+}
+
+/**
  * Missouri agency clock. The signed-in app uses the browser clock. This job
  * uses Central so a dose at 8:00 a.m. is judged in the agency's day.
  */

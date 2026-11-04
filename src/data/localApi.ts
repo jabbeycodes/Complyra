@@ -409,7 +409,7 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, operatingReminderNotices, type ReminderMembership } from "./operatingReminders";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -1748,7 +1748,7 @@ export interface ComplyraApi {
   /* locked; the auditor scores the rest, PM/HM dispute with photo    */
   /* evidence, and the auditor resolves disputes.                       */
   /* ------------------------------------------------------------------ */
-  /** Start (or reopen) a draft audit for a site + quarter (qa.audit). */
+  /** Start (or reopen) a draft audit for a site + quarter (qa.schedule). */
   createQaAudit(
     siteId: string,
     year: number,
@@ -6608,6 +6608,38 @@ export class LocalApi implements ComplyraApi {
         agencyId: view.agencyId,
       });
     }
+    // The house managers of the order's home get their own copies,
+    // addressed personally and scoped to that home: a house_manager role
+    // broadcast would reach every home in the agency, and previously the
+    // HM of the home received nothing at all (simulation wave 4A
+    // follow-up). Same recipient rule as HostedApi
+    // (houseManagerRecipientIds in operatingReminders).
+    const person = this.store.db.individuals.find(
+      (row) => row.id === view.individualId && row.agencyId === view.agencyId,
+    );
+    if (!person) return;
+    const memberships: ReminderMembership[] = this.store.db.memberships
+      .filter((m) => m.agencyId === view.agencyId)
+      .map((m) => ({
+        userId: m.userId,
+        role: m.roleKey ?? m.role,
+        siteId: m.siteId,
+        expiresOn: m.expiresOn,
+      }));
+    for (const userId of houseManagerRecipientIds(memberships, person.siteId, todayIso())) {
+      this.notifyRole({
+        userId,
+        roleKey: null,
+        type,
+        title,
+        body,
+        deepLink: "/medication-orders",
+        entityType: "medication_order",
+        entityId: view.id,
+        dedupeKey: `${type}:house_manager:${userId}:${view.id}:${when}`,
+        agencyId: view.agencyId,
+      });
+    }
   }
 
   async listMedicationOrders(individualId: string): Promise<MedicationOrder[]> {
@@ -6654,7 +6686,8 @@ export class LocalApi implements ComplyraApi {
       )
       .map((row) => this.medOrderView(row, today));
     // No cron: when a reviewer opens the worklist, raise the expiring / expired
-    // alert for the nurse and Program Manager. Deduped per order + review date.
+    // alert for the nurse and Program Manager roles and for the house
+    // managers of each order's home. Deduped per recipient + order + date.
     for (const view of views) {
       if (view.expiry !== "ok") this.notifyOrderReview(view);
     }
@@ -15081,7 +15114,9 @@ export class LocalApi implements ComplyraApi {
     quarter: number,
   ): Promise<QaAudit> {
     const session = assertSession(this.store);
-    assertCan(session, "qa.audit");
+    // Starting a review is a program-management act (qa.schedule);
+    // scoring/finalizing stay on qa.audit. See HostedApi.createQaAudit.
+    assertCan(session, "qa.schedule");
     this.assertQaSite(session, siteId);
     if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
       throw new Error("That quarter is not valid.");
