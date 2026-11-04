@@ -156,6 +156,10 @@ export interface HubStaffEntry {
   email: string;
   roleKey: string;
   siteId: string | null;
+  /** The member's membership-home site name, when the workspace could
+   *  resolve it — the Binder Board labels homes from this, never from
+   *  the viewer's own site list alone. */
+  siteName?: string | null;
 }
 
 export interface HubSite {
@@ -4795,6 +4799,7 @@ export default function EmployeeHubPage({
         email: s.email,
         roleKey: s.roleKey,
         siteId: s.siteId,
+        siteName: s.siteName,
       })),
     [workspace, session],
   );

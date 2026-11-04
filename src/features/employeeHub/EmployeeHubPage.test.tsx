@@ -621,6 +621,7 @@ function makeStubStore(): HrStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
+    listBinders: async () => [],
     listBinderDocuments: async () => [],
     uploadBinderDocument: async () => {
       throw new Error("not used in this test");

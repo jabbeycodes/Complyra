@@ -4,7 +4,7 @@ import { createApi, isSupabaseConfigured, type ComplyraApi, type WorkspaceView }
 import { LoadStallWatchdog, workspaceLoadPending } from "./loadWatchdog";
 import type { LoginInput, SessionUser } from "./types";
 
-interface DataContextValue {
+export interface DataContextValue {
   api: ComplyraApi;
   session: SessionUser | null;
   workspace: WorkspaceView | null;
@@ -18,6 +18,7 @@ interface DataContextValue {
   refresh: () => Promise<void>;
 }
 
+/** Exported so component tests can stub the data layer (jsdom harnesses). */
 export const DataContext = createContext<DataContextValue | null>(null);
 
 function asErrorMessage(err: unknown, fallback: string) {

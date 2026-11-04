@@ -662,6 +662,7 @@ function ProfilePanel({
                               ) : (
                                 <LineInitialsStamp
                                   event={latestEvent}
+                                  documentTitle={`Training checklist — ${line.topicTitle}`}
                                   documentId={trainingChecklistDocId(
                                     profile.userId,
                                     line.siteId ?? "",
@@ -901,10 +902,12 @@ function LineInitialsStamp({
   event,
   documentId,
   getDocumentPayload,
+  documentTitle,
 }: {
   event: SignatureEvent;
   documentId: string;
   getDocumentPayload: () => object;
+  documentTitle?: string;
 }) {
   const { api } = useData();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -942,6 +945,7 @@ function LineInitialsStamp({
         documentId={documentId}
         fieldName={event.fieldName}
         getDocumentPayload={getDocumentPayload}
+        documentTitle={documentTitle}
       />
     </span>
   );

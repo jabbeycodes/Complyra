@@ -7,6 +7,21 @@ import {
 } from "./signatureUtils";
 
 /**
+ * The invalid-seal alert text. It must NAME the document — "document
+ * changed after signing" on its own leaves the reader hunting for which
+ * of a chart's signed documents is meant (simulation expired-consent
+ * check, 2026-11-02). Callers that know the document's title pass it;
+ * the generic wording remains only as the fallback for call sites that
+ * cannot name their document yet.
+ */
+export function signatureInvalidMessage(documentTitle?: string | null): string {
+  const title = documentTitle?.trim();
+  return title
+    ? `Signature invalid — ${title} changed after signing`
+    : "Signature invalid — document changed after signing";
+}
+
+/**
  * Tamper-evidence seal: recomputes the document hash from the LIVE document
  * payload and compares it to the hash bound at signing time. Text + icon
  * signaling (never color alone).
@@ -17,12 +32,15 @@ export default function SignatureSeal({
   documentId,
   fieldName,
   getDocumentPayload,
+  documentTitle,
 }: {
   event: SignatureEvent;
   documentType: string;
   documentId: string;
   fieldName: string;
   getDocumentPayload: () => object;
+  /** The document's display title, named in the invalid alert. */
+  documentTitle?: string | null;
 }) {
   const [verdict, setVerdict] = useState<"checking" | "valid" | "invalid">(
     "checking",
@@ -65,7 +83,7 @@ export default function SignatureSeal({
   return (
     <span className="sig-seal invalid" role="alert">
       <AlertTriangle size={16} aria-hidden />
-      Signature invalid — document changed after signing
+      {signatureInvalidMessage(documentTitle)}
     </span>
   );
 }

@@ -288,12 +288,12 @@ export function adaptKioskStore(store: HrStore): KioskStore {
     }
     // Bind to the store: HrStore implementations are classes whose methods
     // read `this.client` / `this.load()`. Returning the bare method here
-    // (as this adapter originally did) invoked them with `this` undefined,
-    // which crashed every kiosk-backed hub section — Missed-punch review,
-    // Clock settings, Punch exceptions, Who's here now, Kiosk admin — with
-    // "Cannot read properties of undefined (reading 'client')" on hosted
-    // sessions (simulation batches 33–35). adaptRemotePunchStore below has
-    // always bound via fn.apply(store, args); this call now matches it.
+    // invoked it with `this` undefined, which crashed every kiosk-backed
+    // hub section — Missed-punch review first (simulation batches 33–35,
+    // again in pass 16 batch 212) — with "Cannot read properties of
+    // undefined (reading 'client')" on hosted sessions, and the section
+    // rendered that raw exception text to the user. adaptRemotePunchStore
+    // below has always bound via fn.apply(store, args); this call matches.
     return (...args: unknown[]): Promise<unknown> => {
       try {
         return Promise.resolve(

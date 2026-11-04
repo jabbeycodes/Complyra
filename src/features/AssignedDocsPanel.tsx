@@ -662,6 +662,7 @@ function RequiredList({
                     documentId={view.item.id}
                     fieldName="rn_signature"
                     label="Delegating RN signature"
+                    documentTitle={view.item.title}
                     getDocumentPayload={() =>
                       view.item.delegationForm ? delegationFormPayload({
                         obligationId: view.item.id,
