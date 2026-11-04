@@ -50,3 +50,77 @@ test("open work ranks above compliant copies of the same person", () => {
     assert.ok(firstOpen < firstCompliant);
   }
 });
+
+// Batch 13: header search must find people and homes in a real agency
+// whose requirement collection may be empty. The caller passes only
+// collections already scoped to the caller's readable sites; these
+// fixtures model that post-scope input (a Juniper-only caller never
+// receives Maple rows at all).
+import { directoryNameMatches, searchDirectory } from "./search";
+
+const directoryFixture = {
+  individuals: [
+    { id: "ind-alex", name: "Alex Rivera", site: "Maple House" },
+    { id: "ind-bailey", name: "Bailey Chen", site: "Maple House" },
+    { id: "ind-cameron", name: "Cameron Ortiz", site: "Juniper House" },
+  ],
+  staff: [
+    { id: "st-harper", name: "Harper Lane", role: "House Manager", site: "Maple House" },
+    { id: "st-avery", name: "Avery Brooks", role: "DSP", site: "Maple House" },
+    { id: "st-quinn", name: "Morgan Quinn", role: "Nurse", site: "Agency-wide" },
+  ],
+  sites: [
+    { id: "site-maple", name: "Maple House" },
+    { id: "site-juniper", name: "Juniper House" },
+  ],
+};
+
+test("directory search finds an Individual by first name", () => {
+  const hits = searchDirectory(directoryFixture, "Alex");
+  assert.deepEqual(
+    hits.filter((h) => h.kind === "individual").map((h) => h.id),
+    ["ind-alex"],
+  );
+});
+
+test("directory search finds an Individual by last name and by partial tokens", () => {
+  assert.ok(directoryNameMatches("Alex Rivera", "Rivera"));
+  assert.ok(directoryNameMatches("Alex Rivera", "alex riv"));
+  assert.ok(!directoryNameMatches("Alex Rivera", "Bailey"));
+  const hits = searchDirectory(directoryFixture, "Chen");
+  assert.deepEqual(
+    hits.filter((h) => h.kind === "individual").map((h) => h.id),
+    ["ind-bailey"],
+  );
+});
+
+test("directory search finds staff and sites by name", () => {
+  const staffHits = searchDirectory(directoryFixture, "Harper");
+  assert.deepEqual(
+    staffHits.filter((h) => h.kind === "staff").map((h) => h.id),
+    ["st-harper"],
+  );
+  const siteHits = searchDirectory(directoryFixture, "Juniper");
+  assert.ok(siteHits.some((h) => h.kind === "site" && h.id === "site-juniper"));
+  // Individuals match on their own name, not their home's name.
+  assert.ok(!siteHits.some((h) => h.kind === "individual"));
+});
+
+test("directory search cannot leak records the caller never received", () => {
+  // A Maple-only caller's scoped input contains no Juniper people; a
+  // query for a Juniper Individual must come back empty rather than
+  // reaching across the scope boundary.
+  const mapleOnly = {
+    individuals: directoryFixture.individuals.filter((p) => p.site === "Maple House"),
+    staff: directoryFixture.staff.filter((s) => s.site !== "Juniper House"),
+    sites: directoryFixture.sites.filter((s) => s.id === "site-maple"),
+  };
+  assert.equal(searchDirectory(mapleOnly, "Cameron").length, 0);
+  assert.equal(searchDirectory(mapleOnly, "Juniper").length, 0);
+  assert.ok(searchDirectory(mapleOnly, "Alex").length > 0);
+});
+
+test("directory search matches nothing on an empty query", () => {
+  assert.equal(searchDirectory(directoryFixture, "   ").length, 0);
+  assert.equal(directoryNameMatches("Alex Rivera", ""), false);
+});
