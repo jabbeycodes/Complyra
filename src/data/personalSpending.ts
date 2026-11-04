@@ -41,8 +41,10 @@
  *    second sign-off: the statement records either that the Individual
  *    signed it, or that the Individual was unable to sign and a second
  *    staff member signed in their place (named, with their signature).
- *    A closed month refuses new back-dated entries; void/replace
- *    corrections stay possible and are marked post-close corrections.
+ *    After the close only a manager (administrator, program manager,
+ *    house manager) may record or void in that month; whatever they
+ *    write there is marked a post-close correction. Everyone else can
+ *    still view it.
  *  - Money is integer cents everywhere.
  *
  * Wording: "Individual/Individuals" only — never client/patient.
@@ -563,12 +565,20 @@ export function isPostCloseCorrection(
   return false;
 }
 
-/** The message shown when a back-dated entry targets a closed month. */
+/** The message shown when a non-manager tries to record in a closed month. */
 export function closedMonthMessage(monthLabel: string): string {
   return (
-    `${monthLabel} is closed and signed. New entries cannot be added to a ` +
-    `closed month — record the entry in the current month, or void and ` +
-    `replace an entry in the closed month as a post-close correction.`
+    `${monthLabel} is closed and signed. Only an administrator, program ` +
+    `manager, or house manager can record an entry in a closed month. ` +
+    `Record the entry in an open month, or ask a manager to correct it.`
+  );
+}
+
+/** The message shown when a non-manager tries to void in a closed month. */
+export function closedMonthVoidMessage(monthLabel: string): string {
+  return (
+    `${monthLabel} is closed and signed. Only an administrator, program ` +
+    `manager, or house manager can void an entry in a closed month.`
   );
 }
 

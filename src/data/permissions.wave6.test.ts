@@ -65,22 +65,22 @@ test("other roles still go through their stored permissions", () => {
 test("personal spending void: closers void any entry, recorders only their own", () => {
   const entry = { recordedBy: "user-dsp" };
   assert.equal(
-    canVoidPersonalSpendingEntry({ roleKey: "house_manager", userId: "user-hm" }, entry),
+    canVoidPersonalSpendingEntry({ roleKey: "house_manager", userId: "user-hm" }, entry, false),
     true,
     "house manager (closer) voids a DSP's entry",
   );
   assert.equal(
-    canVoidPersonalSpendingEntry({ roleKey: "administrator", userId: "user-admin" }, entry),
+    canVoidPersonalSpendingEntry({ roleKey: "administrator", userId: "user-admin" }, entry, false),
     true,
     "administrator (closer) voids any entry",
   );
   assert.equal(
-    canVoidPersonalSpendingEntry({ roleKey: "dsp", userId: "user-dsp" }, entry),
+    canVoidPersonalSpendingEntry({ roleKey: "dsp", userId: "user-dsp" }, entry, false),
     true,
     "the recorder undoes their own entry",
   );
   assert.equal(
-    canVoidPersonalSpendingEntry({ roleKey: "dsp", userId: "user-other-dsp" }, entry),
+    canVoidPersonalSpendingEntry({ roleKey: "dsp", userId: "user-other-dsp" }, entry, false),
     false,
     "another DSP cannot void it",
   );
@@ -88,6 +88,7 @@ test("personal spending void: closers void any entry, recorders only their own",
     canVoidPersonalSpendingEntry(
       { roleKey: "dsp", userId: "user-dsp" },
       { recordedBy: "user-admin" },
+      false,
     ),
     false,
     "a DSP cannot void the admin's entry (simulation batch 38)",
@@ -96,6 +97,7 @@ test("personal spending void: closers void any entry, recorders only their own",
     canVoidPersonalSpendingEntry(
       { roleKey: "dsp", userId: "user-dsp" },
       { recordedBy: "user-hm" },
+      false,
     ),
     false,
     "a DSP cannot void a house manager's entry (simulation batch 38)",

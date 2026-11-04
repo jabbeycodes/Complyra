@@ -702,8 +702,13 @@ export default function MobilePersonalSpending({
                                     </button>
                                   )}
                                   {/* Wave 6 item 3: Void only for closers,
-                                      or on the recorder's own entry. */}
-                                  {canVoidPersonalSpendingEntry(session, entry) && (
+                                      or on the recorder's own entry while
+                                      the month is open. */}
+                                  {canVoidPersonalSpendingEntry(
+                                    session,
+                                    entry,
+                                    Boolean(close),
+                                  ) && (
                                     <>
                                       {" "}
                                       <button
@@ -732,9 +737,9 @@ export default function MobilePersonalSpending({
                   <p className="stack-help">
                     Closing signs the month off as {session.fullName}, with{" "}
                     {individualName}&rsquo;s sign-off recorded alongside.
-                    After closing, new entries cannot be back-dated into
-                    this month; corrections stay possible and are marked as
-                    post-close corrections.
+                    After closing, only managers can record or void entries
+                    in this month, and what they write is marked as a
+                    post-close correction.
                   </p>
                   <div className="ps-form-grid">
                     <label className="ps-field">

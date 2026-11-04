@@ -1076,13 +1076,18 @@ export function canRecordPersonalSpending(roleKey: string) {
  * ledger; anyone else who can record may void ONLY their own entry —
  * that is the shipped mobile "Undo right after recording" path, and it
  * must never extend to other people's entries.
+ *
+ * On a signed month the own-entry path ends (founder decision 2026-11-04):
+ * only month-closers may void there. Matches the database guard
+ * (20261104130000) and both APIs.
  */
 export function canVoidPersonalSpendingEntry(
   session: { roleKey: string; userId: string },
   entry: { recordedBy: string },
+  monthClosed: boolean,
 ) {
   if (canClosePersonalSpendingMonth(session.roleKey)) return true;
-  return entry.recordedBy === session.userId;
+  return !monthClosed && entry.recordedBy === session.userId;
 }
 
 /** Personal spending — who may sign a month closed. */
@@ -1093,13 +1098,11 @@ export function canClosePersonalSpendingMonth(roleKey: string) {
 }
 
 /**
- * Personal spending — may this person be OFFERED the entry form while a
- * given month's ledger is on screen? (Wave 3, retest.) A signed month is
- * read-only for everyone who cannot close one: they keep viewing it, and
- * record again on an open month. Closers keep their controls on a closed
- * month, the same split canVoidPersonalSpendingEntry draws. The APIs and
- * the database still refuse any new entry dated inside a closed month,
- * whoever sends it; this gate is about what the screen offers.
+ * Personal spending — may this person record an entry dated inside a month
+ * with this closed state? A signed month stays open to month-closers, who
+ * may record and void there (founder decision 2026-11-04); it is read-only
+ * for everyone else. The form gate, both APIs, and the database guard
+ * (20261104130000) all follow this one rule.
  */
 export function canOfferPersonalSpendingEntryForm(
   roleKey: string,

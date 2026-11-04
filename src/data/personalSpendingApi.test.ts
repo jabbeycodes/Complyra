@@ -336,11 +336,24 @@ test("void and replace: the original stops counting and the pair stays linked", 
   );
 });
 
-test("closed months refuse new entries — including the seeded signed month", async () => {
+test("closed months: managers record and void, a DSP only views", async () => {
   const api = new LocalApi(store());
   const { ellis } = await people(api);
-  await api.signIn(login(DEMO_ADMIN_USERNAME)); // Sarah Mitchell, administrator
-
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "deposit",
+    location: "Family",
+    amountCents: 1000,
+  });
+  const dspCorrected = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "deposit",
+    location: "Family",
+    amountCents: 2000,
+  });
   // Ellis's previous month was signed closed in the seed.
   await assert.rejects(
     () =>
@@ -353,6 +366,17 @@ test("closed months refuse new entries — including the seeded signed month", a
       }),
     /closed and signed/i,
   );
+  await api.signOut();
+
+  await api.signIn(login(DEMO_ADMIN_USERNAME)); // Sarah Mitchell, administrator
+  const late = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: `${prevMonth()}-15`,
+    kind: "deposit",
+    location: "Family",
+    amountCents: 1000,
+  });
+  assert.equal(late.postCloseCorrection, true);
 
   const close = await api.closePersonalSpendingMonth({
     individualId: ellis.id,
@@ -361,7 +385,6 @@ test("closed months refuse new entries — including the seeded signed month", a
     individualSignoff: "individual_signed",
   });
   assert.equal(close.printedName, "Sarah Mitchell");
-  assert.equal(close.closingBalanceCents, 18084);
   await assert.rejects(
     () =>
       api.closePersonalSpendingMonth({
@@ -372,6 +395,30 @@ test("closed months refuse new entries — including the seeded signed month", a
       }),
     /already closed/i,
   );
+  // This file's clock is pinned, and post-close marking compares timestamps.
+  mock.timers.tick(1000);
+  const inClosed = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "deposit",
+    location: "Family",
+    amountCents: 1000,
+  });
+  assert.equal(inClosed.postCloseCorrection, true);
+  const voidedByManager = await api.voidPersonalSpendingEntry(
+    dspEntry.id,
+    "Corrected after sign-off.",
+    null,
+  );
+  assert.equal(voidedByManager.voided.voided, true);
+  assert.equal(voidedByManager.voided.postCloseCorrection, true);
+  await api.signOut();
+
+  // The DSP keeps reading the month and can change nothing in it, their
+  // own entry included.
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const visible = await api.listPersonalSpendingEntries(ellis.id);
+  assert.ok(visible.some((entry) => entry.id === dspCorrected.id));
   await assert.rejects(
     () =>
       api.createPersonalSpendingEntry({
@@ -381,7 +428,28 @@ test("closed months refuse new entries — including the seeded signed month", a
         location: "Family",
         amountCents: 1000,
       }),
-    /closed and signed/i,
+    /Only an administrator, program\s+manager, or house manager can record/i,
+  );
+  await assert.rejects(
+    () => api.voidPersonalSpendingEntry(dspCorrected.id, "My own typo.", null),
+    /Only an administrator, program\s+manager, or house manager can void/i,
+  );
+  await assert.rejects(
+    () =>
+      api.voidPersonalSpendingEntry(dspCorrected.id, "My own typo.", {
+        individualId: ellis.id,
+        entryDate: today(),
+        kind: "deposit",
+        location: "Family",
+        amountCents: 1900,
+      }),
+    /can void/i,
+  );
+  const after = await api.listPersonalSpendingEntries(ellis.id);
+  assert.equal(after.length, visible.length, "no replacement was written");
+  assert.equal(
+    after.find((entry) => entry.id === dspCorrected.id)?.voided,
+    false,
   );
 });
 

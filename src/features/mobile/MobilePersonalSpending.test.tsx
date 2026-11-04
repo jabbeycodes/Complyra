@@ -113,6 +113,18 @@ describe("MobilePersonalSpending close sign-off", () => {
       const ellis = (await api.loadWorkspace(admin)).individuals.find(
         (i) => i.name === "Ellis Hart",
       )!;
+      // The DSP's own entry predates the close, for the Void counts below.
+      await api.signOut();
+      await api.signIn(creds(DEMO_DSP_USERNAME));
+      await api.createPersonalSpendingEntry({
+        individualId: ellis.id,
+        entryDate: centralTodayIso(),
+        kind: "deposit",
+        location: "Family",
+        amountCents: 1000,
+      });
+      await api.signOut();
+      await api.signIn(creds(DEMO_ADMIN_USERNAME));
       if (closeFirst) {
         await api.closePersonalSpendingMonth({
           individualId: ellis.id,
@@ -153,17 +165,20 @@ describe("MobilePersonalSpending close sign-off", () => {
       const view = await renderFor(DEMO_DSP_USERNAME, true);
       assert.ok(!view.buttons.includes("Record an entry"));
       assert.ok(!view.buttons.includes("Repeat"));
+      assert.ok(!view.buttons.includes("Void"), "no Void, even on their own entry");
       assert.match(view.text, /closed and signed/);
     });
 
     it("offers a DSP the entry form on an open month", async () => {
       const view = await renderFor(DEMO_DSP_USERNAME, false);
       assert.ok(view.buttons.includes("Record an entry"));
+      assert.ok(view.buttons.includes("Void"), "their own entry on an open month");
     });
 
     it("keeps the entry form for a closer on a closed month", async () => {
       const view = await renderFor(DEMO_ADMIN_USERNAME, true);
       assert.ok(view.buttons.includes("Record an entry"));
+      assert.ok(view.buttons.includes("Void"));
     });
   });
 });

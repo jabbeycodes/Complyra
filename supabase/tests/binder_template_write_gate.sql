@@ -16,7 +16,7 @@ insert into auth.users(id,email) values
 update profiles set must_change_password=false,home_agency_id='a4000000-0000-0000-0000-000000000001'
  where id::text like 'd4000000-%';
 insert into memberships(agency_id,user_id,role,role_key) values
- ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000001','admin','administrator'),
+ ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000001','administrator','administrator'),
  ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000002','manager','program_manager'),
  ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000003','hr','hr');
 
