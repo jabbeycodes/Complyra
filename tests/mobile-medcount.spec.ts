@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openPersonMar } from "./fixtures";
 
 // Med count under Medications: every medication row in the mobile MAR
 // carries its own supply countdown (no separate Med Count tile). A
@@ -34,8 +34,7 @@ async function toShellHome(page: Page, homeName: string) {
 }
 
 async function toPersonMar(page: Page, personName: string) {
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await page.getByRole("button", { name: new RegExp(personName) }).click();
+  await openPersonMar(page, personName);
   await expect(page.getByText("Med count & supply")).toBeVisible();
 }
 

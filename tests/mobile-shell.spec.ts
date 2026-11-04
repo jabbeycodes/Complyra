@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openPersonMar } from "./fixtures";
 
 // Mobile shell + MAR + ISP flows at a phone viewport, in local/demo mode.
 // The clock is pinned to 08:30 Central on the seed's service day so Ellis
@@ -75,8 +75,7 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await page.screenshot({ path: shot("tile-home.png"), fullPage: true });
 
   // MAR: pick the person, read the day as passes with text counts.
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await openPersonMar(page, /Ellis Hart/);
   await expect(page.getByText("Med count & supply")).toBeVisible();
 
   // Allergies are one tap from the person header.
@@ -126,8 +125,7 @@ test("mobile MAR: a Refused record needs a reason and lands on the Other tab", a
   await signInToShell(page);
   await pickCedarHouse(page);
 
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await openPersonMar(page, /Ellis Hart/);
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
 
@@ -521,8 +519,7 @@ test("mobile home: a Refused exception does NOT move the donut, and home refresh
 
   // Record a Refused exception on Ellis Hart's 8:00 AM dose — an exception
   // with no dose mark. The dose itself stays "Not yet given".
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await openPersonMar(page, /Ellis Hart/);
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
   await page.getByLabel("Record type").selectOption("refused");
@@ -554,8 +551,7 @@ test("mobile home: a Given mark moves the donut on return, without a reload", as
   const before = await readHomeTracking(page);
 
   // Record the 8:00 AM Levetiracetam as Given (a real dose mark).
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await page.getByRole("button", { name: /Ellis Hart/ }).click();
+  await openPersonMar(page, /Ellis Hart/);
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
   await page.getByLabel(/I confirm the administered time/).check();

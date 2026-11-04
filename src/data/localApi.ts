@@ -2046,11 +2046,75 @@ export class MemoryStore {
 const browserStore = new MemoryStore();
 let hydrated = false;
 
+/**
+ * Wave 1 audit: signed consent / rights packet PDFs (now branded, logo
+ * included) were saved as base64 INSIDE the one localStorage meta entry, so
+ * filing one or two packets blew the ~5 MB quota ("Setting the value of
+ * 'complyra-v2-meta' exceeded the quota") and signing failed in the local
+ * workspace. Evidence bytes now live in the file store (IndexedDB, the same
+ * store uploads use); the meta keeps the evidence name/mime with an empty
+ * base64, and the evidence getters read the bytes back on demand.
+ */
+type EvidenceMap = Record<string, PacketEvidence> | undefined;
+const persistedEvidenceKeys = new Set<string>();
+
+function packetEvidenceFilePath(kind: "consent" | "rights", packetId: string) {
+  return `packet-evidence:${kind}:${packetId}`;
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function persistEvidenceFiles(kind: "consent" | "rights", map: EvidenceMap) {
+  for (const [packetId, evidence] of Object.entries(map ?? {})) {
+    const path = packetEvidenceFilePath(kind, packetId);
+    if (!evidence.base64 || persistedEvidenceKeys.has(path)) continue;
+    await persistFile(
+      path,
+      new File([base64ToBytes(evidence.base64)], evidence.name, { type: evidence.mime }),
+    );
+    persistedEvidenceKeys.add(path);
+  }
+}
+
+function withoutEvidenceBytes(map: EvidenceMap): EvidenceMap {
+  if (!map) return map;
+  return Object.fromEntries(
+    Object.entries(map).map(([id, evidence]) => [id, { ...evidence, base64: "" }]),
+  );
+}
+
+/** The evidence with its bytes, reading them from the file store when the
+ *  in-memory copy came from a slimmed meta entry (after a reload). */
+async function loadPacketEvidence(
+  store: MemoryStore,
+  kind: "consent" | "rights",
+  packetId: string,
+  evidence: PacketEvidence,
+): Promise<PacketEvidence> {
+  if (evidence.base64) return structuredClone(evidence);
+  const blob = await readStoredFile(store, packetEvidenceFilePath(kind, packetId));
+  if (!blob) throw new Error("The signed evidence file could not be read in this browser.");
+  const dataUrl = await blobToDataUrl(blob);
+  return { ...evidence, base64: String(dataUrl).split(",")[1] ?? "" };
+}
+
 async function persistMeta(store: MemoryStore) {
   if (typeof localStorage === "undefined") return;
+  await persistEvidenceFiles("consent", store.db.consentPacketEvidence);
+  await persistEvidenceFiles("rights", store.db.rightsPacketEvidence);
+  const db = {
+    ...store.db,
+    consentPacketEvidence: withoutEvidenceBytes(store.db.consentPacketEvidence),
+    rightsPacketEvidence: withoutEvidenceBytes(store.db.rightsPacketEvidence),
+  };
   localStorage.setItem(
     META_KEY,
-    JSON.stringify({ db: store.db, sessionUserId: store.sessionUserId }),
+    JSON.stringify({ db, sessionUserId: store.sessionUserId }),
   );
 }
 
@@ -3540,7 +3604,7 @@ export class LocalApi implements ComplyraApi {
         const evidence = this.store.db.consentPacketEvidence?.[id];
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return loadPacketEvidence(this.store, 'consent', id, evidence);
     }
     async listRightsPackets() {
         const session = assertSession(this.store);
@@ -3612,7 +3676,7 @@ export class LocalApi implements ComplyraApi {
         const evidence = this.store.db.rightsPacketEvidence?.[id];
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return loadPacketEvidence(this.store, 'rights', id, evidence);
     }
     async getConsents(): Promise<ConsentRegister> {
         const session = assertSession(this.store);

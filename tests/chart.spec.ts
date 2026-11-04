@@ -55,6 +55,11 @@ test("Ellis opens as a full chart with widgets, download, and med count", async 
   const keppra = chart.locator(".med-card").filter({ has: page.getByLabel("Pills remaining") }).filter({ hasText: "Levetiracetam" });
   await keppra.getByLabel("Pills remaining").fill("40");
   await keppra.getByLabel("Pills per day").fill("2");
+  // A count that differs from the expected on-hand figure needs its reason
+  // (count variance history, #207/#232).
+  await keppra
+    .getByLabel(/Count variance — why the count differs/)
+    .fill("New pharmacy delivery counted at the door.");
   await keppra.getByRole("button", { name: "Record delivery count" }).click();
   await expect(keppra).toContainText("40 pills left");
 

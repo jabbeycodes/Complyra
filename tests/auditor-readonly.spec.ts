@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openPersonMar } from "./fixtures";
 
 /**
  * Wave 7R (simulation batch 105): the auditor is read-only — "Auditors
@@ -143,14 +143,7 @@ test.describe("auditor read-only matrix — phone (wave 7R)", () => {
     page,
   }) => {
     await signInPhone(page);
-    await page
-      .getByRole("button", { name: /Medications/ })
-      .first()
-      .click();
-    await page
-      .getByRole("button", { name: /Ellis Hart/ })
-      .first()
-      .click();
+    await openPersonMar(page, /Ellis Hart/);
     // Pass rows are navigation; open the 8:00 AM pass…
     await page
       .getByRole("button", { name: /8:00 AM/ })

@@ -147,7 +147,8 @@ test("platform nav: Overview — sidebar starts collapsed, scroll-collapse cycle
   // The pill is here, expanded, carrying the role's destinations.
   const nav = page.getByRole("navigation", { name: "Mobile" });
   await expect(nav).toBeVisible();
-  for (const label of ["Home", "Tasks", "Meds", "People", "More"]) {
+  // No "Meds" destination: medications live under Health (#189).
+  for (const label of ["Home", "Tasks", "People", "More"]) {
     await expect(
       nav.getByRole("button", { name: label, exact: true }),
     ).toBeVisible();
@@ -197,19 +198,15 @@ test("platform nav: present on Individuals and Appointments, absent where the bo
   await expect(page.locator(".checklist-sticky-bar")).toBeVisible();
   await expect(nav).toHaveCount(0);
 
-  // Back in the shell (the deep link's "‹ Mobile home" return bar), the
-  // MAR flow and the ISP entry form own their bottoms too — no pill
-  // there either.
+  // Back in the shell (the deep link's "‹ Mobile home" return bar). The
+  // shell's own pill is on EVERY screen since batches 28–30 (#206) — the
+  // ISP entry form included — so the bottom is never left empty there.
+  // (Medications live under Health on mobile since #189; there is no
+  // separate Medications door to check here.)
   await page.locator(".mobile-return-bar").click();
   await expect(
     page.getByRole("heading", { name: "Today at Cedar House" }),
   ).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await expect(
-    page.getByText("Pick the person whose medications"),
-  ).toBeVisible();
-  await expect(nav).toHaveCount(0);
-  await page.getByRole("button", { name: "‹ Home" }).click();
   await page.getByRole("button", { name: /ISP Data/ }).first().click();
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await page
@@ -219,7 +216,7 @@ test("platform nav: present on Individuals and Appointments, absent where the bo
   await expect(
     page.getByRole("heading", { name: "Task scores" }),
   ).toBeVisible();
-  await expect(nav).toHaveCount(0);
+  await expect(nav).toBeVisible();
 });
 
 test("platform nav destinations land in the shell at the right view", async ({

@@ -14,3 +14,20 @@ export const test = base.extend<{ sampleDate: void }>({
     await use();
   }, { auto: true }],
 });
+
+/**
+ * Open one Individual's MAR in the phone shell. Since #189 medications live
+ * UNDER Health on mobile: the home's Medications door opens the Health
+ * person picker, and the MAR is the Medications row inside that person's
+ * Health screen. Every spec goes through here so a future nav change is a
+ * one-line fix.
+ */
+export async function openPersonMar(page: import("@playwright/test").Page, personName: string | RegExp) {
+  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await page
+    .getByRole("button", { name: typeof personName === "string" ? new RegExp(personName) : personName })
+    .first()
+    .click();
+  const marRow = page.getByRole("button", { name: /^Medications Pass meds/ });
+  if (await marRow.isVisible().catch(() => false)) await marRow.click();
+}

@@ -167,7 +167,10 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
                     // Compliant here — the same standing the compliance
                     // scores are built from (consentCompliance.ts).
                     const standing = individualConsentStanding(data, person.id);
-                    return <p role="status">{standing.required === 0
+                    // A static verdict, not a live announcement: role="status"
+                    // made screen readers read it on every chart load and
+                    // collided with the page's real status toasts.
+                    return <p className="consent-standing">{standing.required === 0
                         ? 'No required consent types are configured for this agency.'
                         : standing.compliant
                             ? `✓ Compliant — all ${standing.required} required consents are current.`
