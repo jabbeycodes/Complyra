@@ -273,9 +273,9 @@ insert into staff_assignments(agency_id,user_id,individual_id,site_id) values
 -- Deposits in an open month (no close four months back), one by each DSP
 -- plus a second by Dana for the manager case.
 insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,recorded_by_name,recorded_by_role) values
- ('f4000000-0000-0000-0000-000000000101','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope A',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
- ('f4000000-0000-0000-0000-000000000102','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope B',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp'),
- ('f4000000-0000-0000-0000-000000000103','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','Void scope C',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp');
+ ('f4000000-0000-0000-0000-000000000101','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family (void scope A)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000102','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family (void scope B)','',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000103','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family (void scope C)','',500,'d4000000-0000-0000-0000-000000000007','Dana DSP','dsp');
 set local role authenticated;
 
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000007"}',true);
