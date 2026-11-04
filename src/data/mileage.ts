@@ -168,19 +168,18 @@ export function compareMileageTrips(a: MileageTrip, b: MileageTrip): number {
 // The paper log is one unbroken chain: the next trip's odometer start must
 // continue from the most recent trip's end. If a user types anything else,
 // the form blocks with an error so they fix it — unless an authorized
-// backfiller (administrator, compliance administrator, or house manager)
+// backfiller (administrator or house manager)
 // checks the "Backfill" box to log a forgotten trip out of sequence.
 
 /** Roles allowed to bypass odometer continuity with a backfill. */
 export const MILEAGE_BACKFILL_ROLE_KEYS = [
   "administrator",
-  "compliance_admin",
   "house_manager",
 ] as const;
 
 /**
  * Whether this session may backfill an out-of-sequence trip: administrators,
- * compliance administrators, house managers, and platform admins. Everyone
+ * house managers, and platform admins. Everyone
  * else (DSP, nurse, HR, auditor, …) can never bypass continuity.
  */
 export function canBackfillMileage(
@@ -200,7 +199,7 @@ export function assertCanBackfillMileage(session: {
 }): void {
   if (!canBackfillMileage(session)) {
     throw new Error(
-      "Only administrators, compliance administrators, and house managers " +
+      "Only administrators and house managers " +
         "can backfill an out-of-sequence trip.",
     );
   }

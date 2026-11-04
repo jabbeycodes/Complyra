@@ -849,7 +849,6 @@ test("HR-HUB: all hub keys are declared with labels", () => {
 test("HR-HUB: hub.access defaults on for all 8 roles", () => {
   for (const role of [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "dsp",
@@ -871,7 +870,7 @@ test("HR-HUB: scheduling/timecard/time-off/team grants for managers only", () =>
     for (const role of ["administrator", "program_manager", "house_manager"]) {
       assert.equal(defaultPermissions(role)[key], true, `${role}.${key}`);
     }
-    for (const role of ["compliance_admin", "dsp", "nurse", "hr", "auditor"]) {
+    for (const role of ["dsp", "nurse", "hr", "auditor"]) {
       assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
     }
   }
@@ -882,7 +881,6 @@ test("HR-HUB: payroll lock and HR documents for administrator/PM only", () => {
     assert.equal(defaultPermissions("administrator")[key], true);
     assert.equal(defaultPermissions("program_manager")[key], true);
     for (const role of [
-      "compliance_admin",
       "house_manager",
       "dsp",
       "nurse",
@@ -1062,7 +1060,7 @@ test("staffing: hub.manage_staffing permission gating per role", () => {
       `${role} can configure staffing`,
     );
   }
-  for (const role of ["compliance_admin", "dsp", "nurse", "auditor"]) {
+  for (const role of ["dsp", "nurse", "auditor"]) {
     assert.equal(
       hasPermission({ role }, "hub.manage_staffing"),
       false,
@@ -1489,7 +1487,6 @@ test("PHASE2: hub.manage_pay_settings defaults for admin/PM/HR only", () => {
     assert.equal(defaultPermissions(role)["hub.manage_pay_settings"], true, role);
   }
   for (const role of [
-    "compliance_admin",
     "house_manager",
     "dsp",
     "nurse",

@@ -53,7 +53,6 @@ export function dayOrdinal(day: number) {
 export function canConfigureMonthlyDue(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }
@@ -290,7 +289,6 @@ export function isAdaptiveEquipmentObligation(item: ObligationItem) {
 export function canManageEquipment(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
   ].includes(roleKey);

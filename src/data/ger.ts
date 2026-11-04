@@ -125,8 +125,7 @@ export function canCreateGerReport(roleKey: string | null | undefined): boolean 
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 
@@ -136,8 +135,7 @@ export function canReviewGerReport(roleKey: string | null | undefined): boolean 
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 

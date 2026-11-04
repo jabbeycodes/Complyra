@@ -320,6 +320,11 @@ test("an administrator can edit template access and cannot demote the last admin
   const workspace = await api.loadWorkspace(admin);
   const dspRole = workspace.roles.find((row) => row.key === "dsp");
   assert.equal(dspRole?.permissions["members.invite"], true);
+  // The demo seed carries a second administrator (Omar Haddad, the former
+  // compliance_admin demo account). Demoting him first leaves Sarah as
+  // the last administrator — her own demotion must then be refused.
+  const omar = workspace.staff.find((row) => row.username === "omar.haddad")!;
+  await api.assignMemberRole(omar.id, "dsp");
   await assert.rejects(
     () => api.assignMemberRole(admin.userId, "dsp"),
     /at least one agency administrator/,
@@ -1033,9 +1038,10 @@ test("HR-ROLES: HR can add staff and assign operational roles, but cannot escala
     () => api.assignMemberRole(target.id, "administrator"),
     /Only an administrator can grant that role/,
   );
+  // …and the retired compliance_admin role cannot be assigned at all…
   await assert.rejects(
     () => api.assignMemberRole(target.id, "compliance_admin"),
-    /Only an administrator can grant that role/,
+    /Choose a valid role/,
   );
   // …cannot invite an administrator…
   await assert.rejects(

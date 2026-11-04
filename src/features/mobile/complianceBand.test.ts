@@ -59,7 +59,7 @@ const ITEMS: Requirement[] = [
 ];
 
 test("roles without house scope get no house rows at all", () => {
-  for (const roleKey of ["dsp", "nurse", "auditor", "hr", "compliance_admin"]) {
+  for (const roleKey of ["dsp", "nurse", "auditor", "hr"]) {
     assert.equal(
       bandHouseRows(session(roleKey), SITES, STAFF, ITEMS),
       null,

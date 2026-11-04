@@ -280,7 +280,6 @@ export const SITE_REVIEW_SECTIONS: { id: SiteReviewSectionId; title: string; hel
 export function canEditSiteReview(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
   ].includes(roleKey);

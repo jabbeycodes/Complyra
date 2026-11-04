@@ -72,8 +72,8 @@ export default function InviteMemberForm({
   const template = ROLE_TEMPLATES.find((row) => row.key === roleKey)!;
 
   // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
-  // HR can invite staff into operational roles, but the administrator /
-  // compliance-administrator options are hidden for HR.
+  // HR can invite staff into operational roles, but the administrator
+  // option is hidden for HR.
   const grantableRoles = grantableRoleTemplates(session?.roleKey);
 
   if (created) {

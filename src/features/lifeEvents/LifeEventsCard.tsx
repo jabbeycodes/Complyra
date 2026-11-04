@@ -5,7 +5,7 @@
  * in this person's life lately" at a glance. It raises no alerts and no
  * dashboard work — recording an entry changes nothing but this timeline.
  * Anyone who can read the Individual sees it (auditors read-only); the
- * editor roles (administrator, compliance_admin, program manager, house
+ * editor roles (administrator, program manager, house
  * manager, nurse) add, correct, and void entries. Removal is a void with
  * a reason — entries are never deleted.
  */

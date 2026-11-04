@@ -293,8 +293,7 @@ export function canRecordHealthEntry(roleKey: string | null | undefined): boolea
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 
@@ -304,8 +303,7 @@ export function canCorrectHealthTrackEntry(roleKey: string | null | undefined): 
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 

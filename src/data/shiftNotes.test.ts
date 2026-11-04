@@ -79,7 +79,6 @@ test("issue #80 role gates: config is PM/administrator only, entry covers staff"
   assert.equal(canEnterShiftNotes("dsp"), true);
   assert.equal(canEnterShiftNotes("auditor"), false);
   assert.equal(canSeeShiftNotes("auditor"), true);
-  assert.equal(canSeeShiftNotes("compliance_admin"), true);
 });
 
 test("issue #80: draft programs are invisible to staff, approval opens notes", async () => {

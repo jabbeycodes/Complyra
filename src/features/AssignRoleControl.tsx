@@ -17,8 +17,7 @@ export default function AssignRoleControl({
 }) {
   const { api, workspace, refresh, session } = useData();
   // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
-  // HR can assign operational roles but never sees administrator /
-  // compliance-administrator.
+  // HR can assign operational roles but never sees administrator.
   const grantableRoles = grantableRoleTemplates(session?.roleKey);
   // WAVE-7T (simulation batch 158): the draft must start on the member's
   // actual current role. The old initializer fell back to "dsp" whenever the

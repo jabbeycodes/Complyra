@@ -114,7 +114,6 @@ test("a void always needs a reason", () => {
 test("the editor gate: five roles in, DSP/auditor/HR out", () => {
   for (const roleKey of [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",

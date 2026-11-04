@@ -110,7 +110,7 @@ export default function MileagePage() {
     agencyStateCode(null, session?.agencyCode),
   );
   const showYearly = canViewYearlySummary(session);
-  /** Admin backfill: administrators, compliance admins, and house managers
+  /** Admin backfill: administrators and house managers
    * may log a forgotten trip out of sequence. Regular staff never see it. */
   const showBackfill = canBackfillMileage(session);
   const people = useMemo(

@@ -14,7 +14,7 @@ import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.
  *
  * Authorization matches delegation-ack-sweep: the platform verifies the JWT,
  * then the caller must present the service role key or be an active
- * administrator or compliance admin.
+ * administrator.
  *
  * Deployed to Complyra. A cron job calls it only when the project URL and
  * service key are in Vault. The job command reads those secrets at run time
@@ -30,7 +30,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ADMIN_ROLE_KEYS = ["administrator", "compliance_admin"];
+const ADMIN_ROLE_KEYS = ["administrator"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

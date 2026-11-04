@@ -54,7 +54,7 @@ The migrations enable deny-by-default RLS, append-only `audit_events`, and a pri
 
 ## What this version does
 
-- Signed-in agency workspace with Administrator, Compliance Admin, Manager, and DSP roles.
+- Signed-in agency workspace with Administrator, Manager, and DSP roles.
 - Agency, program, site, individual (including date of birth), and dated staff assignments.
 - Real PDF upload with SHA-256 hashing and retained file bytes (no longer discarded).
 - Human review and approval of requirement drafts. Drafts do not affect the active score.

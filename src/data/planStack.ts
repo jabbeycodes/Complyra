@@ -542,7 +542,6 @@ export function proposeFromPcsp(input: {
 export function canEditCover(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }
@@ -559,7 +558,6 @@ export function canToggleDelegation(roleKey: string, role: string, canApprove: b
 export function canSeeRenewals(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",

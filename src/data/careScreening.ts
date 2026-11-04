@@ -82,7 +82,7 @@ export const emptyCareData = (): CareScreeningData => ({
 });
 export const canManageCare = (role: string) => role === 'nurse';
 export const canApproveCare = (role: string) => ['nurse', 'program_manager'].includes(role);
-export const canViewCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp', 'auditor', 'administrator', 'compliance_admin'].includes(role);
+export const canViewCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp', 'auditor', 'administrator'].includes(role);
 export const canViewScreening = (role: string) => canViewCare(role) && role !== 'dsp';
 export const canAcknowledgeCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp'].includes(role);
 export function validateCareDraft(draft: CareDraft) {
