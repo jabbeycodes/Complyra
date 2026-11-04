@@ -153,6 +153,7 @@ function AdministerForm({
   doseDate,
   onDone,
   onCancel,
+  onConflict,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -162,6 +163,10 @@ function AdministerForm({
   doseDate: string;
   onDone: () => void;
   onCancel: () => void;
+  /** Wave 7M: the dose was marked by someone else after this screen
+   * loaded — the API refused with "Already given by …"; the parent
+   * closes the form, reloads the pass, and shows that message. */
+  onConflict: (message: string) => void;
 }) {
   const [recordType, setRecordType] = useState<RecordChoice>("given");
   const [confirmTime, setConfirmTime] = useState(false);
@@ -225,7 +230,12 @@ function AdministerForm({
       }
       onDone();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      if (message.startsWith("Already ")) {
+        onConflict(message);
+        return;
+      }
+      setError(message);
       setBusy(false);
     }
   };
@@ -964,6 +974,11 @@ export default function MobileMar({
           doseDate={dateIso}
           onCancel={() => setAdminister(null)}
           onDone={() => {
+            setAdminister(null);
+            void reload();
+          }}
+          onConflict={(message) => {
+            setError(message);
             setAdminister(null);
             void reload();
           }}

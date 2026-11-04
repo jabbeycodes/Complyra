@@ -1,6 +1,6 @@
 import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatPillCount, medCountdown } from "./mobile/medcount";
 import { medSupplyDisplayState } from "../data/medInventory";
 import { scrollToSectionId } from "./sectionLinks";
@@ -190,37 +190,37 @@ export default function IndividualChart({
   const [medViewsLoad, setMedViewsLoad] = useState<
     "loading" | "ready" | "failed"
   >("loading");
-  useEffect(() => {
+  // Wave 7M: the load is a callback so the MAR check-off card can ask for
+  // a reload after it records a mark — the countdown and PRN sections
+  // read this state, not the card's, and must not wait for a workspace
+  // refresh to show a dose someone just recorded. A sequence number keeps
+  // a slow, superseded load (another Individual, a newer reload) from
+  // writing stale rows.
+  const medLoadSeq = useRef(0);
+  const loadMedData = useCallback(async () => {
     if (!medsEnabled) return;
-    let live = true;
-    setMedViewsLoad("loading");
-    api
-      .getMedInventory(individualId)
-      .then((views) => {
-        if (!live) return;
-        setMedViews(views);
-        setMedViewsLoad("ready");
-      })
-      .catch(() => {
-        if (live) setMedViewsLoad("failed");
-      });
-    return () => {
-      live = false;
-    };
-  }, [api, individualId, medsEnabled, workspace]);
-  useEffect(() => {
-    if (!medsEnabled) return;
-    let live = true;
+    const seq = ++medLoadSeq.current;
+    const current = () => seq === medLoadSeq.current;
     const today = todayIso();
     const from = new Date(Date.now() - 370 * 86_400_000)
       .toISOString()
       .slice(0, 10);
-    Promise.all([
+    const inventory = api
+      .getMedInventory(individualId)
+      .then((views) => {
+        if (!current()) return;
+        setMedViews(views);
+        setMedViewsLoad("ready");
+      })
+      .catch(() => {
+        if (current()) setMedViewsLoad("failed");
+      });
+    const history = Promise.all([
       api.getMedDoseMarksInRange(individualId, from, today),
       api.listPrnDoses(individualId),
     ])
       .then(([marks, logs]) => {
-        if (!live) return;
+        if (!current()) return;
         setMedMarks(marks);
         setPrnLogs(logs);
       })
@@ -228,10 +228,17 @@ export default function IndividualChart({
         // Marks/PRN history degrade to empty; the count source above is
         // unaffected.
       });
+    await Promise.all([inventory, history]);
+  }, [api, individualId, medsEnabled]);
+
+  useEffect(() => {
+    setMedViewsLoad("loading");
+    void loadMedData();
     return () => {
-      live = false;
+      // Unmount or a new Individual: any in-flight load is now stale.
+      medLoadSeq.current += 1;
     };
-  }, [api, individualId, medsEnabled, workspace]);
+  }, [loadMedData, workspace]);
 
   // Wave 6 item 2: honor the section deep-link once the chart body has
   // rendered (this effect sits after the early return on purpose — the
@@ -993,9 +1000,16 @@ export default function IndividualChart({
         )}
 
         {/* Issue #76: today's scheduled-med MAR check-off (clears Overview
-            unmarked-medication due items). */}
-        {canSeeChartWidgets(chartSession.roleKey) && (
-          <MarCard individualId={individualId} />
+            unmarked-medication due items). Wave 7M: gated on med
+            visibility (canSeeMeds), not the chart-widget bundle — the
+            bundle gate also hid the MAR from DSPs, who administer these
+            doses and already see the med board and PRN logging here;
+            MarCard itself decides who may press the mark buttons. */}
+        {showMeds && (
+          <MarCard
+            individualId={individualId}
+            onMarksChanged={() => void loadMedData()}
+          />
         )}
 
         {/* Issue #75: HM alone-time editor (shrinks the required Shift-note
