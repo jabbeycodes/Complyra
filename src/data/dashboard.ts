@@ -30,34 +30,6 @@ export const AGENCY_WIDE_ROLE_KEYS = [
   "hr",
 ] as const;
 
-/**
- * Staff-directory visibility (wave 6, item 4; simulation batch 33: a
- * Maple house manager saw all 13 agency staff on the Staff page, Audit
- * picker, Certificates, Timecards and Binder, but only her own three on
- * Performance). ONE rule for every staff list: agency-wide roles keep
- * the full directory; a site-scoped viewer (house manager, DSP, nurse)
- * sees the staff whose home membership site is one of the viewer's
- * visible sites — the same home-membership basis the Individuals list
- * uses — plus their own row, so nobody loses themselves from pickers.
- *
- * `staff` needs only `id` and `siteId` (the workspace staff row's
- * membership-home site). Assignment-derived coverage already flows
- * through `assignedSiteIds` for the viewer's OWN visible sites.
- */
-export function staffVisibleTo<T extends { id: string; siteId: string | null }>(
-  session: SessionUser,
-  staff: T[],
-  assignmentSiteIds: string[] = [],
-): T[] {
-  if (isAgencyWideViewer(session)) return staff;
-  const visible = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
-  return staff.filter(
-    (member) =>
-      member.id === session.userId ||
-      (member.siteId != null && visible.has(member.siteId)),
-  );
-}
-
 export type VisibleSite = {
   id: string;
   name: string;
@@ -72,7 +44,10 @@ export type StaffSiteRef = {
   siteId: string | null;
 };
 
-export function isAgencyWideViewer(session: SessionUser): boolean {
+/** The slice of a session the visibility rules below read. */
+export type ViewerRef = Pick<SessionUser, "userId" | "roleKey" | "siteId" | "platformAdmin">;
+
+export function isAgencyWideViewer(session: ViewerRef): boolean {
   if (session.platformAdmin) return true;
   return (AGENCY_WIDE_ROLE_KEYS as readonly string[]).includes(session.roleKey);
 }
@@ -96,7 +71,7 @@ export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
 }
 
 export function assignedSiteIds(
-  session: SessionUser,
+  session: ViewerRef,
   staff: StaffSiteRef[],
   assignmentSiteIds: string[] = [],
 ): string[] {
@@ -122,6 +97,30 @@ export function sitesVisibleTo<T extends { id: string }>(
   if (isAgencyWideViewer(session)) return sites;
   const ids = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
   return sites.filter((site) => ids.has(site.id));
+}
+
+/**
+ * Staff-directory visibility (wave 6, item 4; simulation batch 33: a
+ * Maple house manager saw all 13 agency staff on the Staff page, Audit
+ * picker, Certificates, Timecards and Binder, but only her own three on
+ * Performance). ONE rule for every staff list: agency-wide roles keep
+ * the full directory; a site-scoped viewer (house manager, DSP, nurse)
+ * sees the staff whose home membership site is one of the viewer's
+ * visible sites — the same home-membership basis the Individuals list
+ * uses — plus their own row, so nobody loses themselves from pickers.
+ *
+ * `staff` needs only `id` and `siteId` (the workspace staff row's
+ * membership-home site). Assignment-derived coverage already flows
+ * through `assignedSiteIds` for the viewer's OWN visible sites.
+ */
+export function staffVisibleTo<T extends StaffSiteRef>(
+  session: ViewerRef,
+  staff: T[],
+  assignmentSiteIds: string[] = [],
+): T[] {
+  if (isAgencyWideViewer(session)) return staff;
+  const ids = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
+  return staff.filter((row) => row.id === session.userId || (row.siteId != null && ids.has(row.siteId)));
 }
 
 /** Agency-wide roles may act at every site; everyone else is locked to home site. */

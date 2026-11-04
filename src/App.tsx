@@ -2220,7 +2220,13 @@ export default function App() {
                     )}
                     <SignatureSettingsSection onSaved={notify} />
                     {/* Secondary/destructive chrome collapses by default so
-                        Settings reads as sections, not one long list (#110 Cut A). */}
+                        Settings reads as sections, not one long list (#110 Cut A).
+                        Batch 59: this section is the local sample workspace's
+                        reset — in the hosted app there is no reset to offer,
+                        so the section (and its "workspace reset" label) no
+                        longer renders for anyone; in local mode the reset
+                        itself is administrator-only. */}
+                    {!usingHostedBackend && (
                     <Disclosure label="Advanced &amp; data" summary="Data handling · workspace reset">
                       <div className="settings-row">
                         <span>
@@ -2232,7 +2238,7 @@ export default function App() {
                         </span>
                         <ShieldCheck size={20} />
                       </div>
-                      {!usingHostedBackend && (
+                      {session.roleKey === "administrator" && (
                         <button
                           className="button danger"
                           onClick={() => setModal("reset")}
@@ -2241,6 +2247,7 @@ export default function App() {
                         </button>
                       )}
                     </Disclosure>
+                    )}
                   </section>
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
@@ -2783,6 +2790,7 @@ export default function App() {
         <Modal title="Your notifications" onClose={() => setModal(null)}>
           <NotificationsPanel {...notifications}
             onMarkRead={(id) => void notifications.markRead(id)}
+            onMarkManyRead={(ids) => void notifications.markManyRead(ids)}
             onMarkAllRead={() => void notifications.markAllAsRead()}
             onRetry={() => void notifications.refresh()}
             onClose={() => setModal(null)}

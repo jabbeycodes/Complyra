@@ -47,6 +47,8 @@ import {
   hasPermission,
   type PermissionKey,
 } from "../../data/permissions";
+import { staffVisibleTo } from "../../data/dashboard";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -140,7 +142,6 @@ import { PunchRulesConfig } from "./PunchRulesConfig";
 import { KioskAdmin } from "./KioskAdmin";
 import { OpenShiftsTab } from "./OpenShiftsTab";
 import { createOpenShiftStore, type OpenShiftStore } from "../../data/openShiftStore";
-import { staffVisibleTo } from "../../data/dashboard";
 import { scheduledVsActual } from "./punchInsights";
 import {
   adaptRemotePunchStore,
@@ -166,6 +167,10 @@ interface EmployeeHubShellProps {
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
+  /** Batch 59: training-profile reads for the scheduling clearance warning. */
+  api?: ReturnType<typeof useData>["api"];
   initialTab?: string;
   /** The viewer's active staff-assignment site ids (WorkspaceView). Used to
    * scope the scheduling forms' staff/site options for site-scoped roles. */
@@ -487,6 +492,8 @@ export function EmployeeHubShell({
   store,
   staffList,
   sites,
+  swapPickerStaffList,
+  api,
   initialTab,
   assignmentSiteIds,
   openShiftStore,
@@ -672,9 +679,9 @@ export function EmployeeHubShell({
       </div>
 
       <div className="hub-panel">
-        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
+        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} />}
         {tab === "staffing" && (
-          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} />
+          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} />
         )}
         {tab === "open-shifts" && (
           <OpenShiftsTab
@@ -755,7 +762,7 @@ export function EmployeeHubShell({
           />
         )}
         {tab === "team-schedule" && can("hub.manage_schedule") && (
-          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} />
+          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} />
         )}
         {tab === "attendance" && canViewTeamHub && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
@@ -789,11 +796,14 @@ function MyScheduleTab({
   store,
   sites,
   staffList,
+  swapPickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   sites: HubSite[];
   staffList: HubStaffEntry[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -919,7 +929,7 @@ function MyScheduleTab({
           ))}
         </ul>
       )}
-      <SwapBoard session={session} store={store} staffList={staffList} />
+      <SwapBoard session={session} store={store} staffList={staffList} pickerStaffList={swapPickerStaffList} />
     </section>
   );
 }
@@ -936,11 +946,19 @@ function SwapBoard({
   session,
   store,
   staffList,
+  pickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
+  /**
+   * Batch 47: coworkers this viewer may target with a swap — the
+   * staffVisibleTo-scoped subset of staffList. Name lookups for existing
+   * swap rows keep the full staffList; only the target pickers scope.
+   */
+  pickerStaffList?: HubStaffEntry[];
 }) {
+  const targetChoices = pickerStaffList ?? staffList;
   const notifyClient = useNotifyClient();
   // Wave 6 item 3: auditors are read-only everywhere (founder rule:
   // auditors see everything, change nothing) — the board stays visible
@@ -1182,7 +1200,7 @@ function SwapBoard({
             Target coworker (optional)
             <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
               <option value="">Open to everyone</option>
-              {staffList
+              {targetChoices
                 .filter((s) => s.userId !== session.userId)
                 .map((s) => (
                   <option key={s.userId} value={s.userId}>
@@ -1288,6 +1306,7 @@ function StaffingTab({
   sites,
   formStaffList,
   formSites,
+  api,
 }: {
   session: SessionUser;
   store: HrStore;
@@ -1298,6 +1317,7 @@ function StaffingTab({
    * lists stay unscoped. */
   formStaffList?: HubStaffEntry[];
   formSites?: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
 }) {
   const canManage = hasPermission(session, "hub.manage_staffing");
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
@@ -1385,6 +1405,7 @@ function StaffingTab({
             sites={formSites ?? sites}
             initial={editing}
             busy={busy}
+            api={api}
             onSave={handleSave}
             onCancel={() => {
               setFormOpen(false);
@@ -2952,6 +2973,7 @@ function TeamScheduleTab({
   sites,
   formStaffList,
   formSites,
+  api,
 }: {
   session: SessionUser;
   store: HrStore;
@@ -2962,6 +2984,7 @@ function TeamScheduleTab({
    * Display name resolution keeps the full staffList/sites. */
   formStaffList?: HubStaffEntry[];
   formSites?: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
 }) {
   const assignableStaff = formStaffList ?? staffList;
   const formSiteOptions = formSites ?? sites;
@@ -2975,6 +2998,10 @@ function TeamScheduleTab({
   const [editing, setEditing] = useState<HrShift | null>(null);
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
   const [form, setForm] = useState({ title: "Shift", siteId: "", staffId: "", date: dayStamp(new Date()), start: "08:00", end: "16:00", notes: "", status: "published" as HrShift["status"] });
+  // Batch 59: warn (never block) when the chosen assignee is a DSP who is
+  // not training-cleared yet.
+  const assignee = staffList.find((s) => s.userId === form.staffId);
+  const clearanceWarning = useAssigneeClearanceWarning(api, assignee?.userId ?? null, assignee?.roleKey ?? null);
 
   const weekStart = useMemo(() => addDays(startOfWeek(new Date()), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -3149,6 +3176,11 @@ function TeamScheduleTab({
                 ))}
               </select>
             </label>
+            {clearanceWarning && (
+              <p className="hub-clearance-warning" role="alert">
+                {clearanceWarning}
+              </p>
+            )}
             <label>
               Site
               <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
@@ -4605,10 +4637,40 @@ export default function EmployeeHubPage({
             agencyId: session.agencyId,
             userId: session.userId,
             roleKey: session.roleKey,
+            // Batch 47: the store enforces the same swap-target scope the
+            // picker shows, so a swap cannot be offered across homes.
+            swapScope: {
+              roleKey: session.roleKey,
+              siteId: session.siteId,
+              staffDirectory: (workspace?.staff ?? []).map((s) => ({
+                id: s.id,
+                siteId: s.siteId,
+              })),
+              assignmentSiteIds: workspace?.assignmentSiteIds ?? [],
+            },
           })
         : null,
-    [session],
+    [session, workspace],
   );
+  // Batch 47: the swap target picker offers only coworkers this viewer may
+  // see (staffVisibleTo) — a Juniper DSP no longer sees Maple staff.
+  const swapPickerStaffList: HubStaffEntry[] = useMemo(() => {
+    if (!session || !workspace) return [];
+    const visibleIds = new Set(
+      staffVisibleTo(session, workspace.staff, workspace.assignmentSiteIds).map(
+        (s) => s.id,
+      ),
+    );
+    return (workspace.staff ?? [])
+      .filter((s) => visibleIds.has(s.id))
+      .map((s) => ({
+        userId: s.id,
+        fullName: s.name,
+        email: s.email,
+        roleKey: s.roleKey,
+        siteId: s.siteId,
+      }));
+  }, [session, workspace]);
 
   useEffect(() => {
     if (focusTab) onFocusHandled?.();
@@ -4654,6 +4716,8 @@ export default function EmployeeHubPage({
       staffList={staffList}
       sites={sites}
       assignmentSiteIds={workspace?.assignmentSiteIds ?? []}
+      swapPickerStaffList={swapPickerStaffList}
+      api={api}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

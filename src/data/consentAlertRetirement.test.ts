@@ -49,9 +49,11 @@ function localFixture() {
     return { db, store, api, hm, person, draft };
 }
 
+/** Current (unretired) consent alert rows. Retire = mark read, never
+ *  delete — the hosted 20261031220000 sweep's rule, mirrored locally. */
 function consentRowsFor(db: ReturnType<typeof createEvergreenSeed>, entityId: string) {
     return (db.notifications ?? []).filter(
-        n => n.type.startsWith('consent.') && n.entityId === entityId,
+        n => n.type.startsWith('consent.') && n.entityId === entityId && !n.readAt,
     );
 }
 

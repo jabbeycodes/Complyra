@@ -174,6 +174,67 @@
   background: var(--color-h-eef2e9);
 }
 
+/* Grouped repeats (batches 51/52/58): the head is a div shell carrying the
+   row chrome; the main button inside keeps the row layout, and the toggle
+   expands the individual member rows beneath it. */
+.notif-group-head {
+  cursor: default;
+}
+
+.notif-group-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.notif-count {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-h-e8e3d5);
+  color: var(--color-h-5f5145);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notif-group-toggle {
+  flex: none;
+  align-self: center;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-h-5f5145);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notif-group-toggle:hover {
+  background: var(--color-h-f1f0ed);
+}
+
+.notif-group-members {
+  list-style: none;
+  margin: 4px 0 4px 24px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--color-h-e3e9dd);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .notif-icon {
   flex: none;
   display: inline-flex;

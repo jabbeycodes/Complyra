@@ -23,8 +23,10 @@ import {
 } from "lucide-react";
 import type { NotificationType } from "./notify";
 import {
+  groupNotifications,
   isUnread,
   metaForType,
+  type NotificationGroup,
 } from "./notify";
 import type { NotificationRow } from "./useNotifications";
 import "./notifications.css";
@@ -76,6 +78,8 @@ interface NotificationsPanelProps {
   loading: boolean;
   error: string | null;
   onMarkRead: (id: string) => void;
+  /** Batch-mark a group's members read in one call (falls back to per-row). */
+  onMarkManyRead?: (ids: string[]) => void;
   onMarkAllRead: () => void;
   /** Navigate to the notification's deep link (app route like /checklists/<id>). */
   onNavigate: (deepLink: string, row: NotificationRow) => void;
@@ -89,15 +93,69 @@ export default function NotificationsPanel({
   loading,
   error,
   onMarkRead,
+  onMarkManyRead,
   onMarkAllRead,
   onNavigate,
   onClose,
   onRetry,
 }: NotificationsPanelProps) {
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const visible = showUnreadOnly
     ? notifications.filter(isUnread)
     : notifications;
+  // Batches 51/52/58: collapse repeats about one subject into a single
+  // counted row; the members stay individually reachable via expansion.
+  const groups = groupNotifications(visible);
+
+  function markGroupRead(group: NotificationGroup) {
+    const ids = group.rows.filter(isUnread).map((row) => row.id);
+    if (ids.length === 0) return;
+    if (onMarkManyRead) onMarkManyRead(ids);
+    else ids.forEach((id) => onMarkRead(id));
+  }
+
+  function toggleGroup(key: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function renderRow(n: NotificationRow) {
+    const Icon = iconForType(n.type);
+    const meta = metaForType(n.type);
+    const unreadRow = isUnread(n);
+    return (
+      <button
+        type="button"
+        className={`notif-row${unreadRow ? " unread" : ""}`}
+        onClick={() => {
+          if (unreadRow) onMarkRead(n.id);
+          onNavigate(n.deep_link, n);
+        }}
+        aria-label={`${meta.label}: ${n.title}${unreadRow ? " (unread)" : ""}`}
+      >
+        <span className={`notif-icon status-${meta.status}`} aria-hidden="true">
+          <Icon size={17} />
+        </span>
+        <span className="notif-text">
+          <span className="notif-meta">
+            <span className={`notif-status status-${meta.status}`}>
+              {meta.label}
+            </span>
+            <span className="notif-time">
+              {formatRelativeTime(n.created_at)}
+            </span>
+          </span>
+          <strong>{n.title}</strong>
+          <small>{n.body}</small>
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div className="notif-panel" role="region" aria-label="Notifications">
@@ -161,37 +219,62 @@ export default function NotificationsPanel({
         </div>
       ) : (
         <ul className="notif-list">
-          {visible.map((n) => {
-            const Icon = iconForType(n.type);
-            const meta = metaForType(n.type);
-            const unreadRow = isUnread(n);
+          {groups.map((group) => {
+            if (group.rows.length === 1) {
+              return <li key={group.key}>{renderRow(group.head)}</li>;
+            }
+            const head = group.head;
+            const Icon = iconForType(head.type);
+            const meta = metaForType(head.type);
+            const expanded = expandedGroups.has(group.key);
             return (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  className={`notif-row${unreadRow ? " unread" : ""}`}
-                  onClick={() => {
-                    if (unreadRow) onMarkRead(n.id);
-                    onNavigate(n.deep_link, n);
-                  }}
-                  aria-label={`${meta.label}: ${n.title}${unreadRow ? " (unread)" : ""}`}
-                >
-                  <span className={`notif-icon status-${meta.status}`} aria-hidden="true">
-                    <Icon size={17} />
-                  </span>
-                  <span className="notif-text">
-                    <span className="notif-meta">
-                      <span className={`notif-status status-${meta.status}`}>
-                        {meta.label}
-                      </span>
-                      <span className="notif-time">
-                        {formatRelativeTime(n.created_at)}
-                      </span>
+              <li key={group.key} className="notif-group">
+                <div className={`notif-row notif-group-head${group.unreadCount > 0 ? " unread" : ""}`}>
+                  <button
+                    type="button"
+                    className="notif-group-main"
+                    onClick={() => {
+                      markGroupRead(group);
+                      onNavigate(head.deep_link, head);
+                    }}
+                    aria-label={`${meta.label}: ${head.title} (${group.rows.length} notices${group.unreadCount > 0 ? `, ${group.unreadCount} unread` : ""})`}
+                  >
+                    <span className={`notif-icon status-${meta.status}`} aria-hidden="true">
+                      <Icon size={17} />
                     </span>
-                    <strong>{n.title}</strong>
-                    <small>{n.body}</small>
-                  </span>
-                </button>
+                    <span className="notif-text">
+                      <span className="notif-meta">
+                        <span className={`notif-status status-${meta.status}`}>
+                          {meta.label}
+                        </span>
+                        <span className="notif-time">
+                          {formatRelativeTime(head.created_at)}
+                        </span>
+                      </span>
+                      <strong>{head.title}</strong>
+                      <small>{head.body}</small>
+                    </span>
+                    <span className="notif-count" aria-hidden="true">
+                      ×{group.rows.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="notif-group-toggle"
+                    aria-expanded={expanded}
+                    aria-label={expanded ? "Hide the individual notices" : `Show all ${group.rows.length} notices`}
+                    onClick={() => toggleGroup(group.key)}
+                  >
+                    {expanded ? "Hide" : "Show all"}
+                  </button>
+                </div>
+                {expanded && (
+                  <ul className="notif-group-members">
+                    {group.rows.map((n) => (
+                      <li key={n.id}>{renderRow(n)}</li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}

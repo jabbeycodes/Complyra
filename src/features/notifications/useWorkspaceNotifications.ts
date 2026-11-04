@@ -44,6 +44,9 @@ export function useWorkspaceNotifications() {
   }
   return { notifications, unread: unreadCount(notifications), loading, error, refresh,
     markRead: (id: string) => markRead([id]),
+    // Grouped bell rows (batches 51/52/58) mark every member read in one
+    // API call so per-notice read state stays exact without a refresh storm.
+    markManyRead: (ids: string[]) => markRead(ids),
     markAllAsRead: () => markRead(notifications.filter((row) => !row.read_at).map((row) => row.id)),
   };
 }
