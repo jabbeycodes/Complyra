@@ -67,7 +67,12 @@ export default function QaAuditsPage() {
   const [editDue, setEditDue] = useState("");
   const [editAuditor, setEditAuditor] = useState("");
 
-  const canAudit = can(session!, "qa.audit");
+  // Starting a review belongs to the roles that run the QA program
+  // (qa.schedule: Program Manager / administrator). The auditor scores an
+  // existing review (qa.audit) but is read-only elsewhere and must not
+  // start one — the gate previously read qa.audit, so only the auditor
+  // saw this form (simulation wave 4A follow-up).
+  const canStartReview = can(session!, "qa.schedule");
   const canSchedule = can(session!, "qa.schedule");
   const canManageActions = can(session!, "correctiveActions.manage");
   // Corrective actions belong to a home (site scope): the create form
@@ -282,7 +287,7 @@ export default function QaAuditsPage() {
                 ))}
               </select>
             </label>
-            {canAudit && (
+            {canStartReview && (
               <div className="qa-new-audit">
                 <label>
                   <span>Site for new review</span>

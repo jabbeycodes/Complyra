@@ -216,3 +216,85 @@ test("the worklist queues one order-expired notice per role, deduped per role", 
   await api.listMedicationOrderWorklist();
   assert.equal(expiredNotices().length, 2);
 });
+
+test("the worklist also notifies the house manager of the order's home — and only that home's HM", async () => {
+  const s = store();
+  const api = new LocalApi(s);
+  const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const workspace = await api.loadWorkspace(admin);
+  const reese = workspace.individuals.find((person) => person.name === "Reese Lang");
+  const ellis = workspace.individuals.find((person) => person.name === "Ellis Hart");
+  assert.ok(reese && ellis, "seed includes Reese Lang (Willow) and Ellis Hart (Cedar)");
+  // James Wilson is the Willow house manager — the only HM membership in
+  // the demo seed (Cedar's house-manager staff row is the administrator).
+  const jamesId = s.db.memberships.find((m) => m.roleKey === "house_manager")?.userId;
+  assert.ok(jamesId, "seed includes a house manager membership");
+
+  async function activeOrder(individualId: string, name: string, endReviewDate: string) {
+    const draft = await api.createMedicationOrder({
+      individualId,
+      medicationName: name,
+      dose: "100 mg",
+      route: "By mouth",
+      schedule: "Once daily",
+      scheduleTimes: ["08:00"],
+      prescriberName: "Dr. Rivera",
+      reason: "Test order",
+      startDate: "2025-01-01",
+      endReviewDate,
+    });
+    return api.activateMedicationOrder(draft.id, { initialCount: 30 });
+  }
+
+  const expiredWillow = await activeOrder(reese.id, "WillowExpiredMed", "2025-06-01");
+  const inFiveDays = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+  const expiringWillow = await activeOrder(reese.id, "WillowExpiringMed", inFiveDays);
+  const expiredCedar = await activeOrder(ellis.id, "CedarExpiredMed", "2025-06-01");
+
+  const orderNotices = (orderId: string) =>
+    s.db.notifications.filter(
+      (n) =>
+        n.entityId === orderId &&
+        (n.type === "med.order_expired" || n.type === "med.order_expiring"),
+    );
+
+  await api.listMedicationOrderWorklist();
+
+  // The role audiences are unchanged for the Willow order…
+  assert.deepEqual(
+    orderNotices(expiredWillow.id)
+      .filter((n) => n.roleKey)
+      .map((n) => n.roleKey)
+      .sort(),
+    ["nurse", "program_manager"],
+  );
+  // …and its house manager now holds a personal copy of each type.
+  const jamesExpired = orderNotices(expiredWillow.id).filter((n) => n.userId === jamesId);
+  assert.equal(jamesExpired.length, 1);
+  assert.equal(jamesExpired[0].type, "med.order_expired");
+  const jamesExpiring = orderNotices(expiringWillow.id).filter((n) => n.userId === jamesId);
+  assert.equal(jamesExpiring.length, 1);
+  assert.equal(jamesExpiring[0].type, "med.order_expiring");
+  // The Cedar order is not his home: no copy for James.
+  assert.equal(
+    orderNotices(expiredCedar.id).filter((n) => n.userId === jamesId).length,
+    0,
+  );
+
+  // Reopening the worklist dedupes every audience.
+  const total = s.db.notifications.length;
+  await api.listMedicationOrderWorklist();
+  assert.equal(s.db.notifications.length, total);
+
+  // And the copies are in the HM's own bell.
+  await api.signIn(login(DEMO_HM_USERNAME));
+  const bell = await api.listNotifications();
+  const mine = bell.filter(
+    (n) => n.entity_id === expiredWillow.id || n.entity_id === expiringWillow.id,
+  );
+  assert.equal(mine.length, 2);
+  assert.deepEqual(
+    mine.map((n) => n.type).sort(),
+    ["med.order_expired", "med.order_expiring"],
+  );
+});

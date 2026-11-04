@@ -8,6 +8,7 @@ import {
   daysUntilReview,
   normalizeScheduleTimes,
   orderExpiry,
+  orderExpiryBoardLabel,
   orderNeedsReview,
   projectOrderToMedication,
   validateOrderInput,
@@ -134,6 +135,30 @@ test("orderExpiry boundary respects the lead window exactly", () => {
   assert.equal(orderExpiry(boundary, TODAY), "expiring");
   const justBeyond = order({ endReviewDate: addDays(TODAY, ORDER_REVIEW_LEAD_DAYS + 1) });
   assert.equal(orderExpiry(justBeyond, TODAY), "ok");
+});
+
+test("orderExpiryBoardLabel words the board line the way the notice does", () => {
+  // Approaching the review date (within the lead window).
+  assert.equal(
+    orderExpiryBoardLabel(order({ endReviewDate: "2026-11-05" }), TODAY),
+    "Order expires Nov 5, 2026",
+  );
+  // Past the review date.
+  assert.equal(
+    orderExpiryBoardLabel(order({ endReviewDate: "2026-10-20" }), TODAY),
+    "Order expired Oct 20, 2026",
+  );
+  // Nothing to flag: on-schedule, open-ended, draft, discontinued.
+  assert.equal(orderExpiryBoardLabel(order({ endReviewDate: "2026-12-01" }), TODAY), null);
+  assert.equal(orderExpiryBoardLabel(order({ endReviewDate: null }), TODAY), null);
+  assert.equal(
+    orderExpiryBoardLabel(order({ status: "draft", endReviewDate: "2026-10-20" }), TODAY),
+    null,
+  );
+  assert.equal(
+    orderExpiryBoardLabel(order({ status: "discontinued", endReviewDate: "2026-10-20" }), TODAY),
+    null,
+  );
 });
 
 test("daysUntilReview and orderNeedsReview agree with orderExpiry", () => {
