@@ -1806,7 +1806,7 @@ function MyComplianceTab({ session, store }: { session: SessionUser; store: HrSt
       {loading || !evidence ? (
         <p>Loading…</p>
       ) : items.length === 0 ? (
-        <Empty title="No requirements assigned" text="Nothing is tracking against your role right now." mark="check" />
+        <Empty title="No requirements assigned" text="Readiness is not assessed. No readiness requirements are assigned to your role; New Hire Binder completion is separate." mark="quiet" />
       ) : (
         <>
           {attention.length > 0 && (
@@ -4536,3 +4536,4 @@ export default function EmployeeHubPage({
     />
   );
 }
+

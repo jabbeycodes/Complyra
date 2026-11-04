@@ -8370,3 +8370,6 @@ button.qa-row:hover {
   /* Room for the floating bottom navigation: content never sits under it. */
   padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 }
+
+/* Empty populations carry words rather than a passing percentage. */
+.stat-value.population-unassessed { font-size: var(--text-lg, 1.125rem); letter-spacing: normal; white-space: normal; overflow-wrap: anywhere; }

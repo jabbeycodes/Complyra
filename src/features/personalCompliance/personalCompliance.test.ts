@@ -103,9 +103,10 @@ test("team summary: missing/expired drives attention; due-soon-only counts curre
     [result("d", "complete"), result("e", "missing_or_expired", "2026-01-01")],
   ]);
   assert.equal(summary.total, 5);
-  assert.equal(summary.fullyCurrent, 3);
+  assert.equal(summary.fullyCurrent, 2);
+  assert.equal(summary.unassessed, 1);
   assert.equal(summary.needAttention, 2);
-  assert.equal(summary.fullyCurrent + summary.needAttention, summary.total);
+  assert.equal(summary.fullyCurrent + summary.needAttention + summary.unassessed, summary.total);
 });
 
 test("team summary: nobody assigned means zero totals", () => {
@@ -113,5 +114,6 @@ test("team summary: nobody assigned means zero totals", () => {
     total: 0,
     fullyCurrent: 0,
     needAttention: 0,
+    unassessed: 0,
   });
 });

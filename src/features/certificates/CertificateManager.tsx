@@ -184,10 +184,12 @@ export default function CertificateManager() {
           <h2>Expiring soon</h2>
           <p>Agency-wide — every certificate renewing within 90 days.</p>
         </div>
-        {loading ? (
+        {error ? (
+          <p role="alert">Certificate alerts unavailable. This is not an all-clear result.</p>
+        ) : loading ? (
           <p className="muted">Loading certificates…</p>
         ) : expiring.length === 0 ? (
-          <p className="muted">Nothing expiring within 90 days. All clear.</p>
+          <p className="muted">Nothing expiring within 90 days. No certificate alerts in this list.</p>
         ) : (
           <div className="cert-list">
             {expiring.map((cert) => (

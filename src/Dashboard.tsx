@@ -1,3 +1,7 @@
+import { useData } from "./data/DataProvider";
+import { hasPermission } from "./data/permissions";
+import { requirementPopulation } from "./features/overview/requirementPopulation";
+import MonthlyCheckAttention from "./features/overview/MonthlyCheckAttention";
 import Consents from "./features/consents/Consents";
 import CareScreeningAttention from "./features/CareScreeningAttention";
 import { useState } from "react";
@@ -20,7 +24,7 @@ import {
   PenLine,
   BookOpen,
 } from "lucide-react";
-import { categories, metrics } from "./domain";
+import { categories } from "./domain";
 import type { Requirement, Activity } from "./domain";
 import { Badge, Empty } from "./components";
 import StatusMixDonut from "./components/StatusMixDonut";
@@ -88,7 +92,6 @@ function scoreTone(score: number, overdue: number) {
 export default function Dashboard({
   items,
   allItems,
-  scorecard,
   activity,
   sites,
   siteReviews = [],
@@ -106,7 +109,10 @@ export default function Dashboard({
 }: Props) {
   const [sitesOpen, setSitesOpen] = useState(true);
   const focusedSite = sites.find((row) => row.name === site) ?? (sites.length === 1 ? sites[0] : null);
-  const agency = scorecard ?? metrics(allItems);
+  const { session } = useData();
+  const canReadRequirements = Boolean(session && hasPermission(session, "individuals.view"));
+  const agency = requirementPopulation(items, canReadRequirements);
+  const focusedSites = site === "All sites" ? sites : sites.filter(row => row.name === site);
   const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
 
   function openPersonal(item: PersonalWorkItem) {
@@ -162,7 +168,7 @@ export default function Dashboard({
           </span>
         </div>
         <span className="snapshot-label">
-          <span /> Sample agency snapshot
+          <span /> Current workspace records
         </span>
       </div>
       {/* Personal compliance (2026-10-29): manager roles get the slim strip
@@ -186,6 +192,12 @@ export default function Dashboard({
       )}
       <Consents attentionOnly siteId={focusedSite?.id ?? null} />
       <CareScreeningAttention siteId={focusedSite?.id ?? null} onOpenPerson={onOpenPerson} />
+      <section className="panel" aria-label="Requirement score scope">
+        <p>{site === "All sites" ? "All authorized sites" : site} · Requirement register</p>
+        <p>{agency.explanation}</p>
+        <p>Audit Me uses a different, weighted readiness score. Your work and My compliance always concern you, across your authorized sites.</p>
+      </section>
+      <MonthlyCheckAttention site={site} onOpenSite={(name) => { onSite(name); onNavigate("Sites & programs"); }} onOpenPerson={onOpenPerson} />
       {agency.overdue > 0 && (
       <div className="readiness-banner">
         <div className="readiness-symbol">
@@ -202,7 +214,7 @@ export default function Dashboard({
         </button>
       </div>
       )}
-      <div className="stat-grid">
+      {canReadRequirements && <div className="stat-grid">
         <button
           className="stat-card"
           onClick={() => onNavigate("Requirements")}
@@ -213,9 +225,8 @@ export default function Dashboard({
               <ShieldCheck size={17} />
             </span>
           </div>
-          <div className="stat-value">
-            {agency.score}
-            <span>%</span>
+          <div className={`stat-value${agency.assessed ? "" : " population-unassessed"}`}>
+            {agency.scoreText}
           </div>
           <div className="stat-foot">
             <span className="positive">
@@ -281,16 +292,16 @@ export default function Dashboard({
             <ArrowUpRight size={14} />
           </div>
         </button>
-      </div>
-      <section className="panel status-mix-panel">
+      </div>}
+      {canReadRequirements && <section className="panel status-mix-panel">
         <div className="panel-heading">
           <div>
             <h2>Status mix</h2>
           </div>
         </div>
-        <StatusMixDonut items={allItems} />
-      </section>
-      <section className="panel agency-hero" data-tour="command-center">
+        <StatusMixDonut items={items} />
+      </section>}
+      {canReadRequirements && <section className="panel agency-hero" data-tour="command-center">
         <button
           type="button"
           className="agency-hero-toggle"
@@ -301,16 +312,14 @@ export default function Dashboard({
           <div className="agency-hero-copy">
             <h2>Agency compliance</h2>
             <p>
-              {agency.done} of {agency.total} current · {agency.overdue} need
-              attention
+              {agency.assessed ? `${agency.done} of ${agency.total} current · ${agency.overdue} overdue requirements` : agency.status}
             </p>
           </div>
-          <div className={`agency-hero-score ${scoreTone(agency.score, agency.overdue)}`}>
+          <div className={`agency-hero-score ${agency.assessed ? scoreTone(agency.score, agency.overdue) : "watch"}`}>
             <strong>
-              {agency.score}
-              <small>%</small>
+              {agency.scoreText}
             </strong>
-            <span>current</span>
+            <span>Requirement register</span>
           </div>
           <span className="agency-hero-hint">
             {sitesOpen ? "Hide site scores" : "View program site scores"}{" "}
@@ -318,7 +327,7 @@ export default function Dashboard({
           </span>
         </button>
         <div className="agency-hero-bar" aria-hidden="true">
-          <span style={{ width: `${agency.score}%` }} />
+          <span style={{ width: `${agency.assessed ? agency.score : 0}%` }} />
         </div>
         {sitesOpen && (
           <div className="site-score-block" id="site-compliance-grid">
@@ -340,8 +349,8 @@ export default function Dashboard({
             </div>
             {sites.length ? (
               <div className="site-score-grid">
-                {sites.map((s) => {
-                  const sm = metrics(allItems.filter((r) => r.site === s.name));
+                {focusedSites.map((s) => {
+                  const sm = requirementPopulation(items.filter((r) => r.site === s.name));
                   const people = individuals.filter((p) => p.site === s.name).length;
                   const selected = site === s.name;
                   const reviewInPlace = isSiteReviewInPlace(
@@ -353,8 +362,8 @@ export default function Dashboard({
                     <button
                       type="button"
                       key={s.id || s.name}
-                      className={`site-score-card ${scoreTone(sm.score, sm.overdue)}${selected ? " selected" : ""}`}
-                      aria-label={`${s.name} compliance ${sm.score} percent`}
+                      className={`site-score-card ${sm.assessed ? scoreTone(sm.score, sm.overdue) : "watch"}${selected ? " selected" : ""}`}
+                      aria-label={`${s.name} requirement register ${sm.scoreText}`}
                       onClick={() => onSite(selected ? "All sites" : s.name)}
                     >
                       <div className="site-score-top">
@@ -362,17 +371,16 @@ export default function Dashboard({
                           <Building2 size={18} />
                         </span>
                         <Badge
-                          status={sm.overdue ? "Needs attention" : "On track"}
+                          status={sm.status}
                         />
                       </div>
                       <strong>{s.name}</strong>
                       <small>{s.program || s.address}</small>
                       <div className="site-score-value">
-                        {sm.score}
-                        <span>%</span>
+                        {sm.scoreText}
                       </div>
                       <div className="progress-track">
-                        <span style={{ width: `${sm.score}%` }} />
+                        <span style={{ width: `${sm.assessed ? sm.score : 0}%` }} />
                       </div>
                       <div className="site-score-meta">
                         <span>
@@ -386,7 +394,7 @@ export default function Dashboard({
                           </span>
                         ) : (
                           <span className="positive">
-                            <Check size={13} /> All clear
+                            <Check size={13} /> {sm.status}
                           </span>
                         )}
                       </div>
@@ -402,7 +410,7 @@ export default function Dashboard({
             )}
           </div>
         )}
-      </section>
+      </section>}
       <section className="panel personal-queue">
         <div className="panel-heading">
           <div>
@@ -454,7 +462,7 @@ export default function Dashboard({
           <Empty title="Nothing pending" />
         )}
       </section>
-      <div className="dashboard-middle">
+      {canReadRequirements && <div className="dashboard-middle">
         <section className="panel priorities-panel" data-tour="risk-list">
           <div className="panel-heading">
             <div>
@@ -522,7 +530,7 @@ export default function Dashboard({
           <div className="category-list">
             {categories.map((category, i) => {
               const group = items.filter((r) => r.category === category);
-              const cm = metrics(group);
+              const cm = requirementPopulation(group);
               return (
                 <button
                   key={category}
@@ -531,7 +539,7 @@ export default function Dashboard({
                 >
                   <div>
                     <span>{category}</span>
-                    <strong>{cm.score}%</strong>
+                    <strong>{cm.scoreText}</strong>
                   </div>
                   <div className="progress-track">
                     <span
@@ -542,7 +550,7 @@ export default function Dashboard({
                             ? "progress-fill done"
                             : "progress-fill clay"
                       }
-                      style={{ width: `${cm.score}%` }}
+                      style={{ width: `${cm.assessed ? cm.score : 0}%` }}
                     />
                   </div>
                 </button>
@@ -561,9 +569,9 @@ export default function Dashboard({
             <span>{agency.total} active requirements</span>
           </div>
         </section>
-      </div>
+      </div>}
       {/* THERAP-CORE-GAPS-1: event reports awaiting review + open follow-up. */}
-      <GerDashboardSections onOpenPerson={onOpenPerson} />
+      <GerDashboardSections onOpenPerson={onOpenPerson} siteId={focusedSite?.id ?? null} />
       <section className="panel activity-panel dashboard-activity">
         <div className="panel-heading">
           <div>
@@ -578,7 +586,8 @@ export default function Dashboard({
           </button>
         </div>
         <div className="activity-list">
-          {activity.slice(0, 3).map((a, i) => (
+          {site !== "All sites" && <p>Activity is agency-wide. Open Activity log to inspect event details.</p>}
+          {(site === "All sites" ? activity.slice(0, 3) : []).map((a, i) => (
             <div className="activity-row" key={a.id}>
               <span
                 className={`activity-icon ${a.kind === "complete" ? "green" : a.kind === "alert" ? "red" : "purple"}`}
