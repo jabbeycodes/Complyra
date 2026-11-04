@@ -96,9 +96,11 @@ export function consentTypeRows(
   register: ConsentRegister,
   individualId: string,
   roleKey: string,
+  /** The Central day to judge on; defaults to consentStatusFor's own today. */
+  today?: string,
 ): ConsentTypeRow[] {
   return register.types.map((type) => {
-    const status = consentStatusFor(register, individualId, type.id);
+    const status = consentStatusFor(register, individualId, type.id, today);
     const row = status.row;
     const history = register.records
       .filter(

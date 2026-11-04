@@ -20,11 +20,12 @@ import {
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
 import { todayStamp } from './status';
+import { addDaysIso, centralTodayIso } from './menuRecords';
 
+/** A Central calendar day relative to today (the app judges consents on
+ *  the Central day; a UTC-day helper flips a day early every evening). */
 function daysFromNow(days: number): string {
-    const date = new Date();
-    date.setDate(date.getDate() + days);
-    return date.toISOString().slice(0, 10);
+    return addDaysIso(centralTodayIso(), days);
 }
 
 function localFixture() {

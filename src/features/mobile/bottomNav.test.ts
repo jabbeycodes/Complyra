@@ -117,10 +117,12 @@ const SEEDED_MATRIX: {
   },
   {
     username: "omar.haddad",
-    roleKey: "compliance_admin",
-    tiles: ["ispData", "health", "quickLog", "messages", "timeClock", "myHub", "myTasks", "individuals", "appointments", "checklists", "houseCard", "reports", "qaReview"],
+    // Former compliance administrator: the role was removed 2026-11-02
+    // (founder decision) and its holders became administrators.
+    roleKey: "administrator",
+    tiles: ["ispData", "health", "quickLog", "messages", "scheduling", "timeClock", "myHub", "myTasks", "individuals", "appointments", "checklists", "houseCard", "reports", "qaReview"],
     pill: ["home", "tasks", "people", "more"],
-    more: ["ispData", "health", "quickLog", "messages", "timeClock", "myHub", "appointments", "checklists", "houseCard", "reports", "qaReview"],
+    more: ["ispData", "health", "quickLog", "messages", "scheduling", "timeClock", "myHub", "appointments", "checklists", "houseCard", "reports", "qaReview"],
   },
   {
     username: "mark.delaney",

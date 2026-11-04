@@ -148,7 +148,7 @@ test('identical verdicts in the LocalApi and HostedApi register shapes', () => {
 });
 
 test('every surface derives the same text: register selector, mobile rows, attention gaps, alert bodies', () => {
-    const rows = consentTypeRows(register, 'i1', 'house_manager');
+    const rows = consentTypeRows(register, 'i1', 'house_manager', TODAY);
     const gaps = consentGaps(register, TODAY);
     for (const type of DEFAULT_CONSENT_TYPES) {
         const selector = consentStatusFor(register, 'i1', type.id, TODAY);
