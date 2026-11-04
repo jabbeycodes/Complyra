@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
 import {
@@ -15,6 +15,25 @@ import {
   computePersonalBalanceCents,
   personalSpendingNeedsAttention,
 } from "./personalSpending";
+
+// Pin the wall clock for this whole file. The demo seed stamps its
+// current-month ledger entries on days 1–20 of the current month, clamped
+// to today's day-of-month (see addPersonalSpendingLedgers in
+// demoShowcase.ts), and stamps their createdAt times from a per-entry
+// sequence whose hour wraps (14 + seq % 6). Late in a month every entry
+// lands on its own day and the ledger's (entryDate, createdAt) order is
+// the intended one; early in a month the days collapse together, the
+// wrapped timestamps reorder entries within the shared day, and entries
+// recorded "now" by these tests can sort ahead of the seed's same-day
+// fixed-afternoon timestamps — so Harper's running balances (and only
+// those) drift with the calendar. Pinning Date to a fixed late-month
+// instant (Central 2026-10-28, day 28 ≥ every seeded day) makes the seed
+// layout, the API's createdAt stamps, and this file's today()/thisMonth()/
+// prevMonth() all derive from one clock in any real month.
+mock.timers.enable({
+  apis: ["Date"],
+  now: new Date("2026-10-28T17:00:00.000Z"),
+});
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));

@@ -7,6 +7,57 @@ import { US_STATES } from "../data/usStates";
 import type { PendingAgency } from "../data/types";
 import { createRulesStore } from "../data/rulesStore";
 import { AgencyRulesPanel } from "./AgencyRulesPanel";
+import PasswordField from "../components/PasswordField";
+import OneTimeSecret from "../components/OneTimeSecret";
+
+export type PlatformCreatedAgencyCredentials = {
+  agencyCode: string;
+  username: string;
+  tempPassword: string;
+};
+
+/**
+ * The platform console's post-creation handover. The temporary password
+ * renders only through OneTimeSecret (masked by default, explicit
+ * Show/Copy); "Done" clears it from the console entirely — previously
+ * it sat in plain text on the page with no way to dismiss it.
+ */
+export function PlatformCreatedAgencyView({
+  created,
+  onDismiss,
+}: {
+  created: PlatformCreatedAgencyCredentials;
+  onDismiss: () => void;
+}) {
+  return (
+    <div>
+      <dl className="ack-meta">
+        <div>
+          <dt>Provider code</dt>
+          <dd>
+            <strong>{created.agencyCode}</strong>
+          </dd>
+        </div>
+        <div>
+          <dt>Username</dt>
+          <dd>
+            <strong>{created.username}</strong>
+          </dd>
+        </div>
+        <div>
+          <dt>Temporary password</dt>
+          <dd>
+            <OneTimeSecret value={created.tempPassword} onDone={onDismiss} />
+          </dd>
+        </div>
+      </dl>
+      <p className="form-help">
+        Hand these credentials to the agency's first administrator once.
+        The password is not shown again after you dismiss it.
+      </p>
+    </div>
+  );
+}
 
 export default function PlatformConsole({
   onSaved,
@@ -129,26 +180,13 @@ export default function PlatformConsole({
           This path is Complyrer-operated, so the agency is active immediately.
         </p>
         {created ? (
-          <dl className="ack-meta">
-            <div>
-              <dt>Provider code</dt>
-              <dd>
-                <strong>{created.agencyCode}</strong>
-              </dd>
-            </div>
-            <div>
-              <dt>Username</dt>
-              <dd>
-                <strong>{created.username}</strong>
-              </dd>
-            </div>
-            <div>
-              <dt>Temporary password</dt>
-              <dd>
-                <strong>{created.tempPassword}</strong>
-              </dd>
-            </div>
-          </dl>
+          <PlatformCreatedAgencyView
+            created={created}
+            onDismiss={() => {
+              setCreated(null);
+              setAdminTempPassword("");
+            }}
+          />
         ) : (
           <form
             onSubmit={async (e) => {
@@ -169,6 +207,9 @@ export default function PlatformConsole({
                   username: result.username,
                   tempPassword: adminTempPassword,
                 });
+                // The handover view holds the only copy now; the form
+                // field must not keep the password after submit.
+                setAdminTempPassword("");
                 onSaved(`${result.agencyCode} is ready.`);
               } catch (err) {
                 setError((err as Error).message);
@@ -238,15 +279,13 @@ export default function PlatformConsole({
                 required
               />
             </label>
-            <label className="form-label">
-              Temporary password
-              <input
-                value={adminTempPassword}
-                onChange={(e) => setAdminTempPassword(e.target.value)}
-                minLength={8}
-                required
-              />
-            </label>
+            <PasswordField
+              label="Temporary password"
+              value={adminTempPassword}
+              onChange={setAdminTempPassword}
+              minLength={8}
+              required
+            />
             <button className="button primary" type="submit">
               <Building2 size={16} /> Create active agency
             </button>

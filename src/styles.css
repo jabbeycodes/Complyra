@@ -1453,6 +1453,12 @@ h1 {
   color: var(--color-h-2f4630);
   font-weight: 550;
 }
+.right-now-attention {
+  padding: 4px var(--panel-inline) 12px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-h-b91c1c);
+}
 .right-now-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -5381,6 +5387,19 @@ th {
   min-width: 0;
   max-width: 100%;
 }
+/* Chart form stacks (PRN dose / follow-up forms, MAR late-dose form,
+   screening and order stacks): labels and controls stack vertically at
+   EVERY width. This pair previously existed only inside the
+   max-width: 860px block below, so on desktop the labels stayed inline and
+   ran together with their inputs (chart tabs repair). */
+.individual-chart .stack {
+  display: grid;
+  gap: 10px;
+}
+.individual-chart .stack label {
+  display: grid;
+  gap: 4px;
+}
 .chart-widget h2 {
   font-size: 18px;
   color: var(--color-h-2f4630);
@@ -6948,6 +6967,28 @@ body.nav-open {
   outline-offset: -2px;
 }
 
+/* ---------- One-time credential reveal ---------- */
+.onetime-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onetime-secret-mask {
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+.onetime-secret-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.onetime-secret-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ---------- Interactive demo ---------- */
 .login-demo-copy {
   margin: 0;
@@ -7666,6 +7707,32 @@ button.qa-row:hover {
 .health-track-tabs {
   margin: 4px 0 12px;
   padding-inline: 0;
+  /* Containment (chart tabs repair): the 12 tracker tabs were an unbounded
+     flex row. Its min-content (~1,180px) sized the widget's inner grid
+     column, so the strip — and the panel under it — painted across the
+     neighbouring Behavior column and off the page edge, buttons crushed to
+     word-width ribbons and tabs under the spill unclickable. Mirror the
+     site-detail tabstrip: contained scroll on narrow widths, wrap on wide. */
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.health-track-tabs::-webkit-scrollbar {
+  display: none;
+}
+.health-track-tabs > button {
+  flex: none;
+  white-space: nowrap;
+}
+@media (min-width: 861px) {
+  .health-track-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
 }
 
 .appointments-filters {
@@ -8257,16 +8324,6 @@ button.qa-row:hover {
   .individual-chart .obligation-card > header h3 {
     flex: 1 1 100%;
     order: 3;
-  }
-  /* The PRN follow-up block uses a `stack` class that has no desktop
-     definition, so its labels and inputs ran together inline. Stack it. */
-  .individual-chart .stack {
-    display: grid;
-    gap: 10px;
-  }
-  .individual-chart .stack label {
-    display: grid;
-    gap: 4px;
   }
   /* Form controls: full-size text (16px stops iOS focus zoom) and
      44px-class tap targets. */

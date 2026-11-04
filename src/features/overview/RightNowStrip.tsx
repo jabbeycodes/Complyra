@@ -28,6 +28,14 @@
  * Freshness: loads on mount and whenever the home focus (or the viewer's
  * scope) changes. No polling. An "as of" time (Central) is shown on the
  * card.
+ *
+ * Tonight's overnight: the all-clear line claims "no shift is uncovered",
+ * so the load also reads, per scoped home, the shifts in a ±1 day window
+ * and the site's overnight block, and judges the in-progress (or upcoming)
+ * overnight instance in the pure helper. That read is strict — if it
+ * fails, the whole strip shows its could-not-load note rather than a
+ * guessed verdict. Clearance reads are best-effort: a DSP is flagged
+ * not-cleared only on a positive read, never on a failed one.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -41,9 +49,12 @@ import {
 } from "lucide-react";
 import { useData } from "../../data/DataProvider";
 import { hasPermission } from "../../data/permissions";
+import { shiftBlocksForSite } from "../../data/dueItems";
+import { normalizeSiteFacts } from "../../data/siteReview";
 import type { HrPunch } from "../../data/hr";
 import { createHrStore } from "../../data/hrStore";
 import { createOpenShiftStore } from "../../data/openShiftStore";
+import { addIsoDays } from "../coverage/coverageWeek";
 import {
   buildRightNowModel,
   chicagoToday,
@@ -73,7 +84,7 @@ function asOfLabel(d: Date): string {
 }
 
 export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
-  const { session, workspace } = useData();
+  const { api, session, workspace } = useData();
   const [model, setModel] = useState<RightNowModel | null>(null);
   const [asOf, setAsOf] = useState<Date | null>(null);
   const [failed, setFailed] = useState(false);
@@ -87,6 +98,7 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
         userId: s.id,
         fullName: s.name,
         siteId: s.siteId,
+        roleKey: s.roleKey,
       })),
     [workspace],
   );
@@ -164,6 +176,43 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
           ),
         )
       ).flat();
+      // Tonight's overnight: shifts in a ±1 day window per scoped home, so
+      // an instance that started yesterday is read too. Strict on purpose —
+      // a failure lands in the outer catch and the strip shows its
+      // could-not-load note instead of an all-clear it did not verify.
+      const tonightShifts = (
+        await Promise.all(
+          scopedSiteIds.map((id) =>
+            store.listShifts(
+              `${addIsoDays(today, -1)}T00:00:00`,
+              `${addIsoDays(today, 1)}T23:59:59`,
+              id,
+            ),
+          ),
+        )
+      ).flat();
+      const clearanceRows = await Promise.all(
+        scopedSiteIds.map((id) => api.listStaffNeedingClearance(id).catch(() => null)),
+      );
+      const clearanceByStaffId = new Map<string, boolean>();
+      for (const rows of clearanceRows) {
+        for (const row of rows ?? []) {
+          clearanceByStaffId.set(row.userId, row.clearedForInRatio);
+        }
+      }
+      const tonightSites = scopedSiteIds.flatMap((id) => {
+        const site = workspace?.sites.find((s) => s.id === id);
+        if (!site) return [];
+        const blocks = shiftBlocksForSite(normalizeSiteFacts(site));
+        return [
+          {
+            siteId: id,
+            siteName: site.name,
+            overnightStartMin: blocks.overnight.startMin,
+            overnightEndMin: blocks.overnight.endMin,
+          },
+        ];
+      });
       if (cancelled) return;
       setModel(
         buildRightNowModel({
@@ -181,6 +230,9 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
           canApproveTimeOff: hasPermission(session, "hub.approve_time_off"),
           canReviewTimecards: hasPermission(session, "hub.review_timecards"),
           canViewTeam: hasPermission(session, "hub.view_team"),
+          tonightSites,
+          tonightShifts,
+          clearanceByStaffId,
         }),
       );
       setAsOf(new Date());
@@ -218,7 +270,28 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
         <p className="right-now-note" role="status">
           Loading right now…
         </p>
-      ) : model.allClear ? (
+      ) : (
+        <>
+          {model.tonight
+            .filter((entry) => entry.state !== "covered")
+            .map((entry) => (
+              <p key={entry.siteId} className="right-now-attention">
+                {entry.state === "uncovered" ? (
+                  <>
+                    Tonight at <strong>{entry.siteName}</strong>: no one is
+                    scheduled for the overnight.
+                  </>
+                ) : (
+                  <>
+                    Tonight at <strong>{entry.siteName}</strong>:{" "}
+                    {entry.unclearedNames.join(", ")}{" "}
+                    {entry.unclearedNames.length === 1 ? "is" : "are"} on the
+                    overnight but not cleared to work alone.
+                  </>
+                )}
+              </p>
+            ))}
+          {model.allClear ? (
         <p className="right-now-allclear">
           All clear — nobody is out today, no shift is uncovered, and nothing is
           waiting on you.
@@ -372,6 +445,8 @@ export default function RightNowStrip({ focusSite, sites, onNavigate }: Props) {
             <ChevronRight size={14} className="right-now-chevron" />
           </button>
         </div>
+          )}
+        </>
       )}
     </section>
   );

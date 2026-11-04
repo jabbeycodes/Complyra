@@ -787,6 +787,23 @@
   line-height: 1;
 }
 
+/* Trailing amount on a people-picker row (Personal Spending chooser).
+   Money amounts must NEVER truncate: the amount never shrinks and
+   never wraps — the name column (.msh-row-main, min-width: 0) is the
+   part of the row that gives. */
+.msh-row-amount {
+  flex: none;
+  white-space: nowrap;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.msh-row-amount-loading {
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
 .msh-current {
   font-size: 13px;
   font-weight: 700;

@@ -23,6 +23,7 @@ import {
 } from "../../data/houseCard";
 import {
   PERSONAL_SPENDING_KIND_LABELS,
+  computePersonalBalanceCents,
   type PersonalSpendingEntryView,
 } from "../../data/personalSpending";
 
@@ -154,6 +155,48 @@ export function houseTodayTotals<T extends HouseCardEntryRow>(
     else receivedCents += entry.amountCents;
   }
   return { spentCents, receivedCents };
+}
+
+/** One home's personal-spending lists, keyed by Individual. */
+export type SpendingEntriesByPerson = {
+  personId: string;
+  entries: PersonalSpendingEntryView[];
+}[];
+
+/**
+ * The entries behind one person in the Quick log's spending flow — or
+ * null while the home's lists have not loaded yet. The distinction is
+ * the batch-49 fix: the flow used to collapse "not loaded" into an
+ * empty list, so the chooser showed names with no amounts and the
+ * person view stated a factual $0.00 balance and "Nothing recorded
+ * yet" for ledgers that simply had not arrived (and never would when
+ * the load had failed behind the status guard). A loaded home that
+ * has no row for the person is a factual empty ledger ([]), never
+ * null.
+ */
+export function spendingEntriesFor(
+  entriesByPerson: SpendingEntriesByPerson | null,
+  personId: string,
+): PersonalSpendingEntryView[] | null {
+  if (entriesByPerson === null) return null;
+  return (
+    entriesByPerson.find((row) => row.personId === personId)?.entries ?? []
+  );
+}
+
+/**
+ * The chooser row's balance for one person — or null while the lists
+ * have not loaded, so the row can say "Loading…" instead of silently
+ * carrying no amount (the batch-49 surface inconsistency: the Health
+ * door showed the balance on the row, the Quick log picker never did).
+ */
+export function spendingChooserBalanceCents(
+  entriesByPerson: SpendingEntriesByPerson | null,
+  personId: string,
+): number | null {
+  const entries = spendingEntriesFor(entriesByPerson, personId);
+  if (entries === null) return null;
+  return computePersonalBalanceCents(entries);
 }
 
 /** The person's most recent entries, newest first, for the timeline. */

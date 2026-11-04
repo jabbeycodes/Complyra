@@ -22,9 +22,12 @@ import {
   monthsWithNotes,
   progressNoteName,
   progressNoteProblem,
+  shiftNoteTimingProblem,
   shiftNotesForMonth,
   shiftNotesForPrint,
 } from "./shiftNotes";
+import { addDaysIso, centralTodayIso } from "./menuRecords";
+import { ESIGN_CONSENT_VERSION } from "../features/signatures/signatureUtils";
 
 const PNG_1X1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -537,8 +540,10 @@ test("quick log identity: a note saved through the shared API is the chart's rec
     programId: program.id,
     noteDate: today,
     shift: "7a–3p",
-    beginTime: "07:00",
-    endTime: "15:00",
+    // Clocks start at midnight so this save is valid at any wall-clock
+    // time (a note dated today cannot begin in the future — wave 7F).
+    beginTime: "00:00",
+    endTime: "08:00",
     location: "Cedar House",
     staffTitle: dsp.jobTitle,
     waiverService: "Individualized Supported Living",
@@ -570,4 +575,160 @@ test("quick log identity: a note saved through the shared API is the chart's rec
   });
   assert.equal(afterItems.length, 1);
   assert.equal(afterItems[0].done, true);
+});
+
+test("wave 7F: shiftNoteTimingProblem judges dates and begin times on the Central clock", () => {
+  // 2026-10-31 15:00 Central (CDT, UTC-5) — the batch 37 observation time.
+  const now = new Date("2026-10-31T20:00:00.000Z");
+  assert.equal(
+    shiftNoteTimingProblem({ noteDate: "2026-11-01", beginTime: "07:00", now }),
+    "A shift note cannot be dated in the future.",
+  );
+  // The batch 37 note itself: dated today, running 4–5 p.m., present at 3 p.m.
+  assert.equal(
+    shiftNoteTimingProblem({ noteDate: "2026-10-31", beginTime: "16:00", now }),
+    "A shift note cannot begin in the future.",
+  );
+  // A note for an earlier shift today is fine.
+  assert.equal(shiftNoteTimingProblem({ noteDate: "2026-10-31", beginTime: "07:00", now }), null);
+  // A shift in progress (began at 3 p.m., ends later) is fine.
+  assert.equal(shiftNoteTimingProblem({ noteDate: "2026-10-31", beginTime: "15:00", now }), null);
+  // Yesterday's late shift is fine, and a legacy note without clocks is fine.
+  assert.equal(shiftNoteTimingProblem({ noteDate: "2026-10-30", beginTime: "23:00", now }), null);
+  assert.equal(shiftNoteTimingProblem({ noteDate: "2026-10-31", beginTime: "", now }), null);
+});
+
+/** Minute-of-day right now in America/Chicago, for time-safe fixtures. */
+function centralMinutesNow(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "0";
+  return Number(read("hour")) * 60 + Number(read("minute"));
+}
+
+function hhmm(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+test("wave 7F: a direct LocalApi call refuses future notes and still saves an earlier shift today", async () => {
+  const impl = api();
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const ellisId = await individualId(impl, admin, "Ellis Hart");
+  const data = await impl.getIspData(ellisId);
+  const program = data.programs.find((p) => p.status === "approved");
+  assert.ok(program);
+  await impl.updateIspProgram(program.id, {
+    goalService: "Morning routine in the current PCSP.",
+  });
+  const today = centralTodayIso();
+  await assert.rejects(
+    () =>
+      impl.saveShiftNote({
+        individualId: ellisId,
+        programId: program.id,
+        noteDate: addDaysIso(today, 1),
+        shift: "Day",
+        ...acceptableProgress("A note for tomorrow's shift."),
+      }),
+    /dated in the future/,
+  );
+  const laterToday = centralMinutesNow() + 60;
+  if (laterToday <= 1439) {
+    await assert.rejects(
+      () =>
+        impl.saveShiftNote({
+          individualId: ellisId,
+          programId: program.id,
+          noteDate: today,
+          shift: "Day",
+          ...acceptableProgress("A note for a shift that has not started."),
+          beginTime: hhmm(laterToday),
+          endTime: hhmm(Math.min(1439, laterToday + 60)),
+        }),
+      /begin in the future/,
+    );
+  }
+  // A note for an earlier shift today still saves.
+  const noteId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: today,
+    shift: "7a–3p",
+    ...acceptableProgress("Supported the morning routine earlier today."),
+    beginTime: "00:00",
+    endTime: "01:00",
+  });
+  assert.ok(noteId);
+});
+
+test("wave 7F: an edit cannot empty the body, move a note into the future, or leave it unsigned", async () => {
+  const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+  const impl = new LocalApi(store);
+  const admin = await signInAs(impl, DEMO_ADMIN_USERNAME);
+  const ellisId = await individualId(impl, admin, "Ellis Hart");
+  const data = await impl.getIspData(ellisId);
+  const program = data.programs.find((p) => p.status === "approved");
+  assert.ok(program);
+  await impl.updateIspProgram(program.id, {
+    goalService: "Morning routine in the current PCSP.",
+  });
+  const noteId = await impl.saveShiftNote({
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-07",
+    shift: "Day",
+    ...acceptableProgress("Original body."),
+  });
+  const edit = {
+    noteId,
+    individualId: ellisId,
+    programId: program.id,
+    noteDate: "2026-10-07",
+    shift: "Day",
+    beginTime: "07:00",
+    endTime: "15:00",
+    waiverService: "Individualized Supported Living",
+    staffTitle: "Direct support professional",
+    timeSpentMinutes: null as number | null,
+    scores: [] as { taskId: string; levelId: string; comment: string }[],
+  };
+  await assert.rejects(
+    () => impl.saveShiftNote({ ...edit, summary: "   " }),
+    /Describe what the person did/,
+  );
+  await assert.rejects(
+    () =>
+      impl.saveShiftNote({
+        ...edit,
+        summary: "Kept body.",
+        noteDate: addDaysIso(centralTodayIso(), 1),
+      }),
+    /dated in the future/,
+  );
+  // A valid edit of the signed note still saves.
+  await impl.saveShiftNote({ ...edit, summary: "Corrected body." });
+  // Blank the stored signature (a pre-signature-era row): re-saving must
+  // refuse while the author has no adopted signature to stamp.
+  const row = store.db.shiftNotes.find((note) => note.id === noteId);
+  assert.ok(row);
+  row.signatureDataUrl = "";
+  await assert.rejects(
+    () => impl.saveShiftNote({ ...edit, summary: "Corrected body." }),
+    /Adopt your signature/,
+  );
+  // After adopting, the same edit saves and stamps the session signature.
+  await impl.adoptSignature({
+    signatureDataUrl: PNG_1X1,
+    initialsDataUrl: PNG_1X1,
+    consentTextVersion: ESIGN_CONSENT_VERSION,
+    consentGiven: true,
+  });
+  await impl.saveShiftNote({ ...edit, summary: "Corrected body." });
+  const after = (await impl.getIspData(ellisId)).notes.find((note) => note.id === noteId);
+  assert.equal(after?.summary, "Corrected body.");
+  assert.equal(after?.signatureDataUrl, PNG_1X1);
 });

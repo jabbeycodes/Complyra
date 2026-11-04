@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Car,
   ClipboardList,
@@ -91,7 +91,10 @@ import {
   personalEntryTitle,
   personalRecentRows,
   personalSignedAmount,
+  spendingChooserBalanceCents,
+  spendingEntriesFor,
   type MoneySheetValues,
+  type SpendingEntriesByPerson,
 } from "./money";
 import type { WorkspaceIndividual } from "./types";
 
@@ -466,7 +469,7 @@ export default function MobileQuickLog({
         siteId={siteId}
         siteName={siteName}
         people={people}
-        entries={houseEntries ?? []}
+        entries={houseEntries}
         todayIso={todayIso}
         onOpenHouseCard={onOpenHouseCard}
         onBack={() => setScreen("chooser")}
@@ -480,7 +483,7 @@ export default function MobileQuickLog({
         api={api}
         session={session}
         people={people}
-        entriesByPerson={spendingEntries ?? []}
+        entriesByPerson={spendingEntries}
         canRecord={access.spendingRecord}
         todayIso={todayIso}
         onOpenChart={onOpenChart}
@@ -1269,14 +1272,24 @@ function DrillLogSheet({
  * line reloads. The full view (month totals, close, print) is one row
  * away via "Open house card". Only recording roles reach this screen;
  * the chooser sends view-only roles straight to the full view.
+ *
+ * Load honesty: the chooser hands over its ledger only once it has
+ * actually loaded — null means "not loaded yet" (its load may still
+ * be running, or it failed behind the chooser's per-domain guard),
+ * never an empty ledger. An empty array is a factual claim ($0.00 in
+ * the pin, "Nothing recorded today yet"), so while no ledger is in
+ * hand this screen loads it itself and says so — "Loading…" first,
+ * and on failure the error with a Try again — the same nullable
+ * load state the full House Card view (MobileHouseCard) keeps.
+ * Exported for the load-state render tests.
  */
-function HouseCardLogScreen({
+export function HouseCardLogScreen({
   api,
   session,
   siteId,
   siteName,
   people,
-  entries,
+  entries: handedEntries,
   todayIso,
   onOpenHouseCard,
   onBack,
@@ -1287,17 +1300,46 @@ function HouseCardLogScreen({
   siteId: string;
   siteName: string;
   people: WorkspaceIndividual[];
-  entries: HouseCardEntryView[];
+  entries: HouseCardEntryView[] | null;
   todayIso: string;
   onOpenHouseCard: () => void;
   onBack: () => void;
   onLogged: () => void;
 }) {
+  const [entries, setEntries] = useState<HouseCardEntryView[] | null>(
+    handedEntries,
+  );
+  const [loadError, setLoadError] = useState("");
+  const loadAttempted = useRef(handedEntries !== null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState("");
   const [saving, setSaving] = useState(false);
-  const status = houseCardStatus(entries);
-  const ledger = useMemo(() => buildHouseCardLedger(entries), [entries]);
+
+  const load = useCallback(async () => {
+    loadAttempted.current = true;
+    setLoadError("");
+    try {
+      setEntries(await api.listHouseCardEntries(siteId));
+    } catch (err) {
+      setLoadError(
+        err instanceof Error
+          ? err.message
+          : "Could not load the house card ledger.",
+      );
+    }
+  }, [api, siteId]);
+
+  useEffect(() => {
+    if (entries === null && !loadAttempted.current) {
+      void load();
+    }
+  }, [entries, load]);
+
+  const status = entries ? houseCardStatus(entries) : null;
+  const ledger = useMemo(
+    () => (entries ? buildHouseCardLedger(entries) : []),
+    [entries],
+  );
   const todayRows = useMemo(
     () => houseTodayRows(ledger, todayIso),
     [ledger, todayIso],
@@ -1308,7 +1350,7 @@ function HouseCardLogScreen({
   );
   const categories = useMemo(
     () =>
-      orderCategoriesByUse(entries).map((category) => ({
+      orderCategoriesByUse(entries ?? []).map((category) => ({
         value: category,
         label: HOUSE_CARD_CATEGORY_LABELS[category],
         icon: HOUSE_CATEGORY_ICONS[category],
@@ -1338,6 +1380,37 @@ function HouseCardLogScreen({
       setSaving(false);
     }
   };
+
+  if (loadError) {
+    return (
+      <div>
+        <button type="button" className="msh-text-button" onClick={onBack}>
+          ‹ Quick log
+        </button>
+        <p className="msh-alert" role="alert">
+          The house card ledger could not be loaded. {loadError}
+        </p>
+        <button
+          type="button"
+          className="msh-button secondary block"
+          onClick={() => void load()}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!entries || !status) {
+    return (
+      <div>
+        <button type="button" className="msh-text-button" onClick={onBack}>
+          ‹ Quick log
+        </button>
+        <p className="msh-empty">Loading the house card ledger…</p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1471,6 +1544,17 @@ function HouseCardLogScreen({
  * is one row away via "Open personal spending". View-only roles get
  * the same screens with no Record button — recording follows the
  * #152 role list, and the API enforces per-person assignment scope.
+ *
+ * Amounts are load-aware (simulation batch 49): the chooser carries
+ * each person's current balance, the way the Health door's row does,
+ * and "not loaded yet" is never collapsed into an empty ledger — the
+ * chooser says "Loading…" and the person view shows the ledger
+ * loading state instead of a factual $0.00 and "Nothing recorded
+ * yet". The entries normally arrive with the Quick log's status load
+ * (spending loads last there, so a fast user can beat it); when a
+ * person is opened before that load lands — or it failed behind the
+ * status guard — the person view loads that person's ledger itself,
+ * with the same error + retry the full Personal Spending view has.
  */
 function SpendingLogScreen({
   api,
@@ -1487,7 +1571,8 @@ function SpendingLogScreen({
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
-  entriesByPerson: { personId: string; entries: PersonalSpendingEntryView[] }[];
+  /** The home's loaded lists, or null while the status load has not landed. */
+  entriesByPerson: SpendingEntriesByPerson | null;
   canRecord: boolean;
   todayIso: string;
   onOpenChart: (name: string) => void;
@@ -1500,17 +1585,55 @@ function SpendingLogScreen({
   const [sheetError, setSheetError] = useState("");
   const [saving, setSaving] = useState(false);
   const person = people.find((row) => row.id === personId) ?? null;
-  const entries = useMemo(
-    () =>
-      entriesByPerson.find((row) => row.personId === personId)?.entries ??
-      [],
-    [entriesByPerson, personId],
-  );
+
+  // The opened person's entries: the status load's copy when it has
+  // landed, otherwise this view's own load of just that ledger (the
+  // fallback also surfaces a failed status load as a real error with
+  // a retry, instead of an endless factual $0.00).
+  const loadedEntries = person
+    ? spendingEntriesFor(entriesByPerson, person.id)
+    : null;
+  const [ownEntries, setOwnEntries] = useState<{
+    personId: string;
+    entries: PersonalSpendingEntryView[];
+  } | null>(null);
+  const [ownLoadError, setOwnLoadError] = useState("");
+  const [ownLoadRetry, setOwnLoadRetry] = useState(0);
+  useEffect(() => {
+    if (!personId || loadedEntries !== null) return;
+    let cancelled = false;
+    setOwnLoadError("");
+    api
+      .listPersonalSpendingEntries(personId)
+      .then((rows) => {
+        if (!cancelled) setOwnEntries({ personId, entries: rows });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setOwnLoadError(
+            err instanceof Error
+              ? err.message
+              : "Could not load the personal spending ledger.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, personId, loadedEntries, ownLoadRetry]);
+  const entries =
+    loadedEntries ??
+    (ownEntries && ownEntries.personId === personId
+      ? ownEntries.entries
+      : null);
   const balance = useMemo(
-    () => computePersonalBalanceCents(entries),
+    () => (entries ? computePersonalBalanceCents(entries) : 0),
     [entries],
   );
-  const recentRows = useMemo(() => personalRecentRows(entries), [entries]);
+  const recentRows = useMemo(
+    () => (entries ? personalRecentRows(entries) : []),
+    [entries],
+  );
 
   const saveSheet = async (values: MoneySheetValues) => {
     if (!person) return;
@@ -1552,6 +1675,21 @@ function SpendingLogScreen({
           <MobilePeopleList
             people={people}
             onPick={(row) => setPersonId(row.id)}
+            trailingFor={(row) => {
+              const balanceCents = spendingChooserBalanceCents(
+                entriesByPerson,
+                row.id,
+              );
+              return balanceCents === null ? (
+                <span className="msh-row-amount msh-row-amount-loading">
+                  Loading…
+                </span>
+              ) : (
+                <strong className="msh-row-amount">
+                  {formatCents(balanceCents)}
+                </strong>
+              );
+            }}
           />
         </>
       ) : (
@@ -1564,6 +1702,28 @@ function SpendingLogScreen({
             ‹ All Individuals
           </button>
           <PersonHeader person={person} onOpenChart={onOpenChart} />
+          {entries === null && ownLoadError && (
+            <>
+              <p className="msh-alert" role="alert">
+                The personal spending ledger could not be loaded.{" "}
+                {ownLoadError}
+              </p>
+              <button
+                type="button"
+                className="msh-button secondary block"
+                onClick={() => setOwnLoadRetry((key) => key + 1)}
+              >
+                Try again
+              </button>
+            </>
+          )}
+          {entries === null && !ownLoadError && (
+            <p className="msh-empty">
+              Loading the personal spending ledger…
+            </p>
+          )}
+          {entries !== null && (
+            <>
           <div className="mq-pin">
             <div className="mq-pin-top">
               <span className="mq-pin-label">
@@ -1680,6 +1840,8 @@ function SpendingLogScreen({
               onClose={() => setSheetOpen(false)}
               onSave={(values) => void saveSheet(values)}
             />
+          )}
+            </>
           )}
         </>
       )}

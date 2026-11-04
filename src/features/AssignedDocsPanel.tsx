@@ -225,7 +225,7 @@ export default function AssignedDocsPanel({
         />
       )}
 
-      <div className="stack-tabs" role="tablist">
+      <div className="stack-tabs" role="tablist" aria-label="Plan document sections">
         <button
           type="button"
           role="tab"

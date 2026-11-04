@@ -5,6 +5,70 @@ import { useData } from "../data/DataProvider";
 import { buildAgencyCode, suggestAgencySlug } from "../data/agencyCode";
 import { US_STATES } from "../data/usStates";
 import type { CreateAgencyResult } from "../data/types";
+import PasswordField from "../components/PasswordField";
+import OneTimeSecret from "../components/OneTimeSecret";
+
+export type CreatedAgencyCredentials = CreateAgencyResult & {
+  tempPassword: string;
+};
+
+/**
+ * The post-submit confirmation. The temporary password is a one-time
+ * handover: it renders only through OneTimeSecret (masked by default,
+ * explicit Show/Copy) and leaves the screen for good when the creator
+ * continues to sign in — it is never echoed in plain text.
+ */
+export function AgencyCreatedView({
+  created,
+  onContinue,
+}: {
+  created: CreatedAgencyCredentials;
+  onContinue: () => void;
+}) {
+  const pending = created.status === "pending";
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-brand">
+          <ComplyRerWordmark size={36} />
+        </div>
+        <h1>{pending ? "Submitted for review" : "Agency is ready"}</h1>
+        <p>
+          {pending
+            ? "Complyrer will review this agency before staff can open care records. Save these first-administrator credentials."
+            : "Give these credentials to the first administrator once. They must change the temporary password at first sign-in."}
+        </p>
+        <dl className="ack-meta">
+          <div>
+            <dt>Provider code</dt>
+            <dd>
+              <strong>{created.agencyCode}</strong>
+            </dd>
+          </div>
+          <div>
+            <dt>Username</dt>
+            <dd>
+              <strong>{created.username}</strong>
+            </dd>
+          </div>
+          <div>
+            <dt>Temporary password</dt>
+            <dd>
+              <OneTimeSecret value={created.tempPassword} />
+            </dd>
+          </div>
+        </dl>
+        <button
+          className="button primary full"
+          type="button"
+          onClick={onContinue}
+        >
+          Continue to sign in
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function SetupAgencyScreen({
   onBack,
@@ -33,48 +97,11 @@ export default function SetupAgencyScreen({
   );
 
   if (created) {
-    const pending = created.status === "pending";
     return (
-      <div className="login-shell">
-        <div className="login-card">
-          <div className="login-brand">
-            <ComplyRerWordmark size={36} />
-          </div>
-          <h1>{pending ? "Submitted for review" : "Agency is ready"}</h1>
-          <p>
-            {pending
-              ? "Complyrer will review this agency before staff can open care records. Save these first-administrator credentials."
-              : "Give these credentials to the first administrator once. They must change the temporary password at first sign-in."}
-          </p>
-          <dl className="ack-meta">
-            <div>
-              <dt>Provider code</dt>
-              <dd>
-                <strong>{created.agencyCode}</strong>
-              </dd>
-            </div>
-            <div>
-              <dt>Username</dt>
-              <dd>
-                <strong>{created.username}</strong>
-              </dd>
-            </div>
-            <div>
-              <dt>Temporary password</dt>
-              <dd>
-                <strong>{created.tempPassword}</strong>
-              </dd>
-            </div>
-          </dl>
-          <button
-            className="button primary full"
-            type="button"
-            onClick={() => onCreated(created)}
-          >
-            Continue to sign in
-          </button>
-        </div>
-      </div>
+      <AgencyCreatedView
+        created={created}
+        onContinue={() => onCreated(created)}
+      />
     );
   }
 
@@ -105,6 +132,9 @@ export default function SetupAgencyScreen({
                 provisionedBy: "self",
               });
               setCreated({ ...result, tempPassword: adminTempPassword });
+              // The confirmation holds the only copy now; the form field
+              // must not keep the password around after submit.
+              setAdminTempPassword("");
             } catch (err) {
               setError((err as Error).message);
             } finally {
@@ -178,17 +208,13 @@ export default function SetupAgencyScreen({
               required
             />
           </label>
-          <label className="form-label">
-            Temporary password
-            <input
-              type="text"
-              autoComplete="off"
-              value={adminTempPassword}
-              onChange={(e) => setAdminTempPassword(e.target.value)}
-              minLength={8}
-              required
-            />
-          </label>
+          <PasswordField
+            label="Temporary password"
+            value={adminTempPassword}
+            onChange={setAdminTempPassword}
+            minLength={8}
+            required
+          />
           {error && (
             <p className="inline-error" role="alert">
               {error}

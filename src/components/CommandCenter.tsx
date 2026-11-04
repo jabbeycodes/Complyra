@@ -39,7 +39,7 @@ import {
   ATTENTION_KIND_META,
   buildAttentionFeed,
 } from "../data/attentionFeed";
-import { rightsTrackingFor } from "../data/rightsPackets";
+import { rightsPacketStatusFor } from "../data/rightsPackets";
 import {
   evaluateReadiness,
   readinessByCategory,
@@ -339,26 +339,28 @@ export function CommandCenterView({
       providerRecertification: null,
       rightsRenewals: (data.individuals ?? []).flatMap((person): NonNullable<TimelineFacts["rightsRenewals"]> => {
         const mine = (data.rightsPackets ?? []).filter((packet) => packet.individualId === person.id);
-        if (mine.length === 0) return [];
-        const tracking = rightsTrackingFor(mine);
-        if (tracking.kind === "tracked") {
+        // The shared selector, fed null when the packet load failed:
+        // an unknown status contributes no timeline row, so this
+        // surface can never state a verdict the data does not support.
+        const status = rightsPacketStatusFor((data.unavailable ?? []).includes("Rights packets") ? null : mine);
+        if (status.kind === "signed_current" || status.kind === "signed_renewal_due" || status.kind === "signed_overdue") {
           return [{
-            id: tracking.packet.id,
+            id: status.packet.id,
             individualName: person.name,
             siteName: person.site,
-            dueOn: tracking.renewal.renewalOn,
+            dueOn: status.renewal.renewalOn,
             unsigned: false,
-            detail: tracking.renewal.text,
+            detail: status.text,
           }];
         }
-        if (!tracking.packet) return [];
+        if (status.kind !== "never_signed" || !status.packet) return [];
         return [{
-          id: tracking.packet.id,
+          id: status.packet.id,
           individualName: person.name,
           siteName: person.site,
-          dueOn: tracking.packet.createdAt.slice(0, 10),
+          dueOn: status.packet.createdAt.slice(0, 10),
           unsigned: true,
-          detail: `Not yet signed — awaiting signature since ${tracking.packet.createdAt.slice(0, 10)}`,
+          detail: `Not yet signed — awaiting signature since ${status.packet.createdAt.slice(0, 10)}`,
         }];
       }),
     }),

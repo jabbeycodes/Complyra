@@ -567,8 +567,15 @@ export function canSeeRenewals(roleKey: string) {
   ].includes(roleKey);
 }
 
+/** Who may upload renewal evidence (which resets the due date). Compliance
+ * administrators keep read-only chart access via canSeeRenewals but do not
+ * upload (founder ruling, batch 158); auditors are read-only throughout. */
 export function canUploadRenewal(roleKey: string) {
-  return canSeeRenewals(roleKey) && roleKey !== "auditor";
+  return (
+    canSeeRenewals(roleKey) &&
+    roleKey !== "auditor" &&
+    roleKey !== "compliance_admin"
+  );
 }
 
 export function canSignAsDelegatingRn(roleKey: string, role: string) {

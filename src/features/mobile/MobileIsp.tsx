@@ -6,6 +6,7 @@ import {
   canEditShiftNoteRow,
   clocksFromShiftLabel,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   waiverServiceNames,
   type IspProgramView,
   type ShiftNoteView,
@@ -165,6 +166,7 @@ function EntryForm({
   const [error, setError] = useState("");
 
   const duration = shiftDurationMinutes(beginTime, endTime);
+  const timingProblem = shiftNoteTimingProblem({ noteDate, beginTime });
   const isNew = !initial;
   // Mirrors the desktop entry gate (and the API's progress-note rule): a new
   // entry cannot be saved until the plan carries its goal/outcome text.
@@ -190,6 +192,7 @@ function EntryForm({
     noteDate.length > 0 &&
     shift.trim().length > 0 &&
     duration !== null &&
+    !timingProblem &&
     waiverServiceNames().includes(waiverService) &&
     summary.trim().length > 0 &&
     (!isNew || signatureUrl.length > 0) &&
@@ -319,6 +322,11 @@ function EntryForm({
             ? `Duration: ${duration} minutes`
             : "Enter a start and end time to compute the duration."}
         </p>
+        {timingProblem && (
+          <p className="msh-duration" role="alert">
+            {timingProblem}
+          </p>
+        )}
         <label className="msh-field">
           <span>Location</span>
           <input
