@@ -370,7 +370,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: "auditor",
     name: "Auditor",
     shortCode: "AUD",
-    description: "Time-limited read and export access. Cannot change records or add staff.",
+    // AUDITOR CONTRACT (founder decision, 2026-11-04, PR #252 review): the
+    // auditor reads and exports everything and AUTHORS QA reviews — it
+    // scores the reviewable items, signs and finalizes the review, and
+    // decides disputes raised against its scores (qa.audit). It cannot
+    // START a review (qa.schedule: administrator / program manager), and
+    // it changes no other record. Every other key below is read-only.
+    description:
+      "Time-limited read and export access to every record. Scores, signs and finalizes QA reviews and decides disputes on them; cannot start a review, change any other record, or add staff.",
     defaultScope: "agency",
     capability: "auditor",
     permissions: pack([
@@ -380,7 +387,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       // QA-AUDIT (2026-09-14): conduct QA audits — system-verified items stay
-      // locked; the auditor scores the rest and resolves disputes.
+      // locked; the auditor scores the rest and resolves disputes. The ONE
+      // write key the auditor holds (see the AUDITOR CONTRACT above).
       "qa.audit",
       "recognition.view_winners",
       // DELEGATION: view templates only.
