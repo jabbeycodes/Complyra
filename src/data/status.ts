@@ -3,6 +3,7 @@ import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
+  canReadAsAuditor,
   canSeeShiftNotes,
   canViewStaffAsProgramManager,
   canViewHouseCard,
@@ -82,15 +83,20 @@ export function pageVisible(session: SessionUser, page: string) {
       can(session, "members.invite") ||
       can(session, "members.assign_roles") ||
       // PM-STAFF-NAV (wave 7U-2): the program manager's path — keyed on the
-      // team/reset keys its template actually holds; every member-admin
-      // control on the page stays keyed on the members.* keys above.
-      canViewStaffAsProgramManager(session)
+      // team/reset keys its template actually holds. AUDITOR-NAV (wave 7U):
+      // read-only roster view for the auditor. Every member-admin control
+      // on the page stays keyed on the members.* keys above.
+      canViewStaffAsProgramManager(session) ||
+      canReadAsAuditor(session)
     );
   }
   if (page === "Documents") return can(session, "documents.view");
   // Issue #80: the site-detail "Shift notes" tab mirrors chart visibility.
   if (page === "ShiftNotes") return canSeeShiftNotes(session.roleKey);
-  if (page === "Review queue") return can(session, "requirements.approve");
+  // AUDITOR-NAV (wave 7U): the approve/write path stays requirements.approve;
+  // the auditor reads the queue read-only (drawer actions stay canManage-gated).
+  if (page === "Review queue")
+    return can(session, "requirements.approve") || canReadAsAuditor(session);
   if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {
     return (
@@ -113,13 +119,29 @@ export function pageVisible(session: SessionUser, page: string) {
   // from assigning roles to people (members.assign_roles).
   if (page === "Roles & access") return can(session, "roles.manage");
   // LIFEPATH-P2-PAGEVIS (training engine)
+  // AUDITOR-NAV (wave 7U): + the auditor's read path (roster renders
+  // read-only; assign/waive/edit stay keyed on hr.view_staff and role lists).
   if (page === "Training")
-    return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
+    return (
+      can(session, "hr.view_staff") ||
+      can(session, "acknowledgments.sign_own") ||
+      canReadAsAuditor(session)
+    );
   // LIFEPATH-P3-PAGEVIS (delegation forms)
-  if (page === "Delegations") return can(session, "clinical.view");
+  // AUDITOR-NAV (wave 7U): the stored auditor template carries isp.view, not
+  // clinical.view — the auditor read path keeps Delegations reachable either
+  // way; create/sign/activate stay keyed on their own gates.
+  if (page === "Delegations")
+    return can(session, "clinical.view") || canReadAsAuditor(session);
   // LIFEPATH-P4-PAGEVIS (certificates)
+  // AUDITOR-NAV (wave 7U): + the auditor's read path (add/edit/delete stay
+  // keyed on certificates.manage in the page and both APIs).
   if (page === "Certificates") {
-    return can(session, "certificates.manage") || can(session, "hr.view_staff");
+    return (
+      can(session, "certificates.manage") ||
+      can(session, "hr.view_staff") ||
+      canReadAsAuditor(session)
+    );
   }
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
   if (page === "Weekly checklist") {

@@ -215,6 +215,7 @@ import {
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
+  canReadAsAuditor,
   defaultPermissions,
   hasPermission,
   hasHubTeamPermission,
@@ -7950,8 +7951,13 @@ export class HostedApi implements ComplyraApi {
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
     // Own profile is always readable; another staffer's needs
-    // hr.view_staff OR a training-oversight role (batch 25).
-    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
+    // hr.view_staff, a training-oversight role (batch 25), or the auditor
+    // read path (AUDITOR-NAV, wave 7U).
+    if (
+      session.userId !== userId &&
+      !canOverseeTraining(session.roleKey) &&
+      !canReadAsAuditor(session)
+    ) {
       this.requirePermission(session, "hr.view_staff");
     }
     return this.staffTrainingProfileFor(session, userId);
@@ -8073,7 +8079,10 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    if (!canOverseeTraining(session.roleKey)) this.requirePermission(session, "hr.view_staff");
+    // Roster read: hr.view_staff, a training-oversight role (batch 25), or
+    // the auditor read path (AUDITOR-NAV, wave 7U).
+    if (!canOverseeTraining(session.roleKey) && !canReadAsAuditor(session))
+      this.requirePermission(session, "hr.view_staff");
     // Wave 7S (simulation batch 103 + Pass 7 roll-up): the roster comes
     // from the agency's staff memberships — not from training_requirements.
     // The old requirements-derived roster hid exactly the people this page
@@ -10036,7 +10045,10 @@ export class HostedApi implements ComplyraApi {
   private requireCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind the certificates.manage write gate.
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }

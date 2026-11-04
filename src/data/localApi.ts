@@ -96,6 +96,7 @@ import {
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
   capabilityForRoleKey,
   canGrantRole,
+  canReadAsAuditor,
   checkRoleTemplateUpdate,
   defaultPermissions,
   hasPermission,
@@ -2280,6 +2281,23 @@ function assertPrivileged(session: SessionUser) {
 
 function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/**
+ * AUDITOR-NAV (wave 7U): training-roster READS (clearance list + another
+ * staffer's training profile) — hr.view_staff holders, or the auditor on
+ * its read path. Writes (initial/waive/assign/correct) keep their own gates.
+ */
+/** Training roster / cross-profile read: hr.view_staff, a training-
+ *  oversight role (batch 25), or the auditor read path (wave 7U). */
+function assertTrainingRosterRead(session: SessionUser) {
+  if (
+    !hasPermission(session, "hr.view_staff") &&
+    !canOverseeTraining(session.roleKey) &&
+    !canReadAsAuditor(session)
+  ) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -9162,11 +9180,10 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    // Own profile is always readable; another staffer's needs
-    // hr.view_staff OR a training-oversight role (batch 25).
-    if (session.userId !== userId && !canOverseeTraining(session.roleKey)) {
-      assertCan(session, "hr.view_staff");
-    }
+    // Own profile is always readable; another staffer's follows the
+    // roster rule (hr.view_staff, a training-oversight role — batch 25 —
+    // or the auditor read path — wave 7U).
+    if (session.userId !== userId) assertTrainingRosterRead(session);
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9250,7 +9267,7 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    if (!canOverseeTraining(session.roleKey)) assertCan(session, "hr.view_staff");
+    assertTrainingRosterRead(session);
     // Roster comes from the agency's staff memberships — not only from staff
     // who already have training assigned — so "All staff" never renders an
     // empty table while the agency has people. A house manager's roster is
@@ -9975,7 +9992,10 @@ export class LocalApi implements ComplyraApi {
   private assertCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind assertCertificateWrite (certificates.manage).
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }

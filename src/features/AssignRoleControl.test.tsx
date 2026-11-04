@@ -60,6 +60,7 @@ function renderControl(session: SessionUser, memberRoleKey: string, memberUserId
     loading: false,
     error: "",
     usingHostedBackend: false,
+    loadStalled: false,
     signIn: async () => {},
     changePassword: async () => {},
     signOut: async () => {},

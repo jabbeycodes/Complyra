@@ -13,7 +13,7 @@ import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
-import { hasPermission } from "../../data/permissions";
+import { canReadAsAuditor, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -104,11 +104,18 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
+  // AUDITOR-NAV (wave 7U): the auditor reads the same roster read-only.
+  // canManage stays hr.view_staff-only, so Assign training, N/A waivers and
+  // line edits never render for the auditor (ProfilePanel gates them on
+  // canManage / canInitialOwn / role lists the auditor is not on).
+  const canViewRoster = canManage || (session ? canReadAsAuditor(session) : false);
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
   // Roster access is wider than the hr.view_staff permission: oversight
   // roles (PM/HM/admin) land on the roster too (batch 25). Assigning
   // training still requires hr.view_staff itself (canManage).
-  const canRoster = canManage || isHm;
+  // Who sees the roster panels: staff viewers, training overseers (HM),
+  // and the auditor read path (AUDITOR-NAV, wave 7U).
+  const canRoster = canViewRoster || isHm;
 
   async function loadRows() {
     setRowsFailed(false);
@@ -132,7 +139,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     if (!session) return;
     if (
       trainingLandingMode({
-        canViewStaff: can(session, "hr.view_staff"),
+        canViewStaff: can(session, "hr.view_staff") || canReadAsAuditor(session),
         roleKey: session.roleKey,
       }) === "roster"
     ) {
