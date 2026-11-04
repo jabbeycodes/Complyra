@@ -275,9 +275,12 @@ export function CommandCenterView({
       // their projection is a fabricated zero, so they must not be tallied
       // as out of stock here — they surface as "No count recorded yet" on
       // the med surfaces, not as Audit Me findings.
+      // Rows name the Individual: med names repeat across people, so a
+      // site-only label is not identifiable.
       medications: (data.medications ?? []).filter((med) => med.status !== "ok" && medHasCountOnFile(med)).map((med) => {
         const person = data.individuals.find((row) => row.id === med.individualId);
         return { id: med.medicationId, medName: med.medicationName,
+          personName: person?.name,
           siteId: person?.siteId ?? "", siteName: person?.site ?? "Unknown site",
           daysRemaining: med.daysRemaining, status: med.status as "low" | "critical" | "out" };
       }),
@@ -327,6 +330,9 @@ export function CommandCenterView({
           dueOn: (list.dueAt as string).slice(0, 10),
           submitted: false,
         })),
+      // Never-counted meds are excluded for the same reason as the
+      // risk rows above: their projected daysRemaining is 0 from a
+      // fabricated zero, which would invent a run-out date today.
       medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null && medHasCountOnFile(med)).map((med) => {
         const end = new Date();
         end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));

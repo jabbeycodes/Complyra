@@ -119,7 +119,7 @@ export default function MedInventoryPage() {
                   {alert.medicationName} ({alert.strength}):{" "}
                   {alert.lastCountedOn === null
                     ? "No count recorded yet"
-                    : inventoryCountdownLabel(alert)}
+                    : `Projected: ${inventoryCountdownLabel(alert)}`}
                 </span>
                 {alert.alertActive && canManage && (
                   <button className="button" onClick={() => acknowledge(alert.medicationId)}>
