@@ -1,4 +1,5 @@
-import { todayIso, daysBetween } from "./chart";
+import { daysBetween } from "./chart";
+import { centralTodayIso } from "./menuRecords";
 
 // LIFEPATH-P4 (certificates): pure certificate expiry logic shared by the
 // local/hosted APIs and the HR UI. No side effects, easy to unit test.
@@ -9,7 +10,7 @@ export const CERTIFICATE_KINDS = ["CPR", "CPI", "PBS", "L1MA"] as const;
 export const CERTIFICATE_MAX_BYTES = 10 * 1024 * 1024;
 
 /** Whole days from `today` until `expiresOn` (ISO yyyy-mm-dd). Negative = expired. */
-export function daysRemaining(expiresOn: string, today: string = todayIso()): number {
+export function daysRemaining(expiresOn: string, today: string = centralTodayIso()): number {
   return daysBetween(today, expiresOn.slice(0, 10));
 }
 

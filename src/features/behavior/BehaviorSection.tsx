@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { addDaysIso, centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
 import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
 import {
@@ -40,7 +41,7 @@ export default function BehaviorSection({
     interventions: "",
     crisisSteps: "",
   });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   const [entryDraft, setEntryDraft] = useState<BehaviorEntryDraft>({
     occurredOn: today,
     occurredAtTime: "",
@@ -113,7 +114,7 @@ export default function BehaviorSection({
   }, [load]);
 
   const summary = useMemo(() => {
-    const from = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+    const from = addDaysIso(today, -29);
     return summarizeBehaviorEntries(entries, from, today);
   }, [entries, today]);
 

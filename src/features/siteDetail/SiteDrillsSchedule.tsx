@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Download, Printer } from "lucide-react";
 import { useData } from "../../data/DataProvider";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
 import { drillExportScopeLabel, drillScheduleYearSummary } from "../../data/drillSchedule";
 import type { EmergencyDrill } from "../../data/monthlyChecks";
@@ -30,8 +30,8 @@ export default function SiteDrillsSchedule({
   drills,
 }: SiteDrillsScheduleProps) {
   const { api } = useData();
-  const year = Number(todayIso().slice(0, 4));
-  const currentMonth = Number(todayIso().slice(5, 7));
+  const year = Number(centralTodayIso().slice(0, 4));
+  const currentMonth = Number(centralTodayIso().slice(5, 7));
   const [monthFilter, setMonthFilter] = useState<number | "all">("all");
   const [busy, setBusy] = useState<"download" | "print" | null>(null);
   const [error, setError] = useState("");

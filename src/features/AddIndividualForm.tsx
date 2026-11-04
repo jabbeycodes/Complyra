@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
 import { useData } from "../data/DataProvider";
-import { todayIso } from "../data/chart";
+import { centralTodayIso } from "../data/menuRecords";
 import { countIndividualsAtSite, siteAtCapacityMessage, siteIndividualCap } from "../data/siteCapacity";
 
 type Mode = "pcsp" | "manual";
@@ -23,7 +23,7 @@ export default function AddIndividualForm({
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [dmhId, setDmhId] = useState("");
   const [siteId, setSiteId] = useState(lockedSiteId ?? initialSiteId ?? "");
-  const [enrolledOn, setEnrolledOn] = useState(todayIso());
+  const [enrolledOn, setEnrolledOn] = useState(centralTodayIso());
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState("12");
   const [effectiveOn, setEffectiveOn] = useState("2026-09-12");

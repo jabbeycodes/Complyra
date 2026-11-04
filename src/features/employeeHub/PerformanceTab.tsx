@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Check, PenLine, Printer, Scale, Star } from "lucide-react";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import type { HrStore } from "../../data/hrStore";
 import { hasPermission } from "../../data/permissions";
 import {
@@ -115,7 +115,7 @@ export function PerformanceTab({
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [showActionForm, setShowActionForm] = useState(false);
   const [reviewForm, setReviewForm] = useState({
-    reviewDate: todayIso(),
+    reviewDate: centralTodayIso(),
     periodStart: "",
     periodEnd: "",
     rating: "Meets expectations" as PerformanceReview["rating"],
@@ -125,7 +125,7 @@ export function PerformanceTab({
     supersedesId: "",
   });
   const [actionForm, setActionForm] = useState({
-    actionDate: todayIso(),
+    actionDate: centralTodayIso(),
     level: "Verbal warning" as StaffCorrectiveAction["level"],
     description: "",
     expectations: "",
