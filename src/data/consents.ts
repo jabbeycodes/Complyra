@@ -148,6 +148,48 @@ export function consentAlerts(register: ConsentRegister, memberships: Membership
         }));
     });
 }
+/** Notification types whose stored rows live only while the underlying gap persists. */
+export const CONSENT_ALERT_TYPES = ['consent.missing', 'consent.expiring', 'consent.packet_outstanding'] as const;
+/**
+ * The (type, entityId) pairs whose consent alert is currently true,
+ * from the same gap computation that queues the alerts. A consent
+ * carries exactly ONE current status, so at most one alert pair exists
+ * per (Individual, consent type): an "Expiring soon" consent has no
+ * live "missing" pair, an Active consent has neither. Stored rows
+ * outside this set are stale and must retire (batch 24: the bell kept
+ * saying "Consent needs attention — Missing" for consents the chart
+ * already showed Active, because nothing ever retired the row).
+ */
+export function consentAlertPairs(register: ConsentRegister, today = todayStamp()): Set<string> {
+    return new Set(consentGaps(register, today).map(gap => `consent.${gap.alert}:${gap.row?.id ?? `${gap.person.id}:${gap.type.id}`}`));
+}
+export function consentAlertPairKey(type: string, entityId: string | null): string {
+    return `${type}:${entityId ?? ''}`;
+}
+/**
+ * True when a stored consent alert no longer matches reality: its
+ * (type, entity) pair is not a current gap, or its packet is no
+ * longer outstanding. Non-alert types (e.g. consent.packet_signed)
+ * are never stale — they are the record that the work happened.
+ * Rights-packet alerts REUSE the consent.missing / consent.expiring
+ * types with entityType 'rights_packet', but they track packet
+ * states, not consent gaps — an explicit non-'consent' entityType
+ * exempts a row from the gap rule.
+ */
+export function isStaleConsentNotification(row: {
+    type: string;
+    entityId: string | null;
+    entityType?: string | null;
+}, livePairs: ReadonlySet<string>, outstandingPacketIds: ReadonlySet<string>): boolean {
+    if (row.type === 'consent.missing' || row.type === 'consent.expiring') {
+        if (row.entityType && row.entityType !== 'consent')
+            return false;
+        return !livePairs.has(consentAlertPairKey(row.type, row.entityId));
+    }
+    if (row.type === 'consent.packet_outstanding')
+        return !(row.entityId !== null && outstandingPacketIds.has(row.entityId));
+    return false;
+}
 /** Only business fields cross the local write boundary; ignore forged metadata. */
 export function consentDraftFields(input: ConsentDraft): ConsentDraft {
     return { individualId: input.individualId, typeId: input.typeId, covers: input.covers,

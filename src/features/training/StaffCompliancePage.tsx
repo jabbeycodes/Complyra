@@ -42,7 +42,7 @@ import {
   canRequestTrainingCorrection,
   canSignTrainingAsHm,
 } from "../../data/chart";
-import { TRAINING_LINE_MAX_HOURS } from "./gate";
+import { TRAINING_LINE_MAX_HOURS, rosterPanelState, trainingLandingMode } from "./gate";
 import AssignTrainingModal from "./AssignTrainingModal";
 import type {
   AdoptedSignature,
@@ -104,6 +104,10 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 
   const canManage = session ? can(session, "hr.view_staff") : false;
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
+  // Roster access is wider than the hr.view_staff permission: oversight
+  // roles (PM/HM/admin) land on the roster too (batch 25). Assigning
+  // training still requires hr.view_staff itself (canManage).
+  const canRoster = canManage || isHm;
 
   async function loadRows() {
     try {
@@ -124,7 +128,12 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 
   useEffect(() => {
     if (!session) return;
-    if (can(session, "hr.view_staff")) {
+    if (
+      trainingLandingMode({
+        canViewStaff: can(session, "hr.view_staff"),
+        roleKey: session.roleKey,
+      }) === "roster"
+    ) {
       loadRows();
     } else {
       setRowsFailed(true);
@@ -147,7 +156,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       await action();
       await refresh();
       if (selected) await loadProfile(selected);
-      if (canManage) await loadRows();
+      if (canRoster) await loadRows();
       setModal(null);
       setSignatureTick((tick) => tick + 1);
       onSaved(savedMessage);
@@ -159,6 +168,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   }
 
   const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
+  const rosterState = rosterPanelState(rows);
 
   return (
     <div data-tour="training">
@@ -166,6 +176,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         title="Training"
         description="In-ratio gate: 20 hours of training, including 8 hours alongside the house manager, before working alone."
       >
+        {canRoster && (
+          <button className="button" onClick={() => setSelected(session.userId)}>
+            My training
+          </button>
+        )}
         {canManage && (
           <button className="button" onClick={() => setModal({ kind: "assign" })}>
             Assign training
@@ -174,10 +189,20 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canManage && rows && (
+      {canRoster && (rows || rowsFailed) && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
-          {notCleared.length === 0 ? (
+          {rowsFailed && !rows ? (
+            <Empty
+              title="The staff roster could not be loaded"
+              text="Refresh the page to try again."
+            />
+          ) : rosterState === "empty" ? (
+            <Empty
+              title="No staff to show yet"
+              text="No staff appear on this roster yet. Once staff are added and training is assigned, their clearance status will show here."
+            />
+          ) : notCleared.length === 0 ? (
             <Empty
               title="Everyone is cleared"
               text="Every staff member with training assigned meets the in-ratio gate."
@@ -210,7 +235,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canManage && rows && (
+      {canRoster && rows && rows.length > 0 && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">
@@ -372,7 +397,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
-      {rowsFailed && !canManage && !profile && (
+      {rowsFailed && !canRoster && !profile && (
         <Empty
           title="No training profile"
           text="Your training profile could not be loaded. Ask your house manager to assign your in-home checklist."
@@ -752,8 +777,10 @@ function ProfilePanel({
           const staffSigned = staffSignedForSite(counter.siteId, counter);
           const staffCanAct = canInitialOwn && gate.allResolved;
           // Paper order: staff signs first, then the HM countersigns — ANDed
-          // with the paper rule that every line is initialed or N/A.
-          const hmCanAct = isHm && staffSigned && gate.allResolved;
+          // with the paper rule that every line is initialed or N/A. A
+          // countersignature is a second person's attestation: the sheet's
+          // owner never countersigns their own sheet (batch 24).
+          const hmCanAct = isHm && !canInitialOwn && staffSigned && gate.allResolved;
           return (
             <li key={counter.id}>
               <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
@@ -782,11 +809,13 @@ function ProfilePanel({
                 actionLabel="Countersign as {name}"
                 canAct={hmCanAct}
                 cantActReason={
-                  !staffSigned
-                    ? "The staffer must sign before the house manager countersigns."
-                    : !gate.allResolved
-                      ? LINES_GATE_MESSAGE
-                      : "Not countersigned yet."
+                  canInitialOwn
+                    ? "You can't countersign your own checklist."
+                    : !staffSigned
+                      ? "The staffer must sign before the house manager countersigns."
+                      : !gate.allResolved
+                        ? LINES_GATE_MESSAGE
+                        : "Not countersigned yet."
                 }
                 legacySigned={
                   counter.hmSignedAt
