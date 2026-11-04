@@ -658,22 +658,28 @@ export default function MobileHouseCard({
                             : formatCents(runningBalanceCents)}
                         </td>
                         <td>
-                          {canRecord && !entry.voided && (
+                          {!entry.voided && (
                             <>
-                              <button
-                                type="button"
-                                className="hc-link-button"
-                                onClick={() => openRepeat(entry)}
-                              >
-                                Repeat
-                              </button>{" "}
-                              <button
-                                type="button"
-                                className="hc-link-button"
-                                onClick={() => openVoid(entry)}
-                              >
-                                Void
-                              </button>
+                              {canRecord && (
+                                <button
+                                  type="button"
+                                  className="hc-link-button"
+                                  onClick={() => openRepeat(entry)}
+                                >
+                                  Repeat
+                                </button>
+                              )}{" "}
+                              {/* Voiding is a manager action (batch 9):
+                                  same gate as close-month, not record. */}
+                              {canClose && (
+                                <button
+                                  type="button"
+                                  className="hc-link-button"
+                                  onClick={() => openVoid(entry)}
+                                >
+                                  Void
+                                </button>
+                              )}
                             </>
                           )}
                         </td>

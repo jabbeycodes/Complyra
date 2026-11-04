@@ -14,6 +14,26 @@
 
 import { collectRisks, type RiskContext, type RiskItem } from "./riskRegistry";
 import { buildTimeline, type TimelineFacts, type TimelineItem } from "./deadlineTimeline";
+import { shiftNoteDeepLink } from "../features/notifications/notify";
+
+/**
+ * A missed shift note, named (simulation batch 9): a scheduled shift
+ * with an approved ISP and still no note once the accountability
+ * engine's grace window has passed. Callers derive these from the
+ * site due-items the client already loads (kind "shift_note",
+ * severity "overdue") — the feed only re-presents them, it does not
+ * compute due-ness itself.
+ */
+export interface MissingShiftNoteFact {
+  /** The due-item id — stable per Individual + block + day. */
+  id: string;
+  individualId: string;
+  individualName: string;
+  siteName: string;
+  serviceDate: string;
+  blockLabel: string;
+  staffName: string;
+}
 
 export type AttentionKind = "overdue" | "due-today" | "escalation";
 
@@ -55,6 +75,12 @@ export interface AttentionItem {
 export interface AttentionInput {
   riskContext: RiskContext;
   timelineFacts: TimelineFacts;
+  /**
+   * Missed shift notes as named facts (optional). When absent the feed
+   * behaves exactly as before — the generic "ISP Data" counters
+   * elsewhere are NOT a substitute for these named items.
+   */
+  missingShiftNotes?: MissingShiftNoteFact[];
 }
 
 /** How many times a site has missed checklists — repeated misses escalate. */
@@ -106,6 +132,27 @@ export function buildAttentionFeed(input: AttentionInput): AttentionItem[] {
       siteName: risk.siteName ?? undefined,
       deepLink: risk.deepLink,
       sourceId: risk.id,
+    });
+  }
+
+  // 1b. Missed shift notes — NAMED overdue items (simulation batch 9):
+  // the manager sees which Individual, which shift, which day, and who
+  // owed the note, not just an "ISP Data 0 of 3" counter.
+  for (const fact of input.missingShiftNotes ?? []) {
+    const sourceId = `shift-note:${fact.id}`;
+    if (items.some((existing) => existing.sourceId === sourceId)) continue;
+    items.push({
+      id: `attention:missing-note:${fact.id}`,
+      kind: "overdue",
+      severity: "warning",
+      title: `Missing Shift note — ${fact.individualName}`,
+      detail:
+        `${fact.blockLabel} · ${fact.serviceDate} · ` +
+        `Note owed by ${fact.staffName}`,
+      personName: fact.individualName,
+      siteName: fact.siteName,
+      deepLink: shiftNoteDeepLink(fact.individualId),
+      sourceId,
     });
   }
 

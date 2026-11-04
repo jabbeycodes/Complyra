@@ -14,6 +14,7 @@ import {
   canEditShiftNoteRow,
   clinicianTimes,
   defaultScoreLevels,
+  isLateShiftNote,
   noteBeginMinutes,
   formatDurationHhmm,
   shiftDurationMinutes,
@@ -730,4 +731,48 @@ test("wave 7F: an edit cannot empty the body, move a note into the future, or le
   const after = (await impl.getIspData(ellisId)).notes.find((note) => note.id === noteId);
   assert.equal(after?.summary, "Corrected body.");
   assert.equal(after?.signatureDataUrl, PNG_1X1);
+test("late shift notes: filed a later Central day than the shift = Late (batches 9/14)", () => {
+  // Filed the same Central day as the shift (3 PM Central = 20:00 UTC
+  // in CDT): on time, however late in the day it was written.
+  assert.equal(
+    isLateShiftNote({
+      noteDate: "2026-09-13",
+      createdAt: "2026-09-13T20:00:00.000Z",
+    }),
+    false,
+  );
+  // Filed the NEXT Central morning for yesterday's shift: late — the
+  // batch-14 case ("due last night", documented this morning).
+  assert.equal(
+    isLateShiftNote({
+      noteDate: "2026-09-13",
+      createdAt: "2026-09-14T13:30:00.000Z",
+    }),
+    true,
+  );
+  // UTC/Central boundary: 04:30 UTC is still 11:30 PM Central the day
+  // before (CDT), so a note for the 13th written then is on time…
+  assert.equal(
+    isLateShiftNote({
+      noteDate: "2026-09-13",
+      createdAt: "2026-09-14T04:30:00.000Z",
+    }),
+    false,
+  );
+  // …while 05:30 UTC is 12:30 AM Central on the 14th: late.
+  assert.equal(
+    isLateShiftNote({
+      noteDate: "2026-09-13",
+      createdAt: "2026-09-14T05:30:00.000Z",
+    }),
+    true,
+  );
+  // A note written ahead of its shift date is never late.
+  assert.equal(
+    isLateShiftNote({
+      noteDate: "2026-09-15",
+      createdAt: "2026-09-14T13:30:00.000Z",
+    }),
+    false,
+  );
 });

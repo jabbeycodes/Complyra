@@ -52,7 +52,11 @@ import type {
   StaffTrainingProfile,
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
-import type { SiteShiftNoteView } from "../../data/shiftNotes";
+import {
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
+  type SiteShiftNoteView,
+} from "../../data/shiftNotes";
 import {
   getSiteDetailTabs,
   canSeeSiteChecklists,
@@ -1441,6 +1445,9 @@ export default function SiteDetailPage({
                     <div>
                       <strong>
                         {note.individualName} · {note.noteDate} · {note.shift}
+                        {isLateShiftNote(note)
+                          ? ` · ${LATE_SHIFT_NOTE_LABEL}`
+                          : ""}
                       </strong>
                       <span className="muted">
                         {" "}
