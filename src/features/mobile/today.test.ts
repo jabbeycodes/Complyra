@@ -164,32 +164,75 @@ const HOUSES = [
 
 test("scoped site: remembered pick wins", () => {
   assert.equal(
-    pickMobileScopedSite(HOUSES, "site-juniper", "site-maple")?.id,
+    pickMobileScopedSite(HOUSES, "site-juniper", "site-maple", "nurse")?.id,
     "site-juniper",
   );
 });
 
-test("scoped site: membership home is the default", () => {
-  assert.equal(pickMobileScopedSite(HOUSES, null, "site-maple")?.id, "site-maple");
+test("scoped site: membership home is the default for home-anchored roles", () => {
+  assert.equal(
+    pickMobileScopedSite(HOUSES, null, "site-maple", "dsp")?.id,
+    "site-maple",
+  );
+  assert.equal(
+    pickMobileScopedSite(HOUSES, null, "site-maple", "house_manager")?.id,
+    "site-maple",
+  );
 });
 
 test("scoped site: a stale remembered pick falls back to the membership home", () => {
   assert.equal(
-    pickMobileScopedSite(HOUSES, "site-gone", "site-juniper")?.id,
+    pickMobileScopedSite(HOUSES, "site-gone", "site-juniper", "dsp")?.id,
+    "site-juniper",
+  );
+});
+
+/* Wave 4A retest item 3 (2026-10-31): the nurse's membership record
+ * carries a home-base site (Maple), and the phone home treated it as
+ * her scope before she picked anything. A membership home base must
+ * never silently scope a role that works across homes. */
+
+test("scoped site: a nurse's membership home base does not preselect a house", () => {
+  assert.equal(pickMobileScopedSite(HOUSES, null, "site-maple", "nurse"), null);
+});
+
+test("scoped site: other multi-home roles are not preselected by a membership home either", () => {
+  for (const roleKey of [
+    "program_manager",
+    "administrator",
+    "compliance_admin",
+    "hr",
+    "auditor",
+  ]) {
+    assert.equal(
+      pickMobileScopedSite(HOUSES, null, "site-maple", roleKey),
+      null,
+      roleKey,
+    );
+  }
+});
+
+test("scoped site: a nurse's stale remembered pick does not fall back to her home base", () => {
+  assert.equal(pickMobileScopedSite(HOUSES, "site-gone", "site-maple", "nurse"), null);
+});
+
+test("scoped site: a nurse's remembered pick still opens that house", () => {
+  assert.equal(
+    pickMobileScopedSite(HOUSES, "site-juniper", "site-maple", "nurse")?.id,
     "site-juniper",
   );
 });
 
 test("scoped site: no pick and no membership home (the nurse) stays unresolved", () => {
-  assert.equal(pickMobileScopedSite(HOUSES, null, null), null);
+  assert.equal(pickMobileScopedSite(HOUSES, null, null, "nurse"), null);
 });
 
 test("scoped site: a single visible home is unambiguous", () => {
   assert.equal(
-    pickMobileScopedSite([HOUSES[0]], null, null)?.id,
+    pickMobileScopedSite([HOUSES[0]], null, null, "nurse")?.id,
     "site-maple",
   );
-  assert.equal(pickMobileScopedSite([], null, null), null);
+  assert.equal(pickMobileScopedSite([], null, null, "nurse"), null);
 });
 
 const queueItem = (partial: Partial<PersonalWorkItem>): PersonalWorkItem => ({
