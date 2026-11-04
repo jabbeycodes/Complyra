@@ -302,3 +302,69 @@ test("mileage yearly PDF agency-wide mode draws one site group header per site",
   const blob = doc.output("blob") as Blob;
   assert.ok(blob.size > 2000, `expected a real PDF, got ${blob.size} bytes`);
 });
+
+const LOGO_1PX =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+test("mileage PDFs embed the agency logo header when a logo is set", async () => {
+  const month = buildMileageMonthPdf({
+    agencyName: "Evergreen Care",
+    logoDataUrl: LOGO_1PX,
+    siteName: "Cedar House",
+    monthKey: "2026-09",
+    people: PEOPLE,
+    trips: [trip()],
+    totalMiles: 40,
+    milesByIndividualId: { p1: 20, p2: 20 },
+  });
+  const monthText = month.output() as string;
+  assert.ok(monthText.includes("Prepared with Complyrer"), "logo header carries the Complyrer line");
+  assert.ok(monthText.includes("Evergreen Care"), "agency name beside the logo");
+  assert.ok(monthText.includes("Mileage Log"), "sheet title unchanged");
+
+  const week = buildMileageWeekPdf({
+    agencyName: "Evergreen Care",
+    logoDataUrl: LOGO_1PX,
+    siteName: "Cedar House",
+    monthKey: "2026-09",
+    people: PEOPLE,
+    rows: [{ individualId: "p1", weeks: [10, 10, 10, 10], monthlyTotal: 40 }],
+  });
+  assert.ok((week.output() as string).includes("Weekly Mileage Sheet"));
+
+  const year = buildMileageYearPdf({
+    agencyName: "Evergreen Care",
+    logoDataUrl: LOGO_1PX,
+    siteName: "Cedar House",
+    year: 2026,
+    people: PEOPLE,
+    summary: {
+      year: 2026,
+      rows: [
+        {
+          individualId: "p1",
+          months: [40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          yearlyTotal: 40,
+        },
+      ],
+      grandTotal: { months: [40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], yearlyTotal: 40 },
+    },
+  });
+  assert.ok((year.output() as string).includes("Yearly Mileage Tracking"));
+});
+
+test("mileage PDFs fall back to the text brand when the logo cannot embed", async () => {
+  const doc = buildMileageMonthPdf({
+    agencyName: "Evergreen Care",
+    logoDataUrl: "data:image/png;base64,not-a-real-image",
+    siteName: "Cedar House",
+    monthKey: "2026-09",
+    people: PEOPLE,
+    trips: [trip()],
+    totalMiles: 40,
+    milesByIndividualId: { p1: 20, p2: 20 },
+  });
+  const text = doc.output() as string;
+  assert.ok(text.includes("COMPLYRER"), "text brand fallback renders");
+  assert.ok(text.includes("Evergreen Care"), "agency name still renders");
+});

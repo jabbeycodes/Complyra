@@ -69,6 +69,7 @@ import {
   formatDateLong,
 } from "./components";
 import {
+  auditRegisterCsvName,
   categories,
   exportCsv,
   metrics,
@@ -2010,8 +2011,8 @@ export default function App() {
                       disabled={!auditItems.length || auditFrom > auditTo}
                       onClick={() => {
                         download(
-                          "complyrer-sample-audit-register.csv",
-                          exportCsv(auditItems),
+                          auditRegisterCsvName(session?.agencyName ?? "Agency"),
+                          exportCsv(auditItems, session?.agencyName),
                         );
                         notify(
                           "Your filtered audit register has been downloaded.",

@@ -469,6 +469,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const summary = await ctx.api.getMileageMonthlySummary(site.id, monthKey, ids);
     const doc = buildMileageMonthPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       monthKey,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -491,6 +492,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const weekly = summarizeWeeklyMileage(trips, ids);
     const doc = buildMileageWeekPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       monthKey,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -508,6 +510,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const summary = await ctx.api.getMileageYearlySummary(site.id, year, ids);
     const doc = buildMileageYearPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       year,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -522,6 +525,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const profile = await ctx.api.getStaffTrainingProfile(userId);
     const doc = buildStaffTrainingChecklistPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       staffName: profile.fullName,
       siteNames: profile.siteNames,
       hoursTotal: profile.hoursTotal,

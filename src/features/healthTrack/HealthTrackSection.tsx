@@ -4,7 +4,7 @@ import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
-import { DIGITAL_RECORD_MARK } from "../../delegation/delegation";
+import { brandedPrintHtml } from "../../data/printHtml";
 import {
   HEALTH_TRACK_KINDS,
   HEALTH_TRACK_KIND_LABELS,
@@ -38,7 +38,7 @@ export default function HealthTrackSection({
   individualId: string;
   individualName: string;
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [kind, setKind] = useState<HealthTrackKind>("immunization");
   const [entries, setEntries] = useState<HealthTrackEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -100,7 +100,12 @@ export default function HealthTrackSection({
           )}</td><td>${e.flaggedAbnormal ? "Flagged abnormal" : ""}</td><td>${esc(e.note)}</td></tr>`,
       )
       .join("");
-    const html = `<!doctype html><html><head><title>${HEALTH_TRACK_KIND_LABELS[kind]} — ${esc(individualName)}</title><style>body{font-family:Arial,sans-serif;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 7px;text-align:left}</style></head><body><h1>${HEALTH_TRACK_KIND_LABELS[kind]} — ${esc(individualName)}</h1><table><tr><th>Date</th><th>Record</th><th>Details</th><th>Flag</th><th>Note</th></tr>${rows}</table><p><em>${DIGITAL_RECORD_MARK}</em></p></body></html>`;
+    const html = brandedPrintHtml({
+      brand: { agencyName: session?.agencyName ?? "Agency", logoDataUrl: workspace?.branding.logoUrl ?? null },
+      title: `${HEALTH_TRACK_KIND_LABELS[kind]} — ${individualName}`,
+      styles: `table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 7px;text-align:left}`,
+      bodyHtml: `<h1>${HEALTH_TRACK_KIND_LABELS[kind]} — ${esc(individualName)}</h1><table><tr><th>Date</th><th>Record</th><th>Details</th><th>Flag</th><th>Note</th></tr>${rows}</table>`,
+    });
     void openPrintable(
       `health-${kind}-${individualId}.html`,
       new Blob([html], { type: "text/html" }),

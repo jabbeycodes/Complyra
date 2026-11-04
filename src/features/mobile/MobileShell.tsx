@@ -928,6 +928,7 @@ export default function MobileShell({
           <MobileHouseCard
             api={api}
             session={session}
+            logoDataUrl={workspace.branding.logoUrl ?? null}
             siteId={scopedSite.id}
             siteName={scopedSite.name}
             people={people.map((person) => ({
@@ -955,6 +956,7 @@ export default function MobileShell({
               <MobilePersonalSpending
                 api={api}
                 session={session}
+                logoDataUrl={workspace.branding.logoUrl ?? null}
                 person={person}
                 siteName={personSite?.name ?? ""}
                 staffOptions={workspace.staff.map((member) => ({

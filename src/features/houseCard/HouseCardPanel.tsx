@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -283,12 +284,15 @@ export default function HouseCardPanel({
   siteId,
   siteName,
   people,
+  logoDataUrl,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   siteId: string;
   siteName: string;
   people: HouseCardPerson[];
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
 }) {
   const today = centralTodayIso();
   const currentMonth = today.slice(0, 7);
@@ -823,6 +827,7 @@ export default function HouseCardPanel({
 
       {/* Printed monthly statement — screen-hidden, print-only. */}
       <div className="house-card-printout" aria-hidden="true">
+        <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
         <h1>
           {siteName} — House Card statement
         </h1>

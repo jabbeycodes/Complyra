@@ -98,6 +98,7 @@ import {
   rollupCompliance,
   summarizeTimecard,
 } from "../../data/hr";
+import { agencyFileSlug } from "../../domain";
 import { useOperatingRules } from "./useOvertimeLines";
 import {
   DOCUMENT_NOT_READABLE_NOTE,
@@ -171,6 +172,8 @@ interface EmployeeHubShellProps {
   swapPickerStaffList?: HubStaffEntry[];
   /** Batch 59: training-profile reads for the scheduling clearance warning. */
   api?: ReturnType<typeof useData>["api"];
+  /** Agency logo (data URL) for printout headers, from the page's workspace branding. */
+  logoDataUrl?: string | null;
   initialTab?: string;
   /** The viewer's active staff-assignment site ids (WorkspaceView). Used to
    * scope the scheduling forms' staff/site options for site-scoped roles. */
@@ -561,6 +564,7 @@ export function EmployeeHubShell({
   sites,
   swapPickerStaffList,
   api,
+  logoDataUrl,
   initialTab,
   assignmentSiteIds,
   openShiftStore,
@@ -800,6 +804,7 @@ export function EmployeeHubShell({
             store={store}
             staffList={staffList}
             initialSubjectId={performanceFocusId ?? undefined}
+            logoDataUrl={logoDataUrl}
           />
         )}
         {tab === "binder-board" &&
@@ -4193,7 +4198,9 @@ function PayrollTab({
       );
       const approved = rows.filter((r) => r.approvalStatus === "approved");
       downloadText(
-        `payroll-${period.startsOn}-to-${period.endsOn}.csv`,
+        // Filename-level agency attribution only: the CSV body is a strict
+        // vendor-import format and must not gain rows.
+        `${agencyFileSlug(session.agencyName)}-payroll-${period.startsOn}-to-${period.endsOn}.csv`,
         buildPayrollCsvExport(approved),
         "text/csv;charset=utf-8",
       );
@@ -4813,6 +4820,7 @@ export default function EmployeeHubPage({
       assignmentSiteIds={workspace?.assignmentSiteIds ?? []}
       swapPickerStaffList={swapPickerStaffList}
       api={api}
+      logoDataUrl={workspace?.branding.logoUrl ?? null}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

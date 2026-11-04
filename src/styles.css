@@ -6856,6 +6856,42 @@ body.nav-open {
   font-weight: 600;
 }
 
+/* Print brand header — agency logo + name + Complyrer line atop the in-app
+   window.print() statements (PrintBrandHeader component). */
+.print-brand-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.print-brand-logo {
+  height: 40px;
+  max-width: 160px;
+  object-fit: contain;
+}
+.print-brand-names p {
+  margin: 0;
+}
+.print-brand-agency {
+  font-size: 15px;
+  font-weight: 700;
+}
+.print-brand-prepared {
+  font-size: 11px;
+  color: var(--color-h-a89c8c);
+}
+.print-brand-lockup {
+  height: 30px;
+  width: auto;
+  margin-left: auto;
+}
+.print-brand-complyrer {
+  margin: 0 0 0 auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: #3f5c3b;
+}
+
 /* Complyrer record mark — discreet provenance line on generated documents. */
 .record-mark {
   font-size: 11px;

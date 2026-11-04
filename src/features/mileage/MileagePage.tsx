@@ -409,6 +409,7 @@ export default function MileagePage() {
         };
         const doc = buildMileageYearPdf({
           agencyName: session?.agencyName ?? "Agency",
+          logoDataUrl: workspace?.branding.logoUrl ?? null,
           siteName: "All sites",
           year,
           people: orderedPeople,
@@ -424,6 +425,7 @@ export default function MileagePage() {
       const yearlySite = sites.find((site) => site.id === yearlyScope);
       const doc = buildMileageYearPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: yearlySiteName,
         year,
         people: scopedPeople.map((person) => ({ id: person.id, name: person.name })),
@@ -450,6 +452,7 @@ export default function MileagePage() {
     try {
       const doc = buildMileageWeekPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: activeSite?.name ?? "Home",
         monthKey: month,
         people: people.map((person) => ({ id: person.id, name: person.name })),
@@ -486,6 +489,7 @@ export default function MileagePage() {
       );
       const doc = buildMileageMonthPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: activeSite?.name ?? "Home",
         monthKey: month,
         people: people.map((person) => ({ id: person.id, name: person.name })),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -110,6 +111,7 @@ function signoffSummary(
 export default function MobilePersonalSpending({
   api,
   session,
+  logoDataUrl,
   person,
   siteName,
   staffOptions,
@@ -118,6 +120,8 @@ export default function MobilePersonalSpending({
 }: {
   api: ComplyraApi;
   session: SessionUser;
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
   person: WorkspaceIndividual;
   siteName: string;
   staffOptions: MobileSpendingStaffOption[];
@@ -912,6 +916,7 @@ export default function MobilePersonalSpending({
           one Individual, never combined with the house statement. */}
       {entries && summary && (
         <div className="personal-spending-printout" aria-hidden="true">
+          <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
           <h1>Personal spending statement</h1>
           <p>
             {individualName}

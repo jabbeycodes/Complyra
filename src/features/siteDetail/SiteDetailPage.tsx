@@ -1404,6 +1404,7 @@ export default function SiteDetailPage({
             <HouseCardPanel
               api={api}
               session={session}
+              logoDataUrl={workspace?.branding.logoUrl ?? null}
               siteId={siteId}
               siteName={siteName}
               people={siteIndividuals.map((person) => ({
