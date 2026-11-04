@@ -2134,6 +2134,14 @@ function packetEvidenceStub(evidence: PacketEvidence): PacketEvidence {
   return { name: evidence.name, mime: evidence.mime, base64: "" };
 }
 
+/**
+ * The evidence writer. A seam so tests can force the file-store write to
+ * fail and prove packet completion is failure-atomic (PR #252 review).
+ */
+export const packetEvidenceWriter = {
+  write: (path: string, file: File): Promise<void> => persistFile(path, file),
+};
+
 async function storePacketEvidenceBytes(
   kind: "consent" | "rights",
   id: string,
@@ -2142,7 +2150,7 @@ async function storePacketEvidenceBytes(
   const binary = atob(evidence.base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  await persistFile(
+  await packetEvidenceWriter.write(
     packetEvidencePath(kind, id),
     new File([bytes], evidence.name, { type: evidence.mime }),
   );
@@ -3527,7 +3535,13 @@ export class LocalApi implements ComplyraApi {
         await persistMeta(this.store);
         return structuredClone({ id: packet.id, snapshot: packet.snapshot });
     }
-    private completeLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, external: boolean) {
+    /**
+     * Every check a packet completion makes, with NO writes: the evidence
+     * bytes are stored only after this passes, and the packet transitions
+     * only after they are stored, so a failed file write leaves the
+     * packet exactly as it was — still open, retryable (PR #252 review).
+     */
+    private prepareLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, external: boolean) {
         if (packet.signedAt)
             throw new Error('Signed packets are immutable.');
         validatePacketSubmission(choices, signer);
@@ -3535,18 +3549,29 @@ export class LocalApi implements ComplyraApi {
         if (signer.signedOn > packet.snapshot.reviewOn)
             throw new Error('Signing date is after the packet review date.');
         const db = this.store.db;
-        db.consents ??= [];
+        const consents = db.consents ?? [];
         const actor = external ? null : assertSession(this.store).userId;
         const now = new Date().toISOString();
         const versions: import("./consents").ConsentRecord[] = [];
         for (const item of PACKET_ITEMS) {
-            const previous = [...db.consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !db.consents!.some(n => n.supersedesId === r.id && n.activatedAt));
+            const previous = [...consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !consents.some(n => n.supersedesId === r.id && n.activatedAt));
             versions.push({ id: crypto.randomUUID(), agencyId: packet.agencyId, individualId: packet.individualId, typeId: item.typeId, packetId: packet.id,
                 covers: item.text, outcome: choices[item.key], giver: signer.authority === 'Self' ? 'individual' : signer.authority === 'Guardian' ? 'guardian' : 'representative',
                 giverName: signer.printedName, relationship: signer.authority + (signer.authorityOther ? ': ' + signer.authorityOther : ''), signedOn: signer.signedOn,
                 effectiveOn: packet.snapshot.effectiveOn, reviewOn: packet.snapshot.reviewOn, supersedesId: previous?.id ?? null, createdBy: packet.createdBy, createdAt: now, activatedBy: actor, activatedAt: now });
         }
-        for (const version of versions) assertSingleConsentActivation(version, [...db.consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
+        for (const version of versions) assertSingleConsentActivation(version, [...consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
+        return { versions, now };
+    }
+    /** The packet transition — run only after the evidence bytes are stored. */
+    private applyLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, prepared: { versions: import("./consents").ConsentRecord[]; now: string }) {
+        // Re-checked: another completion may have landed while the bytes
+        // were being stored.
+        if (packet.signedAt)
+            throw new Error('Signed packets are immutable.');
+        const db = this.store.db;
+        db.consents ??= [];
+        const { versions, now } = prepared;
         db.consents.push(...versions);
         packet.choices = structuredClone(choices);
         packet.signer = structuredClone(signer);
@@ -3571,8 +3596,9 @@ export class LocalApi implements ComplyraApi {
         });
         const base64 = pdf.output('datauristring').split(',')[1];
         const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
-        this.completeLocalPacket(packet, choices, signer, evidence, true);
+        const prepared = this.prepareLocalPacket(packet, choices, signer, true);
         await storePacketEvidenceBytes('consent', packet.id, evidence);
+        this.applyLocalPacket(packet, choices, signer, evidence, prepared);
         await persistMeta(this.store);
         return evidence;
     }
@@ -3581,8 +3607,9 @@ export class LocalApi implements ComplyraApi {
         const { packet } = this.packetForWrite(id);
         if (packet.status === 'draft')
             throw new Error('Generate the packet before filing.');
-        this.completeLocalPacket(packet, choices, signer, evidence, false);
+        const prepared = this.prepareLocalPacket(packet, choices, signer, false);
         await storePacketEvidenceBytes('consent', packet.id, evidence);
+        this.applyLocalPacket(packet, choices, signer, evidence, prepared);
         await persistMeta(this.store);
     }
     async getConsentPacketEvidence(id: string) {
@@ -3627,6 +3654,10 @@ export class LocalApi implements ComplyraApi {
     private async completeRightsPacket(packet: RightsPacket, input: RightsPacketCompletion, evidence: PacketEvidence | null) {
         const fields = rightsCompletionFields(structuredClone(input));
         validateRightsCompletion(fields);
+        // Store the evidence bytes BEFORE any packet change: a failed file
+        // write must leave the packet awaiting signature and retryable.
+        if (evidence)
+            await storePacketEvidenceBytes('rights', packet.id, evidence);
         const now = new Date().toISOString();
         packet.reviewedBy = fields.reviewedBy.trim();
         // The manager-typed date is authoritative: stored exactly as
@@ -3641,7 +3672,6 @@ export class LocalApi implements ComplyraApi {
             this.store.db.rightsPacketEvidence ??= {};
             // A stub only — the bytes go to the file store (see packetEvidencePath).
             this.store.db.rightsPacketEvidence[packet.id] = packetEvidenceStub(evidence);
-            await storePacketEvidenceBytes('rights', packet.id, evidence);
         }
         else {
             packet.status = 'signed';
