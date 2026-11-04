@@ -19,6 +19,7 @@ import { deliveryHistoryLabel } from "../../data/medInventory";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
+import { chartSectionId } from "../sectionLinks";
 import {
   centralNowHhmm,
   centralTodayIso,
@@ -640,7 +641,7 @@ export default function MobileMar({
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
-  onOpenChart: (name: string) => void;
+  onOpenChart: (name: string, sectionId?: string) => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(null);
@@ -781,7 +782,7 @@ export default function MobileMar({
       <button
         type="button"
         className="msh-row msh-medcount-row"
-        onClick={() => onOpenChart(person.name)}
+        onClick={() => onOpenChart(person.name, chartSectionId("medicationBoard"))}
       >
         <span className="msh-row-main">
           <strong>Med count &amp; supply</strong>

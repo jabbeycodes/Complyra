@@ -53,6 +53,10 @@ import type {
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
 import {
+  delegationStatusForActivation,
+  delegationStatusLabel,
+} from "../../data/delegationStatus";
+import {
   isLateShiftNote,
   LATE_SHIFT_NOTE_LABEL,
   type SiteShiftNoteView,
@@ -1172,7 +1176,7 @@ export default function SiteDetailPage({
         {activeTab === "training" && !loading.training && (
           <>
             <div className="panel">
-              <h2>Active delegations at this home</h2>
+              <h2>Delegations at this home</h2>
               {!delegations?.length && (
                 <Empty
                   mark="none"
@@ -1191,7 +1195,9 @@ export default function SiteDetailPage({
                           · {d.templateCategory} · activated {formatDate(d.activatedAt)}
                         </span>
                       </div>
-                      <Badge status={d.status === "active" ? "On track" : d.status} />
+                      <Badge
+                        status={delegationStatusLabel(delegationStatusForActivation(d))}
+                      />
                     </li>
                   ))}
                 </ul>

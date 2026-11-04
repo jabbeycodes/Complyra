@@ -263,6 +263,21 @@ function mapPunchRules(r0: unknown): HrPunchRules {
  * when CALLED (not when adapted), so components can adapt unconditionally
  * and gate rendering with isKioskStoreAvailable().
  */
+/**
+ * A store-layer TypeError is the signature of an internal wiring fault
+ * (historically: adapter methods invoked unbound, so `this.client` inside
+ * SupabaseHrStore read off `undefined`). It must never reach the page as
+ * raw exception text — convert it to a plain-language load failure.
+ */
+function friendlyStoreError(err: unknown): unknown {
+  if (err instanceof TypeError) {
+    return new Error(
+      "This section could not be loaded. Reload the page and try again.",
+    );
+  }
+  return err;
+}
+
 export function adaptKioskStore(store: HrStore): KioskStore {
   const raw = store as unknown as Record<string, unknown>;
   const call = (name: string) => {
@@ -271,7 +286,25 @@ export function adaptKioskStore(store: HrStore): KioskStore {
       return (..._args: unknown[]): Promise<never> =>
         Promise.reject(kioskUnavailable(name));
     }
-    return fn as (...args: unknown[]) => Promise<unknown>;
+    // Bind to the store: HrStore implementations are classes whose methods
+    // read `this.client` / `this.load()`. Returning the bare method here
+    // (as this adapter originally did) invoked them with `this` undefined,
+    // which crashed every kiosk-backed hub section — Missed-punch review,
+    // Clock settings, Punch exceptions, Who's here now, Kiosk admin — with
+    // "Cannot read properties of undefined (reading 'client')" on hosted
+    // sessions (simulation batches 33–35). adaptRemotePunchStore below has
+    // always bound via fn.apply(store, args); this call now matches it.
+    return (...args: unknown[]): Promise<unknown> => {
+      try {
+        return Promise.resolve(
+          (fn as (...a: unknown[]) => Promise<unknown>).apply(store, args),
+        ).catch((err) => {
+          throw friendlyStoreError(err);
+        });
+      } catch (err) {
+        return Promise.reject(friendlyStoreError(err));
+      }
+    };
   };
   const asArray = async (p: Promise<unknown>): Promise<unknown[]> => {
     const v = await p;

@@ -27,6 +27,10 @@ import {
   todayIso,
 } from "../data/chart";
 import { portraitSrc } from "../data/personPortrait";
+import {
+  chartSectionClickHandler,
+  chartSectionId,
+} from "./sectionLinks";
 import type {
   GuardianContact,
   IndividualProfile,
@@ -176,11 +180,10 @@ function ContactEditor({
 }
 
 /** In-page scroll for the quiet section links (see note at the nav). */
-function scrollToChartSection(id: string) {
-  return (e: MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault();
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+function scrollToChartSection(action: "medicationBoard" | "appointments" | "shiftNotes") {
+  return chartSectionClickHandler(action) as (
+    e: MouseEvent<HTMLAnchorElement>,
+  ) => void;
 }
 
 export default function ChartOverview({
@@ -433,7 +436,11 @@ export default function ChartOverview({
           ))}
         </ul>
       )}
-      <a className="overview-quiet-link" href="#chart-meds">
+      <a
+        className="overview-quiet-link"
+        href={`#${chartSectionId("medicationBoard")}`}
+        onClick={scrollToChartSection("medicationBoard")}
+      >
         Open medication board
       </a>
 
@@ -563,11 +570,11 @@ export default function ChartOverview({
           Plain hash hrefs would trip the app's hash router (App.tsx treats
           "#<page>" as a page key), so scroll in-page instead. */}
       <nav className="overview-links" aria-label="Chart sections">
-        <a href="#chart-appointments" onClick={scrollToChartSection("chart-appointments")}>Appointments</a>
+        <a href={`#${chartSectionId("appointments")}`} onClick={scrollToChartSection("appointments")}>Appointments</a>
         <span aria-hidden="true">·</span>
-        <a href="#chart-meds" onClick={scrollToChartSection("chart-meds")}>Medication board</a>
+        <a href={`#${chartSectionId("medicationBoard")}`} onClick={scrollToChartSection("medicationBoard")}>Medication board</a>
         <span aria-hidden="true">·</span>
-        <a href="#chart-shift-notes" onClick={scrollToChartSection("chart-shift-notes")}>Shift notes</a>
+        <a href={`#${chartSectionId("shiftNotes")}`} onClick={scrollToChartSection("shiftNotes")}>Shift notes</a>
       </nav>
     </section>
   );
