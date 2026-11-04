@@ -318,7 +318,7 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeKeys, reminderRecipientIds, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeKeys, reminderRecipientIds, siteHasOverdueMedDose, unmarkedDoseRefreshes, type ReminderMembership } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
 import {
   MED_ADMIN_CLEARANCE_MESSAGE,
@@ -14059,7 +14059,6 @@ export class HostedApi implements ComplyraApi {
       const reminderNotices = operatingReminderNotices({
         now,
         noteDay: clock.noteDay,
-        unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
         prnReminderRepeatMinutes: rules.prnReminderRepeatMinutes,
         prnFollowupMinutes: rules.prnFollowupMinutes,
         sites,
@@ -14091,6 +14090,14 @@ export class HostedApi implements ComplyraApi {
           deepLink: notice.deepLink,
           entityId: notice.entityId,
           dedupeKey: notice.dedupeKey,
+        });
+      }
+      const unmarkedRefreshes = unmarkedDoseRefreshes(reminderNotices);
+      if (unmarkedRefreshes.length && !session.mustChangePassword) {
+        await this.client.rpc("rearm_unmarked_dose_notices", {
+          p_agency_id: session.agencyId,
+          p_notices: unmarkedRefreshes,
+          p_repeat_minutes: rules.unrecordedReminderMinutes,
         });
       }
       const prnKeys = prnNoticeKeys(reminderNotices);

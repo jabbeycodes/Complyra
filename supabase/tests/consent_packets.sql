@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(33);
+select plan(34);
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 insert into agencies(id,name,agency_code,state_code,status) values
  ('a7000000-0000-0000-0000-000000000001','Consent test agency','CONSENT-MO','MO','active');
@@ -97,9 +97,10 @@ select is((select count(*)::int from private.consent_packet_tokens where packet_
 update consent_packets set sent_at=now()-interval '10 days' where id=(select second_id from packet_values);
 select private.sweep_packet_alerts('a7000000-0000-0000-0000-000000000001',false);
 select private.sweep_packet_alerts('a7000000-0000-0000-0000-000000000001',false);
-select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding'),3,'Outstanding packet alerts dedupe');
+select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding'),4,'Outstanding packet alerts dedupe');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding' and user_id='d7000000-0000-0000-0000-000000000001'),1,'Outstanding packet targets home manager');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding' and role_key='program_manager'),1,'Outstanding packet broadcasts to Program Managers');
+select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding' and role_key='administrator'),1,'Outstanding packet alerts administrators');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type='consent.packet_outstanding' and role_key='nurse'),1,'Packet containing medication decision alerts nurses');
 select * from finish();
 rollback;

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LocalApi, MemoryStore } from "./localApi";
@@ -691,4 +691,51 @@ test("hosted: a first mark inserts, and a lost race refuses with the winner's na
   const writes = ctx.writes.filter((w) => w.table === "med_dose_marks");
   assert.equal(writes.length, 1);
   assert.equal(writes[0].op, "insert", "first marks insert — they never upsert over a race winner");
+});
+
+// ─── (d) One row across sweeps (LocalApi, wave 3 retest) ───────────────────
+
+test("repeat sweeps keep one unmarked-dose row, and a read row re-arms on that row", async () => {
+  mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-04T20:00:00.000Z") });
+  try {
+    const st = store();
+    const api = new LocalApi(st);
+    const { workspace, ellis } = await hmOnEllis(api, st);
+    const cedar = workspace.sites.find((s) => s.name === "Cedar House")!;
+    const keppraId = `${ellis.id}-med-keppra`;
+    for (const person of workspace.individuals.filter((p) => p.siteId === cedar.id)) {
+      for (const view of await api.getMedInventory(person.id)) {
+        if (view.kind !== "scheduled") continue;
+        await api.setMedDoseTimes({
+          medicationId: view.medicationId,
+          doseTimes: view.medicationId === keppraId ? ["10:00"] : [],
+        });
+      }
+    }
+    const cedarRows = async () =>
+      (await api.listNotifications()).filter(
+        (row) => row.type === "med.unrecorded" && row.entity_id === cedar.id,
+      );
+
+    const first = await cedarRows();
+    assert.equal(first.length, 1, "the first sweep queues one row");
+    assert.equal(first[0].read_at ?? null, null);
+
+    mock.timers.setTime(Date.parse("2026-11-04T23:00:00.000Z"));
+    const later = await cedarRows();
+    assert.equal(later.length, 1, "three reminder intervals later it is still one row");
+    assert.equal(later[0].id, first[0].id);
+
+    await api.markNotificationsRead([first[0].id]);
+    mock.timers.setTime(Date.parse("2026-11-04T23:10:00.000Z"));
+    assert.ok((await cedarRows())[0].read_at, "read inside the interval stays read");
+
+    mock.timers.setTime(Date.parse("2026-11-05T00:15:00.000Z"));
+    const rearmed = await cedarRows();
+    assert.equal(rearmed.length, 1, "the reminder re-arms the same row");
+    assert.equal(rearmed[0].id, first[0].id);
+    assert.equal(rearmed[0].read_at ?? null, null, "and it is unread again");
+  } finally {
+    mock.timers.reset();
+  }
 });
