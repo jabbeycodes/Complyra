@@ -2115,6 +2115,55 @@ async function logoDataUrlFor(store: MemoryStore, agencyId: string) {
   return null;
 }
 
+/**
+ * Packet evidence (a signed consent / rights packet PDF, or a scanned paper
+ * packet up to 4 MB — PR #241) lives in the file store (IndexedDB), like
+ * every other uploaded file. Only a stub — name and type, empty base64 —
+ * stays in the metadata record. Inline base64 in that one localStorage
+ * record overflowed the browser's ~5 MB quota after a single branded
+ * packet PDF or paper scan ("Setting the value of 'complyra-v2-meta'
+ * exceeded the quota"), so signing and filing failed in the demo
+ * workspace. Stubs written before this change that still carry inline
+ * base64 keep working: they are returned as stored.
+ */
+function packetEvidencePath(kind: "consent" | "rights", id: string) {
+  return `packet-evidence/${kind}/${id}`;
+}
+
+function packetEvidenceStub(evidence: PacketEvidence): PacketEvidence {
+  return { name: evidence.name, mime: evidence.mime, base64: "" };
+}
+
+async function storePacketEvidenceBytes(
+  kind: "consent" | "rights",
+  id: string,
+  evidence: PacketEvidence,
+): Promise<void> {
+  const binary = atob(evidence.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  await persistFile(
+    packetEvidencePath(kind, id),
+    new File([bytes], evidence.name, { type: evidence.mime }),
+  );
+}
+
+async function loadPacketEvidence(
+  kind: "consent" | "rights",
+  id: string,
+  stored: PacketEvidence,
+): Promise<PacketEvidence | null> {
+  if (stored.base64) return structuredClone(stored);
+  const blob = await readFile(packetEvidencePath(kind, id));
+  if (!blob) return null;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return { name: stored.name, mime: stored.mime, base64: btoa(binary) };
+}
+
 async function readFile(path: string): Promise<Blob | null> {
   const memory = browserStore.files.get(path);
   if (memory) return new Blob([memory.bytes], { type: memory.mime });
@@ -3506,7 +3555,8 @@ export class LocalApi implements ComplyraApi {
         packet.status = 'filed';
         packet.evidenceName = evidence.name;
         db.consentPacketEvidence ??= {};
-        db.consentPacketEvidence[packet.id] = structuredClone(evidence);
+        // A stub only — the bytes go to the file store (see packetEvidencePath).
+        db.consentPacketEvidence[packet.id] = packetEvidenceStub(evidence);
         delete db.consentPacketTokens?.[packet.id];
         this.packetAudit(packet.id, 'signed', signer);
         this.packetAudit(packet.id, 'filed', signer);
@@ -3522,6 +3572,7 @@ export class LocalApi implements ComplyraApi {
         const base64 = pdf.output('datauristring').split(',')[1];
         const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
         this.completeLocalPacket(packet, choices, signer, evidence, true);
+        await storePacketEvidenceBytes('consent', packet.id, evidence);
         await persistMeta(this.store);
         return evidence;
     }
@@ -3531,15 +3582,17 @@ export class LocalApi implements ComplyraApi {
         if (packet.status === 'draft')
             throw new Error('Generate the packet before filing.');
         this.completeLocalPacket(packet, choices, signer, evidence, false);
+        await storePacketEvidenceBytes('consent', packet.id, evidence);
         await persistMeta(this.store);
     }
     async getConsentPacketEvidence(id: string) {
         if (!(await this.listConsentPackets()).some(p => p.id === id))
             throw new Error('Packet not found.');
-        const evidence = this.store.db.consentPacketEvidence?.[id];
+        const stored = this.store.db.consentPacketEvidence?.[id];
+        const evidence = stored ? await loadPacketEvidence('consent', id, stored) : null;
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return evidence;
     }
     async listRightsPackets() {
         const session = assertSession(this.store);
@@ -3586,7 +3639,9 @@ export class LocalApi implements ComplyraApi {
             packet.filedAt = now;
             packet.evidenceName = evidence.name;
             this.store.db.rightsPacketEvidence ??= {};
-            this.store.db.rightsPacketEvidence[packet.id] = structuredClone(evidence);
+            // A stub only — the bytes go to the file store (see packetEvidencePath).
+            this.store.db.rightsPacketEvidence[packet.id] = packetEvidenceStub(evidence);
+            await storePacketEvidenceBytes('rights', packet.id, evidence);
         }
         else {
             packet.status = 'signed';
@@ -3608,10 +3663,11 @@ export class LocalApi implements ComplyraApi {
     async getRightsPacketEvidence(id: string) {
         if (!(await this.listRightsPackets()).some(p => p.id === id))
             throw new Error('Rights packet not found.');
-        const evidence = this.store.db.rightsPacketEvidence?.[id];
+        const stored = this.store.db.rightsPacketEvidence?.[id];
+        const evidence = stored ? await loadPacketEvidence('rights', id, stored) : null;
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return evidence;
     }
     async getConsents(): Promise<ConsentRegister> {
         const session = assertSession(this.store);

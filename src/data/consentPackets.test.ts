@@ -80,7 +80,13 @@ test('paper route requires signed evidence and confirmed choices, creates same n
     await f.api.filePaperConsentPacket(id, choices, signer, file);
     // Scoped to this packet's records: the demo seed carries other consents.
     assert.equal(f.db.consents?.filter(r => r.packetId === id).length, 9);
-    assert.equal((await f.api.getConsentPacketEvidence(id)).name, 'paper.pdf');
+    const evidence = await f.api.getConsentPacketEvidence(id);
+    assert.equal(evidence.name, 'paper.pdf');
+    // The bytes live in the file store, not the localStorage metadata
+    // record (a full PDF there overflowed the browser quota); the record
+    // keeps a stub, and the evidence still reads back byte for byte.
+    assert.equal(f.db.consentPacketEvidence?.[id]?.base64, '');
+    assert.equal(evidence.base64, Buffer.from(await file.arrayBuffer()).toString('base64'));
     assert.ok(f.db.consents?.filter(r => r.packetId === id).every(r => r.activatedBy === f.hm.userId));
     await assert.rejects(() => f.api.filePaperConsentPacket(id, choices, signer, file), /immutable/);
 });

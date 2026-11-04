@@ -155,6 +155,9 @@ test('filed paper copy stores evidence and marks the packet filed', async () => 
     const evidence = await f.api.getRightsPacketEvidence(id);
     assert.equal(evidence.name, 'rights-packet.pdf');
     assert.equal(evidence.mime, 'application/pdf');
+    // Bytes in the file store, a stub in the metadata record (quota fix).
+    assert.equal(f.db.rightsPacketEvidence?.[id]?.base64, '');
+    assert.equal(Buffer.from(evidence.base64, 'base64').toString(), '%PDF-signed');
 });
 
 test('notification sweep emits rights alerts once and dedupes on refresh', async () => {
