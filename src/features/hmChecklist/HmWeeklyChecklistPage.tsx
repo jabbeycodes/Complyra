@@ -24,16 +24,60 @@ import {
   SERVICE_LOG_KINDS,
   SERVICE_LOG_KIND_LABELS,
   SERVICE_LOG_PROMPTS,
+  checklistSiteOptions,
   computeChecklistStatus,
   deadlineMondayIso,
   deadlinePassed,
   formatDueAt,
   formatShortDate,
+  resolveChecklistSiteId,
   weekOfSundayIso,
   weekRangeLabel,
 } from "../../data/hmChecklist";
 
 const ANSWERS: ChecklistAnswer[] = ["Y", "N", "N/A"];
+
+/**
+ * Raw database / runtime error fragments. The hosted API passes PostgREST
+ * messages through verbatim (e.g. `new row violates row-level security
+ * policy for table "hm_weekly_checklists"` — simulation pass 16, batch
+ * 213), and this page used to print them straight to the house manager.
+ * A message carrying any of these fragments is an internal fault, not
+ * something the HM can act on, so the surface shows its own human
+ * wording instead. Deliberate app messages (the API's own validation
+ * sentences) contain none of these and pass through untouched.
+ */
+const RAW_ERROR_FRAGMENTS = [
+  "row-level security",
+  "permission denied",
+  "violates row-level",
+  "violates foreign key",
+  "violates check constraint",
+  "duplicate key",
+  "null value in column",
+  "pgrst",
+  "jwt",
+  "relation \"",
+  "column \"",
+  "cannot read properties",
+  "is not a function",
+  "undefined is not",
+];
+
+/** Human wording for a checklist failure — never the raw error text. */
+export function checklistErrorMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : "";
+  if (!message) return fallback;
+  const lower = message.toLowerCase();
+  if (RAW_ERROR_FRAGMENTS.some((fragment) => lower.includes(fragment))) {
+    return fallback;
+  }
+  return message;
+}
+
+const LOAD_ERROR_TEXT =
+  "Could not load your weekly checklist. Reload the page, and tell your program manager if it keeps happening.";
+const SAVE_ERROR_TEXT = "That change could not be saved. Try again.";
 
 function statusBadge(status: HmWeeklyChecklist["status"]) {
   if (status === "open") return "Open";
@@ -80,15 +124,43 @@ export default function HmWeeklyChecklistPage() {
   const [logStaff, setLogStaff] = useState("");
   const [logDateTime, setLogDateTime] = useState("");
   const [rolloverNotice, setRolloverNotice] = useState("");
+  // Batch 55: the page opened whichever house's open list came first.
+  // The house is now an explicit selection (picker below), defaulting to
+  // the phone shell's remembered pick, then the viewer's membership home.
+  const [chosenSiteId, setChosenSiteId] = useState<string | null>(null);
+  const storedSiteId = useMemo(() => {
+    if (!session) return null;
+    try {
+      return window.localStorage.getItem(`complyrer.mobileSite.${session.userId}`);
+    } catch {
+      return null;
+    }
+  }, [session]);
 
   const currentWeek = weekOfSundayIso(todayIso());
+  const siteOptions = useMemo(
+    () => checklistSiteOptions(lists, workspace?.sites ?? []),
+    [lists, workspace],
+  );
+  const selectedSiteId = resolveChecklistSiteId({
+    options: siteOptions,
+    chosenSiteId,
+    storedSiteId,
+    sessionSiteId: session?.siteId ?? null,
+  });
   const openList = useMemo(
-    () => lists.find((c) => c.status === "open" && c.weekOf === currentWeek),
-    [lists, currentWeek],
+    () =>
+      lists.find(
+        (c) =>
+          c.siteId === selectedSiteId &&
+          c.status === "open" &&
+          c.weekOf === currentWeek,
+      ),
+    [lists, currentWeek, selectedSiteId],
   );
   const past = useMemo(
-    () => lists.filter((c) => c !== openList),
-    [lists, openList],
+    () => lists.filter((c) => c.siteId === selectedSiteId && c !== openList),
+    [lists, openList, selectedSiteId],
   );
   const openSite = openList
     ? workspace?.sites.find((s) => s.id === openList.siteId)
@@ -104,8 +176,19 @@ export default function HmWeeklyChecklistPage() {
       const rollover = await api.rolloverWeeklyChecklists();
       setRolloverNotice(formatRolloverNotice(rollover) ?? "");
       const rows = await api.listWeeklyChecklists();
+      // Refresh item 21 on the SELECTED house's open list — the same
+      // house the page renders — not the first open list in the array.
+      const siteId = resolveChecklistSiteId({
+        options: checklistSiteOptions(rows, workspace?.sites ?? []),
+        chosenSiteId,
+        storedSiteId,
+        sessionSiteId: session?.siteId ?? null,
+      });
       const open = rows.find(
-        (c) => c.status === "open" && c.weekOf === weekOfSundayIso(todayIso()),
+        (c) =>
+          c.siteId === siteId &&
+          c.status === "open" &&
+          c.weekOf === weekOfSundayIso(todayIso()),
       );
       if (open) {
         // Keep item 21 live: recompute from training records on every load.
@@ -116,7 +199,7 @@ export default function HmWeeklyChecklistPage() {
         setLists(rows);
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError(checklistErrorMessage(err, LOAD_ERROR_TEXT));
     } finally {
       setLoading(false);
     }
@@ -136,7 +219,7 @@ export default function HmWeeklyChecklistPage() {
       await refresh();
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(checklistErrorMessage(err, SAVE_ERROR_TEXT));
     }
   }
 
@@ -174,7 +257,27 @@ export default function HmWeeklyChecklistPage() {
         </p>
       )}
       {loading && <p>Loading your checklist…</p>}
-      {!loading && !openList && (
+      {!loading && siteOptions.length > 1 && (
+        <div className="form-row">
+          <label>
+            Home
+            <select
+              aria-label="Home"
+              value={selectedSiteId ?? ""}
+              onChange={(e) => setChosenSiteId(e.target.value)}
+            >
+              {siteOptions.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+      {/* A failed load must not claim there is no checklist — the page
+          does not know that; it only knows the load failed (error above). */}
+      {!loading && !openList && !error && (
         <section className="panel">
           <h2>No open checklist for this week</h2>
           <p>
@@ -375,6 +478,7 @@ export default function HmWeeklyChecklistPage() {
             documentId={openList.id}
             fieldName="hm_signature"
             label="HM signature"
+            documentTitle={`Weekly checklist — week of ${weekRangeLabel(openList.weekOf)}`}
             actionLabel="Sign & submit as {name}"
             getDocumentPayload={() => hmChecklistPayload(openList)}
             canAct={session?.userId === openList.assignedToUserId}

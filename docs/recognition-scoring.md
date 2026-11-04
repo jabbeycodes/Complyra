@@ -101,7 +101,7 @@ least **80%** of the signal's maximum weight.
 - Reviews stay private to the pair, appropriate managers, and
   administrators. The HM's current review contributes **25%** of the
   DSP-of-the-Week score.
-- **"Appropriate managers":** administrators and compliance admins see the
+- **"Appropriate managers":** administrators see the
   whole agency; other `recognition.manage` holders (DPMs, program managers,
   customized templates) see only reviews where they share an active site
   (membership or `staff_assignments`) with at least one party of the pair.

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
+  canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
 import { monthLabel } from "../../data/mileage";
@@ -109,6 +111,7 @@ function signoffSummary(
 export default function MobilePersonalSpending({
   api,
   session,
+  logoDataUrl,
   person,
   siteName,
   staffOptions,
@@ -117,6 +120,8 @@ export default function MobilePersonalSpending({
 }: {
   api: ComplyraApi;
   session: SessionUser;
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
   person: WorkspaceIndividual;
   siteName: string;
   staffOptions: MobileSpendingStaffOption[];
@@ -147,8 +152,10 @@ export default function MobilePersonalSpending({
   const [withReplacement, setWithReplacement] = useState(true);
   const [voidError, setVoidError] = useState("");
   const [signature, setSignature] = useState("");
+  // The Individual's sign-off starts UNCHOSEN (simulation batch 7): no
+  // option is pre-selected — the closer must pick deliberately.
   const [signoff, setSignoff] =
-    useState<PersonalSpendingSignoff>("individual_signed");
+    useState<PersonalSpendingSignoff | "">("");
   const [secondStaffId, setSecondStaffId] = useState("");
   const [secondSignature, setSecondSignature] = useState("");
   const [closing, setClosing] = useState(false);
@@ -328,6 +335,12 @@ export default function MobilePersonalSpending({
   const submitClose = async () => {
     setPageError("");
     setNotice("");
+    if (!signoff) {
+      setPageError(
+        "Record how the Individual's sign-off was handled before closing the month.",
+      );
+      return;
+    }
     setClosing(true);
     try {
       await api.closePersonalSpendingMonth({
@@ -341,6 +354,7 @@ export default function MobilePersonalSpending({
           signoff === "unable_second_staff" ? secondSignature : null,
       });
       setSignature("");
+      setSignoff("");
       setSecondStaffId("");
       setSecondSignature("");
       setNotice(`${monthLabel(month)} is closed and signed.`);
@@ -679,14 +693,21 @@ export default function MobilePersonalSpending({
                                     onClick={() => openRepeat(entry)}
                                   >
                                     Repeat
-                                  </button>{" "}
-                                  <button
-                                    type="button"
-                                    className="ps-link-button"
-                                    onClick={() => openVoid(entry)}
-                                  >
-                                    Void
                                   </button>
+                                  {/* Wave 6 item 3: Void only for closers,
+                                      or on the recorder's own entry. */}
+                                  {canVoidPersonalSpendingEntry(session, entry) && (
+                                    <>
+                                      {" "}
+                                      <button
+                                        type="button"
+                                        className="ps-link-button"
+                                        onClick={() => openVoid(entry)}
+                                      >
+                                        Void
+                                      </button>
+                                    </>
+                                  )}
                                 </>
                               )}
                             </td>
@@ -895,6 +916,7 @@ export default function MobilePersonalSpending({
           one Individual, never combined with the house statement. */}
       {entries && summary && (
         <div className="personal-spending-printout" aria-hidden="true">
+          <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
           <h1>Personal spending statement</h1>
           <p>
             {individualName}

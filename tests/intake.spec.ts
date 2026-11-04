@@ -39,8 +39,12 @@ test("admin Intake adds an Individual and opens the chart", async ({ page }, tes
   );
   await expect(page.getByText("0 of 2 Individuals")).toBeVisible();
   await page.getByRole("button", { name: "Add Individual", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Casey Nguyen" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Individual added to Poplar House.");
+  // The chart title is the h1; the Rights packet section heading also
+  // carries the person's name ("… — Rights packet: …").
+  await expect(page.getByRole("heading", { name: "Casey Nguyen", exact: true, level: 1 })).toBeVisible();
+  // The chart also carries a consent-standing status line (PR #248); the
+  // confirmation is the toast.
+  await expect(page.locator(".toast")).toContainText("Individual added to Poplar House.");
   await expect(page.locator(".individual-chart")).toBeVisible();
 });
 

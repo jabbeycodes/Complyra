@@ -1,7 +1,9 @@
 import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatPillCount, medCountdown } from "./mobile/medcount";
+import { medSupplyDisplayState } from "../data/medInventory";
+import { scrollToSectionId } from "./sectionLinks";
 import { formatCentralTime } from "./mobile/mar";
 import type {
   MedDoseMark,
@@ -57,6 +59,13 @@ import {
   type ClinicalEvidenceKind,
 } from "../data/planStack";
 import { can, roleLabel } from "../data/status";
+import {
+  delegationStatusForObligation,
+  delegationStatusLabel,
+  type DelegationStatus,
+} from "../data/delegationStatus";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
+import { useMedAdminLock } from "./medAdminLock";
 import AssignedDocsPanel from "./AssignedDocsPanel";
 import { generateConsultationPacket } from "./appointments/generateConsultationPacket";
 import ChartOverview from "./ChartOverview";
@@ -94,8 +103,11 @@ import {
   canEnterShiftNotes,
   canSeeShiftNotes,
   canSeeMenuEntries,
+  canViewMedicationOrders,
   canViewPersonalSpending,
 } from "../data/permissions";
+import { orderExpiryBoardLabel } from "../data/medicationOrders";
+import type { MedicationOrder } from "../data/types";
 import MenuSection from "./MenuSection";
 import PersonalSpendingCard, {
   PersonalFundsGlance,
@@ -111,10 +123,15 @@ export default function IndividualChart({
   individualId,
   onBack,
   onOpenMessageThread,
+  initialSection,
 }: {
   individualId: string;
   onBack: () => void;
   onOpenMessageThread?: (threadId: string) => void;
+  /** Wave 6 item 2: deep-link to a chart section (e.g. "chart-meds" from
+   * the mobile Med count row). Consumed once the chart body renders;
+   * ignored when the section is not rendered for this session. */
+  initialSection?: string | null;
 }) {
   const { api, session, workspace, refresh } = useData();
   const stack = workspace?.planStacks.find((item) => item.individualId === individualId);
@@ -126,43 +143,117 @@ export default function IndividualChart({
   // Issue #80: ISP data (hook must run before the early return below).
   const ispEnabled = session !== null && canSeeShiftNotes(session.roleKey);
   const isp = useIspData(api, individualId, ispEnabled);
+  // Clearance gate: an uncleared DSP keeps the chart but loses the PRN
+  // administration forms (MAR marks live in MarCard, which self-gates;
+  // the APIs refuse these writes too).
+  const medLocked = useMedAdminLock(api, session);
 
   // Med cluster: the board's headline count is the countdown figure (the
   // same baseline-and-burn-down number the mobile MAR shows), and the PRN
   // section lists the per-dose audit records. Loaded here (hooks before
   // the early return); child cards keep their own loads.
   const medsEnabled = session !== null && canSeeMeds(session.roleKey);
+  // The board flags a med whose source order is expiring / expired (the
+  // supply line alone — "10 pills left · 10 days left" — said nothing
+  // about the order running past its review date; simulation wave 4A).
+  // Only roles that may open medication orders load them; everyone else
+  // simply gets no order labels.
+  const ordersEnabled =
+    session !== null && canViewMedicationOrders(session.roleKey);
+  const [medOrders, setMedOrders] = useState<MedicationOrder[]>([]);
+  useEffect(() => {
+    if (!ordersEnabled) return;
+    let live = true;
+    api
+      .listMedicationOrders(individualId)
+      .then((rows) => {
+        if (live) setMedOrders(rows);
+      })
+      .catch(() => {
+        if (live) setMedOrders([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, individualId, ordersEnabled, workspace]);
   const [medViews, setMedViews] = useState<MedInventoryView[] | null>(null);
   const [medMarks, setMedMarks] = useState<MedDoseMark[]>([]);
   const [prnLogs, setPrnLogs] = useState<PrnDoseLog[]>([]);
   const [prnDraft, setPrnDraft] = useState<
     Record<string, { reason: string; followUp: string }>
   >({});
-  useEffect(() => {
+  // The inventory views load on their own: they are the board's only
+  // count source (shared with the forecast card), so a dose-marks or
+  // PRN-log failure must not take them down with it — an all-or-nothing
+  // load left the board rendering stored-row figures that persistently
+  // disagreed with the forecast (batch 33).
+  const [medViewsLoad, setMedViewsLoad] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
+  // Wave 7M: the load is a callback so the MAR check-off card can ask for
+  // a reload after it records a mark — the countdown and PRN sections
+  // read this state, not the card's, and must not wait for a workspace
+  // refresh to show a dose someone just recorded. A sequence number keeps
+  // a slow, superseded load (another Individual, a newer reload) from
+  // writing stale rows.
+  const medLoadSeq = useRef(0);
+  const loadMedData = useCallback(async () => {
     if (!medsEnabled) return;
-    let live = true;
+    const seq = ++medLoadSeq.current;
+    const current = () => seq === medLoadSeq.current;
     const today = todayIso();
     const from = new Date(Date.now() - 370 * 86_400_000)
       .toISOString()
       .slice(0, 10);
-    Promise.all([
-      api.getMedInventory(individualId),
+    const inventory = api
+      .getMedInventory(individualId)
+      .then((views) => {
+        if (!current()) return;
+        setMedViews(views);
+        setMedViewsLoad("ready");
+      })
+      .catch(() => {
+        if (current()) setMedViewsLoad("failed");
+      });
+    const history = Promise.all([
       api.getMedDoseMarksInRange(individualId, from, today),
       api.listPrnDoses(individualId),
     ])
-      .then(([views, marks, logs]) => {
-        if (!live) return;
-        setMedViews(views);
+      .then(([marks, logs]) => {
+        if (!current()) return;
         setMedMarks(marks);
         setPrnLogs(logs);
       })
       .catch(() => {
-        if (live) setMedViews(null);
+        // Marks/PRN history degrade to empty; the count source above is
+        // unaffected.
       });
+    await Promise.all([inventory, history]);
+  }, [api, individualId, medsEnabled]);
+
+  useEffect(() => {
+    setMedViewsLoad("loading");
+    void loadMedData();
     return () => {
-      live = false;
+      // Unmount or a new Individual: any in-flight load is now stale.
+      medLoadSeq.current += 1;
     };
-  }, [api, individualId, medsEnabled, workspace]);
+  }, [loadMedData, workspace]);
+
+  // Wave 6 item 2: honor the section deep-link once the chart body has
+  // rendered (this effect sits after the early return on purpose — the
+  // section element only exists from here down). One attempt on ready,
+  // one delayed retry for late layout; then the intent is spent.
+  const sectionScrolledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialSection || !stack || !person) return;
+    const key = `${individualId}:${initialSection}`;
+    if (sectionScrolledFor.current === key) return;
+    sectionScrolledFor.current = key;
+    scrollToSectionId(initialSection);
+    const retry = window.setTimeout(() => scrollToSectionId(initialSection), 300);
+    return () => window.clearTimeout(retry);
+  }, [initialSection, individualId, stack, person]);
 
   if (!session || !stack || !person) return null;
 
@@ -464,6 +555,7 @@ export default function IndividualChart({
               <DelegationBlock
                 key={view.item.id}
                 title={view.item.title}
+                delegationStatus={delegationStatusForObligation(view.item)}
                 enabled={view.item.enabled && isObligationActive(view.item)}
                 discontinueTitle={view.item.discontinueTitle}
                 discontinueFileId={view.item.discontinueFileId}
@@ -629,15 +721,34 @@ export default function IndividualChart({
                   const view = medViews?.find(
                     (row) => row.medicationId === med.id,
                   );
-                  const countdown = view
-                    ? medCountdown(view, medMarks, todayIso())
-                    : null;
-                  const neverCounted = countdown
-                    ? !countdown.hasBaseline
-                    : false;
+                  // ONE computed count source for this board and the
+                  // forecast card below: the inventory view's count state
+                  // (medSupplyDisplayState). The stored medication row is
+                  // never a count source — its raw pill figure, days-left
+                  // and low flag are maintained by different write paths
+                  // and persistently disagreed with the forecast in steady
+                  // state (batch 33: "0 pills left · 0 days left" here
+                  // while the forecast said "No count recorded yet"). While
+                  // the views load — or if they fail — the card makes no
+                  // supply claim at all.
+                  const display = medSupplyDisplayState(view, medViewsLoad);
+                  const countdown =
+                    view && display.kind === "counted"
+                      ? medCountdown(view, medMarks, todayIso())
+                      : null;
+                  const neverCounted = display.kind === "never-counted";
                   const medLogs = prnLogs.filter(
                     (log) => log.medicationId === med.id,
                   );
+                  // The source order's expiry, when it needs review —
+                  // rendered under the supply line as text (never color
+                  // alone), matching the orders card's wording.
+                  const sourceOrder = med.sourceOrderId
+                    ? medOrders.find((order) => order.id === med.sourceOrderId)
+                    : undefined;
+                  const orderExpiryNote = sourceOrder
+                    ? orderExpiryBoardLabel(sourceOrder, todayIso())
+                    : null;
                   return (
                     <>
                 <header>
@@ -652,53 +763,47 @@ export default function IndividualChart({
                       status the forecast card below renders — never two
                       different states (e.g. "Due soon" here and a
                       different band there), and never "Expired" for a
-                      stocked med. Falls back to the stored-row low flag
-                      only until the inventory views load. */}
-                  {view ? (
-                    !neverCounted && view.status !== "ok" ? (
-                      <StatusBadge
-                        status={medSupplyStatusFromInventory(view.status)}
-                        label={medSupplyBadgeLabel(
-                          view.status,
-                          view.lastCountedOn,
-                        )}
-                        size="sm"
-                      />
-                    ) : null
-                  ) : med.low ? (
-                    <Badge status="Due soon" />
+                      stocked med. No badge exists before the views load:
+                      a badge derived from the stored row was the batch 21
+                      / item 9 "Due soon" flash. */}
+                  {view && display.kind === "counted" && view.status !== "ok" ? (
+                    <StatusBadge
+                      status={medSupplyStatusFromInventory(view.status)}
+                      label={medSupplyBadgeLabel(
+                        view.status,
+                        view.lastCountedOn,
+                      )}
+                      size="sm"
+                    />
                   ) : null}
                 </header>
                 <p>
                   {med.strength} ·{" "}
-                  {countdown
-                    ? neverCounted
-                      ? "No count recorded yet"
-                      : `${formatPillCount(countdown.pillsLeft ?? 0)} pills left`
-                    : `${med.remainingPills} pills left`}
+                  {display.kind === "loading"
+                    ? "Loading supply…"
+                    : display.kind === "unavailable"
+                      ? "Supply count unavailable"
+                      : neverCounted
+                        ? "No count recorded yet"
+                        : `${formatPillCount(countdown?.pillsLeft ?? 0)} pills left`}
                   {med.kind === "scheduled"
-                    ? countdown && !neverCounted
+                    ? countdown
                       ? ` · ${med.pillsPerDay} per day · ${
                           countdown.daysLeft === null
                             ? "—"
                             : `${countdown.daysLeft} days left`
                         }`
-                      : countdown
-                        ? ""
-                        : ` · ${med.pillsPerDay} per day · ${
-                            med.daysLeft === null
-                              ? "—"
-                              : `${med.daysLeft} days left`
-                          }`
-                    : " · PRN, no automatic drop"}
-                  {view
-                    ? view.lastCountedOn
-                      ? ` · Last counted ${formatDate(view.lastCountedOn)}`
                       : ""
-                    : med.lastDeliveryOn
-                      ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
-                      : ""}
+                    : " · PRN, no automatic drop"}
+                  {view && display.kind === "counted" && view.lastCountedOn
+                    ? ` · Last counted ${formatDate(view.lastCountedOn)}`
+                    : ""}
                 </p>
+                {orderExpiryNote && (
+                  <p className="form-error" role="status">
+                    {orderExpiryNote} — a prescriber review is needed.
+                  </p>
+                )}
                 {canRecordDelivery(session.roleKey) && (
                   <DeliveryForm
                     defaultRemaining={
@@ -723,7 +828,10 @@ export default function IndividualChart({
                     }
                   />
                 )}
-                {med.kind === "prn" && canLogPrnDose(session.roleKey) && (
+                {med.kind === "prn" && canLogPrnDose(session.roleKey) && medLocked && (
+                  <p className="muted">{MED_ADMIN_CLEARANCE_MESSAGE}.</p>
+                )}
+                {med.kind === "prn" && canLogPrnDose(session.roleKey) && !medLocked && (
                   <div className="stack">
                     <form
                       className="stack"
@@ -892,9 +1000,16 @@ export default function IndividualChart({
         )}
 
         {/* Issue #76: today's scheduled-med MAR check-off (clears Overview
-            unmarked-medication due items). */}
-        {canSeeChartWidgets(chartSession.roleKey) && (
-          <MarCard individualId={individualId} />
+            unmarked-medication due items). Wave 7M: gated on med
+            visibility (canSeeMeds), not the chart-widget bundle — the
+            bundle gate also hid the MAR from DSPs, who administer these
+            doses and already see the med board and PRN logging here;
+            MarCard itself decides who may press the mark buttons. */}
+        {showMeds && (
+          <MarCard
+            individualId={individualId}
+            onMarksChanged={() => void loadMedData()}
+          />
         )}
 
         {/* Issue #75: HM alone-time editor (shrinks the required Shift-note
@@ -1021,6 +1136,7 @@ export default function IndividualChart({
 
 function DelegationBlock({
   title,
+  delegationStatus,
   enabled,
   discontinueTitle,
   discontinueFileId,
@@ -1030,6 +1146,8 @@ function DelegationBlock({
   onDiscontinue,
 }: {
   title: string;
+  /** Canonical delegation status (src/data/delegationStatus) — same label as the RN forms. */
+  delegationStatus: DelegationStatus;
   enabled: boolean;
   discontinueTitle: string | null;
   discontinueFileId: string | null;
@@ -1046,7 +1164,7 @@ function DelegationBlock({
       <header>
         <span className="kind-pill delegation">delegation</span>
         <h3>{title}</h3>
-        <Badge status={enabled ? "Current" : "Off"} />
+        <Badge status={delegationStatusLabel(delegationStatus)} />
       </header>
       {discontinueFileId && (
         <p>

@@ -20,6 +20,7 @@ import {
 import type { HrStaffingPattern, StaffingWindow } from "../../data/hr";
 import type { HrStaffingPatternInput } from "../../data/hrStore";
 import type { HubSite, HubStaffEntry } from "./EmployeeHubPage";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 
 const SERVICE_TAG_SUGGESTIONS = ["In-Home Respite", "Community Networking", "Residential"];
 
@@ -161,6 +162,12 @@ interface StaffingBoardProps {
   sites: HubSite[];
   /** hub.manage_staffing: shows edit/deactivate controls. */
   editable: boolean;
+  /**
+   * Wave 7T-3: per-row gate on top of `editable` — a site-scoped viewer
+   * keeps the rows visible but only acts on patterns inside their
+   * houses. Defaults to every row actionable.
+   */
+  canActOnPattern?: (p: HrStaffingPattern) => boolean;
   loading: boolean;
   error: string;
   onEdit: (p: HrStaffingPattern) => void;
@@ -172,6 +179,7 @@ export function StaffingBoard({
   staffList,
   sites,
   editable,
+  canActOnPattern,
   loading,
   error,
   onEdit,
@@ -243,7 +251,7 @@ export function StaffingBoard({
                   pattern={p}
                   staffList={staffList}
                   sites={sites}
-                  editable={editable}
+                  editable={editable && (canActOnPattern?.(p) ?? true)}
                   onEdit={onEdit}
                   onToggleActive={onToggleActive}
                 />
@@ -267,6 +275,7 @@ export function StaffingConfigForm({
   busy,
   onSave,
   onCancel,
+  api,
 }: {
   staffList: HubStaffEntry[];
   sites: HubSite[];
@@ -274,8 +283,16 @@ export function StaffingConfigForm({
   busy: boolean;
   onSave: (input: HrStaffingPatternInput) => void;
   onCancel: () => void;
+  /** Batch 59: enables the training-clearance warning for the chosen staffer. */
+  api?: {
+    getStaffTrainingProfile(userId: string): Promise<import("../../data/types").StaffTrainingProfile>;
+  } | null;
 }) {
   const [staffId, setStaffId] = useState(initial?.staffId ?? "");
+  // Batch 59: warn (never block) when the pattern's staffer is a DSP who
+  // is not training-cleared yet.
+  const chosenStaff = staffList.find((s) => s.userId === staffId);
+  const clearanceWarning = useAssigneeClearanceWarning(api, chosenStaff?.userId ?? null, chosenStaff?.roleKey ?? null);
   const [shiftLabel, setShiftLabel] = useState(initial?.shiftLabel ?? "");
   const [siteId, setSiteId] = useState(initial?.siteId ?? "");
   const [days, setDays] = useState<number[]>(initial ? [...initial.days] : [1, 2, 3, 4, 5]);
@@ -357,6 +374,11 @@ export function StaffingConfigForm({
           ))}
         </select>
       </label>
+      {clearanceWarning && (
+        <p className="hub-clearance-warning hub-form-wide" role="alert">
+          {clearanceWarning}
+        </p>
+      )}
       <label>
         Shift label
         <input

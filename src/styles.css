@@ -1091,50 +1091,8 @@ h1 {
 .risk-end > svg {
   color: var(--color-h-c9c6c3);
 }
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 4px 7px;
-  border-radius: 4px;
-  white-space: nowrap;
-  background: var(--color-h-f5f3f1);
-  color: var(--color-h-8c745f);
-  line-height: 1.3;
-}
-.badge > span {
-  width: 4px;
-  height: 4px;
-  border-radius: 100%;
-  background: currentColor;
-}
-.badge.overdue,
-.badge.expired,
-.badge.needs-attention {
-  background: var(--color-h-f8f1ee);
-  color: var(--color-h-bd988a);
-}
-.badge.due-soon {
-  background: var(--color-h-f7f2ea);
-  color: var(--color-h-be9f71);
-}
-.badge.compliant,
-.badge.active,
-.badge.on-track {
-  background: var(--color-h-eff5ed);
-  color: var(--color-h-84a87e);
-}
-.badge.pending-review {
-  background: var(--color-h-f4f3f0);
-  color: var(--color-h-5d8353);
-}
-.badge.archived {
-  background: var(--color-h-f2f1ef);
-  color: var(--color-h-4a4036);
-}
+/* Badge styles live in the canonical "Badges" section near the end of
+   this file (Theme Phase 2 consolidation) — do not redefine here. */
 .priority-footer {
   border-top: 1px solid var(--color-h-f1f0ed);
   display: flex;
@@ -1452,6 +1410,12 @@ h1 {
 .right-now-allclear {
   color: var(--color-h-2f4630);
   font-weight: 550;
+}
+.right-now-attention {
+  padding: 4px var(--panel-inline) 12px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-h-b91c1c);
 }
 .right-now-grid {
   display: grid;
@@ -4483,25 +4447,6 @@ td {
   font-size: 11px;
   color: var(--color-h-4a4036);
 }
-.badge {
-  font-size: 11px;
-}
-.badge.overdue,
-.badge.expired,
-.badge.needs-attention {
-  color: var(--color-h-9e7262);
-}
-.badge.due-soon {
-  color: var(--color-h-9b763f);
-}
-.badge.compliant,
-.badge.active,
-.badge.on-track {
-  color: var(--color-h-668761);
-}
-.badge.pending-review {
-  color: var(--color-h-5d8354);
-}
 .priority-footer {
   font-size: 11px;
   color: var(--color-h-4a4036);
@@ -5327,14 +5272,6 @@ th {
   background: var(--color-h-d7e2cc);
   color: var(--color-h-2f4630);
 }
-.badge.waiting-for-rn {
-  background: var(--color-h-f3e6dc);
-  color: var(--color-h-6f3f2e);
-}
-.badge.current {
-  background: var(--color-h-d7e2cc);
-  color: var(--color-h-2f4630);
-}
 .individual-chart {
   display: grid;
   gap: 22px;
@@ -5380,6 +5317,19 @@ th {
 .plan-stack {
   min-width: 0;
   max-width: 100%;
+}
+/* Chart form stacks (PRN dose / follow-up forms, MAR late-dose form,
+   screening and order stacks): labels and controls stack vertically at
+   EVERY width. This pair previously existed only inside the
+   max-width: 860px block below, so on desktop the labels stayed inline and
+   ran together with their inputs (chart tabs repair). */
+.individual-chart .stack {
+  display: grid;
+  gap: 10px;
+}
+.individual-chart .stack label {
+  display: grid;
+  gap: 4px;
 }
 .chart-widget h2 {
   font-size: 18px;
@@ -6906,6 +6856,42 @@ body.nav-open {
   font-weight: 600;
 }
 
+/* Print brand header — agency logo + name + Complyrer line atop the in-app
+   window.print() statements (PrintBrandHeader component). */
+.print-brand-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.print-brand-logo {
+  height: 40px;
+  max-width: 160px;
+  object-fit: contain;
+}
+.print-brand-names p {
+  margin: 0;
+}
+.print-brand-agency {
+  font-size: 15px;
+  font-weight: 700;
+}
+.print-brand-prepared {
+  font-size: 11px;
+  color: var(--color-h-a89c8c);
+}
+.print-brand-lockup {
+  height: 30px;
+  width: auto;
+  margin-left: auto;
+}
+.print-brand-complyrer {
+  margin: 0 0 0 auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: #3f5c3b;
+}
+
 /* Complyrer record mark — discreet provenance line on generated documents. */
 .record-mark {
   font-size: 11px;
@@ -6946,6 +6932,28 @@ body.nav-open {
 .password-toggle:focus-visible {
   outline: 2px solid var(--moss);
   outline-offset: -2px;
+}
+
+/* ---------- One-time credential reveal ---------- */
+.onetime-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onetime-secret-mask {
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+.onetime-secret-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.onetime-secret-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ---------- Interactive demo ---------- */
@@ -7666,6 +7674,32 @@ button.qa-row:hover {
 .health-track-tabs {
   margin: 4px 0 12px;
   padding-inline: 0;
+  /* Containment (chart tabs repair): the 12 tracker tabs were an unbounded
+     flex row. Its min-content (~1,180px) sized the widget's inner grid
+     column, so the strip — and the panel under it — painted across the
+     neighbouring Behavior column and off the page edge, buttons crushed to
+     word-width ribbons and tabs under the spill unclickable. Mirror the
+     site-detail tabstrip: contained scroll on narrow widths, wrap on wide. */
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.health-track-tabs::-webkit-scrollbar {
+  display: none;
+}
+.health-track-tabs > button {
+  flex: none;
+  white-space: nowrap;
+}
+@media (min-width: 861px) {
+  .health-track-tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
 }
 
 .appointments-filters {
@@ -7946,33 +7980,53 @@ button.qa-row:hover {
   display: none;
 }
 
-/* ===== Audit D-07 (WCAG AA): legacy Badge contrast — FINAL override =====
+/* ===== Badges — canonical definition set (Theme Phase 2 consolidation) =====
  * The legacy `.badge` component (src/components.tsx) is the dominant status
- * indicator, but its variant color pairs failed WCAG AA (< 4.5:1) for its
- * 10–11px text, and `.badge` was redefined 8+ times above, so rendering was
- * cascade-dependent. This block is intentionally LAST in the file and uses
- * `.badge` / `.badge.<variant>` selectors (equal-or-higher specificity than
- * every earlier definition) so these pairs win regardless of the cascade
- * above — including the 9px shrink contexts (.risk-end .badge etc.), which
- * only change font-size/padding, never color.
- * Visual language is unchanged: same soft tinted backgrounds, text darkened
- * within the same hue family until each pair computes >= 4.5:1 (WCAG
- * relative-luminance formula). Already-passing variants (archived,
- * waiting-for-rn, current) are reaffirmed unchanged so this section is the
- * single authoritative source for every badge variant. Any status string
- * without a dedicated variant inherits the (now AA-passing) default pair.
- *   default:                          #5f5145 on #f5f3f1 = 6.90:1
+ * indicator. This section is the ONLY place `.badge` is defined at the top
+ * level of this file. It consolidates what used to be scattered across the
+ * stylesheet: an original block near the risk rows, a later color-only
+ * override pass, duplicate waiting-for-rn/current rules near the chart
+ * styles, and the Audit D-07 block that previously sat here. Every
+ * declaration below is the value the old cascade already computed —
+ * verified by before/after computed-style measurement; nothing visual
+ * changed.
+ * Audit D-07 (WCAG AA): the variant color pairs were darkened within
+ * their hue family until each computes >= 4.5:1 at the badge's 11px
+ * text, because status is never carried by color alone and the text
+ * itself must stay legible:
+ *   default:                           #5f5145 on #f5f3f1 = 6.90:1
  *   overdue / expired / needs-attention: #8a3d2b on #f8f1ee = 6.76:1
- *   due-soon:                         #7a5a1e on #f7f2ea = 5.70:1
- *   compliant / active / on-track:    #2f5d33 on #eff5ed = 6.93:1
- *   pending-review:                   #3e583a on #f4f3f0 = 7.11:1
- *   archived:                         #4a4036 on #f2f1ef = 8.95:1
- *   waiting-for-rn:                   #6f3f2e on #f3e6dc = 7.07:1
- *   current:                          #2f4630 on #d7e2cc = 7.67:1
+ *   due-soon:                          #7a5a1e on #f7f2ea = 5.70:1
+ *   compliant / active / on-track:     #2f5d33 on #eff5ed = 6.93:1
+ *   pending-review:                    #3e583a on #f4f3f0 = 7.11:1
+ *   archived:                          #4a4036 on #f2f1ef = 8.95:1
+ *   waiting-for-rn:                    #6f3f2e on #f3e6dc = 7.07:1
+ *   current:                           #2f4630 on #d7e2cc = 7.67:1
+ * Any status string without a dedicated variant inherits the default
+ * pair. The only other `.badge` rules in this file are the responsive
+ * shrink rules inside media queries (.risk-end .badge, .location-top
+ * .badge, .notification-row .badge), which change font-size/padding
+ * only — never color — and stay with their media blocks by design.
  */
 .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
   background: var(--color-h-f5f3f1);
   color: var(--color-h-5f5145);
+  line-height: 1.3;
+}
+.badge > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 100%;
+  background: currentColor;
 }
 .badge.overdue,
 .badge.expired,
@@ -8005,6 +8059,18 @@ button.qa-row:hover {
 .badge.current {
   background: var(--color-h-d7e2cc);
   color: var(--color-h-2f4630);
+}
+/* SIM-WAVE6-ITEM5: canonical delegation labels (src/data/delegationStatus)
+ * reuse the already AA-verified pairs above — "Pending" takes the
+ * pending-review pair, "Completed" the archived pair; "Active" and
+ * "Expired" already have dedicated variants in this block. */
+.badge.pending {
+  background: var(--color-h-f4f3f0);
+  color: var(--color-h-3e583a);
+}
+.badge.completed {
+  background: var(--color-h-f2f1ef);
+  color: var(--color-h-4a4036);
 }
 /* ===== Report Library ===== */
 .report-library-tools {
@@ -8257,16 +8323,6 @@ button.qa-row:hover {
   .individual-chart .obligation-card > header h3 {
     flex: 1 1 100%;
     order: 3;
-  }
-  /* The PRN follow-up block uses a `stack` class that has no desktop
-     definition, so its labels and inputs ran together inline. Stack it. */
-  .individual-chart .stack {
-    display: grid;
-    gap: 10px;
-  }
-  .individual-chart .stack label {
-    display: grid;
-    gap: 4px;
   }
   /* Form controls: full-size text (16px stops iOS focus zoom) and
      44px-class tap targets. */

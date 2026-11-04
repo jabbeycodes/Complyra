@@ -1,5 +1,5 @@
 import { assertCalendarDate } from './access';
-import { todayIso } from './chart';
+import { centralTodayIso } from './menuRecords';
 export interface CareItem {
   need: string;
   goal: string;
@@ -82,7 +82,7 @@ export const emptyCareData = (): CareScreeningData => ({
 });
 export const canManageCare = (role: string) => role === 'nurse';
 export const canApproveCare = (role: string) => ['nurse', 'program_manager'].includes(role);
-export const canViewCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp', 'auditor', 'administrator', 'compliance_admin'].includes(role);
+export const canViewCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp', 'auditor', 'administrator'].includes(role);
 export const canViewScreening = (role: string) => canViewCare(role) && role !== 'dsp';
 export const canAcknowledgeCare = (role: string) => ['nurse', 'program_manager', 'house_manager', 'dsp'].includes(role);
 export function validateCareDraft(draft: CareDraft) {
@@ -92,7 +92,7 @@ export function validateCareDraft(draft: CareDraft) {
     assertCalendarDate(item.review_on, 'Each care item needs a valid review date.');
   }
 }
-export function validateScreening(draft: ScreeningDraft, today = todayIso()) {
+export function validateScreening(draft: ScreeningDraft, today = centralTodayIso()) {
   assertCalendarDate(draft.due_on);
   for (const date of [draft.last_completed_on, draft.completed_on]) {
     if (date) {
@@ -102,13 +102,13 @@ export function validateScreening(draft: ScreeningDraft, today = todayIso()) {
   }
   if (draft.completed_on && !draft.result_note.trim()) throw new Error('Add a result note before completing a screening.');
 }
-export function screeningStatus(screening: ScreeningDraft, type: Pick<ScreeningType, 'due_soon_days'>, today = todayIso()) {
+export function screeningStatus(screening: ScreeningDraft, type: Pick<ScreeningType, 'due_soon_days'>, today = centralTodayIso()) {
   if (screening.completed_on) return 'completed';
   if (screening.due_on < today) return 'overdue';
   const boundary = new Date(`${today}T00:00:00Z`);
   boundary.setUTCDate(boundary.getUTCDate() + type.due_soon_days);
   return screening.due_on <= boundary.toISOString().slice(0, 10) ? 'due soon' : 'upcoming';
 }
-export function overdueCare(plan: CarePlan, today = todayIso()) {
+export function overdueCare(plan: CarePlan, today = centralTodayIso()) {
   return plan.status === 'active' && plan.items.some(item => item.review_on < today);
 }

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openMobileMar } from "./fixtures";
 
 // Platform-wide bottom navigation + collapsed-by-default sidebar, on the
 // regular (desktop-layout) pages in mobile view. The mobile shell has its
@@ -106,6 +106,15 @@ test("platform nav: Overview — sidebar starts collapsed, scroll-collapse cycle
 }) => {
   await signIn(page, "sarah.mitchell");
   await toShellHome(page);
+  // The suite pins the clock (tests/fixtures.ts), and a pinned clock
+  // freezes CSS transitions in this Chromium build — the drawer's
+  // 0.2s close transition would hang mid-flight and the geometry
+  // assertions below would measure a half-closed drawer. Kill
+  // transitions, as the other drawer specs do, so the assertions
+  // measure the end states the product actually settles into.
+  await page.addStyleTag({
+    content: "* { transition: none !important; animation: none !important; }",
+  });
   await toDeepLinkedPage(page);
   await drawerTo(page, "Overview");
 
@@ -138,7 +147,9 @@ test("platform nav: Overview — sidebar starts collapsed, scroll-collapse cycle
   // The pill is here, expanded, carrying the role's destinations.
   const nav = page.getByRole("navigation", { name: "Mobile" });
   await expect(nav).toBeVisible();
-  for (const label of ["Home", "Tasks", "Meds", "People", "More"]) {
+  // No Meds destination: medications live under Health (founder
+  // directive 2026-10-31, PR #189).
+  for (const label of ["Home", "Tasks", "People", "More"]) {
     await expect(
       nav.getByRole("button", { name: label, exact: true }),
     ).toBeVisible();
@@ -189,17 +200,14 @@ test("platform nav: present on Individuals and Appointments, absent where the bo
   await expect(nav).toHaveCount(0);
 
   // Back in the shell (the deep link's "‹ Mobile home" return bar), the
-  // MAR flow and the ISP entry form own their bottoms too — no pill
-  // there either.
+  // shell's own pill is on EVERY screen — the MAR flow and the ISP entry
+  // form included (batches 28-30, PR #206: shellBottomNavVisible).
   await page.locator(".mobile-return-bar").click();
   await expect(
     page.getByRole("heading", { name: "Today at Cedar House" }),
   ).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: /Medications/ }).first().click();
-  await expect(
-    page.getByText("Pick the person whose medications"),
-  ).toBeVisible();
-  await expect(nav).toHaveCount(0);
+  await openMobileMar(page);
+  await expect(nav).toBeVisible();
   await page.getByRole("button", { name: "‹ Home" }).click();
   await page.getByRole("button", { name: /ISP Data/ }).first().click();
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
@@ -210,7 +218,7 @@ test("platform nav: present on Individuals and Appointments, absent where the bo
   await expect(
     page.getByRole("heading", { name: "Task scores" }),
   ).toBeVisible();
-  await expect(nav).toHaveCount(0);
+  await expect(nav).toBeVisible();
 });
 
 test("platform nav destinations land in the shell at the right view", async ({
@@ -250,7 +258,9 @@ test("explicit Desktop pick and desktop width: true desktop layout, no platform 
   await toShellHome(page);
   await page.getByRole("button", { name: /Account menu/ }).click();
   await page.getByRole("menuitem", { name: /Desktop view/ }).click();
-  await expect(page.locator(".breadcrumb strong")).toHaveText("Overview", {
+  // Batch 28 (PR #206): the switch keeps the screen + house — from Cedar's
+  // shell home it lands on Cedar's Site detail, not a stale Overview.
+  await expect(page.locator(".breadcrumb strong")).toHaveText("Site detail", {
     timeout: 30_000,
   });
   await expect(page.locator(".app-shell")).not.toHaveClass(/mobile-context/);
@@ -261,7 +271,7 @@ test("explicit Desktop pick and desktop width: true desktop layout, no platform 
 
   // At desktop width the same layout is simply docked, as before.
   await page.setViewportSize({ width: 1280, height: 1050 });
-  await expect(page.locator(".breadcrumb strong")).toHaveText("Overview", {
+  await expect(page.locator(".breadcrumb strong")).toHaveText("Site detail", {
     timeout: 60_000,
   });
   await expect(page.locator(".app-shell")).not.toHaveClass(/mobile-context/);

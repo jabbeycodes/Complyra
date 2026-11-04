@@ -26,6 +26,10 @@ import {
 } from "../../data/rightsPackets";
 import { PersonHeader } from "./MobileMar";
 import {
+  consentProblemsText,
+  individualConsentStanding,
+} from "../overview/consentCompliance";
+import {
   consentRecordStatus,
   consentTypeRows,
   rightsHistoryLine,
@@ -65,12 +69,15 @@ export default function MobileConsents({
   api,
   session,
   person,
+  logoDataUrl,
   onOpenChart,
   onBack,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   person: WorkspaceIndividual;
+  /** Agency logo for the packet PDF headers, when one is configured. */
+  logoDataUrl?: string | null;
   onOpenChart: (name: string) => void;
   onBack: () => void;
 }) {
@@ -94,7 +101,9 @@ export default function MobileConsents({
   });
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const [openAudit, setOpenAudit] = useState<string | null>(null);
-  const [rights, setRights] = useState<RightsPacket[]>([]);
+  // null until the packet list has loaded: an unloaded list must never
+  // render as "Not yet signed" (the batch-41 contradiction).
+  const [rights, setRights] = useState<RightsPacket[] | null>(null);
   const [rightsCompleting, setRightsCompleting] = useState<{
     packet: RightsPacket;
     paper: boolean;
@@ -175,7 +184,7 @@ export default function MobileConsents({
           <div className="msh-list">
             <div className="msh-row static">
               <span className="msh-row-main">
-                <strong>{rightsSummary.trackingText}</strong>
+                <strong>{rightsSummary.trackingText ?? (error ? "Rights packet unavailable" : "Loading rights packet…")}</strong>
                 {rightsSummary.latest ? (
                   <>
                     <small>
@@ -200,7 +209,7 @@ export default function MobileConsents({
                       .
                     </small>
                   </>
-                ) : (
+                ) : rights === null ? null : (
                   <small>
                     {rightsSummary.awaiting
                       ? `A packet is started and awaiting signature. Expected signer ${rightsSummary.awaiting.signerName}.`
@@ -223,6 +232,7 @@ export default function MobileConsents({
                               rightsPrintable,
                               person.name,
                               session.agencyName,
+                              { logoDataUrl: logoDataUrl ?? null },
                             ).output("blob") as Blob,
                           )
                         }
@@ -239,6 +249,7 @@ export default function MobileConsents({
                               rightsPrintable,
                               person.name,
                               session.agencyName,
+                              { logoDataUrl: logoDataUrl ?? null },
                             ).output("blob") as Blob,
                             "print",
                           )
@@ -265,7 +276,7 @@ export default function MobileConsents({
                       Download filed signed evidence
                     </button>
                   )}
-                  {manage && rightsSummary.awaiting && (
+                  {manage && rights !== null && rightsSummary.awaiting && (
                     <>
                       <button
                         type="button"
@@ -285,7 +296,7 @@ export default function MobileConsents({
                       </button>
                     </>
                   )}
-                  {manage && !rightsSummary.awaiting && (
+                  {manage && rights !== null && !rightsSummary.awaiting && (
                     <button
                       type="button"
                       className="msh-chip-button"
@@ -356,6 +367,22 @@ export default function MobileConsents({
         </p>
       )}
       {!register && !error && <p className="msh-empty">Loading consents…</p>}
+      {register &&
+        (() => {
+          // The chart's per-Individual verdict — the same standing the
+          // compliance scores are built from (consentCompliance.ts), so
+          // the phone and the desktop chart cannot disagree.
+          const standing = individualConsentStanding(register, person.id);
+          return (
+            <p className="msh-section-note" role="status">
+              {standing.required === 0
+                ? "No required consent types are configured for this agency."
+                : standing.compliant
+                  ? `✓ Compliant — all ${standing.required} required consents are current.`
+                  : `Not compliant — required consents not current: ${consentProblemsText(standing, session.roleKey === "dsp")}.`}
+            </p>
+          );
+        })()}
       {register && (
         <div className="msh-list">
           {rows.map((row) => (
@@ -553,6 +580,7 @@ export default function MobileConsents({
                                 packet.snapshot,
                                 packet.choices,
                                 packet.signer,
+                                { logoDataUrl: logoDataUrl ?? null },
                               ).output("blob") as Blob,
                             )
                           }
@@ -569,6 +597,7 @@ export default function MobileConsents({
                                 packet.snapshot,
                                 packet.choices,
                                 packet.signer,
+                                { logoDataUrl: logoDataUrl ?? null },
                               ).output("blob") as Blob,
                               "print",
                             )
@@ -687,7 +716,7 @@ export default function MobileConsents({
                 onSigner={setSigner}
               />
               <label className="msh-field">
-                <span>Signed copy (PDF, PNG, JPEG; up to 10 MB)</span>
+                <span>Signed copy (PDF, PNG, JPEG; up to 4 MB)</span>
                 <input
                   required
                   type="file"
@@ -765,7 +794,7 @@ export default function MobileConsents({
               />
               {rightsCompleting.paper && (
                 <label className="msh-field">
-                  <span>Signed copy (PDF, PNG, JPEG; up to 10 MB)</span>
+                  <span>Signed copy (PDF, PNG, JPEG; up to 4 MB)</span>
                   <input
                     required
                     type="file"

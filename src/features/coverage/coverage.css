@@ -85,6 +85,18 @@
   margin-top: 16px;
 }
 
+/* Batch 59: scheduling clearance warning — text, never color alone. */
+.coverage-clearance-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-h-c9b48a);
+  border-radius: 10px;
+  background: var(--color-h-f6f8f4);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-h-4a4036);
+}
+
 .coverage-hour-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: start;

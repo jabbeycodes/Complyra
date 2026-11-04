@@ -131,7 +131,6 @@ test("permissions: documents.review grants mirror the SQL seed", () => {
   const can = (role: string) =>
     hasPermission({ role }, "documents.review" as never);
   assert.equal(can("administrator"), true);
-  assert.equal(can("compliance_admin"), true);
   assert.equal(can("program_manager"), true);
   assert.equal(can("program_manager"), true);
   assert.equal(can("nurse"), true);

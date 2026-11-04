@@ -417,6 +417,53 @@ export function formatDueAt(dueAt: string | null | undefined): string {
   return `${weekdays[d.getUTCDay()]}, ${formatShortDate(d.toISOString().slice(0, 10))} · ${h12}:${mm} ${hh >= 12 ? "PM" : "AM"} UTC`;
 }
 
+/** A house that has at least one visible checklist — a picker option. */
+export interface ChecklistSiteOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Houses the checklist page can show for the loaded lists, in a stable
+ * (name) order. Houses with no lists never appear — the picker only ever
+ * names a house the viewer actually has checklists for.
+ */
+export function checklistSiteOptions(
+  lists: readonly { siteId: string }[],
+  sites: readonly { id: string; name: string }[],
+): ChecklistSiteOption[] {
+  const present = new Set(lists.map((list) => list.siteId));
+  return sites
+    .filter((site) => present.has(site.id))
+    .map((site) => ({ id: site.id, name: site.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Which house's checklist the page opens (simulation batch 55). The page
+ * used to render the FIRST open list for the week across every house —
+ * an arbitrary house whenever a viewer could see more than one. The
+ * selection now resolves deterministically: the house the viewer picked
+ * (while it still has lists), then the house they chose in the phone
+ * shell (the stored pick), then their membership home, then the only
+ * option, then the first option by name — never list order.
+ */
+export function resolveChecklistSiteId(input: {
+  options: readonly ChecklistSiteOption[];
+  chosenSiteId: string | null;
+  storedSiteId: string | null;
+  sessionSiteId: string | null;
+}): string | null {
+  const { options } = input;
+  if (options.length === 0) return null;
+  const has = (id: string | null) =>
+    id != null && options.some((option) => option.id === id);
+  if (has(input.chosenSiteId)) return input.chosenSiteId;
+  if (has(input.storedSiteId)) return input.storedSiteId;
+  if (has(input.sessionSiteId)) return input.sessionSiteId;
+  return options[0].id;
+}
+
 /** HM-per-site assignment the scheduler consumes (from memberships). */
 export interface SchedulerSiteAssignment {
   agencyId: string;

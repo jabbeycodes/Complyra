@@ -212,7 +212,7 @@ export interface CertificateEventInput {
   certificateId: string;
   certName: string;
   expiresOn: string; // ISO date
-  today?: string; // ISO date, default = todayIso()
+  today?: string; // ISO date, default = centralTodayIso()
 }
 
 export interface MedEventInput {

@@ -849,7 +849,6 @@ test("HR-HUB: all hub keys are declared with labels", () => {
 test("HR-HUB: hub.access defaults on for all 8 roles", () => {
   for (const role of [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "dsp",
@@ -861,36 +860,49 @@ test("HR-HUB: hub.access defaults on for all 8 roles", () => {
   }
 });
 
-test("HR-HUB: scheduling/timecard/time-off/team grants for managers only", () => {
-  for (const key of [
-    "hub.manage_schedule",
-    "hub.review_timecards",
-    "hub.approve_time_off",
-    "hub.view_team",
-  ] as const) {
+test("HR-HUB: scheduling/time-off grants for managers only; timecard/team-view also HR's", () => {
+  // Managers-only keys (HR does not gain scheduling or time-off approval).
+  for (const key of ["hub.manage_schedule", "hub.approve_time_off"] as const) {
     for (const role of ["administrator", "program_manager", "house_manager"]) {
       assert.equal(defaultPermissions(role)[key], true, `${role}.${key}`);
     }
-    for (const role of ["compliance_admin", "dsp", "nurse", "hr", "auditor"]) {
+    for (const role of ["dsp", "nurse", "hr", "auditor"]) {
+      assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
+    }
+  }
+  // HR HUB OWNERSHIP (founder decision, Joshua 2026-10-31; sim wave 6
+  // item 9): HR owns Timecards and Attendance, so hub.review_timecards
+  // and hub.view_team are HR's too — the Paycor model.
+  for (const key of ["hub.review_timecards", "hub.view_team"] as const) {
+    for (const role of ["administrator", "program_manager", "house_manager", "hr"]) {
+      assert.equal(defaultPermissions(role)[key], true, `${role}.${key}`);
+    }
+    for (const role of ["dsp", "nurse", "auditor"]) {
       assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
     }
   }
 });
 
-test("HR-HUB: payroll lock and HR documents for administrator/PM only", () => {
-  for (const key of ["hub.approve_payroll", "hub.manage_documents"] as const) {
-    assert.equal(defaultPermissions("administrator")[key], true);
-    assert.equal(defaultPermissions("program_manager")[key], true);
-    for (const role of [
-      "compliance_admin",
-      "house_manager",
-      "dsp",
-      "nurse",
-      "hr",
-      "auditor",
-    ]) {
-      assert.equal(defaultPermissions(role)[key], false, `${role}.${key}`);
-    }
+test("HR-HUB: payroll for administrator/PM/HR; HR documents for administrator/PM only", () => {
+  // HR owns Payroll (founder decision 2026-10-31) — hub.approve_payroll
+  // is HR's as well as administrator/PM.
+  assert.equal(defaultPermissions("administrator")["hub.approve_payroll"], true);
+  assert.equal(defaultPermissions("program_manager")["hub.approve_payroll"], true);
+  assert.equal(defaultPermissions("hr")["hub.approve_payroll"], true);
+  for (const role of ["house_manager", "dsp", "nurse", "auditor"]) {
+    assert.equal(defaultPermissions(role)["hub.approve_payroll"], false, `${role}.hub.approve_payroll`);
+  }
+  // HR documents stay administrator/PM only.
+  assert.equal(defaultPermissions("administrator")["hub.manage_documents"], true);
+  assert.equal(defaultPermissions("program_manager")["hub.manage_documents"], true);
+  for (const role of [
+    "house_manager",
+    "dsp",
+    "nurse",
+    "hr",
+    "auditor",
+  ]) {
+    assert.equal(defaultPermissions(role)["hub.manage_documents"], false, `${role}.hub.manage_documents`);
   }
 });
 
@@ -1062,7 +1074,7 @@ test("staffing: hub.manage_staffing permission gating per role", () => {
       `${role} can configure staffing`,
     );
   }
-  for (const role of ["compliance_admin", "dsp", "nurse", "auditor"]) {
+  for (const role of ["dsp", "nurse", "auditor"]) {
     assert.equal(
       hasPermission({ role }, "hub.manage_staffing"),
       false,
@@ -1489,7 +1501,6 @@ test("PHASE2: hub.manage_pay_settings defaults for admin/PM/HR only", () => {
     assert.equal(defaultPermissions(role)["hub.manage_pay_settings"], true, role);
   }
   for (const role of [
-    "compliance_admin",
     "house_manager",
     "dsp",
     "nurse",
@@ -1540,25 +1551,27 @@ const KIOSK_NOW = "2026-09-16T12:00:00.000Z";
 
 test("KIOSK: rounding 0 minutes leaves the punch untouched", () => {
   assert.equal(
-    applyPunchRounding("2026-09-16T08:07:00", punchRules({ roundingMinutes: 0 })),
-    "2026-09-16T08:07:00",
+    applyPunchRounding("2026-09-16T08:07:00Z", punchRules({ roundingMinutes: 0 })),
+    "2026-09-16T08:07:00Z",
   );
 });
 
 test("KIOSK: 15-minute rounding snaps to the nearest bucket", () => {
+  // Punch stamps are UTC ISO strings; a zone-less literal would be read in
+  // the machine's local zone and only pass on a UTC host.
   const rules = punchRules({ roundingMinutes: 15 });
-  assert.equal(applyPunchRounding("2026-09-16T08:07:00", rules), "2026-09-16T08:00:00.000Z");
-  assert.equal(applyPunchRounding("2026-09-16T08:08:00", rules), "2026-09-16T08:15:00.000Z");
-  assert.equal(applyPunchRounding("2026-09-16T08:00:00", rules), "2026-09-16T08:00:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:07:00Z", rules), "2026-09-16T08:00:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:08:00Z", rules), "2026-09-16T08:15:00.000Z");
+  assert.equal(applyPunchRounding("2026-09-16T08:00:00Z", rules), "2026-09-16T08:00:00.000Z");
 });
 
 test("KIOSK: rounding supports 5 and 10 minute buckets, ties round up", () => {
   assert.equal(
-    applyPunchRounding("2026-09-16T08:02:30", punchRules({ roundingMinutes: 5 })),
+    applyPunchRounding("2026-09-16T08:02:30Z", punchRules({ roundingMinutes: 5 })),
     "2026-09-16T08:05:00.000Z",
   );
   assert.equal(
-    applyPunchRounding("2026-09-16T08:06:00", punchRules({ roundingMinutes: 10 })),
+    applyPunchRounding("2026-09-16T08:06:00Z", punchRules({ roundingMinutes: 10 })),
     "2026-09-16T08:10:00.000Z",
   );
 });

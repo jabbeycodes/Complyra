@@ -1,6 +1,6 @@
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
-import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlerts, consentStatus, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlertEntityIds, consentAlertPairs, consentAlerts, consentStatus, isStaleConsentNotification, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, rightsPacketAlerts, rightsTrackingFor, validateRightsCompletion, validateRightsPacketStart, type RightsPacket, type RightsPacketCompletion } from "./rightsPackets";
 import { emptyCareData, canViewCare, canViewScreening, canManageCare, canApproveCare, canAcknowledgeCare, validateCareDraft, validateScreening, overdueCare, screeningStatus, type CareAction, type CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
@@ -91,13 +91,17 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
   capabilityForRoleKey,
   canGrantRole,
+  canReadAsAuditor,
   checkRoleTemplateUpdate,
   defaultPermissions,
   hasPermission,
+  hasHubTeamPermission,
   isRoleKey,
   type AgencyRole,
   type PermissionKey,
@@ -118,6 +122,7 @@ import {
   normalizeTaskTitle,
   progressNoteProblem,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -151,6 +156,8 @@ import {
   type HouseCardMonthClose,
 } from "./houseCard";
 import {
+  assertPersonalSpendingCloseBalance,
+  assertPersonalSpendingSpendWithinBalance,
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
@@ -165,7 +172,8 @@ import {
   type PersonalSpendingMonthClose,
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { assignedSiteIds, canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import {
   canActAtSite,
   canReadIndividual,
@@ -368,6 +376,7 @@ import {
   canCorrectDoseMark,
   canLogDoseException,
   canLogPrnDose,
+  canOverseeTraining,
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
@@ -388,6 +397,7 @@ import {
   blockForShiftLabel,
   shiftBlocksForSite,
   consecutiveRefusals,
+  alreadyMarkedDoseMessage,
   marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
@@ -395,6 +405,10 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { readLocalCoverage } from "./localSchedule";
+import {
+  MED_ADMIN_CLEARANCE_MESSAGE,
+  roleRequiresMedClearance,
+} from "./medClearance";
 import {
   applyLatenessPoint,
   clockInIsLate,
@@ -407,7 +421,7 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeRearmDue, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -925,13 +939,18 @@ export interface ComplyraApi {
   ): Promise<import("./types").MedDoseMark[]>;
   /** Issue #76 — mark a scheduled dose Given / Missed / LOA / On hold.
    * A first mark recorded after the dose window ends is stamped Late and
-   * requires a brief lateReason. */
+   * requires a brief lateReason.
+   * Wave 7M: a dose that already has a mark refuses a further mark attempt
+   * ("Already given by …") unless the caller passes baseMarkedAt equal to
+   * the stored mark's markedAt — the deliberate-correction signal that the
+   * caller saw the current mark and means to change it. */
   markMedDose(input: {
     medicationId: string;
     doseDate: string;
     doseTime: string;
     status: import("./types").MedDoseMarkStatus;
     lateReason?: string;
+    baseMarkedAt?: string;
   }): Promise<void>;
   // ===== MEDICATION ORDERS + RECONCILIATION =====
   /** Prescriber orders for one Individual, newest first. */
@@ -1201,7 +1220,7 @@ export interface ComplyraApi {
   /** Mark a requirement line N/A with a written reason (no blanks allowed). */
   waiveRequirementLine(requirementId: string, reason: string): Promise<void>;
   /**
-   * Correction flow: an administrator, compliance admin, or PM deletes the
+   * Correction flow: an administrator or PM deletes the
    * house manager's countersignature (with a written reason) to unlock a
    * signed sheet so bad lines can be fixed. The reason is written to the
    * audit trail. The sheet must be re-signed and re-countersigned after.
@@ -1599,7 +1618,7 @@ export interface ComplyraApi {
   logSignatureAudit(input: LogSignatureAuditInput): Promise<void>;
   /**
    * 13 CSR 65-3.050 audit rows visible to the session user (their own rows;
-   * hosted additionally exposes them to administrator/compliance_admin
+   * hosted additionally exposes them to administrator
    * verifiers via RLS).
    */
   getSignatureAuditLog(input?: {
@@ -1746,7 +1765,7 @@ export interface ComplyraApi {
   /* locked; the auditor scores the rest, PM/HM dispute with photo    */
   /* evidence, and the auditor resolves disputes.                       */
   /* ------------------------------------------------------------------ */
-  /** Start (or reopen) a draft audit for a site + quarter (qa.audit). */
+  /** Start (or reopen) a draft audit for a site + quarter (qa.schedule). */
   createQaAudit(
     siteId: string,
     year: number,
@@ -1961,6 +1980,14 @@ export interface WorkspaceView {
     role: string;
     site: string;
     siteId: string | null;
+    /**
+     * The staff member's membership-home site NAME, resolved against the
+     * full agency site set (not the viewer's access-scoped site list) —
+     * directory information the Binder Board uses to label a colleague's
+     * home. Null when the member has no home site, or (hosted) when the
+     * site's row is not readable by this viewer.
+     */
+    siteName: string | null;
     email: string;
     username: string;
     appRole: AppRole;
@@ -2086,6 +2113,63 @@ async function logoDataUrlFor(store: MemoryStore, agencyId: string) {
     return evergreenDemoLogoDataUrl();
   }
   return null;
+}
+
+/**
+ * Packet evidence (a signed consent / rights packet PDF, or a scanned paper
+ * packet up to 4 MB — PR #241) lives in the file store (IndexedDB), like
+ * every other uploaded file. Only a stub — name and type, empty base64 —
+ * stays in the metadata record. Inline base64 in that one localStorage
+ * record overflowed the browser's ~5 MB quota after a single branded
+ * packet PDF or paper scan ("Setting the value of 'complyra-v2-meta'
+ * exceeded the quota"), so signing and filing failed in the demo
+ * workspace. Stubs written before this change that still carry inline
+ * base64 keep working: they are returned as stored.
+ */
+function packetEvidencePath(kind: "consent" | "rights", id: string) {
+  return `packet-evidence/${kind}/${id}`;
+}
+
+function packetEvidenceStub(evidence: PacketEvidence): PacketEvidence {
+  return { name: evidence.name, mime: evidence.mime, base64: "" };
+}
+
+/**
+ * The evidence writer. A seam so tests can force the file-store write to
+ * fail and prove packet completion is failure-atomic (PR #252 review).
+ */
+export const packetEvidenceWriter = {
+  write: (path: string, file: File): Promise<void> => persistFile(path, file),
+};
+
+async function storePacketEvidenceBytes(
+  kind: "consent" | "rights",
+  id: string,
+  evidence: PacketEvidence,
+): Promise<void> {
+  const binary = atob(evidence.base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  await packetEvidenceWriter.write(
+    packetEvidencePath(kind, id),
+    new File([bytes], evidence.name, { type: evidence.mime }),
+  );
+}
+
+async function loadPacketEvidence(
+  kind: "consent" | "rights",
+  id: string,
+  stored: PacketEvidence,
+): Promise<PacketEvidence | null> {
+  if (stored.base64) return structuredClone(stored);
+  const blob = await readFile(packetEvidencePath(kind, id));
+  if (!blob) return null;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return { name: stored.name, mime: stored.mime, base64: btoa(binary) };
 }
 
 async function readFile(path: string): Promise<Blob | null> {
@@ -2264,6 +2348,20 @@ function assertPrivileged(session: SessionUser) {
 
 function assertCan(session: SessionUser, key: PermissionKey) {
   if (!hasPermission(session, key)) {
+    throw new Error("You do not have permission to do that.");
+  }
+}
+
+/**
+ * AUDITOR-NAV (wave 7U): training-roster READS (clearance list + another
+ * staffer's training profile) — hr.view_staff holders, or the auditor on
+ * its read path. Writes (initial/waive/assign/correct) keep their own gates.
+ */
+/** Training roster / cross-profile read: canViewTrainingRoster
+ *  (hr.view_staff, the PM, the auditor read path) or a training-oversight
+ *  role (batch 25). */
+function assertTrainingRosterRead(session: SessionUser) {
+  if (!canViewTrainingRoster(session) && !canOverseeTraining(session.roleKey)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -3023,7 +3121,10 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
   ensurePlanCollections(store);
   ensureClinicalRenewals(store);
   ensureTrainingChecklists(store);
-  ensureMonthlyCycles(store.db, todayIso());
+  // Monthly cycles open on the agency's Central date, never the UTC
+  // date — a UTC-month cycle created at 7 p.m. Central would displace
+  // the still-open previous month in the personal task queue.
+  ensureMonthlyCycles(store.db, centralTodayIso());
   ensureSiteReviews(store.db);
   applyMedicationCountdowns(store);
   const canViewPeople = hasPermission(session, "individuals.view");
@@ -3041,7 +3142,15 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
           : null))
       .filter((id): id is string => Boolean(id)),
   )];
-  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId && canAccessSite(session, row.id));
+  // A site-scoped viewer's workspace sites are their membership home
+  // PLUS any home an active staff assignment places them at — parity
+  // with hosted RLS (private.can_read_site's assignment branch) and
+  // with canReadIndividual. Membership-home-only here hid assigned
+  // homes from the Sites page and left their Individuals with an
+  // "Unknown site" name, which then dropped them from site-filtered
+  // lists (DSP-ASSIGNED-SCOPE, 2026-10-31).
+  const sites = store.db.sites.filter((row) => row.agencyId === session.agencyId &&
+    (canAccessSite(session, row.id) || assignmentSiteIds.includes(row.id)));
   const individuals = canViewPeople
     ? store.db.individuals.filter((row) => canReadIndividual(session, row, store.db.assignments, store.db.individuals))
     : [];
@@ -3135,6 +3244,16 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
         role: roleLabel(membership.roleKey ?? membership.role, profile.jobTitle),
         site: site?.name ?? "Agency-wide",
         siteId: membership.siteId,
+        // Home-site NAME from the full agency site set: the viewer's
+        // access-scoped `sites` list above must not decide whether a
+        // colleague "has" a home (the Binder Board's "No home assigned"
+        // defect — a colleague at a house the viewer cannot open still
+        // has that home).
+        siteName: membership.siteId
+          ? (store.db.sites.find(
+              (s) => s.id === membership.siteId && s.agencyId === session.agencyId,
+            )?.name ?? null)
+          : null,
         email: profile.email,
         username: profile.username,
         appRole: membership.role,
@@ -3416,7 +3535,13 @@ export class LocalApi implements ComplyraApi {
         await persistMeta(this.store);
         return structuredClone({ id: packet.id, snapshot: packet.snapshot });
     }
-    private completeLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, external: boolean) {
+    /**
+     * Every check a packet completion makes, with NO writes: the evidence
+     * bytes are stored only after this passes, and the packet transitions
+     * only after they are stored, so a failed file write leaves the
+     * packet exactly as it was — still open, retryable (PR #252 review).
+     */
+    private prepareLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, external: boolean) {
         if (packet.signedAt)
             throw new Error('Signed packets are immutable.');
         validatePacketSubmission(choices, signer);
@@ -3424,18 +3549,38 @@ export class LocalApi implements ComplyraApi {
         if (signer.signedOn > packet.snapshot.reviewOn)
             throw new Error('Signing date is after the packet review date.');
         const db = this.store.db;
-        db.consents ??= [];
+        const consents = db.consents ?? [];
         const actor = external ? null : assertSession(this.store).userId;
         const now = new Date().toISOString();
         const versions: import("./consents").ConsentRecord[] = [];
         for (const item of PACKET_ITEMS) {
-            const previous = [...db.consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !db.consents!.some(n => n.supersedesId === r.id && n.activatedAt));
+            const previous = [...consents].reverse().find(r => r.agencyId === packet.agencyId && r.individualId === packet.individualId && r.typeId === item.typeId && r.activatedAt && !consents.some(n => n.supersedesId === r.id && n.activatedAt));
             versions.push({ id: crypto.randomUUID(), agencyId: packet.agencyId, individualId: packet.individualId, typeId: item.typeId, packetId: packet.id,
                 covers: item.text, outcome: choices[item.key], giver: signer.authority === 'Self' ? 'individual' : signer.authority === 'Guardian' ? 'guardian' : 'representative',
                 giverName: signer.printedName, relationship: signer.authority + (signer.authorityOther ? ': ' + signer.authorityOther : ''), signedOn: signer.signedOn,
                 effectiveOn: packet.snapshot.effectiveOn, reviewOn: packet.snapshot.reviewOn, supersedesId: previous?.id ?? null, createdBy: packet.createdBy, createdAt: now, activatedBy: actor, activatedAt: now });
         }
-        for (const version of versions) assertSingleConsentActivation(version, [...db.consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
+        for (const version of versions) assertSingleConsentActivation(version, [...consents, ...versions.filter(v => v.id !== version.id)], db.consentRevocations ?? []);
+        return { versions, now };
+    }
+    /**
+     * The packet transition — run only after the evidence bytes are stored.
+     *
+     * Everything is RE-PREPARED here against the current register (PR #252
+     * review): while the bytes were being written, another packet for the
+     * same Individual may have completed, so the predecessor links and the
+     * single-active-version check computed before the await are stale.
+     * prepareLocalPacket + the writes below run with no await between them,
+     * so nothing can interleave with this commit.
+     */
+    private applyLocalPacket(packet: ConsentPacket, choices: PacketChoices, signer: PacketSignature, evidence: PacketEvidence, external: boolean) {
+        // An external signer's link must still be live after the await (a
+        // manager may have revoked it, or another tab signed through it).
+        if (external && !this.store.db.consentPacketTokens?.[packet.id])
+            throw new Error('Signing link is unavailable or expired.');
+        const { versions, now } = this.prepareLocalPacket(packet, choices, signer, external);
+        const db = this.store.db;
+        db.consents ??= [];
         db.consents.push(...versions);
         packet.choices = structuredClone(choices);
         packet.signer = structuredClone(signer);
@@ -3444,7 +3589,8 @@ export class LocalApi implements ComplyraApi {
         packet.status = 'filed';
         packet.evidenceName = evidence.name;
         db.consentPacketEvidence ??= {};
-        db.consentPacketEvidence[packet.id] = structuredClone(evidence);
+        // A stub only — the bytes go to the file store (see packetEvidencePath).
+        db.consentPacketEvidence[packet.id] = packetEvidenceStub(evidence);
         delete db.consentPacketTokens?.[packet.id];
         this.packetAudit(packet.id, 'signed', signer);
         this.packetAudit(packet.id, 'filed', signer);
@@ -3454,10 +3600,15 @@ export class LocalApi implements ComplyraApi {
     async signConsentPacket(token: string, choices: PacketChoices, signer: PacketSignature) {
         const packet = await this.packetFromToken(token);
         validatePacketSubmission(choices, signer);
-        const pdf = buildConsentPacketPdf(packet.snapshot, choices, signer);
+        const pdf = buildConsentPacketPdf(packet.snapshot, choices, signer, {
+            logoDataUrl: await logoDataUrlFor(this.store, packet.agencyId),
+        });
         const base64 = pdf.output('datauristring').split(',')[1];
         const evidence = { name: 'Signed consent packet.pdf', mime: 'application/pdf', base64 };
-        this.completeLocalPacket(packet, choices, signer, evidence, true);
+        // Fail fast before any write; apply re-prepares after the await.
+        this.prepareLocalPacket(packet, choices, signer, true);
+        await storePacketEvidenceBytes('consent', packet.id, evidence);
+        this.applyLocalPacket(packet, choices, signer, evidence, true);
         await persistMeta(this.store);
         return evidence;
     }
@@ -3466,16 +3617,20 @@ export class LocalApi implements ComplyraApi {
         const { packet } = this.packetForWrite(id);
         if (packet.status === 'draft')
             throw new Error('Generate the packet before filing.');
-        this.completeLocalPacket(packet, choices, signer, evidence, false);
+        // Fail fast before any write; apply re-prepares after the await.
+        this.prepareLocalPacket(packet, choices, signer, false);
+        await storePacketEvidenceBytes('consent', packet.id, evidence);
+        this.applyLocalPacket(packet, choices, signer, evidence, false);
         await persistMeta(this.store);
     }
     async getConsentPacketEvidence(id: string) {
         if (!(await this.listConsentPackets()).some(p => p.id === id))
             throw new Error('Packet not found.');
-        const evidence = this.store.db.consentPacketEvidence?.[id];
+        const stored = this.store.db.consentPacketEvidence?.[id];
+        const evidence = stored ? await loadPacketEvidence('consent', id, stored) : null;
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return evidence;
     }
     async listRightsPackets() {
         const session = assertSession(this.store);
@@ -3510,6 +3665,14 @@ export class LocalApi implements ComplyraApi {
     private async completeRightsPacket(packet: RightsPacket, input: RightsPacketCompletion, evidence: PacketEvidence | null) {
         const fields = rightsCompletionFields(structuredClone(input));
         validateRightsCompletion(fields);
+        // Store the evidence bytes BEFORE any packet change: a failed file
+        // write must leave the packet awaiting signature and retryable.
+        if (evidence) {
+            await storePacketEvidenceBytes('rights', packet.id, evidence);
+            // Re-checked after the await: another completion may have landed.
+            if (packet.status !== 'awaiting_signature')
+                throw new Error('Completed rights packets are immutable. Start a new packet for the next year.');
+        }
         const now = new Date().toISOString();
         packet.reviewedBy = fields.reviewedBy.trim();
         // The manager-typed date is authoritative: stored exactly as
@@ -3522,7 +3685,8 @@ export class LocalApi implements ComplyraApi {
             packet.filedAt = now;
             packet.evidenceName = evidence.name;
             this.store.db.rightsPacketEvidence ??= {};
-            this.store.db.rightsPacketEvidence[packet.id] = structuredClone(evidence);
+            // A stub only — the bytes go to the file store (see packetEvidencePath).
+            this.store.db.rightsPacketEvidence[packet.id] = packetEvidenceStub(evidence);
         }
         else {
             packet.status = 'signed';
@@ -3544,10 +3708,11 @@ export class LocalApi implements ComplyraApi {
     async getRightsPacketEvidence(id: string) {
         if (!(await this.listRightsPackets()).some(p => p.id === id))
             throw new Error('Rights packet not found.');
-        const evidence = this.store.db.rightsPacketEvidence?.[id];
+        const stored = this.store.db.rightsPacketEvidence?.[id];
+        const evidence = stored ? await loadPacketEvidence('rights', id, stored) : null;
         if (!evidence)
             throw new Error('No signed evidence filed.');
-        return structuredClone(evidence);
+        return evidence;
     }
     async getConsents(): Promise<ConsentRegister> {
         const session = assertSession(this.store);
@@ -3596,6 +3761,7 @@ export class LocalApi implements ComplyraApi {
             db.consents.push({ ...structuredClone(draft), id, agencyId: session.agencyId, createdBy: session.userId, createdAt: new Date().toISOString(), activatedBy: null, activatedAt: null });
         }
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
         return id;
     }
     async activateConsent(id: string) {
@@ -3607,6 +3773,7 @@ export class LocalApi implements ComplyraApi {
         row.activatedAt = new Date().toISOString();
         row.activatedBy = session.userId;
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async revokeConsent(id: string, revokedOn: string, reason: string) {
         const { row, session } = this.consentForWrite(id);
@@ -3618,6 +3785,7 @@ export class LocalApi implements ComplyraApi {
             throw new Error('This consent is already revoked.');
         this.store.db.consentRevocations.push({ consentId: id, revokedOn, reason: reason.trim(), revokedBy: session.userId, revokedByName: session.fullName });
         await persistMeta(this.store);
+        await this.sweepConsentAlerts();
     }
     async saveConsentTypes(types: ConsentType[]) {
         const session = assertSession(this.store);
@@ -3637,11 +3805,19 @@ export class LocalApi implements ComplyraApi {
         if (!canManageConsents(session.roleKey))
             return;
         const register = await this.getConsents();
-        for (const payload of consentAlerts(register, this.store.db.memberships))
+        for (const payload of consentAlerts(register, this.store.db.memberships)) {
+            // Wave 7B: before the fresh alert lands, retire the same gap's
+            // unread sibling alerts for this recipient (a consent must not
+            // sit in the bell as both "missing" and "expiring").
+            if (payload.entityType === 'consent' && payload.entityId)
+                this.retireConsentAlertSiblings(payload, consentAlertEntityIds(register, payload.entityId));
             this.pushRecognitionNotification(payload);
+        }
+        const outstandingPacketIds = new Set<string>();
         for (const packet of await this.listConsentPackets()) {
             if (!packetOutstanding(packet))
                 continue;
+            outstandingPacketIds.add(packet.id);
             const person = register.individuals.find(p => p.id === packet.individualId);
             if (!person)
                 continue;
@@ -3656,6 +3832,22 @@ export class LocalApi implements ComplyraApi {
         }));
         for (const payload of rightsPacketAlerts(rightsPeople, this.store.db.memberships))
             this.pushRecognitionNotification(payload);
+        // Retire stale consent alerts (batch 24): a stored consent.missing /
+        // consent.expiring row lives only while its (type, entity) pair is a
+        // current gap, and a consent.packet_outstanding row only while its
+        // packet is outstanding. Recording or renewing the consent — or the
+        // status flipping from "Expiring soon" to "Expired" — drops the old
+        // pair, so the alert clears for every recipient at once: the same
+        // lifecycle as missing-note notices retiring when the note is filed.
+        // Retire = mark read (never delete), the same as the hosted
+        // 20261031220000 sweep: a READ alert stays as history (wave 7B).
+        const livePairs = consentAlertPairs(register);
+        const retiredAt = new Date().toISOString();
+        for (const row of this.store.db.notifications ?? []) {
+            if (row.agencyId === session.agencyId && !row.readAt &&
+                isStaleConsentNotification(row, livePairs, outstandingPacketIds))
+                row.readAt = retiredAt;
+        }
         await persistMeta(this.store);
     }
 
@@ -3806,10 +3998,14 @@ export class LocalApi implements ComplyraApi {
 
   async listNotifications() {
     const session = assertSession(this.store);
-    await this.sweepOperatingReminders();
+    const medClearSiteIds = await this.sweepOperatingReminders();
     await this.sweepConsentAlerts();
     if (canViewCare(session.roleKey)) await this.sweepCareScreening();
-    return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey)).filter((row) => row.agencyId === session.agencyId &&
+    return (this.store.db.notifications ?? []).filter(row => !row.type.startsWith('consent.') || canManageConsents(session.roleKey))
+      // Wave 7M: an "Unmarked medication" row retires once the sweep in
+      // this same call verified the site has no overdue unmarked dose.
+      .filter((row) => !medUnrecordedRowRetired({ type: row.type, entityId: row.entityId }, medClearSiteIds))
+      .filter((row) => row.agencyId === session.agencyId &&
       (row.userId === session.userId || (!row.userId && row.roleKey === session.roleKey)))
       .map((row) => ({
         id: row.id, agency_id: row.agencyId, user_id: row.userId, role_key: row.roleKey,
@@ -4495,7 +4691,7 @@ export class LocalApi implements ComplyraApi {
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
     // HR-ROLES (2026-09-13): HR can assign operational roles, but granting
-    // administrator / compliance-administrator stays with administrators.
+    // administrator stays with administrators.
     if (!canGrantRole(session.roleKey, roleKey)) {
       throw new Error("Only an administrator can grant that role.");
     }
@@ -5035,7 +5231,7 @@ export class LocalApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = assertSession(this.store);
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or administrator can edit cover-page fields.");
     }
     const person = this.store.db.individuals.find((p) => p.id === individualId);
     if (!person) throw new Error("Individual not found.");
@@ -5436,6 +5632,8 @@ export class LocalApi implements ComplyraApi {
         signatureDataUrl,
       });
       if (problem) throw new Error(problem);
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
     }
     const timeSpent =
       clockDuration !== null
@@ -5475,6 +5673,31 @@ export class LocalApi implements ComplyraApi {
       }
       if (!canEditShiftNoteRow(session.roleKey, session.userId, existing)) {
         throw new Error("You can only edit your own shift notes.");
+      }
+      // An edit re-saves the note, so it must meet the same integrity
+      // rules as a new note (batch 37): a body, a timeframe that is not
+      // in the future, and a signature on the finished record.
+      if (!input.summary.trim()) {
+        throw new Error(
+          "Describe what the person did and how you supported a goal in the current PCSP.",
+        );
+      }
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
+      if (!existing.signatureDataUrl && !signatureDataUrl) {
+        const adopted = await this.getMySignature();
+        if (adopted) {
+          try {
+            signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+          } catch {
+            signatureDataUrl = "";
+          }
+        }
+      }
+      if (!existing.signatureDataUrl && !signatureDataUrl) {
+        throw new Error(
+          "Adopt your signature before saving a progress note. A printed name is not a signature.",
+        );
       }
       existing.noteDate = input.noteDate;
       existing.shift = shift;
@@ -6305,6 +6528,23 @@ export class LocalApi implements ComplyraApi {
       );
   }
 
+  /**
+   * Medication-administration clearance gate (see ./medClearance): a DSP
+   * whose training is not cleared — including a hire with no training
+   * record at all — cannot record doses. Keys off the same
+   * getStaffTrainingProfile().clearedForInRatio that renders the
+   * Training page's NOT CLEARED state. Oversight roles return at once.
+   */
+  private async assertMedAdministrationCleared(
+    session: SessionUser,
+  ): Promise<void> {
+    if (!roleRequiresMedClearance(session.roleKey)) return;
+    const profile = await this.getStaffTrainingProfile(session.userId);
+    if (!profile.clearedForInRatio) {
+      throw new Error(MED_ADMIN_CLEARANCE_MESSAGE);
+    }
+  }
+
   async markMedDose(
     input: Parameters<ComplyraApi["markMedDose"]>[0],
   ): Promise<void> {
@@ -6312,6 +6552,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("Your role cannot mark medications.");
     }
+    await this.assertMedAdministrationCleared(session);
     if (med.kind !== "scheduled") {
       throw new Error("Only scheduled medications are marked on the MAR.");
     }
@@ -6339,8 +6580,18 @@ export class LocalApi implements ComplyraApi {
         m.doseTime === input.doseTime,
     );
     const now = new Date().toISOString();
-    if (existing && !canCorrectDoseMark(session.roleKey, session.userId, existing)) {
-      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+    if (existing) {
+      // Wave 7M: a mark attempt that is not based on the stored mark (no
+      // base, or a base from a mark that has since changed) is a stale
+      // second attempt, not a correction — refuse it gracefully instead of
+      // silently overwriting the original giver and time. Only a caller
+      // who passes the exact markedAt they saw is correcting deliberately.
+      if (!input.baseMarkedAt || input.baseMarkedAt !== existing.markedAt) {
+        throw new Error(alreadyMarkedDoseMessage(existing));
+      }
+      if (!canCorrectDoseMark(session.roleKey, session.userId, existing)) {
+        throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+      }
     }
     // A first mark recorded after the dose window ended is stamped Late
     // and must carry a brief reason; corrections keep the original stamp
@@ -6561,6 +6812,38 @@ export class LocalApi implements ComplyraApi {
         agencyId: view.agencyId,
       });
     }
+    // The house managers of the order's home get their own copies,
+    // addressed personally and scoped to that home: a house_manager role
+    // broadcast would reach every home in the agency, and previously the
+    // HM of the home received nothing at all (simulation wave 4A
+    // follow-up). Same recipient rule as HostedApi
+    // (houseManagerRecipientIds in operatingReminders).
+    const person = this.store.db.individuals.find(
+      (row) => row.id === view.individualId && row.agencyId === view.agencyId,
+    );
+    if (!person) return;
+    const memberships: ReminderMembership[] = this.store.db.memberships
+      .filter((m) => m.agencyId === view.agencyId)
+      .map((m) => ({
+        userId: m.userId,
+        role: m.roleKey ?? m.role,
+        siteId: m.siteId,
+        expiresOn: m.expiresOn,
+      }));
+    for (const userId of houseManagerRecipientIds(memberships, person.siteId, todayIso())) {
+      this.notifyRole({
+        userId,
+        roleKey: null,
+        type,
+        title,
+        body,
+        deepLink: "/medication-orders",
+        entityType: "medication_order",
+        entityId: view.id,
+        dedupeKey: `${type}:house_manager:${userId}:${view.id}:${when}`,
+        agencyId: view.agencyId,
+      });
+    }
   }
 
   async listMedicationOrders(individualId: string): Promise<MedicationOrder[]> {
@@ -6607,7 +6890,8 @@ export class LocalApi implements ComplyraApi {
       )
       .map((row) => this.medOrderView(row, today));
     // No cron: when a reviewer opens the worklist, raise the expiring / expired
-    // alert for the nurse and Program Manager. Deduped per order + review date.
+    // alert for the nurse and Program Manager roles and for the house
+    // managers of each order's home. Deduped per recipient + order + date.
     for (const view of views) {
       if (view.expiry !== "ok") this.notifyOrderReview(view);
     }
@@ -7379,6 +7663,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const med = this.store.db.medications.find((row) => row.id === medicationId);
     if (!med || med.kind !== "prn") {
       throw new Error("PRN medication not found.");
@@ -7483,6 +7768,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const med = this.store.db.medications.find((row) => row.id === medicationId);
     if (!med || med.kind !== "prn") throw new Error("PRN medication not found.");
     accessibleIndividual(this.store, session, med.individualId);
@@ -7525,7 +7811,7 @@ export class LocalApi implements ComplyraApi {
     sourceKey: string;
   }) {
     const session = assertSession(this.store);
-    if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
+    if (input.staffId !== session.userId && !hasHubTeamPermission(session, "hub.view_team")) {
       throw new Error("You cannot record a clock-in point for someone else.");
     }
     const rules = this.agencyOperatingRules();
@@ -7699,6 +7985,11 @@ export class LocalApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: the checklist owner can never countersign
+      // their own checklist (simulation batch 24).
+      if (row.staffUserId === session.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!row.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
@@ -8710,6 +9001,14 @@ export class LocalApi implements ComplyraApi {
   }
 
   async resetWorkspace() {
+    // Wave 7N (batches 76/78): the reset is destructive and
+    // workspace-level — administrators only, enforced here at the data
+    // boundary as well as in the Settings UI (canResetSampleWorkspace).
+    // HostedApi refuses it for everyone.
+    const session = assertSession(this.store);
+    if (session.roleKey !== "administrator") {
+      throw new Error("Only an administrator can reset the sample workspace.");
+    }
     this.store.db = cloneSeed();
     this.store.files.clear();
     this.store.sessionUserId = null;
@@ -8999,7 +9298,10 @@ export class LocalApi implements ComplyraApi {
 
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = assertSession(this.store);
-    if (session.userId !== userId) assertCan(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's follows the
+    // roster rule (hr.view_staff, a training-oversight role — batch 25 —
+    // or the auditor read path — wave 7U).
+    if (session.userId !== userId) assertTrainingRosterRead(session);
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
     const today = new Date().toISOString().slice(0, 10);
@@ -9083,25 +9385,30 @@ export class LocalApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
-    assertCan(session, "hr.view_staff");
-    // Roster comes from the agency's staff memberships — not only from staff
-    // who already have training assigned — so "All staff" never renders an
-    // empty table while the agency has people.
-    const memberships = this.store.db.memberships.filter(
-      (row) =>
-        row.agencyId === session.agencyId &&
-        (!siteId || row.siteId === siteId),
-    );
-    const userIds = [...new Set(memberships.map((row) => row.userId))];
+    assertTrainingRosterRead(session);
+    const entries = trainingRosterEntries({
+      session,
+      memberships: this.store.db.memberships.filter((row) => row.agencyId === session.agencyId),
+      assignments: this.store.db.assignments.filter((row) => row.agencyId === session.agencyId),
+      individualSiteById: new Map(this.store.db.individuals.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const siteNameOf = (id: string) =>
+      this.store.db.sites.find((row) => row.id === id)?.name ?? "Unknown site";
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
         siteName: siteId
-          ? (this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site")
-          : profile.siteNames.join(", ") || "—",
+          ? siteNameOf(siteId)
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : siteIds.map(siteNameOf).join(", ") || "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,
@@ -9147,7 +9454,7 @@ export class LocalApi implements ComplyraApi {
         session.userId !== requirement.userId
       ) {
         throw new Error(
-          "Only the assigned staff member, an administrator, compliance admin, house manager, or PM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, house manager, or PM can edit a completed training line.",
         );
       }
       Object.assign(existing, {
@@ -9282,7 +9589,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     if (!canRequestTrainingCorrection(session.roleKey)) {
       throw new Error(
-        "Only an administrator, compliance admin, or PM can request a training correction.",
+        "Only an administrator or PM can request a training correction.",
       );
     }
     const coll = this.p2Collections();
@@ -9384,6 +9691,13 @@ export class LocalApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: a countersignature is a second person's
+      // attestation — the sheet's owner can never countersign their own
+      // sheet, even when they hold a manager role (simulation batch 24:
+      // an HM countersigned her own checklist).
+      if (session.userId === input.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!counter.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
@@ -9765,7 +10079,10 @@ export class LocalApi implements ComplyraApi {
   private assertCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind assertCertificateWrite (certificates.manage).
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }
@@ -11080,7 +11397,6 @@ export class LocalApi implements ComplyraApi {
     const ok =
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin;
     if (!ok) {
       throw new Error(
@@ -11093,7 +11409,6 @@ export class LocalApi implements ComplyraApi {
     return (
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin
     );
   }
@@ -11138,7 +11453,6 @@ export class LocalApi implements ComplyraApi {
     const today = todayIso();
     const oversightKeys = [
       "administrator",
-      "compliance_admin",
       "program_manager",
     ];
     return this.store.db.memberships
@@ -11399,12 +11713,19 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     const currentWeek = weekOfSundayIso(todayIso());
     const now = new Date().toISOString();
+    // Mirror of the hosted creation/update scope (migration
+    // 20261031200000): oversight roles roll every home forward; anyone
+    // else — the checklist page runs this under the HM's own session —
+    // only locks and opens rows assigned to themselves. A DSP session
+    // creates nothing.
+    const oversight = this.checklistOversight(session);
     let locked = 0;
     for (const row of this.weeklyChecklists()) {
       if (
         row.agencyId === session.agencyId &&
         row.status === "open" &&
-        row.weekOf < currentWeek
+        row.weekOf < currentWeek &&
+        (oversight || row.assignedToUserId === session.userId)
       ) {
         row.status = "overdue";
         row.updatedAt = now;
@@ -11421,6 +11742,7 @@ export class LocalApi implements ComplyraApi {
     );
     let created = 0;
     for (const m of hmAssignments) {
+      if (!oversight && m.userId !== session.userId) continue;
       const exists = this.weeklyChecklists().some(
         (c) =>
           c.agencyId === session.agencyId &&
@@ -11578,6 +11900,11 @@ export class LocalApi implements ComplyraApi {
     const rows = this.p6rows();
     const orders = this.medOrderRows();
     const today = todayIso();
+    // Delivery rows store only the recorder's user id; resolve display
+    // names from profiles so count history never prints a raw id.
+    const nameByUserId = new Map(
+      this.store.db.profiles.map((profile) => [profile.id, profile.fullName]),
+    );
     return this.store.db.medications
       .filter(
         (med) =>
@@ -11589,9 +11916,15 @@ export class LocalApi implements ComplyraApi {
         projectMedInventory({
           med,
           inventory: rows.find((row) => row.medicationId === med.id) ?? null,
-          deliveries: this.store.db.medicationDeliveries.filter(
-            (delivery) => delivery.medicationId === med.id,
-          ),
+          deliveries: this.store.db.medicationDeliveries
+            .filter((delivery) => delivery.medicationId === med.id)
+            .map((delivery) => ({
+              ...delivery,
+              recordedByName:
+                delivery.recordedByName ??
+                nameByUserId.get(delivery.recordedBy) ??
+                null,
+            })),
           // Local backend: logPrnDose decrements the medication row directly,
           // so projectMedInventory falls back to the row count for PRN meds.
           prnDoses: [],
@@ -11719,6 +12052,7 @@ export class LocalApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("You cannot log a dose exception.");
     }
+    await this.assertMedAdministrationCleared(session);
     const validated = validateDoseExceptionInput(input);
     const now = new Date().toISOString();
     const row: MedDoseException = {
@@ -11969,8 +12303,8 @@ export class LocalApi implements ComplyraApi {
   }
 
   /**
-   * Resolve the backfill request on a trip write: only administrators,
-   * compliance administrators, and house managers may bypass continuity.
+   * Resolve the backfill request on a trip write: only administrators and
+   * house managers may bypass continuity.
    * Returns whether this write is a backfill.
    */
   private async resolveBackfill(
@@ -12235,6 +12569,18 @@ export class LocalApi implements ComplyraApi {
     );
     if (!row) throw new Error("House card entry not found.");
     this.siteOrThrow(session, row.siteId);
+    // Voiding is a manager action (simulation batch 9): anyone who can
+    // close the month may void any entry; a recorder may void only
+    // their OWN entry (the quick-entry Undo and self-correction path) —
+    // never another staff member's.
+    if (
+      !canCloseHouseCardMonth(session.roleKey) &&
+      row.recordedBy !== session.userId
+    ) {
+      throw new Error(
+        "Only a manager can void another staff member's entry. Ask your house manager to void it.",
+      );
+    }
     if (row.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -12453,6 +12799,14 @@ export class LocalApi implements ComplyraApi {
     const person = accessibleIndividual(this.store, session, input.individualId);
     const draft = validatePersonalSpendingDraft(input, centralTodayIso());
     this.assertPersonalSpendingMonthOpen(session, person.id, draft.entryDate);
+    // A spend may not take the person's balance below $0 (batch 7).
+    assertPersonalSpendingSpendWithinBalance(
+      this.personalSpendingEntryRows().filter(
+        (row) =>
+          row.agencyId === session.agencyId && row.individualId === person.id,
+      ),
+      draft,
+    );
     const row: PersonalSpendingEntryRow = {
       id: crypto.randomUUID(),
       agencyId: session.agencyId,
@@ -12494,6 +12848,14 @@ export class LocalApi implements ComplyraApi {
     );
     if (!row) throw new Error("Personal spending entry not found.");
     accessibleIndividual(this.store, session, row.individualId);
+    // Wave 6 item 3: closers may void any entry; other recorders only
+    // their own (the mobile Undo path) — a DSP must not void entries
+    // recorded by managers or the admin.
+    if (!sessionCanVoidPersonalSpendingEntry(session, row)) {
+      throw new Error(
+        "Only the person who recorded an entry can undo it, or a manager can void it.",
+      );
+    }
     if (row.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -12523,6 +12885,17 @@ export class LocalApi implements ComplyraApi {
           draft.entryDate,
         );
       }
+      // The replacement is a new spend: it may not take the balance
+      // below $0 either (the entry it replaces counts as voided).
+      assertPersonalSpendingSpendWithinBalance(
+        this.personalSpendingEntryRows().filter(
+          (item) =>
+            item.agencyId === session.agencyId &&
+            item.individualId === row.individualId,
+        ),
+        draft,
+        row.id,
+      );
       replacementRow = {
         id: crypto.randomUUID(),
         agencyId: session.agencyId,
@@ -12623,6 +12996,16 @@ export class LocalApi implements ComplyraApi {
     const personEntries = this.personalSpendingEntryRows().filter(
       (row) => row.agencyId === session.agencyId && row.individualId === person.id,
     );
+    // A month cannot be signed closed on a negative balance (batch 7):
+    // the figure is computed here from the ledger, never client-given.
+    const closingBalanceCents = personalBalanceThroughCents(
+      personEntries,
+      personalMonthEndIso(draft.month),
+    );
+    assertPersonalSpendingCloseBalance(
+      closingBalanceCents,
+      monthLabel(draft.month),
+    );
     const now = new Date().toISOString();
     const close: PersonalSpendingMonthClose = {
       id: crypto.randomUUID(),
@@ -12630,10 +13013,7 @@ export class LocalApi implements ComplyraApi {
       siteId: person.siteId,
       individualId: person.id,
       month: draft.month,
-      closingBalanceCents: personalBalanceThroughCents(
-        personEntries,
-        personalMonthEndIso(draft.month),
-      ),
+      closingBalanceCents,
       printedName: session.fullName,
       signatureText: draft.signatureText,
       signedBy: session.userId,
@@ -13400,18 +13780,24 @@ export class LocalApi implements ComplyraApi {
    * Opening notifications repeats an unmarked-dose reminder, an open PRN
    * follow-up, and a missing Shift note. The same list is what the unattended
    * sweep writes when nobody has the app open. Each interval sends one notice
-   * per person. A missing note is one notice per day.
+   * per person, except an open PRN follow-up, which is one notice per dose per
+   * person that goes unread again each interval. A missing note is one notice
+   * per day.
    */
-  private async sweepOperatingReminders() {
+  /** Returns the ids of sites this pass verified clear of overdue
+   * unmarked doses (Wave 7M bell retirement); unloaded sites are absent. */
+  private async sweepOperatingReminders(): Promise<Set<string>> {
     const session = assertSession(this.store);
     const rules = this.agencyOperatingRules();
     const now = new Date();
     let added = false;
     const sites = [];
+    const medClearSiteIds = new Set<string>();
     for (const site of this.store.db.sites) {
       if (site.agencyId !== session.agencyId || !canAccessSite(session, site.id)) continue;
       try {
         const due = await this.getSiteDueItems(site.id);
+        if (!siteHasOverdueMedDose(due.items)) medClearSiteIds.add(site.id);
         sites.push({
           id: site.id,
           name: site.name,
@@ -13461,7 +13847,16 @@ export class LocalApi implements ComplyraApi {
         }];
       }),
     })) {
-      if (!notice.userId || (this.store.db.notifications ?? []).some((row) => row.dedupeKey === notice.dedupeKey)) continue;
+      if (!notice.userId) continue;
+      const existing = (this.store.db.notifications ?? []).find((row) => row.dedupeKey === notice.dedupeKey);
+      if (existing) {
+        if (notice.type === "med.prn_repeat" && prnNoticeRearmDue(existing.readAt, now, rules.prnReminderRepeatMinutes)) {
+          existing.readAt = null;
+          existing.createdAt = now.toISOString();
+          added = true;
+        }
+        continue;
+      }
       this.notifyRole({
         userId: notice.userId,
         roleKey: null,
@@ -13476,6 +13871,7 @@ export class LocalApi implements ComplyraApi {
       added = true;
     }
     if (added) await persistMeta(this.store);
+    return medClearSiteIds;
   }
 
   private notifyRole(input: {
@@ -13502,6 +13898,34 @@ export class LocalApi implements ComplyraApi {
       entityType: input.entityType ?? "medication",
       entityId: input.entityId,
       dedupeKey: input.dedupeKey,
+    });
+  }
+
+  /**
+   * Wave 7B (batches 51/52/58): retire the UNREAD sibling alerts of the
+   * consent gap a fresh alert is about to represent — the gap's other
+   * incarnation (person:type before a record exists, consent id after)
+   * or other flavor — for the SAME recipient only. A row anyone has read
+   * is history and stays. Mirrors the delete inside private.sweep_consents
+   * (migration 20261031250000).
+   */
+  private retireConsentAlertSiblings(
+    payload: { agencyId: string; userId: string | null; roleKey: string | null; dedupeKey: string },
+    entityIds: string[],
+  ) {
+    const db = this.store.db;
+    if (!db.notifications?.length) return;
+    const reads = db.notificationReads ?? {};
+    db.notifications = db.notifications.filter((row) => {
+      if (row.agencyId !== payload.agencyId) return true;
+      if (row.type !== 'consent.missing' && row.type !== 'consent.expiring') return true;
+      if (row.entityType !== 'consent' || !row.entityId || !entityIds.includes(row.entityId)) return true;
+      if (row.userId !== payload.userId || row.roleKey !== payload.roleKey) return true;
+      if (row.dedupeKey === payload.dedupeKey) return true;
+      const read = row.userId
+        ? row.readAt != null
+        : Object.keys(reads).some((key) => key.endsWith(`:${row.id}`));
+      return read;
     });
   }
 
@@ -13792,8 +14216,7 @@ export class LocalApi implements ComplyraApi {
     // "Appropriate managers": administrators see the whole agency; other
     // managers see only pairs they share an active site with.
     const isAgencyAdmin =
-      session.roleKey === "administrator" ||
-      session.roleKey === "compliance_admin";
+      session.roleKey === "administrator"
     const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
       a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
     const sitesOf = (userId: string): Set<string> => {
@@ -14980,7 +15403,9 @@ export class LocalApi implements ComplyraApi {
     quarter: number,
   ): Promise<QaAudit> {
     const session = assertSession(this.store);
-    assertCan(session, "qa.audit");
+    // Starting a review is a program-management act (qa.schedule);
+    // scoring/finalizing stay on qa.audit. See HostedApi.createQaAudit.
+    assertCan(session, "qa.schedule");
     this.assertQaSite(session, siteId);
     if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
       throw new Error("That quarter is not valid.");

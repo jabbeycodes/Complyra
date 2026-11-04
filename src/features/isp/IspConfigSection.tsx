@@ -205,7 +205,8 @@ function TaskEditor({
 }: {
   program: IspProgramView;
   pcspSeedTitles: string[];
-  onSave: (tasks: TaskDraft[]) => Promise<void>;
+  /** Resolves true when the save landed, false when it failed. */
+  onSave: (tasks: TaskDraft[]) => Promise<boolean>;
 }) {
   const [drafts, setDrafts] = useState<TaskDraft[]>(() =>
     program.tasks.map((task) => ({ title: task.title, instructions: task.instructions })),
@@ -273,7 +274,12 @@ function TaskEditor({
           type="button"
           className="button primary"
           onClick={() => {
-            void onSave(drafts).then(() => setEditing(false));
+            // Stay in the editor when the save failed — runIsp already
+            // surfaced the error; closing here would hide it and drop
+            // the typed tasks (PR #197 pattern).
+            void onSave(drafts).then((saved) => {
+              if (saved) setEditing(false);
+            });
           }}
         >
           Save tasks
@@ -416,7 +422,7 @@ function ProgramCard({
           <TaskEditor
             program={program}
             pcspSeedTitles={pcspSeedTitles}
-            onSave={(tasks) => runIsp(() => api.saveIspProgramTasks(program.id, tasks)).then(() => undefined)}
+            onSave={(tasks) => runIsp(() => api.saveIspProgramTasks(program.id, tasks))}
           />
         </div>
       )}
@@ -483,8 +489,9 @@ export default function IspConfigSection({
           individualId={individualId}
           scoringMethods={data.scoringMethods}
           onDone={async (action) => {
-            await runIsp(action);
-            setShowForm(false);
+            // Close only when the save landed (PR #197 pattern) — on
+            // failure the form stays open with the error visible.
+            if (await runIsp(action)) setShowForm(false);
           }}
           onNewMethod={() => setShowMethodForm(true)}
         />
@@ -493,8 +500,7 @@ export default function IspConfigSection({
         <ScoringMethodForm
           api={api}
           onDone={async (action) => {
-            await runIsp(action);
-            setShowMethodForm(false);
+            if (await runIsp(action)) setShowMethodForm(false);
           }}
         />
       )}

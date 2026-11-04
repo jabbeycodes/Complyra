@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ROLE_TEMPLATES, canGrantRole, grantableRoleTemplates } from "../data/permissions";
 import { useData } from "../data/DataProvider";
 
@@ -17,19 +17,43 @@ export default function AssignRoleControl({
 }) {
   const { api, workspace, refresh, session } = useData();
   // Grantable roles come from the canonical GRANT_RULES (src/data/permissions.ts):
-  // HR can assign operational roles but never sees administrator /
-  // compliance-administrator.
+  // HR can assign operational roles but never sees administrator.
   const grantableRoles = grantableRoleTemplates(session?.roleKey);
-  const [nextRole, setNextRole] = useState(
-    canGrantRole(session?.roleKey, roleKey) ? roleKey : "dsp",
-  );
+  // WAVE-7T (simulation batch 158): the draft must start on the member's
+  // actual current role. The old initializer fell back to "dsp" whenever the
+  // viewer could not grant the member's current role (e.g. HR or compliance
+  // viewing an administrator's row), so the select read "DSP" under a role
+  // column saying "Agency administrator" — and an untouched Save would have
+  // submitted that wrong role.
+  const canGrantCurrent = canGrantRole(session?.roleKey, roleKey);
+  const [nextRole, setNextRole] = useState(roleKey);
   const [nextSite, setNextSite] = useState(siteId ?? "");
   const [nextExpiry, setNextExpiry] = useState(expiresOn ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // Staff rows are keyed by member name, so this instance can be reused for
+  // a different member (or a changed assignment) after a refresh — re-sync
+  // the draft whenever the member's assignment changes underneath it.
+  useEffect(() => {
+    setNextRole(roleKey);
+    setNextSite(siteId ?? "");
+    setNextExpiry(expiresOn ?? "");
+  }, [userId, roleKey, siteId, expiresOn]);
+
   if (session?.userId === userId && roleKey === "administrator") {
     return <span className="muted">Administrator</span>;
+  }
+
+  if (!canGrantCurrent) {
+    // The viewer may assign roles, but not THIS member's current role —
+    // administrator / compliance-administrator stay with administrators
+    // (GRANT_RULES). There is no safe draft to offer: any select would have
+    // to open on a role the member does not hold. Render the actual role
+    // read-only instead of a form pre-set to a different role.
+    const label =
+      ROLE_TEMPLATES.find((row) => row.key === roleKey)?.name ?? roleKey;
+    return <span className="muted">{label}</span>;
   }
 
   return (

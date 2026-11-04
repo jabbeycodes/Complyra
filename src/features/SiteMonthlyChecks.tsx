@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { Badge, DueChip } from "../components";
-import { todayIso } from "../data/chart";
+import { centralTodayIso } from "../data/menuRecords";
 import {
   asMonthlyCollections,
   availableMonths,
@@ -46,7 +46,7 @@ export default function SiteMonthlyChecks({
   showDrills?: boolean;
 }) {
   const { api, session, workspace, refresh } = useData();
-  const today = todayIso();
+  const today = centralTodayIso();
   const [monthKey, setMonthKey] = useState(monthKeyFrom(today));
   const [error, setError] = useState("");
   if (!session || !workspace) return null;
@@ -329,7 +329,7 @@ function SafetyForm({
   onSave: (lines: SafetyLine[]) => void;
 }) {
   const [draft, setDraft] = useState(lines);
-  const today = todayIso();
+  const today = centralTodayIso();
   const grouped = useMemo(() => SAFETY_LINE_DEFS, []);
 
   function patch(key: SafetyLine["key"], next: Partial<SafetyLine>) {

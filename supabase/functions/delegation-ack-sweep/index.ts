@@ -17,7 +17,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
  * Authorization: the platform verifies the JWT (verify_jwt = true in
  * supabase/config.toml). Inside, the caller must EITHER present the
  * service_role key (external cron / pg_cron) OR be an active admin member
- * (administrator / compliance_admin).
+ * (administrator).
  *
  * NOT DEPLOYED. Built on the lifepath/delegation-templates branch for
  * Joshua's later explicit production approval.
@@ -31,7 +31,7 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const ADMIN_ROLE_KEYS = ["administrator", "compliance_admin"];
+const ADMIN_ROLE_KEYS = ["administrator"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

@@ -27,6 +27,7 @@ import type {
   LeaveType,
 } from "../../data/hr";
 import type { HrOpenShift } from "../../data/openShifts";
+import { shiftSpanOnServiceDate } from "../../data/dueItems";
 
 export const RIGHT_NOW_TIMEZONE = "America/Chicago";
 
@@ -43,6 +44,33 @@ export interface RightNowStaff {
   userId: string;
   fullName: string;
   siteId: string | null;
+  /** Role key — the in-ratio clearance flag applies to DSPs only. */
+  roleKey?: string;
+}
+
+/** One scoped home's overnight block, in minutes from its service date. */
+export interface TonightSiteInput {
+  siteId: string;
+  siteName: string;
+  overnightStartMin: number;
+  /** May exceed 1440 — the block ends after midnight. */
+  overnightEndMin: number;
+}
+
+export interface TonightCoverageEntry {
+  siteId: string;
+  siteName: string;
+  /**
+   * covered — at least one assigned staffer on tonight's overnight is not
+   * positively known to be uncleared. uncovered — no assigned shift touches
+   * the block at all. uncleared_only — every assigned staffer on it is a
+   * DSP positively read as not cleared for in-ratio work.
+   */
+  state: "covered" | "uncovered" | "uncleared_only";
+  /** Names of assigned staff whose shifts touch tonight's overnight. */
+  coveringNames: string[];
+  /** Subset of coveringNames positively read as not cleared (DSPs only). */
+  unclearedNames: string[];
 }
 
 export interface RightNowInputs {
@@ -72,6 +100,20 @@ export interface RightNowInputs {
   canApproveTimeOff: boolean;
   canReviewTimecards: boolean;
   canViewTeam: boolean;
+  /**
+   * Tonight's overnight coverage — the "no shift is uncovered" half of the
+   * all-clear verdict. The caller supplies each scoped home's overnight
+   * block, every shift in a window wide enough to hold tonight's instance
+   * (it may have started yesterday), and the clearance reads it could make.
+   * A staffer counts as uncleared ONLY on a positive read (DSP role +
+   * clearedForInRatio === false); an unreadable clearance never fabricates
+   * a flag. When these inputs are absent the helper judges nothing about
+   * tonight — the component is responsible for always supplying them and
+   * for failing the load (not guessing) when the shifts cannot be read.
+   */
+  tonightSites?: TonightSiteInput[];
+  tonightShifts?: HrShift[];
+  clearanceByStaffId?: ReadonlyMap<string, boolean>;
 }
 
 export interface ClockedInEntry {
@@ -122,7 +164,12 @@ export interface RightNowModel {
     missedPunches: number;
     total: number;
   };
-  /** Every segment empty AND nothing awaiting a decision. */
+  /** Tonight's overnight coverage per scoped home (empty when not judged). */
+  tonight: TonightCoverageEntry[];
+  /**
+   * Every segment empty, nothing awaiting a decision, AND tonight's
+   * overnight covered at every scoped home the caller asked about.
+   */
   allClear: boolean;
 }
 
@@ -182,6 +229,46 @@ function approvedHoursOn(req: HrTimeOffRequest, today: string): number | null {
     return FULL_DAY_HOURS;
   }
   return null;
+}
+
+/** Minutes into the Chicago day for the given instant. */
+function chicagoMinutesOfDay(iso: string): number {
+  // Naive stamps are already agency wall clock — read the written time.
+  if (!/([zZ]|[+-]\d{2}:?\d{2})$/.test(iso.trim())) {
+    const match = iso.match(/T(\d{1,2}):(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: RIGHT_NOW_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(iso));
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return (read("hour") % 24) * 60 + read("minute");
+}
+
+function addDaysIso(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const utc = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return utc.toISOString().slice(0, 10);
+}
+
+/**
+ * The service date of the overnight instance that is in progress now — or,
+ * during the day, the one that starts tonight. An instance belongs to the
+ * date it starts: before its end (after midnight) it is still yesterday's.
+ */
+function tonightServiceDate(
+  today: string,
+  nowMin: number,
+  startMin: number,
+  endMin: number,
+): string {
+  if (nowMin >= startMin) return today;
+  if (endMin > 1440 && nowMin < endMin - 1440) return addDaysIso(today, -1);
+  return today;
 }
 
 /** True when the staffer's latest open-session punch is an unmatched break_in. */
@@ -353,12 +440,59 @@ export function buildRightNowModel(inputs: RightNowInputs): RightNowModel {
   decisions.total =
     decisions.timeOff + decisions.corrections + decisions.missedPunches;
 
+  /* --------------------- Tonight's overnight ------------------------ */
+  // The all-clear line claims "no shift is uncovered", so it must answer
+  // for the one block the other segments cannot see: tonight's overnight.
+  // A block with no assigned shift — not even an open posting — used to be
+  // invisible here, and the strip declared all clear over an empty house.
+  const tonight: TonightCoverageEntry[] = [];
+  if (inputs.tonightSites && inputs.tonightShifts) {
+    const nowMin = chicagoMinutesOfDay(inputs.nowIso);
+    for (const site of inputs.tonightSites) {
+      if (!scope.has(site.siteId)) continue;
+      const serviceDate = tonightServiceDate(
+        inputs.today,
+        nowMin,
+        site.overnightStartMin,
+        site.overnightEndMin,
+      );
+      const covering = inputs.tonightShifts.filter((shift) => {
+        if (!shift.staffId || shift.status === "cancelled") return false;
+        if (shift.siteId !== site.siteId) return false;
+        const span = shiftSpanOnServiceDate(shift.startsAt, shift.endsAt, serviceDate);
+        return Boolean(
+          span && span.start < site.overnightEndMin && site.overnightStartMin < span.end,
+        );
+      });
+      const isUncleared = (staffId: string) =>
+        staffById.get(staffId)?.roleKey === "dsp" &&
+        inputs.clearanceByStaffId?.get(staffId) === false;
+      const coveringNames: string[] = [];
+      const unclearedNames: string[] = [];
+      for (const shift of covering) {
+        const name = nameOf(shift.staffId!) ?? "Staff";
+        if (!coveringNames.includes(name)) coveringNames.push(name);
+        if (isUncleared(shift.staffId!) && !unclearedNames.includes(name)) {
+          unclearedNames.push(name);
+        }
+      }
+      const state =
+        covering.length === 0
+          ? "uncovered"
+          : covering.some((shift) => !isUncleared(shift.staffId!))
+            ? "covered"
+            : "uncleared_only";
+      tonight.push({ siteId: site.siteId, siteName: site.siteName, state, coveringNames, unclearedNames });
+    }
+  }
+
   const allClear =
     clockedIn.length === 0 &&
     notArrived.length === 0 &&
     outToday.length === 0 &&
     openShiftsToday.length === 0 &&
-    decisions.total === 0;
+    decisions.total === 0 &&
+    tonight.every((entry) => entry.state === "covered");
 
-  return { clockedIn, notArrived, outToday, openShiftsToday, decisions, allClear };
+  return { clockedIn, notArrived, outToday, openShiftsToday, decisions, tonight, allClear };
 }

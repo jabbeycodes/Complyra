@@ -1,5 +1,5 @@
 import type { Appointment } from "./appointments";
-import type { DelegationForm, IndividualRecord } from "./types";
+import type { DelegationForm, IndividualRecord, SessionUser } from "./types";
 
 export type ObligationKind =
   | "pcsp"
@@ -542,7 +542,6 @@ export function proposeFromPcsp(input: {
 export function canEditCover(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }
@@ -559,7 +558,6 @@ export function canToggleDelegation(roleKey: string, role: string, canApprove: b
 export function canSeeRenewals(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -567,8 +565,15 @@ export function canSeeRenewals(roleKey: string) {
   ].includes(roleKey);
 }
 
+/** Who may upload renewal evidence (which resets the due date). Compliance
+ * administrators keep read-only chart access via canSeeRenewals but do not
+ * upload (founder ruling, batch 158); auditors are read-only throughout. */
 export function canUploadRenewal(roleKey: string) {
-  return canSeeRenewals(roleKey) && roleKey !== "auditor";
+  return (
+    canSeeRenewals(roleKey) &&
+    roleKey !== "auditor" &&
+    roleKey !== "compliance_admin"
+  );
 }
 
 export function canSignAsDelegatingRn(roleKey: string, role: string) {
@@ -578,6 +583,31 @@ export function canSignAsDelegatingRn(roleKey: string, role: string) {
 export function staffCanSignDelegation(item: ObligationItem) {
   if (item.kind !== "delegation") return true;
   return Boolean(item.enabled && item.rnSignedAt);
+}
+
+/**
+ * DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31: "DSPs only see what
+ * they are assigned"): is this delegation assigned to the viewer? A
+ * delegation names its recipients on the form roster — a row seeded
+ * from the recipient picker carries the staff user id; a hand-typed
+ * row is keyed by the printed name (the roster signing key). A
+ * signature record for the viewer on the item also counts. Used to
+ * narrow the Delegations page for DSPs to their own delegations.
+ */
+export function delegationAssignedToUser(
+  view: ObligationView,
+  user: Pick<SessionUser, "userId" | "fullName">,
+): boolean {
+  const item = view.item;
+  if (item.kind !== "delegation") return false;
+  if (view.mySignature && view.mySignature.userId === user.userId) return true;
+  const name = user.fullName.trim().toLowerCase();
+  return (item.delegationForm?.roster ?? []).some(
+    (row) =>
+      row.staffUserId === user.userId ||
+      (row.printName.trim().toLowerCase() !== "" &&
+        row.printName.trim().toLowerCase() === name),
+  );
 }
 
 export function addMonths(isoDate: string, months: number) {

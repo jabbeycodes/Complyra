@@ -105,8 +105,7 @@ export function canRecordBehavior(roleKey: string | null | undefined): boolean {
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 
@@ -116,8 +115,7 @@ export function canCorrectBehaviorEntry(roleKey: string | null | undefined): boo
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 
@@ -127,8 +125,7 @@ export function canManageBehaviorPlan(roleKey: string | null | undefined): boole
     roleKey === "house_manager" ||
     roleKey === "program_manager" ||
     roleKey === "nurse" ||
-    roleKey === "administrator" ||
-    roleKey === "compliance_admin"
+    roleKey === "administrator"
   );
 }
 

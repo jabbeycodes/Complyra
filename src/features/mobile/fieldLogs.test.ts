@@ -127,25 +127,23 @@ test("an auditor records in no domain, but the tile opens for health and GER rea
   assert.equal(bareAuditor.any, true);
 });
 
-test("a compliance admin reads both money trackers and records in neither", () => {
-  // Money reading alone opens the tile: with no permission keys at
-  // all, the compliance admin's only Quick log doors are the two
-  // money rows, both read-only (the GER read row stays closed without
-  // individuals.view, and compliance admins file nothing here).
-  const compliance = fieldLogAccess("compliance_admin", {});
+test("the retired compliance_admin role key opens no field-log doors", () => {
+  // The compliance_admin role was removed 2026-11-02 (its holders are
+  // administrators now). The retired key is in no role list anymore, so
+  // a session still carrying it — before its membership is migrated —
+  // reaches nothing here.
+  const retired = fieldLogAccess("compliance_admin", {});
   assert.deepEqual(
-    [compliance.houseCardView, compliance.houseCardRecord, compliance.spendingView, compliance.spendingRecord],
-    [true, false, true, false],
+    [retired.houseCardView, retired.houseCardRecord, retired.spendingView, retired.spendingRecord],
+    [false, false, false, false],
   );
-  // Compliance admins also read shift notes (canSeeShiftNotes) and
-  // record none — same read-only shape as the money trackers.
   assert.deepEqual(
-    [compliance.notesView, compliance.notesRecord],
-    [true, false],
+    [retired.notesView, retired.notesRecord],
+    [false, false],
   );
-  assert.equal(compliance.menu, false);
-  assert.equal(compliance.gerCreate, false);
-  assert.equal(compliance.any, true);
+  assert.equal(retired.menu, false);
+  assert.equal(retired.gerCreate, false);
+  assert.equal(retired.any, false);
 });
 
 test("HR records mileage only, and never reads GERs, health, or money", () => {

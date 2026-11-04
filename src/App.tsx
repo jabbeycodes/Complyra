@@ -1,5 +1,11 @@
 import PublicConsentSigning from "./features/consents/PublicConsentSigning";
 import Consents from "./features/consents/Consents";
+import { useConsentRegister } from "./features/consents/useConsentRegister";
+import {
+  consentRequirementItems,
+  consentTalliesFromItems,
+  type ConsentScoreInput,
+} from "./features/overview/consentCompliance";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
@@ -49,6 +55,7 @@ import Dashboard from "./Dashboard";
 import MobileShell, { type ShellView } from "./features/mobile/MobileShell";
 import PlatformBottomNav from "./features/mobile/PlatformBottomNav";
 import type { BottomNavId } from "./features/mobile/bottomNav";
+import { desktopTargetFor } from "./features/mobile/desktopSwitch";
 import "./features/mobile/mobile.css";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
@@ -68,12 +75,21 @@ import {
   formatDateLong,
 } from "./components";
 import {
+  auditRegisterCsvName,
   categories,
   exportCsv,
   metrics,
 } from "./domain";
 import type { Plan, Requirement } from "./domain";
-import { searchRequirements } from "./data/search";
+import { searchDirectory, searchRequirements } from "./data/search";
+import {
+  copilotDisclosure,
+  copilotEmptyText,
+  copilotFallbackText,
+  copilotScopeLabel,
+  copilotSuggestions,
+} from "./data/copilot";
+import { siteFilterForCreatedRecord } from "./data/siteFilterReveal";
 import AuthEntry from "./auth/AuthEntry";
 import { ComplyRerWordmark } from "./brand/ComplyrerBrand";
 import ChangePasswordScreen from "./auth/ChangePasswordScreen";
@@ -82,6 +98,10 @@ import AcknowledgmentSheet from "./features/AcknowledgmentSheet";
 import AddIndividualForm from "./features/AddIndividualForm";
 import AddSiteForm from "./features/AddSiteForm";
 import IndividualChart from "./features/IndividualChart";
+import {
+  defaultOverviewSiteFilter,
+  overviewSnapshotLabel,
+} from "./features/overview/overviewScope";
 import AppointmentsPage from "./features/appointments/AppointmentsPage";
 import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
@@ -89,6 +109,7 @@ import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import { AgencyAdminRules } from "./features/AgencyRulesPanel";
 import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
+import BrandLoader from "./components/BrandLoader";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
@@ -143,8 +164,9 @@ import RolesAccessPage from "./features/RolesAccessPage";
 import { useData } from "./data/DataProvider";
 import { furthestReminderDay } from "./data/rules";
 import { useOperatingRules } from "./features/employeeHub/useOvertimeLines";
-import { individualsAtSite, personalQueue, sitesVisibleTo } from "./data/dashboard";
+import { individualsAtSite, packetsVisibleTo, personalQueue, requirementsVisibleTo, sitesVisibleTo, staffVisibleTo } from "./data/dashboard";
 import { canCreateIndividual } from "./data/permissions";
+import { canResetSampleWorkspace } from "./data/workspaceReset";
 import { can, defaultLandingPage, pageVisible, roleLabel } from "./data/status";
 import { canSeeRenewals, renewalBadge } from "./data/planStack";
 import type { PacketDetail } from "./data/types";
@@ -173,11 +195,48 @@ function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+/**
+ * Recovery card shown when a workspace load stays unsettled past the
+ * stall threshold (see src/data/loadWatchdog.ts): same login-card pattern
+ * as the "Could not open the workspace" error card, so a wedged session
+ * restore or workspace request is escapable instead of an endless
+ * spinner.
+ */
+function WorkspaceStallCard({
+  onRetry,
+  onSignOut,
+}: {
+  onRetry: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-brand">
+          <ComplyRerWordmark size={36} />
+        </div>
+        <h1>Still loading</h1>
+        <p role="alert">
+          This is taking longer than usual. Your connection or session may be stuck.
+        </p>
+        <button className="button primary full" type="button" onClick={onRetry}>
+          <RotateCcw size={16} /> Try again
+        </button>
+        <div className="login-demo">
+          <button type="button" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const {
     session,
     workspace,
     loading,
+    loadStalled,
     error,
     api,
     refresh,
@@ -185,6 +244,12 @@ export default function App() {
     usingHostedBackend,
   } = useData();
   const operating = useOperatingRules(session);
+  // CONSENT SCORE (founder decision, 2026-11-02): the consent register
+  // feeds the compliance scores below; its state is adapted to a
+  // ConsentScoreInput once the visible sites are known (after the
+  // workspace gate). Until it is ready, composites withhold their
+  // consent-inclusive verdicts rather than present partial figures.
+  const consentRegisterState = useConsentRegister();
   const [page, setPage] = useState("Overview");
   const notifications = useWorkspaceNotifications();
   // MESSAGING: unread total for the nav badge + chart deep-link focus.
@@ -198,6 +263,8 @@ export default function App() {
     navigate("Employee Hub");
   };
   const [site, setSite] = useState("All sites");
+  // Wave 6 item 6: the Overview site filter preset lives in an effect
+  // below (after the session-change reset, so the preset wins).
   const [status, setStatus] = useState("All statuses");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -210,11 +277,18 @@ export default function App() {
   const [certAlerts, setCertAlerts] = useState<Record<string, number>>({});
   const [addPersonSiteId, setAddPersonSiteId] = useState<string | null>(null);
   const [person, setPerson] = useState<string | null>(null);
+  // Wave 6 item 2: a pending chart section deep-link (e.g. the mobile
+  // "Med count & supply" row opens the chart AT the medication board).
+  const [chartSection, setChartSection] = useState<string | null>(null);
   const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
   const [reportSitePreset, setReportSitePreset] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [packet, setPacket] = useState<PacketDetail | null>(null);
   const [globalQuery, setGlobalQuery] = useState("");
+  // Header search dropdown visibility is explicit state: it used to be a
+  // pure function of the query text, so it stayed rendered (over unrelated
+  // pages) until the query was manually cleared (batch 13).
+  const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   // Mobile shell view mode: "auto" follows the viewport width, "mobile" and
@@ -276,11 +350,9 @@ export default function App() {
       view:
         id === "tasks"
           ? "tasks"
-          : id === "meds"
-            ? "mar"
-            : id === "people"
-              ? "people"
-              : "home",
+          : id === "people"
+            ? "people"
+            : "home",
       sheet: id === "more",
     });
     if (viewMode === "desktop") pickViewMode("mobile");
@@ -330,6 +402,25 @@ export default function App() {
     setPlan(null);
     setSite("All sites");
   }, [session?.userId]);
+  // Wave 6 item 6: once the workspace loads, the Overview site filter
+  // starts scoped to the viewer's single home when they have exactly
+  // one (a house manager should not land on an agency-wide "All sites"
+  // preset). Declared AFTER the session-change reset above so the
+  // preset wins on sign-in; applied once per user, and any later
+  // manual change is left alone.
+  const sitePresetFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || !workspace) return;
+    if (sitePresetFor.current === session.userId) return;
+    sitePresetFor.current = session.userId;
+    setSite(
+      defaultOverviewSiteFilter(
+        sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds).map(
+          (row) => row.name,
+        ),
+      ),
+    );
+  }, [session, workspace]);
   // Only the explicit demo action starts a tour; ordinary sign-in stays direct.
   useEffect(() => {
     if (!demoMode) return;
@@ -407,6 +498,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
+        setSearchOpen(true);
         searchRef.current?.focus();
       }
       if (e.key === "Escape") {
@@ -429,6 +521,10 @@ export default function App() {
     document.body.classList.toggle("nav-open", mobileOpen);
     return () => document.body.classList.remove("nav-open");
   }, [mobileOpen]);
+  // The search dropdown never follows the user across pages (batch 13).
+  useEffect(() => {
+    setSearchOpen(false);
+  }, [page]);
   // KIOSK-TIME-CLOCK: punch-only standalone page — no session, no app
   // shell, no nav. Renders before every other gate so a kiosk never needs
   // a login. Leaving the hash unmounts the kiosk and restores the app.
@@ -439,7 +535,15 @@ export default function App() {
   const consentToken = /^#\/consent-sign\/([0-9a-f]{64})$/.exec(kioskHash)?.[1];
   if (consentToken) return <PublicConsentSigning token={consentToken} />;
   if (loading) {
-    return <div className="login-shell">Loading workspace…</div>;
+    if (loadStalled) {
+      return (
+        <WorkspaceStallCard
+          onRetry={() => void refresh().catch(() => {})}
+          onSignOut={() => void signOut()}
+        />
+      );
+    }
+    return <BrandLoader status="Loading workspace…" />;
   }
   if (!session) {
     return <AuthEntry />;
@@ -472,13 +576,36 @@ export default function App() {
         </div>
       );
     }
-    return <div className="login-shell">Loading workspace…</div>;
+    if (loadStalled) {
+      return (
+        <WorkspaceStallCard
+          onRetry={() => void refresh().catch(() => {})}
+          onSignOut={() => void signOut()}
+        />
+      );
+    }
+    return <BrandLoader status="Loading workspace…" />;
   }
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds);
+  const consentScore: ConsentScoreInput =
+    consentRegisterState.kind === "ready"
+      ? {
+          kind: "ready",
+          items: consentRequirementItems(
+            consentRegisterState.register,
+            new Map(sites.map((s) => [s.id, s.name] as const)),
+          ),
+        }
+      : consentRegisterState.kind === "excluded"
+        ? { kind: "excluded" }
+        : { kind: "unknown" };
   const individuals = workspace.individuals.filter((person) =>
     sites.some((row) => row.name === person.site),
   );
-  const staff = workspace.staff;
+  // Wave 6 item 4: the Staff directory follows the same site scoping as
+  // every other staff list (staffVisibleTo) — a house manager sees the
+  // staff of her homes, not the whole agency.
+  const staff = staffVisibleTo(session, workspace.staff, workspace.assignmentSiteIds);
   // One visible-staff collection drives BOTH the header count and the table
   // rows, so the two can never disagree when a site or search filter is set.
   const visibleStaff = staff.filter(
@@ -523,14 +650,46 @@ export default function App() {
   const canCompleteWork = can(session, "requirements.complete");
   const canExportAudit = can(session, "audit.export");
   const canResetPassword = can(session, "members.reset_password");
+  // Wave 7N (batches 76/78): the sample-workspace reset is destructive
+  // and workspace-level — administrator + local/demo mode only; hosted
+  // mode and every other role do not render it (or its Settings section).
+  const canResetWorkspace = canResetSampleWorkspace(session, usingHostedBackend);
   const visibleSiteNames = new Set(sites.map((row) => row.name));
-  const visibleRequirements = data.requirements.filter((r) =>
-    visibleSiteNames.has(r.site),
+  // DSP-ASSIGNED-SCOPE: a DSP's Requirements surface (list, category
+  // pages, search, counts) holds only requirements they own — see
+  // requirementsVisibleTo. Other roles keep the site-scoped list.
+  const visibleRequirements = requirementsVisibleTo(
+    session,
+    data.requirements.filter((r) => visibleSiteNames.has(r.site)),
   );
+  // DSP-ASSIGNED-SCOPE: the Acknowledgments page and its nav badge
+  // show a DSP only sheets carrying their own signature row.
+  const visiblePackets = packetsVisibleTo(session, workspace.packets);
   const scoped = visibleRequirements.filter(
     (r) => site === "All sites" || r.site === site,
   );
   const searchHits = searchRequirements(scoped, globalQuery);
+  // Directory hits (batch 13): people and homes, drawn only from
+  // collections already scoped to the caller's readable sites —
+  // `individuals` and `sites` are visibility-filtered above; staff are
+  // limited to the visible sites plus agency-wide memberships (no site),
+  // so search can never surface a record from a home the caller cannot
+  // open.
+  const visibleSiteIds = new Set(sites.map((row) => row.id));
+  const directoryHits = searchDirectory(
+    {
+      individuals: individuals.map((p) => ({
+        id: p.id,
+        name: p.name,
+        site: p.site,
+      })),
+      staff: staff
+        .filter((s) => s.siteId === null || visibleSiteIds.has(s.siteId))
+        .map((s) => ({ id: s.id, name: s.name, role: s.role, site: s.site })),
+      sites: sites.map((s) => ({ id: s.id, name: s.name })),
+    },
+    globalQuery,
+  );
   const alertItems = scoped.filter((r) =>
     ["Overdue", "Expired", "Pending review"].includes(r.status),
   );
@@ -583,6 +742,7 @@ export default function App() {
   function navigate(next: string, nextStatus = "All statuses") {
     if (!pageVisible(session!, next)) return;
     if (next !== "Individual chart") setPerson(null);
+    if (next !== "Individual chart") setChartSection(null);
     if (next !== "Site detail") setDetailSiteId(null);
     setPage(next);
     setStatus(nextStatus);
@@ -591,12 +751,23 @@ export default function App() {
     window.history.replaceState(null, "", `#${encodeURIComponent(next)}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  function openPersonChart(name: string) {
+  function openPersonChart(name: string, sectionId?: string) {
     setPerson(name);
+    setChartSection(sectionId ?? null);
     setPage("Individual chart");
     setQuery("");
     setMobileOpen(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!sectionId) window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  // Create-flow completion (simulation batches 2/3): the global site filter
+  // survives page changes, so a record created for a different house than
+  // the filtered one stays hidden in its list until a full page reload —
+  // the create looks like it failed. When a create lands, move the filter
+  // to the record's house, but only in that case: an unfiltered view and a
+  // same-house view are left exactly as the user set them.
+  function revealCreatedSite(siteName: string) {
+    const next = siteFilterForCreatedRecord(site, siteName);
+    if (next !== site) setSite(next);
   }
   function openSiteDetail(siteId: string) {
     setDetailSiteId(siteId);
@@ -736,12 +907,12 @@ export default function App() {
       understood
         ? {
             text: result.length
-              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${site === "All sites" ? "the sample agency" : site}. ${overdueCount} ${overdueCount === 1 ? "is" : "are"} overdue or expired. Open a source below to see the responsible person and next action.`
-              : "There are no matching requirements in the current sample data and site selection. This does not confirm that a care instruction is absent from a real plan.",
+              ? `I found ${result.length} matching ${result.length === 1 ? "requirement" : "requirements"} in ${copilotScopeLabel(demoMode, site)}. ${overdueCount} ${overdueCount === 1 ? "is" : "are"} overdue or expired. Open a source below to see the responsible person and next action.`
+              : copilotEmptyText(demoMode),
             items: result.slice(0, 8),
           }
         : {
-            text: "This preview can look up requirements, overdue work, delegations, equipment checks, and plan acknowledgments in the sample records. Try “What should we fix before an audit?”",
+            text: copilotFallbackText(demoMode),
             items: [],
           },
     );
@@ -818,7 +989,22 @@ export default function App() {
           workspace={workspace}
           queueItems={personalItems}
           onSignOut={() => void signOut()}
-          onDesktopView={() => pickViewMode("desktop")}
+          onDesktopView={({ view, siteId }) => {
+            // Batch 28: preserve the current screen + house scope —
+            // land on the desktop page for the same work in the same
+            // house, not whatever page the desktop hash last held.
+            const target = desktopTargetFor({
+              view,
+              siteId,
+              canPage: (page) => pageVisible(session, page),
+            });
+            pickViewMode("desktop");
+            if (target.page === "Site detail" && target.siteId) {
+              openSiteDetail(target.siteId);
+            } else {
+              navigate(target.page);
+            }
+          }}
           startView={shellStart.view}
           startSheetOpen={shellStart.sheet}
           nav={{
@@ -830,9 +1016,14 @@ export default function App() {
               setForceDesktop(true);
               openMyCompliance();
             },
-            openPersonChart: (name) => {
+            openHubTab: (tab) => {
               setForceDesktop(true);
-              openPersonChart(name);
+              setHubFocusTab(tab);
+              navigate("Employee Hub");
+            },
+            openPersonChart: (name, sectionId) => {
+              setForceDesktop(true);
+              openPersonChart(name, sectionId);
             },
             openSite: (siteId) => {
               setForceDesktop(true);
@@ -907,12 +1098,12 @@ export default function App() {
                     <span className="nav-count">{messageUnread}</span>
                   )}
                   {name === "Acknowledgments" &&
-                    workspace.packets.some((p) =>
+                    visiblePackets.some((p) =>
                       p.rows.some((row) => !row.signedAt && p.packet.status === "open"),
                     ) && (
                       <span className="nav-count">
                         {
-                          workspace.packets.filter((p) =>
+                          visiblePackets.filter((p) =>
                             p.rows.some((row) => !row.signedAt),
                           ).length
                         }
@@ -1009,25 +1200,109 @@ export default function App() {
             <div
               className="global-search"
               onClick={() => searchRef.current?.focus()}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setSearchOpen(false);
+                }
+              }}
             >
               <Search size={16} aria-hidden="true" />
               <input
                 ref={searchRef}
                 value={globalQuery}
-                onChange={(e) => setGlobalQuery(e.target.value)}
+                onChange={(e) => {
+                  setGlobalQuery(e.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setSearchOpen(false);
+                }}
                 placeholder="Search anything…"
-                aria-label="Search all requirements"
+                aria-label="Search people, homes, and requirements"
               />
               <kbd>⌘ K</kbd>
-              {globalQuery && (
+              {searchOpen && globalQuery && (
                 <div className="search-results">
-                  <div className="search-heading">Requirements and records</div>
+                  {directoryHits.some((h) => h.kind === "individual") && (
+                    <div className="search-heading">Individuals</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "individual")
+                    .map((h) => (
+                      <button
+                        key={`individual-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          openPersonChart(h.name);
+                        }}
+                      >
+                        <Users size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>{h.kind === "individual" ? h.site : ""}</small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {directoryHits.some((h) => h.kind === "staff") && (
+                    <div className="search-heading">Staff</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "staff")
+                    .map((h) => (
+                      <button
+                        key={`staff-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          navigate("Staff");
+                          if (h.kind === "staff") setQuery(h.name);
+                        }}
+                      >
+                        <Users size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>
+                            {h.kind === "staff" ? `${h.role}, ${h.site}` : ""}
+                          </small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {directoryHits.some((h) => h.kind === "site") && (
+                    <div className="search-heading">Homes</div>
+                  )}
+                  {directoryHits
+                    .filter((h) => h.kind === "site")
+                    .map((h) => (
+                      <button
+                        key={`site-${h.id}`}
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setGlobalQuery("");
+                          openSiteDetail(h.id);
+                        }}
+                      >
+                        <Building2 size={17} />
+                        <span>
+                          <strong>{h.name}</strong>
+                          <small>Home</small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
+                  {searchHits.length > 0 && (
+                    <div className="search-heading">Requirements and records</div>
+                  )}
                   {searchHits.map((r) => (
                       <button
                         key={r.id}
                         onClick={() => {
                           selectRequirement(r);
                           setGlobalQuery("");
+                          setSearchOpen(false);
                         }}
                       >
                         <FileText size={17} />
@@ -1043,7 +1318,7 @@ export default function App() {
                         <ChevronRight size={15} />
                       </button>
                     ))}
-                  {searchHits.length === 0 && (
+                  {searchHits.length === 0 && directoryHits.length === 0 && (
                     <p>No matching records. Try a name or site.</p>
                   )}
                 </div>
@@ -1058,11 +1333,12 @@ export default function App() {
           </div>
         </header>
         <main>
-          <Suspense fallback={<p role="status" className="loading-state">Loading workspace page…</p>}>
+          <Suspense fallback={<BrandLoader variant="compact" status="Loading workspace page…" />}>
           {page === "Overview" ? (
             <Dashboard
               items={scoped}
               allItems={visibleRequirements}
+              consentScore={consentScore}
               scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
@@ -1070,6 +1346,7 @@ export default function App() {
               individuals={individuals}
               site={site}
               personalItems={personalItems}
+              snapshotLabel={overviewSnapshotLabel(session)}
               // A house manager runs one home: their Overview opens already
               // focused on it (their visible sites are just that home), and
               // the coverage board does not render here — it belongs inside
@@ -1081,7 +1358,11 @@ export default function App() {
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
               onCopilot={() => setModal("copilot")}
-              onActivity={() => navigate("Activity log")}
+              onActivity={
+                pageVisible(session, "Activity log")
+                  ? () => navigate("Activity log")
+                  : undefined
+              }
             />
           ) : (
             <>
@@ -1220,9 +1501,26 @@ export default function App() {
                   <div className="people-grid">
                     {visibleIndividuals
                       .map((p) => {
-                        const pm = metrics(
-                          data.requirements.filter((r) => r.person === p.name),
-                        );
+                        // Consent currency counts toward this person's
+                        // readiness (founder decision, 2026-11-02): the
+                        // scored consent items join the person's pool.
+                        // While the register is unknown the card withholds
+                        // its verdict rather than present a partial one.
+                        const personConsentItems =
+                          consentScore.kind === "ready"
+                            ? consentScore.items.filter(
+                                (r) => r.person === p.name,
+                              )
+                            : [];
+                        const consentUnknown = consentScore.kind === "unknown";
+                        const personConsent =
+                          consentTalliesFromItems(personConsentItems);
+                        const pm = metrics([
+                          ...data.requirements.filter(
+                            (r) => r.person === p.name,
+                          ),
+                          ...personConsentItems,
+                        ]);
                         const renewals =
                           session && canSeeRenewals(session.roleKey)
                             ? (
@@ -1260,14 +1558,39 @@ export default function App() {
                             )}
                             <div className="person-card-progress">
                               <span>Compliance readiness</span>
-                              <strong>{pm.score}%</strong>
+                              <strong>
+                                {consentUnknown ? "—" : `${pm.score}%`}
+                              </strong>
                             </div>
                             <div className="progress-track">
-                              <span style={{ width: `${pm.score}%` }} />
+                              <span
+                                style={{
+                                  width: `${consentUnknown ? 0 : pm.score}%`,
+                                }}
+                              />
                             </div>
+                            {personConsent.total > 0 && (
+                              <p className="stack-help">
+                                Consents: {personConsent.current} of{" "}
+                                {personConsent.total} current
+                                {personConsent.notCurrent > 0
+                                  ? ` · ${personConsent.notCurrent} not current`
+                                  : ""}
+                              </p>
+                            )}
                             <div className="person-card-bottom">
-                              <span>{pm.total} requirements</span>
-                              {pm.overdue ? (
+                              <span>
+                                {pm.total}{" "}
+                                {personConsent.total > 0
+                                  ? "tracked items"
+                                  : "requirements"}
+                              </span>
+                              {consentUnknown ? (
+                                <span>
+                                  Consent records still loading — readiness
+                                  is not final.
+                                </span>
+                              ) : pm.overdue ? (
                                 <span className="overdue-text">
                                   {pm.overdue} need attention
                                 </span>
@@ -1293,6 +1616,7 @@ export default function App() {
                   <section className="panel intake-panel">
                     <AddIndividualForm
                       onCreated={(name, _uploaded, siteName) => {
+                        revealCreatedSite(siteName);
                         openPersonChart(name);
                         notify(`Individual added to ${siteName}.`);
                       }}
@@ -1309,6 +1633,7 @@ export default function App() {
                   individualId={
                     individuals.find((p) => p.name === person)?.id ?? ""
                   }
+                  initialSection={chartSection}
                   onBack={() => navigate("Individuals")}
                   onOpenMessageThread={(threadId) => {
                     setMessageFocus(threadId);
@@ -1753,8 +2078,8 @@ export default function App() {
                       disabled={!auditItems.length || auditFrom > auditTo}
                       onClick={() => {
                         download(
-                          "complyrer-sample-audit-register.csv",
-                          exportCsv(auditItems),
+                          auditRegisterCsvName(session?.agencyName ?? "Agency"),
+                          exportCsv(auditItems, session?.agencyName),
                         );
                         notify(
                           "Your filtered audit register has been downloaded.",
@@ -1787,7 +2112,7 @@ export default function App() {
                     description="One sheet per person. Export includes anyone who has not signed."
                   />
                   <section className="panel">
-                    {workspace.packets.length ? (
+                    {visiblePackets.length ? (
                       <div className="table-scroll">
                         <table>
                           <thead>
@@ -1801,7 +2126,7 @@ export default function App() {
                             </tr>
                           </thead>
                           <tbody>
-                            {workspace.packets
+                            {visiblePackets
                               .filter(
                                 (item) =>
                                   site === "All sites" ||
@@ -1852,7 +2177,11 @@ export default function App() {
                     ) : (
                       <Empty
                         title="No acknowledgment sheets yet"
-                        text="Approve an uploaded PCSP to build a roster from assigned staff."
+                        text={
+                          session.roleKey === "dsp"
+                            ? "No acknowledgment sheets are assigned to you."
+                            : "Approve an uploaded PCSP to build a roster from assigned staff."
+                        }
                       />
                     )}
                   </section>
@@ -2034,27 +2363,42 @@ export default function App() {
                     )}
                     <SignatureSettingsSection onSaved={notify} />
                     {/* Secondary/destructive chrome collapses by default so
-                        Settings reads as sections, not one long list (#110 Cut A). */}
-                    <Disclosure label="Advanced &amp; data" summary="Data handling · workspace reset">
-                      <div className="settings-row">
-                        <span>
-                          <strong>Data handling</strong>
-                          <small>
-                            Use fictional records only. This preview is not
-                            configured to store sensitive care data.
-                          </small>
-                        </span>
-                        <ShieldCheck size={20} />
-                      </div>
-                      {!usingHostedBackend && (
-                        <button
-                          className="button danger"
-                          onClick={() => setModal("reset")}
-                        >
-                          <RotateCcw size={16} /> Reset sample workspace
-                        </button>
-                      )}
-                    </Disclosure>
+                        Settings reads as sections, not one long list (#110 Cut A).
+                        Wave 7N (batches 76/78): this section carries the
+                        local sample workspace's reset — in the hosted app
+                        there is no reset to offer, so the section (and its
+                        "workspace reset" label) does not render for
+                        anyone; in local mode the reset itself is
+                        administrator-only (canResetSampleWorkspace). */}
+                    {!usingHostedBackend && (
+                      <Disclosure
+                        label="Advanced &amp; data"
+                        summary={
+                          canResetWorkspace
+                            ? "Data handling · workspace reset"
+                            : "Data handling"
+                        }
+                      >
+                        <div className="settings-row">
+                          <span>
+                            <strong>Data handling</strong>
+                            <small>
+                              Use fictional records only. This preview is not
+                              configured to store sensitive care data.
+                            </small>
+                          </span>
+                          <ShieldCheck size={20} />
+                        </div>
+                        {canResetWorkspace && (
+                          <button
+                            className="button danger"
+                            onClick={() => setModal("reset")}
+                          >
+                            <RotateCcw size={16} /> Reset sample workspace
+                          </button>
+                        )}
+                      </Disclosure>
+                    )}
                   </section>
                   {canManageAiSettings(session) && <AiSettingsPage />}
                 </>
@@ -2438,6 +2782,7 @@ export default function App() {
             onCreated={(name, uploaded, siteName) => {
               setAddPersonSiteId(null);
               setModal(null);
+              revealCreatedSite(siteName);
               openPersonChart(name);
               notify(
                 uploaded
@@ -2485,6 +2830,12 @@ export default function App() {
             }
             await refresh();
             setModal(null);
+            // The Review queue is scoped by the same global site filter:
+            // reveal the draft's house or the new draft is hidden there.
+            const draftPerson = individuals.find(
+              (p) => p.id === payload.individualId,
+            );
+            if (draftPerson) revealCreatedSite(draftPerson.site);
             navigate("Review queue");
             notify(
               "Draft created. Review and approve it before it becomes active.",
@@ -2531,14 +2882,14 @@ export default function App() {
             <h2>Ask about an individual, site, or requirement</h2>
           </div>
           <div className="copilot-disclosure">
-            Preview · Grounded lookups in sample records · {site}
+            {copilotDisclosure(demoMode, site)}
           </div>
           <div className="suggested-questions">
-            {[
-              "What should we fix before an audit?",
-              "Which delegations are expiring?",
-              "Who needs to acknowledge Ellis’s PCSP?",
-            ].map((q) => (
+            {copilotSuggestions({
+              demoMode,
+              individuals,
+              requirements: scoped,
+            }).map((q) => (
               <button key={q} onClick={() => askCopilot(q)}>
                 {q}
                 <ArrowUpRight size={15} />
@@ -2597,6 +2948,7 @@ export default function App() {
         <Modal title="Your notifications" onClose={() => setModal(null)}>
           <NotificationsPanel {...notifications}
             onMarkRead={(id) => void notifications.markRead(id)}
+            onMarkManyRead={(ids) => void notifications.markManyRead(ids)}
             onMarkAllRead={() => void notifications.markAllAsRead()}
             onRetry={() => void notifications.refresh()}
             onClose={() => setModal(null)}
@@ -2725,13 +3077,20 @@ export default function App() {
       {modal === "invite" && (
         <Modal title="Add a member" onClose={() => setModal(null)}>
           <InviteMemberForm
-            onCreated={() =>
-              notify("Member account created. Share the credentials only once.")
-            }
+            onCreated={() => {
+              // The Staff directory is agency-wide: a member created while
+              // a house filter or a search is active would stay hidden in
+              // the list until a full reload (simulation batch 2). Reset
+              // both so the new member is in the list when the dialog
+              // closes.
+              setSite("All sites");
+              setQuery("");
+              notify("Member account created. Share the credentials only once.");
+            }}
           />
         </Modal>
       )}
-      {modal === "reset" && (
+      {modal === "reset" && canResetWorkspace && (
         <Modal title="Reset sample workspace?" onClose={() => setModal(null)}>
           <p>
             This removes your local demo changes, including draft requirements

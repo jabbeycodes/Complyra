@@ -135,6 +135,34 @@ export function orderNeedsReview(
   return orderExpiry(order, today, leadDays) !== "ok";
 }
 
+const BOARD_LABEL_DATE = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/**
+ * The order-expiry line for a MAR medication fed by an order, worded the
+ * way the expiry notice describes it: "Order expires Nov 2, 2026" while
+ * the review date is approaching, "Order expired Oct 30, 2026" once it has
+ * passed. Null when the order needs no review attention (or the med has
+ * no dated active order) — the medication board renders this next to the
+ * supply line so an expiring order is visible where doses are worked, not
+ * only on the orders worklist. Text, never color alone.
+ */
+export function orderExpiryBoardLabel(
+  order: Pick<MedicationOrder, "status" | "endReviewDate">,
+  today = todayIso(),
+): string | null {
+  const expiry = orderExpiry(order, today);
+  if (expiry === "ok" || !order.endReviewDate) return null;
+  const when = BOARD_LABEL_DATE.format(
+    new Date(`${order.endReviewDate.slice(0, 10)}T12:00:00Z`),
+  );
+  return expiry === "expired" ? `Order expired ${when}` : `Order expires ${when}`;
+}
+
 /**
  * The medication-row shape an activated scheduled order projects onto the MAR.
  * PRN orders project a PRN medication (no auto-countdown, no dose times); a
@@ -163,18 +191,45 @@ export function projectOrderToMedication(
 }
 
 /**
- * Whether a medication row still belongs on the MAR. A medication fed by an
- * order drops off the MAR once that order is discontinued; legacy / seed
- * medications with no source order always stay. This is what makes the MAR
- * medication list derive from the active orders.
+ * Whether a medication row still belongs on the MAR (and every other
+ * active-med surface — chart board, inventory, forecasts — which all
+ * funnel through this rule). The order link is written in BOTH directions
+ * at activation (medication.sourceOrderId and order.medicationId), and
+ * either one governs:
+ *
+ *  - Source-order link: a medication fed by an order stays only while
+ *    that order is active (the original rule).
+ *  - Order-claim link: an order that was activated against this row
+ *    claims it via medicationId. If claiming orders exist and none is
+ *    active, the med's course has ended — even when the row's own
+ *    sourceOrderId was never written (rows created before the link
+ *    existed, or by an older build). This was the batch 24 defect: the
+ *    order read "Discontinued" while its claimed row, missing the
+ *    back-link, stayed active on the chart, the board, and both
+ *    forecasts, and kept accepting counts.
+ *
+ * Legacy / seed medications claimed by no order always stay. Draft
+ * orders never claim a row (medicationId is written only at activation),
+ * so a claim is proof the order actually fed the med.
  */
 export function medicationStaysOnMar(
-  med: { sourceOrderId?: string | null },
-  orders: readonly Pick<MedicationOrder, "id" | "status">[] | undefined,
+  med: { id?: string; sourceOrderId?: string | null },
+  orders:
+    | readonly Pick<MedicationOrder, "id" | "status" | "medicationId">[]
+    | undefined,
 ): boolean {
-  if (!med.sourceOrderId) return true;
-  const order = (orders ?? []).find((o) => o.id === med.sourceOrderId);
-  return !order || order.status === "active";
+  const list = orders ?? [];
+  if (med.sourceOrderId) {
+    const source = list.find((o) => o.id === med.sourceOrderId);
+    if (source) return source.status === "active";
+  }
+  if (med.id) {
+    const claims = list.filter((o) => o.medicationId === med.id);
+    if (claims.length > 0) {
+      return claims.some((o) => o.status === "active");
+    }
+  }
+  return true;
 }
 
 export const RECONCILIATION_TRIGGER_LABEL: Record<ReconciliationTrigger, string> = {

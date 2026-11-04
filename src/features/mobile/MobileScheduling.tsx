@@ -18,6 +18,7 @@ import {
   weekDates,
 } from "../coverage/coverageWeek";
 import { centralTodayIso, formatCentralTime } from "./mar";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import {
   accountabilityLine,
   shiftTimeLabel,
@@ -311,6 +312,7 @@ export default function MobileScheduling({
 
       {assignShift && (
         <AssignSheet
+          api={api}
           shift={assignShift}
           staff={staff}
           todayIso={todayIso}
@@ -336,6 +338,7 @@ export default function MobileScheduling({
  * text (see scheduling.ts for the rules).
  */
 function AssignSheet({
+  api,
   shift,
   staff,
   todayIso,
@@ -346,6 +349,7 @@ function AssignSheet({
   onClose,
   onSave,
 }: {
+  api: ComplyraApi;
   shift: HrShift;
   staff: SchedStaffChoice[];
   todayIso: string;
@@ -361,6 +365,10 @@ function AssignSheet({
     [staff, todayIso, shift, timeOff, allShifts],
   );
   const [picked, setPicked] = useState<string>(shift.staffId ?? "");
+  // Batch 59: warn (never block) when the picked staffer is a DSP who is
+  // not training-cleared yet.
+  const pickedStaff = staff.find((s) => s.id === picked);
+  const clearanceWarning = useAssigneeClearanceWarning(api, pickedStaff?.id ?? null, pickedStaff?.roleKey ?? null);
   const dayLabel = dayHeading(chicagoWallClock(shift.startsAt).date);
 
   return (
@@ -414,6 +422,11 @@ function AssignSheet({
         <p className="msh-section-note">
           Staff on approved time off for this shift are not listed.
         </p>
+        {clearanceWarning && (
+          <p className="msh-sched-warn" role="alert">
+            {clearanceWarning}
+          </p>
+        )}
         <div className="msh-form-actions">
           <button type="button" className="msh-button secondary" onClick={onClose}>
             Cancel

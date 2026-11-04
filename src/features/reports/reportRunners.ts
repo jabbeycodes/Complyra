@@ -1,7 +1,8 @@
 import type { ComplyraApi, WorkspaceView } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import { metrics } from "../../domain";
-import { pcspTaskSummary, todayIso } from "../../data/chart";
+import { pcspTaskSummary } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import { clinicianScheduleLabel, progressNoteName } from "../../data/shiftNotes";
 import { agencyStateCode, siteLocationFrom } from "../../data/siteAddress";
 import { summarizeWeeklyMileage } from "../../data/mileage";
@@ -187,7 +188,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
       siteFilter = site.name;
       items = all.filter((row) => row.site === site.name);
     }
-    const asOf = todayIso();
+    const asOf = centralTodayIso();
     const card = metrics(items);
     const doc = buildComplianceReportPdf({
       agencyName: ctx.session.agencyName,
@@ -286,7 +287,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     if (!profile) throw new Error("That Individual has no profile on file yet.");
     const generatedAt = new Date().toISOString();
     const summary = pcspTaskSummary([...stack.required, ...stack.checked]);
-    const today = todayIso();
+    const today = centralTodayIso();
     const siteManagers = ctx.workspace.staff.filter(
       (member) =>
         ["house_manager", "program_manager"].includes(member.roleKey) &&
@@ -468,6 +469,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const summary = await ctx.api.getMileageMonthlySummary(site.id, monthKey, ids);
     const doc = buildMileageMonthPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       monthKey,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -490,6 +492,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const weekly = summarizeWeeklyMileage(trips, ids);
     const doc = buildMileageWeekPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       monthKey,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -507,6 +510,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const summary = await ctx.api.getMileageYearlySummary(site.id, year, ids);
     const doc = buildMileageYearPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       siteName: site.name,
       year,
       people: people.map((row) => ({ id: row.id, name: row.name })),
@@ -521,6 +525,7 @@ export const REPORT_RUNNERS: Record<string, ReportRunner> = {
     const profile = await ctx.api.getStaffTrainingProfile(userId);
     const doc = buildStaffTrainingChecklistPdf({
       agencyName: ctx.session.agencyName,
+      logoDataUrl: ctx.workspace.branding.logoUrl,
       staffName: profile.fullName,
       siteNames: profile.siteNames,
       hoursTotal: profile.hoursTotal,

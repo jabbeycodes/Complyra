@@ -362,7 +362,8 @@ export function createEvergreenSeed(): LocalDatabase {
   // Role-coverage demo accounts (2026-10-30): the house staff list above only
   // covers administrator / house_manager / dsp / nurse. These four accounts
   // give the demo one sign-in per remaining role template — program_manager,
-  // hr, compliance_admin, auditor — so every role can be walked and audited.
+  // hr, auditor — plus a second administrator, so every role can be walked
+  // and audited.
   // All four are agency-scoped roles, so their memberships carry no home site
   // (same as Sarah Mitchell's administrator membership). They hold no
   // individual assignments; their reach comes from role permissions + scope.
@@ -386,9 +387,9 @@ export function createEvergreenSeed(): LocalDatabase {
     },
     {
       name: "Omar Haddad",
-      jobTitle: "Compliance Administrator",
-      role: "compliance_admin",
-      roleKey: "compliance_admin",
+      jobTitle: "Agency Administrator",
+      role: "administrator",
+      roleKey: "administrator",
     },
     {
       name: "Mark Delaney",

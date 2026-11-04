@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
-import { PACKET_ITEMS, validatePacketSubmission, packetStatus, packetOutstanding, tokenHash, type PacketChoices, type PacketSignature } from './consentPackets';
+import { PACKET_ITEMS, validatePacketSubmission, packetStatus, packetOutstanding, tokenHash, packetFile, PACKET_EVIDENCE_MAX_BYTES, type PacketChoices, type PacketSignature } from './consentPackets';
+import { centralTodayIso } from './menuRecords';
 import { todayStamp } from './status';
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 const choices: PacketChoices = Object.fromEntries(PACKET_ITEMS.map(i => [i.key, i.key === 'media' ? 'group' : i.key === 'photograph' ? 'no' : 'yes']));
@@ -14,7 +15,7 @@ function setup() {
     const hm = db.memberships.find(m => m.roleKey === 'house_manager')!;
     store.sessionUserId = hm.userId;
     const person = db.individuals.find(p => p.siteId === hm.siteId)!;
-    return { db, store, api, hm, person, input: { individualId: person.id, signerName: 'Jordan Lee', effectiveOn: todayStamp(), reviewOn: '2099-12-31', outstandingAfterDays: 1 } };
+    return { db, store, api, hm, person, input: { individualId: person.id, signerName: 'Jordan Lee', effectiveOn: centralTodayIso(), reviewOn: '2099-12-31', outstandingAfterDays: 1 } };
 }
 test('packet token isolates one packet, hashes at rest, records open/sign trail and refuses replay', async () => {
     const f = setup();
@@ -79,7 +80,13 @@ test('paper route requires signed evidence and confirmed choices, creates same n
     await f.api.filePaperConsentPacket(id, choices, signer, file);
     // Scoped to this packet's records: the demo seed carries other consents.
     assert.equal(f.db.consents?.filter(r => r.packetId === id).length, 9);
-    assert.equal((await f.api.getConsentPacketEvidence(id)).name, 'paper.pdf');
+    const evidence = await f.api.getConsentPacketEvidence(id);
+    assert.equal(evidence.name, 'paper.pdf');
+    // The bytes live in the file store, not the localStorage metadata
+    // record (a full PDF there overflowed the browser quota); the record
+    // keeps a stub, and the evidence still reads back byte for byte.
+    assert.equal(f.db.consentPacketEvidence?.[id]?.base64, '');
+    assert.equal(evidence.base64, Buffer.from(await file.arrayBuffer()).toString('base64'));
     assert.ok(f.db.consents?.filter(r => r.packetId === id).every(r => r.activatedBy === f.hm.userId));
     await assert.rejects(() => f.api.filePaperConsentPacket(id, choices, signer, file), /immutable/);
 });
@@ -97,9 +104,32 @@ test('packet signing needs every explicit choice, authority and witness; PDF car
     assert.equal(PACKET_ITEMS.length, 9);
 });
 
+test('packetFile caps signed evidence at 4 MB and checks content against type', async () => {
+    const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31])], 'scan.pdf', { type: 'application/pdf' });
+    const png = new File([new Uint8Array([137, 80, 78, 71, 13])], 'scan.png', { type: 'image/png' });
+    const jpg = new File([new Uint8Array([255, 216, 255, 224])], 'scan.jpg', { type: 'image/jpeg' });
+    for (const file of [pdf, png, jpg]) {
+        const evidence = await packetFile(file);
+        assert.equal(evidence.name, file.name);
+        assert.equal(evidence.mime, file.type);
+        assert.ok(evidence.base64.length > 0);
+    }
+    // Exactly at the cap is accepted (PDF header plus padding).
+    const atCap = new Uint8Array(PACKET_EVIDENCE_MAX_BYTES);
+    atCap.set([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    assert.equal((await packetFile(new File([atCap], 'full.pdf', { type: 'application/pdf' }))).name, 'full.pdf');
+    // One byte over the cap is refused with the 4 MB message.
+    await assert.rejects(() => packetFile(new File([new Uint8Array(PACKET_EVIDENCE_MAX_BYTES + 1)], 'big.pdf', { type: 'application/pdf' })), /up to 4 MB/);
+    // Wrong types and empty files are refused with the same message.
+    await assert.rejects(() => packetFile(new File(['hello'], 'notes.txt', { type: 'text/plain' })), /up to 4 MB/);
+    await assert.rejects(() => packetFile(new File([], 'empty.pdf', { type: 'application/pdf' })), /up to 4 MB/);
+    // Content must match the declared type.
+    await assert.rejects(() => packetFile(new File(['fake'], 'bad.pdf', { type: 'application/pdf' })), /content must match/);
+    await assert.rejects(() => packetFile(new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], 'bad.png', { type: 'image/png' })), /content must match/);
+});
 test('packet filing supersedes an existing standalone decision and DSPs receive only the replacement', async () => {
     const f = setup();
-    const previous = await f.api.saveConsent({individualId:f.person.id,typeId:'media',covers:'No media permission.',giver:'individual',giverName:f.person.fullName,relationship:'Self',outcome:'none',signedOn:todayStamp(),effectiveOn:todayStamp(),reviewOn:'2099-12-31',supersedesId:null});
+    const previous = await f.api.saveConsent({individualId:f.person.id,typeId:'media',covers:'No media permission.',giver:'individual',giverName:f.person.fullName,relationship:'Self',outcome:'none',signedOn:centralTodayIso(),effectiveOn:centralTodayIso(),reviewOn:'2099-12-31',supersedesId:null});
     await f.api.activateConsent(previous);
     const id = await f.api.createConsentPacket(f.input);
     await f.api.generateConsentPacket(id);

@@ -3,7 +3,9 @@ import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
   canCreateIndividual,
+  canReadAsAuditor,
   canSeeShiftNotes,
+  canViewStaffAsProgramManager,
   canViewHouseCard,
   canViewMedicationOrders,
   canUseMessaging,
@@ -42,13 +44,12 @@ export function computeRequirementStatus(
 export function isPrivileged(role: string) {
   return (
     role === "administrator" ||
-    role === "compliance_admin" ||
     role === "manager"
   );
 }
 
 export function isAgencyAdmin(role: string) {
-  return role === "administrator" || role === "compliance_admin";
+  return role === "administrator";
 }
 
 export function can(session: SessionUser, key: PermissionKey) {
@@ -80,13 +81,22 @@ export function pageVisible(session: SessionUser, page: string) {
     return (
       can(session, "hr.view_staff") ||
       can(session, "members.invite") ||
-      can(session, "members.assign_roles")
+      can(session, "members.assign_roles") ||
+      // PM-STAFF-NAV (wave 7U-2): the program manager's path — keyed on the
+      // team/reset keys its template actually holds. AUDITOR-NAV (wave 7U):
+      // read-only roster view for the auditor. Every member-admin control
+      // on the page stays keyed on the members.* keys above.
+      canViewStaffAsProgramManager(session) ||
+      canReadAsAuditor(session)
     );
   }
   if (page === "Documents") return can(session, "documents.view");
   // Issue #80: the site-detail "Shift notes" tab mirrors chart visibility.
   if (page === "ShiftNotes") return canSeeShiftNotes(session.roleKey);
-  if (page === "Review queue") return can(session, "requirements.approve");
+  // AUDITOR-NAV (wave 7U): the approve/write path stays requirements.approve;
+  // the auditor reads the queue read-only (drawer actions stay canManage-gated).
+  if (page === "Review queue")
+    return can(session, "requirements.approve") || canReadAsAuditor(session);
   if (page === "Audit center" || page === "Audit Me") return can(session, "audit.read");
   if (page === "Acknowledgments") {
     return (
@@ -97,19 +107,41 @@ export function pageVisible(session: SessionUser, page: string) {
   }
   if (page === "Platform") return Boolean(session.platformAdmin);
   if (page === "Activity log") {
+    // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): workspace
+    // activity rows carry no actor, so the log cannot be narrowed to a
+    // DSP's own activity honestly — DSPs do not get the surface at
+    // all (nav hidden and direct navigation refused, like every other
+    // pageVisible gate).
+    if (session.roleKey === "dsp") return false;
     return can(session, "audit.read") || can(session, "individuals.view");
   }
   // HR-ROLES (2026-09-13): editing role templates is roles.manage, separate
   // from assigning roles to people (members.assign_roles).
   if (page === "Roles & access") return can(session, "roles.manage");
   // LIFEPATH-P2-PAGEVIS (training engine)
+  // AUDITOR-NAV (wave 7U): + the auditor's read path (roster renders
+  // read-only; assign/waive/edit stay keyed on hr.view_staff and role lists).
   if (page === "Training")
-    return can(session, "hr.view_staff") || can(session, "acknowledgments.sign_own");
+    return (
+      can(session, "hr.view_staff") ||
+      can(session, "acknowledgments.sign_own") ||
+      canReadAsAuditor(session)
+    );
   // LIFEPATH-P3-PAGEVIS (delegation forms)
-  if (page === "Delegations") return can(session, "clinical.view");
+  // AUDITOR-NAV (wave 7U): the stored auditor template carries isp.view, not
+  // clinical.view — the auditor read path keeps Delegations reachable either
+  // way; create/sign/activate stay keyed on their own gates.
+  if (page === "Delegations")
+    return can(session, "clinical.view") || canReadAsAuditor(session);
   // LIFEPATH-P4-PAGEVIS (certificates)
+  // AUDITOR-NAV (wave 7U): + the auditor's read path (add/edit/delete stay
+  // keyed on certificates.manage in the page and both APIs).
   if (page === "Certificates") {
-    return can(session, "certificates.manage") || can(session, "hr.view_staff");
+    return (
+      can(session, "certificates.manage") ||
+      can(session, "hr.view_staff") ||
+      canReadAsAuditor(session)
+    );
   }
   // LIFEPATH-P5-PAGEVIS (HM weekly checklist)
   if (page === "Weekly checklist") {
@@ -173,7 +205,6 @@ export function pageVisible(session: SessionUser, page: string) {
   if (page === "Report Library")
     return [
       "administrator",
-      "compliance_admin",
       "program_manager",
       "house_manager",
       "nurse",
@@ -233,7 +264,6 @@ export function roleLabel(role: string, jobTitle?: string) {
   if (isRoleKey(role)) return ROLE_TEMPLATE_BY_KEY[role].name;
   if (role === "manager") return ROLE_TEMPLATE_BY_KEY.house_manager.name;
   if (role === "administrator") return ROLE_TEMPLATE_BY_KEY.administrator.name;
-  if (role === "compliance_admin") return ROLE_TEMPLATE_BY_KEY.compliance_admin.name;
   return jobTitle || ROLE_TEMPLATE_BY_KEY.dsp.name;
 }
 

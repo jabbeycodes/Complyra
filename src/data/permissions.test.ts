@@ -72,7 +72,6 @@ test("HR-ROLES: HR can assign roles to staff but cannot manage role templates", 
   assert.equal(defaultPermissions("hr")["roles.manage"], false);
   assert.equal(defaultPermissions("hr")["members.invite"], true);
   assert.equal(defaultPermissions("administrator")["roles.manage"], true);
-  assert.equal(defaultPermissions("compliance_admin")["roles.manage"], true);
   assert.equal(defaultPermissions("administrator")["members.assign_roles"], true);
 });
 
@@ -84,15 +83,9 @@ test("HR-ROLES: canGrantRole keeps administrator grants with administrators", ()
   assert.equal(canGrantRole("hr", "nurse"), true);
   // …but never administrator…
   assert.equal(canGrantRole("hr", "administrator"), false);
-  assert.equal(canGrantRole("hr", "compliance_admin"), false);
   // …administrators can grant anything…
   assert.equal(canGrantRole("administrator", "administrator"), true);
-  assert.equal(canGrantRole("administrator", "compliance_admin"), true);
   assert.equal(canGrantRole("administrator", "hr"), true);
-  // …compliance admins can grant compliance_admin but not administrator…
-  assert.equal(canGrantRole("compliance_admin", "compliance_admin"), true);
-  assert.equal(canGrantRole("compliance_admin", "administrator"), false);
-  assert.equal(canGrantRole("compliance_admin", "dsp"), true);
   // …and unknown targets are rejected.
   assert.equal(canGrantRole("administrator", "superuser"), false);
 });
@@ -116,7 +109,7 @@ import {
 } from "./permissions";
 
 test("WS4: registry covers every permission key with description + derived defaults", () => {
-  assert.equal(ROLE_KEYS.length, 8); // 8 roles after the 2026-09-16 DPM merge
+  assert.equal(ROLE_KEYS.length, 7); // 7 roles after the 2026-11-02 compliance_admin removal
   for (const key of PERMISSION_KEYS) {
     const entry = PERMISSION_REGISTRY[key];
     assert.ok(entry, `registry entry for ${key}`);
@@ -128,15 +121,13 @@ test("WS4: registry covers every permission key with description + derived defau
     );
     assert.deepEqual(entry.defaultRoles, expected, `defaultRoles for ${key}`);
   }
-  // Spot-checks: certificates.manage defaults to HR + compliance_admin;
-  // roles.manage to administrator + compliance_admin.
+  // Spot-checks: certificates.manage defaults to HR;
+  // roles.manage to administrator.
   assert.deepEqual(PERMISSION_REGISTRY["certificates.manage"].defaultRoles, [
-    "compliance_admin",
     "hr",
   ]);
   assert.deepEqual(PERMISSION_REGISTRY["roles.manage"].defaultRoles, [
     "administrator",
-    "compliance_admin",
   ]);
   // Descriptions mirror PERMISSION_LABELS.
   for (const key of PERMISSION_KEYS) {
@@ -145,10 +136,9 @@ test("WS4: registry covers every permission key with description + derived defau
 });
 
 test("WS4: GRANT_RULES data matches canGrantRole behavior", () => {
-  assert.deepEqual([...PRIVILEGED_ROLE_KEYS], ["administrator", "compliance_admin"]);
-  assert.equal(OPERATIONAL_ROLE_KEYS.length, 6); // 8 roles after the 2026-09-16 DPM merge
+  assert.deepEqual([...PRIVILEGED_ROLE_KEYS], ["administrator"]);
+  assert.equal(OPERATIONAL_ROLE_KEYS.length, 6); // 7 roles, administrator the only privileged key
   assert.ok(!OPERATIONAL_ROLE_KEYS.includes("administrator"));
-  assert.ok(!OPERATIONAL_ROLE_KEYS.includes("compliance_admin"));
   for (const target of ROLE_KEYS) {
     const rule = GRANT_RULES[target];
     for (const granter of ROLE_KEYS) {
@@ -165,10 +155,7 @@ test("WS4: GRANT_RULES data matches canGrantRole behavior", () => {
 test("WS4: grant rules — the required truth table", () => {
   assert.equal(canGrantRole("administrator", "administrator"), true);
   assert.equal(canGrantRole("hr", "administrator"), false);
-  assert.equal(canGrantRole("compliance_admin", "compliance_admin"), true);
-  assert.equal(canGrantRole("hr", "compliance_admin"), false);
   assert.equal(canGrantRole("dsp", "administrator"), false);
-  assert.equal(canGrantRole("dsp", "compliance_admin"), false);
   // Operational grants stay open (permission gates live in the API layer).
   assert.equal(canGrantRole("hr", "dsp"), true);
   assert.equal(canGrantRole("dsp", "nurse"), true);
@@ -176,9 +163,8 @@ test("WS4: grant rules — the required truth table", () => {
   assert.equal(canGrantRole("administrator", "nope"), false);
 });
 
-test("WS4: canEditRoleTemplates — only administrator / compliance_admin", () => {
+test("WS4: canEditRoleTemplates — only administrator", () => {
   assert.equal(canEditRoleTemplates("administrator"), true);
-  assert.equal(canEditRoleTemplates("compliance_admin"), true);
   assert.equal(canEditRoleTemplates("hr"), false);
   assert.equal(canEditRoleTemplates("house_manager"), false);
   assert.equal(canEditRoleTemplates("dsp"), false);
@@ -192,6 +178,8 @@ test("WS4: canAssignOperationalRole — HR path excludes privileged roles", () =
   assert.equal(canAssignOperationalRole("hr", "house_manager"), true);
   assert.equal(canAssignOperationalRole("hr", "hr"), true);
   assert.equal(canAssignOperationalRole("hr", "administrator"), false);
+  // The retired compliance_admin key (removed 2026-11-02) is not a role
+  // anymore, so it is rejected like any unknown key.
   assert.equal(canAssignOperationalRole("hr", "compliance_admin"), false);
   assert.equal(canAssignOperationalRole("administrator", "administrator"), false);
   assert.equal(canAssignOperationalRole("administrator", "dsp"), true);
@@ -208,7 +196,7 @@ test("WS4: grantableRoleTemplates mirrors the inline filters it replaces", () =>
     "auditor",
   ]);
   const adminRoles = grantableRoleTemplates("administrator").map((row) => row.key);
-  assert.equal(adminRoles.length, 8); // 8 roles after the 2026-09-16 DPM merge
+  assert.equal(adminRoles.length, 7); // 7 roles after the 2026-11-02 compliance_admin removal
 });
 
 test("WS4: template locks — administrator keeps assign_roles + roles.manage", () => {
@@ -258,12 +246,11 @@ test("WS4: assertNoDrift catches undeclared permission strings", () => {
 test("AUDIT-READINESS: correctiveActions.manage defaults — managers on, field staff off", () => {
   assert.ok(PERMISSION_KEYS.includes("correctiveActions.manage"));
   assert.equal(PERMISSION_LABELS["correctiveActions.manage"], "Manage corrective actions");
-  // Granted: administrator, compliance_admin, program_manager, house_manager.
+  // Granted: administrator, program_manager, house_manager.
   // House manager joined the granted set with the simulation batch-7 fix:
   // HMs own house-level QA follow-up, and with the key off for HM the QA
   // corrective-action entity had no creator at the houses at all.
   assert.equal(defaultPermissions("administrator")["correctiveActions.manage"], true);
-  assert.equal(defaultPermissions("compliance_admin")["correctiveActions.manage"], true);
   assert.equal(
     defaultPermissions("program_manager")["correctiveActions.manage"],
     true,

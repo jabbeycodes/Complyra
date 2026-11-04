@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -16,6 +17,7 @@ import {
   closeForMonth,
   computeBalanceCents,
   formatCents,
+  houseCardOpenMonthNote,
   isLowBalance,
   signedAmountCents,
   summarizeHouseCardMonth,
@@ -109,12 +111,15 @@ export default function MobileHouseCard({
   siteId,
   siteName,
   people,
+  logoDataUrl,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   siteId: string;
   siteName: string;
   people: MobileHouseCardPerson[];
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
 }) {
   const today = centralTodayIso();
   const currentMonth = today.slice(0, 7);
@@ -514,8 +519,7 @@ export default function MobileHouseCard({
             </p>
           ) : (
             <p className="hc-close-note">
-              {monthLabel(month)} is still open. New entries can be recorded
-              for this month until a manager signs it closed.
+              {houseCardOpenMonthNote(canRecord, monthLabel(month))}
             </p>
           )}
 
@@ -658,22 +662,28 @@ export default function MobileHouseCard({
                             : formatCents(runningBalanceCents)}
                         </td>
                         <td>
-                          {canRecord && !entry.voided && (
+                          {!entry.voided && (
                             <>
-                              <button
-                                type="button"
-                                className="hc-link-button"
-                                onClick={() => openRepeat(entry)}
-                              >
-                                Repeat
-                              </button>{" "}
-                              <button
-                                type="button"
-                                className="hc-link-button"
-                                onClick={() => openVoid(entry)}
-                              >
-                                Void
-                              </button>
+                              {canRecord && (
+                                <button
+                                  type="button"
+                                  className="hc-link-button"
+                                  onClick={() => openRepeat(entry)}
+                                >
+                                  Repeat
+                                </button>
+                              )}{" "}
+                              {/* Voiding is a manager action (batch 9):
+                                  same gate as close-month, not record. */}
+                              {canClose && (
+                                <button
+                                  type="button"
+                                  className="hc-link-button"
+                                  onClick={() => openVoid(entry)}
+                                >
+                                  Void
+                                </button>
+                              )}
                             </>
                           )}
                         </td>
@@ -828,6 +838,7 @@ export default function MobileHouseCard({
       {/* Printed monthly statement — screen-hidden, print-only (same
           markup and body flag as the desktop panel, #150). */}
       <div className="house-card-printout" aria-hidden="true">
+        <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
         <h1>
           {siteName} — House Card statement
         </h1>

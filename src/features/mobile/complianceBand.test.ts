@@ -59,7 +59,7 @@ const ITEMS: Requirement[] = [
 ];
 
 test("roles without house scope get no house rows at all", () => {
-  for (const roleKey of ["dsp", "nurse", "auditor", "hr", "compliance_admin"]) {
+  for (const roleKey of ["dsp", "nurse", "auditor", "hr"]) {
     assert.equal(
       bandHouseRows(session(roleKey), SITES, STAFF, ITEMS),
       null,
@@ -161,4 +161,34 @@ test("house slices mirror the desktop donut's status mix", () => {
 test("a house with nothing tracked has no donut to draw", () => {
   const rows = bandHouseRows(session("administrator"), SITES, STAFF, [])!;
   assert.ok(rows.every((r) => !houseHasDonut(r)));
+});
+
+test("scored consent items join the band's house rows (phone agrees with desktop)", () => {
+  const consentItems: Requirement[] = [
+    { ...req("consent-1", "Willow House", "Expired"), category: "Consents", person: "Wren Willow" },
+    { ...req("consent-2", "Willow House", "Compliant"), category: "Consents", person: "Wren Willow" },
+    { ...req("consent-3", "Cedar House", "Compliant"), category: "Consents", person: "Carl Cedar" },
+    // A house outside the viewer's scope never reaches their band rows.
+    { ...req("consent-4", "Maple House", "Expired"), category: "Consents", person: "Mia Maple" },
+  ];
+  const rows = bandHouseRows(session("administrator"), SITES, STAFF, ITEMS, [], {
+    kind: "ready",
+    items: consentItems,
+  })!;
+  const willow = rows.find((r) => r.siteName === "Willow House")!;
+  assert.equal(willow.consentTotal, 2);
+  assert.equal(willow.consentNotCurrent, 1);
+  assert.equal(willow.consentUnknown, false);
+  const cedar = rows.find((r) => r.siteName === "Cedar House")!;
+  assert.equal(cedar.consentTotal, 1);
+  assert.equal(cedar.consentNotCurrent, 0);
+  assert.ok(rows.every((r) => r.siteName !== "Maple House"));
+});
+
+test("an unknown consent register flags the band's rows instead of scoring without it", () => {
+  const rows = bandHouseRows(session("administrator"), SITES, STAFF, ITEMS, [], {
+    kind: "unknown",
+  })!;
+  assert.ok(rows.every((r) => r.consentUnknown));
+  assert.ok(rows.every((r) => r.consentTotal === 0));
 });

@@ -1,0 +1,130 @@
+/* BrandLoader — branded loading gate (founder request, 2026-10-31).
+ *
+ * Solid colors only — no gradients, no decorative colored edges. The mark's
+ * colors are the favicon's own: cream tile #e8dcc8, shield greens #3f5c3b /
+ * #6f815c / #2f4630, check brown #8b5e3c.
+ *
+ * Animation timeline (motion-safe only, see the reduced-motion block):
+ *   0.00s  shield main segment starts drawing      (0.55s)
+ *   0.50s  shield top-right segment draws          (0.28s)
+ *   0.74s  shield bottom-right segment draws       (0.28s)  → shield done ≈1.0s
+ *   1.00s  check mark ticks in                     (0.35s)  → mark done ≈1.35s
+ *   1.50s  gentle pulse loop begins (2.4s cycle, subtle scale/opacity)
+ * Draw uses pathLength=100 on every path, so dasharray/dashoffset are in
+ * percent of each path's own length regardless of its true geometry.
+ */
+
+.brand-loader {
+  display: grid;
+  place-items: center;
+}
+
+.brand-loader--full {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  background: var(--color-paper, #e8dcc8);
+}
+
+.brand-loader--compact {
+  padding: 40px 16px;
+}
+
+.brand-loader-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.brand-loader-mark {
+  display: block;
+  transform-origin: center;
+  animation: brand-loader-breathe 2.4s ease-in-out 1.5s infinite;
+}
+
+.brand-loader--full .brand-loader-mark {
+  width: 96px;
+  height: 96px;
+}
+
+.brand-loader--compact .brand-loader-mark {
+  width: 56px;
+  height: 56px;
+}
+
+.brand-loader-seg,
+.brand-loader-check {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation-name: brand-loader-draw;
+  animation-timing-function: ease-in-out;
+  animation-fill-mode: forwards;
+}
+
+.brand-loader-seg--main {
+  animation-duration: 0.55s;
+  animation-delay: 0s;
+}
+
+.brand-loader-seg--top {
+  animation-duration: 0.28s;
+  animation-delay: 0.5s;
+}
+
+.brand-loader-seg--bottom {
+  animation-duration: 0.28s;
+  animation-delay: 0.74s;
+}
+
+.brand-loader-check {
+  animation-duration: 0.35s;
+  animation-delay: 1s;
+}
+
+.brand-loader-word {
+  margin-top: 20px;
+}
+
+.brand-loader-status {
+  margin: 12px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-h-605245, #605245);
+}
+
+.brand-loader--full .brand-loader-status {
+  margin-top: 10px;
+}
+
+@keyframes brand-loader-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes brand-loader-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.035);
+    opacity: 0.92;
+  }
+}
+
+/* Reduced motion: no draw, no pulse — the fully drawn static mark and the
+ * status text only. */
+@media (prefers-reduced-motion: reduce) {
+  .brand-loader-mark {
+    animation: none;
+  }
+
+  .brand-loader-seg,
+  .brand-loader-check {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

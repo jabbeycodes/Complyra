@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openMobileMar } from "./fixtures";
 
 // Med count under Medications: every medication row in the mobile MAR
 // carries its own supply countdown (no separate Med Count tile). A
@@ -34,7 +34,7 @@ async function toShellHome(page: Page, homeName: string) {
 }
 
 async function toPersonMar(page: Page, personName: string) {
-  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await openMobileMar(page);
   await page.getByRole("button", { name: new RegExp(personName) }).click();
   await expect(page.getByText("Med count & supply")).toBeVisible();
 }
@@ -106,6 +106,9 @@ test("a house manager resets the countdown with a refill count; the count is rec
   await expect(page.getByText("Refill count")).toBeVisible();
   await expect(page.getByText("Countdown now")).toBeVisible();
   await page.getByLabel("Pills now on hand").fill("20");
+  // 20 differs from the countdown's 30, so the count needs a reason
+  // (variance history, PR #207 — the API refuses an unexplained one).
+  await page.getByLabel(/Count variance/).fill("Recounted the card at shift change");
   await page.screenshot({ path: shot("mar-refill-form.png"), fullPage: true });
   await page.getByRole("button", { name: "Save count" }).click();
 
@@ -120,7 +123,8 @@ test("a house manager resets the countdown with a refill count; the count is rec
   // and the audited recent-count entry (date, pills, recorded by).
   await page.getByRole("button", { name: /20 pills left/ }).click();
   await expect(page.getByText("Counted Sat, Sep 12")).toBeVisible();
-  await expect(page.getByText(/20 pills counted/)).toBeVisible();
+  // Variance history (PR #207): the row names the expected and counted figures.
+  await expect(page.getByText(/expected 30, counted 20/)).toBeVisible();
   await expect(page.getByText(/recorded by/)).toBeVisible();
 });
 

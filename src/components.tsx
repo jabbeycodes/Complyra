@@ -55,8 +55,21 @@ export function Modal({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const el = ref.current;
-    el?.showModal();
-    return () => el?.close();
+    if (!el) return;
+    // showModal() throws InvalidStateError when the element is already in
+    // the top layer (a remount race would otherwise surface as an uncaught
+    // error mid-open). An already-open dialog is the desired end state.
+    try {
+      if (!el.open) el.showModal();
+    } catch {
+      /* the dialog is already modal; nothing else to do */
+    }
+    // Teardown is deterministic: unmount always takes the dialog out of
+    // the top layer, so no backdrop or focus trap can outlive the dialog
+    // (simulation batch 3).
+    return () => {
+      if (el.open) el.close();
+    };
   }, []);
   return (
     <dialog

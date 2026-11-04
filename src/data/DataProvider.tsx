@@ -1,13 +1,15 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createApi, isSupabaseConfigured, type ComplyraApi, type WorkspaceView } from "./index";
+import { LoadStallWatchdog, workspaceLoadPending } from "./loadWatchdog";
 import type { LoginInput, SessionUser } from "./types";
 
-interface DataContextValue {
+export interface DataContextValue {
   api: ComplyraApi;
   session: SessionUser | null;
   workspace: WorkspaceView | null;
   loading: boolean;
+  loadStalled: boolean;
   error: string;
   usingHostedBackend: boolean;
   signIn: (input: LoginInput) => Promise<void>;
@@ -16,7 +18,8 @@ interface DataContextValue {
   refresh: () => Promise<void>;
 }
 
-const DataContext = createContext<DataContextValue | null>(null);
+/** Exported so component tests can stub the data layer (jsdom harnesses). */
+export const DataContext = createContext<DataContextValue | null>(null);
 
 function asErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -28,8 +31,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionUser | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadStalled, setLoadStalled] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef(0);
+  const watchdog = useRef<LoadStallWatchdog | null>(null);
+  if (!watchdog.current) {
+    watchdog.current = new LoadStallWatchdog(setLoadStalled);
+  }
+
+  // Stall watchdog: while a load stays unsettled (session restoring, or a
+  // session present with no workspace and no error) the timer runs; past
+  // the threshold App.tsx swaps the bare spinner for a recovery card. Any
+  // settle — session resolved, workspace landed, or an error — clears it.
+  useEffect(() => {
+    watchdog.current?.update(workspaceLoadPending({ loading, session, workspace, error }));
+  }, [loading, session, workspace, error]);
+  useEffect(() => () => watchdog.current?.dispose(), []);
 
   async function refresh(nextSession?: SessionUser | null) {
     const request = ++requestId.current;
@@ -94,6 +111,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         session,
         workspace,
         loading,
+        loadStalled,
         error,
         usingHostedBackend,
         signIn: async (input) => {

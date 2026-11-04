@@ -70,9 +70,9 @@ export interface FieldLogAccess {
   /**
    * Open the Shift notes flow (canSeeShiftNotes — the role list the
    * ISP Data tile and both API layers gate shift notes on; auditors
-   * and compliance admins included, HR never). In ComplyRer's model
+   * included, HR never). In ComplyRer's model
    * the shift note IS the ISP data collection, so this one flag is
-   * the door for both. View-only roles (auditor, compliance_admin)
+   * the door for both. View-only roles (auditor)
    * read today's notes inside; writing follows notesRecord.
    */
   notesView: boolean;
@@ -104,7 +104,7 @@ export interface FieldLogAccess {
    * Open the home's House Card ledger (canViewHouseCard — the desktop
    * page gate itself is the pure role list, restated verbatim by both
    * API layers; no permission key is involved). View-only roles
-   * (auditor, compliance_admin) get the row reaching the read-only
+   * (auditor) get the row reaching the read-only
    * mobile view; recording follows houseCardRecord.
    */
   houseCardView: boolean;

@@ -201,8 +201,23 @@ function hrBucket() {
 async function seedStores(page: Page) {
   await page.addInitScript(
     ({ agency, james, sarah, bucket }) => {
+      // The local HR store self-seeds demo hub/staffing/readiness rows
+      // into any bucket missing its seeded flags (hrStore load gates) —
+      // including extra shifts for these same demo people on this same
+      // day, which merged with the rows below and listed Alex Morgan
+      // twice in the strip. Mark the bucket seeded so the store stays
+      // hermetic: only this test's rows drive the strip.
+      const hermetic = {
+        ...bucket,
+        staffingSeeded: true,
+        demoHubSeeded: true,
+        demoAccountabilitySeeded: true,
+        demoReadinessSeeded: true,
+        demoBinderSeeded: true,
+        demoPerformanceSeeded: true,
+      };
       const hr = {
-        [agency]: { [james]: bucket, [sarah]: bucket },
+        [agency]: { [james]: hermetic, [sarah]: hermetic },
       };
       localStorage.setItem("complyrer.hr.v1", JSON.stringify(hr));
       const open = {
@@ -243,12 +258,25 @@ async function seedStores(page: Page) {
 }
 
 async function signIn(page: Page, username: string) {
+  // These specs assert on the desktop layout, including at phone
+  // width. Since PR #134 a phone sign-in lands in the mobile shell;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads
+  // complyrer.viewMode at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.locator(".topbar")).toBeVisible({ timeout: 15_000 });
+  // At phone width sign-in lands in the mobile shell (PR #134) — its
+  // header is the banner landmark; the desktop topbar only exists in
+  // the desktop layout. Accept either.
+  await expect(
+    page.getByRole("banner").or(page.locator(".topbar")),
+  ).toBeVisible({ timeout: 15_000 });
   await page
     .getByRole("dialog", { name: "Interactive demo tour" })
     .waitFor({ state: "visible", timeout: 3_000 })

@@ -73,6 +73,52 @@ test("DSP records at their own home and is refused at the other home", async () 
   );
 });
 
+test("voiding is a manager action: a DSP cannot void another's entry (batch 9)", async () => {
+  const api = new LocalApi(store());
+  const { cedar, ellis } = await sites(api);
+
+  // The administrator records an entry at Cedar.
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const adminEntry = await api.createHouseCardEntry({
+    siteId: cedar.id,
+    entryDate: today(),
+    kind: "credit",
+    location: "",
+    amountCents: 2500,
+    note: "Top-up from the agency office.",
+  });
+  await api.signOut();
+
+  // The Cedar DSP sees the entry but cannot void it — batch 9 found
+  // this exact button live on the admin's entries.
+  await api.signIn(login(DEMO_DSP_USERNAME)); // Alex Morgan, Cedar DSP
+  await assert.rejects(
+    () => api.voidHouseCardEntry(adminEntry.id, "Trying to void it."),
+    /only a manager can void/i,
+  );
+
+  // The DSP can still void their OWN entry — the quick-entry Undo and
+  // self-correction path.
+  const own = await api.createHouseCardEntry({
+    siteId: cedar.id,
+    entryDate: today(),
+    kind: "purchase",
+    location: "Shell",
+    amountCents: 1500,
+    category: "gas",
+    individualId: ellis.id,
+  });
+  const { voided } = await api.voidHouseCardEntry(own.id, "Keyed it wrong.");
+  assert.equal(voided.voided, true);
+  await api.signOut();
+
+  // A manager (Willow's HM has no Cedar scope — use the admin) and the
+  // Cedar-scope closer path: sign the administrator back in and void.
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const result = await api.voidHouseCardEntry(adminEntry.id, "Duplicate top-up.");
+  assert.equal(result.voided.voided, true);
+});
+
 test("nurse cannot see the house card at all", async () => {
   const api = new LocalApi(store());
   const { cedar } = await sites(api);

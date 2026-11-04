@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { SessionUser } from "../../data/types";
 import type { HrStore } from "../../data/hrStore";
 import type { HrDocument, HrDocumentAck } from "../../data/hr";
+import {
+  DOCUMENT_NOT_READABLE_NOTE,
+  documentHasReadableContent,
+} from "../../data/starterDocuments";
 import { myDocumentAck } from "./hub";
 
 /**
@@ -118,7 +122,9 @@ export default function MobileDocuments({
                       by Complyrer.
                     </small>
                   ) : doc.requiresAck ? (
-                    ackingId === doc.id ? (
+                    !documentHasReadableContent(doc) ? (
+                      <small>{DOCUMENT_NOT_READABLE_NOTE}</small>
+                    ) : ackingId === doc.id ? (
                       <>
                         <label className="msh-field">
                           <span>Type your full name to acknowledge</span>

@@ -18,6 +18,7 @@
  */
 import { scheduledStartIso } from "./lateness";
 import { claimedCoverageShifts } from "./localSchedule";
+import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -101,9 +102,38 @@ import {
   type StaffCorrectiveActionInput,
 } from "./performanceRecords";
 import { AGENCY_ID as EVERGREEN_DEMO_AGENCY_ID } from "./seed";
+import {
+  DOCUMENT_INACTIVE_ERROR,
+  DOCUMENT_NOT_READABLE_ERROR,
+  STARTER_POLICY_DOCUMENTS,
+  documentHasReadableContent,
+  starterHrDocuments,
+} from "./starterDocuments";
 
 /* ------------------------------ input types ------------------------------ */
 /* (the domain module exports entities only; inputs are a store concern) */
+
+
+/**
+ * Today's punch window as real UTC instants: the device's local calendar
+ * day, from 00:00:00.000 to 23:59:59.999 local time.
+ *
+ * Punches store punchedAt as a UTC ISO string. The old range was the
+ * zone-less text `${today}T00:00:00` … `${today}T23:59:59.999`, compared
+ * as text (local store) or read in the server's UTC session zone (hosted
+ * store). After 6 PM Central the UTC date has already rolled over, so an
+ * evening clock-in fell outside "today" and the clock-out was refused with
+ * "No open clock-in to close." — exactly the evening-shift case.
+ */
+export function punchDayRange(d: Date = new Date()): { from: string; to: string } {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  return {
+    from: new Date(y, m, day, 0, 0, 0, 0).toISOString(),
+    to: new Date(y, m, day, 23, 59, 59, 999).toISOString(),
+  };
+}
 
 export type HrShiftInput = Omit<HrShift, "id" | "agencyId" | "createdBy"> & {
   createdBy?: string;
@@ -524,6 +554,11 @@ export interface HrStore {
    *  template for their role (preset when one exists, else the agency
    *  default). Existing binders return their own snapshot untouched. */
   getBinder(staffId: string, roleKey?: string): Promise<StaffBinder>;
+  /** Every issued binder in the agency (no creation on read). The Binder
+   *  Board pools its headline totals over this population so the totals
+   *  describe the agency, not whichever staff list the current viewer's
+   *  hub happened to pass in. */
+  listBinders(): Promise<StaffBinder[]>;
   /** Wallet documents filed against a staff member's binder. */
   listBinderDocuments(staffId: string): Promise<BinderDocument[]>;
   /** Upload (or replace) the wallet file for one document item. A fresh
@@ -1271,12 +1306,100 @@ function validateMissedPunchInput(input: MissedPunchReportInput): void {
   if (!input.reason.trim()) throw new Error("A reason is required.");
 }
 
-class SupabaseHrStore implements HrStore {
+/**
+ * Who the signed-in user may target with a shift swap (simulation batch 47).
+ * Callers that know the session pass the full staff directory plus the
+ * viewer's role/home; createShiftSwap then applies the same staffVisibleTo
+ * rule the coworker picker uses, so a crafted request cannot offer a swap
+ * to a coworker at another home. When no scope is supplied, the Supabase
+ * store falls back to a memberships lookup; the local store skips the
+ * check (single-user demo data).
+ */
+export interface HrSwapScope {
+  roleKey: string;
+  siteId: string | null;
+  staffDirectory: StaffSiteRef[];
+  assignmentSiteIds?: string[];
+}
+
+const SWAP_TARGET_OUT_OF_SCOPE =
+  "You can only offer a shift swap to a coworker at your own home.";
+
+function swapTargetVisible(
+  scope: HrSwapScope,
+  actorUserId: string,
+  targetStaffId: string,
+): boolean {
+  const visible = staffVisibleTo(
+    { userId: actorUserId, roleKey: scope.roleKey, siteId: scope.siteId, platformAdmin: false },
+    scope.staffDirectory,
+    scope.assignmentSiteIds ?? [],
+  );
+  return visible.some((row) => row.id === targetStaffId);
+}
+
+export class SupabaseHrStore implements HrStore {
   constructor(
     private client: SupabaseClient,
     private agencyId: string,
     private userId: string,
+    private actorRoleKey?: string,
+    private swapScope?: HrSwapScope,
   ) {}
+
+  /** Wave 6 item 3: auditors are read-only — swap writes are refused in
+   *  the store itself, not just hidden in the UI. */
+  private assertSwapWritable() {
+    if (this.actorRoleKey === "auditor") {
+      throw new Error("Auditors are read-only and cannot change shift swaps.");
+    }
+  }
+
+  /**
+   * Batch 47 enforcement for createShiftSwap. With an injected scope this
+   * is a pure check; without one, resolve both memberships (plus the
+   * actor's assignment homes) and apply the same visibility rule. If the
+   * membership rows cannot be read, the check is skipped rather than
+   * blocking a legitimate swap on missing data.
+   */
+  private async assertSwapTargetInScope(targetStaffId: string): Promise<void> {
+    if (this.swapScope) {
+      if (!swapTargetVisible(this.swapScope, this.userId, targetStaffId)) {
+        throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
+      }
+      return;
+    }
+    const { data, error } = await this.client
+      .from("memberships")
+      .select("user_id, role_key, site_id")
+      .eq("agency_id", this.agencyId)
+      .in("user_id", [this.userId, targetStaffId]);
+    if (error || !data) return;
+    const rows = data as Record<string, unknown>[];
+    const actor = rows.find((r) => String(r.user_id) === this.userId);
+    const target = rows.find((r) => String(r.user_id) === targetStaffId);
+    if (!actor || !target) return;
+    const { data: assignmentRows } = await this.client
+      .from("staff_assignments")
+      .select("site_id")
+      .eq("agency_id", this.agencyId)
+      .eq("user_id", this.userId);
+    const directory: StaffSiteRef[] = rows.map((r) => ({
+      id: String(r.user_id),
+      siteId: r.site_id == null ? null : String(r.site_id),
+    }));
+    const scope: HrSwapScope = {
+      roleKey: String(actor.role_key ?? ""),
+      siteId: actor.site_id == null ? null : String(actor.site_id),
+      staffDirectory: directory,
+      assignmentSiteIds: (assignmentRows ?? []).map((r) =>
+        String((r as Record<string, unknown>).site_id),
+      ),
+    };
+    if (!swapTargetVisible(scope, this.userId, targetStaffId)) {
+      throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
+    }
+  }
 
   async listShifts(fromIso: string, toIso: string, siteId?: string): Promise<HrShift[]> {
     let q = this.client
@@ -1361,8 +1484,7 @@ class SupabaseHrStore implements HrStore {
   }
 
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchDayRange(d);
   }
 
   /**
@@ -1653,6 +1775,32 @@ class SupabaseHrStore implements HrStore {
 
   async acknowledgeDocument(docId: string, signatureName: string): Promise<HrDocumentAck> {
     if (!signatureName.trim()) throw new Error("Type your full name to acknowledge.");
+    // Wave 7I: never record a signature on a document the signer could
+    // not read — the document must exist in this agency's library and
+    // carry readable content (body text or a file link). It must also
+    // be ACTIVE: a deactivated document is not a signable target, even
+    // for a caller who reaches this method directly (the lists hide
+    // inactive documents, but the guard cannot rely on the lists).
+    const { data: doc, error: docError } = await this.client
+      .from("hr_documents")
+      .select("body, file_url, active")
+      .eq("id", docId)
+      .eq("agency_id", this.agencyId)
+      .maybeSingle();
+    if (docError) throwIf(docError, "Could not load the document");
+    if (!doc) throw new Error("Document not found.");
+    const row = doc as Record<string, unknown>;
+    if (row.active != null && !Boolean(row.active)) {
+      throw new Error(DOCUMENT_INACTIVE_ERROR);
+    }
+    if (
+      !documentHasReadableContent({
+        body: row.body == null ? null : String(row.body),
+        fileUrl: row.file_url == null ? null : String(row.file_url),
+      })
+    ) {
+      throw new Error(DOCUMENT_NOT_READABLE_ERROR);
+    }
     const { data, error } = await this.client
       .from("hr_document_acks")
       .insert({
@@ -1796,6 +1944,15 @@ class SupabaseHrStore implements HrStore {
       .single();
     throwIf(insertError, "Could not open the binder");
     return mapBinder(created as Record<string, unknown>);
+  }
+
+  async listBinders(): Promise<StaffBinder[]> {
+    const { data, error } = await this.client
+      .from("hr_binders")
+      .select("*")
+      .eq("agency_id", this.agencyId);
+    throwIf(error, "Could not load binders");
+    return (data ?? []).map((r) => mapBinder(r as Record<string, unknown>));
   }
 
   async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {
@@ -2878,11 +3035,13 @@ class SupabaseHrStore implements HrStore {
   }
 
   async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const offered = await this.getShiftById(input.offeredShiftId);
     const targetId = input.targetStaffId ?? null;
     if (targetId !== null && targetId === this.userId) {
       throw new Error("You can't offer a shift swap to yourself.");
     }
+    if (targetId !== null) await this.assertSwapTargetInScope(targetId);
     const claimerShifts = targetId
       ? await this.shiftsOverlappingWindow(targetId, offered.startsAt, offered.endsAt)
       : [];
@@ -2928,6 +3087,7 @@ class SupabaseHrStore implements HrStore {
     claimerId: string,
     counterOfferShiftId?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("This shift swap is no longer open.");
@@ -2992,6 +3152,7 @@ class SupabaseHrStore implements HrStore {
     decidedBy: string,
     note?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("This shift swap has already been decided.");
@@ -3030,6 +3191,7 @@ class SupabaseHrStore implements HrStore {
   }
 
   async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     const swap = await this.getSwap(id);
     if (swap.status !== "pending") {
       throw new Error("Only a pending swap can be cancelled.");
@@ -3752,6 +3914,12 @@ interface LocalBucket {
   emergencyContacts: Record<string, StaffEmergencyContact>;
   /** True once the Evergreen demo binder seed has been written. */
   demoBinderSeeded?: boolean;
+  /** Wave 7I: true once pre-7I demo policy shells got their starter bodies. */
+  demoBinderBodiesFilled?: boolean;
+  /** Wave 7I: true once the starter policy library seed has run for
+   *  this (non-demo) agency bucket — seeded once, only into an empty
+   *  library, so an agency's own document choices are never undone. */
+  starterDocumentsSeeded?: boolean;
   /* PERFORMANCE (build 3): per-staff reviews + corrective actions.
    * Reads merge across buckets like the binder; newest updatedAt wins. */
   performanceReviews: PerformanceReview[];
@@ -4342,20 +4510,16 @@ const DEMO_STAFF_NAMES: Record<string, string> = {
   [DEMO_STAFF_IDS.cameron]: "Cameron Price",
 };
 
-const DEMO_POLICY_DOCS: Array<{ key: string; title: string }> = [
-  { key: "onboarding-packet", title: "Onboarding Packet" },
-  { key: "hipaa-107", title: "HIPAA 107" },
-  { key: "help-protocol-207", title: "HELP Protocol 207" },
-  { key: "abuse-neglect-200", title: "Abuse & Neglect 200" },
-  { key: "event-reporting-205", title: "Event Reporting 205" },
-  { key: "infection-control-210", title: "Infection Control 210" },
-  { key: "emergency-preparedness-204", title: "Emergency Preparedness 204" },
-  { key: "dress-code-203", title: "Dress Code 203" },
-  { key: "vehicle-use-agreement", title: "Vehicle Use Agreement" },
-  { key: "hcbs", title: "HCBS" },
-  { key: "individual-rights", title: "Individual Rights Cover Page" },
-  { key: "isp-acknowledgment", title: "ISP Acknowledgment" },
-];
+/* The demo library IS the starter library (wave 7I): same twelve
+ * titles, same readable bodies — the demo used to seed title-only
+ * shells a signer could not read. Keys/titles come from
+ * STARTER_POLICY_DOCUMENTS so the demo and a provisioned agency agree. */
+const DEMO_POLICY_DOCS: Array<{ key: string; title: string; body: string }> =
+  STARTER_POLICY_DOCUMENTS.map((doc) => ({
+    key: doc.key,
+    title: doc.title,
+    body: doc.body,
+  }));
 
 /** Wallet ("document") item keys from the default template, in order. */
 const DEMO_WALLET_ITEMS = [
@@ -4393,7 +4557,7 @@ function seedDemoBinderData(): {
     agencyId,
     title: doc.title,
     category: "policy",
-    body: null,
+    body: doc.body,
     fileUrl: null,
     requiresAck: true,
     active: true,
@@ -4641,7 +4805,17 @@ class LocalHrStore implements HrStore {
     private agencyId: string,
     private userId: string,
     private kioskTestSeed?: KioskTestSeed,
+    private actorRoleKey?: string,
+    private swapScope?: HrSwapScope,
   ) {}
+
+  /** Wave 6 item 3: auditors are read-only — swap writes are refused in
+   *  the store itself, not just hidden in the UI. */
+  private assertSwapWritable() {
+    if (this.actorRoleKey === "auditor") {
+      throw new Error("Auditors are read-only and cannot change shift swaps.");
+    }
+  }
 
   private storageAvailable(): boolean {
     try {
@@ -4783,6 +4957,41 @@ class LocalHrStore implements HrStore {
       this.memory.demoBinderSeeded = true;
       this.save(this.memory);
     }
+    // Wave 7I repair: demo buckets seeded before the starter bodies
+    // existed hold title-only policy shells a signer cannot read. Fill
+    // each shell's body once from the starter library; a document that
+    // already has a body or a file (agency-edited) is never touched.
+    if (
+      this.agencyId === EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.demoBinderBodiesFilled
+    ) {
+      const bodies = new Map(
+        STARTER_POLICY_DOCUMENTS.map((d) => [`doc-demo-policy-${d.key}`, d.body]),
+      );
+      for (const doc of this.memory.documents) {
+        const body = bodies.get(doc.id);
+        if (body && !doc.body && !doc.fileUrl) doc.body = body;
+      }
+      this.memory.demoBinderBodiesFilled = true;
+      this.save(this.memory);
+    }
+    // Wave 7I: the starter policy library for every non-demo agency,
+    // seeded once and only into an empty library. Hosted agencies get
+    // the same twelve documents from migration 20261031270000; this is
+    // the local-mode half of that provisioning, so a new agency's
+    // binder signature links resolve from the first day. Running once
+    // (and only when the library is empty) means an agency that later
+    // removes or replaces documents never gets the starters back.
+    if (
+      this.agencyId !== EVERGREEN_DEMO_AGENCY_ID &&
+      !this.memory.starterDocumentsSeeded
+    ) {
+      if (this.memory.documents.length === 0) {
+        this.memory.documents.push(...starterHrDocuments(this.agencyId));
+      }
+      this.memory.starterDocumentsSeeded = true;
+      this.save(this.memory);
+    }
     // One-time fictional performance-records seed for the Evergreen demo
     // agency (build 3): one review awaiting its subject's acknowledgment,
     // one acknowledged review with a response note, one signed written
@@ -4902,8 +5111,7 @@ class LocalHrStore implements HrStore {
   }
 
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchDayRange(d);
   }
 
   /**
@@ -5153,6 +5361,20 @@ class LocalHrStore implements HrStore {
   async acknowledgeDocument(docId: string, signatureName: string): Promise<HrDocumentAck> {
     if (!signatureName.trim()) throw new Error("Type your full name to acknowledge.");
     return this.mutate((b) => {
+      // Wave 7I: never record a signature on a document the signer
+      // could not read — it must exist in the library with readable
+      // content (body text or a file link). It must also be ACTIVE:
+      // a deactivated document is not a signable target, even for a
+      // caller who reaches this method directly (listDocuments hides
+      // inactive documents, but the guard cannot rely on the lists).
+      const doc = b.documents.find((d) => d.id === docId);
+      if (!doc) throw new Error("Document not found.");
+      if (!doc.active) {
+        throw new Error(DOCUMENT_INACTIVE_ERROR);
+      }
+      if (!documentHasReadableContent(doc)) {
+        throw new Error(DOCUMENT_NOT_READABLE_ERROR);
+      }
       const ack: HrDocumentAck = {
         id: newId(),
         docId,
@@ -5295,6 +5517,12 @@ class LocalHrStore implements HrStore {
       b.binders[staffId] = binder;
     });
     return binder;
+  }
+
+  async listBinders(): Promise<StaffBinder[]> {
+    return Object.values(this.mergedBinders()).filter(
+      (b) => b.agencyId === this.agencyId,
+    );
   }
 
   async listBinderDocuments(staffId: string): Promise<BinderDocument[]> {
@@ -6137,11 +6365,21 @@ class LocalHrStore implements HrStore {
   }
 
   async createShiftSwap(input: ShiftSwapInput): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const offered = this.getShiftLocal(b, input.offeredShiftId);
       const targetId = input.targetStaffId ?? null;
       if (targetId !== null && targetId === this.userId) {
         throw new Error("You can't offer a shift swap to yourself.");
+      }
+      // Batch 47: same staffVisibleTo rule as the picker and the hosted
+      // store — an out-of-scope target is refused, not just hidden.
+      if (
+        targetId !== null &&
+        this.swapScope &&
+        !swapTargetVisible(this.swapScope, this.userId, targetId)
+      ) {
+        throw new Error(SWAP_TARGET_OUT_OF_SCOPE);
       }
       let claimedShift: HrShift | null = null;
       if (input.requestedShiftId) {
@@ -6184,6 +6422,7 @@ class LocalHrStore implements HrStore {
     claimerId: string,
     counterOfferShiftId?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6228,6 +6467,7 @@ class LocalHrStore implements HrStore {
     decidedBy: string,
     note?: string,
   ): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6259,6 +6499,7 @@ class LocalHrStore implements HrStore {
   }
 
   async cancelShiftSwap(id: string): Promise<HrShiftSwap> {
+    this.assertSwapWritable();
     return this.mutate((b) => {
       const swap = this.getSwapLocal(b, id);
       if (swap.status !== "pending") {
@@ -6920,12 +7161,16 @@ class LocalHrStore implements HrStore {
 export function createHrStore(opts: {
   agencyId: string;
   userId: string;
+  /** Acting user's role — the stores refuse auditor writes (wave 6 item 3). */
+  roleKey?: string;
   /** Test-only: seeds a known kiosk token + PIN credential in the local impl. */
   kioskTestSeed?: KioskTestSeed;
+  /** Batch 47: swap-target visibility context for createShiftSwap. */
+  swapScope?: HrSwapScope;
 }): HrStore {
   const client = createSupabaseBrowserClient();
-  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId);
-  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed);
+  if (client) return new SupabaseHrStore(client, opts.agencyId, opts.userId, opts.roleKey, opts.swapScope);
+  return new LocalHrStore(opts.agencyId, opts.userId, opts.kioskTestSeed, opts.roleKey, opts.swapScope);
 }
 
 /** CSV export is pure domain logic; re-exported here for page convenience. */

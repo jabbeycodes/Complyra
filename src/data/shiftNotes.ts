@@ -16,6 +16,7 @@
  */
 
 import { roleLabel } from "./status";
+import { centralTodayIso } from "./menuRecords";
 
 export type IspProgramStatus = "draft" | "approved" | "superseded";
 
@@ -429,6 +430,59 @@ export function normalizeTaskTitle(title: string): string {
   return title.trim().slice(0, 200);
 }
 
+/** The wall-clock day and minute-of-day in the agency's Central zone. */
+function centralDayMinutes(when: Date): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(when);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    date: `${read("year")}-${read("month")}-${read("day")}`,
+    minutes: Number(read("hour")) * 60 + Number(read("minute")),
+  };
+}
+
+/**
+ * Why a shift note's date and begin time are not acceptable yet. Null means
+ * the timing is fine. A shift note documents work already done, so it cannot
+ * be dated after today, and a note dated today cannot begin before the shift
+ * has started (simulation batch 37: a 4–5 p.m. note was on the chart at
+ * 3 p.m.). The end time may run past the current time — staff document
+ * during a shift that is still in progress. Judged on the Central calendar
+ * the note subsystem already uses (the mobile form's "Date (Central)" and
+ * centralTodayIso), with no grace: the codebase's other future-date checks
+ * (house card, care screening, med exceptions) allow none either. Called by
+ * both APIs on create and update, so a direct store call is refused the
+ * same way the forms refuse.
+ */
+export function shiftNoteTimingProblem(input: {
+  noteDate: string;
+  beginTime: string;
+  now?: Date;
+}): string | null {
+  const { date: today, minutes: nowMinutes } = centralDayMinutes(input.now ?? new Date());
+  const noteDay = input.noteDate.slice(0, 10);
+  if (noteDay > today) {
+    return "A shift note cannot be dated in the future.";
+  }
+  if (noteDay < today) return null;
+  const begin = /^(\d{1,2}):(\d{2})$/.exec(input.beginTime.trim());
+  if (!begin) return null;
+  const hour = Number(begin[1]);
+  const minute = Number(begin[2]);
+  if (hour > 23 || minute > 59) return null;
+  if (hour * 60 + minute > nowMinutes) {
+    return "A shift note cannot begin in the future.";
+  }
+  return null;
+}
+
 function addDays(iso: string, days: number) {
   const [year, month, day] = iso.split("-").map(Number);
   const date = new Date(year, (month || 1) - 1, day || 1);
@@ -518,3 +572,26 @@ export function shiftNotesForPrint<T extends { noteDate: string }>(notes: T[], t
     coversToday: false as const,
   };
 }
+
+/**
+ * A note is LATE when it was filed on a later Central calendar day than
+ * the shift it documents (simulation batches 9/14: "Bailey's overdue
+ * note isn't marked late"). Derived at render time from the note's
+ * service date and its creation timestamp — nothing is persisted, so
+ * backdated corrections and imports label themselves correctly.
+ * A note filed during the overnight shift that ENDS on its service
+ * date (e.g. written at 2 AM for the shift that began the evening
+ * before) is compared by calendar day, the same rule staff see on the
+ * chart.
+ */
+export function isLateShiftNote(note: {
+  noteDate: string;
+  createdAt: string;
+}): boolean {
+  if (!note.createdAt) return false;
+  const filedOn = centralTodayIso(new Date(note.createdAt));
+  return filedOn > note.noteDate;
+}
+
+/** The text label for a late note — a word, never color alone. */
+export const LATE_SHIFT_NOTE_LABEL = "Late";

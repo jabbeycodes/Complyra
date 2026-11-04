@@ -9,13 +9,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
+import { EmployeeHubShell, defaultTimecardStaffId, describeOvertimeRules, hubRowActionScope, hubSchedulingFormScope, rowActionAllowed, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
 import {
   DEFAULT_BINDER_TEMPLATE,
   defaultBinderTemplateLibrary,
 } from "../../data/newHireBinder";
 import type { SessionUser } from "../../data/types";
+import { defaultPermissions } from "../../data/permissions";
 import type {
   ComplianceEvidence,
   HrDocument,
@@ -101,6 +102,24 @@ const dspSession = makeSession({
   role: "dsp",
   roleKey: "dsp",
   permissions: { "hub.access": true },
+});
+
+// Wave 7S (batch 103): HR with a stored template that still denies the
+// hub team keys outright — the HR role must own Attendance / Timecards
+// / Payroll anyway (HR hub rule, Joshua 2026-10-31; PR #213 item 9's
+// gate, carried here so the phone hub's doors land on open tabs).
+const hrDeniedTemplateSession = makeSession({
+  userId: "user-riley",
+  fullName: "Riley Hart",
+  role: "hr",
+  roleKey: "hr",
+  jobTitle: "Human Resources",
+  permissions: {
+    "hub.access": true,
+    "hub.view_team": false,
+    "hub.review_timecards": false,
+    "hub.approve_payroll": false,
+  },
 });
 
 const staffList: HubStaffEntry[] = [
@@ -602,6 +621,7 @@ function makeStubStore(): HrStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
+    listBinders: async () => [],
     listBinderDocuments: async () => [],
     uploadBinderDocument: async () => {
       throw new Error("not used in this test");
@@ -716,6 +736,22 @@ describe("EmployeeHubShell", () => {
     // "My Schedule" is the first tab and its content renders by default.
     assert.ok(html.includes("My Schedule"), "default tab label");
   });
+
+  it("opens Attendance, Timecards and Payroll for HR even when the stored template denies the keys", () => {
+    const html = render(hrDeniedTemplateSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(html.includes(label), `HR tab "${label}"`);
+    }
+    // The ownership is exactly those three tabs: Team Schedule and
+    // Team Compliance keep their permission-only gates.
+    assert.ok(!html.includes("Team Schedule"), "Team Schedule stays permission-gated");
+    assert.ok(!html.includes("Team Compliance"), "Team Compliance stays permission-gated");
+  });
+
+  it("renders the Payroll tab content for HR, not just the tab chip", () => {
+    const html = render(hrDeniedTemplateSession, "payroll");
+    assert.ok(html.includes("Export-first payroll"), "payroll tab content for HR");
+  });
 });
 
 function renderBoard(editable: boolean): string {
@@ -822,6 +858,195 @@ describe("Staffing tab", () => {
     const readOnlyHtml = renderBoard(false);
     assert.ok(!readOnlyHtml.includes("Deactivate"), "no deactivate control");
     assert.ok(!readOnlyHtml.includes("Edit staffing pattern for"), "no edit control");
+  });
+});
+
+describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
+  // Sessions carry the roles' real default templates so the pins track the
+  // permission model, not a hand-picked subset.
+  const hrSession = makeSession({
+    userId: "user-riley",
+    fullName: "Riley Hart",
+    role: "hr",
+    roleKey: "hr",
+    jobTitle: "Human Resources",
+    permissions: defaultPermissions("hr"),
+  });
+  const adminSession = makeSession({
+    userId: "user-admin",
+    fullName: "Sim Admin",
+    role: "administrator",
+    roleKey: "administrator",
+    jobTitle: "Agency Administrator",
+    permissions: defaultPermissions("administrator"),
+  });
+
+  it("HR no longer gets the Post coverage / Post shift form", () => {
+    const html = render(hrSession, "open-shifts");
+    assert.ok(!html.includes("Post coverage"), "no post-coverage form for HR");
+    assert.ok(!html.includes("Post shift"), "no post-shift button for HR");
+  });
+
+  it("a program manager keeps site coverage posting", () => {
+    const html = render(pmSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for PM");
+    assert.ok(html.includes("Post shift"), "post-shift button for PM");
+  });
+
+  it("an administrator keeps coverage posting", () => {
+    const html = render(adminSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for administrator");
+    assert.ok(html.includes("Post shift"), "post-shift button for administrator");
+  });
+
+  it("item 5: a house manager's scheduling-form scope covers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites);
+    assert.ok(scope, "HM is site-scoped");
+    assert.deepEqual(
+      scope.staffList.map((s) => s.userId).sort(),
+      ["user-alex", "user-pat"],
+      "only Maple House staff (site-1) are offered",
+    );
+    assert.deepEqual(scope.sites.map((s) => s.id), ["site-1"], "only Maple House is offered");
+  });
+
+  it("item 5: an HM's assignment sites join the form scope", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites, ["site-2"]);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(scope.sites.length, 2, "both houses offered with an active assignment");
+    assert.equal(scope.staffList.length, 3, "both houses' staff offered");
+  });
+
+  it("item 5: agency-wide roles get no form scoping (full lists kept)", () => {
+    for (const [roleKey, perms] of [
+      ["program_manager", PM_PERMISSIONS],
+      ["administrator", defaultPermissions("administrator")],
+      ["hr", defaultPermissions("hr")],
+    ] as const) {
+      const s = makeSession({ roleKey, permissions: perms });
+      assert.equal(hubSchedulingFormScope(s, staffList, sites), null, `${roleKey} unscoped`);
+    }
+  });
+
+  it("item 5: the HM's Team Schedule site filter offers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-hm",
+      fullName: "Jordan Reyes",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.view_team": true },
+    });
+    const html = render(hm, "team-schedule");
+    assert.ok(html.includes("Maple House"), "own house in the site filter");
+    assert.ok(!html.includes("Oak House"), "the other house is not offered");
+    const pmHtml = render(pmSession, "team-schedule");
+    assert.ok(pmHtml.includes("Oak House"), "PM keeps every house in the filter");
+  });
+
+  it("HR keeps its staffing-pattern power (hub.manage_staffing, a deliberate template grant)", () => {
+    // Wave 7T flags rather than changes this: the Staffing tab's Add pattern
+    // is gated on hub.manage_staffing, the same key HM/PM use there, and the
+    // HR template grants that key by design (HR-STAFFING, 2026-09-16).
+    // Removing it is a role-template change, out of this wave's scope.
+    const html = render(hrSession, "staffing");
+    assert.ok(html.includes("Add pattern"), "add-pattern button for HR under current templates");
+  });
+});
+
+describe("wave 7T-3 row-action scope (batches 174/187)", () => {
+  const hm = makeSession({
+    userId: "user-alex",
+    role: "manager",
+    roleKey: "house_manager",
+    siteId: "site-1",
+    permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.manage_staffing": true },
+  });
+
+  it("an HM's row actions cover only their own house", () => {
+    const scope = hubRowActionScope(hm, staffList);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-1"), true, "own house row actionable");
+    assert.equal(rowActionAllowed(scope, "site-2"), false, "other house row read-only");
+    assert.equal(rowActionAllowed(scope, null), false, "unassigned/agency row reserved for agency-wide roles");
+  });
+
+  it("an HM's assignment sites join the row-action scope", () => {
+    const scope = hubRowActionScope(hm, staffList, ["site-2"]);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-2"), true, "assigned house row actionable");
+  });
+
+  it("a DSP is site-scoped the same way", () => {
+    const scope = hubRowActionScope(dspSession, staffList);
+    assert.ok(scope, "DSP is site-scoped");
+    assert.equal(rowActionAllowed(scope, "site-1"), true);
+    assert.equal(rowActionAllowed(scope, "site-2"), false);
+  });
+
+  it("agency-wide roles keep row actions on every row", () => {
+    for (const [roleKey, perms] of [
+      ["program_manager", PM_PERMISSIONS],
+      ["administrator", { "hub.access": true }],
+      ["hr", { "hub.access": true }],
+      ["nurse", { "hub.access": true }],
+      ["auditor", { "hub.access": true }],
+    ] as const) {
+      const s = makeSession({ roleKey, permissions: perms });
+      const scope = hubRowActionScope(s, staffList);
+      assert.equal(scope, null, `${roleKey} unscoped`);
+      assert.equal(rowActionAllowed(scope, "site-2"), true, `${roleKey} acts on any house`);
+      assert.equal(rowActionAllowed(scope, null), true, `${roleKey} acts on agency rows`);
+    }
+  });
+
+  it("the staffing board gates row controls per pattern when canActOnPattern is given", () => {
+    const html = renderToStaticMarkup(
+      <StaffingBoard
+        patterns={BOARD_PATTERNS}
+        staffList={staffList}
+        sites={sites}
+        editable={true}
+        canActOnPattern={(p) => rowActionAllowed(new Set(["site-1"]), p.siteId)}
+        loading={false}
+        error=""
+        onEdit={() => {}}
+        onToggleActive={() => {}}
+      />,
+    );
+    // pat-2 sits at site-1 (actionable); pat-1 is unassigned (agency row).
+    assert.ok(html.includes("Edit staffing pattern for Sam Chen"), "in-scope pattern keeps edit");
+    assert.ok(!html.includes("Edit staffing pattern for Alex Rivera"), "out-of-scope pattern loses edit");
+    assert.equal(html.split("Deactivate").length - 1, 1, "only the in-scope pattern keeps deactivate");
+    // Rows themselves stay visible either way (display scoping is #213's concern).
+    assert.ok(html.includes("Demo Individual A"), "out-of-scope row still renders");
+  });
+});
+
+describe("wave 7T-3 timecards picker default (batch 187)", () => {
+  it("defaults to the viewer themselves, not the first roster row", () => {
+    const sam = makeSession({ userId: "user-sam", roleKey: "dsp", role: "dsp" });
+    assert.equal(staffList[0].userId, "user-pat", "fixture: viewer is not the first row");
+    assert.equal(defaultTimecardStaffId(sam, staffList), "user-sam", "own timecard by default");
+  });
+
+  it("a viewer who is not on the roster gets no preselection", () => {
+    const outsider = makeSession({ userId: "user-outsider", roleKey: "administrator", role: "administrator" });
+    assert.equal(defaultTimecardStaffId(outsider, staffList), "", "never silently the first roster row");
   });
 });
 
@@ -1058,5 +1283,120 @@ describe("phase-2 pay settings", () => {
   it("renders swap approvals on the team schedule for a manager", () => {
     const html = renderWith(pmSession, makeStubStore(), "team-schedule");
     assert.ok(html.includes("Shift swap approvals"), "approvals section");
+  });
+});
+
+/* ------------------------- wave 6: HR hub + auditor ------------------------ */
+
+const hrSession = makeSession({
+  userId: "user-hr",
+  fullName: "Harriet HR",
+  role: "hr",
+  roleKey: "hr",
+  jobTitle: "Human Resources",
+  // Stored template WITHOUT the payroll/time keys — and with explicit
+  // false values, as an existing agency's template would carry. The HR
+  // role must still own the three tabs (founder decision 2026-10-31).
+  permissions: {
+    "hub.access": true,
+    "hub.view_team": false,
+    "hub.review_timecards": false,
+    "hub.approve_payroll": false,
+  },
+});
+
+const adminSession = makeSession({
+  userId: "user-admin",
+  fullName: "Ada Admin",
+  role: "administrator",
+  roleKey: "administrator",
+  jobTitle: "Administrator",
+  permissions: { ...PM_PERMISSIONS, "hub.manage_pay_settings": true },
+});
+
+const nurseSession = makeSession({
+  userId: "user-nurse",
+  fullName: "Nina Nurse",
+  role: "nurse",
+  roleKey: "nurse",
+  jobTitle: "Nurse",
+  permissions: { ...PM_PERMISSIONS, "hub.manage_pay_settings": true },
+});
+
+const auditorSession = makeSession({
+  userId: "user-auditor",
+  fullName: "Aubrey Auditor",
+  role: "auditor",
+  roleKey: "auditor",
+  jobTitle: "Auditor",
+  permissions: { "hub.access": true },
+});
+
+describe("wave 6 item 9 — HR owns Payroll, Timecards and Attendance", () => {
+  it("shows all three tabs to HR even when the stored template denies the keys", () => {
+    const html = render(hrSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(html.includes(label), `HR tab "${label}"`);
+    }
+  });
+
+  it("renders the Attendance tab for HR", () => {
+    const html = render(hrSession, "attendance");
+    assert.ok(html.includes('aria-label="Attendance"'), "attendance section");
+    assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+  });
+
+  it("renders the Timecards tab for HR", () => {
+    const html = render(hrSession, "timecards");
+    assert.ok(html.includes("<h2>Timecards</h2>"), "timecards heading");
+  });
+
+  it("renders the Payroll tab for HR", () => {
+    const html = render(hrSession, "payroll");
+    assert.ok(html.includes("Export-first payroll"), "payroll content");
+  });
+
+  it("does not give the DSP any management tab", () => {
+    const html = render(dspSession);
+    for (const label of ["Attendance", "Timecards", "Payroll"]) {
+      assert.ok(!html.includes(`>${label}<`), `DSP must not see "${label}"`);
+    }
+  });
+});
+
+describe("wave 6 item 1 — hub tabs render under admin / nurse / HR sessions", () => {
+  for (const [name, session] of [
+    ["administrator", adminSession],
+    ["nurse", nurseSession],
+    ["hr", hrSession],
+  ] as const) {
+    it(`Attendance renders for ${name}`, () => {
+      const html = render(session, "attendance");
+      assert.ok(html.includes('aria-label="Attendance"'), "attendance section");
+      assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+    });
+    it(`Payroll renders for ${name}`, () => {
+      const html = render(session, "payroll");
+      assert.ok(html.includes("Export-first payroll"), "payroll content");
+      assert.ok(!html.includes("Cannot read properties"), "no raw TypeError");
+    });
+  }
+});
+
+describe("wave 6 item 3 — auditor swap board is read-only", () => {
+  it("shows the board with a read-only note and no post form for an auditor", () => {
+    const html = render(auditorSession);
+    assert.ok(html.includes("Shift swaps"), "swap board visible");
+    assert.ok(
+      html.includes("Auditors can view the swap board but cannot post, claim, or cancel swaps."),
+      "read-only note",
+    );
+    assert.ok(!html.includes("Post a shift for swap"), "no post form");
+    assert.ok(!html.includes("Post swap"), "no post button");
+  });
+
+  it("keeps the post form for a DSP", () => {
+    const html = render(dspSession);
+    assert.ok(html.includes("Post a shift for swap"), "post form for DSP");
   });
 });

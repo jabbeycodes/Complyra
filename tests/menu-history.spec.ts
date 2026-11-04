@@ -29,8 +29,10 @@ async function openChart(page: Page, name: string) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: new RegExp(name) }).first().click();
   const chart = page.locator(".individual-chart");
+  // Chart title is the h1; the Consents register section repeats the
+  // name as an h3, so pin the title by level.
   await expect(
-    chart.getByRole("heading", { name, exact: true }),
+    chart.getByRole("heading", { name, exact: true, level: 1 }),
   ).toBeVisible();
   return chart;
 }
@@ -72,12 +74,20 @@ test("a correction's earlier version and a voided entry stay readable on the cha
 
   // Record and void a snack: it leaves the grid but stays on the record.
   await recordFood(page, menu, "Yogurt cup", "all");
-  const snack = menu.locator(".menu-entry", { hasText: "Yogurt cup" });
+  // The demo week already contains a seeded "A yogurt cup and
+  // graham crackers" entry, which a plain "Yogurt cup" text match
+  // also hits — target the entry this test recorded, whose food
+  // line starts with "Yogurt cup".
+  const snack = menu.locator(".menu-entry").filter({
+    has: page.locator(".menu-entry-food", { hasText: /^Yogurt cup/ }),
+  });
   await snack.getByRole("button", { name: "Void" }).click();
   await menu.getByLabel("Reason for voiding").fill("Recorded against the wrong day");
   await menu.getByRole("button", { name: "Void entry" }).click();
   await expect(
-    menu.locator(".menu-entry", { hasText: "Yogurt cup" }),
+    menu.locator(".menu-entry").filter({
+      has: page.locator(".menu-entry-food", { hasText: /^Yogurt cup/ }),
+    }),
   ).toHaveCount(0);
 
   await menu.getByRole("button", { name: /Voided this week \(1\)/ }).click();

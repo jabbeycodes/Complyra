@@ -28,7 +28,6 @@ function sessionFor(
 ): SessionUser {
   const roleByKey: Record<string, string> = {
     administrator: "administrator",
-    compliance_admin: "compliance_admin",
     house_manager: "manager",
     program_manager: "manager",
     nurse: "nurse",

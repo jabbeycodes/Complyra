@@ -34,6 +34,7 @@ import {
   type HouseSlice,
 } from "./complianceBand";
 import type { HouseComplianceRow } from "../overview/houseCompliance";
+import { useConsentScoreInput } from "../consents/useConsentRegister";
 
 /* ------------------------------ personal ------------------------------ */
 
@@ -213,33 +214,67 @@ export function MobileComplianceBandHouse({
   row: HouseComplianceRow;
   onOpen: (siteId: string) => void;
 }) {
+  if (row.consentUnknown) {
+    // The consent register has not loaded: the row's figures would be
+    // requirements-only, so the band withholds the score entirely
+    // rather than present a partial figure as the house's standing.
+    return (
+      <button
+        type="button"
+        className="msh-band-house"
+        onClick={() => onOpen(row.siteId)}
+        aria-label={`${row.siteName}: compliance score is not final yet — consent records are still loading. Switch the mobile view to this home`}
+      >
+        <span className="msh-band-house-name">{row.siteName}</span>
+        <span className="msh-band-house-empty">
+          Consent records are still loading — this house's score is not
+          final yet.
+        </span>
+      </button>
+    );
+  }
+  const hasDonut = houseHasDonut(row);
   return (
     <button
       type="button"
       className="msh-band-house"
       onClick={() => onOpen(row.siteId)}
-      aria-label={`${row.siteName}: ${row.score}% current, ${row.done} of ${row.total} complete. Switch the mobile view to this home`}
+      aria-label={
+        hasDonut
+          ? `${row.siteName}: ${row.score}% current, ${row.done} of ${row.total} complete. Switch the mobile view to this home`
+          : `${row.siteName}: no requirements tracked yet. Switch the mobile view to this home`
+      }
     >
       <span className="msh-band-house-name">{row.siteName}</span>
-      {houseHasDonut(row) ? (
-        <HouseMiniDonut slices={houseSlices(row)} />
+      {hasDonut ? (
+        <>
+          <HouseMiniDonut slices={houseSlices(row)} />
+          <span className="msh-band-house-score">
+            <strong>{row.score}%</strong> current
+          </span>
+          <small>
+            {row.done} of {row.total} complete
+          </small>
+          <small className="msh-status-text">
+            {row.overdue > 0
+              ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
+              : "Nothing overdue"}
+            {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
+          </small>
+          {row.consentTotal > 0 && (
+            <small className="msh-status-text">
+              Consents: {row.consentCurrent} of {row.consentTotal} current
+              {row.consentNotCurrent > 0
+                ? ` · ${row.consentNotCurrent} not current`
+                : ""}
+            </small>
+          )}
+        </>
       ) : (
         <span className="msh-band-house-empty">
           No requirements are tracked for this house yet.
         </span>
       )}
-      <span className="msh-band-house-score">
-        <strong>{row.score}%</strong> current
-      </span>
-      <small>
-        {row.done} of {row.total} complete
-      </small>
-      <small className="msh-status-text">
-        {row.overdue > 0
-          ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-          : "Nothing overdue"}
-        {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
-      </small>
     </button>
   );
 }
@@ -260,6 +295,10 @@ export default function MobileComplianceBand({
   onOpenSite: (siteId: string) => void;
 }) {
   const personal = usePersonalCompliance(session);
+  // Consent currency counts in the house scores (founder decision,
+  // 2026-11-02) — the same ConsentScoreInput the desktop Overview uses,
+  // so the band and the donuts cannot disagree.
+  const consentScore = useConsentScoreInput(workspace.sites);
   const houses = useMemo(
     () =>
       bandHouseRows(
@@ -268,8 +307,9 @@ export default function MobileComplianceBand({
         workspace.staff,
         workspace.requirements,
         workspace.assignmentSiteIds,
+        consentScore,
       ),
-    [session, workspace],
+    [session, workspace, consentScore],
   );
   return (
     <section className="msh-band" aria-label="Compliance">

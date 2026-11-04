@@ -50,7 +50,7 @@ test("canManageAiSettings is platformAdmin only", () => {
   );
   assert.equal(
     canManageAiSettings(
-      session({ role: "compliance_admin", platformAdmin: false }),
+      session({ role: "manager", platformAdmin: false }),
     ),
     false,
   );
@@ -165,7 +165,7 @@ test("pageVisible Consents agrees with canSeeConsents for every role", async () 
   // Regression (role audit 2026-10-30, M1): PR #171 added administrator to
   // canSeeConsents, but the Consents page gate in status.ts kept its own
   // stale role list, so the agency Consents page never rendered for admins.
-  // The page gate and the data predicate must agree for all eight roles.
+  // The page gate and the data predicate must agree for all seven roles.
   const api = new LocalApi(new MemoryStore(createEvergreenSeed()));
   const usernames = [
     "sarah.mitchell", // administrator
@@ -174,7 +174,7 @@ test("pageVisible Consents agrees with canSeeConsents for every role", async () 
     "alex.morgan", // dsp
     "cameron.price", // nurse
     "tanya.brooks", // hr
-    "omar.haddad", // compliance_admin
+    "omar.haddad", // administrator
     "mark.delaney", // auditor
   ];
   for (const username of usernames) {

@@ -10,7 +10,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Pill } from "lucide-react";
 import { Empty } from "../components";
 import { useData } from "../data/DataProvider";
-import { canLogDoseException, todayIso } from "../data/chart";
+import { canLogDoseException } from "../data/chart";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
+import { useMedAdminLock } from "./medAdminLock";
+import { centralTodayIso } from "../data/menuRecords";
 import { formatClock, hhmmToMinutes } from "../data/dueItems";
 import type {
   MedDoseMark,
@@ -34,9 +37,20 @@ interface DoseRow {
   minutes: number;
 }
 
-export default function MarCard({ individualId }: { individualId: string }) {
+export default function MarCard({
+  individualId,
+  onMarksChanged,
+}: {
+  individualId: string;
+  /** Called after a mark lands (or a refusal reveals one) so the chart
+   * can refresh its own med data — the countdown reads separate state. */
+  onMarksChanged?: () => void;
+}) {
   const { api, session } = useData();
-  const today = todayIso();
+  // Wave 7M: the MAR day is the agency (Central) day — the same day the
+  // phone MAR writes and the due-item clock uses. The old UTC day made
+  // every dose read "Not marked" from 7 p.m. on, though the mark existed.
+  const today = centralTodayIso();
   const [views, setViews] = useState<MedInventoryView[] | null>(null);
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
   const [error, setError] = useState("");
@@ -48,6 +62,8 @@ export default function MarCard({ individualId }: { individualId: string }) {
     status: MedDoseMarkStatus;
     reason: string;
   } | null>(null);
+  // Clearance gate: an uncleared DSP sees the record but no mark buttons.
+  const medLocked = useMedAdminLock(api, session);
 
   async function reloadMarks() {
     try {
@@ -95,7 +111,8 @@ export default function MarCard({ individualId }: { individualId: string }) {
   }, [views]);
 
   if (!session) return null;
-  const canMark = canLogDoseException(session.roleKey);
+  const roleCanMark = canLogDoseException(session.roleKey);
+  const canMark = roleCanMark && !medLocked;
 
   function markFor(medicationId: string, doseTime: string): MedDoseMark | undefined {
     return marks.find(
@@ -119,15 +136,27 @@ export default function MarCard({ individualId }: { individualId: string }) {
         doseTime,
         status,
         lateReason,
+        // Wave 7M: when this card already shows a mark, the tap is a
+        // deliberate correction — pass the mark's timestamp as the base.
+        // With no mark on screen the attempt is a first mark, and the
+        // API refuses it if another session marked the dose meanwhile.
+        baseMarkedAt: markFor(medicationId, doseTime)?.markedAt,
       });
       setLatePrompt(null);
       await reloadMarks();
+      onMarksChanged?.();
     } catch (err) {
       const message = (err as Error).message;
       if (!lateReason && message.includes("past its recording window")) {
         setLatePrompt({ key, status, reason: "" });
       } else {
         setError(message);
+        if (message.startsWith("Already ")) {
+          // Someone else marked this dose: pull the real mark in so the
+          // row now shows who recorded it instead of "Not marked".
+          await reloadMarks();
+          onMarksChanged?.();
+        }
       }
     } finally {
       setBusy(null);
@@ -145,6 +174,10 @@ export default function MarCard({ individualId }: { individualId: string }) {
         Scheduled doses for today. Marking Given, Missed, LOA, or On hold clears
         the dose from the site due-items list.
       </p>
+
+      {medLocked && roleCanMark && (
+        <p className="muted mar-lock-note">{MED_ADMIN_CLEARANCE_MESSAGE}.</p>
+      )}
 
       {error && (
         <p className="form-error" role="alert">

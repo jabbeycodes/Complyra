@@ -7,6 +7,7 @@ import type { HrShift } from "../../data/hr";
 import { createOpenShiftStore } from "../../data/openShiftStore";
 import type { HrOpenShift } from "../../data/openShifts";
 import { useOperatingRules } from "../employeeHub/useOvertimeLines";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import {
   shiftBlocksForSite,
   shiftClockFromFacts,
@@ -107,6 +108,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   const { api, session, workspace, refresh } = useData();
   const [weekStart, setWeekStart] = useState(currentWeekStart);
   const [shifts, setShifts] = useState<HrShift[]>([]);
+  const [unclearedIds, setUnclearedIds] = useState<ReadonlySet<string>>(new Set());
   const [accountability, setAccountability] = useState<Map<string, ShiftAccountability>>(new Map());
   const [openShifts, setOpenShifts] = useState<HrOpenShift[]>([]);
   const [error, setError] = useState("");
@@ -135,18 +137,27 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   }
 
   const houseWriters = people.filter((person) => person.roleKey === "dsp" && person.siteId === siteId);
+  // Batch 59: warn (never block) when the draft's chosen staffer is a DSP
+  // who is not training-cleared yet.
+  const draftPerson = draft ? people.find((person) => person.id === draft.staffId) : undefined;
+  const clearanceWarning = useAssigneeClearanceWarning(
+    api,
+    draftPerson?.id ?? null,
+    draftPerson?.roleKey ?? null,
+  );
   const loadTicket = useRef(0);
 
   async function loadWeek(start: string) {
     if (!session || !siteId) return;
     const ticket = ++loadTicket.current;
-    const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+    const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
     const range = coverageQueryWindow(start);
     const posted = createOpenShiftStore({
       agencyId: session.agencyId,
       userId: session.userId,
       fullName: session.fullName,
       canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
       canPostAgencyWide: false,
     });
     const [rows, openings] = await Promise.all([
@@ -156,6 +167,21 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     const dates = weekDates(start);
     if (ticket !== loadTicket.current) return;
     setShifts(rows.filter((row) => row.status !== "cancelled"));
+    // Clearance flags for the owed lines: only a DSP positively read as not
+    // cleared is flagged. A failed read leaves the set empty — the board
+    // never guesses a flag it could not read.
+    const clearance = await api.listStaffNeedingClearance(siteId).catch(() => null);
+    if (ticket !== loadTicket.current) return;
+    if (clearance) {
+      const dspIds = new Set(people.filter((person) => person.roleKey === "dsp").map((person) => person.id));
+      setUnclearedIds(
+        new Set(
+          clearance
+            .filter((row) => !row.clearedForInRatio && dspIds.has(row.userId))
+            .map((row) => row.userId),
+        ),
+      );
+    }
     // Accountability reads the same local coverage buckets the shift list
     // just loaded (the demo seed lands with that load), so it runs after.
     // A failed read leaves the board usable without the lines — the board
@@ -223,6 +249,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
           writers: houseWriters.map((person) => ({ userId: person.id, name: person.name })),
           graceMinutes: operating.noteGraceMinutes,
           weekHasSchedule: planShifts.length > 0,
+          unclearedStaffIds: unclearedIds,
         })
       : [],
     shifts: shifts
@@ -288,6 +315,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
           userId: session.userId,
           fullName: session.fullName,
           canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
           canPostAgencyWide: false,
         });
         await posted.postOpenShift({
@@ -303,7 +331,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         });
         setNotice("Posted. A PRN takes it from Open Shifts, and then that person owes the note.");
       } else {
-        const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+        const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
         const input: HrShiftInput = {
           siteId,
           staffId: draft.staffId,
@@ -331,7 +359,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       await store.updateShift(shift.id, { status: "cancelled" });
       await loadWeek(weekStart);
     } catch (err) {
@@ -352,6 +380,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
         userId: session.userId,
         fullName: session.fullName,
         canManageSchedule: can(session, "hub.manage_schedule"),
+      readOnly: session.roleKey === "auditor",
         canPostAgencyWide: false,
       });
       await posted.cancelOpenShift(shift.id);
@@ -384,7 +413,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       for (const row of rows) {
         const times = chicagoShiftInstants(row.date, row.start, row.end);
         await store.createShift({
@@ -412,7 +441,7 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
     setError("");
     setNotice("");
     try {
-      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId });
+      const store = createHrStore({ agencyId: session.agencyId, userId: session.userId, roleKey: session.roleKey });
       const previousWeek = addWeek(weekStart, -1);
       const range = coverageQueryWindow(previousWeek);
       const previous = (await store.listShifts(range.fromIso, range.toIso, siteId)).filter((row) => row.status !== "cancelled");
@@ -594,6 +623,11 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
                   ))}
                 </select>
               </label>
+              {clearanceWarning && (
+                <p className="coverage-clearance-warning" role="alert">
+                  {clearanceWarning}
+                </p>
+              )}
               <div className="coverage-presets">
                 {(["day", "evening", "overnight"] as const).map((block) => (
                   <button

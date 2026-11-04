@@ -28,6 +28,7 @@ import {
   type ScoreFacts,
 } from "../data/complianceScore";
 import { collectRisks, riskCounts, type RiskContext } from "../data/riskRegistry";
+import { medHasCountOnFile } from "../data/medInventory";
 import {
   buildTimeline,
   dueNext,
@@ -39,7 +40,7 @@ import {
   ATTENTION_KIND_META,
   buildAttentionFeed,
 } from "../data/attentionFeed";
-import { rightsTrackingFor } from "../data/rightsPackets";
+import { rightsPacketStatusFor } from "../data/rightsPackets";
 import {
   evaluateReadiness,
   readinessByCategory,
@@ -82,6 +83,8 @@ export interface CommandCenterData {
   requirements: WorkspaceView["requirements"];
   individuals: WorkspaceView["individuals"];
   unavailable?: string[];
+  /** Missed shift notes as named facts for the attention feed (batch 9). */
+  missingShiftNotes?: import("../data/attentionFeed").MissingShiftNoteFact[];
   medications?: MedInventoryView[];
   planStacks?: WorkspaceView["planStacks"];
   rightsPackets?: import("../data/rightsPackets").RightsPacket[];
@@ -145,8 +148,18 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
   for (const row of data.clearance) {
     const site = staffSite.get(row.userId);
     const facts = get(site?.siteId ?? null, site?.siteName ?? "Unassigned");
+    // Wave 7S (batches 75/76 + 103): the verdict keys off
+    // clearedForInRatio — the canonical gate verdict — not the raw
+    // counts. A staffer with no training assigned has 0 pending /
+    // 0 overdue yet is NOT cleared, and the counts alone scored them
+    // "complete", which is how the Overview could read 100% over staff
+    // whose own Training pages said NOT CLEARED.
     facts.training.push(
-      row.overdueCount > 0 ? "overdue" : row.pendingCount > 0 ? "incomplete" : "complete",
+      row.clearedForInRatio
+        ? "complete"
+        : row.overdueCount > 0
+          ? "overdue"
+          : "incomplete",
     );
   }
 
@@ -260,7 +273,7 @@ export function CommandCenterView({
         late: list.late ?? list.status === "overdue",
       })),
       training: clearance
-        .filter((row) => row.overdueCount > 0 || row.pendingCount > 0)
+        .filter((row) => !row.clearedForInRatio)
         .map((row) => ({
           id: row.userId,
           staffName: row.fullName,
@@ -270,9 +283,19 @@ export function CommandCenterView({
             | "incomplete",
           dueOn: null,
         })),
-      medications: (data.medications ?? []).filter((med) => med.status !== "ok").map((med) => {
+      // A med with no count on file (lastCountedOn === null) has no
+      // stock state: the projection behind `status` is a fabricated
+      // zero, so calling it "out of stock" contradicts the chart and
+      // the forecast, which both report "No count recorded yet"
+      // (batch 86: Audit Me declared a never-counted med out of stock
+      // at a home where the same-named counted med read 28 pills).
+      // Only counted meds make stock claims — the same rule the
+      // supply tallies use. Rows name the Individual: med names repeat
+      // across people, so a site-only label is not identifiable.
+      medications: (data.medications ?? []).filter((med) => med.status !== "ok" && medHasCountOnFile(med)).map((med) => {
         const person = data.individuals.find((row) => row.id === med.individualId);
         return { id: med.medicationId, medName: med.medicationName,
+          personName: person?.name,
           siteId: person?.siteId ?? "", siteName: person?.site ?? "Unknown site",
           daysRemaining: med.daysRemaining, status: med.status as "low" | "critical" | "out" };
       }),
@@ -322,7 +345,10 @@ export function CommandCenterView({
           dueOn: (list.dueAt as string).slice(0, 10),
           submitted: false,
         })),
-      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null).map((med) => {
+      // Never-counted meds are excluded for the same reason as the
+      // risk rows above: their projected daysRemaining is 0 from a
+      // fabricated zero, which would invent a run-out date today.
+      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null && medHasCountOnFile(med)).map((med) => {
         const end = new Date();
         end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));
         return { id: med.medicationId, medName: med.medicationName,
@@ -339,26 +365,28 @@ export function CommandCenterView({
       providerRecertification: null,
       rightsRenewals: (data.individuals ?? []).flatMap((person): NonNullable<TimelineFacts["rightsRenewals"]> => {
         const mine = (data.rightsPackets ?? []).filter((packet) => packet.individualId === person.id);
-        if (mine.length === 0) return [];
-        const tracking = rightsTrackingFor(mine);
-        if (tracking.kind === "tracked") {
+        // The shared selector, fed null when the packet load failed:
+        // an unknown status contributes no timeline row, so this
+        // surface can never state a verdict the data does not support.
+        const status = rightsPacketStatusFor((data.unavailable ?? []).includes("Rights packets") ? null : mine);
+        if (status.kind === "signed_current" || status.kind === "signed_renewal_due" || status.kind === "signed_overdue") {
           return [{
-            id: tracking.packet.id,
+            id: status.packet.id,
             individualName: person.name,
             siteName: person.site,
-            dueOn: tracking.renewal.renewalOn,
+            dueOn: status.renewal.renewalOn,
             unsigned: false,
-            detail: tracking.renewal.text,
+            detail: status.text,
           }];
         }
-        if (!tracking.packet) return [];
+        if (status.kind !== "never_signed" || !status.packet) return [];
         return [{
-          id: tracking.packet.id,
+          id: status.packet.id,
           individualName: person.name,
           siteName: person.site,
-          dueOn: tracking.packet.createdAt.slice(0, 10),
+          dueOn: status.packet.createdAt.slice(0, 10),
           unsigned: true,
-          detail: `Not yet signed — awaiting signature since ${tracking.packet.createdAt.slice(0, 10)}`,
+          detail: `Not yet signed — awaiting signature since ${status.packet.createdAt.slice(0, 10)}`,
         }];
       }),
     }),
@@ -368,8 +396,13 @@ export function CommandCenterView({
   const timeline = useMemo(() => buildTimeline(timelineFacts), [timelineFacts]);
   const nextUp = useMemo(() => dueNext(timelineFacts, 5), [timelineFacts]);
   const attention = useMemo(
-    () => buildAttentionFeed({ riskContext, timelineFacts }),
-    [riskContext, timelineFacts],
+    () =>
+      buildAttentionFeed({
+        riskContext,
+        timelineFacts,
+        missingShiftNotes: data.missingShiftNotes ?? [],
+      }),
+    [riskContext, timelineFacts, data.missingShiftNotes],
   );
 
   /* ---------------- DMH readiness (honest evidence) ---------------- */
@@ -954,7 +987,7 @@ export default function CommandCenter() {
       const optional = async <T,>(label: string, request: Promise<T>, fallback: T): Promise<T> => {
         try { return await request; } catch { unavailable.push(label); return fallback; }
       };
-      const [actions, certs, clearance, checklists, snapshots, medicationGroups, rightsPackets] = await Promise.all([
+      const [actions, certs, clearance, checklists, snapshots, medicationGroups, rightsPackets, dueItemGroups] = await Promise.all([
         api.listCorrectiveActions(),
         optional("Certificates", api.certificatesExpiringSoon(36500), []),
         optional("Staff training", api.listStaffNeedingClearance(), [] as StaffClearanceRow[]),
@@ -962,7 +995,29 @@ export default function CommandCenter() {
         optional("Score history", api.listComplianceSnapshots(null, 30), [] as ScoreSnapshot[]),
         optional("Medication supply", Promise.all((workspace?.individuals ?? []).map((person) => api.getMedInventory(person.id))), [] as MedInventoryView[][]),
         optional("Rights packets", api.listRightsPackets(), [] as import("../data/rightsPackets").RightsPacket[]),
+        // Missed shift notes (batch 9): the due-items engine already
+        // knows them by name per site — surface them in the feed.
+        optional("Missing shift notes", Promise.all((workspace?.sites ?? []).map((site) => api.getSiteDueItems(site.id))), [] as import("../data/dueItems").SiteDueItemsResult[]),
       ]);
+      const missingShiftNotes: import("../data/attentionFeed").MissingShiftNoteFact[] =
+        dueItemGroups.flatMap((group, index) =>
+          group.items
+            .filter(
+              (item) =>
+                item.kind === "shift_note" &&
+                item.severity === "overdue" &&
+                item.shift,
+            )
+            .map((item) => ({
+              id: item.id,
+              individualId: item.individualId,
+              individualName: item.individualName,
+              siteName: workspace?.sites[index]?.name ?? "",
+              serviceDate: item.shift!.serviceDate,
+              blockLabel: item.shift!.blockLabel,
+              staffName: item.shift!.staffName,
+            })),
+        );
       if (request !== loadSequence.current) return;
       setData({
         actions: sortCorrectiveActions(actions, new Date()),
@@ -978,6 +1033,7 @@ export default function CommandCenter() {
         medications: medicationGroups.flat(),
         planStacks: workspace?.planStacks ?? [],
         rightsPackets,
+        missingShiftNotes,
       });
     } catch (err) {
       if (request === loadSequence.current) setError(err instanceof Error ? err.message : "Could not load the command center.");

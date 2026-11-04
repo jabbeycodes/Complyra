@@ -27,3 +27,6 @@ android/local.properties
 *.keystore
 *.p12
 *.mobileprovision
+
+# Screenshot folders written by e2e specs during a run (wave7a/wave7k chart + phone shots).
+wave*-shots/

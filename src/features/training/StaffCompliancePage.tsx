@@ -13,7 +13,7 @@ import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
-import { hasPermission } from "../../data/permissions";
+import { canViewTrainingRoster, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -32,6 +32,7 @@ import {
   trainingLinePayloadFromView,
 } from "../signatures/documentPayloads";
 import { can } from "../../data/status";
+import { trainingRosterView } from "./rosterState";
 import { downloadBlob } from "../../data/openFile";
 import {
   buildStaffTrainingChecklistPdf,
@@ -42,7 +43,7 @@ import {
   canRequestTrainingCorrection,
   canSignTrainingAsHm,
 } from "../../data/chart";
-import { TRAINING_LINE_MAX_HOURS } from "./gate";
+import { TRAINING_LINE_MAX_HOURS, trainingLandingMode } from "./gate";
 import AssignTrainingModal from "./AssignTrainingModal";
 import type {
   AdoptedSignature,
@@ -103,9 +104,20 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
+  // Roster read: hr.view_staff, the program manager, and the auditor's
+  // read path (canViewTrainingRoster). Assign training, N/A waivers and
+  // line edits stay on canManage (hr.view_staff) only.
+  const canViewRoster = session ? canViewTrainingRoster(session) : false;
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
+  // Roster access is wider than the hr.view_staff permission: oversight
+  // roles (PM/HM/admin) land on the roster too (batch 25). Assigning
+  // training still requires hr.view_staff itself (canManage).
+  // Who sees the roster panels: staff viewers, training overseers (HM),
+  // and the auditor read path (AUDITOR-NAV, wave 7U).
+  const canRoster = canViewRoster || isHm;
 
   async function loadRows() {
+    setRowsFailed(false);
     try {
       setRows(await api.listStaffNeedingClearance());
     } catch {
@@ -124,7 +136,12 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
 
   useEffect(() => {
     if (!session) return;
-    if (can(session, "hr.view_staff")) {
+    if (
+      trainingLandingMode({
+        canViewStaff: canViewTrainingRoster(session),
+        roleKey: session.roleKey,
+      }) === "roster"
+    ) {
       loadRows();
     } else {
       setRowsFailed(true);
@@ -147,7 +164,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       await action();
       await refresh();
       if (selected) await loadProfile(selected);
-      if (canManage) await loadRows();
+      if (canRoster) await loadRows();
       setModal(null);
       setSignatureTick((tick) => tick + 1);
       onSaved(savedMessage);
@@ -158,7 +175,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     }
   }
 
-  const notCleared = (rows ?? []).filter((row) => !row.clearedForInRatio);
+  // Wave 7S (batches 75/76 + 103): the verdict comes from the roster
+  // selector — loading, failed, and loaded-empty rosters get honest
+  // states, and "Everyone is cleared" exists only for a loaded roster
+  // whose every displayed row carries the canonical profile verdict.
+  const roster = trainingRosterView(rows, rowsFailed);
 
   return (
     <div data-tour="training">
@@ -166,6 +187,11 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         title="Training"
         description="In-ratio gate: 20 hours of training, including 8 hours alongside the house manager, before working alone."
       >
+        {canRoster && (
+          <button className="button" onClick={() => setSelected(session.userId)}>
+            My training
+          </button>
+        )}
         {canManage && (
           <button className="button" onClick={() => setModal({ kind: "assign" })}>
             Assign training
@@ -174,17 +200,47 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       </PageHeading>
       {error && <p className="form-error">{error}</p>}
 
-      {canManage && rows && (
+      {canRoster && roster.kind === "loading" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <p className="muted">Loading staff training…</p>
+        </section>
+      )}
+
+      {canRoster && roster.kind === "error" && (
+        <section className="panel" aria-label="Staff training status">
+          <h2>Staff training status</h2>
+          <Empty
+            title="Staff training couldn't be loaded"
+            text="Clearance can't be judged until the roster loads — a failed load never means everyone is cleared."
+          />
+          <button className="button" onClick={() => void loadRows()}>
+            Try again
+          </button>
+        </section>
+      )}
+
+      {canRoster && roster.kind === "empty" && (
+        <section className="panel" aria-label="All staff training status">
+          <h2>All staff</h2>
+          <Empty
+            title="No staff in scope"
+            text="No staff members are in scope for this view, so there is no clearance verdict to show."
+          />
+        </section>
+      )}
+
+      {canRoster && roster.kind === "ready" && (
         <section className="panel" aria-label="Not cleared to work alone">
           <h2>Not cleared to work alone</h2>
-          {notCleared.length === 0 ? (
+          {roster.allCleared ? (
             <Empty
               title="Everyone is cleared"
-              text="Every staff member with training assigned meets the in-ratio gate."
+              text="Every staff member in the roster meets the in-ratio gate."
             />
           ) : (
             <ul className="clearance-list">
-              {notCleared.map((row) => (
+              {roster.notCleared.map((row) => (
                 <li key={row.userId}>
                   <div>
                     <strong>{row.fullName}</strong>
@@ -210,7 +266,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
         </section>
       )}
 
-      {canManage && rows && (
+      {canRoster && roster.kind === "ready" && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
           <table className="data-table">
@@ -225,7 +281,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {roster.rows.map((row) => (
                 <tr key={row.userId}>
                   <td>{row.fullName}</td>
                   <td>{row.siteName}</td>
@@ -372,7 +428,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
-      {rowsFailed && !canManage && !profile && (
+      {rowsFailed && !canRoster && !profile && (
         <Empty
           title="No training profile"
           text="Your training profile could not be loaded. Ask your house manager to assign your in-home checklist."
@@ -414,7 +470,7 @@ function ProfilePanel({
   onCorrect: (countersignatureId: string) => void;
   onClose: () => void;
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   const [showCertificates, setShowCertificates] = useState(false);
   const sessionAgencyName = session?.agencyName ?? "Agency";
   const sections = [1, 2, 3, 4, 5, 6].map((section) => ({
@@ -606,6 +662,7 @@ function ProfilePanel({
                               ) : (
                                 <LineInitialsStamp
                                   event={latestEvent}
+                                  documentTitle={`Training checklist — ${line.topicTitle}`}
                                   documentId={trainingChecklistDocId(
                                     profile.userId,
                                     line.siteId ?? "",
@@ -689,6 +746,7 @@ function ProfilePanel({
           onClick={() => {
             const doc = buildStaffTrainingChecklistPdf({
               agencyName: sessionAgencyName,
+              logoDataUrl: workspace?.branding.logoUrl ?? null,
               staffName: profile.fullName,
               siteNames: profile.siteNames,
               hoursTotal: profile.hoursTotal,
@@ -752,8 +810,10 @@ function ProfilePanel({
           const staffSigned = staffSignedForSite(counter.siteId, counter);
           const staffCanAct = canInitialOwn && gate.allResolved;
           // Paper order: staff signs first, then the HM countersigns — ANDed
-          // with the paper rule that every line is initialed or N/A.
-          const hmCanAct = isHm && staffSigned && gate.allResolved;
+          // with the paper rule that every line is initialed or N/A. A
+          // countersignature is a second person's attestation: the sheet's
+          // owner never countersigns their own sheet (batch 24).
+          const hmCanAct = isHm && !canInitialOwn && staffSigned && gate.allResolved;
           return (
             <li key={counter.id}>
               <strong>{profile.siteNames[0] ?? counter.siteId}</strong>
@@ -782,11 +842,13 @@ function ProfilePanel({
                 actionLabel="Countersign as {name}"
                 canAct={hmCanAct}
                 cantActReason={
-                  !staffSigned
-                    ? "The staffer must sign before the house manager countersigns."
-                    : !gate.allResolved
-                      ? LINES_GATE_MESSAGE
-                      : "Not countersigned yet."
+                  canInitialOwn
+                    ? "You can't countersign your own checklist."
+                    : !staffSigned
+                      ? "The staffer must sign before the house manager countersigns."
+                      : !gate.allResolved
+                        ? LINES_GATE_MESSAGE
+                        : "Not countersigned yet."
                 }
                 legacySigned={
                   counter.hmSignedAt
@@ -840,10 +902,12 @@ function LineInitialsStamp({
   event,
   documentId,
   getDocumentPayload,
+  documentTitle,
 }: {
   event: SignatureEvent;
   documentId: string;
   getDocumentPayload: () => object;
+  documentTitle?: string;
 }) {
   const { api } = useData();
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -881,6 +945,7 @@ function LineInitialsStamp({
         documentId={documentId}
         fieldName={event.fieldName}
         getDocumentPayload={getDocumentPayload}
+        documentTitle={documentTitle}
       />
     </span>
   );

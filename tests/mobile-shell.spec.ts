@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, openMobileMar } from "./fixtures";
 
 // Mobile shell + MAR + ISP flows at a phone viewport, in local/demo mode.
 // The clock is pinned to 08:30 Central on the seed's service day so Ellis
@@ -39,8 +39,8 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
 
   await pickCedarHouse(page);
 
-  // Role-correct tiles for an administrator; modules that do not exist on
-  // main (Messages, Event Reports, Time Off) render no tile at all.
+  // Role-correct tiles for an administrator; surfaces with no home tile
+  // (Event Reports; Time Off, which lives in My Hub) render no tile.
   for (const label of [
     "Medications",
     "ISP Data",
@@ -63,7 +63,11 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await expect(page.getByRole("button", { name: /Med Count/ })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("button", { name: /Messages/ })).toHaveCount(0);
+  // Messages DOES have a tile: staff messaging shipped on mobile
+  // (PR #154) and an administrator can use it.
+  await expect(
+    page.getByRole("button", { name: /Messages/ }).first(),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /Time Off/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Event Reports/ })).toHaveCount(
     0,
@@ -71,7 +75,7 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await page.screenshot({ path: shot("tile-home.png"), fullPage: true });
 
   // MAR: pick the person, read the day as passes with text counts.
-  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await openMobileMar(page);
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await expect(page.getByText("Med count & supply")).toBeVisible();
 
@@ -122,7 +126,7 @@ test("mobile MAR: a Refused record needs a reason and lands on the Other tab", a
   await signInToShell(page);
   await pickCedarHouse(page);
 
-  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await openMobileMar(page);
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
@@ -517,7 +521,7 @@ test("mobile home: a Refused exception does NOT move the donut, and home refresh
 
   // Record a Refused exception on Ellis Hart's 8:00 AM dose — an exception
   // with no dose mark. The dose itself stays "Not yet given".
-  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await openMobileMar(page);
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
@@ -550,7 +554,7 @@ test("mobile home: a Given mark moves the donut on return, without a reload", as
   const before = await readHomeTracking(page);
 
   // Record the 8:00 AM Levetiracetam as Given (a real dose mark).
-  await page.getByRole("button", { name: /Medications/ }).first().click();
+  await openMobileMar(page);
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
@@ -635,8 +639,9 @@ test("mobile home: donut math, up next, and the bottom navigation", async ({
   await page.locator(".msh-upnext").screenshot({ path: shot("up-next.png") });
   await page.screenshot({ path: shot("home-clean.png"), fullPage: true });
 
-  // Bottom navigation: Tasks and People are shell views, Meds opens the
-  // MAR — where the pill steps aside for the MAR's own tab bar.
+  // Bottom navigation: Tasks and People are shell views. There is no Meds
+  // pill (founder directive 2026-10-31: medications live under Health), and
+  // the pill stays on every shell screen, the MAR included (batches 28-30).
   const navBar = page.getByRole("navigation", { name: "Mobile" });
   await expect(navBar).toBeVisible();
   await navBar.getByRole("button", { name: "Tasks", exact: true }).click();
@@ -645,11 +650,9 @@ test("mobile home: donut math, up next, and the bottom navigation", async ({
   await expect(
     page.getByRole("heading", { name: "Today at Cedar House" }),
   ).toBeVisible();
-  await navBar.getByRole("button", { name: "Meds", exact: true }).click();
-  await expect(
-    page.getByText("Pick the person whose medications"),
-  ).toBeVisible();
-  await expect(navBar).toHaveCount(0);
+  await expect(navBar.getByRole("button", { name: "Meds", exact: true })).toHaveCount(0);
+  await openMobileMar(page);
+  await expect(navBar).toBeVisible();
   await page.getByRole("button", { name: "‹ Home" }).click();
   await expect(navBar).toBeVisible();
   await navBar.getByRole("button", { name: "People", exact: true }).click();

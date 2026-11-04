@@ -154,7 +154,7 @@ test("assignment instantiates a draft and notifies reviewers, not all staff", as
   const notified = new Set(reviewNotes.map((n) => n.userId));
   // Reviewers: everyone whose role template holds delegation.training.review
   // and has an Evergreen account — the Maple nurse, the agency admin, the
-  // program manager, and the compliance administrator (agency-scoped).
+  // program manager, and the administrator (agency-scoped).
   assert.ok(notified.has(userIdFor(s, "Cameron Price")));
   assert.ok(notified.has(userIdFor(s, "Sarah Mitchell")));
   assert.ok(notified.has(userIdFor(s, "Melissa Grant")));
@@ -292,7 +292,7 @@ test("overdue sweep notifies staff and managers idempotently", async () => {
   const first = await api.sweepDelegationAckOverdue();
   // 3 unsigned Maple staff (Alex, Taylor, Cameron) + the 3 agency-scoped
   // holders of delegation.activate (Sarah Mitchell, admin; Melissa Grant,
-  // program manager; Omar Haddad, compliance administrator).
+  // program manager; Omar Haddad, administrator).
   assert.equal(first, 6);
   const overdueNotes = () =>
     s.db.notifications.filter((n) => n.type === "delegation.ack_overdue");

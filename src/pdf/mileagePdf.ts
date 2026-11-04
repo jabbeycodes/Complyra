@@ -7,7 +7,7 @@
  */
 import { jsPDF } from "jspdf";
 import { monthLabel } from "../data/mileage";
-import { stampRecordMark } from "./brandHeader";
+import { drawBrandHeader, stampRecordMark, type ReportBrand } from "./brandHeader";
 import type { MileageTripView } from "../data/types";
 import type { MileageYearlySummary } from "../data/mileage";
 import { siteLocationFields, type SiteAddressParts } from "../data/siteAddress";
@@ -19,6 +19,8 @@ export interface MileagePdfPerson {
 
 export interface MileageMonthPdfInput {
   agencyName: string;
+  /** Agency logo (data URL) when one is set; the header falls back to the agency name alone. */
+  logoDataUrl?: string | null;
   siteName: string;
   monthKey: string;
   people: MileagePdfPerson[];
@@ -49,7 +51,6 @@ const FOOTER_Y = 572;
 
 type RGB = [number, number, number];
 const INK: RGB = [36, 30, 24];
-const EVERGREEN: RGB = [47, 70, 48];
 const HEADER_FILL: RGB = [240, 240, 240];
 const GROUP_FILL: RGB = [233, 229, 221];
 
@@ -81,25 +82,25 @@ function drawHomeHeader(
   return next;
 }
 
-function drawBrand(
+/**
+ * Shared sheet header for all three mileage PDFs: the platform brand header
+ * (agency logo when set, agency name always, via brandHeader's
+ * drawBrandHeader), then the sheet title and the home/period line.
+ */
+function drawSheetHeader(
   doc: jsPDF,
-  agencyName: string,
-  monthKey: string,
+  title: string,
+  brand: ReportBrand,
   siteName: string,
-  location?: SiteAddressParts,
+  location: SiteAddressParts | undefined,
+  periodLabel: string,
 ) {
-  let y = 48;
+  const titleY = drawBrandHeader(doc, brand, MARGIN, 48);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...EVERGREEN);
-  doc.text("COMPLYRER", MARGIN, y);
-  doc.setFontSize(10);
-  doc.setTextColor(...INK);
-  doc.text(agencyName, MARGIN, y + 14);
-  y += 34;
   doc.setFontSize(16);
-  doc.text("Mileage Log", MARGIN, y);
-  return drawHomeHeader(doc, y, siteName, location, `Month: ${monthLabel(monthKey)}`);
+  doc.setTextColor(...INK);
+  doc.text(title, MARGIN, titleY);
+  return drawHomeHeader(doc, titleY, siteName, location, periodLabel);
 }
 
 interface Column {
@@ -144,7 +145,14 @@ function fmtDate(iso: string) {
 
 export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
   const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
-  let y = drawBrand(doc, input.agencyName, input.monthKey, input.siteName, input.siteLocation);
+  let y = drawSheetHeader(
+    doc,
+    "Mileage Log",
+    { agencyName: input.agencyName, logoDataUrl: input.logoDataUrl },
+    input.siteName,
+    input.siteLocation,
+    `Month: ${monthLabel(input.monthKey)}`,
+  );
 
   const columns = buildColumns(input.people);
   const lineH = 11;
@@ -277,6 +285,8 @@ export function buildMileageMonthPdf(input: MileageMonthPdfInput) {
 
 export interface MileageWeekPdfInput {
   agencyName: string;
+  /** Agency logo (data URL) when one is set; the header falls back to the agency name alone. */
+  logoDataUrl?: string | null;
   siteName: string;
   monthKey: string;
   people: MileagePdfPerson[];
@@ -293,20 +303,10 @@ const WEEK_SHORT = ["Week 1", "Week 2", "Week 3", "Week 4"] as const;
 /** Weekly mileage sheet: one row per individual, Week 1–4 + monthly total. */
 export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
   const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
-  let y = 48;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...EVERGREEN);
-  doc.text("COMPLYRER", MARGIN, y);
-  doc.setFontSize(10);
-  doc.setTextColor(...INK);
-  doc.text(input.agencyName, MARGIN, y + 14);
-  y += 34;
-  doc.setFontSize(16);
-  doc.text("Weekly Mileage Sheet", MARGIN, y);
-  y = drawHomeHeader(
+  let y = drawSheetHeader(
     doc,
-    y,
+    "Weekly Mileage Sheet",
+    { agencyName: input.agencyName, logoDataUrl: input.logoDataUrl },
     input.siteName,
     input.siteLocation,
     `Month: ${monthLabel(input.monthKey)}`,
@@ -420,6 +420,8 @@ export function buildMileageWeekPdf(input: MileageWeekPdfInput) {
 
 export interface MileageYearPdfInput {
   agencyName: string;
+  /** Agency logo (data URL) when one is set; the header falls back to the agency name alone. */
+  logoDataUrl?: string | null;
   /** Per-site home name, or "All sites" for the agency-wide view. */
   siteName: string;
   year: number;
@@ -448,20 +450,10 @@ export function buildMileageYearPdf(input: MileageYearPdfInput) {
   const lineH = 11;
 
   // header
-  let y = 48;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...EVERGREEN);
-  doc.text("COMPLYRER", MARGIN, y);
-  doc.setFontSize(10);
-  doc.setTextColor(...INK);
-  doc.text(input.agencyName, MARGIN, y + 14);
-  y += 34;
-  doc.setFontSize(16);
-  doc.text("Yearly Mileage Tracking", MARGIN, y);
-  y = drawHomeHeader(
+  let y = drawSheetHeader(
     doc,
-    y,
+    "Yearly Mileage Tracking",
+    { agencyName: input.agencyName, logoDataUrl: input.logoDataUrl },
     input.siteName,
     input.siteLocation,
     `Year: ${input.year}`,

@@ -576,6 +576,53 @@ export function checklistSubmittedPayload(input: {
   };
 }
 
+export interface NotificationGroup {
+  key: string;
+  /** Every row in the group, in panel order (the order rows were given). */
+  rows: NotificationRow[];
+  /** The member whose title/body/deep link represent the group (its first). */
+  head: NotificationRow;
+  unreadCount: number;
+}
+
+/**
+ * Bell display grouping (simulation batches 51/52/58): repeat reminders
+ * about the SAME subject — the same type about the same entity, e.g.
+ * dozens of "PRN follow-up still open" rows for one medication, or a run
+ * of "Unmarked medication" rows for one home — collapse into one bell row
+ * with a count, so a flood of repeats cannot bury everything else.
+ * Grouping is display-only: every row keeps its own read state, marking
+ * the group read marks each member, and the badge count still counts
+ * individual unread rows. Rows with no entity never merge; a group sits
+ * at the position of its first (newest) member.
+ */
+export function groupNotifications(rows: NotificationRow[]): NotificationGroup[] {
+  const groups: NotificationGroup[] = [];
+  const byKey = new Map<string, NotificationGroup>();
+  for (const row of rows) {
+    const key = row.entity_id
+      ? `${row.type}|${row.entity_type ?? ""}|${row.entity_id}`
+      : null;
+    if (key) {
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.rows.push(row);
+        if (isUnread(row)) existing.unreadCount += 1;
+        continue;
+      }
+    }
+    const group: NotificationGroup = {
+      key: key ?? `row:${row.id}`,
+      rows: [row],
+      head: row,
+      unreadCount: isUnread(row) ? 1 : 0,
+    };
+    groups.push(group);
+    if (key) byKey.set(key, group);
+  }
+  return groups;
+}
+
 /** Sort newest first, unread before read when equal — the panel's order. */
 export function sortNotifications(rows: NotificationRow[]): NotificationRow[] {
   return [...rows].sort((a, b) => {

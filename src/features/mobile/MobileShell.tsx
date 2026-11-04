@@ -14,7 +14,6 @@ import {
   LogOut,
   MessageSquare,
   Monitor,
-  Pill,
   Search,
   Users,
   Wallet,
@@ -32,11 +31,18 @@ import {
   type NotificationRow,
 } from "../notifications/notify";
 import { mobileTiles, type MobileTileId } from "./tiles";
-import { bottomNavItems, moreSheetTiles, type BottomNavId } from "./bottomNav";
+import {
+  activeBottomNavFor,
+  bottomNavItems,
+  moreSheetTiles,
+  shellBottomNavVisible,
+  type BottomNavId,
+} from "./bottomNav";
 import BottomNavPill from "./BottomNavPill";
 import {
   centralHour,
   greetingForHour,
+  homeTasksSummaryText,
   pickMobileScopedSite,
   queueItemsForHome,
   type TrackingCategoryId,
@@ -89,7 +95,6 @@ export type ShellView =
   | "notifications";
 
 const TILE_ICONS: Record<MobileTileId, LucideIcon> = {
-  medications: Pill,
   ispData: ClipboardList,
   health: HeartPulse,
   quickLog: Zap,
@@ -161,7 +166,12 @@ export default function MobileShell({
   workspace: WorkspaceView;
   queueItems: PersonalWorkItem[];
   onSignOut: () => void;
-  onDesktopView: () => void;
+  /**
+   * Switch to the desktop layout, preserving the current screen and
+   * house scope (batch 28): the shell reports where it is, App maps it
+   * to the desktop page for the same work in the same house.
+   */
+  onDesktopView: (target: { view: ShellView; siteId: string | null }) => void;
   nav: MobileNav;
   /**
    * Where the platform bottom navigation (on the desktop-layout pages)
@@ -174,7 +184,15 @@ export default function MobileShell({
   /** Open the More sheet on arrival (the pill's More destination). */
   startSheetOpen?: boolean;
 }) {
-  const sites = workspace.sites;
+  // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP's home
+  // picker and scoped home come only from their assigned homes —
+  // membership home plus active assignment sites (sitesVisibleTo, the
+  // same rule the desktop applies). Other roles keep the workspace
+  // list as delivered.
+  const sites =
+    session.roleKey === "dsp"
+      ? sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds)
+      : workspace.sites;
   const [siteId, setSiteId] = useState<string | null>(() => {
     try {
       return window.localStorage.getItem(siteStorageKey(session.userId));
@@ -184,10 +202,18 @@ export default function MobileShell({
   });
   const storedSite = sites.find((site) => site.id === siteId) ?? null;
   // Scope resolves from the remembered pick or the membership home —
-  // never from list order. With several visible homes and neither source,
-  // the scope stays unresolved and the picker opens instead of rendering
-  // an arbitrary house's name and data (simulation batch 17).
-  const scopedSite = pickMobileScopedSite(sites, siteId, session.siteId);
+  // never from list order. The membership home only scopes home-anchored
+  // roles (house manager, DSP); for multi-home roles (nurse, program
+  // manager, …) it is a home base, not a pick, so with several visible
+  // homes and no remembered pick the scope stays unresolved and the
+  // picker opens instead of rendering an arbitrary house's name and
+  // data (simulation batch 17; wave 4A retest item 3, 2026-10-31).
+  const scopedSite = pickMobileScopedSite(
+    sites,
+    siteId,
+    session.siteId,
+    session.roleKey,
+  );
   // Multi-home users with no remembered home pick one first (the shell's
   // home-first rule); single-home users skip straight in.
   const [view, setView] = useState<ShellView>(() =>
@@ -351,9 +377,6 @@ export default function MobileShell({
 
   const openTile = (id: MobileTileId) => {
     switch (id) {
-      case "medications":
-        setView("mar");
-        break;
       case "ispData":
         setIspPersonId(null);
         setIspKey((value) => value + 1);
@@ -372,7 +395,11 @@ export default function MobileShell({
         setView("scheduling");
         break;
       case "timeClock":
-        nav.openPage("Employee Hub");
+        // The Time Clock stays in the mobile experience (batches
+        // 29–30: it used to leave the shell for the desktop Employee
+        // Hub and land on My Schedule).
+        setHubStartSection("timeclock");
+        setView("hub");
         break;
       case "myHub":
         setHubStartSection("home");
@@ -409,7 +436,11 @@ export default function MobileShell({
   };
 
   const openCategory = (id: TrackingCategoryId) => {
-    if (id === "medications") setView("mar");
+    // Medications live under Health (founder directive, 2026-10-31):
+    // the tracking card's Medications door lands on the Health surface,
+    // whose Medications section opens the MAR. The MAR itself is only
+    // ever entered from within Health (or Quick log's Health flow).
+    if (id === "medications") setView("health");
     else if (id === "ispData") openTile("ispData");
     else if (id === "checklists") nav.openPage("Weekly checklist");
   };
@@ -426,36 +457,19 @@ export default function MobileShell({
     }
     if (id === "home") setView("home");
     else if (id === "tasks") setView("tasks");
-    else if (id === "meds") setView("mar");
     else if (id === "people") setView("people");
   };
 
-  const activeNav: BottomNavId | null =
-    view === "home"
-      ? "home"
-      : view === "tasks"
-        ? "tasks"
-        : view === "people"
-          ? "people"
-          : null;
+  const activeNav: BottomNavId = activeBottomNavFor(view);
 
-  // The pill shows on the home and list-level screens. It hides on the
-  // home picker, in the MAR flow (the MAR's own Scheduled/PRN/Other bar
-  // owns the bottom there), on the notifications surface, while the
-  // ISP entry form is open, and while a message conversation is open
-  // (the reply composer owns the bottom there) — never two bars stacked.
-  const showBottomNav =
-    view === "home" ||
-    view === "tasks" ||
-    view === "people" ||
-    view === "health" ||
-    view === "quicklog" ||
-    view === "scheduling" ||
-    view === "hub" ||
-    view === "reports" ||
-    view === "qa" ||
-    (view === "messages" && !messagesInThread) ||
-    (view === "isp" && !ispFormActive);
+  // The pill shows on EVERY shell screen (batches 28–30) — see
+  // shellBottomNavVisible. In the MAR the pass tab bar stacks above
+  // the pill (mobile.css, .with-mar-tabs) instead of replacing it.
+  const showBottomNav = shellBottomNavVisible({
+    view,
+    ispFormActive,
+    messagesInThread,
+  });
 
   // The home's "Today at …" surface shows only this home's slice of the
   // personal queue — the full queue lives in My Tasks (simulation
@@ -475,14 +489,21 @@ export default function MobileShell({
         : "All med doses recorded",
     );
   }
-  if (homeQueueItems.length > 0) {
-    summaryParts.push(
-      `${homeQueueItems.length} task${homeQueueItems.length === 1 ? "" : "s"} due for you`,
-    );
+  // The greeting counts this home's slice of the queue; the badge and
+  // My Tasks count the whole queue. When the slice is a subset, the
+  // sentence names both numbers so the two surfaces never look broken
+  // against each other (simulation batch 65).
+  const tasksSummary = homeTasksSummaryText(
+    queueItems.length,
+    homeQueueItems.length,
+    scopedSite?.name ?? null,
+  );
+  if (tasksSummary) {
+    summaryParts.push(tasksSummary);
   }
 
   return (
-    <div className="msh-shell">
+    <div className={`msh-shell${view === "mar" ? " with-mar-tabs" : ""}`}>
       <header className="msh-header">
         <div className="msh-brand">
           <ComplyRerWordmark size={26} />
@@ -537,6 +558,9 @@ export default function MobileShell({
                       {session.agencyName}
                     </small>
                   </p>
+                  {/* Batch 59: no Switch home when there is only one
+                      home to switch to. */}
+                  {sites.length > 1 && (
                   <button
                     type="button"
                     role="menuitem"
@@ -547,12 +571,13 @@ export default function MobileShell({
                   >
                     Switch home
                   </button>
+                  )}
                   <button
                     type="button"
                     role="menuitem"
                     onClick={() => {
                       setMenuOpen(false);
-                      onDesktopView();
+                      onDesktopView({ view, siteId: scopedSite?.id ?? null });
                     }}
                   >
                     <Monitor size={17} aria-hidden="true" /> Desktop view
@@ -609,7 +634,7 @@ export default function MobileShell({
               </p>
             </section>
 
-            {scopedSite && (
+            {scopedSite && sites.length > 1 && (
               <button
                 type="button"
                 className="msh-site-chip"
@@ -626,6 +651,17 @@ export default function MobileShell({
                 <ChevronDown size={20} aria-hidden="true" />
               </button>
             )}
+            {scopedSite && sites.length <= 1 && (
+              <div className="msh-site-chip" aria-label={`Current home ${scopedSite.name}`}>
+                <span className="msh-row-main">
+                  <strong>{scopedSite.name}</strong>
+                  <small>
+                    {scopedSite.program} · {people.length} Individual
+                    {people.length === 1 ? "" : "s"}
+                  </small>
+                </span>
+              </div>
+            )}
 
             {scopedSite && (
               <MobileToday
@@ -633,7 +669,7 @@ export default function MobileShell({
                 queueItems={homeQueueItems}
                 onOpenCategory={openCategory}
                 onOpenTasks={() => setView("tasks")}
-                onOpenMar={() => setView("mar")}
+                onOpenMedications={() => setView("health")}
                 onOpenQueueItem={openQueueItem}
                 yourShift={ownShiftStrip}
                 complianceBand={
@@ -816,6 +852,7 @@ export default function MobileShell({
                   api={api}
                   session={session}
                   person={person}
+                  logoDataUrl={workspace.branding?.logoUrl ?? null}
                   onOpenChart={nav.openPersonChart}
                   onBack={() => setView("health")}
                 />
@@ -891,6 +928,7 @@ export default function MobileShell({
           <MobileHouseCard
             api={api}
             session={session}
+            logoDataUrl={workspace.branding.logoUrl ?? null}
             siteId={scopedSite.id}
             siteName={scopedSite.name}
             people={people.map((person) => ({
@@ -918,6 +956,7 @@ export default function MobileShell({
               <MobilePersonalSpending
                 api={api}
                 session={session}
+                logoDataUrl={workspace.branding.logoUrl ?? null}
                 person={person}
                 siteName={personSite?.name ?? ""}
                 staffOptions={workspace.staff.map((member) => ({
@@ -935,6 +974,7 @@ export default function MobileShell({
             api={api}
             session={session}
             onOpenFullHub={() => nav.openPage("Employee Hub")}
+            onOpenHubTab={nav.openHubTab}
             startSection={hubStartSection}
           />
         )}
@@ -1089,6 +1129,7 @@ export default function MobileShell({
                   </button>
                 );
               })}
+              {sites.length > 1 && (
               <button
                 type="button"
                 className="msh-row"
@@ -1105,12 +1146,13 @@ export default function MobileShell({
                   ›
                 </span>
               </button>
+              )}
               <button
                 type="button"
                 className="msh-row"
                 onClick={() => {
                   setSheetOpen(false);
-                  onDesktopView();
+                  onDesktopView({ view, siteId: scopedSite?.id ?? null });
                 }}
               >
                 <span className="msh-row-main">

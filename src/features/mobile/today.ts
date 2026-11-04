@@ -185,6 +185,18 @@ export function greetingForHour(hour: number): string {
 }
 
 /**
+ * Roles whose membership home IS their working home on the phone: a
+ * house manager runs one home and a DSP works their assigned home, so
+ * landing scoped to the membership home matches the job. Everyone else
+ * who can see several homes (nurse, program manager, administrator,
+ * compliance, HR, auditor) works ACROSS homes — a membership home on
+ * their record is a home base at most, never a silent scope.
+ */
+export function mobileMembershipHomeScopes(roleKey: string): boolean {
+  return roleKey === "house_manager" || roleKey === "dsp";
+}
+
+/**
  * Which home the mobile shell is scoped to. Simulation batch 17: the
  * nurse's phone home briefly listed one house's overdue tasks under the
  * other house's name. The shell used to fall back to `sites[0]` — an
@@ -195,17 +207,28 @@ export function greetingForHour(hour: number): string {
  * (one visible house cannot be the wrong house). Otherwise the scope is
  * unresolved (null) and the shell shows the home picker instead of
  * rendering another house's name and data, even briefly.
+ *
+ * Wave 4A retest (2026-10-31, item 3 FAIL): a nurse whose membership
+ * record DOES carry a home-base site still landed scoped to that house
+ * (Maple) before picking anything — the picker badged it "Current
+ * home", the header named it, and leaving the picker without choosing
+ * rendered that house's data. For multi-home roles the membership home
+ * is not a choice the user made, so it no longer scopes them: only a
+ * remembered pick (or a single visible home) resolves their scope.
+ * Home-anchored roles (house manager, DSP) keep the membership-home
+ * default — that home is the job, not a preselection.
  */
 export function pickMobileScopedSite<T extends { id: string }>(
   sites: readonly T[],
   storedSiteId: string | null,
   sessionSiteId: string | null,
+  roleKey: string,
 ): T | null {
   if (storedSiteId) {
     const stored = sites.find((site) => site.id === storedSiteId);
     if (stored) return stored;
   }
-  if (sessionSiteId) {
+  if (sessionSiteId && mobileMembershipHomeScopes(roleKey)) {
     const home = sites.find((site) => site.id === sessionSiteId);
     if (home) return home;
   }
@@ -227,4 +250,40 @@ export function queueItemsForHome(
 ): PersonalWorkItem[] {
   if (!siteName) return [];
   return items.filter((item) => !item.siteName || item.siteName === siteName);
+}
+
+/**
+ * The words for the home greeting's task count. The badge and My Tasks
+ * show the WHOLE personal queue; home shows one home's slice of it. When
+ * the slice is the whole queue the sentence is the plain total; when it
+ * is a subset the sentence must say so ("4 of your 7 tasks are at Maple
+ * House") — a bare smaller number reads as the total and makes the
+ * surfaces look broken (simulation batch 65: home said 4, Tasks said 7,
+ * both from the same queue). Returns null when there is nothing to say
+ * (no open tasks at all).
+ */
+export function homeTasksSummaryText(
+  totalCount: number,
+  homeCount: number,
+  siteName: string | null,
+): string | null {
+  if (totalCount <= 0) return null;
+  if (!siteName || homeCount >= totalCount) {
+    return `${totalCount} task${totalCount === 1 ? "" : "s"} due for you`;
+  }
+  return `${homeCount} of your ${totalCount} tasks are at ${siteName}`;
+}
+
+/**
+ * The words for a truncated Up next list. Up next intentionally shows
+ * only the first few items; when it does, it says how many it is showing
+ * out of how many there are, so an item past the cap never reads as
+ * having vanished (simulation batch 61).
+ */
+export function upNextSubsetText(
+  shownCount: number,
+  totalCount: number,
+): string | null {
+  if (totalCount <= shownCount) return null;
+  return `Showing ${shownCount} of ${totalCount} items in Up next.`;
 }

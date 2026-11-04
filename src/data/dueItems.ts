@@ -860,6 +860,40 @@ export function computeMedDueItems(input: MedDetectorInput): MedDueItem[] {
   });
 }
 
+/** Minutes after midnight in `timeZone` at the given instant. */
+export function zonedMinutesOfDay(isoTimestamp: string, timeZone = "America/Chicago"): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(isoTimestamp));
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+  return (read("hour") % 24) * 60 + read("minute");
+}
+
+const ALREADY_MARKED_PHRASE: Record<MedDoseMarkStatus, string> = {
+  given: "Already given",
+  missed: "Already marked missed",
+  loa: "Already marked LOA",
+  on_hold: "Already on hold",
+};
+
+/**
+ * Wave 7M — the graceful refusal for a second mark attempt on a dose that
+ * already has a mark the caller did not base their action on. Names the
+ * recorded status, the original giver, and when they recorded it (agency
+ * clock), e.g. "Already given by Avery Cole · 10:40 p.m.".
+ */
+export function alreadyMarkedDoseMessage(mark: {
+  status: MedDoseMarkStatus;
+  markedByName: string;
+  markedAt: string;
+}): string {
+  const phrase = ALREADY_MARKED_PHRASE[mark.status] ?? "Already marked";
+  return `${phrase} by ${mark.markedByName} · ${formatClock(zonedMinutesOfDay(mark.markedAt))}`;
+}
+
 /**
  * Why a MAR mark is too early, or null when recording is allowed.
  * Past dates stay open so a late mark can still be recorded.

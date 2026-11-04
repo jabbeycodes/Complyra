@@ -146,6 +146,54 @@ export function rightsTrackingText(tracking: RightsTracking): string {
     return tracking.kind === 'tracked' ? tracking.renewal.text : 'Not yet signed';
 }
 
+export type RightsPacketStatus =
+    /** Packets have not loaded (or the load failed): NO surface may render a verdict. */
+    | { kind: 'unknown'; text: null; packet: null; renewal: null }
+    | { kind: 'signed_current'; text: string; packet: RightsPacket; renewal: RightsRenewal }
+    | { kind: 'signed_renewal_due'; text: string; packet: RightsPacket; renewal: RightsRenewal }
+    | { kind: 'signed_overdue'; text: string; packet: RightsPacket; renewal: RightsRenewal }
+    /** Loaded, and no completed packet exists. `packet` is the open awaiting packet, if one was started. */
+    | { kind: 'never_signed'; text: 'Not yet signed'; packet: RightsPacket | null; renewal: null };
+
+/**
+ * THE shared packet-status selector. Every surface that renders a
+ * Rights packet status — the Overview attention section, the Consents
+ * area (page and Individual chart), the mobile chart card, and the
+ * deadline timeline / attention feed facts — derives it here, from
+ * the packet rows themselves, so one packet state can never read two
+ * ways on two screens.
+ *
+ * The load state is part of the contract: callers pass `null` (or
+ * `undefined`) until their packet list has actually loaded, and the
+ * status is `unknown` — surfaces render nothing rather than a verdict.
+ * An EMPTY loaded list is different: it honestly means no packet was
+ * ever completed, which is the never-signed state. (Batch 41: the
+ * Overview attention section rendered "Not yet signed" for every
+ * Individual from a still-empty, pre-load packet list while the
+ * Consents area — read after its load finished — showed the same
+ * packets signed. The packets were signed all along; the empty list
+ * was.)
+ */
+export function rightsPacketStatusFor(packets: readonly RightsPacket[] | null | undefined, today = todayStamp()): RightsPacketStatus {
+    if (!packets)
+        return { kind: 'unknown', text: null, packet: null, renewal: null };
+    const tracking = rightsTrackingFor([...packets], today);
+    if (tracking.kind === 'tracked') {
+        const kind = tracking.renewal.state === 'current'
+            ? 'signed_current'
+            : tracking.renewal.state === 'overdue'
+                ? 'signed_overdue'
+                : 'signed_renewal_due';
+        return { kind, text: tracking.renewal.text, packet: tracking.packet, renewal: tracking.renewal };
+    }
+    return { kind: 'never_signed', text: 'Not yet signed', packet: tracking.packet, renewal: null };
+}
+
+/** Whether a packet status belongs in attention views (signed-and-current does not). */
+export function rightsPacketNeedsAttention(status: RightsPacketStatus): boolean {
+    return status.kind === 'never_signed' || status.kind === 'signed_renewal_due' || status.kind === 'signed_overdue';
+}
+
 export function validateRightsPacketStart(input: { signerName: string }) {
     if (!input.signerName.trim())
         throw new Error('Name the expected signer for the rights packet.');

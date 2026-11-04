@@ -111,7 +111,9 @@ test('local lifecycle: start, sign with a TYPED past date, immutability, renewal
     // The typed date is stored exactly as entered — never re-stamped.
     assert.equal(saved.packetOn, typedDate);
     assert.equal(saved.status, 'signed');
-    assert.ok(saved.signedAt && saved.signedAt.slice(0, 10) === todayStamp());
+    // signedAt is a UTC instant; compare its LOCAL calendar day (a UTC slice
+    // is tomorrow after 6 PM Central).
+    assert.ok(saved.signedAt && todayStamp(new Date(saved.signedAt)) === todayStamp());
     const list = await f.api.listRightsPackets();
     const mine = list.filter(p => p.individualId === f.person.id);
     assert.equal(rightsTrackingText(rightsTrackingFor(mine)), rightsRenewalFor(typedDate).text);
@@ -153,6 +155,9 @@ test('filed paper copy stores evidence and marks the packet filed', async () => 
     const evidence = await f.api.getRightsPacketEvidence(id);
     assert.equal(evidence.name, 'rights-packet.pdf');
     assert.equal(evidence.mime, 'application/pdf');
+    // Bytes in the file store, a stub in the metadata record (quota fix).
+    assert.equal(f.db.rightsPacketEvidence?.[id]?.base64, '');
+    assert.equal(Buffer.from(evidence.base64, 'base64').toString(), '%PDF-signed');
 });
 
 test('notification sweep emits rights alerts once and dedupes on refresh', async () => {

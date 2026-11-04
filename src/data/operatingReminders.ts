@@ -53,6 +53,30 @@ export function reminderRecipientIds(
 }
 
 /**
+ * The house managers of ONE home: active house_manager memberships anchored
+ * to that site. Unlike reminderRecipientIds, a house_manager membership
+ * with no home site does NOT count — a house manager's reach is their home,
+ * so a site-less HM membership receives nothing here rather than every
+ * home's notices. Used where a notice belongs to a home's own managers
+ * (medication order expiry), addressed per user because a house_manager
+ * role broadcast would reach every home in the agency.
+ */
+export function houseManagerRecipientIds(
+  memberships: ReminderMembership[],
+  siteId: string,
+  today: string,
+): string[] {
+  const ids = new Set<string>();
+  for (const membership of memberships) {
+    if (membership.role !== "house_manager") continue;
+    if (membership.siteId !== siteId) continue;
+    if (membership.expiresOn && membership.expiresOn < today) continue;
+    ids.add(membership.userId);
+  }
+  return [...ids];
+}
+
+/**
  * Missouri agency clock. The signed-in app uses the browser clock. This job
  * uses Central so a dose at 8:00 a.m. is judged in the agency's day.
  */
@@ -120,7 +144,6 @@ export function operatingReminderNotices(input: {
 }): OperatingNotice[] {
   const notices: OperatingNotice[] = [];
   const medSlot = reminderSlot(input.now.getTime(), input.unrecordedReminderMinutes);
-  const prnSlot = reminderSlot(input.now.getTime(), input.prnReminderRepeatMinutes);
   const noteDay = input.noteDay ?? input.now.toISOString().slice(0, 10);
   for (const site of input.sites) {
     const overdue = site.items.filter((item) => item.kind === "medication" && item.severity === "overdue");
@@ -184,11 +207,51 @@ export function operatingReminderNotices(input: {
         deepLink: "/meds",
         entityId: followup.medicationId,
         entityType: "medication",
-        dedupeKey: `med.prn_repeat:${followup.medicationId}:${userId}:${prnSlot}`,
+        dedupeKey: prnRepeatDedupeKey(followup.medicationId, userId, followup.createdAt),
       });
     }
   }
   return notices;
+}
+
+/** True when a site's freshly computed due items include an overdue dose. */
+export function siteHasOverdueMedDose(items: SiteDueItem[]): boolean {
+  return items.some((item) => item.kind === "medication" && item.severity === "overdue");
+}
+
+/**
+ * Wave 7M — a queued "Unmarked medication" bell row retires once the sweep
+ * has verified the site it names currently has no overdue unmarked dose
+ * (the dose was marked, by anyone). Rows for sites the sweep could not
+ * load are never retired on a guess: the site id must be in the verified
+ * clear set the same listNotifications call computed.
+ */
+export function medUnrecordedRowRetired(
+  row: { type: string; entityId: string | null },
+  clearSiteIds: ReadonlySet<string>,
+): boolean {
+  return row.type === "med.unrecorded" && row.entityId != null && clearSiteIds.has(row.entityId);
+}
+
+/**
+ * Simulation batch 199: one notice per PRN dose per recipient. The key names
+ * the dose event, not the reminder slot: a slot-keyed notice minted a fresh
+ * row for every recipient every interval while a follow-up stayed open.
+ */
+export function prnRepeatDedupeKey(medicationId: string, userId: string, givenAt: string): string {
+  return `med.prn_repeat:${medicationId}:${userId}:${new Date(givenAt).toISOString()}`;
+}
+
+/**
+ * The repeat reminder lives on that one row: if the recipient read it and the
+ * follow-up is still open a full interval later, the same row goes unread again.
+ */
+export function prnNoticeRearmDue(readAt: string | null | undefined, now: Date, repeatMinutes: number): boolean {
+  return Boolean(readAt) && now.getTime() >= Date.parse(readAt as string) + repeatMinutes * 60_000;
+}
+
+export function prnNoticeKeys(notices: OperatingNotice[]): string[] {
+  return notices.filter((notice) => notice.type === "med.prn_repeat").map((notice) => notice.dedupeKey);
 }
 
 export interface UnattendedAgencyInput {

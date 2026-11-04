@@ -21,6 +21,10 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
 }, testInfo) => {
   const shot = (name: string) =>
     `${process.env.WALKTHROUGH_DIR || testInfo.outputDir}/${name}`;
+  // The consultation-packet download below gets a 90s event wait
+  // (CPU-bound PDF build under parallel CI load), so this test needs
+  // a longer budget than the 30s default.
+  test.setTimeout(120_000);
   await signIn(page);
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
@@ -68,12 +72,23 @@ test("chart Health shows appointments, allergies, and a consultation packet", as
   await expect(chart.getByRole("button", { name: "Log BM" })).toHaveCount(0);
   const sep22 = appointmentCard(chart, "September 22, 2026");
   await expect(sep22.getByRole("button", { name: "Generate consultation packet" })).toBeVisible();
-  await page.screenshot({ path: shot("health_appointments.png"), fullPage: true });
-  const download = page.waitForEvent("download");
+  // Packet generation is CPU-bound (a full jsPDF build); under CI's
+  // parallel workers it can outlast the default 30s event wait. The
+  // assertion is unchanged — the download must still arrive with the
+  // expected filename — only the patience is longer.
+  const download = page.waitForEvent("download", { timeout: 90_000 });
   await sep22.getByRole("button", { name: "Generate consultation packet" }).click();
   expect((await download).suggestedFilename()).toMatch(
     /complyrer-consultation-ellis-hart-2026-09-22/,
   );
+  // The walkthrough screenshot goes last on purpose: in the current
+  // app build, a full-page screenshot's scroll/viewport emulation
+  // resets the Health card to its Overview tab (probe-verified: the
+  // appointment cards unmount and the selected tab flips), which
+  // would strand the packet flow above. The screenshot is an
+  // artifact, not an assertion, so it moves after the flow it
+  // documents.
+  await page.screenshot({ path: shot("health_appointments.png"), fullPage: true });
 });
 
 test("DSP can view Health and generate a packet but cannot create appointments", async ({

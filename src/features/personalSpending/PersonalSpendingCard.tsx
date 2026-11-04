@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import PrintBrandHeader from "../../components/PrintBrandHeader";
 import { useData } from "../../data/DataProvider";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
@@ -24,6 +25,7 @@ import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
   canViewPersonalSpending,
+  canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
 import { monthLabel } from "../../data/mileage";
@@ -269,12 +271,13 @@ export default function PersonalSpendingCard({
   siteName: string;
   staffOptions: PersonalSpendingStaffOption[];
 }) {
-  const { api, session } = useData();
+  const { api, session, workspace } = useData();
   if (!session) return null;
   return (
     <PersonalSpendingSection
       api={api}
       session={session}
+      logoDataUrl={workspace?.branding.logoUrl ?? null}
       individualId={individualId}
       individualName={individualName}
       dmhId={dmhId}
@@ -285,9 +288,10 @@ export default function PersonalSpendingCard({
   );
 }
 
-function PersonalSpendingSection({
+export function PersonalSpendingSection({
   api,
   session,
+  logoDataUrl,
   individualId,
   individualName,
   dmhId,
@@ -297,6 +301,8 @@ function PersonalSpendingSection({
 }: {
   api: ComplyraApi;
   session: SessionUser;
+  /** Agency logo (data URL) for the printed statement header, when one is set. */
+  logoDataUrl?: string | null;
   individualId: string;
   individualName: string;
   dmhId: string;
@@ -324,8 +330,10 @@ function PersonalSpendingSection({
     blankForm(today),
   );
   const [signature, setSignature] = useState("");
+  // The Individual's sign-off starts UNCHOSEN (simulation batch 7): no
+  // option is pre-selected — the closer must pick deliberately.
   const [signoff, setSignoff] =
-    useState<PersonalSpendingSignoff>("individual_signed");
+    useState<PersonalSpendingSignoff | "">("");
   const [secondStaffId, setSecondStaffId] = useState("");
   const [secondSignature, setSecondSignature] = useState("");
   const [closing, setClosing] = useState(false);
@@ -449,6 +457,12 @@ function PersonalSpendingSection({
   const submitClose = async () => {
     setFormError("");
     setNotice("");
+    if (!signoff) {
+      setFormError(
+        "Record how the Individual's sign-off was handled before closing the month.",
+      );
+      return;
+    }
     setClosing(true);
     try {
       await api.closePersonalSpendingMonth({
@@ -462,6 +476,7 @@ function PersonalSpendingSection({
           signoff === "unable_second_staff" ? secondSignature : null,
       });
       setSignature("");
+      setSignoff("");
       setSecondStaffId("");
       setSecondSignature("");
       setNotice(`${monthLabel(month)} is closed and signed.`);
@@ -734,15 +749,20 @@ function PersonalSpendingSection({
                               : formatCents(entry.runningBalanceCents)}
                           </td>
                           <td>
-                            {canRecord && !entry.voided && (
-                              <button
-                                type="button"
-                                className="ps-link-button"
-                                onClick={() => openVoid(entry)}
-                              >
-                                Void
-                              </button>
-                            )}
+                            {canRecord &&
+                              !entry.voided &&
+                              // Wave 6 item 3: Void is a closer action;
+                              // other recorders see it only on their own
+                              // entries (their Undo path).
+                              canVoidPersonalSpendingEntry(session, entry) && (
+                                <button
+                                  type="button"
+                                  className="ps-link-button"
+                                  onClick={() => openVoid(entry)}
+                                >
+                                  Void
+                                </button>
+                              )}
                           </td>
                         </tr>
                       ))}
@@ -900,6 +920,7 @@ function PersonalSpendingSection({
       {/* Printed monthly statement — screen-hidden, print-only. */}
       {entries && summary && (
         <div className="personal-spending-printout" aria-hidden="true">
+          <PrintBrandHeader agencyName={session.agencyName} logoDataUrl={logoDataUrl} />
           <h1>Personal spending statement</h1>
           <p>
             {individualName}

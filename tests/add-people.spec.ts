@@ -36,7 +36,9 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await personDialog.getByLabel("Date of birth").fill("1991-04-12");
   await personDialog.getByLabel("Program site").selectOption({ label: "Poplar House" });
   await personDialog.getByRole("button", { name: "Add Individual", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Nora Fields" })).toBeVisible();
+  // The chart title is the h1; the Rights packet and Consents register
+  // sections repeat the person's name in their own headings.
+  await expect(page.getByRole("heading", { name: "Nora Fields", exact: true, level: 1 })).toBeVisible();
   await expect(page.locator(".individual-chart")).toContainText("Nora");
 
   await page.getByRole("button", { name: "Back to individuals" }).click();
@@ -54,7 +56,10 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   await uploadDialog
     .getByRole("button", { name: "Add Individual and send plan for review" })
     .click();
-  await expect(page.getByRole("status")).toContainText("Review queue");
+  // The confirmation is the toast; the app also carries transient
+  // role="status" loading lines ("Loading care records…" etc.), so a
+  // bare getByRole("status") is ambiguous while they are on screen.
+  await expect(page.locator(".toast")).toContainText("Review queue");
 });
 
 test("DSP does not see add-site, add-person, or Intake", async ({ page }) => {

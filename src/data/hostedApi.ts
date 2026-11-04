@@ -1,10 +1,11 @@
-import { assertPacketDates, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
+import { assertPacketDates, packetOutstanding, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
-import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
+import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, canSeeConsents, consentAlertPairs, isStaleConsentNotification, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
 import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
+import { agencySetupErrorFromBody, agencySetupErrorFromInvoke } from "./agencySetupErrors";
 import type { Activity, Plan, Requirement } from "../domain";
 import {
   computeRequirementStatus,
@@ -92,7 +93,8 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import { portraitSrc } from "./personPortrait";
 import {
   assertCalendarDate,
@@ -128,6 +130,8 @@ import {
   type HouseCardReceiptPhoto,
 } from "./houseCard";
 import {
+  assertPersonalSpendingCloseBalance,
+  assertPersonalSpendingSpendWithinBalance,
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
@@ -209,10 +213,14 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
+  canReadAsAuditor,
   defaultPermissions,
   hasPermission,
+  hasHubTeamPermission,
   isRoleKey,
   PLAN_SIGNER_ROLE_KEYS,
   type AgencyRole,
@@ -226,6 +234,7 @@ import {
   normalizeTaskTitle,
   progressNoteProblem,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   type IspProgram,
   type IspProgramView,
   type IspScoringMethod,
@@ -282,6 +291,7 @@ import {
   canRecordDelivery,
   canRequestTrainingCorrection,
   canSeeMeds,
+  canOverseeTraining,
   canSignTrainingAsHm,
   toMedicationView,
   todayIso,
@@ -300,6 +310,7 @@ import {
   shiftBlocksForSite,
   zonedWallTimeMs,
   consecutiveRefusals,
+  alreadyMarkedDoseMessage,
   marLateRecording,
   marRecordingProblem,
   recordingCostsAPoint,
@@ -307,8 +318,12 @@ import {
   type ShiftBlockId,
 } from "./dueItems";
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
-import { agencyClock, dueItemClock, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeKeys, reminderRecipientIds, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
+import {
+  MED_ADMIN_CLEARANCE_MESSAGE,
+  roleRequiresMedClearance,
+} from "./medClearance";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -576,10 +591,22 @@ function throwIf(error: { message: string } | null | undefined, fallback: string
   if (error) throw new Error(error.message || fallback);
 }
 
+/**
+ * The correct_med_dose_mark RPC raises DOSE_MARK_CONFLICT (errcode
+ * P0001) when its compare-and-set matches zero rows — another corrector
+ * wrote first. PostgREST surfaces the exception text in `message` and
+ * the DETAIL in `details`; accept the token in either.
+ */
+function isDoseMarkConflict(error: unknown): boolean {
+  const parts = error as { message?: unknown; details?: unknown } | null;
+  return [parts?.message, parts?.details].some(
+    (part) => typeof part === "string" && part.includes("DOSE_MARK_CONFLICT"),
+  );
+}
+
 function asRole(value: string): AppRole {
   if (
     value === "administrator" ||
-    value === "compliance_admin" ||
     value === "manager" ||
     value === "dsp" ||
     value === "nurse" ||
@@ -1152,6 +1179,18 @@ export class HostedApi implements ComplyraApi {
       existingData as Record<string, unknown>,
     );
     await this.assertHouseCardSite(session, existing.siteId);
+    // Voiding is a manager action (simulation batch 9): anyone who can
+    // close the month may void any entry; a recorder may void only
+    // their OWN entry (the quick-entry Undo and self-correction path) —
+    // never another staff member's.
+    if (
+      !canCloseHouseCardMonth(session.roleKey) &&
+      existing.recordedBy !== session.userId
+    ) {
+      throw new Error(
+        "Only a manager can void another staff member's entry. Ask your house manager to void it.",
+      );
+    }
     if (existing.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -1471,6 +1510,13 @@ export class HostedApi implements ComplyraApi {
       person.id,
       draft.entryDate,
     );
+    // A spend may not take the person's balance below $0 (batch 7) —
+    // the ledger is fetched so the refusal uses the real balance.
+    const currentEntries = await this.personalSpendingViewsFor(
+      session,
+      person.id,
+    );
+    assertPersonalSpendingSpendWithinBalance(currentEntries, draft);
     const { data, error } = await this.client
       .from("personal_spending_entries")
       .insert({
@@ -1517,6 +1563,14 @@ export class HostedApi implements ComplyraApi {
       existingData as Record<string, unknown>,
     );
     await this.assertPersonalSpendingReadable(session, existing.individualId);
+    // Wave 6 item 3: closers may void any entry; other recorders only
+    // their own (the mobile Undo path) — a DSP must not void entries
+    // recorded by managers or the admin.
+    if (!sessionCanVoidPersonalSpendingEntry(session, existing)) {
+      throw new Error(
+        "Only the person who recorded an entry can undo it, or a manager can void it.",
+      );
+    }
     if (existing.voidedAt) {
       throw new Error("That entry is already voided.");
     }
@@ -1542,6 +1596,17 @@ export class HostedApi implements ComplyraApi {
           draft.entryDate,
         );
       }
+      // The replacement is a new spend: it may not take the balance
+      // below $0 either (the entry it replaces counts as voided).
+      const currentEntries = await this.personalSpendingViewsFor(
+        session,
+        existing.individualId,
+      );
+      assertPersonalSpendingSpendWithinBalance(
+        currentEntries,
+        draft,
+        existing.id,
+      );
       const { data, error } = await this.client
         .from("personal_spending_entries")
         .insert({
@@ -1657,6 +1722,16 @@ export class HostedApi implements ComplyraApi {
     const entries = (entryData ?? []).map((row) =>
       this.personalSpendingFromRow(row as Record<string, unknown>),
     );
+    // A month cannot be signed closed on a negative balance (batch 7):
+    // the figure is computed here from the ledger, never client-given.
+    const closingBalanceCents = personalBalanceThroughCents(
+      entries,
+      personalMonthEndIso(draft.month),
+    );
+    assertPersonalSpendingCloseBalance(
+      closingBalanceCents,
+      monthLabel(draft.month),
+    );
     const { data, error } = await this.client
       .from("personal_spending_month_closes")
       .insert({
@@ -1664,10 +1739,7 @@ export class HostedApi implements ComplyraApi {
         site_id: person.siteId,
         individual_id: person.id,
         month: draft.month,
-        closing_balance_cents: personalBalanceThroughCents(
-          entries,
-          personalMonthEndIso(draft.month),
-        ),
+        closing_balance_cents: closingBalanceCents,
         printed_name: session.fullName,
         signature_text: draft.signatureText,
         signed_by: session.userId,
@@ -1802,21 +1874,55 @@ export class HostedApi implements ComplyraApi {
                 supersedesId: r.supersedes_id, createdBy: r.created_by, createdAt: r.created_at, activatedBy: r.activated_by, activatedAt: r.activated_at })),
             revocations: (revoked.data ?? []).map(r => ({ consentId: r.consent_id, revokedOn: r.revoked_on, reason: r.reason, revokedBy: r.revoked_by, revokedByName: r.revoked_by_name })) };
     }
+    /**
+     * Best-effort hard-retire of stale consent notices for one
+     * Individual (retire_stale_consent_notices, sim wave 6 item 8 —
+     * the consent mirror of the missing-note retire in the reminder
+     * sweep below). The RPC only marks a consent.missing /
+     * consent.expiring / consent.packet_outstanding notice read when
+     * a current consent now covers that type (or the packet is no
+     * longer outstanding), and it always exempts rights-packet rows.
+     * A missing database function must not undo the consent action
+     * that triggered this, so every failure is swallowed.
+     */
+    private async retireStaleConsentNotices(session: SessionUser, individualId: string | null | undefined) {
+        if (!individualId) return;
+        try {
+            await this.client.rpc('retire_stale_consent_notices', {
+                p_agency_id: session.agencyId,
+                p_individual_id: individualId,
+            });
+        } catch {
+            // The consent action already succeeded; retirement is cleanup.
+        }
+    }
+    /** The Individual a consent record belongs to, for notice retirement. */
+    private async consentIndividualId(id: string): Promise<string | null> {
+        const { data } = await this.client.from('individual_consents')
+            .select('individual_id').eq('id', id).maybeSingle();
+        return (data as { individual_id?: string } | null)?.individual_id ?? null;
+    }
     async saveConsent(draft: ConsentDraft, id?: string): Promise<string> {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { data, error } = await this.client.rpc('save_consent', { p_id: id ?? null, p_draft: draft });
         throwIf(error, 'Could not save consent.');
+        await this.retireStaleConsentNotices(session, draft.individualId);
         return data as string;
     }
     async activateConsent(id: string) {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { error } = await this.client.rpc('activate_consent', { p_id: id });
         throwIf(error, 'Could not activate consent.');
+        await this.retireStaleConsentNotices(session, await this.consentIndividualId(id));
     }
     async revokeConsent(id: string, revokedOn: string, reason: string) {
-        assertConsentRole(await this.requireSession(), true);
+        const session = await this.requireSession();
+        assertConsentRole(session, true);
         const { error } = await this.client.rpc('revoke_consent', { p_id: id, p_revoked_on: revokedOn, p_reason: reason });
         throwIf(error, 'Could not revoke consent.');
+        await this.retireStaleConsentNotices(session, await this.consentIndividualId(id));
     }
     async saveConsentTypes(types: ConsentType[]) {
         const session = await this.requireSession();
@@ -1830,18 +1936,82 @@ export class HostedApi implements ComplyraApi {
 
   async listNotifications(): Promise<import("../features/notifications/notify").NotificationRow[]> {
     const session = await this.requireSession();
-    await this.sweepOperatingReminders(session);
+    const medClearSiteIds = await this.sweepOperatingReminders(session);
     if (canManageConsents(session.roleKey)) {
       const { error } = await this.client.rpc('sweep_consent_alerts', { p_agency_id: session.agencyId });
       throwIf(error, 'Could not check consent alerts.');
+      // The sweep only ever raises consent notices; hard-retire the
+      // ones whose state has since resolved (a current consent now
+      // covers the type, or the packet was signed/filed — including
+      // packets signed through the public signing link, which never
+      // pass through save/activate above). Best-effort per Individual,
+      // mirroring how the reminder sweep retires stale missing-note
+      // notices after queueing its own.
+      const { data: people } = await this.client.from("individuals")
+        .select("id").eq("agency_id", session.agencyId);
+      for (const person of people ?? [])
+        await this.retireStaleConsentNotices(session, (person as { id: string }).id);
     }
     const { data, error } = await this.client.from("notifications")
       .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
       .order("created_at", { ascending: false }).limit(100);
     throwIf(error, "Could not load notifications.");
-    return (data ?? []).map((row) => ({ ...row,
-      read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
-    })) as import("../features/notifications/notify").NotificationRow[];
+    const mapped = (data ?? [])
+      // Wave 7M: an "Unmarked medication" row retires once the sweep in
+      // this same call verified the site has no overdue unmarked dose.
+      .filter((row) => !medUnrecordedRowRetired(
+        { type: String(row.type ?? ""), entityId: row.entity_id ? String(row.entity_id) : null },
+        medClearSiteIds,
+      ))
+      .map((row) => ({ ...row,
+        read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
+      })) as import("../features/notifications/notify").NotificationRow[];
+    return this.filterStaleConsentNotifications(session, mapped);
+  }
+
+  /**
+   * Batch 24: stored consent alerts never retired — the bell kept saying
+   * "Consent needs attention — Missing" for consents the chart already
+   * showed Active, and a consent flipping "Expiring soon" → "Expired"
+   * showed BOTH alerts at once. The notifications RLS grants clients
+   * only update(read_at), so retirement happens at the read boundary:
+   * drop consent.missing / consent.expiring rows whose (type, entity)
+   * pair is no longer a current gap, and consent.packet_outstanding
+   * rows whose packet is no longer outstanding — one consent carries
+   * one current status on every surface. A server-side hard delete
+   * (like retire_stale_missing_note_notices) would need a migration.
+   * Fails open: a register that fails to load never hides alerts.
+   */
+  private async filterStaleConsentNotifications(
+    session: SessionUser,
+    rows: import("../features/notifications/notify").NotificationRow[],
+  ): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    if (
+      !canSeeConsents(session.roleKey) ||
+      !rows.some((row) =>
+        ["consent.missing", "consent.expiring", "consent.packet_outstanding"].includes(row.type),
+      )
+    ) {
+      return rows;
+    }
+    try {
+      const register = await this.getConsents();
+      const livePairs = consentAlertPairs(register);
+      const packets = await this.listConsentPackets().catch(() => [] as ConsentPacket[]);
+      const outstandingPacketIds = new Set(
+        packets.filter((packet) => packetOutstanding(packet)).map((packet) => packet.id),
+      );
+      return rows.filter(
+        (row) =>
+          !isStaleConsentNotification(
+            { type: row.type, entityId: row.entity_id, entityType: row.entity_type },
+            livePairs,
+            outstandingPacketIds,
+          ),
+      );
+    } catch {
+      return rows;
+    }
   }
 
   async markNotificationsRead(ids: string[]) {
@@ -2554,13 +2724,8 @@ export class HostedApi implements ComplyraApi {
         provisionedBy: input.provisionedBy ?? "self",
       },
     });
-    if (error) {
-      const body = (data as { error?: string } | null)?.error;
-      throw new Error(body || error.message || "Could not create that agency.");
-    }
-    if ((data as { error?: string } | null)?.error) {
-      throw new Error((data as { error: string }).error);
-    }
+    if (error) throw await agencySetupErrorFromInvoke(error);
+    if ((data as { error?: string } | null)?.error) throw agencySetupErrorFromBody(data);
     const result = data as CreateAgencyResult;
     return {
       agencyCode: result.agencyCode,
@@ -2623,7 +2788,7 @@ export class HostedApi implements ComplyraApi {
     }
     if (!isRoleKey(roleKey)) throw new Error("Choose a valid role.");
     // HR-ROLES (2026-09-13): HR can assign operational roles, but granting
-    // administrator / compliance-administrator stays with administrators.
+    // administrator stays with administrators.
     if (!canGrantRole(session.roleKey, roleKey)) {
       throw new Error("Only an administrator can grant that role.");
     }
@@ -2975,7 +3140,7 @@ export class HostedApi implements ComplyraApi {
           (
             await this.client
               .from("medication_orders")
-              .select("id,status")
+              .select("id,status,medication_id")
               .eq("agency_id", agencyId)
           ).data ?? []
         ).map((row) => ({
@@ -2983,6 +3148,10 @@ export class HostedApi implements ComplyraApi {
           status: String(
             (row as Record<string, unknown>).status,
           ) as MedicationOrder["status"],
+          medicationId:
+            ((row as Record<string, unknown>).medication_id as
+              | string
+              | null) ?? null,
         }))
       : [];
     const planStacks = canViewPeople
@@ -3114,6 +3283,9 @@ export class HostedApi implements ComplyraApi {
           appRole: asRole(membership.role as string),
           roleKey: String(membership.role_key ?? membership.role),
           siteId: (membership.site_id as string | null) ?? null,
+          siteName: membership.site_id
+            ? (siteById[membership.site_id as string]?.name ?? null)
+            : null,
           expiresOn: membership.expires_on
             ? String(membership.expires_on).slice(0, 10)
             : null,
@@ -3694,7 +3866,7 @@ export class HostedApi implements ComplyraApi {
   async updateIndividualProfile(individualId: string, profile: IndividualProfile) {
     const session = await this.requireSession();
     if (!canEditCover(session.roleKey)) {
-      throw new Error("Only a PM or compliance admin can edit cover-page fields.");
+      throw new Error("Only a PM or administrator can edit cover-page fields.");
     }
     const { data: person, error: personError } = await this.client
       .from("individuals")
@@ -4247,6 +4419,7 @@ export class HostedApi implements ComplyraApi {
     if (!ispProgramVisibleToStaff(program)) {
       throw new Error("Notes can only be entered against an approved ISP program.");
     }
+    assertCalendarDate(input.noteDate, "Use a valid note date.");
     const shift = input.shift.trim().slice(0, 80);
     if (!shift) throw new Error("Choose the shift for this note.");
     const beginTime = input.beginTime?.trim().slice(0, 5) ?? "";
@@ -4284,6 +4457,8 @@ export class HostedApi implements ComplyraApi {
         signatureDataUrl,
       });
       if (problem) throw new Error(problem);
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
     }
     const { data: taskRows, error: taskError } = await this.client
       .from("isp_program_tasks")
@@ -4339,6 +4514,34 @@ export class HostedApi implements ComplyraApi {
       );
       if (!canEditShiftNoteRow(session.roleKey, session.userId, { staffUserId: existingUserId })) {
         throw new Error("You can only edit your own shift notes.");
+      }
+      // An edit re-saves the note, so it must meet the same integrity
+      // rules as a new note (batch 37): a body, a timeframe that is not
+      // in the future, and a signature on the finished record.
+      if (!input.summary.trim()) {
+        throw new Error(
+          "Describe what the person did and how you supported a goal in the current PCSP.",
+        );
+      }
+      const timingProblem = shiftNoteTimingProblem({ noteDate: input.noteDate, beginTime });
+      if (timingProblem) throw new Error(timingProblem);
+      const existingSignature = String(
+        (existing as Record<string, unknown>).signature_data_url ?? "",
+      );
+      if (!existingSignature && !signatureDataUrl) {
+        const adopted = await this.getMySignature();
+        if (adopted) {
+          try {
+            signatureDataUrl = await this.getSignatureImageUrl(adopted.signaturePath);
+          } catch {
+            signatureDataUrl = "";
+          }
+        }
+      }
+      if (!existingSignature && !signatureDataUrl) {
+        throw new Error(
+          "Adopt your signature before saving a progress note. A printed name is not a signature.",
+        );
       }
       const hrShiftId = await this.linkedHrShiftId({
         agencyId: session.agencyId,
@@ -5292,6 +5495,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogPrnDose(session.roleKey)) {
       throw new Error("You cannot log a PRN dose.");
     }
+    await this.assertMedAdministrationCleared(session);
     const { data: row, error } = await this.client
       .from("medications")
       .select("*")
@@ -5365,6 +5569,7 @@ export class HostedApi implements ComplyraApi {
   ) {
     const session = await this.requireSession();
     if (!canLogPrnDose(session.roleKey)) throw new Error("You cannot log a PRN dose.");
+    await this.assertMedAdministrationCleared(session);
     const { data: row, error } = await this.client.from("medications").select("*").eq("id", medicationId).single();
     throwIf(error, "PRN medication not found.");
     const med = mapMedication(row!);
@@ -5441,7 +5646,7 @@ export class HostedApi implements ComplyraApi {
     sourceKey: string;
   }) {
     const session = await this.requireSession();
-    if (input.staffId !== session.userId && !hasPermission(session, "hub.view_team")) {
+    if (input.staffId !== session.userId && !hasHubTeamPermission(session, "hub.view_team")) {
       throw new Error("You cannot record a clock-in point for someone else.");
     }
     const rules = await this.loadOperatingRules(session);
@@ -5562,6 +5767,11 @@ export class HostedApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: the checklist owner can never countersign
+      // their own checklist (simulation batch 24).
+      if (checklist.staffUserId === session.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!checklist.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
@@ -6786,7 +6996,6 @@ export class HostedApi implements ComplyraApi {
   private canSetupChartRows(roleKey: string) {
     return [
       "administrator",
-      "compliance_admin",
       "house_manager",
       "program_manager",
       "nurse",
@@ -6820,7 +7029,10 @@ export class HostedApi implements ComplyraApi {
     session: SessionUser,
     input: { sites: SiteRecord[]; individuals: IndividualRecord[]; equipment: AdaptiveEquipment[] },
   ) {
-    const monthKey = monthKeyFrom(todayIso());
+    // Monthly cycles open on the agency's Central date, never the UTC
+    // date — a UTC-month cycle created at 7 p.m. Central would displace
+    // the still-open previous month in the personal task queue.
+    const monthKey = monthKeyFrom(centralTodayIso());
     const writableSites = input.sites.filter((site) => canAccessSite(session, site.id));
     if (canCompleteMonthly(session.roleKey)) {
       const drillsPayload = writableSites.flatMap((site) =>
@@ -7724,9 +7936,48 @@ export class HostedApi implements ComplyraApi {
     };
   }
 
+  /**
+   * Medication-administration clearance gate (see ./medClearance): a DSP
+   * whose training is not cleared — including a hire with no training
+   * record at all — cannot record doses. Keys off the same
+   * staffTrainingProfileFor().clearedForInRatio that renders the Training
+   * page's NOT CLEARED state. Oversight roles return at once.
+   */
+  private async assertMedAdministrationCleared(
+    session: SessionUser,
+  ): Promise<void> {
+    if (!roleRequiresMedClearance(session.roleKey)) return;
+    const profile = await this.staffTrainingProfileFor(session, session.userId);
+    if (!profile.clearedForInRatio) {
+      throw new Error(MED_ADMIN_CLEARANCE_MESSAGE);
+    }
+  }
+
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
-    if (session.userId !== userId) this.requirePermission(session, "hr.view_staff");
+    // Own profile is always readable; another staffer's needs
+    // the roster rule: canViewTrainingRoster (hr.view_staff, the PM, the
+    // auditor read path) or a training-oversight role (batch 25).
+    if (
+      session.userId !== userId &&
+      !canViewTrainingRoster(session) &&
+      !canOverseeTraining(session.roleKey)
+    ) {
+      this.requirePermission(session, "hr.view_staff");
+    }
+    return this.staffTrainingProfileFor(session, userId);
+  }
+
+  /**
+   * The profile computation behind getStaffTrainingProfile, split out so
+   * internal gates (medication-administration clearance) can evaluate the
+   * CALLER's own clearance against an already-resolved session instead of
+   * round-tripping requireSession().
+   */
+  private async staffTrainingProfileFor(
+    session: SessionUser,
+    userId: string,
+  ): Promise<StaffTrainingProfile> {
     const fullName = await this.profileName(userId);
     const today = new Date().toISOString().slice(0, 10);
     const { data: reqRows, error: reqError } = await this.client
@@ -7833,22 +8084,57 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    this.requirePermission(session, "hr.view_staff");
-    let query = this.client
-      .from("training_requirements")
-      .select("user_id")
+    // Roster read: canViewTrainingRoster (hr.view_staff, the PM, the auditor
+    // read path) or a training-oversight role (batch 25). Rows come from
+    // staff memberships, scoped by trainingRosterEntries (batches 195-197).
+    if (!canViewTrainingRoster(session) && !canOverseeTraining(session.roleKey))
+      this.requirePermission(session, "hr.view_staff");
+    const { data: memberRows, error: memberError } = await this.client
+      .from("memberships")
+      .select("user_id, site_id")
       .eq("agency_id", session.agencyId);
-    if (siteId) query = query.eq("site_id", siteId);
-    const { data, error } = await query;
-    throwIf(error, "Could not load staff training.");
-    const userIds = [...new Set((data ?? []).map((row) => String(row.user_id)))];
+    throwIf(memberError, "Could not load staff training.");
+    // Assignments only decide house membership for a site-scoped view; an
+    // agency-wide viewer with no site filter gets everyone regardless.
+    const needsAssignments = Boolean(siteId) || !isAgencyWideViewer(session);
+    const [assignments, individualRefs] = needsAssignments
+      ? await Promise.all([
+          this.agencyAssignments(session.agencyId),
+          this.agencyIndividualRefs(session.agencyId),
+        ])
+      : [[], []];
+    const entries = trainingRosterEntries({
+      session,
+      memberships: ((memberRows ?? []) as Record<string, unknown>[]).map((row) => ({
+        userId: String(row.user_id),
+        siteId: (row.site_id as string | null) ?? null,
+      })),
+      assignments,
+      individualSiteById: new Map(individualRefs.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const labelSiteIds = [...new Set(entries.flatMap((entry) => entry.siteIds))];
+    const { data: siteRows } = labelSiteIds.length
+      ? await this.client.from("sites").select("id, name").in("id", labelSiteIds)
+      : { data: [] as { id: string; name: string }[] };
+    const siteNameById = new Map(
+      ((siteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+    );
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        siteName: siteId ? (profile.siteNames[0] ?? "Unknown site") : profile.siteNames.join(", ") || "—",
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
+        siteName: siteId
+          ? (siteNameById.get(siteId) ?? "Unknown site")
+          : profile.siteNames.length > 0
+            ? profile.siteNames.join(", ")
+            : siteIds.map((id) => siteNameById.get(id) ?? "Unknown site").join(", ") ||
+              "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,
@@ -7966,7 +8252,7 @@ export class HostedApi implements ComplyraApi {
       // out of the re-initial the stamp path demands.
       if (!canEditTrainingLine(session.roleKey) && session.userId !== mapped.userId) {
         throw new Error(
-          "Only the assigned staff member, an administrator, compliance admin, house manager, or PM can edit a completed training line.",
+          "Only the assigned staff member, an administrator, house manager, or PM can edit a completed training line.",
         );
       }
       // Void-and-redo: the edit voids the previous initialing — the line must
@@ -8080,7 +8366,7 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     if (!canRequestTrainingCorrection(session.roleKey)) {
       throw new Error(
-        "Only an administrator, compliance admin, or PM can request a training correction.",
+        "Only an administrator or PM can request a training correction.",
       );
     }
     const reason = input.reason.trim();
@@ -8189,6 +8475,13 @@ export class HostedApi implements ComplyraApi {
     } else {
       if (!canSignTrainingAsHm(session.roleKey)) {
         throw new Error("Only a house manager can counter-sign training.");
+      }
+      // Attribution discipline: a countersignature is a second person's
+      // attestation — the sheet's owner can never countersign their own
+      // sheet, even when they hold a manager role (simulation batch 24:
+      // an HM countersigned her own checklist).
+      if (session.userId === input.userId) {
+        throw new Error("You can't countersign your own checklist.");
       }
       if (!counter.staffSignedAt) {
         throw new Error("Staff must sign this sheet before the house manager.");
@@ -9202,7 +9495,12 @@ export class HostedApi implements ComplyraApi {
 
   async createQaAudit(siteId: string, year: number, quarter: number): Promise<QaAudit> {
     const session = await this.requireSession();
-    this.requirePermission(session, "qa.audit");
+    // Starting a review is a program-management act (qa.schedule — the
+    // Program Manager / administrator side of the QA program). Scoring and
+    // finalizing an existing review stay on qa.audit; gating creation on
+    // qa.audit left the read-only auditor as the only non-admin role that
+    // could start a review while PMs could not (simulation wave 4A).
+    this.requirePermission(session, "qa.schedule");
     if (session.roleKey === "house_manager" && session.siteId && session.siteId !== siteId) {
       throw new Error("You do not have permission to do that.");
     }
@@ -9749,7 +10047,10 @@ export class HostedApi implements ComplyraApi {
   private requireCertificateRead(session: SessionUser) {
     if (
       !hasPermission(session, "certificates.manage") &&
-      !hasPermission(session, "hr.view_staff")
+      !hasPermission(session, "hr.view_staff") &&
+      // AUDITOR-NAV (wave 7U): the auditor reads certificates read-only;
+      // writes stay behind the certificates.manage write gate.
+      !canReadAsAuditor(session)
     ) {
       throw new Error("You do not have permission to do that.");
     }
@@ -11170,7 +11471,6 @@ export class HostedApi implements ComplyraApi {
     return (
       session.roleKey === "program_manager" ||
       session.role === "administrator" ||
-      session.role === "compliance_admin" ||
       session.platformAdmin
     );
   }
@@ -11252,7 +11552,7 @@ export class HostedApi implements ComplyraApi {
       .not(
         "role_key",
         "in",
-        "(administrator,compliance_admin,program_manager)",
+        "(administrator,program_manager)",
       );
     throwIf(memberError, "Could not load site staff.");
     const active = (memberships ?? []).filter(
@@ -11574,12 +11874,23 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     const today = new Date().toISOString().slice(0, 10);
     const currentWeek = weekOfSundayIso(today);
-    const { data: stale, error: staleError } = await this.client
+    // The checklist page runs this under every viewer's own session,
+    // including the assigned HM's. Creation/update scope mirrors the RLS
+    // policies (20261031200000): oversight roles work agency-wide, anyone
+    // else only on rows assigned to themselves — otherwise the loop would
+    // attempt inserts the insert policy rightly refuses and surface a raw
+    // row-level-security error on the HM's own page (batch 19).
+    const canOversee = this.checklistCanOversee(session);
+    let staleQuery = this.client
       .from("hm_weekly_checklists")
       .select("id")
       .eq("agency_id", session.agencyId)
       .eq("status", "open")
       .lt("week_of", currentWeek);
+    if (!canOversee) {
+      staleQuery = staleQuery.eq("assigned_to_user_id", session.userId);
+    }
+    const { data: stale, error: staleError } = await staleQuery;
     throwIf(staleError, "Could not find stale checklists.");
     let locked = 0;
     if (stale && stale.length > 0) {
@@ -11613,6 +11924,8 @@ export class HostedApi implements ComplyraApi {
     for (const m of (assignments ?? []) as Array<Record<string, unknown>>) {
       const expiresOn = m.expires_on as string | null;
       if (expiresOn && expiresOn < today) continue;
+      // Non-oversight callers may only open their own row (see above).
+      if (!canOversee && (m.user_id as string) !== session.userId) continue;
       const siteId = m.site_id as string;
       if (haveSites.has(siteId)) continue;
       const readiness = await this.trainingReadinessHosted(session, siteId);
@@ -11744,7 +12057,7 @@ export class HostedApi implements ComplyraApi {
     const allMeds = (medsRes.data ?? []).map(mapMedication);
     const ordersRes = await this.client
       .from("medication_orders")
-      .select("id,status")
+      .select("id,status,medication_id")
       .eq("agency_id", session.agencyId)
       .eq("individual_id", individualId);
     throwIf(ordersRes.error, "Could not load medication orders.");
@@ -11753,6 +12066,9 @@ export class HostedApi implements ComplyraApi {
       status: String(
         (row as Record<string, unknown>).status,
       ) as MedicationOrder["status"],
+      medicationId:
+        ((row as Record<string, unknown>).medication_id as string | null) ??
+        null,
     }));
     const meds = allMeds.filter((med) => medicationStaysOnMar(med, orders));
     const medIds = meds.map((med) => med.id);
@@ -11800,9 +12116,18 @@ export class HostedApi implements ComplyraApi {
       }),
     );
     const { mapMedicationDelivery } = await import("./hostedMappers");
-    const deliveries = (
+    const rawDeliveries = (
       (delRes.data ?? []) as Record<string, unknown>[]
     ).map((row) => mapMedicationDelivery(row));
+    // Delivery rows store only the recorder's user id; resolve display
+    // names from profiles so count history never prints a raw id.
+    const recorderNames = await this.lifeEventNames(
+      rawDeliveries.map((row) => row.recordedBy),
+    );
+    const deliveries = rawDeliveries.map((row) => ({
+      ...row,
+      recordedByName: recorderNames.get(row.recordedBy) ?? null,
+    }));
     const prnByMed = new Map<string, Array<{ date: string; pills: number }>>();
     for (const row of (prnRes.data ?? []) as Record<string, unknown>[]) {
       const medId = row.medication_id as string;
@@ -12016,6 +12341,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("You cannot log a dose exception.");
     }
+    await this.assertMedAdministrationCleared(session);
     const validated = validateDoseExceptionInput(input);
     // Insert-only: corrections are new rows, never edits — there is no
     // update/delete path for med_dose_exceptions on this API.
@@ -12783,6 +13109,7 @@ export class HostedApi implements ComplyraApi {
     if (!canLogDoseException(session.roleKey)) {
       throw new Error("Your role cannot mark medications.");
     }
+    await this.assertMedAdministrationCleared(session);
     if (med.kind !== "scheduled") {
       throw new Error("Only scheduled medications are marked on the MAR.");
     }
@@ -12802,20 +13129,43 @@ export class HostedApi implements ComplyraApi {
     if (early) throw new Error(early);
     const { data: existingMark, error: existingError } = await this.client
       .from("med_dose_marks")
-      .select("marked_by,late,late_reason")
+      .select("id,marked_by,marked_by_name,marked_at,status,late,late_reason")
       .eq("agency_id", session.agencyId)
       .eq("medication_id", med.id)
       .eq("dose_date", input.doseDate.slice(0, 10))
       .eq("dose_time", input.doseTime)
       .maybeSingle();
     throwIf(existingError, "Could not load the MAR entry.");
-    if (
-      existingMark &&
-      !canCorrectDoseMark(session.roleKey, session.userId, {
-        markedBy: (existingMark as { marked_by: string | null }).marked_by,
-      })
-    ) {
-      throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+    if (existingMark) {
+      // Wave 7M: a mark attempt that is not based on the stored mark (no
+      // base, or a base from a mark that has since changed) is a stale
+      // second attempt, not a correction — refuse it gracefully instead
+      // of silently overwriting the original giver and time via upsert.
+      // Only a caller who passes the exact markedAt they saw is
+      // correcting deliberately.
+      const stored = existingMark as {
+        id: string;
+        marked_by: string | null;
+        marked_by_name: string | null;
+        marked_at: string;
+        status: string;
+      };
+      if (!input.baseMarkedAt || input.baseMarkedAt !== String(stored.marked_at)) {
+        throw new Error(
+          alreadyMarkedDoseMessage({
+            status: stored.status as import("./types").MedDoseMarkStatus,
+            markedByName: String(stored.marked_by_name ?? ""),
+            markedAt: String(stored.marked_at),
+          }),
+        );
+      }
+      if (
+        !canCorrectDoseMark(session.roleKey, session.userId, {
+          markedBy: stored.marked_by,
+        })
+      ) {
+        throw new Error("You can correct only MAR entries you recorded. Ask your house manager or nurse.");
+      }
     }
     // A first mark recorded after the dose window ended is stamped Late
     // and must carry a brief reason; corrections keep the original stamp
@@ -12837,8 +13187,50 @@ export class HostedApi implements ComplyraApi {
     const existingReason = existingMark
       ? ((existingMark as { late_reason: string | null }).late_reason ?? null)
       : null;
-    const { error } = await this.client.from("med_dose_marks").upsert(
-      {
+    const correctedLate = lateReason ? true : existingLate;
+    const correctedLateReason = lateReason || existingReason;
+    if (existingMark) {
+      // Deliberate correction (base verified above): the write goes
+      // through the correct_med_dose_mark RPC, which re-checks the base
+      // inside the UPDATE statement itself — an atomic compare-and-set
+      // at the database boundary (PR #228 reviewer HOLD fix). The
+      // browser-side check above is only a fast path: if another
+      // corrector writes between that read and this call, the RPC
+      // updates zero rows and raises DOSE_MARK_CONFLICT instead of
+      // letting this correction silently overwrite theirs. The
+      // identity-guard trigger archives the prior version in
+      // med_dose_mark_history and re-stamps marked_by/marked_at.
+      const { error } = await this.client.rpc("correct_med_dose_mark", {
+        p_mark_id: (existingMark as { id: string }).id,
+        p_base_marked_at: input.baseMarkedAt,
+        p_status: input.status,
+        p_late: correctedLate,
+        p_late_reason: correctedLateReason,
+      });
+      if (error && isDoseMarkConflict(error)) {
+        // The race was lost: name the mark that is stored now.
+        const { data: current } = await this.client
+          .from("med_dose_marks")
+          .select("marked_by_name,marked_at,status")
+          .eq("agency_id", session.agencyId)
+          .eq("medication_id", med.id)
+          .eq("dose_date", input.doseDate.slice(0, 10))
+          .eq("dose_time", input.doseTime)
+          .maybeSingle();
+        if (current) {
+          const row = current as { marked_by_name: string | null; marked_at: string; status: string };
+          throw new Error(
+            alreadyMarkedDoseMessage({
+              status: row.status as import("./types").MedDoseMarkStatus,
+              markedByName: String(row.marked_by_name ?? ""),
+              markedAt: String(row.marked_at),
+            }),
+          );
+        }
+      }
+      throwIf(error, "Could not mark the dose.");
+    } else {
+      const markRow = {
         agency_id: session.agencyId,
         individual_id: med.individualId,
         medication_id: med.id,
@@ -12848,12 +13240,35 @@ export class HostedApi implements ComplyraApi {
         marked_by: session.userId,
         marked_by_name: session.fullName,
         marked_at: new Date().toISOString(),
-        late: lateReason ? true : existingMark ? existingLate : isLate,
-        late_reason: lateReason || (existingMark ? existingReason : null),
-      },
-      { onConflict: "agency_id,medication_id,dose_date,dose_time" },
-    );
-    throwIf(error, "Could not mark the dose.");
+        late: lateReason ? true : isLate,
+        late_reason: lateReason || null,
+      };
+      // First mark: a plain INSERT, never an upsert — if another session
+      // marked the dose after the check above, the unique index refuses
+      // (23505) and the winner's mark is what the refusal names.
+      const { error } = await this.client.from("med_dose_marks").insert(markRow);
+      if (error && (error as { code?: string }).code === "23505") {
+        const { data: winner } = await this.client
+          .from("med_dose_marks")
+          .select("marked_by_name,marked_at,status")
+          .eq("agency_id", session.agencyId)
+          .eq("medication_id", med.id)
+          .eq("dose_date", input.doseDate.slice(0, 10))
+          .eq("dose_time", input.doseTime)
+          .maybeSingle();
+        if (winner) {
+          const row = winner as { marked_by_name: string | null; marked_at: string; status: string };
+          throw new Error(
+            alreadyMarkedDoseMessage({
+              status: row.status as import("./types").MedDoseMarkStatus,
+              markedByName: String(row.marked_by_name ?? ""),
+              markedAt: String(row.marked_at),
+            }),
+          );
+        }
+      }
+      throwIf(error, "Could not mark the dose.");
+    }
     const late = !existingMark && recordingCostsAPoint({
       doseDate: input.doseDate.slice(0, 10),
       doseTime: input.doseTime,
@@ -12933,11 +13348,13 @@ export class HostedApi implements ComplyraApi {
     );
     const personName = new Map<string, string>();
     const personSite = new Map<string, string>();
+    const personSiteId = new Map<string, string>();
     for (const row of (indRes.data ?? []) as Record<string, unknown>[]) {
       personName.set(String(row.id), String(row.full_name ?? ""));
       personSite.set(String(row.id), siteName.get(String(row.site_id)) ?? "");
+      if (row.site_id) personSiteId.set(String(row.id), String(row.site_id));
     }
-    return { personName, personSite };
+    return { personName, personSite, personSiteId };
   }
 
   private async reconciliationView(
@@ -12992,7 +13409,7 @@ export class HostedApi implements ComplyraApi {
       .eq("agency_id", session.agencyId)
       .in("status", ["draft", "active"]);
     throwIf(error, "Could not load medication orders.");
-    const { personName, personSite } = await this.orderNameMaps(session.agencyId);
+    const { personName, personSite, personSiteId } = await this.orderNameMaps(session.agencyId);
     const views: MedicationOrderView[] = (
       (data ?? []) as Record<string, unknown>[]
     ).map((row) => {
@@ -13005,10 +13422,27 @@ export class HostedApi implements ComplyraApi {
         siteName: personSite.get(order.individualId) ?? "",
       };
     });
-    // No cron: alert the nurse + Program Manager when a reviewer opens the
-    // worklist. The notice RPC dedupes per role + order + review date, so
-    // each role keeps its own copy (one shared key would dedupe the second
-    // role's notice away).
+    // No cron: alert the nurse + Program Manager roles and the house
+    // managers of the order's home when a reviewer opens the worklist.
+    // The notice RPC dedupes per recipient + order + review date, so each
+    // audience keeps its own copy (one shared key would dedupe the second
+    // copy away). House managers are addressed personally, scoped to the
+    // Individual's home: a house_manager role broadcast would reach every
+    // home in the agency (simulation wave 4A follow-up: the HM of the home
+    // previously received nothing at all).
+    let memberships: ReminderMembership[] = [];
+    if (views.some((view) => view.expiry !== "ok")) {
+      const { data: membershipRows } = await this.client
+        .from("memberships")
+        .select("user_id, role_key, role, site_id, expires_on")
+        .eq("agency_id", session.agencyId);
+      memberships = (membershipRows ?? []).map((membership) => ({
+        userId: String(membership.user_id),
+        role: String(membership.role_key ?? membership.role ?? ""),
+        siteId: membership.site_id ? String(membership.site_id) : null,
+        expiresOn: membership.expires_on ? String(membership.expires_on).slice(0, 10) : null,
+      }));
+    }
     for (const view of views) {
       if (view.expiry === "ok") continue;
       const type =
@@ -13034,6 +13468,21 @@ export class HostedApi implements ComplyraApi {
           deepLink: "/medication-orders",
           entityId: view.id,
           dedupeKey: `${type}:${roleKey}:${view.id}:${when}`,
+        });
+      }
+      const homeId = personSiteId.get(view.individualId);
+      if (!homeId) continue;
+      for (const userId of houseManagerRecipientIds(memberships, homeId, today)) {
+        await this.queueOperatingNotice(session, {
+          agencyId: session.agencyId,
+          userId,
+          roleKey: null,
+          type,
+          title,
+          body,
+          deepLink: "/medication-orders",
+          entityId: view.id,
+          dedupeKey: `${type}:house_manager:${userId}:${view.id}:${when}`,
         });
       }
     }
@@ -13529,19 +13978,22 @@ export class HostedApi implements ComplyraApi {
    * Opening the bell queues the same gaps the unattended sweep writes.
    * A failure leaves the existing notices readable.
    */
-  private async sweepOperatingReminders(session: SessionUser) {
+  /** Returns the ids of sites this pass verified clear of overdue
+   * unmarked doses (Wave 7M bell retirement); unloaded sites are absent. */
+  private async sweepOperatingReminders(session: SessionUser): Promise<Set<string>> {
+    const medClearSiteIds = new Set<string>();
     // Until the first-sign-in password change completes, the notice and
     // rules RPCs refuse this session by design (private.has_agency is
     // false), so the sweep would only log 4xx noise. It runs again on the
     // first bell open after the change.
-    if (session.mustChangePassword) return;
+    if (session.mustChangePassword) return medClearSiteIds;
     try {
       const rules = await this.loadOperatingRules(session);
       const { data: siteRows, error: siteError } = await this.client
         .from("sites")
         .select("id, name")
         .eq("agency_id", session.agencyId);
-      if (siteError || !siteRows) return;
+      if (siteError || !siteRows) return medClearSiteIds;
       const { data: membershipRows } = await this.client
         .from("memberships")
         .select("user_id, role_key, role, site_id, expires_on")
@@ -13561,6 +14013,7 @@ export class HostedApi implements ComplyraApi {
         if (!canAccessSite(session, siteId)) continue;
         try {
           const due = await this.getSiteDueItems(siteId);
+          if (!siteHasOverdueMedDose(due.items)) medClearSiteIds.add(siteId);
           sites.push({
             id: siteId,
             name: String(site.name),
@@ -13603,7 +14056,7 @@ export class HostedApi implements ComplyraApi {
         : { data: [] };
       const siteByPerson = new Map((people ?? []).map((row) => [String(row.id), row.site_id ? String(row.site_id) : null]));
       const medById = new Map((medRows ?? []).map((row) => [String(row.id), row]));
-      for (const notice of operatingReminderNotices({
+      const reminderNotices = operatingReminderNotices({
         now,
         noteDay: clock.noteDay,
         unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
@@ -13625,7 +14078,8 @@ export class HostedApi implements ComplyraApi {
               : [],
           }];
         }),
-      })) {
+      });
+      for (const notice of reminderNotices) {
         if (!notice.userId) continue;
         await this.queueOperatingNotice(session, {
           agencyId: session.agencyId,
@@ -13637,6 +14091,14 @@ export class HostedApi implements ComplyraApi {
           deepLink: notice.deepLink,
           entityId: notice.entityId,
           dedupeKey: notice.dedupeKey,
+        });
+      }
+      const prnKeys = prnNoticeKeys(reminderNotices);
+      if (prnKeys.length && !session.mustChangePassword) {
+        await this.client.rpc("rearm_prn_repeat_notices", {
+          p_agency_id: session.agencyId,
+          p_dedupe_keys: prnKeys,
+          p_repeat_minutes: rules.prnReminderRepeatMinutes,
         });
       }
       const loadedSiteIds = sites.map((site) => site.id);
@@ -13659,6 +14121,7 @@ export class HostedApi implements ComplyraApi {
     } catch {
       // The bell still opens if a reminder cannot be queued.
     }
+    return medClearSiteIds;
   }
 
   /**
@@ -13976,8 +14439,8 @@ export class HostedApi implements ComplyraApi {
   }
 
   /**
-   * Resolve the backfill request on a trip write: only administrators,
-   * compliance administrators, and house managers may bypass continuity.
+   * Resolve the backfill request on a trip write: only administrators and
+   * house managers may bypass continuity.
    * Returns whether this write is a backfill.
    */
   private async resolveBackfill(
@@ -14504,7 +14967,7 @@ export class HostedApi implements ComplyraApi {
   }
 
   /**
-   * Manager feedback scope: administrators (administrator/compliance_admin)
+   * Manager feedback scope: administrators
    * see the whole agency (null); other recognition.manage holders see only
    * pairs at sites they are actively assigned to. Mirrors
    * private.recognition_manager_view in the recognition migration.
@@ -14513,8 +14976,7 @@ export class HostedApi implements ComplyraApi {
     session: SessionUser,
   ): Promise<Set<string> | null> {
     if (
-      session.roleKey === "administrator" ||
-      session.roleKey === "compliance_admin"
+      session.roleKey === "administrator"
     ) {
       return null;
     }

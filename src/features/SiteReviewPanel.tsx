@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { Badge } from "../components";
-import { todayIso } from "../data/chart";
+import { centralTodayIso } from "../data/menuRecords";
 import {
   asMonthlyCollections,
   monthKeyFrom,
@@ -47,7 +47,7 @@ function parseYesNo(value: string): boolean | null {
 
 export default function SiteReviewPanel({ siteId }: { siteId: string }) {
   const { api, session, workspace, refresh } = useData();
-  const today = todayIso();
+  const today = centralTodayIso();
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<SiteReview | null>(null);
   const [factsDraft, setFactsDraft] = useState<SiteFacts | null>(null);

@@ -1,4 +1,5 @@
 import { assertCalendarDate } from './access';
+import { centralTodayIso } from './menuRecords';
 import { todayStamp } from './status';
 import type { Membership, SessionUser } from './types';
 export interface ConsentType {
@@ -59,6 +60,25 @@ export interface ConsentRegister {
         fullName: string;
     }[];
 }
+/**
+ * DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31: "DSPs only see what
+ * they are assigned"): narrow a consent register to a set of
+ * Individuals — the ones the caller may read. Records and revocations
+ * follow their Individual, so nothing about anyone outside the set
+ * survives in the result. The Consents view applies this for DSPs with
+ * the workspace's readable Individuals, so the register they see holds
+ * only consents for Individuals at their assigned homes.
+ */
+export function scopeConsentRegister(
+    register: ConsentRegister,
+    individualIds: ReadonlySet<string>,
+): ConsentRegister {
+    const individuals = register.individuals.filter(p => individualIds.has(p.id));
+    const records = register.records.filter(r => individualIds.has(r.individualId));
+    const recordIds = new Set(records.map(r => r.id));
+    const revocations = register.revocations.filter(v => recordIds.has(v.consentId));
+    return { ...register, individuals, records, revocations };
+}
 export type ConsentStatus = 'Draft' | 'Scheduled' | 'Active' | 'Expiring soon' | 'Expired' | 'Revoked' | 'Superseded' | 'Missing';
 export function canSeeConsents(roleKey: string) {
     return ['house_manager', 'program_manager', 'nurse', 'dsp', 'auditor', 'administrator'].includes(roleKey);
@@ -70,7 +90,15 @@ export function assertConsentRole(session: SessionUser, write = false) {
     if (!(write ? canManageConsents(session.roleKey) : canSeeConsents(session.roleKey)))
         throw new Error('You do not have permission to access consents.');
 }
-export function consentStatus(row: ConsentRecord, records: ConsentRecord[], revocations: ConsentRevocation[], today = todayStamp()): ConsentStatus {
+/**
+ * The record-level status primitive. Every consent verdict on every
+ * surface is built from this one comparison chain, and its default
+ * "today" is the agency's Central calendar day (America/Chicago) —
+ * the same day the med dose clock and House Card use — never the
+ * viewer's device-local day. (The hosted alert sweep judges the same
+ * Central day in SQL; see migration 20261031260000.)
+ */
+export function consentStatus(row: ConsentRecord, records: ConsentRecord[], revocations: ConsentRevocation[], today = centralTodayIso()): ConsentStatus {
     if (!row.activatedAt)
         return 'Draft';
     if (revocations.some(r => r.consentId === row.id && r.revokedOn <= today))
@@ -84,19 +112,92 @@ export function consentStatus(row: ConsentRecord, records: ConsentRecord[], revo
     const days = (Date.parse(row.reviewOn + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000;
     return days <= 30 ? 'Expiring soon' : 'Active';
 }
-export function consentOnFile(register: ConsentRegister, individualId: string, typeId: string, today = todayStamp()) {
+export function consentOnFile(register: ConsentRegister, individualId: string, typeId: string, today = centralTodayIso()) {
     const rows = register.records.filter(r => r.individualId === individualId && r.typeId === typeId);
     const usable = rows.filter(r => ['Active', 'Expiring soon'].includes(consentStatus(r, register.records, register.revocations, today)))
         .sort((a, b) => b.effectiveOn.localeCompare(a.effectiveOn) || b.createdAt.localeCompare(a.createdAt));
-    const row = usable[0] ?? rows.filter(r => r.activatedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? rows[0];
+    // Fallback order is fully deterministic — latest created wins at each
+    // tier, never the register's array order (the hosted register arrives
+    // in unspecified database order, so rows[0] could name different
+    // versions on different loads). The hosted sweep picks in exactly
+    // this order: usable (effective, then created), activated, any.
+    const row = usable[0]
+        ?? rows.filter(r => r.activatedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+        ?? [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     return { row, status: row ? consentStatus(row, register.records, register.revocations, today) : 'Missing' as ConsentStatus };
 }
-export function consentGaps(register: ConsentRegister, today = todayStamp()) {
+export type ConsentStatusKind =
+    /** The register has not loaded (or its load failed): NO surface may render a verdict. */
+    | 'unknown'
+    | 'current'
+    | 'expiring'
+    | 'expired'
+    | 'missing'
+    | 'draft'
+    | 'scheduled'
+    | 'revoked'
+    | 'superseded';
+export interface ConsentStatusResult {
+    kind: ConsentStatusKind;
+    /** The one status word every surface renders ('Active', 'Expiring soon', …); null while unknown. */
+    text: ConsentStatus | null;
+    /** The record the verdict describes (the consentOnFile pick); null for unknown and missing. */
+    row: ConsentRecord | null;
+    /** Whole Central days from today until the picked record's review date; null when no record is picked. */
+    daysUntilReview: number | null;
+}
+const CONSENT_KIND_BY_STATUS: Record<ConsentStatus, ConsentStatusKind> = {
+    Active: 'current', 'Expiring soon': 'expiring', Expired: 'expired', Missing: 'missing',
+    Draft: 'draft', Scheduled: 'scheduled', Revoked: 'revoked', Superseded: 'superseded',
+};
+/**
+ * THE shared consent-status selector. Every surface that renders a
+ * consent verdict for one Individual and consent type — the Consents
+ * register, the Individual chart Consents tab, the mobile chart rows,
+ * the printed summary, the Overview attention list (via consentGaps),
+ * and the LocalApi alert sweep (via consentAlerts) — derives it here,
+ * from the register rows themselves, so one consent can never read two
+ * ways on two screens. The hosted alert sweep mirrors this computation
+ * in SQL on the same Central day (migration 20261031260000).
+ *
+ * The load state is part of the contract: callers pass `null` (or
+ * `undefined`) until their register has actually loaded, and the
+ * status is `unknown` — text is null and surfaces render nothing
+ * rather than a verdict. A LOADED register with no record for the
+ * type is different: it honestly answers `missing`. (The rights
+ * packets learned this in wave 7E: an empty, still-loading list read
+ * as "Not yet signed" for everyone. An unloaded register must never
+ * read as "Missing" the same way.)
+ */
+export function consentStatusFor(register: ConsentRegister | null | undefined, individualId: string, typeId: string, today = centralTodayIso()): ConsentStatusResult {
+    if (!register)
+        return { kind: 'unknown', text: null, row: null, daysUntilReview: null };
+    const { row, status } = consentOnFile(register, individualId, typeId, today);
+    return {
+        kind: CONSENT_KIND_BY_STATUS[status],
+        text: status,
+        row: row ?? null,
+        daysUntilReview: row ? (Date.parse(row.reviewOn + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000 : null,
+    };
+}
+/**
+ * The one display rule over the selector's text: a DSP never sees the
+ * word "Missing" — for them a missing consent reads "No active consent
+ * available" (their register only ever carries currently usable
+ * consents; that scoping is unchanged). Every other role sees the
+ * status word itself. Unknown stays null: no text, no verdict.
+ */
+export function consentDisplayText(status: ConsentStatusResult, roleKey: string): string | null {
+    if (status.text === null)
+        return null;
+    return roleKey === 'dsp' && status.kind === 'missing' ? 'No active consent available' : status.text;
+}
+export function consentGaps(register: ConsentRegister, today = centralTodayIso()) {
     return register.individuals.flatMap(person => register.types.filter(t => t.required).flatMap(type => {
-        const { row, status } = consentOnFile(register, person.id, type.id, today);
-        if (status === 'Active')
+        const { row, text: status } = consentStatusFor(register, person.id, type.id, today);
+        if (status === 'Active' || status === null)
             return [];
-        return [{ person, type, row, status, alert: status === 'Expiring soon' ? 'expiring' : 'missing' }];
+        return [{ person, type, row: row ?? undefined, status, alert: status === 'Expiring soon' ? 'expiring' : 'missing' }];
     }));
 }
 export function validateConsentDraft(draft: ConsentDraft, types: ConsentType[], activating = false, today = todayStamp()) {
@@ -124,9 +225,23 @@ export function validateConsentTypes(types: ConsentType[]) {
     if (!types.some(t => t.id === 'medication' && t.medication))
         throw new Error('Keep the medication administration consent type.');
 }
+/**
+ * The entity ids under which one consent gap's alerts can appear: the
+ * consent record id once a record exists, and the person:type form used
+ * before any record exists. A fresh alert for a gap retires the gap's
+ * other UNREAD incarnations for the same recipient (LocalApi sweep +
+ * private.sweep_consents, migration 20261031250000), so the bell never
+ * shows one consent as both "missing" and "expiring" (batches 51/52/58).
+ */
+export function consentAlertEntityIds(register: ConsentRegister, entityId: string): string[] {
+    const record = register.records.find((row) => row.id === entityId);
+    if (!record)
+        return [entityId];
+    return [record.id, `${record.individualId}:${record.typeId}`];
+}
 // Missing/expiring notices fire once per consent and target on entering the window.
 // Repeated sweeps dedupe permanently; there is no repeating alert cadence.
-export function consentAlerts(register: ConsentRegister, memberships: Membership[], today = todayStamp()) {
+export function consentAlerts(register: ConsentRegister, memberships: Membership[], today = centralTodayIso()) {
     return consentGaps(register, today).flatMap(gap => {
         const targets = new Map<string, {
             userId: string | null;
@@ -147,6 +262,48 @@ export function consentAlerts(register: ConsentRegister, memberships: Membership
             dedupeKey: `consent.${gap.alert}:${gap.row?.id ?? `${gap.person.id}:${gap.type.id}`}:${target}`,
         }));
     });
+}
+/** Notification types whose stored rows live only while the underlying gap persists. */
+export const CONSENT_ALERT_TYPES = ['consent.missing', 'consent.expiring', 'consent.packet_outstanding'] as const;
+/**
+ * The (type, entityId) pairs whose consent alert is currently true,
+ * from the same gap computation that queues the alerts. A consent
+ * carries exactly ONE current status, so at most one alert pair exists
+ * per (Individual, consent type): an "Expiring soon" consent has no
+ * live "missing" pair, an Active consent has neither. Stored rows
+ * outside this set are stale and must retire (batch 24: the bell kept
+ * saying "Consent needs attention — Missing" for consents the chart
+ * already showed Active, because nothing ever retired the row).
+ */
+export function consentAlertPairs(register: ConsentRegister, today = todayStamp()): Set<string> {
+    return new Set(consentGaps(register, today).map(gap => `consent.${gap.alert}:${gap.row?.id ?? `${gap.person.id}:${gap.type.id}`}`));
+}
+export function consentAlertPairKey(type: string, entityId: string | null): string {
+    return `${type}:${entityId ?? ''}`;
+}
+/**
+ * True when a stored consent alert no longer matches reality: its
+ * (type, entity) pair is not a current gap, or its packet is no
+ * longer outstanding. Non-alert types (e.g. consent.packet_signed)
+ * are never stale — they are the record that the work happened.
+ * Rights-packet alerts REUSE the consent.missing / consent.expiring
+ * types with entityType 'rights_packet', but they track packet
+ * states, not consent gaps — an explicit non-'consent' entityType
+ * exempts a row from the gap rule.
+ */
+export function isStaleConsentNotification(row: {
+    type: string;
+    entityId: string | null;
+    entityType?: string | null;
+}, livePairs: ReadonlySet<string>, outstandingPacketIds: ReadonlySet<string>): boolean {
+    if (row.type === 'consent.missing' || row.type === 'consent.expiring') {
+        if (row.entityType && row.entityType !== 'consent')
+            return false;
+        return !livePairs.has(consentAlertPairKey(row.type, row.entityId));
+    }
+    if (row.type === 'consent.packet_outstanding')
+        return !(row.entityId !== null && outstandingPacketIds.has(row.entityId));
+    return false;
 }
 /** Only business fields cross the local write boundary; ignore forged metadata. */
 export function consentDraftFields(input: ConsentDraft): ConsentDraft {

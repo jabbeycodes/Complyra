@@ -9,6 +9,7 @@ import {
   DEMO_NURSE_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
+import { addDaysIso, centralTodayIso } from "./menuRecords";
 import { todayIso } from "./chart";
 import {
   medSupplyBadgeLabel,
@@ -337,9 +338,9 @@ test("late MAR: a past-window mark needs a reason and is stamped Late", async ()
   const api = new LocalApi(st);
   const { ellis } = await hmOnEllis(api, st);
   const medId = `${ellis.id}-med-keppra`;
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const day = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+  // Yesterday on the Central day: dose windows are judged in Central time,
+  // and a host-local "yesterday" is today in Central after 6 PM on a UTC host.
+  const day = addDaysIso(centralTodayIso(), -1);
 
   await assert.rejects(
     () =>
@@ -370,13 +371,15 @@ test("late MAR: a past-window mark needs a reason and is stamped Late", async ()
     minute: "2-digit",
     hourCycle: "h23",
   }).format(new Date());
+  // Today on the Central day — nowHhmm above is a Central clock reading.
+  const centralToday = centralTodayIso();
   await api.markMedDose({
     medicationId: medId,
-    doseDate: todayIso(),
+    doseDate: centralToday,
     doseTime: nowHhmm,
     status: "given",
   });
-  const todayMarks = await api.getMedDoseMarks(ellis.id, todayIso());
+  const todayMarks = await api.getMedDoseMarks(ellis.id, centralToday);
   const fresh = todayMarks.find((m) => m.doseTime === nowHhmm)!;
   assert.equal(fresh.late ?? false, false);
 });

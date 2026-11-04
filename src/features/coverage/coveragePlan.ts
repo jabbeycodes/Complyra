@@ -33,8 +33,12 @@ function dueLabel(endsAt: string, graceMinutes: number): string {
 
 /**
  * One line per house block. A person on a published shift owes the note after
- * their own end. Hours nobody covers name the usual DSP once the week has any
- * schedule, and every assigned DSP when the week is still empty.
+ * their own end. Truth rule: a line names someone as covering a block ONLY
+ * when an assigned shift actually covers it. Hours nobody covers read
+ * "Not covered" — the usual DSP (or, in an empty week, every assigned DSP)
+ * is named only as owing the note, never as holding the block. A covering
+ * DSP listed in `unclearedStaffIds` is flagged in the line: scheduled is
+ * not the same as cleared to work alone.
  */
 export function owedLinesForDay(input: {
   date: string;
@@ -43,6 +47,8 @@ export function owedLinesForDay(input: {
   writers: HouseWriter[];
   graceMinutes: number;
   weekHasSchedule: boolean;
+  /** DSP user ids positively known to be not cleared for in-ratio work. */
+  unclearedStaffIds?: ReadonlySet<string>;
 }): OwedLine[] {
   const assigned = input.shifts.filter((shift) => shift.staffId);
   const open = input.shifts.filter((shift) => !shift.staffId);
@@ -64,28 +70,35 @@ export function owedLinesForDay(input: {
     const full = blockFullyCovered(spans, block.startMin, block.endMin);
     const owner = usualOwnerForBlock(input.writers, blockId);
     const names = input.writers.map((writer) => writer.name);
+    const uncleared = input.unclearedStaffIds;
+    const displayName = (shift: PlanShift) =>
+      `${shift.staffName}${shift.staffId && uncleared?.has(shift.staffId) ? " (not cleared to work alone)" : ""}`;
     if (covering.length > 0 && full) {
       const who = covering
-        .map((shift) => `${shift.staffName}, note due ${dueLabel(shift.endsAt, input.graceMinutes)}`)
+        .map((shift) => `${displayName(shift)}, note due ${dueLabel(shift.endsAt, input.graceMinutes)}`)
         .join(" · ");
       return { blockId, text: `${block.label} · ${who}` };
     }
     if (covering.length > 0) {
-      const who = covering.map((shift) => shift.staffName).join(", ");
+      const who = covering.map((shift) => displayName(shift)).join(", ");
       const gapOwner = owner && covering.some((shift) => shift.staffId === owner.userId)
         ? input.writers.find((writer) => writer.userId !== owner.userId) ?? null
         : owner;
-      const rest = gapOwner ? `${gapOwner.name} still owes the rest` : "the rest of this block is still open";
+      const rest = gapOwner ? `${gapOwner.name} owes the note for the rest` : "the rest of this block is still open";
       return { blockId, text: `${block.label} · ${who} covers part · ${rest}` };
     }
-    if (openHere && owner) {
-      return { blockId, text: `${block.label} · Open for a PRN · still with ${owner.name} until someone takes it` };
+    if (openHere) {
+      const duty = owner ? ` · ${owner.name} owes the note until someone does` : "";
+      return { blockId, text: `${block.label} · Open for a PRN · nobody has taken it${duty}` };
     }
     if (dayHasSchedule && owner) {
-      return { blockId, text: `${block.label} · still with ${owner.name}` };
+      return { blockId, text: `${block.label} · Not covered · no one is scheduled · ${owner.name} owes the note` };
     }
     if (names.length === 0) return { blockId, text: `${block.label} · nobody assigned` };
-    return { blockId, text: `${block.label} · ${names.join(" and ")}` };
+    return {
+      blockId,
+      text: `${block.label} · Not covered · no one is scheduled · ${names.join(" and ")} ${names.length === 1 ? "owes" : "owe"} the note`,
+    };
   });
 }
 

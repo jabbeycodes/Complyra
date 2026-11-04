@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { zonedWallTimeMs } from "../../../src/data/dueItems.ts";
-import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency } from "../../../src/data/operatingReminders.ts";
+import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency, prnNoticeKeys } from "../../../src/data/operatingReminders.ts";
 import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.ts";
 
 /**
@@ -14,7 +14,7 @@ import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.
  *
  * Authorization matches delegation-ack-sweep: the platform verifies the JWT,
  * then the caller must present the service role key or be an active
- * administrator or compliance admin.
+ * administrator.
  *
  * Deployed to Complyra. A cron job calls it only when the project URL and
  * service key are in Vault. The job command reads those secrets at run time
@@ -30,7 +30,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ADMIN_ROLE_KEYS = ["administrator", "compliance_admin"];
+const ADMIN_ROLE_KEYS = ["administrator"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -270,6 +270,14 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
       p_dedupe_key: notice.dedupeKey,
     });
     if (!error) queued += Number(data ?? 0);
+  }
+  const prnKeys = prnNoticeKeys(notices);
+  if (prnKeys.length) {
+    await admin.rpc("rearm_prn_repeat_notices", {
+      p_agency_id: agencyId,
+      p_dedupe_keys: prnKeys,
+      p_repeat_minutes: rules.prnReminderRepeatMinutes,
+    });
   }
   if (!shiftError) {
     const liveIds = [...new Set(

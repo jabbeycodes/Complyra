@@ -225,7 +225,7 @@ export default function AssignedDocsPanel({
         />
       )}
 
-      <div className="stack-tabs" role="tablist">
+      <div className="stack-tabs" role="tablist" aria-label="Plan document sections">
         <button
           type="button"
           role="tab"
@@ -662,6 +662,7 @@ function RequiredList({
                     documentId={view.item.id}
                     fieldName="rn_signature"
                     label="Delegating RN signature"
+                    documentTitle={view.item.title}
                     getDocumentPayload={() =>
                       view.item.delegationForm ? delegationFormPayload({
                         obligationId: view.item.id,

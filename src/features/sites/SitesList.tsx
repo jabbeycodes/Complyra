@@ -14,7 +14,7 @@ import {
   normalizeSiteFacts,
   type SiteReview,
 } from "../../data/siteReview";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import type { SessionUser } from "../../data/types";
 import "./sitesList.css";
 
@@ -147,7 +147,7 @@ export default function SitesList(props: {
             const reviewInPlace = isSiteReviewInPlace(
               review,
               normalizeSiteFacts(site),
-              todayIso(),
+              centralTodayIso(),
             );
             const overflow = Math.max(0, people.length - AVATAR_LIMIT);
             const faces = people.slice(0, AVATAR_LIMIT);

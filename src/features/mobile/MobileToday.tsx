@@ -9,7 +9,11 @@
 import { useMemo, useState } from "react";
 import type { PersonalWorkItem } from "../../data/dashboard";
 import { formatDoseTime } from "./mar";
-import { TRACK_COLOR, type TrackingCategoryId } from "./today";
+import {
+  TRACK_COLOR,
+  upNextSubsetText,
+  type TrackingCategoryId,
+} from "./today";
 import type { TodayTracking } from "./useTodayTracking";
 
 const TONE_LABELS: Record<PersonalWorkItem["tone"], string> = {
@@ -91,7 +95,7 @@ export default function MobileToday({
   queueItems,
   onOpenCategory,
   onOpenTasks,
-  onOpenMar,
+  onOpenMedications,
   onOpenQueueItem,
   complianceCard,
   yourShift,
@@ -101,7 +105,11 @@ export default function MobileToday({
   queueItems: PersonalWorkItem[];
   onOpenCategory: (id: TrackingCategoryId) => void;
   onOpenTasks: () => void;
-  onOpenMar: () => void;
+  /**
+   * A med-pass row in Up next. Medications live under Health, so this
+   * lands on the Health surface — its Medications section opens the MAR.
+   */
+  onOpenMedications: () => void;
   onOpenQueueItem: (item: PersonalWorkItem) => void;
   /**
    * The personal compliance card, rendered directly below the tracking
@@ -139,7 +147,7 @@ export default function MobileToday({
         detail: done
           ? `${pass.personName} · all ${pass.total} dose${pass.total === 1 ? "" : "s"} recorded`
           : `${pass.personName} · ${pass.total - pass.recorded} of ${pass.total} dose${pass.total === 1 ? "" : "s"} still to record`,
-        open: onOpenMar,
+        open: onOpenMedications,
       };
     });
     const duePasses = passItems.filter((item) => item.state === "due");
@@ -153,7 +161,7 @@ export default function MobileToday({
       open: () => onOpenQueueItem(item),
     }));
     return [...duePasses, ...queue, ...donePasses];
-  }, [tracking.passes, queueItems, onOpenMar, onOpenQueueItem]);
+  }, [tracking.passes, queueItems, onOpenMedications, onOpenQueueItem]);
 
   const hasBothStates =
     items.some((item) => item.state === "due") &&
@@ -161,6 +169,12 @@ export default function MobileToday({
   const visibleItems = items
     .filter((item) => filter === "all" || item.state === filter)
     .slice(0, 4);
+  // The cap is intentional, so it is stated in words: an item past the
+  // cap is "not shown here", never silently gone (simulation batch 61).
+  const subsetText =
+    filter === "all"
+      ? upNextSubsetText(visibleItems.length, items.length)
+      : null;
 
   return (
     <>
@@ -273,6 +287,7 @@ export default function MobileToday({
             </button>
           ))}
         </div>
+        {subsetText && <p className="msh-section-note">{subsetText}</p>}
       </section>
     </>
   );

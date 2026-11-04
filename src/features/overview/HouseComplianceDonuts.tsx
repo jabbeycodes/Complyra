@@ -27,6 +27,10 @@ import type { Requirement } from "../../domain";
 import { Badge } from "../../components";
 import StatusMixDonut from "../../components/StatusMixDonut";
 import { houseComplianceRows } from "./houseCompliance";
+import {
+  CONSENT_SCORE_EXCLUDED,
+  type ConsentScoreInput,
+} from "./consentCompliance";
 import { useTeamComplianceBySite } from "./teamCompliance";
 import { HOUSE_DONUT_ROLES as MANAGER_ROLES } from "../personalCompliance/personalCompliance";
 
@@ -36,6 +40,12 @@ interface Props {
   /** The Overview's site filter: "All sites" or a site name. */
   focusSite: string;
   onSite: (siteName: string) => void;
+  /**
+   * Consent currency in the score (founder decision, 2026-11-02).
+   * Defaults to excluded — the pre-decision composition — for callers
+   * that do not load the consent register.
+   */
+  consentScore?: ConsentScoreInput;
 }
 
 export default function HouseComplianceDonuts({
@@ -43,10 +53,13 @@ export default function HouseComplianceDonuts({
   allItems,
   focusSite,
   onSite,
+  consentScore = CONSENT_SCORE_EXCLUDED,
 }: Props) {
   const { session, workspace } = useData();
   const isManager = Boolean(session && MANAGER_ROLES.has(session.roleKey));
-  const rows = isManager ? houseComplianceRows(sites, allItems, focusSite) : [];
+  const rows = isManager
+    ? houseComplianceRows(sites, allItems, focusSite, consentScore)
+    : [];
   // Team compliance per house (the manager lever): each staff member's own
   // readiness roll-up, counted for the houses on screen. Loaded for the
   // same narrowed set of houses the donuts show.
@@ -88,19 +101,38 @@ export default function HouseComplianceDonuts({
               >
                 {row.siteName}
               </button>
-              <Badge status={row.overdue ? "Needs attention" : "On track"} />
+              {!row.consentUnknown && row.total + row.review > 0 && (
+                <Badge status={row.overdue ? "Needs attention" : "On track"} />
+              )}
             </div>
-            <p className="house-compliance-score">
-              <strong>{row.score}%</strong> current · {row.done} of {row.total}{" "}
-              complete
-              {row.overdue > 0
-                ? ` · ${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-                : " · nothing overdue"}
-              {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
-            </p>
-            {row.total + row.review > 0 ? (
-              <StatusMixDonut items={row.items} />
+            {row.consentUnknown ? (
+              <p className="house-compliance-empty">
+                Consent records are still loading — this house's score is
+                not final yet.
+              </p>
+            ) : row.total + row.review > 0 ? (
+              <>
+                <p className="house-compliance-score">
+                  <strong>{row.score}%</strong> current · {row.done} of{" "}
+                  {row.total} complete
+                  {row.overdue > 0
+                    ? ` · ${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
+                    : " · nothing overdue"}
+                  {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
+                </p>
+                <StatusMixDonut items={row.items} />
+                {row.consentTotal > 0 && (
+                  <p className="house-compliance-team">
+                    Consents: {row.consentCurrent} of {row.consentTotal}{" "}
+                    current
+                    {row.consentNotCurrent > 0
+                      ? ` · ${row.consentNotCurrent} not current`
+                      : ""}
+                  </p>
+                )}
+              </>
             ) : (
+              // #179 follow-up: an untracked house never claims 100%.
               <p className="house-compliance-empty">
                 No requirements are tracked for this house yet.
               </p>

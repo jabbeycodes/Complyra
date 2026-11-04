@@ -29,7 +29,7 @@ import {
 import type { MileageYearlySummary, MileageAgencyYearlySummary } from "../../data/mileage";
 import type { MileageTrip, MileageTripView } from "../../data/types";
 import { individualsAtSite } from "../../data/dashboard";
-import { todayIso } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import { agencyStateCode, siteLocationFrom } from "../../data/siteAddress";
 import "./mileage.css";
 
@@ -47,7 +47,7 @@ interface FormState {
 
 function emptyForm(): FormState {
   return {
-    tripDate: todayIso(),
+    tripDate: centralTodayIso(),
     odometerStart: "",
     odometerEnd: "",
     riderIds: [],
@@ -81,7 +81,7 @@ function canDownloadMonthly(
 export default function MileagePage() {
   const { api, session, workspace, refresh } = useData();
   const [siteId, setSiteId] = useState("");
-  const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
+  const [month, setMonth] = useState(() => monthKeyOf(centralTodayIso()));
   const [tab, setTab] = useState<"weekly" | "monthly" | "yearly">("monthly");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [trips, setTrips] = useState<MileageTripView[]>([]);
@@ -110,7 +110,7 @@ export default function MileagePage() {
     agencyStateCode(null, session?.agencyCode),
   );
   const showYearly = canViewYearlySummary(session);
-  /** Admin backfill: administrators, compliance admins, and house managers
+  /** Admin backfill: administrators and house managers
    * may log a forgotten trip out of sequence. Regular staff never see it. */
   const showBackfill = canBackfillMileage(session);
   const people = useMemo(
@@ -409,6 +409,7 @@ export default function MileagePage() {
         };
         const doc = buildMileageYearPdf({
           agencyName: session?.agencyName ?? "Agency",
+          logoDataUrl: workspace?.branding.logoUrl ?? null,
           siteName: "All sites",
           year,
           people: orderedPeople,
@@ -424,6 +425,7 @@ export default function MileagePage() {
       const yearlySite = sites.find((site) => site.id === yearlyScope);
       const doc = buildMileageYearPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: yearlySiteName,
         year,
         people: scopedPeople.map((person) => ({ id: person.id, name: person.name })),
@@ -450,6 +452,7 @@ export default function MileagePage() {
     try {
       const doc = buildMileageWeekPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: activeSite?.name ?? "Home",
         monthKey: month,
         people: people.map((person) => ({ id: person.id, name: person.name })),
@@ -486,6 +489,7 @@ export default function MileagePage() {
       );
       const doc = buildMileageMonthPdf({
         agencyName: session?.agencyName ?? "Agency",
+        logoDataUrl: workspace?.branding.logoUrl ?? null,
         siteName: activeSite?.name ?? "Home",
         monthKey: month,
         people: people.map((person) => ({ id: person.id, name: person.name })),

@@ -133,7 +133,8 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   await page.getByRole("button", { name: "Export audit register" }).click();
   const download = await dl;
   expect(download.suggestedFilename()).toBe(
-    "complyrer-sample-audit-register.csv",
+    // Agency-branded filename (founder rule, PR #245).
+    "Evergreen-Care-sample-audit-register.csv",
   );
   await page
     .getByRole("button", {
@@ -188,7 +189,7 @@ test("search and copilot answers lead to the correct sample records", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("medication");
+  await page.getByLabel("Search people, homes, and requirements").fill("medication");
   await page
     .locator(".search-results")
     .getByRole("button", { name: /Renew medication delegation Morgan Pruitt/ })
@@ -214,19 +215,32 @@ test("site scope updates readiness and mobile navigation remains usable", async 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  await page.getByLabel("Filter by site").selectOption("Willow House");
+  // Phone width: sign-in lands in the mobile shell (PR #134) and the
+  // home picker IS the site scope. Picking Willow re-scopes the home:
+  // the heading and the compliance band report Willow's readiness.
+  // (The desktop "Filter by site" select and the old "No overdue
+  // items" Overview heading this spec used before no longer exist.)
+  await page.getByRole("button", { name: /Willow House/ }).click();
   await expect(
-    page.getByRole("heading", { name: "No overdue items" }),
+    page.getByRole("heading", { name: "Today at Willow House" }),
   ).toBeVisible();
+  const band = page.locator(".msh-band");
+  await expect(band).toContainText("Willow House");
+  // Consent currency counts in the house scores (founder decision
+  // 2026-11-02, PR #248), so Willow's total includes its consent items.
+  await expect(band).toContainText("19 of 29");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("button", { name: "Individuals", exact: true }).click();
-  await expect(page.locator(".person-card")).toHaveCount(2);
-  await page.locator(".person-card").first().click();
+  // Mobile navigation: People lists exactly Willow's two Individuals,
+  // and tapping one bridges into the chart.
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await expect(
+    page.locator(".msh-row", { hasText: /Harper Soto|Reese Lang/ }),
+  ).toHaveCount(2);
+  await page.getByRole("button", { name: /Harper Soto/ }).click();
   await expect(page.locator(".individual-chart")).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to individuals" })).toBeVisible();
   expect(
@@ -424,6 +438,8 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.locator(".location-card")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Willow House" })).toHaveCount(0);
+  // Exact: the site page also carries "Site review pack · Cedar House" and
+  // "Monthly home checks · Cedar House" headings.
+  await expect(page.getByRole("heading", { name: "Cedar House", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Willow House", exact: true })).toHaveCount(0);
 });

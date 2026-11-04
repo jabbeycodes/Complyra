@@ -92,6 +92,27 @@ test("risks: missed checklists, overdue training, low meds, overdue actions", ()
   }
 });
 
+test("risks: medication rows name the Individual the med belongs to", () => {
+  const items = collectRisks(
+    ctx({
+      medications: [
+        { id: "m1", medName: "Testoprofen", personName: "Dana", siteName: "Juniper", siteId: "s1", daysRemaining: 0, status: "out" },
+        { id: "m2", medName: "Ritalin", siteName: "Maple", siteId: "s2", daysRemaining: 1, status: "critical" },
+      ],
+    }),
+  );
+  const meds = items.filter((item) => item.source === "medications");
+  assert.equal(meds.length, 2);
+  // Med names repeat across people: the claim must say whose med it is.
+  const named = meds.find((item) => item.id === "medications:m1");
+  assert.equal(named?.personName, "Dana");
+  assert.equal(named?.title, "Testoprofen — out of stock (Dana · Juniper)");
+  // Rows without a resolved person keep the site-only label.
+  const unnamed = meds.find((item) => item.id === "medications:m2");
+  assert.equal(unnamed?.personName, undefined);
+  assert.equal(unnamed?.title, "Ritalin — low stock (Maple)");
+});
+
 test("risks: ids dedupe across sources", () => {
   registerRiskSource({
     key: "dup-test",

@@ -1,7 +1,7 @@
 -- LIFE-EVENTS RLS: hosted enforcement for the per-Individual timeline.
 -- Proves the rules the API promises: anyone who can read the Individual
 -- reads the timeline (DSPs on their Individuals, auditors read-only),
--- only the editor roles (administrator, compliance_admin, program
+-- only the editor roles (administrator, program
 -- manager, house manager, nurse) can add/edit within their Individual
 -- scope, HR has no access path, authorship binds to auth.uid(), and
 -- removal is a reasoned soft void — never a delete — that hides the row

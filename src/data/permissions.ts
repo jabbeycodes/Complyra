@@ -99,7 +99,6 @@ export type PermissionMap = Record<PermissionKey, boolean>;
 export type RoleScope = "agency" | "program" | "site" | "assigned";
 export type RoleKey =
   | "administrator"
-  | "compliance_admin"
   | "house_manager"
   | "program_manager"
   | "dsp"
@@ -140,28 +139,6 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     // LIFEPATH-P4 (certificates): certificates.manage is NOT in the
     // administrator default set — it is grantable explicitly via Roles & access.
     permissions: pack(ALL.filter((key) => key !== "certificates.manage")),
-  },
-  {
-    key: "compliance_admin",
-    name: "Compliance administrator",
-    shortCode: "CA",
-    description: "Owns the compliance loop: plans, approvals, acknowledgments, and audit exports.",
-    defaultScope: "agency",
-    capability: "compliance_admin",
-    // QA-AUDIT (2026-09-14): qa.audit / qa.dispute / qa.schedule stay out of
-    // the compliance_admin defaults — the auditor role owns scoring, PM/HM
-    // own disputes and schedules. Grantable explicitly via Roles & access.
-    // HR-EMPLOYEE-HUB: hub.access only — scheduling, timecard review,
-    // time-off approval, team view, payroll lock, and HR documents stay with
-    // the operational managers (administrator / program_manager / house_manager).
-    permissions: pack(
-      ALL.filter(
-        (key) =>
-          key !== "hr.view_staff" &&
-          !key.startsWith("qa.") &&
-          (key === "hub.access" || !key.startsWith("hub.")),
-      ),
-    ),
   },
   {
     key: "house_manager",
@@ -370,6 +347,16 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "delegation.templates.view",
       // HR-EMPLOYEE-HUB: every employee opens their own hub.
       "hub.access",
+      // HR HUB OWNERSHIP (founder decision, Joshua 2026-10-31; wave 6
+      // item 9): HR owns payroll/time like Paycor — Payroll, Timecards
+      // and Attendance are HR's tabs. These keys are in the canonical
+      // template for new agencies; hasHubTeamPermission ALSO accepts
+      // the HR role directly so existing agencies, whose stored
+      // templates predate this grant, get the tabs without a template
+      // flip.
+      "hub.view_team",
+      "hub.review_timecards",
+      "hub.approve_payroll",
       // HR-STAFFING (2026-09-16): recurring staffing patterns agency-wide.
       "hub.manage_staffing",
       // HR-PHASE2 (2026-09-16): accrual policies + overtime rules.
@@ -383,7 +370,14 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     key: "auditor",
     name: "Auditor",
     shortCode: "AUD",
-    description: "Time-limited read and export access. Cannot change records or add staff.",
+    // AUDITOR CONTRACT (founder decision, 2026-11-04, PR #252 review): the
+    // auditor reads and exports everything and AUTHORS QA reviews — it
+    // scores the reviewable items, signs and finalizes the review, and
+    // decides disputes raised against its scores (qa.audit). It cannot
+    // START a review (qa.schedule: administrator / program manager), and
+    // it changes no other record. Every other key below is read-only.
+    description:
+      "Time-limited read and export access to every record. Scores, signs and finalizes QA reviews and decides disputes on them; cannot start a review, change any other record, or add staff.",
     defaultScope: "agency",
     capability: "auditor",
     permissions: pack([
@@ -393,7 +387,8 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
       "audit.read",
       "audit.export",
       // QA-AUDIT (2026-09-14): conduct QA audits — system-verified items stay
-      // locked; the auditor scores the rest and resolves disputes.
+      // locked; the auditor scores the rest and resolves disputes. The ONE
+      // write key the auditor holds (see the AUDITOR CONTRACT above).
       "qa.audit",
       "recognition.view_winners",
       // DELEGATION: view templates only.
@@ -408,13 +403,12 @@ export const ROLE_TEMPLATE_BY_KEY = Object.fromEntries(
   ROLE_TEMPLATES.map((row) => [row.key, row]),
 ) as Record<RoleKey, RoleTemplate>;
 
-/** All nine role keys, in template order. */
+/** All role keys, in template order. */
 export const ROLE_KEYS = ROLE_TEMPLATES.map((row) => row.key);
 
 /** Roles whose grant must stay with privileged granters — never HR / line staff. */
 export const PRIVILEGED_ROLE_KEYS = [
   "administrator",
-  "compliance_admin",
 ] as const satisfies readonly RoleKey[];
 
 /**
@@ -423,15 +417,13 @@ export const PRIVILEGED_ROLE_KEYS = [
  * `"any"` marks operational roles: any caller may be evaluated for them and
  * the permission gates (members.invite / members.assign_roles) live in the
  * API layer. Explicit granter lists restrict privileged targets:
- *  - only `administrator` may grant `administrator`;
- *  - `administrator` and `compliance_admin` may grant `compliance_admin`.
+ *  - only `administrator` may grant `administrator`.
  *
  * This mirrors the Postgres backstop private.can_grant_role_key() in
  * 20260913191500_phase0_security.sql — keep both in sync.
  */
 export const GRANT_RULES: Record<RoleKey, readonly RoleKey[] | "any"> = {
   administrator: ["administrator"],
-  compliance_admin: ["administrator", "compliance_admin"],
   house_manager: "any",
   program_manager: "any",
   dsp: "any",
@@ -549,7 +541,6 @@ export const PERMISSION_REGISTRY: Record<PermissionKey, PermissionRegistryEntry>
  */
 export const TEMPLATE_LOCKED_PERMISSIONS: Record<RoleKey, readonly PermissionKey[]> = {
   administrator: ["members.assign_roles", "roles.manage"],
-  compliance_admin: [],
   house_manager: [],
   program_manager: [],
   dsp: [],
@@ -583,17 +574,50 @@ export function hasPermission(
   if (session.role === "manager") {
     return ROLE_TEMPLATE_BY_KEY.house_manager.permissions[key];
   }
-  if (session.role === "administrator" || session.role === "compliance_admin") {
+  if (session.role === "administrator") {
     return ROLE_TEMPLATE_BY_KEY[session.role].permissions[key];
   }
   return ROLE_TEMPLATE_BY_KEY.dsp.permissions[key];
 }
 
+/** The Employee Hub team-management permissions (Attendance/Timecards/Payroll). */
+export type HubTeamPermissionKey =
+  | "hub.view_team"
+  | "hub.review_timecards"
+  | "hub.approve_payroll";
+
+/**
+ * Hub team-tool access (HR hub rule — founder decision, Joshua
+ * 2026-10-31: "HR must have Payroll, Timecards, and Attendance in the
+ * Employee Hub... use what other platforms do like Paycor"). HR is a
+ * first-class owner of payroll/time, so the HR ROLE satisfies these
+ * three gates directly — even when the agency's stored role template
+ * still carries an explicit false from before the decision (stored
+ * templates are only rewritten by an admin, and a template flip must
+ * not be what stands between HR and payroll). Every other role goes
+ * through the ordinary permission check, so a DSP gains nothing here.
+ *
+ * This is the gate PR #213 item 9 defines for the desktop hub; wave 7S
+ * carries the same helper so the phone hub's HR doors (batch 103) use
+ * the identical rule, and the two waves converge on one implementation.
+ */
+export function hasHubTeamPermission(
+  session: {
+    permissions?: Partial<PermissionMap>;
+    role?: string;
+    roleKey?: string;
+  },
+  key: HubTeamPermissionKey,
+) {
+  if (session.roleKey === "hr" || session.role === "hr") return true;
+  return hasPermission(session, key);
+}
+
 /**
  * Who may grant which role — derived from GRANT_RULES.
  *
- * HR can grant operational roles (invite + assign), but the administrator and
- * compliance-administrator roles can only be granted by someone who already
+ * HR can grant operational roles (invite + assign), but the administrator
+ * role can only be granted by someone who already
  * holds equivalent-or-higher standing — otherwise HR could silently promote
  * anyone (including themselves) to full administrator.
  *
@@ -621,7 +645,7 @@ export function grantableRoleTemplates(
 /**
  * May this role assign operational (non-privileged) roles to staff?
  * HR's members.assign_roles path: operational targets are always grantable;
- * administrator / compliance_admin are never in reach through this function.
+ * administrator is never in reach through this function.
  */
 export function canAssignOperationalRole(
   granterRoleKey: string | undefined,
@@ -636,9 +660,9 @@ export function canAssignOperationalRole(
 
 /**
  * May this role edit role templates (the roles.manage permission)?
- * Derived from the default templates: only administrator and
- * compliance_admin hold it. HR (members.assign_roles) may assign roles to
- * people but may NOT redefine templates.
+ * Derived from the default templates: only administrator holds it.
+ * HR (members.assign_roles) may assign roles to people but may NOT
+ * redefine templates.
  */
 export function canEditRoleTemplates(roleKey: string | undefined): boolean {
   return (
@@ -737,7 +761,7 @@ export function canEnterShiftNotes(roleKey: string) {
 /**
  * Medication Orders — who may open the orders + reconciliation surfaces.
  *
- * Nurses, Program Managers, administrators, and compliance administrators own
+ * Nurses, Program Managers, and administrators own
  * the workflow. House managers may view (and start a reconciliation) for their
  * homes. Auditors read everything, read-only. Direct support professionals are
  * deliberately excluded here — they continue to see only the MAR check-off.
@@ -746,7 +770,6 @@ export function canEnterShiftNotes(roleKey: string) {
 export function canViewMedicationOrders(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
     "house_manager",
@@ -761,7 +784,6 @@ export function canViewMedicationOrders(roleKey: string) {
 export function canManageMedicationOrders(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -775,7 +797,6 @@ export function canManageMedicationOrders(roleKey: string) {
 export function canStartReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
     "house_manager",
@@ -790,7 +811,6 @@ export function canStartReconciliation(roleKey: string) {
 export function canSignReconciliation(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "nurse",
   ].includes(roleKey);
@@ -805,7 +825,6 @@ export function canSignReconciliation(roleKey: string) {
  */
 export const MESSAGING_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "nurse",
@@ -828,11 +847,84 @@ export function canUseMessaging(session: {
   return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
 }
 
+/**
+ * PM-STAFF-NAV (wave 7U-2, sim batch 181): the program manager's path to
+ * the Staff page. The page gate keys on hr.view_staff / members.invite /
+ * members.assign_roles — none of which the program manager template (TS
+ * default or the stored agency template) carries — so the PM could not
+ * open the staff directory at all, even though the same template grants
+ * members.reset_password, a control that lives ON that page (the PM
+ * template's own description says the role "resets staff passwords"), and
+ * hub.view_team for the hub's team surfaces. A role holding a page's
+ * control key while the page itself is unreachable is incoherent; this
+ * predicate is the single place the PM's page access is granted, keyed on
+ * what the PM actually holds. It never widens any other role, and it
+ * grants no write power: Add member stays members.invite, role assignment
+ * stays members.assign_roles, and the password column stays
+ * members.reset_password.
+ */
+export function canViewStaffAsProgramManager(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return (
+    session.roleKey === "program_manager" &&
+    (hasPermission(session, "hub.view_team") ||
+      hasPermission(session, "members.reset_password"))
+  );
+}
+
+/**
+ * AUDITOR-NAV (wave 7U, sim batches 159/172): the auditor's READ path.
+ * The founder's rule is that auditors see everything read-only (the only
+ * designed exceptions are Internal Messaging and Time-Off). Several read
+ * surfaces are gated on write-ish keys the auditor template deliberately
+ * never holds — hr.view_staff, certificates.manage, requirements.approve,
+ * and clinical.view (absent from the stored auditor template, which carries
+ * isp.view instead) — so keying those surfaces on the write keys alone made
+ * whole pages unreachable for a read-only role. This predicate is the single
+ * place the read path is granted: the auditor role holding its audit.read
+ * key. It never widens any other role, and it grants no write power: every
+ * write control on the surfaces it opens stays keyed on its own write key.
+ */
+export function canReadAsAuditor(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return session.roleKey === "auditor" && hasPermission(session, "audit.read");
+}
+
+/**
+ * TRAINING-ROSTER (simulation batches 195/196/197): who may read the Training
+ * roster and open another staffer's training profile. Every hr.view_staff
+ * holder, plus the program manager: an agency-wide role whose template does
+ * not carry hr.view_staff (and should not — that key also unlocks staff
+ * records and the assign/waive controls). Read only: every write on the page
+ * stays keyed on hr.view_staff. The auditor's read path (canReadAsAuditor)
+ * opens it read-only too. House managers reach the roster through the
+ * training-oversight rule (canOverseeTraining). Which rows a viewer gets is
+ * decided by trainingRosterEntries; a DSP holds neither key and keeps
+ * own-record only.
+ */
+export function canViewTrainingRoster(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return (
+    hasPermission(session, "hr.view_staff") ||
+    session.roleKey === "program_manager" ||
+    // AUDITOR-NAV (wave 7U): the auditor reads the roster read-only.
+    canReadAsAuditor(session)
+  );
+}
+
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
 export function canSeeShiftNotes(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",
@@ -853,7 +945,6 @@ export function canSeeShiftNotes(roleKey: string) {
  */
 export const LIFE_EVENT_EDITOR_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "nurse",
@@ -883,7 +974,7 @@ export function canRecordLifeEvents(session: {
  * program_manager template trap does not apply): DSPs and house managers
  * record for their own home; program managers and administrators reach
  * every home in the agency; house managers, PMs, and administrators sign
- * months closed. Auditors and compliance administrators read only.
+ * months closed. Auditors read only.
  * Nurses are deliberately absent from every list — the house card is not
  * their workflow, so the site tab stays hidden for them. Site scoping
  * itself is enforced by the API layers (canAccessSite locally,
@@ -892,7 +983,6 @@ export function canRecordLifeEvents(session: {
  */
 export const HOUSE_CARD_VIEWER_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "dsp",
@@ -935,8 +1025,8 @@ export function canCloseHouseCardMonth(roleKey: string) {
  * house card): DSPs and house managers record for the Individuals at
  * their own site; program managers and administrators reach the whole
  * agency; house managers, PMs, and administrators sign months closed
- * (with the Individual's own sign-off recorded alongside). Auditors and
- * compliance administrators read only. Nurses are deliberately absent
+ * (with the Individual's own sign-off recorded alongside). Auditors
+ * read only. Nurses are deliberately absent
  * from every list — an Individual's money is not their workflow, so the
  * chart section stays hidden for them. Person scoping itself is
  * enforced by the API layers (canReadIndividual locally,
@@ -946,7 +1036,6 @@ export function canCloseHouseCardMonth(roleKey: string) {
  */
 export const PERSONAL_SPENDING_VIEWER_ROLE_KEYS: RoleKey[] = [
   "administrator",
-  "compliance_admin",
   "program_manager",
   "house_manager",
   "dsp",
@@ -980,6 +1069,22 @@ export function canRecordPersonalSpending(roleKey: string) {
   );
 }
 
+/**
+ * Personal spending — who may void an entry (wave 6, item 3; simulation
+ * batches 37/38: a DSP could void ledger entries recorded by the admin
+ * and by a house manager). Month-closers may void any entry in the
+ * ledger; anyone else who can record may void ONLY their own entry —
+ * that is the shipped mobile "Undo right after recording" path, and it
+ * must never extend to other people's entries.
+ */
+export function canVoidPersonalSpendingEntry(
+  session: { roleKey: string; userId: string },
+  entry: { recordedBy: string },
+) {
+  if (canClosePersonalSpendingMonth(session.roleKey)) return true;
+  return entry.recordedBy === session.userId;
+}
+
 /** Personal spending — who may sign a month closed. */
 export function canClosePersonalSpendingMonth(roleKey: string) {
   return (PERSONAL_SPENDING_CLOSER_ROLE_KEYS as readonly string[]).includes(
@@ -1002,7 +1107,6 @@ export function canEnterMenuEntries(roleKey: string) {
 export function canSeeMenuEntries(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
     "house_manager",
     "nurse",

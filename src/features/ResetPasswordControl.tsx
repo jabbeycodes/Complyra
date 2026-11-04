@@ -1,5 +1,29 @@
 import { useState } from "react";
 import { useData } from "../data/DataProvider";
+import OneTimeSecret from "../components/OneTimeSecret";
+
+/**
+ * The post-reset handover notice. The generated temporary password
+ * renders only through OneTimeSecret (masked by default, explicit
+ * Show/Copy); "Done" removes it from the staff table entirely —
+ * previously it sat in plain text in the row with no way to clear it.
+ */
+export function ResetTempPasswordNotice({
+  name,
+  tempPassword,
+  onDone,
+}: {
+  name: string;
+  tempPassword: string;
+  onDone: () => void;
+}) {
+  return (
+    <p className="form-help">
+      Temporary password for {name}:{" "}
+      <OneTimeSecret value={tempPassword} onDone={onDone} />
+    </p>
+  );
+}
 
 export default function ResetPasswordControl({
   userId,
@@ -19,9 +43,11 @@ export default function ResetPasswordControl({
 
   if (tempPassword) {
     return (
-      <p className="form-help">
-        Temporary password for {name}: <strong>{tempPassword}</strong>
-      </p>
+      <ResetTempPasswordNotice
+        name={name}
+        tempPassword={tempPassword}
+        onDone={() => setTempPassword("")}
+      />
     );
   }
 

@@ -42,7 +42,13 @@ import {
 import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { createSupabaseBrowserClient } from "../../data/index";
-import { hasPermission, type PermissionKey } from "../../data/permissions";
+import {
+  hasHubTeamPermission,
+  hasPermission,
+  type PermissionKey,
+} from "../../data/permissions";
+import { staffVisibleTo } from "../../data/dashboard";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -92,7 +98,12 @@ import {
   rollupCompliance,
   summarizeTimecard,
 } from "../../data/hr";
+import { agencyFileSlug } from "../../domain";
 import { useOperatingRules } from "./useOvertimeLines";
+import {
+  DOCUMENT_NOT_READABLE_NOTE,
+  documentHasReadableContent,
+} from "../../data/starterDocuments";
 import type {
   ComplianceEvidence,
   HrDocument,
@@ -145,6 +156,10 @@ export interface HubStaffEntry {
   email: string;
   roleKey: string;
   siteId: string | null;
+  /** The member's membership-home site name, when the workspace could
+   *  resolve it — the Binder Board labels homes from this, never from
+   *  the viewer's own site list alone. */
+  siteName?: string | null;
 }
 
 export interface HubSite {
@@ -157,7 +172,16 @@ interface EmployeeHubShellProps {
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
+  /** Batch 59: training-profile reads for the scheduling clearance warning. */
+  api?: ReturnType<typeof useData>["api"];
+  /** Agency logo (data URL) for printout headers, from the page's workspace branding. */
+  logoDataUrl?: string | null;
   initialTab?: string;
+  /** The viewer's active staff-assignment site ids (WorkspaceView). Used to
+   * scope the scheduling forms' staff/site options for site-scoped roles. */
+  assignmentSiteIds?: string[];
   /** Injected in tests; defaults to the hosted/local open-shift store. */
   openShiftStore?: OpenShiftStore;
   /** Records a lateness point when a hub clock-in is past the saved minutes. */
@@ -408,11 +432,17 @@ const EMPLOYEE_TABS: TabDef[] = [
 
 const MANAGER_TABS: TabDef[] = [
   { id: "team-schedule", label: "Team Schedule", icon: Users, perm: "hub.manage_schedule" },
-  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team" },
-  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards" },
+  // HR HUB OWNERSHIP (founder decision 2026-10-31): HR owns Payroll,
+  // Timecards and Attendance (Paycor model), so the HR role opens those
+  // three tabs even when the agency's stored template has not granted
+  // the keys yet. Same gate change as PR #213 item 9 — wave 7S carries
+  // it so the phone hub's HR doors land on tabs that actually open
+  // (batch 103); the two waves converge on the same lines.
+  { id: "attendance", label: "Attendance", icon: ClipboardList, perm: "hub.view_team", roleAny: ["hr"] },
+  { id: "timecards", label: "Timecards", icon: FileText, perm: "hub.review_timecards", roleAny: ["hr"] },
   { id: "team-compliance", label: "Team Compliance", icon: ShieldCheck, perm: "hub.view_team" },
   { id: "binder-board", label: "Binder Board", icon: ClipboardCheck, perm: "hub.view_team", roleAny: ["hr", "administrator", "auditor"] },
-  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll" },
+  { id: "payroll", label: "Payroll", icon: Wallet, perm: "hub.approve_payroll", roleAny: ["hr"] },
   { id: "kiosk", label: "Kiosk", icon: MonitorSmartphone, permAny: ["hub.manage_staffing", "hub.manage_pay_settings"] },
 ];
 
@@ -425,20 +455,157 @@ interface BadgeCounts {
   documents: number;
 }
 
+/**
+ * WAVE-7T item 5 (simulation batch 161) — scheduling-form scope.
+ *
+ * The Team Schedule and Staffing create/edit forms must not offer a
+ * site-scoped viewer another house's staff or sites: a Juniper house
+ * manager could pick Maple staff in "Assign to" next to an enabled
+ * Add shift button, because the hub built its lists from the entire
+ * workspace. For house_manager / dsp viewers this returns the form
+ * options scoped to their visible homes — membership home + own
+ * staff-row home + active assignment sites (mirroring the
+ * sitesVisibleTo derivation in src/data/dashboard.ts and the
+ * staffVisibleTo model in src/data/dashboard.ts; the site set is
+ * hubRowActionScope's, so the form options and the row actions can
+ * never disagree) —
+ * plus the viewer themselves. Agency-wide roles (administrator,
+ * program_manager, hr, nurse, auditor) return null: their forms keep
+ * the full lists. Display lists are never scoped —
+ * name resolution on existing shifts/patterns is unaffected.
+ */
+export function hubSchedulingFormScope(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+  sites: HubSite[],
+  assignmentSiteIds: string[] = [],
+): { staffList: HubStaffEntry[]; sites: HubSite[] } | null {
+  const ids = hubRowActionScope(session, staffList, assignmentSiteIds);
+  if (ids === null) return null;
+  return {
+    staffList: staffList.filter(
+      (s) =>
+        s.userId === session.userId ||
+        (s.siteId != null && ids.has(s.siteId)),
+    ),
+    sites: sites.filter((s) => ids.has(s.id)),
+  };
+}
+
+/**
+ * WAVE-7T-3 (simulation batches 174/187) — row-action scope for the
+ * scheduling surfaces.
+ *
+ * The Team Schedule list renders Edit/Delete on EVERY dated shift and
+ * the Staffing board renders Edit/Deactivate on every pattern, but a
+ * site-scoped manager (Juniper HM) could open or delete another house's
+ * records from the "All sites" view: the rows were visible agency-wide
+ * (display scoping is PR #213's separate concern — rows stay visible)
+ * and their actions were ungated. For house_manager / dsp viewers this
+ * returns the site ids their row actions may touch — membership home +
+ * own staff-row home + active assignment sites, the same derivation
+ * hubSchedulingFormScope (PR #237) applies to the create/edit FORM
+ * options — that function reads its site set from here, so the two
+ * cannot drift. Agency-wide roles (administrator, program_manager, hr,
+ * nurse, auditor) return null: their row actions are unchanged.
+ */
+export function hubRowActionScope(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+  assignmentSiteIds: string[] = [],
+): Set<string> | null {
+  if (session.roleKey !== "house_manager" && session.roleKey !== "dsp") {
+    return null;
+  }
+  const ids = new Set<string>();
+  if (session.siteId) ids.add(session.siteId);
+  const own = staffList.find((s) => s.userId === session.userId);
+  if (own?.siteId) ids.add(own.siteId);
+  for (const id of assignmentSiteIds) if (id) ids.add(id);
+  return ids;
+}
+
+/**
+ * Whether a viewer with the given row-action scope may act on a row
+ * anchored at `siteId`. An unscoped (agency-wide) viewer may act on any
+ * row; a scoped viewer only on rows inside their scope — unassigned /
+ * agency rows (siteId null) stay agency-wide-only.
+ */
+export function rowActionAllowed(
+  scope: Set<string> | null,
+  siteId: string | null,
+): boolean {
+  if (scope === null) return true;
+  return siteId != null && scope.has(siteId);
+}
+
+/**
+ * WAVE-7T-3 (simulation batch 187) — Timecards staff-picker default.
+ *
+ * The picker used to initialize on staffList[0] — silently the first
+ * roster row (the agency admin in the sim) — so a house manager or HR
+ * opening Timecards landed on someone else's timecard and their
+ * approvals with it. The review is per-person by design (the picker
+ * offers no "All staff" option), so the honest default is the viewer
+ * themselves; a viewer who is not on the roster gets no preselection
+ * rather than a stranger's timecard. The tab's other picker, Pay
+ * period, defaults to the first row too — but periods come back
+ * newest-first, so that is a current-period default, not a person trap.
+ */
+export function defaultTimecardStaffId(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+): string {
+  return staffList.some((s) => s.userId === session.userId)
+    ? session.userId
+    : "";
+}
+
 export function EmployeeHubShell({
   session,
   store,
   staffList,
   sites,
+  swapPickerStaffList,
+  api,
+  logoDataUrl,
   initialTab,
+  assignmentSiteIds,
   openShiftStore,
   onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
+  // HR owns Attendance / Timecards / Payroll by role (founder decision
+  // 2026-10-31), independent of stored template keys — the render and
+  // badge gates below use the same helper as the tab registry's roleAny.
+  const canViewTeamHub = hasHubTeamPermission(session, "hub.view_team");
+  const canReviewTimecards = hasHubTeamPermission(session, "hub.review_timecards");
+  const canApprovePayroll = hasHubTeamPermission(session, "hub.approve_payroll");
   const operating = useOperatingRules(session);
-  // HMs/PMs post for their sites; HR and administrators also post agency-wide.
+  // Wave 7T-3: scope Team Schedule / Staffing ROW actions for
+  // site-scoped viewers (see hubRowActionScope). Display lists and
+  // every other tab keep the full lists.
+  const rowActionScope = useMemo(
+    () => hubRowActionScope(session, staffList, assignmentSiteIds ?? []),
+    [session, staffList, assignmentSiteIds],
+  );
+  // HMs/PMs post for their sites on hub.manage_schedule; agency-wide posting
+  // is the administrator's, on the same key. WAVE-7T (simulation batch 157):
+  // HR previously qualified for agency-wide posting through
+  // hub.manage_staffing, which put a scheduling write in HR's hands —
+  // scheduling writes belong to HM/PM and the administrator, so HR no longer
+  // qualifies (HR does not hold hub.manage_schedule).
   const canPostAgencyWide =
-    can("hub.manage_staffing") && ["hr", "administrator"].includes(session.roleKey);
+    can("hub.manage_schedule") && session.roleKey === "administrator";
+  // Wave 7T item 5: scope the scheduling forms' staff/site options for
+  // site-scoped viewers (see hubSchedulingFormScope). Display lists and
+  // every other tab keep the full lists.
+  const formScope = useMemo(
+    () => hubSchedulingFormScope(session, staffList, sites, assignmentSiteIds ?? []),
+    [session, staffList, sites, assignmentSiteIds],
+  );
+  const formStaffList = formScope?.staffList ?? staffList;
+  const formSites = formScope?.sites ?? sites;
   const shiftStore = useMemo(
     () =>
       openShiftStore ??
@@ -447,6 +614,7 @@ export function EmployeeHubShell({
         userId: session.userId,
         fullName: session.fullName,
         canManageSchedule: can("hub.manage_schedule"),
+        readOnly: session.roleKey === "auditor",
         canPostAgencyWide,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -491,7 +659,7 @@ export function EmployeeHubShell({
     (async () => {
       const counts: BadgeCounts = { attendance: 0, timecards: 0, timeoff: 0, documents: 0 };
       try {
-        if (can("hub.view_team")) {
+        if (canViewTeamHub) {
           const stamp = dayStamp(new Date());
           const [shiftsToday, perStaff] = await Promise.all([
             store
@@ -516,7 +684,7 @@ export function EmployeeHubShell({
             lateClockInMinutes: operating.lateClockInMinutes,
           }).length;
         }
-        if (can("hub.review_timecards")) {
+        if (canReviewTimecards) {
           const corrections = await store.listPunchCorrections({}).catch(() => []);
           counts.timecards += corrections.filter((c) => c.status === "pending").length;
           const periods = await store.listPayPeriods().catch(() => []);
@@ -594,9 +762,9 @@ export function EmployeeHubShell({
       </div>
 
       <div className="hub-panel">
-        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
+        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} />}
         {tab === "staffing" && (
-          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} />
+          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
         )}
         {tab === "open-shifts" && (
           <OpenShiftsTab
@@ -640,6 +808,7 @@ export function EmployeeHubShell({
             store={store}
             staffList={staffList}
             initialSubjectId={performanceFocusId ?? undefined}
+            logoDataUrl={logoDataUrl}
           />
         )}
         {tab === "binder-board" &&
@@ -677,12 +846,12 @@ export function EmployeeHubShell({
           />
         )}
         {tab === "team-schedule" && can("hub.manage_schedule") && (
-          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} />
+          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
         )}
-        {tab === "attendance" && can("hub.view_team") && (
+        {tab === "attendance" && canViewTeamHub && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
         )}
-        {tab === "timecards" && can("hub.review_timecards") && (
+        {tab === "timecards" && canReviewTimecards && (
           <TimecardsTab session={session} store={store} staffList={staffList} onChanged={refresh} />
         )}
         {tab === "team-compliance" && can("hub.view_team") && (
@@ -693,7 +862,7 @@ export function EmployeeHubShell({
             canManage={can("hub.manage_documents")}
           />
         )}
-        {tab === "payroll" && can("hub.approve_payroll") && (
+        {tab === "payroll" && canApprovePayroll && (
           <PayrollTab session={session} store={store} staffList={staffList} />
         )}
         {tab === "kiosk" && (can("hub.manage_staffing") || can("hub.manage_pay_settings")) && (
@@ -711,11 +880,14 @@ function MyScheduleTab({
   store,
   sites,
   staffList,
+  swapPickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   sites: HubSite[];
   staffList: HubStaffEntry[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -841,7 +1013,7 @@ function MyScheduleTab({
           ))}
         </ul>
       )}
-      <SwapBoard session={session} store={store} staffList={staffList} />
+      <SwapBoard session={session} store={store} staffList={staffList} pickerStaffList={swapPickerStaffList} />
     </section>
   );
 }
@@ -858,12 +1030,25 @@ function SwapBoard({
   session,
   store,
   staffList,
+  pickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
+  /**
+   * Batch 47: coworkers this viewer may target with a swap — the
+   * staffVisibleTo-scoped subset of staffList. Name lookups for existing
+   * swap rows keep the full staffList; only the target pickers scope.
+   */
+  pickerStaffList?: HubStaffEntry[];
 }) {
+  const targetChoices = pickerStaffList ?? staffList;
   const notifyClient = useNotifyClient();
+  // Wave 6 item 3: auditors are read-only everywhere (founder rule:
+  // auditors see everything, change nothing) — the board stays visible
+  // but offers them no post / claim / cancel actions, and the HrStore
+  // refuses the same writes if called directly.
+  const readOnlyAuditor = session.roleKey === "auditor";
   const [swaps, setSwaps] = useState<HrShiftSwap[]>([]);
   const [shifts, setShifts] = useState<HrShift[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1058,6 +1243,12 @@ function SwapBoard({
         target a coworker, or propose a direct two-shift exchange.
       </p>
       {error && <div className="hub-error" role="alert">{error}</div>}
+      {readOnlyAuditor && (
+        <p className="hub-sub">
+          Auditors can view the swap board but cannot post, claim, or cancel swaps.
+        </p>
+      )}
+      {!readOnlyAuditor && (
       <div className="hub-inline-form" style={{ marginBottom: 20 }}>
         <h3>Post a shift for swap</h3>
         <div className="hub-form">
@@ -1093,7 +1284,7 @@ function SwapBoard({
             Target coworker (optional)
             <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
               <option value="">Open to everyone</option>
-              {staffList
+              {targetChoices
                 .filter((s) => s.userId !== session.userId)
                 .map((s) => (
                   <option key={s.userId} value={s.userId}>
@@ -1114,6 +1305,7 @@ function SwapBoard({
           </button>
         </div>
       </div>
+      )}
       <h3>Open swaps</h3>
       {loading ? (
         <p>Loading swaps…</p>
@@ -1136,7 +1328,7 @@ function SwapBoard({
               </div>
               <div className="hub-row">
                 <span className={statusClass(s.status)}>{s.status}</span>
-                {swapClaimable(s, session.userId) && (
+                {!readOnlyAuditor && swapClaimable(s, session.userId) && (
                   <button className="hub-btn primary" disabled={busy} onClick={() => claim(s)}>
                     <Check size={16} /> Claim
                   </button>
@@ -1170,7 +1362,7 @@ function SwapBoard({
               </div>
               <div className="hub-row">
                 <span className={statusClass(s.status)}>{s.status}</span>
-                {s.status === "pending" && s.requesterId === session.userId && (
+                {!readOnlyAuditor && s.status === "pending" && s.requesterId === session.userId && (
                   <button className="hub-btn" disabled={busy} onClick={() => cancel(s.id)}>
                     <X size={16} /> Cancel
                   </button>
@@ -1196,11 +1388,23 @@ function StaffingTab({
   store,
   staffList,
   sites,
+  formStaffList,
+  formSites,
+  api,
+  rowActionScope,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Wave 7T item 5: options for the pattern config form, scoped to the
+   * viewer's visible homes for site-scoped roles. The board's display
+   * lists stay unscoped. */
+  formStaffList?: HubStaffEntry[];
+  formSites?: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
+  /** Wave 7T-3: site ids a site-scoped viewer may act on; null = agency-wide. */
+  rowActionScope?: Set<string> | null;
 }) {
   const canManage = hasPermission(session, "hub.manage_staffing");
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
@@ -1284,10 +1488,11 @@ function StaffingTab({
         <div className="hub-inline-form" style={{ marginBottom: 16 }}>
           <h3>{editing ? "Edit staffing pattern" : "New staffing pattern"}</h3>
           <StaffingConfigForm
-            staffList={staffList}
-            sites={sites}
+            staffList={formStaffList ?? staffList}
+            sites={formSites ?? sites}
             initial={editing}
             busy={busy}
+            api={api}
             onSave={handleSave}
             onCancel={() => {
               setFormOpen(false);
@@ -1306,6 +1511,7 @@ function StaffingTab({
         staffList={staffList}
         sites={sites}
         editable={canManage}
+        canActOnPattern={(p) => rowActionAllowed(rowActionScope ?? null, p.siteId)}
         loading={loading}
         error=""
         onEdit={(p) => {
@@ -1974,6 +2180,10 @@ function DocumentsTab({
                       Acknowledged by {ack.signatureName} on {fmtDateTime(ack.ackedAt)}.
                       <br />
                       <em>Digital record generated by Complyrer.</em>
+                    </span>
+                  ) : doc.requiresAck && !documentHasReadableContent(doc) ? (
+                    <span className="hub-item-sub">
+                      {DOCUMENT_NOT_READABLE_NOTE}
                     </span>
                   ) : ackingId === doc.id ? (
                     <div className="hub-inline-form">
@@ -2849,12 +3059,26 @@ function TeamScheduleTab({
   store,
   staffList,
   sites,
+  formStaffList,
+  formSites,
+  api,
+  rowActionScope,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Wave 7T item 5: options for the site filter and the Add/Edit shift
+   * form, scoped to the viewer's visible homes for site-scoped roles.
+   * Display name resolution keeps the full staffList/sites. */
+  formStaffList?: HubStaffEntry[];
+  formSites?: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
+  /** Wave 7T-3: site ids a site-scoped viewer may act on; null = agency-wide. */
+  rowActionScope?: Set<string> | null;
 }) {
+  const assignableStaff = formStaffList ?? staffList;
+  const formSiteOptions = formSites ?? sites;
   const [weekOffset, setWeekOffset] = useState(0);
   const [siteFilter, setSiteFilter] = useState("");
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -2865,6 +3089,10 @@ function TeamScheduleTab({
   const [editing, setEditing] = useState<HrShift | null>(null);
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
   const [form, setForm] = useState({ title: "Shift", siteId: "", staffId: "", date: dayStamp(new Date()), start: "08:00", end: "16:00", notes: "", status: "published" as HrShift["status"] });
+  // Batch 59: warn (never block) when the chosen assignee is a DSP who is
+  // not training-cleared yet.
+  const assignee = staffList.find((s) => s.userId === form.staffId);
+  const clearanceWarning = useAssigneeClearanceWarning(api, assignee?.userId ?? null, assignee?.roleKey ?? null);
 
   const weekStart = useMemo(() => addDays(startOfWeek(new Date()), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -3010,7 +3238,7 @@ function TeamScheduleTab({
           Site
           <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
             <option value="">All sites</option>
-            {sites.map((s) => (
+            {formSiteOptions.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
@@ -3034,16 +3262,21 @@ function TeamScheduleTab({
               Assign to
               <select value={form.staffId} onChange={(e) => setForm({ ...form, staffId: e.target.value })}>
                 <option value="">Open shift (unassigned)</option>
-                {staffList.map((s) => (
+                {assignableStaff.map((s) => (
                   <option key={s.userId} value={s.userId}>{s.fullName}</option>
                 ))}
               </select>
             </label>
+            {clearanceWarning && (
+              <p className="hub-clearance-warning" role="alert">
+                {clearanceWarning}
+              </p>
+            )}
             <label>
               Site
               <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
                 <option value="">All sites</option>
-                {sites.map((s) => (
+                {formSiteOptions.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -3107,12 +3340,19 @@ function TeamScheduleTab({
                     </div>
                     <div className="hub-row">
                       <span className={statusClass(s.status)}>{s.status}</span>
-                      <button className="hub-btn" aria-label={`Edit shift ${s.title}`} onClick={() => openEdit(s)}>
-                        <Pencil size={16} />
-                      </button>
-                      <button className="hub-btn danger" aria-label={`Delete shift ${s.title}`} disabled={busy} onClick={() => remove(s.id)}>
-                        <Trash2 size={16} />
-                      </button>
+                      {/* Wave 7T-3: rows stay visible agency-wide, but a
+                          site-scoped viewer only gets Edit/Delete on rows
+                          inside their houses (see hubRowActionScope). */}
+                      {rowActionAllowed(rowActionScope ?? null, s.siteId) && (
+                        <>
+                          <button className="hub-btn" aria-label={`Edit shift ${s.title}`} onClick={() => openEdit(s)}>
+                            <Pencil size={16} />
+                          </button>
+                          <button className="hub-btn danger" aria-label={`Delete shift ${s.title}`} disabled={busy} onClick={() => remove(s.id)}>
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -3394,6 +3634,7 @@ function AttendanceTab({
 /* -------------------------------- Timecards -------------------------------- */
 
 function TimecardsTab({
+  session,
   store,
   staffList,
   onChanged,
@@ -3427,8 +3668,13 @@ function TimecardsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
 
+  // Wave 7T-3 (batch 187): default to the viewer's OWN timecard, never
+  // silently to the first roster row — see defaultTimecardStaffId. An
+  // existing selection that is still on the roster is left alone.
   useEffect(() => {
-    if (staffList.length && !staffId) setStaffId(staffList[0].userId);
+    if (!staffList.length) return;
+    if (staffId && staffList.some((s) => s.userId === staffId)) return;
+    setStaffId(defaultTimecardStaffId(session, staffList));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staffList]);
 
@@ -3956,7 +4202,9 @@ function PayrollTab({
       );
       const approved = rows.filter((r) => r.approvalStatus === "approved");
       downloadText(
-        `payroll-${period.startsOn}-to-${period.endsOn}.csv`,
+        // Filename-level agency attribution only: the CSV body is a strict
+        // vendor-import format and must not gain rows.
+        `${agencyFileSlug(session.agencyName)}-payroll-${period.startsOn}-to-${period.endsOn}.csv`,
         buildPayrollCsvExport(approved),
         "text/csv;charset=utf-8",
       );
@@ -4491,10 +4739,44 @@ export default function EmployeeHubPage({
   const store = useMemo(
     () =>
       session
-        ? createHrStore({ agencyId: session.agencyId, userId: session.userId })
+        ? createHrStore({
+            agencyId: session.agencyId,
+            userId: session.userId,
+            roleKey: session.roleKey,
+            // Batch 47: the store enforces the same swap-target scope the
+            // picker shows, so a swap cannot be offered across homes.
+            swapScope: {
+              roleKey: session.roleKey,
+              siteId: session.siteId,
+              staffDirectory: (workspace?.staff ?? []).map((s) => ({
+                id: s.id,
+                siteId: s.siteId,
+              })),
+              assignmentSiteIds: workspace?.assignmentSiteIds ?? [],
+            },
+          })
         : null,
-    [session],
+    [session, workspace],
   );
+  // Batch 47: the swap target picker offers only coworkers this viewer may
+  // see (staffVisibleTo) — a Juniper DSP no longer sees Maple staff.
+  const swapPickerStaffList: HubStaffEntry[] = useMemo(() => {
+    if (!session || !workspace) return [];
+    const visibleIds = new Set(
+      staffVisibleTo(session, workspace.staff, workspace.assignmentSiteIds).map(
+        (s) => s.id,
+      ),
+    );
+    return (workspace.staff ?? [])
+      .filter((s) => visibleIds.has(s.id))
+      .map((s) => ({
+        userId: s.id,
+        fullName: s.name,
+        email: s.email,
+        roleKey: s.roleKey,
+        siteId: s.siteId,
+      }));
+  }, [session, workspace]);
 
   useEffect(() => {
     if (focusTab) onFocusHandled?.();
@@ -4503,14 +4785,23 @@ export default function EmployeeHubPage({
   }, []);
   const staffList: HubStaffEntry[] = useMemo(
     () =>
-      (workspace?.staff ?? []).map((s) => ({
+      // Wave 6 item 4: ONE staff-directory rule (staffVisibleTo) — a
+      // site-scoped viewer (house manager, DSP, nurse) gets the staff of
+      // their visible homes on Timecards / Attendance / Binder /
+      // Certificates, matching Performance Review's scoping; agency-wide
+      // roles keep the full directory.
+      (session
+        ? staffVisibleTo(session, workspace?.staff ?? [], workspace?.assignmentSiteIds ?? [])
+        : []
+      ).map((s) => ({
         userId: s.id,
         fullName: s.name,
         email: s.email,
         roleKey: s.roleKey,
         siteId: s.siteId,
+        siteName: s.siteName,
       })),
-    [workspace],
+    [workspace, session],
   );
   const sites: HubSite[] = useMemo(
     () => (workspace?.sites ?? []).map((s) => ({ id: s.id, name: s.name })),
@@ -4531,6 +4822,10 @@ export default function EmployeeHubPage({
       store={store}
       staffList={staffList}
       sites={sites}
+      assignmentSiteIds={workspace?.assignmentSiteIds ?? []}
+      swapPickerStaffList={swapPickerStaffList}
+      api={api}
+      logoDataUrl={workspace?.branding.logoUrl ?? null}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

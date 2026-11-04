@@ -25,7 +25,7 @@ import { buildSchedulerChecklistItems } from "./items.ts";
  * Authorization: the platform verifies the JWT (verify_jwt = true in
  * supabase/config.toml). Inside, the caller must EITHER present the
  * service_role key (external cron) OR be an active admin member
- * (administrator / compliance_admin).
+ * (administrator).
  *
  * Returns { created, already_existed, newly_late, notifications_queued,
  *           week_start, warnings }.
@@ -39,7 +39,7 @@ const cors = {
 
 const SCHEDULER_UNIQUE_CONSTRAINT = "hm_weekly_checklists_site_week_uniq";
 const HM_ROLE_KEY = "house_manager";
-const ADMIN_ROLE_KEYS = ["administrator", "compliance_admin"];
+const ADMIN_ROLE_KEYS = ["administrator"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

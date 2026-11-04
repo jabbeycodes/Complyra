@@ -1,12 +1,25 @@
 import { test, expect, type Page, type Locator } from "./fixtures";
 
 async function signIn(page: Page) {
+  // These specs assert on the desktop layout, including at phone
+  // width. Since PR #134 a phone sign-in lands in the mobile shell;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads
+  // complyrer.viewMode at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill("sarah.mitchell");
   await page.locator('input[autocomplete="current-password"]').fill("Evergreen!demo1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.locator(".topbar")).toBeVisible({ timeout: 10_000 });
+  // At phone width sign-in lands in the mobile shell (PR #134) — its
+  // header is the banner landmark; the desktop topbar only exists in
+  // the desktop layout. Accept either.
+  await expect(
+    page.getByRole("banner").or(page.locator(".topbar")),
+  ).toBeVisible({ timeout: 10_000 });
   await page
     .getByRole("dialog", { name: "Interactive demo tour" })
     .waitFor({ state: "visible", timeout: 3_000 })
@@ -106,8 +119,11 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("Ellis");
-  const results = page.locator(".search-results > button");
+  await page.getByLabel("Search people, homes, and requirements").fill("Ellis");
+  // Requirement rows carry .search-meta; the directory groups above them
+  // (Individuals / Staff / Homes, PR #202) are a separate, separately
+  // capped list and are not what this dedupe test pins.
+  const results = page.locator(".search-results > button").filter({ has: page.locator(".search-meta") });
   await expect(results.first()).toBeVisible();
   const count = await results.count();
   expect(count).toBeGreaterThan(0);
@@ -127,7 +143,7 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
 
 test("search empty state copy is unchanged", async ({ page }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("zzzz-no-such-record");
+  await page.getByLabel("Search people, homes, and requirements").fill("zzzz-no-such-record");
   await expect(page.locator(".search-results p")).toHaveText(
     "No matching records. Try a name or site.",
   );

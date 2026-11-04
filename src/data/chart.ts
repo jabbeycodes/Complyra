@@ -50,6 +50,13 @@ export interface MedicationDelivery {
   pillsPerDay: number;
   recordedBy: string;
   /**
+   * Display name of the recorder, resolved at read time from the agency's
+   * profiles (the stored row carries only the user id). Null when the
+   * profile cannot be resolved — history labels must fall back to a
+   * generic "Staff member", never print the raw user id.
+   */
+  recordedByName?: string | null;
+  /**
    * The on-hand figure the countdown expected at count time (baseline −
    * recorded administrations). Null when the med had never been counted —
    * a first count cannot disagree with an expectation that does not exist.
@@ -97,8 +104,26 @@ export interface CarePlanView {
   assignedCount: number;
 }
 
+/**
+ * Today's calendar date on the AGENCY day (America/Chicago), as YYYY-MM-DD.
+ *
+ * This used to be the UTC date (`toISOString().slice(0, 10)`), which is
+ * already tomorrow from 6 PM CST / 7 PM CDT — so every evening the MAR day,
+ * med-count dates, the supply forecast, order expiry, membership expiry and
+ * month keys all jumped a day early (PR #252 review; the class wave 7Q /
+ * PR #233 closed for files it could touch). The product judges every
+ * day-keyed rule on the agency's Central day, so the shared default does
+ * too; this matches centralTodayIso() in menuRecords.
+ */
 export function todayIso(now = new Date()) {
-  return now.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
 export function daysBetween(from: string, to: string) {
@@ -121,7 +146,6 @@ export function countdownLabel(nextDueOn: string, today = todayIso()) {
 export function canSeeChartWidgets(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -138,7 +162,6 @@ export function canSeeChartWidgets(roleKey: string) {
 export function canSeeChartOverview(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -213,13 +236,12 @@ export function canLogPrnDose(roleKey: string) {
 /**
  * Who may log a refused / held / wasted dose exception. Matches the
  * med_dose_exceptions RLS insert policy: DSPs record exceptions during the
- * med pass, alongside administrators, compliance admins, house managers,
+ * med pass, alongside administrators, house managers,
  * PMs, and nurses.
  */
 export function canLogDoseException(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
     "nurse",
@@ -250,7 +272,6 @@ export function canCorrectDoseMark(
 export function canEditTrainingLine(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "house_manager",
     "program_manager",
   ].includes(roleKey);
@@ -260,11 +281,11 @@ export function canEditTrainingLine(roleKey: string) {
  * Who may void a locked training sheet via the correction flow (delete the
  * HM countersignature with a written reason). Matches the
  * training_countersignatures_delete RLS policy — house managers are
- * deliberately excluded; they ask an administrator, compliance admin, or
+ * deliberately excluded; they ask an administrator or
  * PM instead.
  */
 export function canRequestTrainingCorrection(roleKey: string) {
-  return ["administrator", "compliance_admin", "program_manager"].includes(
+  return ["administrator", "program_manager"].includes(
     roleKey,
   );
 }
@@ -275,6 +296,18 @@ export function canSignTrainingAsHm(roleKey: string) {
     "house_manager",
     "program_manager",
   ].includes(roleKey);
+}
+
+/**
+ * Roles that oversee OTHER staff's training: the same trio that can
+ * countersign. Oversight implies readable training records — the
+ * Training surface opens on the staff roster for these roles and the
+ * training read gates accept them alongside hr.view_staff (batch 25:
+ * a program manager, whose stored role template carries no
+ * hr.view_staff, landed on her own uncleared record instead).
+ */
+export function canOverseeTraining(roleKey: string) {
+  return canSignTrainingAsHm(roleKey);
 }
 
 export function applyDailyMedDrop(med: Medication, today = todayIso()): Medication {

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
 import {
@@ -15,6 +15,25 @@ import {
   computePersonalBalanceCents,
   personalSpendingNeedsAttention,
 } from "./personalSpending";
+
+// Pin the wall clock for this whole file. The demo seed stamps its
+// current-month ledger entries on days 1–20 of the current month, clamped
+// to today's day-of-month (see addPersonalSpendingLedgers in
+// demoShowcase.ts), and stamps their createdAt times from a per-entry
+// sequence whose hour wraps (14 + seq % 6). Late in a month every entry
+// lands on its own day and the ledger's (entryDate, createdAt) order is
+// the intended one; early in a month the days collapse together, the
+// wrapped timestamps reorder entries within the shared day, and entries
+// recorded "now" by these tests can sort ahead of the seed's same-day
+// fixed-afternoon timestamps — so Harper's running balances (and only
+// those) drift with the calendar. Pinning Date to a fixed late-month
+// instant (Central 2026-10-28, day 28 ≥ every seeded day) makes the seed
+// layout, the API's createdAt stamps, and this file's today()/thisMonth()/
+// prevMonth() all derive from one clock in any real month.
+mock.timers.enable({
+  apis: ["Date"],
+  now: new Date("2026-10-28T17:00:00.000Z"),
+});
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));
@@ -156,25 +175,122 @@ test("nurse cannot see personal spending at all", async () => {
   );
 });
 
-test("an over-balance spend records, is labeled, and raises the flag", async () => {
+test("a spend that would take the balance below $0 is refused (batch 7)", async () => {
   const api = new LocalApi(store());
   const { harper } = await people(api);
   await api.signIn(login(DEMO_HM_USERNAME)); // James Wilson, Willow HM
 
-  const created = await api.createPersonalSpendingEntry({
+  // Harper's balance is $10.20; a $50 spend used to record at -$39.80.
+  await assert.rejects(
+    () =>
+      api.createPersonalSpendingEntry({
+        individualId: harper.id,
+        entryDate: today(),
+        kind: "spend",
+        location: "Walmart",
+        purpose: "Extra personal items",
+        amountCents: 5000,
+      }),
+    /below \$0/,
+  );
+  const entries = await api.listPersonalSpendingEntries(harper.id);
+  assert.equal(computePersonalBalanceCents(entries), 1020);
+
+  // The seeded history still carries its over-balance label + flag:
+  // history is documented reality; only NEW over-balance spends stop.
+  const over = entries.filter((entry) => entry.overBalance);
+  assert.equal(over.length, 1);
+  const closes = await api.listPersonalSpendingMonthCloses(harper.id);
+  assert.equal(personalSpendingNeedsAttention(entries, closes), true);
+
+  // A spend within the balance still records.
+  const ok = await api.createPersonalSpendingEntry({
     individualId: harper.id,
     entryDate: today(),
     kind: "spend",
-    location: "Walmart",
-    purpose: "Extra personal items",
+    location: "Dollar General",
+    purpose: "Snacks",
+    amountCents: 1000,
+  });
+  assert.equal(ok.overBalance, false);
+});
+
+test("a month cannot close on a negative balance; the close figure is the ledger's (batch 7)", async () => {
+  const api = new LocalApi(store());
+  const { harper } = await people(api);
+  await api.signIn(login(DEMO_HM_USERNAME)); // James Wilson, Willow HM
+
+  // Voiding Harper's $50 family deposit (a correction, not a spend)
+  // takes the balance to -$39.80 — the state batch 7 closed at -$15.
+  const entries = await api.listPersonalSpendingEntries(harper.id);
+  const familyDeposit = entries.find(
+    (entry) => entry.kind === "deposit" && entry.amountCents === 5000,
+  )!;
+  await api.voidPersonalSpendingEntry(
+    familyDeposit.id,
+    "The deposit was recorded twice.",
+  );
+  assert.equal(
+    computePersonalBalanceCents(await api.listPersonalSpendingEntries(harper.id)),
+    1020 - 5000,
+  );
+
+  await assert.rejects(
+    () =>
+      api.closePersonalSpendingMonth({
+        individualId: harper.id,
+        month: thisMonth(),
+        signatureText: "James Wilson",
+        individualSignoff: "individual_signed",
+      }),
+    /below \$0/,
+  );
+
+  // Record the funds and the close lands on the ledger's own figure.
+  await api.createPersonalSpendingEntry({
+    individualId: harper.id,
+    entryDate: today(),
+    kind: "deposit",
+    location: "Family",
     amountCents: 5000,
   });
-  assert.equal(created.overBalance, true);
-  assert.equal(created.runningBalanceCents, 1020 - 5000);
+  const close = await api.closePersonalSpendingMonth({
+    individualId: harper.id,
+    month: thisMonth(),
+    signatureText: "James Wilson",
+    individualSignoff: "individual_signed",
+  });
+  assert.equal(close.closingBalanceCents, 1020);
+});
 
-  const entries = await api.listPersonalSpendingEntries(harper.id);
-  const closes = await api.listPersonalSpendingMonthCloses(harper.id);
-  assert.equal(personalSpendingNeedsAttention(entries, closes), true);
+test("a replacement spend that would over-draw is refused and the original stays live", async () => {
+  const api = new LocalApi(store());
+  const { ellis } = await people(api);
+  await api.signIn(login(DEMO_DSP_USERNAME));
+
+  const created = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "ALDI",
+    purpose: "Favorite foods",
+    amountCents: 1244,
+  });
+  await assert.rejects(
+    () =>
+      api.voidPersonalSpendingEntry(created.id, "Keyed the wrong total.", {
+        individualId: ellis.id,
+        entryDate: today(),
+        kind: "spend",
+        location: "ALDI",
+        purpose: "Favorite foods",
+        amountCents: 999999,
+      }),
+    /below \$0/,
+  );
+  const entries = await api.listPersonalSpendingEntries(ellis.id);
+  const original = entries.find((entry) => entry.id === created.id)!;
+  assert.equal(original.voided, false);
 });
 
 test("void and replace: the original stops counting and the pair stays linked", async () => {
@@ -375,4 +491,65 @@ test("auditor reads and prints but cannot record, void, or close", async () => {
       }),
     /permission/i,
   );
+});
+
+test("wave 6 item 3: a DSP cannot void entries recorded by others; closers can void any", async () => {
+  const api = new LocalApi(store());
+  const { ellis } = await people(api);
+
+  // The administrator records an entry on Ellis's ledger.
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const adminEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Pharmacy",
+    purpose: "Admin-recorded spend",
+    amountCents: 500,
+  });
+  await api.signOut();
+
+  // The Cedar DSP can see the ledger but must NOT void the admin's entry
+  // (simulation batch 38: a DSP voided rows recorded by Sim Admin / HM).
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  await assert.rejects(
+    () => api.voidPersonalSpendingEntry(adminEntry.id, "Trying to void it."),
+    /Only the person who recorded an entry can undo it/,
+  );
+
+  // The DSP's own entry can still be undone by the DSP (shipped Undo path).
+  const ownEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Corner store",
+    purpose: "DSP-recorded spend",
+    amountCents: 300,
+  });
+  const undone = await api.voidPersonalSpendingEntry(
+    ownEntry.id,
+    "Undone right after recording",
+    null,
+  );
+  assert.equal(undone.voided.voided, true);
+  await api.signOut();
+
+  // A closer (administrator) may void another recorder's entry.
+  await api.signIn(login(DEMO_DSP_USERNAME));
+  const dspEntry = await api.createPersonalSpendingEntry({
+    individualId: ellis.id,
+    entryDate: today(),
+    kind: "spend",
+    location: "Bakery",
+    purpose: "Second DSP-recorded spend",
+    amountCents: 250,
+  });
+  await api.signOut();
+  await api.signIn(login(DEMO_ADMIN_USERNAME));
+  const closed = await api.voidPersonalSpendingEntry(
+    dspEntry.id,
+    "Recorded against the wrong Individual.",
+    null,
+  );
+  assert.equal(closed.voided.voided, true);
 });

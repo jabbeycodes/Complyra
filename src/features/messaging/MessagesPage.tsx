@@ -2,7 +2,7 @@
  * MESSAGING — the staff inbox.
  *
  * Staff-to-staff conversations for operational roles (administrator,
- * compliance_admin, program_manager, house_manager, nurse, dsp, hr).
+ * program_manager, house_manager, nurse, dsp, hr).
  * Auditors are excluded by design: messaging is staff communication, not a
  * compliance record surface. Only participants can see a thread; adding
  * someone writes a visible system note in the thread. Messages cannot be

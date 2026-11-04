@@ -35,6 +35,8 @@ import { SERVICE_LOG_KIND_LABELS } from "../../data/hmChecklist";
 import { openPrintable } from "../../data/openFile";
 import { monthKeyOf, monthLabel } from "../../data/mileage";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
+import { useConsentScoreInput } from "../consents/useConsentRegister";
+import { consentTalliesFromItems } from "../overview/consentCompliance";
 import { inventoryCountdownLabel } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
@@ -52,7 +54,15 @@ import type {
   StaffTrainingProfile,
 } from "../../data/types";
 import type { SiteDelegationActivation } from "../../delegation/delegation";
-import type { SiteShiftNoteView } from "../../data/shiftNotes";
+import {
+  delegationStatusForActivation,
+  delegationStatusLabel,
+} from "../../data/delegationStatus";
+import {
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
+  type SiteShiftNoteView,
+} from "../../data/shiftNotes";
 import {
   getSiteDetailTabs,
   canSeeSiteChecklists,
@@ -103,7 +113,6 @@ export function auditPeriodLabel(
 
 const DUE_ITEM_MANAGER_ROLES = [
   "administrator",
-  "compliance_admin",
   "house_manager",
   "program_manager",
 ];
@@ -158,6 +167,9 @@ export default function SiteDetailPage({
   onOpenReports,
 }: SiteDetailPageProps) {
   const { api, session, workspace } = useData();
+  // Consent currency counts in this house's score (founder decision,
+  // 2026-11-02): scored consent items join the site's requirement pool.
+  const consentScore = useConsentScoreInput(workspace?.sites ?? []);
   const tabs = useMemo(() => getSiteDetailTabs(session), [session]);
   const [tab, setTab] = useState<SiteDetailTabId>("overview");
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
@@ -221,11 +233,17 @@ export default function SiteDetailPage({
     [workspace, siteId],
   );
   const openRequirements = useMemo(
-    () =>
-      (workspace?.requirements ?? []).filter(
+    () => [
+      ...(workspace?.requirements ?? []).filter(
         (r) => r.site === siteName && r.status !== "Compliant",
       ),
-    [workspace, siteName],
+      ...(consentScore.kind === "ready"
+        ? consentScore.items.filter(
+            (r) => r.site === siteName && r.status !== "Compliant",
+          )
+        : []),
+    ],
+    [workspace, siteName, consentScore],
   );
   const siteDrills = useMemo(
     () =>
@@ -235,7 +253,17 @@ export default function SiteDetailPage({
     [workspace, siteId],
   );
 
-  const hasAccess = !!session && !!site && !!workspace && canAccessSite(session, siteId);
+  // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP's assigned
+  // homes are their membership home plus any home an ACTIVE staff
+  // assignment places them at (workspace.assignmentSiteIds) — the
+  // detail page must open for those homes, not just the membership
+  // home canAccessSite knows. Other roles keep the existing gate.
+  const hasAccess =
+    !!session &&
+    !!site &&
+    !!workspace &&
+    (canAccessSite(session, siteId) ||
+      (session.roleKey === "dsp" && workspace.assignmentSiteIds.includes(siteId)));
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? "overview";
 
   const loadTab = useCallback(
@@ -370,7 +398,7 @@ export default function SiteDetailPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
-  if (!site || !workspace || !session || !canAccessSite(session, siteId)) {
+  if (!site || !workspace || !session || !hasAccess) {
     return (
       <div>
         <button type="button" className="button" onClick={onBack}>
@@ -387,10 +415,15 @@ export default function SiteDetailPage({
   const latestQa = qaHistory?.[0] ?? null;
   const latestQaScore = latestQa?.score ?? null;
   const latestQaPct = latestQaScore?.pct;
-  const siteRequirements = (workspace.requirements ?? []).filter(
-    (r) => r.site === siteName,
-  );
+  const siteRequirements = [
+    ...(workspace.requirements ?? []).filter((r) => r.site === siteName),
+    ...(consentScore.kind === "ready"
+      ? consentScore.items.filter((r) => r.site === siteName)
+      : []),
+  ];
   const siteReqMetrics = metrics(siteRequirements);
+  const consentUnknown = consentScore.kind === "unknown";
+  const siteConsentTallies = consentTalliesFromItems(siteRequirements);
   // The same monthly site-review status the Overview site card summarizes as
   // "Review in place / Review open", carried here inside the home itself.
   const reviewInPlace = site
@@ -521,7 +554,9 @@ export default function SiteDetailPage({
             status={
               openRequirements.length || (dueItems?.items.length ?? 0)
                 ? "Needs attention"
-                : "On track"
+                : consentUnknown
+                  ? "Checking consents"
+                  : "On track"
             }
           />
         </div>
@@ -530,18 +565,42 @@ export default function SiteDetailPage({
           <div className="site-hero-scores site-hero-kpis" aria-label={`${site.name} status`}>
             <div className="site-hero-score">
               <strong>
-                {siteReqMetrics.score}
-                <small>%</small>
+                {consentUnknown ? (
+                  "—"
+                ) : (
+                  <>
+                    {siteReqMetrics.score}
+                    <small>%</small>
+                  </>
+                )}
               </strong>
               <span>Ready</span>
               <div className="progress-track" aria-hidden="true">
-                <span style={{ width: `${siteReqMetrics.score}%` }} />
+                <span
+                  style={{
+                    width: `${consentUnknown ? 0 : siteReqMetrics.score}%`,
+                  }}
+                />
               </div>
+              {consentUnknown && (
+                <p className="stack-help">
+                  Consent records are still loading — this score does not
+                  include consents yet.
+                </p>
+              )}
             </div>
             <div className="site-hero-stat">
               <strong>{siteIndividuals.length}</strong>
               <span>Individuals</span>
             </div>
+            {siteConsentTallies.total > 0 && (
+              <div className="site-hero-stat">
+                <strong>
+                  {siteConsentTallies.current} of {siteConsentTallies.total}
+                </strong>
+                <span>Consents current</span>
+              </div>
+            )}
             <div className="site-hero-stat">
               <strong>{siteStaff.length}</strong>
               <span>Staff</span>
@@ -1159,7 +1218,7 @@ export default function SiteDetailPage({
         {activeTab === "training" && !loading.training && (
           <>
             <div className="panel">
-              <h2>Active delegations at this home</h2>
+              <h2>Delegations at this home</h2>
               {!delegations?.length && (
                 <Empty
                   mark="none"
@@ -1178,7 +1237,9 @@ export default function SiteDetailPage({
                           · {d.templateCategory} · activated {formatDate(d.activatedAt)}
                         </span>
                       </div>
-                      <Badge status={d.status === "active" ? "On track" : d.status} />
+                      <Badge
+                        status={delegationStatusLabel(delegationStatusForActivation(d))}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -1295,7 +1356,7 @@ export default function SiteDetailPage({
                             </strong>
                             <span className="muted">
                               {" "}
-                              · {alert.strength} · {inventoryCountdownLabel(alert)}
+                              · {alert.strength} · Projected: {inventoryCountdownLabel(alert)}
                             </span>
                           </div>
                           <Badge
@@ -1385,6 +1446,7 @@ export default function SiteDetailPage({
             <HouseCardPanel
               api={api}
               session={session}
+              logoDataUrl={workspace?.branding.logoUrl ?? null}
               siteId={siteId}
               siteName={siteName}
               people={siteIndividuals.map((person) => ({
@@ -1432,6 +1494,9 @@ export default function SiteDetailPage({
                     <div>
                       <strong>
                         {note.individualName} · {note.noteDate} · {note.shift}
+                        {isLateShiftNote(note)
+                          ? ` · ${LATE_SHIFT_NOTE_LABEL}`
+                          : ""}
                       </strong>
                       <span className="muted">
                         {" "}

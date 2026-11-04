@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeShiftNoteDueItems } from "./dueItems";
-import { agencyClock, dueItemClock, noticesForAgency, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, noticesForAgency, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
 import type { SiteDueItem } from "./dueItems";
 
 const missing: SiteDueItem = {
@@ -75,6 +75,27 @@ test("an agency-wide administrator is told, and an expired member is not", () =>
     "2026-10-15",
   );
   assert.deepEqual(ids, ["sarah"]);
+});
+
+test("houseManagerRecipientIds names only the home's own active house managers", () => {
+  const memberships = [
+    { userId: "james", role: "house_manager", siteId: "willow", expiresOn: null },
+    { userId: "second-hm", role: "house_manager", siteId: "willow", expiresOn: null },
+    { userId: "cedar-hm", role: "house_manager", siteId: "cedar", expiresOn: null },
+    { userId: "expired-hm", role: "house_manager", siteId: "willow", expiresOn: "2026-01-01" },
+    { userId: "floating-hm", role: "house_manager", siteId: null, expiresOn: null },
+    { userId: "pm", role: "program_manager", siteId: null, expiresOn: null },
+    { userId: "dsp", role: "dsp", siteId: "willow", expiresOn: null },
+  ];
+  // Both of Willow's HMs — and nobody else: not Cedar's HM, not the
+  // expired membership, not a site-less HM membership (a house manager's
+  // reach is their home), and not other roles at the same home.
+  assert.deepEqual(
+    houseManagerRecipientIds(memberships, "willow", "2026-10-15"),
+    ["james", "second-hm"],
+  );
+  assert.deepEqual(houseManagerRecipientIds(memberships, "cedar", "2026-10-15"), ["cedar-hm"]);
+  assert.deepEqual(houseManagerRecipientIds(memberships, "oak", "2026-10-15"), []);
 });
 
 test("the unattended job uses the Central day", () => {

@@ -2,7 +2,6 @@ import type { Category, Status } from "../domain";
 
 export type AppRole =
   | "administrator"
-  | "compliance_admin"
   | "manager"
   | "dsp"
   | "nurse"
@@ -732,7 +731,7 @@ export interface AddMileageTripInput {
   /**
    * Admin backfill: skip the odometer-continuity check for a forgotten trip
    * logged out of sequence, and mark the trip backfilled. Only
-   * administrator / compliance_admin / house_manager (or platform admin)
+   * administrator / house_manager (or platform admin)
    * may pass true — the API rejects it from everyone else.
    */
   backfill?: boolean;
@@ -893,6 +892,13 @@ export interface MedDeliverySummary {
   remainingPills: number;
   pillsPerDay: number;
   recordedBy: string;
+  /**
+   * Display name of the recorder, resolved at read time from the agency's
+   * profiles (the stored row carries only the user id). Null when the
+   * profile cannot be resolved — history labels must fall back to a
+   * generic "Staff member", never print the raw user id.
+   */
+  recordedByName?: string | null;
   /** Countdown-expected on-hand figure at count time; null for first counts. */
   expectedPills?: number | null;
   /** Note explaining a count that differs from expectedPills. */

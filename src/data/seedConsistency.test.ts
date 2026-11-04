@@ -9,6 +9,7 @@ import {
   createEvergreenSeed,
   DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
+  DEMO_DSP_USERNAME,
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { seedRequirements } from "../domain";
@@ -92,12 +93,27 @@ test("certificates seed shows a realistic mix incl. one expiring within 90 days"
 
 test("training clearance roster includes all agency staff even with no training assigned", async () => {
   const data = seed();
-  const p2 = data as unknown as { trainingRequirements?: unknown[] };
-  assert.equal(
-    (p2.trainingRequirements ?? []).length,
-    0,
-    "precondition: the demo seeds no P2 training requirements",
+  const p2 = data as unknown as {
+    trainingRequirements?: { userId: string }[];
+  };
+  // Precondition (SHOWCASE_REVISION 13): the demo seeds completed P2
+  // training for its med-pass DSP only (Alex Morgan, DEMO_DSP_USERNAME) —
+  // the medication-administration clearance gate locks an uncleared DSP
+  // out of recording doses, so the walkthrough's DSP must be cleared.
+  // Nobody else carries requirements.
+  const demoDsp = data.profiles.find((p) => p.username === DEMO_DSP_USERNAME);
+  assert.ok(demoDsp, "precondition: the demo seeds its med-pass DSP");
+  assert.ok(
+    (p2.trainingRequirements ?? []).length > 0,
+    "precondition: the demo seeds P2 training requirements for its med-pass DSP",
   );
+  for (const requirement of p2.trainingRequirements ?? []) {
+    assert.equal(
+      requirement.userId,
+      demoDsp.id,
+      "only the demo med-pass DSP carries seeded training requirements",
+    );
+  }
   const api = new LocalApi(new MemoryStore(data));
   const session = await api.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -116,10 +132,18 @@ test("training clearance roster includes all agency staff even with no training 
   );
   for (const row of rows) {
     assert.ok(row.fullName.length > 0);
-    assert.equal(row.clearedForInRatio, false);
-    assert.ok(
-      row.gateReasons.includes("No training assigned yet"),
-      `${row.fullName} should explain why they are not cleared`,
-    );
+    if (row.userId === demoDsp.id) {
+      assert.equal(
+        row.clearedForInRatio,
+        true,
+        `${row.fullName} (demo med-pass DSP) should be cleared so the demo med pass works`,
+      );
+    } else {
+      assert.equal(row.clearedForInRatio, false);
+      assert.ok(
+        row.gateReasons.includes("No training assigned yet"),
+        `${row.fullName} should explain why they are not cleared`,
+      );
+    }
   }
 });

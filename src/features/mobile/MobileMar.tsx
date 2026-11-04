@@ -15,9 +15,13 @@ import {
   canRecordDelivery,
 } from "../../data/chart";
 import { hhmmToMinutes } from "../../data/dueItems";
+import { deliveryHistoryLabel } from "../../data/medInventory";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
+import { useMedAdminLock } from "../medAdminLock";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
+import { chartSectionId } from "../sectionLinks";
 import {
   centralNowHhmm,
   centralTodayIso,
@@ -149,6 +153,7 @@ function AdministerForm({
   doseDate,
   onDone,
   onCancel,
+  onConflict,
 }: {
   api: ComplyraApi;
   session: SessionUser;
@@ -158,6 +163,10 @@ function AdministerForm({
   doseDate: string;
   onDone: () => void;
   onCancel: () => void;
+  /** Wave 7M: the dose was marked by someone else after this screen
+   * loaded — the API refused with "Already given by …"; the parent
+   * closes the form, reloads the pass, and shows that message. */
+  onConflict: (message: string) => void;
 }) {
   const [recordType, setRecordType] = useState<RecordChoice>("given");
   const [confirmTime, setConfirmTime] = useState(false);
@@ -221,7 +230,12 @@ function AdministerForm({
       }
       onDone();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      if (message.startsWith("Already ")) {
+        onConflict(message);
+        return;
+      }
+      setError(message);
       setBusy(false);
     }
   };
@@ -404,12 +418,14 @@ function CountUnavailable({ onRetry }: { onRetry: () => void }) {
 function RefillCountForm({
   api,
   med,
+  individualName,
   countdown,
   onDone,
   onCancel,
 }: {
   api: ComplyraApi;
   med: MedInventoryView;
+  individualName: string;
   countdown: MedCountdown;
   onDone: () => void;
   onCancel: () => void;
@@ -517,8 +533,10 @@ function RefillCountForm({
           <h4>Recent counts</h4>
           {med.deliveries.slice(0, 3).map((delivery) => (
             <p key={delivery.id}>
-              {delivery.countedOn} — {delivery.remainingPills} pills counted ·
-              recorded by {delivery.recordedBy}
+              {deliveryHistoryLabel(delivery, {
+                medicationName: med.medicationName,
+                individualName,
+              })}
             </p>
           ))}
         </div>
@@ -635,7 +653,7 @@ export default function MobileMar({
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
-  onOpenChart: (name: string) => void;
+  onOpenChart: (name: string, sectionId?: string) => void;
 }) {
   const todayIso = centralTodayIso();
   const [personId, setPersonId] = useState<string | null>(null);
@@ -658,8 +676,11 @@ export default function MobileMar({
   const [error, setError] = useState("");
 
   const person = people.find((row) => row.id === personId) ?? null;
-  const canMark = canLogDoseException(session.roleKey);
-  const canPrn = canLogPrnDose(session.roleKey);
+  // Clearance gate: an uncleared DSP keeps the MAR view but cannot open
+  // the dose/exception forms or the PRN log (the APIs refuse them too).
+  const medLocked = useMedAdminLock(api, session);
+  const canMark = canLogDoseException(session.roleKey) && !medLocked;
+  const canPrn = canLogPrnDose(session.roleKey) && !medLocked;
   const canReset = canRecordDelivery(session.roleKey);
 
   const reload = useCallback(async () => {
@@ -776,7 +797,7 @@ export default function MobileMar({
       <button
         type="button"
         className="msh-row msh-medcount-row"
-        onClick={() => onOpenChart(person.name)}
+        onClick={() => onOpenChart(person.name, chartSectionId("medicationBoard"))}
       >
         <span className="msh-row-main">
           <strong>Med count &amp; supply</strong>
@@ -929,10 +950,16 @@ export default function MobileMar({
               );
             })}
           </div>
-          {!canMark && (
+          {medLocked ? (
             <p className="msh-section-note">
-              Your role can view this pass but cannot record doses.
+              {MED_ADMIN_CLEARANCE_MESSAGE}.
             </p>
+          ) : (
+            !canMark && (
+              <p className="msh-section-note">
+                Your role can view this pass but cannot record doses.
+              </p>
+            )
           )}
         </div>
       )}
@@ -950,6 +977,11 @@ export default function MobileMar({
             setAdminister(null);
             void reload();
           }}
+          onConflict={(message) => {
+            setError(message);
+            setAdminister(null);
+            void reload();
+          }}
         />
       )}
 
@@ -957,6 +989,7 @@ export default function MobileMar({
         <RefillCountForm
           api={api}
           med={refillMed}
+          individualName={person.name}
           countdown={
             countdowns.get(refillMed.medicationId) ??
             medCountdown(refillMed, marksRange, todayIso)
@@ -983,6 +1016,11 @@ export default function MobileMar({
 
       {!administer && !refillMed && !prnMed && tab === "prn" && (
         <div className="msh-list">
+          {medLocked && (
+            <p className="msh-section-note">
+              {MED_ADMIN_CLEARANCE_MESSAGE}.
+            </p>
+          )}
           {prnMeds.length === 0 && (
             <p className="msh-empty">No PRN medications for {person.name}.</p>
           )}

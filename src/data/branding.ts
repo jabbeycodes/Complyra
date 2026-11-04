@@ -19,7 +19,6 @@ export function agencyLogoPath(agencyId: string) {
 export function canManageAgencyLogo(roleKey: string) {
   return [
     "administrator",
-    "compliance_admin",
     "program_manager",
   ].includes(roleKey);
 }

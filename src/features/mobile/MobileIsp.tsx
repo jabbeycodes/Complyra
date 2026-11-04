@@ -5,7 +5,10 @@ import {
   ISP_SHIFTS,
   canEditShiftNoteRow,
   clocksFromShiftLabel,
+  isLateShiftNote,
+  LATE_SHIFT_NOTE_LABEL,
   shiftDurationMinutes,
+  shiftNoteTimingProblem,
   waiverServiceNames,
   type IspProgramView,
   type ShiftNoteView,
@@ -65,7 +68,10 @@ export function NoteReadView({
         <h4>Collection details</h4>
         <div className="msh-read-row">
           <span>Date (Central)</span>
-          <strong>{note.noteDate}</strong>
+          <strong>
+            {note.noteDate}
+            {isLateShiftNote(note) ? ` · ${LATE_SHIFT_NOTE_LABEL}` : ""}
+          </strong>
         </div>
         <div className="msh-read-row">
           <span>Shift and time</span>
@@ -165,6 +171,7 @@ function EntryForm({
   const [error, setError] = useState("");
 
   const duration = shiftDurationMinutes(beginTime, endTime);
+  const timingProblem = shiftNoteTimingProblem({ noteDate, beginTime });
   const isNew = !initial;
   // Mirrors the desktop entry gate (and the API's progress-note rule): a new
   // entry cannot be saved until the plan carries its goal/outcome text.
@@ -190,6 +197,7 @@ function EntryForm({
     noteDate.length > 0 &&
     shift.trim().length > 0 &&
     duration !== null &&
+    !timingProblem &&
     waiverServiceNames().includes(waiverService) &&
     summary.trim().length > 0 &&
     (!isNew || signatureUrl.length > 0) &&
@@ -319,6 +327,11 @@ function EntryForm({
             ? `Duration: ${duration} minutes`
             : "Enter a start and end time to compute the duration."}
         </p>
+        {timingProblem && (
+          <p className="msh-duration" role="alert">
+            {timingProblem}
+          </p>
+        )}
         <label className="msh-field">
           <span>Location</span>
           <input
@@ -699,6 +712,9 @@ export default function MobileIsp({
                       <strong>
                         {note.staffName}
                         {note.staffTitle ? ` · ${note.staffTitle}` : ""}
+                        {isLateShiftNote(note)
+                          ? ` · ${LATE_SHIFT_NOTE_LABEL}`
+                          : ""}
                       </strong>
                       <small>{noteTimeText(note, formatDoseTime)}</small>
                       <small>
