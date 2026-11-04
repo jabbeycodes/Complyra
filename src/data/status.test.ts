@@ -109,8 +109,8 @@ test("non-auditor outcomes on the five pages are unchanged", () => {
   // template — pinned so the auditor clause cannot widen another role.
   const expected: Record<string, Record<string, boolean>> = {
     administrator: { Delegations: true, Training: true, Staff: true, Certificates: true, "Review queue": true },
-    compliance_admin: { Delegations: true, Training: true, Staff: true, Certificates: true, "Review queue": true },
-    program_manager: { Delegations: true, Training: true, Staff: false, Certificates: false, "Review queue": true },
+    // Staff: true since PM-STAFF-NAV (wave 7U-2, PR #240).
+    program_manager: { Delegations: true, Training: true, Staff: true, Certificates: false, "Review queue": true },
     house_manager: { Delegations: true, Training: true, Staff: true, Certificates: true, "Review queue": false },
     nurse: { Delegations: true, Training: true, Staff: false, Certificates: false, "Review queue": true },
     hr: { Delegations: false, Training: true, Staff: true, Certificates: true, "Review queue": false },
@@ -118,7 +118,6 @@ test("non-auditor outcomes on the five pages are unchanged", () => {
   };
   const roleOf: Record<string, string> = {
     administrator: "administrator",
-    compliance_admin: "compliance_admin",
     program_manager: "manager",
     house_manager: "manager",
     nurse: "nurse",

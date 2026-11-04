@@ -72,7 +72,6 @@ const NORTHSTAR_PM_PERMISSIONS: PermissionMap = {
 test("Staff page: program manager now reaches it; every other seeded role is unchanged", () => {
   const expected: Record<string, boolean> = {
     administrator: true, // hr.view_staff + members.* (pre-existing)
-    compliance_admin: true, // members.invite / members.assign_roles (pre-existing)
     house_manager: true, // hr.view_staff (pre-existing)
     hr: true, // hr.view_staff + members.invite (pre-existing)
     program_manager: true, // NEW — the wave 7U-2 path
@@ -130,7 +129,7 @@ test("the PM path requires the program_manager role — the same keys never wide
   assert.equal(pageVisible(nurse, "Staff"), false);
   // Nor does the predicate fire for the roles that already reach Staff by
   // their own keys, or for the auditor (whose read path is PR #239's).
-  for (const roleKey of ["administrator", "compliance_admin", "house_manager", "hr", "dsp", "auditor"]) {
+  for (const roleKey of ["administrator", "house_manager", "hr", "dsp", "auditor"]) {
     assert.equal(
       canViewStaffAsProgramManager(sessionFor(roleKey)),
       false,
@@ -149,13 +148,12 @@ test("the PM gains no member-admin keys from the nav fix (control gates are unto
   assert.equal(pm.permissions["members.reset_password"], true);
 });
 
-test("Activity log visibility (the condition App uses to render the Overview activity controls): HR is the only seeded role excluded", () => {
+test("Activity log visibility (the condition App uses to render the Overview activity controls): HR and DSP are excluded", () => {
   const expected: Record<string, boolean> = {
     administrator: true,
-    compliance_admin: true,
     house_manager: true,
     program_manager: true,
-    dsp: true,
+    dsp: false, // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31; PR #218)
     nurse: true,
     hr: false, // neither audit.read nor individuals.view — the dead-link role
     auditor: true,
