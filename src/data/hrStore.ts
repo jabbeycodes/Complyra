@@ -16,6 +16,7 @@
  * Entity types and pure logic (validateClockIn/validateClockOut, the punch
  * guards) come from ./hr, owned by the domain workstream.
  */
+import { agencyToday } from "./agencyDay";
 import { scheduledStartIso } from "./lateness";
 import { claimedCoverageShifts } from "./localSchedule";
 import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
@@ -71,7 +72,7 @@ import type {
   ShiftSwapInput,
   ShiftSwapStatus,
 } from "./hr";
-import { DEFAULT_PUNCH_RULES, hrShiftSpanProblem } from "./hr";
+import { DEFAULT_PUNCH_RULES, hrShiftSpanProblem, punchLookbackWindow } from "./hr";
 import {
   DEFAULT_BINDER_TEMPLATE,
   binderTemplateForRole,
@@ -623,11 +624,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Today in the agency's calendar (America/Chicago) — see agencyDay.ts. */
 function todayStamp(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return agencyToday(d);
 }
 
 /* ------------------------- Supabase implementation ---------------------- */
@@ -1461,9 +1460,9 @@ export class SupabaseHrStore implements HrStore {
     return (data ?? []).map(mapPunch);
   }
 
+  /** The open-session window for clock in/out checks (see punchLookbackWindow). */
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchLookbackWindow(d);
   }
 
   /**
@@ -5089,9 +5088,9 @@ class LocalHrStore implements HrStore {
       .sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1));
   }
 
+  /** The open-session window for clock in/out checks (see punchLookbackWindow). */
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchLookbackWindow(d);
   }
 
   /**

@@ -7,7 +7,7 @@
  * No real PII anywhere — the PIN, token, employee id, and names are
  * obviously fictional fixtures.
  */
-import { describe, test, beforeEach } from "node:test";
+import { describe, test, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSubmitKioskPunchParams,
@@ -15,7 +15,7 @@ import {
   type HrStore,
   type KioskPunchInput,
 } from "./hrStore";
-import { DEFAULT_PUNCH_RULES } from "./hr";
+import { DEFAULT_PUNCH_RULES, punchLookbackWindow } from "./hr";
 
 const AGENCY = "agency-kiosk-test";
 const MANAGER = "mgr-kiosk-test";
@@ -485,6 +485,46 @@ describe("hub clockIn/clockOut require the remote-punch grant (local)", () => {
     await store.revokeRemotePunch(MANAGER);
     await assert.rejects(() => store.clockIn(), /house kiosk laptop/);
     await assert.rejects(() => store.clockOut(), /house kiosk laptop/);
+  });
+});
+
+describe("clock out finds the open session across the evening and midnight (wave 1)", () => {
+  // The stores used to load "today's" punches with zone-less local-midnight
+  // bounds: a 9 PM Central clock-in (03:00Z next day) and every overnight
+  // shift fell outside, so clock-out said "No open clock-in to close."
+  test("an overnight shift: clock in 11:30 PM Central, clock out 6:30 AM", async () => {
+    mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-04T05:30:00.000Z") });
+    try {
+      const store = makeStore();
+      await store.grantRemotePunch(MANAGER, MANAGER);
+      const punchIn = await store.clockIn("overnight");
+      assert.equal(punchIn.kind, "in");
+      mock.timers.setTime(new Date("2026-11-04T12:30:00.000Z").getTime());
+      const punchOut = await store.clockOut();
+      assert.equal(punchOut.kind, "out");
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test("an evening clock-in after 6 PM Central closes the same evening", async () => {
+    mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-04T03:00:00.000Z") });
+    try {
+      const store = makeStore();
+      await store.grantRemotePunch(MANAGER, MANAGER);
+      await store.clockIn();
+      mock.timers.setTime(new Date("2026-11-04T04:30:00.000Z").getTime());
+      assert.equal((await store.clockOut()).kind, "out");
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test("the lookback window is absolute UTC and covers a 16-hour shift", () => {
+    const now = new Date("2026-11-04T12:30:00.000Z");
+    const { from, to } = punchLookbackWindow(now);
+    assert.equal(from, "2026-11-03T12:30:00.000Z");
+    assert.equal(to, "2026-11-04T12:31:00.000Z");
   });
 });
 

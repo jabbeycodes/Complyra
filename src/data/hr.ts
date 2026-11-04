@@ -62,6 +62,26 @@ export interface HrShift {
  */
 export const MAX_HR_SHIFT_MINUTES = 16 * 60;
 
+/**
+ * How far back a clock-in/clock-out check looks for the staffer's open
+ * session: the longest shift (MAX_HR_SHIFT_MINUTES) plus slack for breaks
+ * and late clock-outs. Wave 1 audit (2026-11-03): the stores used to load
+ * "today's" punches as zone-less local-midnight strings, which (a) missed
+ * any clock-in after 6 PM Central — the hosted database reads such strings
+ * as UTC and the local store string-compares them with UTC stamps — and
+ * (b) could never find an overnight shift's clock-in once the clock passed
+ * midnight, so the overnight DSP saw "No open clock-in to close."
+ */
+export const PUNCH_LOOKBACK_MINUTES = 24 * 60;
+
+/** Absolute UTC window [now − lookback, now + 1 min] for open-session checks. */
+export function punchLookbackWindow(now: Date = new Date()): { from: string; to: string } {
+  return {
+    from: new Date(now.getTime() - PUNCH_LOOKBACK_MINUTES * 60_000).toISOString(),
+    to: new Date(now.getTime() + 60_000).toISOString(),
+  };
+}
+
 export function hrShiftSpanProblem(
   startsAt: string,
   endsAt: string,

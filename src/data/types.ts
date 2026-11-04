@@ -1,3 +1,4 @@
+import { agencyToday } from "./agencyDay";
 import type { Category, Status } from "../domain";
 
 export type AppRole =
@@ -640,7 +641,7 @@ export function delegationFormStatus(form: DelegationForm): {
  */
 export function delegationReviewState(
   form: DelegationForm,
-  today = new Date().toISOString().slice(0, 10),
+  today = agencyToday(),
 ): { label: string; overdue: boolean; dueSoon: boolean } | null {
   if (!form.reviewDate) return null;
   const days = Math.round(

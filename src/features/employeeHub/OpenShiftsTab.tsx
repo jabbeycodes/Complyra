@@ -5,6 +5,7 @@
  * database functions in 20260925150000_open_shifts.sql.
  */
 
+import { agencyToday } from "../../data/agencyDay";
 import { useEffect, useMemo, useState } from "react";
 import { Check, Send, X } from "lucide-react";
 import { Empty } from "../../components";
@@ -50,8 +51,9 @@ function errMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/** Today in the agency's calendar (America/Chicago) — see agencyDay.ts. */
 function todayStamp(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return agencyToday(d);
 }
 
 /** Local date + "HH:MM" start/end → ISO instants; an earlier end runs to the next day. */

@@ -1,3 +1,4 @@
+import { agencyToday } from "../../data/agencyDay";
 import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, CalendarDays, Download, Plus, TrendingDown, TrendingUp } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
@@ -238,7 +239,7 @@ export default function QaAuditsPage() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = agencyToday();
   const { year: cy, quarter: cq } = currentQuarter();
 
   return (

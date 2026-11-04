@@ -1,3 +1,4 @@
+import { agencyToday } from "./agencyDay";
 import type { Appointment } from "./appointments";
 import type { DelegationForm, IndividualRecord, SessionUser } from "./types";
 
@@ -384,7 +385,7 @@ export function nextAllergiesStamp(
 
 export function isObligationActive(
   item: ObligationItem,
-  today = new Date().toISOString().slice(0, 10),
+  today = agencyToday(),
   options?: { delegationsExpire?: boolean },
 ) {
   if (!item.enabled) return false;
@@ -619,7 +620,7 @@ export function addMonths(isoDate: string, months: number) {
 
 export function renewalStatus(
   nextDueOn: string,
-  today = new Date().toISOString().slice(0, 10),
+  today = agencyToday(),
   reminderDays?: number[],
 ): RenewalStatus {
   if (nextDueOn < today) return "overdue";

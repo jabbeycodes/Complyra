@@ -15,6 +15,7 @@
  * Wording: "Individual/Individuals" only — never client/patient, never T-Log.
  */
 
+import { agencyToday } from "./agencyDay";
 import { roleLabel } from "./status";
 import { centralTodayIso } from "./menuRecords";
 
@@ -159,7 +160,7 @@ export function activeIspProgram<TProgram extends IspProgram>(
   programs: TProgram[],
   individualId: string,
   planYear: string,
-  today = new Date().toISOString().slice(0, 10),
+  today = agencyToday(),
 ): TProgram | null {
   const candidates = programs.filter(
     (program) =>

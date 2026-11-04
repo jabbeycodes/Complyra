@@ -34,6 +34,11 @@ import { monthKeyFrom } from "./monthlyChecks";
 const EVENING_A = "2026-11-02T01:30:00.000Z";
 const EVENING_B = "2026-11-01T01:30:00.000Z";
 
+/** The raw UTC calendar day — what the app used to call "today". */
+function utcDay(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function withMockedNow(iso: string, fn: () => void) {
   mock.timers.enable({ apis: ["Date"], now: new Date(iso) });
   try {
@@ -45,7 +50,10 @@ function withMockedNow(iso: string, fn: () => void) {
 
 test("7Q: at 19:30 CST the UTC day is already tomorrow; the Central day is not", () => {
   withMockedNow(EVENING_A, () => {
-    assert.equal(todayIso(), "2026-11-02", "the old UTC derivation");
+    // The raw UTC day is still tomorrow — the trap…
+    assert.equal(utcDay(), "2026-11-02", "the raw UTC day");
+    // …and todayIso no longer falls into it (wave 1: agencyDay.ts).
+    assert.equal(todayIso(), "2026-11-01", "todayIso is the agency day");
     assert.equal(centralTodayIso(), "2026-11-01", "the agency day every surface now uses");
   });
 });
@@ -59,7 +67,7 @@ test("7Q: Appointments opens on the Central day (batch 93: it opened on Nov 2)",
       to: "2026-11-30",
     });
     assert.equal(monthStart(centralTodayIso()), "2026-11-01");
-    assert.equal(thirtyDayRange(todayIso()).from, "2026-11-02", "the batch-93 defect, for contrast");
+    assert.equal(thirtyDayRange(utcDay()).from, "2026-11-02", "the batch-93 defect, for contrast");
   });
 });
 
@@ -200,9 +208,9 @@ test("7Q: the checklist week and month filters open on the Central week/month", 
   withMockedNow(EVENING_B, () => {
     // ChecklistAssigner's current-week derivation (week of the Central day).
     assert.equal(weekOfSundayIso(centralTodayIso()), "2026-10-25");
-    assert.equal(weekOfSundayIso(todayIso()), "2026-11-01", "the UTC week, for contrast");
+    assert.equal(weekOfSundayIso(utcDay()), "2026-11-01", "the UTC week, for contrast");
     // The month key behind the mileage / reports / monthly-checks defaults.
     assert.equal(monthKeyFrom(centralTodayIso()), "2026-10");
-    assert.equal(monthKeyFrom(todayIso()), "2026-11", "the UTC month, for contrast");
+    assert.equal(monthKeyFrom(utcDay()), "2026-11", "the UTC month, for contrast");
   });
 });

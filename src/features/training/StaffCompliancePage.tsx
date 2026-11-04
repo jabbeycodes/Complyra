@@ -7,6 +7,7 @@
  *   countersignatures, and the prominent NOT CLEARED banner when the gate fails.
  * - Certificate tracking hook: a marked extension point below (Phase 4 fills it).
  */
+import { agencyToday } from "../../data/agencyDay";
 import { useEffect, useState } from "react";
 import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
@@ -1029,7 +1030,7 @@ function InitialLineModal({
   }) => void;
 }) {
   const { api, session } = useData();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = agencyToday();
   const [signedOn, setSignedOn] = useState(existing?.signedOn ?? today);
   const [trainerUserId, setTrainerUserId] = useState(existing?.trainerUserId ?? "");
   const [method, setMethod] = useState<TrainingMethod | "">(existing?.method ?? "");

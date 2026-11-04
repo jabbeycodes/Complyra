@@ -1,3 +1,4 @@
+import { agencyToday } from "../../data/agencyDay";
 import { useEffect, useState } from "react";
 import { BellRing, History, Pill, Settings2, TriangleAlert } from "lucide-react";
 import { Empty, formatDate } from "../../components";
@@ -54,7 +55,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
     pills: string;
     reason: string;
     occurredOn: string;
-  }>({ kind: "refused", pills: "", reason: "", occurredOn: new Date().toISOString().slice(0, 10) });
+  }>({ kind: "refused", pills: "", reason: "", occurredOn: agencyToday() });
 
   useEffect(() => {
     let live = true;
@@ -286,7 +287,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                       kind: "refused",
                       pills: "",
                       reason: "",
-                      occurredOn: new Date().toISOString().slice(0, 10),
+                      occurredOn: agencyToday(),
                     });
                   }}
                 >
@@ -361,7 +362,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                   <input
                     type="date"
                     required
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={agencyToday()}
                     value={exceptionDraft.occurredOn}
                     onChange={(e) =>
                       setExceptionDraft((prev) => ({ ...prev, occurredOn: e.target.value }))

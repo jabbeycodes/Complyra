@@ -1,3 +1,4 @@
+import { agencyToday } from "./agencyDay";
 import type { ObligationItem, ObligationView } from "./planStack";
 
 export type ChartFileKind = "renewal" | "discontinue" | "training" | "other";
@@ -104,8 +105,9 @@ export interface CarePlanView {
   assignedCount: number;
 }
 
+/** Today in the agency's calendar (America/Chicago) — see agencyDay.ts. */
 export function todayIso(now = new Date()) {
-  return now.toISOString().slice(0, 10);
+  return agencyToday(now);
 }
 
 export function daysBetween(from: string, to: string) {

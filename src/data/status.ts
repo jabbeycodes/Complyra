@@ -1,4 +1,5 @@
 import type { Status } from "../domain";
+import { agencyToday } from "./agencyDay";
 import type { SessionUser } from "./types";
 import {
   ROLE_TEMPLATE_BY_KEY,
@@ -21,11 +22,9 @@ export function startOfDay(isoDate: string) {
   return Date.parse(`${isoDate.slice(0, 10)}T00:00:00`);
 }
 
+/** Today in the agency's calendar (America/Chicago) — see agencyDay.ts. */
 export function todayStamp(now = new Date()) {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return agencyToday(now);
 }
 
 export function computeRequirementStatus(

@@ -1,3 +1,5 @@
+import { agencyToday } from "./agencyDay";
+import { addDaysIso } from "./menuRecords";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalApi, MemoryStore } from "./localApi";
@@ -808,8 +810,9 @@ test("managers can correct a requirement and the fix is audit-logged", async () 
   );
 });
 
+/** An agency (Central) calendar day relative to today. */
 function isoPlus(days: number): string {
-  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  return addDaysIso(agencyToday(), days);
 }
 
 function pdfFile(name = "cpr.pdf", size = 2048): File {

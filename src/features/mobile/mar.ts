@@ -7,20 +7,14 @@
  * a dose to a different day. Calendar math on ISO dates is done on the date
  * string itself so it can never drift across a timezone boundary.
  */
+import { AGENCY_TIME_ZONE, agencyToday } from "../../data/agencyDay";
 import type {
   MedDoseMark,
   MedDoseMarkStatus,
   MedInventoryView,
 } from "../../data/types";
 
-export const MAR_TIME_ZONE = "America/Chicago";
-
-const dateParts = new Intl.DateTimeFormat("en-US", {
-  timeZone: MAR_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
+export const MAR_TIME_ZONE = AGENCY_TIME_ZONE;
 
 const timeParts = new Intl.DateTimeFormat("en-US", {
   timeZone: MAR_TIME_ZONE,
@@ -52,8 +46,7 @@ function partValue(
 
 /** The calendar date ("YYYY-MM-DD") it currently is in Central. */
 export function centralTodayIso(now: Date = new Date()): string {
-  const parts = dateParts.formatToParts(now);
-  return `${partValue(parts, "year")}-${partValue(parts, "month")}-${partValue(parts, "day")}`;
+  return agencyToday(now);
 }
 
 /** The current wall-clock time ("HH:MM", 24-hour) in Central. */

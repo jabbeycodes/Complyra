@@ -1,3 +1,4 @@
+import { agencyToday } from "./data/agencyDay";
 import PublicConsentSigning from "./features/consents/PublicConsentSigning";
 import Consents from "./features/consents/Consents";
 import { useConsentRegister } from "./features/consents/useConsentRegister";
@@ -786,7 +787,7 @@ export default function App() {
   }
   function exportComplianceReport(items: Requirement[] = scoped) {
     if (!session || !workspace) return;
-    const asOf = new Date().toISOString().slice(0, 10);
+    const asOf = agencyToday();
     const card = metrics(items);
     const pdf = buildComplianceReportPdf({
       agencyName: session.agencyName,

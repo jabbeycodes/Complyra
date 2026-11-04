@@ -18,6 +18,7 @@
  * data as props so UI/accessibility tests can render every section without
  * a live API.
  */
+import { agencyToday } from "../data/agencyDay";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useData } from "../data/DataProvider";
 import { hasPermission } from "../data/permissions";
@@ -183,7 +184,7 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return agencyToday();
 }
 
 function bandMeta(band: string): { icon: string; label: string; className: string } {

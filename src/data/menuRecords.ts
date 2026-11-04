@@ -21,6 +21,7 @@
  *
  * Wording: "Individual/Individuals" only — never client/patient.
  */
+import { agencyToday } from "./agencyDay";
 
 export const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 export type MealSlot = (typeof MEAL_SLOTS)[number];
@@ -156,14 +157,7 @@ export function addDaysIso(iso: string, days: number): string {
 
 /** Today's date in America/Chicago, whatever the device clock says. */
 export function centralTodayIso(now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${read("year")}-${read("month")}-${read("day")}`;
+  return agencyToday(now);
 }
 
 /** Monday of the week (Mon–Sun) containing the given ISO date. */

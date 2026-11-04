@@ -1,3 +1,4 @@
+import { agencyDayOf } from "./agencyDay";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -111,7 +112,7 @@ test('local lifecycle: start, sign with a TYPED past date, immutability, renewal
     // The typed date is stored exactly as entered — never re-stamped.
     assert.equal(saved.packetOn, typedDate);
     assert.equal(saved.status, 'signed');
-    assert.ok(saved.signedAt && saved.signedAt.slice(0, 10) === todayStamp());
+    assert.ok(saved.signedAt && agencyDayOf(saved.signedAt) === todayStamp());
     const list = await f.api.listRightsPackets();
     const mine = list.filter(p => p.individualId === f.person.id);
     assert.equal(rightsTrackingText(rightsTrackingFor(mine)), rightsRenewalFor(typedDate).text);

@@ -31,6 +31,7 @@
  * RN") are a different dimension — whether one staffer has signed — and are
  * deliberately NOT part of this vocabulary.
  */
+import { agencyToday } from "./agencyDay";
 import type {
   DelegationActivationStatus,
   DelegationAssignmentStatus,
@@ -87,7 +88,7 @@ export function delegationStatusForObligation(
 ): DelegationStatus {
   const form: DelegationForm | null | undefined = item.delegationForm;
   if (form && delegationFormStatus(form).rescinded) return "expired";
-  const today = options?.today ?? new Date().toISOString().slice(0, 10);
+  const today = options?.today ?? agencyToday();
   if (options?.delegationsExpire && item.expiresOn && item.expiresOn < today) {
     return "expired";
   }

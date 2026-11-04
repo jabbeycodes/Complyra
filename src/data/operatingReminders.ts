@@ -3,6 +3,7 @@
  * the unattended sweep both use this so a closed browser does not invent a
  * second set of rules.
  */
+import { AGENCY_TIME_ZONE } from "./agencyDay";
 import {
   blockForShiftLabel,
   buildSiteDueItems,
@@ -80,7 +81,7 @@ export function houseManagerRecipientIds(
  * Missouri agency clock. The signed-in app uses the browser clock. This job
  * uses Central so a dose at 8:00 a.m. is judged in the agency's day.
  */
-export const AGENCY_TIME_ZONE = "America/Chicago";
+export { AGENCY_TIME_ZONE } from "./agencyDay";
 
 /** The day, the dose clock, and the notice day the bell and the job share. */
 export function dueItemClock(now = new Date()) {

@@ -1,3 +1,4 @@
+import { agencyToday } from "./agencyDay";
 import { buildConsentPacketPdf } from '../pdf/consentPacketPdf';
 import { PACKET_ITEMS, PACKET_COPY_VERSION, HEALTH_SCOPE, newPacketToken, tokenHash, assertPacketDates, assertPacketTypes, validatePacketSubmission, packetSignerDate, packetFile, packetOutstanding, type ConsentPacket, type PacketCreateInput, type PacketPublicView, type PacketEvidence, type PacketChoices, type PacketSignature } from './consentPackets';
 import { DEFAULT_CONSENT_TYPES, assertSingleConsentActivation, consentDraftFields, assertConsentRole, canManageConsents, consentAlertEntityIds, consentAlertPairs, consentAlerts, consentStatus, isStaleConsentNotification, validateConsentDraft, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -2659,8 +2660,8 @@ function assignedUserIds(store: MemoryStore, individual: IndividualRecord) {
   const ids = new Set<string>();
   for (const assignment of store.db.assignments) {
     const active =
-      assignment.startsOn <= new Date().toISOString().slice(0, 10) &&
-      (!assignment.endsOn || assignment.endsOn >= new Date().toISOString().slice(0, 10));
+      assignment.startsOn <= agencyToday() &&
+      (!assignment.endsOn || assignment.endsOn >= agencyToday());
     if (!active) continue;
     if (assignment.individualId === individual.id) {
       ids.add(assignment.userId);
@@ -5015,7 +5016,7 @@ export class LocalApi implements ComplyraApi {
       userId,
       individualId,
       siteId: individual.siteId,
-      startsOn: new Date().toISOString().slice(0, 10),
+      startsOn: agencyToday(),
       endsOn: null,
     });
     for (const packet of this.store.db.packets.filter(
@@ -6517,7 +6518,14 @@ export class LocalApi implements ComplyraApi {
       existing.status = input.status;
       existing.markedBy = session.userId;
       existing.markedByName = session.fullName;
-      existing.markedAt = now;
+      // markedAt is the correction's version token (the hosted CAS RPC
+      // compares it). Hosted re-stamps with microsecond now(); locally a
+      // correction in the same millisecond as the mark it replaces would
+      // reuse the token and let a second corrector on the same base win
+      // too, so the re-stamp is always strictly later than the old one.
+      existing.markedAt = new Date(
+        Math.max(Date.parse(now), Date.parse(existing.markedAt) + 1),
+      ).toISOString();
       if (lateReason) {
         existing.late = true;
         existing.lateReason = lateReason;
@@ -8675,11 +8683,11 @@ export class LocalApi implements ComplyraApi {
         title: `${fullName} · PCSP`,
         kind: "pcsp",
         pageCount: input.pageCount || 1,
-        effectiveOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        effectiveOn: input.effectiveOn || agencyToday(),
         requirementTitle: `Acknowledge PCSP for ${fullName}`,
         category: "PCSP acknowledgments",
         ownerUserId: session.userId,
-        dueOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        dueOn: input.effectiveOn || agencyToday(),
         frequency: "On plan update",
         sourcePage: 1,
       });
@@ -9203,7 +9211,7 @@ export class LocalApi implements ComplyraApi {
     if (session.userId !== userId) assertTrainingRosterRead(session);
     const profile = this.store.db.profiles.find((row) => row.id === userId);
     if (!profile) throw new Error("Staff member not found.");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const coll = this.p2Collections();
     const requirements = coll.trainingRequirements
       .filter((row) => row.agencyId === session.agencyId && row.userId === userId)
@@ -9537,7 +9545,7 @@ export class LocalApi implements ComplyraApi {
     const coll = this.p2Collections();
     const site = this.store.db.sites.find((row) => row.id === input.siteId);
     if (!site) throw new Error("Site not found.");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const lines = coll.trainingRequirements
       .filter(
         (row) =>
@@ -11238,7 +11246,7 @@ export class LocalApi implements ComplyraApi {
     const session = assertSession(this.store);
     this.assertCorrectiveActionWrite(session);
     const siteId = input.siteId ?? null;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const rows = this.complianceSnapshotsOf();
     // One snapshot per day per scope — replace today's if it exists.
     const existing = rows.find(
@@ -13495,7 +13503,7 @@ export class LocalApi implements ComplyraApi {
   /** Two members are "assigned together" when they share an active site. */
   private shareActiveSite(userA: string, userB: string): boolean {
     const db = this.store.db;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
       a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
     const sitesA = new Set(
@@ -13543,7 +13551,7 @@ export class LocalApi implements ComplyraApi {
   }
 
   private siteIdFor(userId: string): string | null {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const membership = this.store.db.memberships.find(
       (row) =>
         row.userId === userId &&
@@ -13881,7 +13889,7 @@ export class LocalApi implements ComplyraApi {
     if (!isValidRating(input.rating)) {
       throw new Error("Rating must be a whole number from 1 to 5.");
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const hm = this.activeMembership(input.hmUserId, "house_manager", today);
     if (!hm || hm.agencyId !== session.agencyId) {
       throw new Error("That house manager was not found.");
@@ -13995,7 +14003,7 @@ export class LocalApi implements ComplyraApi {
     if (!isValidRating(input.rating)) {
       throw new Error("Rating must be a whole number from 1 to 5.");
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const dsp = this.activeMembership(input.dspUserId, "dsp", today);
     if (!dsp || dsp.agencyId !== session.agencyId) {
       throw new Error("That DSP was not found.");
@@ -14111,7 +14119,7 @@ export class LocalApi implements ComplyraApi {
       throw new Error("You do not have permission to do that.");
     }
     const db = this.store.db;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     // "Appropriate managers": administrators see the whole agency; other
     // managers see only pairs they share an active site with.
     const isAgencyAdmin =
@@ -14195,7 +14203,7 @@ export class LocalApi implements ComplyraApi {
     const agencyWideAward =
       awarding && session.roleKey !== "dsp" && session.roleKey !== "house_manager";
     const db = this.store.db;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const activeAsg = (a: { startsOn: string; endsOn: string | null }) =>
       a.startsOn <= today && (!a.endsOn || a.endsOn >= today);
     const roleOf = (userId: string) =>
@@ -14264,7 +14272,7 @@ export class LocalApi implements ComplyraApi {
       throw new Error("You do not have permission to do that.");
     }
     const db = this.store.db;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const weekStart =
       input?.weekStart && /^\d{4}-\d{2}-\d{2}$/.test(input.weekStart)
         ? input.weekStart
@@ -14577,7 +14585,7 @@ export class LocalApi implements ComplyraApi {
    * agency/program-scoped users like the administrator).
    */
   private delegationStaffAtSite(agencyId: string, siteId: string): string[] {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const ids = new Set<string>();
     for (const m of this.store.db.memberships) {
       if (m.agencyId !== agencyId) continue;
@@ -14597,7 +14605,7 @@ export class LocalApi implements ComplyraApi {
     siteId: string,
     key: PermissionKey,
   ): string[] {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agencyToday();
     const ids = new Set<string>();
     for (const m of this.store.db.memberships) {
       if (m.agencyId !== agencyId) continue;
@@ -15619,7 +15627,7 @@ export class LocalApi implements ComplyraApi {
    * Queue due/overdue reminders for active QA schedules. Idempotent per
    * schedule per day — safe to run on login and on a daily sweep.
    */
-  async sweepQaScheduleReminders(today = new Date().toISOString().slice(0, 10)): Promise<number> {
+  async sweepQaScheduleReminders(today = agencyToday()): Promise<number> {
     const session = assertSession(this.store);
     assertCan(session, "qa.schedule");
     ensureQaCollections(this.store);
