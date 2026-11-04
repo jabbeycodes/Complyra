@@ -162,6 +162,9 @@ interface EmployeeHubShellProps {
   staffList: HubStaffEntry[];
   sites: HubSite[];
   initialTab?: string;
+  /** The viewer's active staff-assignment site ids (WorkspaceView). Used to
+   * scope the scheduling forms' staff/site options for site-scoped roles. */
+  assignmentSiteIds?: string[];
   /** Injected in tests; defaults to the hosted/local open-shift store. */
   openShiftStore?: OpenShiftStore;
   /** Records a lateness point when a hub clock-in is past the saved minutes. */
@@ -429,20 +432,76 @@ interface BadgeCounts {
   documents: number;
 }
 
+/**
+ * WAVE-7T item 5 (simulation batch 161) — scheduling-form scope.
+ *
+ * The Team Schedule and Staffing create/edit forms must not offer a
+ * site-scoped viewer another house's staff or sites: a Juniper house
+ * manager could pick Maple staff in "Assign to" next to an enabled
+ * Add shift button, because the hub built its lists from the entire
+ * workspace. For house_manager / dsp viewers this returns the form
+ * options scoped to their visible homes — membership home + own
+ * staff-row home + active assignment sites (mirroring the
+ * sitesVisibleTo derivation in src/data/dashboard.ts and the
+ * staffVisibleTo model in PR #213; dedupe with #213 when it lands) —
+ * plus the viewer themselves. Agency-wide roles (administrator,
+ * program_manager, hr, nurse, auditor, compliance_admin) return null:
+ * their forms keep the full lists. Display lists are never scoped —
+ * name resolution on existing shifts/patterns is unaffected.
+ */
+export function hubSchedulingFormScope(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+  sites: HubSite[],
+  assignmentSiteIds: string[] = [],
+): { staffList: HubStaffEntry[]; sites: HubSite[] } | null {
+  if (session.roleKey !== "house_manager" && session.roleKey !== "dsp") {
+    return null;
+  }
+  const ids = new Set<string>();
+  if (session.siteId) ids.add(session.siteId);
+  const own = staffList.find((s) => s.userId === session.userId);
+  if (own?.siteId) ids.add(own.siteId);
+  for (const id of assignmentSiteIds) if (id) ids.add(id);
+  return {
+    staffList: staffList.filter(
+      (s) =>
+        s.userId === session.userId ||
+        (s.siteId != null && ids.has(s.siteId)),
+    ),
+    sites: sites.filter((s) => ids.has(s.id)),
+  };
+}
+
 export function EmployeeHubShell({
   session,
   store,
   staffList,
   sites,
   initialTab,
+  assignmentSiteIds,
   openShiftStore,
   onLateClockIn,
 }: EmployeeHubShellProps) {
   const can = (key: PermissionKey) => hasPermission(session, key);
   const operating = useOperatingRules(session);
-  // HMs/PMs post for their sites; HR and administrators also post agency-wide.
+  // HMs/PMs post for their sites on hub.manage_schedule; agency-wide posting
+  // is the administrator's, on the same key. WAVE-7T (simulation batch 157):
+  // HR previously qualified for agency-wide posting through
+  // hub.manage_staffing, which put a scheduling write in HR's hands —
+  // scheduling writes belong to HM/PM and the administrator, so HR no longer
+  // qualifies (HR does not hold hub.manage_schedule).
   const canPostAgencyWide =
-    can("hub.manage_staffing") && ["hr", "administrator"].includes(session.roleKey);
+    can("hub.manage_schedule") && session.roleKey === "administrator";
+  // Wave 7T item 5: scope the scheduling forms' staff/site options for
+  // site-scoped viewers (see hubSchedulingFormScope). Display lists and
+  // every other tab keep the full lists.
+  const formScope = useMemo(
+    () => hubSchedulingFormScope(session, staffList, sites, assignmentSiteIds ?? []),
+    [session, staffList, sites, assignmentSiteIds],
+  );
+  const formStaffList = formScope?.staffList ?? staffList;
+  const formSites = formScope?.sites ?? sites;
   const shiftStore = useMemo(
     () =>
       openShiftStore ??
@@ -600,7 +659,7 @@ export function EmployeeHubShell({
       <div className="hub-panel">
         {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
         {tab === "staffing" && (
-          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} />
+          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} />
         )}
         {tab === "open-shifts" && (
           <OpenShiftsTab
@@ -681,7 +740,7 @@ export function EmployeeHubShell({
           />
         )}
         {tab === "team-schedule" && can("hub.manage_schedule") && (
-          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} />
+          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} />
         )}
         {tab === "attendance" && can("hub.view_team") && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
@@ -1200,11 +1259,18 @@ function StaffingTab({
   store,
   staffList,
   sites,
+  formStaffList,
+  formSites,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Wave 7T item 5: options for the pattern config form, scoped to the
+   * viewer's visible homes for site-scoped roles. The board's display
+   * lists stay unscoped. */
+  formStaffList?: HubStaffEntry[];
+  formSites?: HubSite[];
 }) {
   const canManage = hasPermission(session, "hub.manage_staffing");
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
@@ -1288,8 +1354,8 @@ function StaffingTab({
         <div className="hub-inline-form" style={{ marginBottom: 16 }}>
           <h3>{editing ? "Edit staffing pattern" : "New staffing pattern"}</h3>
           <StaffingConfigForm
-            staffList={staffList}
-            sites={sites}
+            staffList={formStaffList ?? staffList}
+            sites={formSites ?? sites}
             initial={editing}
             busy={busy}
             onSave={handleSave}
@@ -2857,12 +2923,21 @@ function TeamScheduleTab({
   store,
   staffList,
   sites,
+  formStaffList,
+  formSites,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Wave 7T item 5: options for the site filter and the Add/Edit shift
+   * form, scoped to the viewer's visible homes for site-scoped roles.
+   * Display name resolution keeps the full staffList/sites. */
+  formStaffList?: HubStaffEntry[];
+  formSites?: HubSite[];
 }) {
+  const assignableStaff = formStaffList ?? staffList;
+  const formSiteOptions = formSites ?? sites;
   const [weekOffset, setWeekOffset] = useState(0);
   const [siteFilter, setSiteFilter] = useState("");
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -3018,7 +3093,7 @@ function TeamScheduleTab({
           Site
           <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
             <option value="">All sites</option>
-            {sites.map((s) => (
+            {formSiteOptions.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
@@ -3042,7 +3117,7 @@ function TeamScheduleTab({
               Assign to
               <select value={form.staffId} onChange={(e) => setForm({ ...form, staffId: e.target.value })}>
                 <option value="">Open shift (unassigned)</option>
-                {staffList.map((s) => (
+                {assignableStaff.map((s) => (
                   <option key={s.userId} value={s.userId}>{s.fullName}</option>
                 ))}
               </select>
@@ -3051,7 +3126,7 @@ function TeamScheduleTab({
               Site
               <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
                 <option value="">All sites</option>
-                {sites.map((s) => (
+                {formSiteOptions.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -4539,6 +4614,7 @@ export default function EmployeeHubPage({
       store={store}
       staffList={staffList}
       sites={sites}
+      assignmentSiteIds={workspace?.assignmentSiteIds ?? []}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

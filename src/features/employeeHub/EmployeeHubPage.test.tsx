@@ -9,13 +9,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeHubShell, describeOvertimeRules, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
+import { EmployeeHubShell, describeOvertimeRules, hubSchedulingFormScope, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
 import type { HrStore } from "../../data/hrStore";
 import {
   DEFAULT_BINDER_TEMPLATE,
   defaultBinderTemplateLibrary,
 } from "../../data/newHireBinder";
 import type { SessionUser } from "../../data/types";
+import { defaultPermissions } from "../../data/permissions";
 import type {
   ComplianceEvidence,
   HrDocument,
@@ -822,6 +823,113 @@ describe("Staffing tab", () => {
     const readOnlyHtml = renderBoard(false);
     assert.ok(!readOnlyHtml.includes("Deactivate"), "no deactivate control");
     assert.ok(!readOnlyHtml.includes("Edit staffing pattern for"), "no edit control");
+  });
+});
+
+describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
+  // Sessions carry the roles' real default templates so the pins track the
+  // permission model, not a hand-picked subset.
+  const hrSession = makeSession({
+    userId: "user-riley",
+    fullName: "Riley Hart",
+    role: "hr",
+    roleKey: "hr",
+    jobTitle: "Human Resources",
+    permissions: defaultPermissions("hr"),
+  });
+  const adminSession = makeSession({
+    userId: "user-admin",
+    fullName: "Sim Admin",
+    role: "administrator",
+    roleKey: "administrator",
+    jobTitle: "Agency Administrator",
+    permissions: defaultPermissions("administrator"),
+  });
+
+  it("HR no longer gets the Post coverage / Post shift form", () => {
+    const html = render(hrSession, "open-shifts");
+    assert.ok(!html.includes("Post coverage"), "no post-coverage form for HR");
+    assert.ok(!html.includes("Post shift"), "no post-shift button for HR");
+  });
+
+  it("a program manager keeps site coverage posting", () => {
+    const html = render(pmSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for PM");
+    assert.ok(html.includes("Post shift"), "post-shift button for PM");
+  });
+
+  it("an administrator keeps coverage posting", () => {
+    const html = render(adminSession, "open-shifts");
+    assert.ok(html.includes("Post coverage"), "post-coverage form for administrator");
+    assert.ok(html.includes("Post shift"), "post-shift button for administrator");
+  });
+
+  it("item 5: a house manager's scheduling-form scope covers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites);
+    assert.ok(scope, "HM is site-scoped");
+    assert.deepEqual(
+      scope.staffList.map((s) => s.userId).sort(),
+      ["user-alex", "user-pat"],
+      "only Maple House staff (site-1) are offered",
+    );
+    assert.deepEqual(scope.sites.map((s) => s.id), ["site-1"], "only Maple House is offered");
+  });
+
+  it("item 5: an HM's assignment sites join the form scope", () => {
+    const hm = makeSession({
+      userId: "user-alex",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true },
+    });
+    const scope = hubSchedulingFormScope(hm, staffList, sites, ["site-2"]);
+    assert.ok(scope, "HM is site-scoped");
+    assert.equal(scope.sites.length, 2, "both houses offered with an active assignment");
+    assert.equal(scope.staffList.length, 3, "both houses' staff offered");
+  });
+
+  it("item 5: agency-wide roles get no form scoping (full lists kept)", () => {
+    for (const [roleKey, perms] of [
+      ["program_manager", PM_PERMISSIONS],
+      ["administrator", defaultPermissions("administrator")],
+      ["hr", defaultPermissions("hr")],
+    ] as const) {
+      const s = makeSession({ roleKey, permissions: perms });
+      assert.equal(hubSchedulingFormScope(s, staffList, sites), null, `${roleKey} unscoped`);
+    }
+  });
+
+  it("item 5: the HM's Team Schedule site filter offers only their own house", () => {
+    const hm = makeSession({
+      userId: "user-hm",
+      fullName: "Jordan Reyes",
+      role: "manager",
+      roleKey: "house_manager",
+      siteId: "site-1",
+      permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.view_team": true },
+    });
+    const html = render(hm, "team-schedule");
+    assert.ok(html.includes("Maple House"), "own house in the site filter");
+    assert.ok(!html.includes("Oak House"), "the other house is not offered");
+    const pmHtml = render(pmSession, "team-schedule");
+    assert.ok(pmHtml.includes("Oak House"), "PM keeps every house in the filter");
+  });
+
+  it("HR keeps its staffing-pattern power (hub.manage_staffing, a deliberate template grant)", () => {
+    // Wave 7T flags rather than changes this: the Staffing tab's Add pattern
+    // is gated on hub.manage_staffing, the same key HM/PM use there, and the
+    // HR template grants that key by design (HR-STAFFING, 2026-09-16).
+    // Removing it is a role-template change, out of this wave's scope.
+    const html = render(hrSession, "staffing");
+    assert.ok(html.includes("Add pattern"), "add-pattern button for HR under current templates");
   });
 });
 
