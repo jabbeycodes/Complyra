@@ -19,7 +19,6 @@ import {
 } from './consents';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
-import { todayStamp } from './status';
 import { addDaysIso, centralTodayIso } from './menuRecords';
 
 /** A Central calendar day relative to today (the app judges consents on
@@ -42,8 +41,8 @@ function localFixture() {
         giver: 'guardian' as const,
         giverName: 'Sam Rivera',
         relationship: 'Parent and guardian',
-        signedOn: todayStamp(),
-        effectiveOn: todayStamp(),
+        signedOn: centralTodayIso(),
+        effectiveOn: centralTodayIso(),
         reviewOn: '2099-12-31',
         supersedesId: null,
     };

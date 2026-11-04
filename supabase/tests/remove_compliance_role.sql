@@ -41,7 +41,7 @@ insert into auth.users(id,email) values
  ('d3100000-0000-0000-0000-000000000001','former-compliance-a@example.invalid'),
  ('d3100000-0000-0000-0000-000000000002','former-compliance-b@example.invalid'),
  ('d3100000-0000-0000-0000-000000000003','plain-dsp@example.invalid');
-update profiles set must_change_password=<redacted>
+update profiles set must_change_password=false where id::text like 'd3100000-%';
 -- The retired template row, as it existed before the migration.
 insert into public.role_templates (key, name, short_code, description, default_scope, capability, permissions) values
  ('compliance_admin','Compliance administrator','CA','Retired fixture template.','agency','compliance_admin','{"ger.create":true}'::jsonb);

@@ -15,6 +15,9 @@ import {
 } from "./seed";
 import { DEMO_PASSWORD, type SessionUser } from "./types";
 import { todayIso } from "./chart";
+// Dose windows are judged on the Central day (the doseTime below is a
+// Central clock reading), so the dose date must be the Central date too.
+import { centralTodayIso } from "./menuRecords";
 import {
   MED_ADMIN_CLEARANCE_MESSAGE,
   medAdminLocked,
@@ -107,7 +110,7 @@ async function assertAllFourRefused(
     () =>
       api.markMedDose({
         medicationId: fx.keppra,
-        doseDate: todayIso(),
+        doseDate: centralTodayIso(),
         doseTime: nowCentralHhmm(),
         status: "given",
       }),
@@ -183,7 +186,7 @@ test("LocalApi: the cleared demo DSP records doses normally", async () => {
 
   await fx.api.markMedDose({
     medicationId: fx.keppra,
-    doseDate: todayIso(),
+    doseDate: centralTodayIso(),
     doseTime: nowCentralHhmm(),
     status: "given",
   });
@@ -242,7 +245,7 @@ test("LocalApi: nurse and house manager record with no training record", async (
   });
   await nurseApi.markMedDose({
     medicationId: `${ellis.id}-med-keppra`,
-    doseDate: todayIso(),
+    doseDate: centralTodayIso(),
     doseTime: nowCentralHhmm(),
     status: "given",
   });

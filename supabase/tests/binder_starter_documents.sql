@@ -15,7 +15,7 @@ insert into agencies (id, name, agency_code, state_code, status) values
 insert into auth.users(id,email) values
  ('d7000000-0000-0000-0000-000000000001','starter-dsp@example.invalid'),
  ('d7000000-0000-0000-0000-000000000002','starter-outsider@example.invalid');
-update profiles set must_change_password=<redacted>
+update profiles set must_change_password=false
  where id::text like 'd7000000-%';
 update profiles set home_agency_id='a7000000-0000-0000-0000-000000000001'
  where id='d7000000-0000-0000-0000-000000000001';

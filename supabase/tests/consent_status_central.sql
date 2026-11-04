@@ -10,7 +10,7 @@ insert into sites(id,agency_id,program_id,name) values
  ('c9000000-0000-0000-0000-000000000001','a9000000-0000-0000-0000-000000000001','b9000000-0000-0000-0000-000000000001','Home One');
 insert into auth.users(id,email) values
  ('d9000000-0000-0000-0000-000000000001','central-hm@example.invalid');
-update profiles set must_change_password=<redacted>
+update profiles set must_change_password=false where id::text like 'd9000000-%';
 insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a9000000-0000-0000-0000-000000000001','d9000000-0000-0000-0000-000000000001','manager','house_manager','c9000000-0000-0000-0000-000000000001');
 insert into individuals(id,agency_id,site_id,full_name,date_of_birth) values

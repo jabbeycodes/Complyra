@@ -113,6 +113,28 @@ import {
 /* ------------------------------ input types ------------------------------ */
 /* (the domain module exports entities only; inputs are a store concern) */
 
+
+/**
+ * Today's punch window as real UTC instants: the device's local calendar
+ * day, from 00:00:00.000 to 23:59:59.999 local time.
+ *
+ * Punches store punchedAt as a UTC ISO string. The old range was the
+ * zone-less text `${today}T00:00:00` … `${today}T23:59:59.999`, compared
+ * as text (local store) or read in the server's UTC session zone (hosted
+ * store). After 6 PM Central the UTC date has already rolled over, so an
+ * evening clock-in fell outside "today" and the clock-out was refused with
+ * "No open clock-in to close." — exactly the evening-shift case.
+ */
+export function punchDayRange(d: Date = new Date()): { from: string; to: string } {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
+  return {
+    from: new Date(y, m, day, 0, 0, 0, 0).toISOString(),
+    to: new Date(y, m, day, 23, 59, 59, 999).toISOString(),
+  };
+}
+
 export type HrShiftInput = Omit<HrShift, "id" | "agencyId" | "createdBy"> & {
   createdBy?: string;
 };
@@ -1462,8 +1484,7 @@ export class SupabaseHrStore implements HrStore {
   }
 
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchDayRange(d);
   }
 
   /**
@@ -5090,8 +5111,7 @@ class LocalHrStore implements HrStore {
   }
 
   private dayRange(d = new Date()): { from: string; to: string } {
-    const stamp = todayStamp(d);
-    return { from: `${stamp}T00:00:00`, to: `${stamp}T23:59:59.999` };
+    return punchDayRange(d);
   }
 
   /**

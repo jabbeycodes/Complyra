@@ -267,6 +267,11 @@ test("two correctors racing on one base: exactly one wins, the loser is refused"
   // Both correctors loaded the chart before either wrote: same base.
   const hmSession = await api.signIn(login(DEMO_HM_USERNAME));
   const base = original.markedAt;
+  // On a fast machine the correction can land in the same millisecond as
+  // the original mark, which would make "re-stamped" unobservable. Let the
+  // clock move past the base first (the CAS itself is keyed on the value,
+  // not on elapsed time).
+  while (new Date().toISOString() === base) await new Promise((r) => setTimeout(r, 1));
 
   // Corrector 1 (the HM) wins.
   await api.markMedDose({
