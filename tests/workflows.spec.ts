@@ -133,7 +133,8 @@ test("new requirement is reviewed, assigned, approved, and exportable", async ({
   await page.getByRole("button", { name: "Export audit register" }).click();
   const download = await dl;
   expect(download.suggestedFilename()).toBe(
-    "complyrer-sample-audit-register.csv",
+    // Agency-branded filename (founder rule, PR #245).
+    "Evergreen-Care-sample-audit-register.csv",
   );
   await page
     .getByRole("button", {
@@ -188,7 +189,7 @@ test("search and copilot answers lead to the correct sample records", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("medication");
+  await page.getByLabel("Search people, homes, and requirements").fill("medication");
   await page
     .locator(".search-results")
     .getByRole("button", { name: /Renew medication delegation Morgan Pruitt/ })
@@ -225,7 +226,9 @@ test("site scope updates readiness and mobile navigation remains usable", async 
   ).toBeVisible();
   const band = page.locator(".msh-band");
   await expect(band).toContainText("Willow House");
-  await expect(band).toContainText("8 of 11");
+  // Consent currency counts in the house scores (founder decision
+  // 2026-11-02, PR #248), so Willow's total includes its consent items.
+  await expect(band).toContainText("19 of 29");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -435,6 +438,8 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
   await expect(page.getByRole("heading", { name: "Individuals", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sites & programs", exact: true }).click();
   await expect(page.locator(".location-card")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Cedar House" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Willow House" })).toHaveCount(0);
+  // Exact: the site page also carries "Site review pack · Cedar House" and
+  // "Monthly home checks · Cedar House" headings.
+  await expect(page.getByRole("heading", { name: "Cedar House", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Willow House", exact: true })).toHaveCount(0);
 });

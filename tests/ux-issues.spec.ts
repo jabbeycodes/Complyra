@@ -119,8 +119,11 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
   page,
 }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("Ellis");
-  const results = page.locator(".search-results > button");
+  await page.getByLabel("Search people, homes, and requirements").fill("Ellis");
+  // Requirement rows carry .search-meta; the directory groups above them
+  // (Individuals / Staff / Homes, PR #202) are a separate, separately
+  // capped list and are not what this dedupe test pins.
+  const results = page.locator(".search-results > button").filter({ has: page.locator(".search-meta") });
   await expect(results.first()).toBeVisible();
   const count = await results.count();
   expect(count).toBeGreaterThan(0);
@@ -140,7 +143,7 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
 
 test("search empty state copy is unchanged", async ({ page }) => {
   await signIn(page);
-  await page.getByLabel("Search all requirements").fill("zzzz-no-such-record");
+  await page.getByLabel("Search people, homes, and requirements").fill("zzzz-no-such-record");
   await expect(page.locator(".search-results p")).toHaveText(
     "No matching records. Try a name or site.",
   );
