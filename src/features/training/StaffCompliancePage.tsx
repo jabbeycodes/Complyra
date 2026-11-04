@@ -13,7 +13,7 @@ import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
-import { canReadAsAuditor, hasPermission } from "../../data/permissions";
+import { canViewTrainingRoster, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
@@ -104,11 +104,10 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   );
 
   const canManage = session ? can(session, "hr.view_staff") : false;
-  // AUDITOR-NAV (wave 7U): the auditor reads the same roster read-only.
-  // canManage stays hr.view_staff-only, so Assign training, N/A waivers and
-  // line edits never render for the auditor (ProfilePanel gates them on
-  // canManage / canInitialOwn / role lists the auditor is not on).
-  const canViewRoster = canManage || (session ? canReadAsAuditor(session) : false);
+  // Roster read: hr.view_staff, the program manager, and the auditor's
+  // read path (canViewTrainingRoster). Assign training, N/A waivers and
+  // line edits stay on canManage (hr.view_staff) only.
+  const canViewRoster = session ? canViewTrainingRoster(session) : false;
   const isHm = session ? canSignTrainingAsHm(session.roleKey) : false;
   // Roster access is wider than the hr.view_staff permission: oversight
   // roles (PM/HM/admin) land on the roster too (batch 25). Assigning
@@ -139,7 +138,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     if (!session) return;
     if (
       trainingLandingMode({
-        canViewStaff: can(session, "hr.view_staff") || canReadAsAuditor(session),
+        canViewStaff: canViewTrainingRoster(session),
         roleKey: session.roleKey,
       }) === "roster"
     ) {
@@ -222,22 +221,13 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       )}
 
       {canRoster && roster.kind === "empty" && (
-        <>
-          <section className="panel" aria-label="Not cleared to work alone">
-            <h2>Not cleared to work alone</h2>
-            <Empty
-              title="No staff in scope"
-              text="No staff members are in scope for this view, so there is no clearance verdict to show."
-            />
-          </section>
-          <section className="panel" aria-label="All staff training status">
-            <h2>All staff</h2>
-            <Empty
-              title="No staff in scope"
-              text="Staff appear here as they join the agency."
-            />
-          </section>
-        </>
+        <section className="panel" aria-label="All staff training status">
+          <h2>All staff</h2>
+          <Empty
+            title="No staff in scope"
+            text="No staff members are in scope for this view, so there is no clearance verdict to show."
+          />
+        </section>
       )}
 
       {canRoster && roster.kind === "ready" && (

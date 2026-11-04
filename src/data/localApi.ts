@@ -91,6 +91,7 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
@@ -172,6 +173,7 @@ import {
 } from "./personalSpending";
 import { generateTempPassword } from "./agencyCode";
 import { assignedSiteIds, canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import {
   canActAtSite,
   canReadIndividual,
@@ -2290,14 +2292,11 @@ function assertCan(session: SessionUser, key: PermissionKey) {
  * staffer's training profile) — hr.view_staff holders, or the auditor on
  * its read path. Writes (initial/waive/assign/correct) keep their own gates.
  */
-/** Training roster / cross-profile read: hr.view_staff, a training-
- *  oversight role (batch 25), or the auditor read path (wave 7U). */
+/** Training roster / cross-profile read: canViewTrainingRoster
+ *  (hr.view_staff, the PM, the auditor read path) or a training-oversight
+ *  role (batch 25). */
 function assertTrainingRosterRead(session: SessionUser) {
-  if (
-    !hasPermission(session, "hr.view_staff") &&
-    !canOverseeTraining(session.roleKey) &&
-    !canReadAsAuditor(session)
-  ) {
+  if (!canViewTrainingRoster(session) && !canOverseeTraining(session.roleKey)) {
     throw new Error("You do not have permission to do that.");
   }
 }
@@ -9268,60 +9267,29 @@ export class LocalApi implements ComplyraApi {
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = assertSession(this.store);
     assertTrainingRosterRead(session);
-    // Roster comes from the agency's staff memberships — not only from staff
-    // who already have training assigned — so "All staff" never renders an
-    // empty table while the agency has people. A house manager's roster is
-    // scoped to her own homes (her membership site plus sites she is
-    // assigned to); agency-level viewers (admin, PM, HR) keep the full
-    // roster (batch 25: oversight surfaces are scoped to their sites).
-    let visibleSiteIds: Set<string> | null = null;
-    if (session.roleKey === "house_manager") {
-      const today = todayIso();
-      const assignmentSites = this.store.db.assignments
-        .filter(
-          (row) =>
-            row.agencyId === session.agencyId &&
-            row.userId === session.userId &&
-            row.startsOn <= today &&
-            (!row.endsOn || row.endsOn >= today),
-        )
-        .map((row) => row.siteId)
-        .filter((id): id is string => Boolean(id));
-      visibleSiteIds = new Set(assignedSiteIds(session, [], assignmentSites));
-    }
-    const memberships = this.store.db.memberships.filter(
-      (row) =>
-        row.agencyId === session.agencyId &&
-        (!siteId || row.siteId === siteId) &&
-        (!visibleSiteIds || (row.siteId !== null && visibleSiteIds.has(row.siteId))),
-    );
-    const userIds = [...new Set(memberships.map((row) => row.userId))];
-    // Wave 7S (batch 103): membership homes per staffer, for rows whose
-    // training profile carries no checklist sites yet.
-    const membershipSiteNames = new Map<string, string[]>();
-    for (const row of memberships) {
-      if (!row.siteId) continue;
-      const name =
-        this.store.db.sites.find((site) => site.id === row.siteId)?.name ?? "Unknown site";
-      const list = membershipSiteNames.get(row.userId) ?? [];
-      if (!list.includes(name)) list.push(name);
-      membershipSiteNames.set(row.userId, list);
-    }
+    const entries = trainingRosterEntries({
+      session,
+      memberships: this.store.db.memberships.filter((row) => row.agencyId === session.agencyId),
+      assignments: this.store.db.assignments.filter((row) => row.agencyId === session.agencyId),
+      individualSiteById: new Map(this.store.db.individuals.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const siteNameOf = (id: string) =>
+      this.store.db.sites.find((row) => row.id === id)?.name ?? "Unknown site";
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        // The row's site label never goes blank: checklist sites first,
-        // then the staffer's membership homes, and a staffer with neither
-        // is named as what they are — "No site assigned" — instead of a
-        // bare dash that hides the unassigned group (batch 103).
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
         siteName: siteId
-          ? (this.store.db.sites.find((row) => row.id === siteId)?.name ?? "Unknown site")
+          ? siteNameOf(siteId)
           : profile.siteNames.length > 0
             ? profile.siteNames.join(", ")
-            : (membershipSiteNames.get(userId) ?? []).join(", ") || "No site assigned",
+            : siteIds.map(siteNameOf).join(", ") || "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,

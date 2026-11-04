@@ -93,7 +93,8 @@ import {
   normalizeUsername,
 } from "./types";
 import { generateTempPassword } from "./agencyCode";
-import { canAccessSite } from "./dashboard";
+import { canAccessSite, isAgencyWideViewer } from "./dashboard";
+import { trainingRosterEntries } from "./trainingRosterScope";
 import { portraitSrc } from "./personPortrait";
 import {
   assertCalendarDate,
@@ -212,6 +213,7 @@ import {
   canRecordHouseCard,
   canCloseHouseCardMonth,
   canViewPersonalSpending,
+  canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
@@ -7951,12 +7953,12 @@ export class HostedApi implements ComplyraApi {
   async getStaffTrainingProfile(userId: string): Promise<StaffTrainingProfile> {
     const session = await this.requireSession();
     // Own profile is always readable; another staffer's needs
-    // hr.view_staff, a training-oversight role (batch 25), or the auditor
-    // read path (AUDITOR-NAV, wave 7U).
+    // the roster rule: canViewTrainingRoster (hr.view_staff, the PM, the
+    // auditor read path) or a training-oversight role (batch 25).
     if (
       session.userId !== userId &&
-      !canOverseeTraining(session.roleKey) &&
-      !canReadAsAuditor(session)
+      !canViewTrainingRoster(session) &&
+      !canOverseeTraining(session.roleKey)
     ) {
       this.requirePermission(session, "hr.view_staff");
     }
@@ -8079,60 +8081,57 @@ export class HostedApi implements ComplyraApi {
 
   async listStaffNeedingClearance(siteId?: string): Promise<StaffClearanceRow[]> {
     const session = await this.requireSession();
-    // Roster read: hr.view_staff, a training-oversight role (batch 25), or
-    // the auditor read path (AUDITOR-NAV, wave 7U).
-    if (!canOverseeTraining(session.roleKey) && !canReadAsAuditor(session))
+    // Roster read: canViewTrainingRoster (hr.view_staff, the PM, the auditor
+    // read path) or a training-oversight role (batch 25). Rows come from
+    // staff memberships, scoped by trainingRosterEntries (batches 195-197).
+    if (!canViewTrainingRoster(session) && !canOverseeTraining(session.roleKey))
       this.requirePermission(session, "hr.view_staff");
-    // Wave 7S (simulation batch 103 + Pass 7 roll-up): the roster comes
-    // from the agency's staff memberships — not from training_requirements.
-    // The old requirements-derived roster hid exactly the people this page
-    // exists to flag: a new hire with no training rows yet was invisible,
-    // so the Training page printed "Everyone is cleared" over an empty
-    // table while that staffer's own page said NOT CLEARED (parity with
-    // LocalApi; the same roster fix as PR #229, carried here so the
-    // verdict surfaces agree whichever lands first).
     const { data: memberRows, error: memberError } = await this.client
       .from("memberships")
       .select("user_id, site_id")
       .eq("agency_id", session.agencyId);
     throwIf(memberError, "Could not load staff training.");
-    const memberSiteIds = new Map<string, string[]>();
-    for (const row of (memberRows ?? []) as Record<string, unknown>[]) {
-      const userId = String(row.user_id);
-      const memberSiteId = (row.site_id as string | null) ?? null;
-      if (siteId && memberSiteId !== siteId) continue;
-      const list = memberSiteIds.get(userId) ?? [];
-      if (memberSiteId && !list.includes(memberSiteId)) list.push(memberSiteId);
-      memberSiteIds.set(userId, list);
-    }
-    const userIds = [...memberSiteIds.keys()];
-    // Names for membership homes, used by rows whose training profile
-    // carries no checklist sites yet (training not assigned).
-    const homeSiteIds = [...new Set([...memberSiteIds.values()].flat())];
-    const { data: homeSiteRows } = homeSiteIds.length
-      ? await this.client.from("sites").select("id, name").in("id", homeSiteIds)
+    // Assignments only decide house membership for a site-scoped view; an
+    // agency-wide viewer with no site filter gets everyone regardless.
+    const needsAssignments = Boolean(siteId) || !isAgencyWideViewer(session);
+    const [assignments, individualRefs] = needsAssignments
+      ? await Promise.all([
+          this.agencyAssignments(session.agencyId),
+          this.agencyIndividualRefs(session.agencyId),
+        ])
+      : [[], []];
+    const entries = trainingRosterEntries({
+      session,
+      memberships: ((memberRows ?? []) as Record<string, unknown>[]).map((row) => ({
+        userId: String(row.user_id),
+        siteId: (row.site_id as string | null) ?? null,
+      })),
+      assignments,
+      individualSiteById: new Map(individualRefs.map((row) => [row.id, row.siteId])),
+      today: todayIso(),
+      siteId,
+    });
+    const labelSiteIds = [...new Set(entries.flatMap((entry) => entry.siteIds))];
+    const { data: siteRows } = labelSiteIds.length
+      ? await this.client.from("sites").select("id, name").in("id", labelSiteIds)
       : { data: [] as { id: string; name: string }[] };
-    const homeSiteNameById = new Map(
-      ((homeSiteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+    const siteNameById = new Map(
+      ((siteRows ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
     );
-    const filteredSiteName = siteId ? await this.siteName(siteId) : null;
     const rows: StaffClearanceRow[] = [];
-    for (const userId of userIds) {
+    for (const { userId, siteIds } of entries) {
       const profile = await this.getStaffTrainingProfile(userId);
       rows.push({
         userId,
         fullName: profile.fullName,
-        // The row's site label never goes blank: checklist sites first,
-        // then the staffer's membership homes, and a staffer with neither
-        // is named as what they are — "No site assigned" — instead of a
-        // bare dash that hides the unassigned group (batch 103).
+        // Checklist sites first; a staffer with no training assigned yet is
+        // labelled by their house so the row still says where they work.
         siteName: siteId
-          ? (filteredSiteName ?? "Unknown site")
+          ? (siteNameById.get(siteId) ?? "Unknown site")
           : profile.siteNames.length > 0
             ? profile.siteNames.join(", ")
-            : (memberSiteIds.get(userId) ?? [])
-                .map((id) => homeSiteNameById.get(id) ?? "Unknown site")
-                .join(", ") || "No site assigned",
+            : siteIds.map((id) => siteNameById.get(id) ?? "Unknown site").join(", ") ||
+              "No site assigned",
         clearedForInRatio: profile.clearedForInRatio,
         gateReasons: profile.gateReasons,
         pendingCount: profile.counts.pending,
