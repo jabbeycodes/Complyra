@@ -918,49 +918,27 @@ export default function App() {
           },
     );
   }
+  // NAV-IA (wave 1 audit, 2026-11-03): five groups that follow how an agency
+  // runs — the homes and people (Programs), the recurring house work (Daily
+  // operations), the audit evidence (Compliance), the staff side
+  // (Workforce), and reporting/administration. Every page sits in exactly
+  // one group; pageVisible() still decides who sees each entry, and a
+  // group with nothing visible for the role is not rendered.
   const navItems = [
     {
       title: "Programs",
       items: [
         ["Overview", LayoutDashboard],
-        ["Scheduling", CalendarClock],
-        ["Platform", ShieldCheck],
+        ["Sites & programs", Building2],
         ["Individuals", Users],
+        ["Intake", UserPlus],
         ["Appointments", CalendarDays],
         ["Consents", FileText],
-        ["Sites & programs", Building2],
-        ["Intake", UserPlus],
-        ["Staff", Users],
-        ["Roles & access", KeyRound],
       ],
     },
     {
-      title: "Compliance",
+      title: "Daily operations",
       items: [
-        ["Requirements", ListChecks],
-        ["Documents", FolderOpen],
-        ["Review queue", ClipboardCheck],
-        ["Audit center", ShieldCheck],
-        ["Audit Me", ClipboardCheck],
-        // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
-        // system-verified items, auditor scoring, and photo disputes.
-        ["QA Review", BadgeCheck],
-        ["Report Library", LibraryBig],
-        ["Acknowledgments", PenLine],
-        ["Activity log", History],
-        ["AI settings", ServerCog],
-      ],
-    },
-    {
-      // Section header shows the current agency's display name — never a hardcoded name.
-      title: session.agencyName,
-      items: [
-        // LIFEPATH-P2-NAV (training engine)
-        ["Training", BookOpen],
-        // LIFEPATH-P3-NAV (delegation forms)
-        ["Delegations", FileText],
-        // LIFEPATH-P4-NAV (certificates)
-        ["Certificates", Award],
         // LIFEPATH-P5-NAV (HM weekly checklist)
         ["Weekly checklist", ClipboardCheck],
         ["Checklist assignments", ClipboardList],
@@ -968,19 +946,56 @@ export default function App() {
         ["Supply forecast", MedInventoryNavIcon],
         // Medication orders worklist + expiring review report
         ["Medication orders", MedOrdersNavIcon],
+        ["Scheduling", CalendarClock],
+      ],
+    },
+    {
+      title: "Compliance",
+      items: [
+        ["Requirements", ListChecks],
+        ["Review queue", ClipboardCheck],
+        ["Acknowledgments", PenLine],
+        // LIFEPATH-P3-NAV (delegation forms)
+        ["Delegations", FileText],
+        ["Documents", FolderOpen],
+        ["Audit Me", ClipboardCheck],
+        ["Audit center", ShieldCheck],
+        // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
+        // system-verified items, auditor scoring, and photo disputes.
+        ["QA Review", BadgeCheck],
+      ],
+    },
+    {
+      title: "Workforce",
+      items: [
+        ["Staff", Users],
+        // LIFEPATH-P2-NAV (training engine)
+        ["Training", BookOpen],
+        // LIFEPATH-P4-NAV (certificates)
+        ["Certificates", Award],
+        ["Employee Hub", Briefcase],
+        ["Messages", MessageSquare],
+        ["Recognition", Trophy],
         // LIFEPATH-P7-NAV (mileage tracking)
         ["Mileage", MileageNavIcon],
       ],
     },
     {
-      title: "Employee hub",
+      title: "Reports & admin",
       items: [
-        ["Employee Hub", Briefcase],
-        ["Messages", MessageSquare],
-        ["Recognition", Trophy],
+        ["Report Library", LibraryBig],
+        ["Activity log", History],
+        ["Roles & access", KeyRound],
+        ["AI settings", ServerCog],
+        ["Platform", ShieldCheck],
       ],
     },
   ] as const;
+  // The breadcrumb names the group the current page lives in.
+  const currentNavGroup =
+    navItems.find((group) =>
+      group.items.some(([name]) => name === (isCategory ? "Requirements" : page)),
+    )?.title ?? "Programs";
   if (mobileActive) {
     return (
       <InactivityGuard onSignOut={() => void signOut()}>
@@ -1193,7 +1208,7 @@ export default function App() {
             >
               <Menu size={21} />
             </button>
-            <span>Programs</span>
+            <span>{currentNavGroup}</span>
             <ChevronRight size={13} />
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>

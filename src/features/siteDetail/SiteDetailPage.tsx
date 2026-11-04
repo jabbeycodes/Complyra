@@ -74,6 +74,7 @@ import {
   MAX_INDIVIDUAL_HIGHLIGHTS,
 } from "./individualHighlights";
 import SiteDrillsSchedule from "./SiteDrillsSchedule";
+import SiteReviewPanel from "../SiteReviewPanel";
 import GerTab from "../ger/GerTab";
 import SiteQaReview from "../qa/SiteQaReview";
 import SiteCoverageBoard from "../coverage/SiteCoverageBoard";
@@ -927,6 +928,11 @@ export default function SiteDetailPage({
                 ))}
               </dl>
             </div>
+            {/* Wave 1 (NAV-IA): the site review / pre-survey pack belongs to
+                the home. It was only reachable from Sites & programs with a
+                single home picked in the filter; it now also lives on the
+                home's own page. The panel keeps its own edit gates. */}
+            <SiteReviewPanel siteId={site.id} />
           </>
         )}
 
