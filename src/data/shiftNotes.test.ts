@@ -731,6 +731,8 @@ test("wave 7F: an edit cannot empty the body, move a note into the future, or le
   const after = (await impl.getIspData(ellisId)).notes.find((note) => note.id === noteId);
   assert.equal(after?.summary, "Corrected body.");
   assert.equal(after?.signatureDataUrl, PNG_1X1);
+});
+
 test("late shift notes: filed a later Central day than the shift = Late (batches 9/14)", () => {
   // Filed the same Central day as the shift (3 PM Central = 20:00 UTC
   // in CDT): on time, however late in the day it was written.

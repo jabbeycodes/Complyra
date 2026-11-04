@@ -218,9 +218,9 @@ test("each shell screen highlights its pill destination", () => {
   assert.equal(activeBottomNavFor("people"), "people");
   assert.equal(activeBottomNavFor("health"), "people");
   assert.equal(activeBottomNavFor("spending"), "people");
-  assert.equal(activeBottomNavFor("mar"), "meds");
-  assert.equal(activeBottomNavFor("quicklog"), "meds");
-  assert.equal(activeBottomNavFor("housecard"), "meds");
+  assert.equal(activeBottomNavFor("mar"), "people");
+  assert.equal(activeBottomNavFor("quicklog"), "more");
+  assert.equal(activeBottomNavFor("housecard"), "more");
   assert.equal(activeBottomNavFor("scheduling"), "more");
   assert.equal(activeBottomNavFor("sites"), "more");
   assert.equal(activeBottomNavFor("notifications"), "more");

@@ -73,9 +73,11 @@ const ACTIVE_BY_VIEW: Record<string, BottomNavId> = {
   careplans: "people",
   consents: "people",
   lifeevents: "people",
-  mar: "meds",
-  quicklog: "meds",
-  housecard: "meds",
+  // Medications live under Health (founder directive, 2026-10-31), and
+  // Health belongs to People. House-level logs ride More.
+  mar: "people",
+  quicklog: "more",
+  housecard: "more",
 };
 
 /** The pill destination a shell screen belongs to (More for utility screens). */

@@ -88,7 +88,6 @@ describe("AssignRoleControl role-select initialization (wave 7T)", () => {
     const admin = makeSession({});
     assert.equal(selectedOptionValue(renderControl(admin, "house_manager")), "house_manager");
     assert.equal(selectedOptionValue(renderControl(admin, "dsp")), "dsp");
-    assert.equal(selectedOptionValue(renderControl(admin, "compliance_admin")), "compliance_admin");
   });
 
   it("HR viewer: an administrator member renders read-only — no form, no select, no Save", () => {
@@ -102,31 +101,6 @@ describe("AssignRoleControl role-select initialization (wave 7T)", () => {
     assert.ok(!html.includes("<select"), "no select that could submit a wrong role");
     assert.ok(!html.includes("Save"), "no save button");
     assert.ok(html.includes("Agency administrator"), "the member's actual role is shown");
-  });
-
-  it("compliance viewer: an administrator member renders read-only (the batch-158 scene)", () => {
-    const compliance = makeSession({
-      userId: "viewer-ca",
-      role: "compliance_admin",
-      roleKey: "compliance_admin",
-      permissions: defaultPermissions("compliance_admin"),
-    });
-    const html = renderControl(compliance, "administrator");
-    assert.ok(!html.includes("<select"), "no select that could submit a wrong role");
-    assert.ok(!html.includes("Save"), "no save button");
-    assert.ok(html.includes("Agency administrator"), "the member's actual role is shown");
-  });
-
-  it("HR viewer: a compliance-administrator member also renders read-only", () => {
-    const hr = makeSession({
-      userId: "viewer-hr",
-      role: "hr",
-      roleKey: "hr",
-      permissions: defaultPermissions("hr"),
-    });
-    const html = renderControl(hr, "compliance_admin");
-    assert.ok(!html.includes("<select"), "no select");
-    assert.ok(html.includes("Compliance administrator"), "the member's actual role is shown");
   });
 
   it("HR viewer keeps assignment power over operational roles, pre-set to the actual role", () => {

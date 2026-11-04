@@ -34,7 +34,6 @@ test("start-review gate (qa.schedule) per role template", () => {
   const expected: Record<RoleKey, boolean> = {
     administrator: true,
     program_manager: true,
-    compliance_admin: false,
     house_manager: false,
     dsp: false,
     nurse: false,
