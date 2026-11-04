@@ -1,0 +1,87 @@
+# Apply database migrations to a hosted Supabase project.
+#
+# Run it from GitHub → Actions → "Migrate database" → Run workflow.
+#   target:   staging or production (each is a GitHub Environment with its own secrets)
+#   git_ref:  the branch, tag or commit whose supabase/migrations to apply
+#   apply:    leave off for a dry run (lists what would change, touches nothing)
+#
+# Secrets, per Environment (Settings → Environments → staging / production):
+#   SUPABASE_ACCESS_TOKEN  personal access token (supabase.com → Account → Access Tokens)
+#   SUPABASE_PROJECT_REF   the project's ref (Project Settings → General)
+#   SUPABASE_DB_PASSWORD   the project's database password
+#
+# Tip: add "Required reviewers" to the production Environment so a
+# production run waits for your click before it touches the database.
+name: Migrate database
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which project to migrate
+        type: choice
+        options: [staging, production]
+        default: staging
+      git_ref:
+        description: Branch, tag or commit to take migrations from
+        type: string
+        default: main
+      apply:
+        description: Apply the migrations (off = dry run only)
+        type: boolean
+        default: false
+
+# Never run two migrations against the same project at once.
+concurrency:
+  group: migrate-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: ${{ inputs.apply && 'Apply' || 'Dry run' }} → ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Check secrets are set
+        run: |
+          missing=0
+          for name in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD PROJECT_REF; do
+            if [ -z "${!name}" ]; then echo "::error::$name is not set for the '${{ inputs.target }}' environment"; missing=1; fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.107.0
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      # --include-all: some migrations from merged branches carry timestamps
+      # older than the newest one already applied; without it they are skipped.
+      - name: Pending migrations (dry run)
+        run: supabase db push --include-all --dry-run --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Apply migrations
+        if: ${{ inputs.apply }}
+        run: supabase db push --include-all --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ inputs.apply && 'Applied' || 'Dry run' }} → ${{ inputs.target }}"
+            echo "Migrations from \`${{ inputs.git_ref }}\` ($(git rev-parse --short HEAD))."
+          } >> "$GITHUB_STEP_SUMMARY"
