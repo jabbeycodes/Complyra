@@ -188,11 +188,48 @@ function download(name: string, body: string, type = "text/csv;charset=utf-8") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+/**
+ * Recovery card shown when a workspace load stays unsettled past the
+ * stall threshold (see src/data/loadWatchdog.ts): same login-card pattern
+ * as the "Could not open the workspace" error card, so a wedged session
+ * restore or workspace request is escapable instead of an endless
+ * spinner.
+ */
+function WorkspaceStallCard({
+  onRetry,
+  onSignOut,
+}: {
+  onRetry: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-brand">
+          <ComplyRerWordmark size={36} />
+        </div>
+        <h1>Still loading</h1>
+        <p role="alert">
+          This is taking longer than usual. Your connection or session may be stuck.
+        </p>
+        <button className="button primary full" type="button" onClick={onRetry}>
+          <RotateCcw size={16} /> Try again
+        </button>
+        <div className="login-demo">
+          <button type="button" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const {
     session,
     workspace,
     loading,
+    loadStalled,
     error,
     api,
     refresh,
@@ -485,6 +522,14 @@ export default function App() {
   const consentToken = /^#\/consent-sign\/([0-9a-f]{64})$/.exec(kioskHash)?.[1];
   if (consentToken) return <PublicConsentSigning token={consentToken} />;
   if (loading) {
+    if (loadStalled) {
+      return (
+        <WorkspaceStallCard
+          onRetry={() => void refresh().catch(() => {})}
+          onSignOut={() => void signOut()}
+        />
+      );
+    }
     return <BrandLoader status="Loading workspace…" />;
   }
   if (!session) {
@@ -516,6 +561,14 @@ export default function App() {
             </div>
           </div>
         </div>
+      );
+    }
+    if (loadStalled) {
+      return (
+        <WorkspaceStallCard
+          onRetry={() => void refresh().catch(() => {})}
+          onSignOut={() => void signOut()}
+        />
       );
     }
     return <BrandLoader status="Loading workspace…" />;
