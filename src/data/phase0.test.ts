@@ -33,12 +33,19 @@ function login(username: string) {
   return { agencyCode: DEMO_AGENCY_CODE, username, password: DEMO_PASSWORD };
 }
 
+// The P0-8 training flows exercise a staffer with a BLANK sheet. Alex
+// Morgan (DEMO_DSP_USERNAME) no longer qualifies: the demo seeds his
+// completed training so the medication-administration clearance gate
+// leaves the demo med pass usable (his dose-exception test above still
+// signs in as him). Taylor Reed is the other Cedar DSP.
+const TRAINEE_USERNAME = "taylor.reed";
+
 async function adminApi() {
   const mem = store();
   const api = new LocalApi(mem);
   const session = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const workspace = await api.loadWorkspace(session);
-  const dsp = workspace.staff.find((person) => person.username === DEMO_DSP_USERNAME);
+  const dsp = workspace.staff.find((person) => person.username === TRAINEE_USERNAME);
   const hm = workspace.staff.find((person) => person.username === DEMO_HM_USERNAME);
   assert.ok(dsp, "demo DSP exists");
   assert.ok(hm, "demo HM exists");
@@ -272,13 +279,13 @@ test("signoff records trainer name, signer id, and self-training flag", async ()
   const siteId = workspace.sites[0].id;
   await api.assignTraining({ userId: dspId, siteId, source: "checklist" });
   const dspApi = new LocalApi(mem);
-  await dspApi.signIn(login(DEMO_DSP_USERNAME));
+  await dspApi.signIn(login(TRAINEE_USERNAME));
   const lines = (await dspApi.getStaffTrainingProfile(dspId)).requirements;
   const line = lines[0];
   assert.ok(line);
   const hmName = workspace.staff.find((person) => person.id === hmId)!.name;
   await dspApi.initialRequirementLine(line.id, {
-    initials: "AM",
+    initials: "TR",
     trainerUserId: hmId,
     hoursTotal: 2,
     hoursWithHm: 1,
@@ -297,11 +304,11 @@ test("self-training is flagged when the trainer is the staffer", async () => {
   const siteId = workspace.sites[0].id;
   await api.assignTraining({ userId: dspId, siteId, source: "checklist" });
   const dspApi = new LocalApi(mem);
-  await dspApi.signIn(login(DEMO_DSP_USERNAME));
+  await dspApi.signIn(login(TRAINEE_USERNAME));
   const line = (await dspApi.getStaffTrainingProfile(dspId)).requirements[0];
   assert.ok(line);
   await dspApi.initialRequirementLine(line.id, {
-    initials: "AM",
+    initials: "TR",
     trainerUserId: dspId,
     hoursTotal: 1,
     hoursWithHm: 0,
@@ -341,11 +348,11 @@ async function completedSheet() {
   const { mem, api, workspace, dspId, hmId } = await adminApi();
   const siteId = workspace.sites[0].id;
   await api.assignTraining({ userId: dspId, siteId, source: "checklist" });
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   const lines = (await api.getStaffTrainingProfile(dspId)).requirements;
   for (const line of lines) {
     await api.initialRequirementLine(line.id, {
-      initials: "AM",
+      initials: "TR",
       trainerUserId: hmId,
       hoursTotal: 1,
       hoursWithHm: 0.5,
@@ -355,7 +362,7 @@ async function completedSheet() {
     userId: dspId,
     siteId,
     role: "staff",
-    signatureName: "Alex Morgan",
+    signatureName: "Taylor Reed",
   });
   await api.signIn(login(DEMO_HM_USERNAME));
   await api.signStaffChecklist({
@@ -373,7 +380,7 @@ async function completedSheet() {
 
 test("locked sheets reject line edits, new initials, and N/A", async () => {
   const { api, hmId, lineId } = await completedSheet();
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await assert.rejects(
     api.initialRequirementLine(lineId, {
       initials: "XX",
@@ -411,14 +418,19 @@ test("admin correction unlocks the sheet, audits the reason, and allows re-edit"
     countersignatureId,
     reason: "hours were under-counted",
   });
-  assert.equal(countersignatures(mem).length, 0);
+  // Scoped to the trainee: the demo seed carries one countersignature of
+  // its own (Alex Morgan's completed training) that is not this sheet's.
+  assert.equal(
+    countersignatures(mem).filter((row) => row.userId === dspId).length,
+    0,
+  );
   const audit = mem.db.audit[0];
   assert.equal(audit.action, "training.correction_requested");
   assert.match(audit.detail, /hours were under-counted/);
   // The sheet is unlocked: an admin may edit the line, then staff re-signs and
   // the HM re-countersigns.
   await api.initialRequirementLine(lineId, {
-    initials: "AM",
+    initials: "TR",
     trainerUserId: hmId,
     hoursTotal: 3,
     hoursWithHm: 1,
@@ -428,12 +440,12 @@ test("admin correction unlocks the sheet, audits the reason, and allows re-edit"
   assert.equal(signoff?.hoursTotal, 3);
   const edited = mem.db.audit[0];
   assert.equal(edited.action, "training.line_edited");
-  await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.signIn(login(TRAINEE_USERNAME));
   await api.signStaffChecklist({
     userId: dspId,
     siteId,
     role: "staff",
-    signatureName: "Alex Morgan",
+    signatureName: "Taylor Reed",
   });
   await api.signIn(login(DEMO_HM_USERNAME));
   await api.signStaffChecklist({
@@ -442,7 +454,10 @@ test("admin correction unlocks the sheet, audits the reason, and allows re-edit"
     role: "hm",
     signatureName: "Jordan Lee",
   });
-  assert.equal(countersignatures(mem).length, 1);
+  assert.equal(
+    countersignatures(mem).filter((row) => row.userId === dspId).length,
+    1,
+  );
 });
 
 test("a waived line can be corrected back to an ordinary signoff", async () => {

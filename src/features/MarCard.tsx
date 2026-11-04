@@ -11,6 +11,8 @@ import { Pill } from "lucide-react";
 import { Empty } from "../components";
 import { useData } from "../data/DataProvider";
 import { canLogDoseException, todayIso } from "../data/chart";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
+import { useMedAdminLock } from "./medAdminLock";
 import { formatClock, hhmmToMinutes } from "../data/dueItems";
 import type {
   MedDoseMark,
@@ -48,6 +50,8 @@ export default function MarCard({ individualId }: { individualId: string }) {
     status: MedDoseMarkStatus;
     reason: string;
   } | null>(null);
+  // Clearance gate: an uncleared DSP sees the record but no mark buttons.
+  const medLocked = useMedAdminLock(api, session);
 
   async function reloadMarks() {
     try {
@@ -95,7 +99,8 @@ export default function MarCard({ individualId }: { individualId: string }) {
   }, [views]);
 
   if (!session) return null;
-  const canMark = canLogDoseException(session.roleKey);
+  const roleCanMark = canLogDoseException(session.roleKey);
+  const canMark = roleCanMark && !medLocked;
 
   function markFor(medicationId: string, doseTime: string): MedDoseMark | undefined {
     return marks.find(
@@ -145,6 +150,10 @@ export default function MarCard({ individualId }: { individualId: string }) {
         Scheduled doses for today. Marking Given, Missed, LOA, or On hold clears
         the dose from the site due-items list.
       </p>
+
+      {medLocked && roleCanMark && (
+        <p className="muted mar-lock-note">{MED_ADMIN_CLEARANCE_MESSAGE}.</p>
+      )}
 
       {error && (
         <p className="form-error" role="alert">

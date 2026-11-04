@@ -16,6 +16,8 @@ import {
 } from "../../data/chart";
 import { hhmmToMinutes } from "../../data/dueItems";
 import { deliveryHistoryLabel } from "../../data/medInventory";
+import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
+import { useMedAdminLock } from "../medAdminLock";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
@@ -664,8 +666,11 @@ export default function MobileMar({
   const [error, setError] = useState("");
 
   const person = people.find((row) => row.id === personId) ?? null;
-  const canMark = canLogDoseException(session.roleKey);
-  const canPrn = canLogPrnDose(session.roleKey);
+  // Clearance gate: an uncleared DSP keeps the MAR view but cannot open
+  // the dose/exception forms or the PRN log (the APIs refuse them too).
+  const medLocked = useMedAdminLock(api, session);
+  const canMark = canLogDoseException(session.roleKey) && !medLocked;
+  const canPrn = canLogPrnDose(session.roleKey) && !medLocked;
   const canReset = canRecordDelivery(session.roleKey);
 
   const reload = useCallback(async () => {
@@ -935,10 +940,16 @@ export default function MobileMar({
               );
             })}
           </div>
-          {!canMark && (
+          {medLocked ? (
             <p className="msh-section-note">
-              Your role can view this pass but cannot record doses.
+              {MED_ADMIN_CLEARANCE_MESSAGE}.
             </p>
+          ) : (
+            !canMark && (
+              <p className="msh-section-note">
+                Your role can view this pass but cannot record doses.
+              </p>
+            )
           )}
         </div>
       )}
@@ -990,6 +1001,11 @@ export default function MobileMar({
 
       {!administer && !refillMed && !prnMed && tab === "prn" && (
         <div className="msh-list">
+          {medLocked && (
+            <p className="msh-section-note">
+              {MED_ADMIN_CLEARANCE_MESSAGE}.
+            </p>
+          )}
           {prnMeds.length === 0 && (
             <p className="msh-empty">No PRN medications for {person.name}.</p>
           )}
