@@ -223,6 +223,8 @@ export default function MobileShell({
   );
   const [siteQuery, setSiteQuery] = useState("");
   const [ispPersonId, setIspPersonId] = useState<string | null>(null);
+  // Wave 1: the person whose MAR to open (null = the MAR person picker).
+  const [marPersonId, setMarPersonId] = useState<string | null>(null);
   const [spendingPersonId, setSpendingPersonId] = useState<string | null>(
     null,
   );
@@ -774,9 +776,11 @@ export default function MobileShell({
 
         {view === "mar" && scopedSite && (
           <MobileMar
+            key={marPersonId ?? "picker"}
             api={api}
             session={session}
             people={people}
+            initialPersonId={marPersonId}
             onOpenChart={nav.openPersonChart}
           />
         )}
@@ -801,7 +805,10 @@ export default function MobileShell({
             session={session}
             people={people}
             onOpenChart={nav.openPersonChart}
-            onOpenMedications={() => setView("mar")}
+            onOpenMedications={(personId) => {
+              setMarPersonId(personId ?? null);
+              setView("mar");
+            }}
             onOpenSpending={(person) => {
               setSpendingPersonId(person.id);
               setView("spending");
@@ -880,7 +887,10 @@ export default function MobileShell({
               (drill) => drill.siteId === scopedSite.id,
             )}
             onOpenChart={nav.openPersonChart}
-            onOpenMedications={() => setView("mar")}
+            onOpenMedications={() => {
+              setMarPersonId(null);
+              setView("mar");
+            }}
             onOpenHouseCard={() => setView("housecard")}
             onOpenSpending={(person) => {
               setSpendingPersonId(person.id);

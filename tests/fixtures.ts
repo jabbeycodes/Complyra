@@ -28,6 +28,8 @@ export async function openPersonMar(page: import("@playwright/test").Page, perso
     .getByRole("button", { name: typeof personName === "string" ? new RegExp(personName) : personName })
     .first()
     .click();
+  // From the person's Health view the MAR opens on that same person
+  // (wave 1: no second person picker).
   const marRow = page.getByRole("button", { name: /^Medications Pass meds/ });
   if (await marRow.isVisible().catch(() => false)) await marRow.click();
 }

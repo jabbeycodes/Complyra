@@ -89,7 +89,8 @@ export default function MobileHealth({
   session: SessionUser;
   people: WorkspaceIndividual[];
   onOpenChart: (name: string) => void;
-  onOpenMedications: () => void;
+  /** Opens the MAR; from a person's view it opens on that person. */
+  onOpenMedications: (personId?: string) => void;
   /**
    * Embedding door (the Quick log chooser): when set, the people picker
    * carries a back button to the host flow. The Health TILE mounts this
@@ -195,7 +196,7 @@ export default function MobileHealth({
           <>
             <h3 className="msh-pass-title">Medications</h3>
             <div className="msh-list">
-              <MedicationsEntry onOpen={onOpenMedications} />
+              <MedicationsEntry onOpen={() => onOpenMedications()} />
             </div>
           </>
         )}
@@ -278,7 +279,9 @@ export default function MobileHealth({
                 </div>
               );
             })}
-            {medsVisible && <MedicationsEntry onOpen={onOpenMedications} />}
+            {/* Wave 1: from a person's view the MAR opens on that same
+                person — no second person picker. */}
+            {medsVisible && <MedicationsEntry onOpen={() => onOpenMedications(person.id)} />}
             {spendingVisible && onOpenSpending && (
               <button
                 type="button"

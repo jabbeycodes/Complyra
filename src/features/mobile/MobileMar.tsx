@@ -648,15 +648,20 @@ export default function MobileMar({
   api,
   session,
   people,
+  initialPersonId = null,
   onOpenChart,
 }: {
   api: ComplyraApi;
   session: SessionUser;
   people: WorkspaceIndividual[];
+  /** Open straight on this person's MAR (e.g. from their Health view). */
+  initialPersonId?: string | null;
   onOpenChart: (name: string, sectionId?: string) => void;
 }) {
   const todayIso = centralTodayIso();
-  const [personId, setPersonId] = useState<string | null>(null);
+  const [personId, setPersonId] = useState<string | null>(
+    initialPersonId && people.some((row) => row.id === initialPersonId) ? initialPersonId : null,
+  );
   const [dateIso, setDateIso] = useState(todayIso);
   const [tab, setTab] = useState<MarTab>("scheduled");
   const [passTime, setPassTime] = useState<string | null>(null);
