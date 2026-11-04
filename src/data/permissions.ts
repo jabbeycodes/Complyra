@@ -828,6 +828,34 @@ export function canUseMessaging(session: {
   return session.roleKey !== "auditor" && hasPermission(session, "messages.use");
 }
 
+/**
+ * PM-STAFF-NAV (wave 7U-2, sim batch 181): the program manager's path to
+ * the Staff page. The page gate keys on hr.view_staff / members.invite /
+ * members.assign_roles — none of which the program manager template (TS
+ * default or the stored agency template) carries — so the PM could not
+ * open the staff directory at all, even though the same template grants
+ * members.reset_password, a control that lives ON that page (the PM
+ * template's own description says the role "resets staff passwords"), and
+ * hub.view_team for the hub's team surfaces. A role holding a page's
+ * control key while the page itself is unreachable is incoherent; this
+ * predicate is the single place the PM's page access is granted, keyed on
+ * what the PM actually holds. It never widens any other role, and it
+ * grants no write power: Add member stays members.invite, role assignment
+ * stays members.assign_roles, and the password column stays
+ * members.reset_password.
+ */
+export function canViewStaffAsProgramManager(session: {
+  roleKey: string;
+  role?: string;
+  permissions?: Partial<PermissionMap>;
+}): boolean {
+  return (
+    session.roleKey === "program_manager" &&
+    (hasPermission(session, "hub.view_team") ||
+      hasPermission(session, "members.reset_password"))
+  );
+}
+
 /** Issue #80 — who may read shift notes (entry visibility is the approve gate). */
 export function canSeeShiftNotes(roleKey: string) {
   return [

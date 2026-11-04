@@ -1224,7 +1224,11 @@ export default function App() {
               onRequirement={selectRequirement}
               onOpenPerson={openPersonChart}
               onCopilot={() => setModal("copilot")}
-              onActivity={() => navigate("Activity log")}
+              onActivity={
+                pageVisible(session, "Activity log")
+                  ? () => navigate("Activity log")
+                  : undefined
+              }
             />
           ) : (
             <>

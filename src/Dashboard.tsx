@@ -76,7 +76,13 @@ interface Props {
   onRequirement: (r: Requirement) => void;
   onOpenPerson: (name: string) => void;
   onCopilot: () => void;
-  onActivity: () => void;
+  /**
+   * Opens the full Activity log page. Optional: App passes it only when the
+   * viewer's role may open that page (pageVisible) — roles that cannot
+   * (e.g. HR) get the Recent activity preview without dead-end controls
+   * whose navigation silently no-ops (sim batches 171/183).
+   */
+  onActivity?: () => void;
 }
 
 function scoreTone(score: number, overdue: number) {
@@ -569,13 +575,15 @@ export default function Dashboard({
           <div>
             <h2>Recent activity</h2>
           </div>
-          <button
-            className="icon-button"
-            aria-label="View full activity timeline"
-            onClick={onActivity}
-          >
-            <MoreHorizontal size={20} />
-          </button>
+          {onActivity && (
+            <button
+              className="icon-button"
+              aria-label="View full activity timeline"
+              onClick={onActivity}
+            >
+              <MoreHorizontal size={20} />
+            </button>
+          )}
         </div>
         <div className="activity-list">
           {activity.slice(0, 3).map((a, i) => (
@@ -606,9 +614,11 @@ export default function Dashboard({
             </div>
           ))}
         </div>
-        <button className="activity-link" onClick={onActivity}>
-          View activity log <ArrowRight size={14} />
-        </button>
+        {onActivity && (
+          <button className="activity-link" onClick={onActivity}>
+            View activity log <ArrowRight size={14} />
+          </button>
+        )}
       </section>
       <button className="copilot-banner" onClick={onCopilot}>
         <span className="copilot-banner-icon">
