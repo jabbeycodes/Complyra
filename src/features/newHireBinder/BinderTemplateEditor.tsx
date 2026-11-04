@@ -1,8 +1,8 @@
 /**
  * Binder template editor (New Hire Binder build 2, 2026-10-30).
  *
- * HR/admin edit the agency default template and the role presets
- * (Direct Support Professional, House Manager, Nurse) in one editor:
+ * Administrators and program managers edit the agency default template
+ * and the role presets (Direct Support Professional, House Manager, Nurse) in one editor:
  * sections and items can be added, renamed, reordered, marked required
  * or optional, and removed.
  *

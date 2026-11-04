@@ -1092,6 +1092,40 @@ export function canClosePersonalSpendingMonth(roleKey: string) {
   );
 }
 
+/**
+ * Personal spending — may this person be OFFERED the entry form while a
+ * given month's ledger is on screen? (Wave 3, retest.) A signed month is
+ * read-only for everyone who cannot close one: they keep viewing it, and
+ * record again on an open month. Closers keep their controls on a closed
+ * month, the same split canVoidPersonalSpendingEntry draws. The APIs and
+ * the database still refuse any new entry dated inside a closed month,
+ * whoever sends it; this gate is about what the screen offers.
+ */
+export function canOfferPersonalSpendingEntryForm(
+  roleKey: string,
+  monthClosed: boolean,
+) {
+  if (!canRecordPersonalSpending(roleKey)) return false;
+  return !monthClosed || canClosePersonalSpendingMonth(roleKey);
+}
+
+/**
+ * New hire binder templates are agency configuration (wave 3, retest):
+ * administrators and program managers only. HR runs the binder board
+ * (issuing, the chase list, contacts) from the templates set here.
+ * Matches the hr_binder_templates write policy (20261104110000).
+ */
+export const BINDER_TEMPLATE_EDITOR_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+];
+
+export function canEditBinderTemplates(roleKey: string | undefined) {
+  return (BINDER_TEMPLATE_EDITOR_ROLE_KEYS as readonly string[]).includes(
+    roleKey ?? "",
+  );
+}
+
 /** Menu records — who may record what an Individual ate (daily-care staff). */
 export function canEnterMenuEntries(roleKey: string) {
   return [

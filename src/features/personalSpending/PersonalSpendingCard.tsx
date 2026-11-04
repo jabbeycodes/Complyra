@@ -25,6 +25,7 @@ import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
   canViewPersonalSpending,
+  canOfferPersonalSpendingEntryForm,
   canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -377,6 +378,10 @@ export function PersonalSpendingSection({
     [entries, month],
   );
   const close = closeForMonth(closes, month);
+  const canOfferForm = canOfferPersonalSpendingEntryForm(
+    session.roleKey,
+    Boolean(close),
+  );
   const locations = useMemo(
     () => (entries ? recentPersonalSpendingLocations(entries) : []),
     [entries],
@@ -610,7 +615,14 @@ export function PersonalSpendingSection({
               </p>
             )}
 
-            {canRecord && (
+            {canRecord && !canOfferForm && (
+              <p className="ps-close-note">
+                New entries are not offered on a signed month. Choose an open
+                month to record one.
+              </p>
+            )}
+
+            {canOfferForm && (
               <section className="ps-section" aria-label="Record an entry">
                 <h3>Record an entry</h3>
                 <EntryFormFields

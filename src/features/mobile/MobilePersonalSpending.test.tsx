@@ -4,10 +4,13 @@ import { JSDOM } from "jsdom";
 import { LocalApi, MemoryStore } from "../../data/localApi";
 import {
   createEvergreenSeed,
+  DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
+  DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
 } from "../../data/seed";
 import { DEMO_PASSWORD } from "../../data/types";
+import { centralTodayIso } from "../../data/menuRecords";
 
 /**
  * Fix wave 3, item 1(c) (simulation batch 7): the mobile Personal
@@ -94,5 +97,73 @@ describe("MobilePersonalSpending close sign-off", () => {
       "no sign-off option is pre-checked",
     );
     await act(async () => root.unmount());
+  });
+
+  describe("entry form on a signed month (wave 3 retest)", () => {
+    async function renderFor(username: string, closeFirst: boolean) {
+      const api = new LocalApi(
+        new MemoryStore(structuredClone(createEvergreenSeed())),
+      );
+      const creds = (name: string) => ({
+        agencyCode: DEMO_AGENCY_CODE,
+        username: name,
+        password: DEMO_PASSWORD,
+      });
+      const admin = await api.signIn(creds(DEMO_ADMIN_USERNAME));
+      const ellis = (await api.loadWorkspace(admin)).individuals.find(
+        (i) => i.name === "Ellis Hart",
+      )!;
+      if (closeFirst) {
+        await api.closePersonalSpendingMonth({
+          individualId: ellis.id,
+          month: centralTodayIso().slice(0, 7),
+          signatureText: "Sarah Mitchell",
+          individualSignoff: "individual_signed",
+        });
+      }
+      await api.signOut();
+      const session = await api.signIn(creds(username));
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await React.act(async () => {
+        root.render(
+          React.createElement(MobilePersonalSpending, {
+            api,
+            session,
+            person: ellis,
+            siteName: "Cedar House",
+            staffOptions: [],
+            onBack: () => undefined,
+            onOpenChart: () => undefined,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+      const buttons = [...container.querySelectorAll("button")].map(
+        (button) => button.textContent ?? "",
+      );
+      const text = container.textContent ?? "";
+      await React.act(async () => root.unmount());
+      container.remove();
+      return { buttons, text };
+    }
+
+    it("offers a DSP no entry form or Repeat on a closed month", async () => {
+      const view = await renderFor(DEMO_DSP_USERNAME, true);
+      assert.ok(!view.buttons.includes("Record an entry"));
+      assert.ok(!view.buttons.includes("Repeat"));
+      assert.match(view.text, /closed and signed/);
+    });
+
+    it("offers a DSP the entry form on an open month", async () => {
+      const view = await renderFor(DEMO_DSP_USERNAME, false);
+      assert.ok(view.buttons.includes("Record an entry"));
+    });
+
+    it("keeps the entry form for a closer on a closed month", async () => {
+      const view = await renderFor(DEMO_ADMIN_USERNAME, true);
+      assert.ok(view.buttons.includes("Record an entry"));
+    });
   });
 });

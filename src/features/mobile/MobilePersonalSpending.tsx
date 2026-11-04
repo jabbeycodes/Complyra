@@ -6,6 +6,7 @@ import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
   canClosePersonalSpendingMonth,
+  canOfferPersonalSpendingEntryForm,
   canRecordPersonalSpending,
   canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
@@ -204,6 +205,10 @@ export default function MobilePersonalSpending({
     [entries],
   );
   const close = closeForMonth(closes, month);
+  const canOfferForm = canOfferPersonalSpendingEntryForm(
+    session.roleKey,
+    Boolean(close),
+  );
   const postCloseCount = monthRows.filter(
     (row) => row.postCloseCorrection,
   ).length;
@@ -451,7 +456,7 @@ export default function MobilePersonalSpending({
               </div>
             )}
 
-            {canRecord && (
+            {canOfferForm && (
               <button
                 type="button"
                 className="msh-button primary block"
@@ -518,7 +523,7 @@ export default function MobilePersonalSpending({
                         ? "—"
                         : formatCents(entry.runningBalanceCents)}
                     </small>
-                    {canRecord && !entry.voided && (
+                    {canOfferForm && !entry.voided && (
                       <button
                         type="button"
                         className="msh-chip-button mq-repeat"
@@ -687,13 +692,15 @@ export default function MobilePersonalSpending({
                             <td>
                               {canRecord && !entry.voided && (
                                 <>
-                                  <button
-                                    type="button"
-                                    className="ps-link-button"
-                                    onClick={() => openRepeat(entry)}
-                                  >
-                                    Repeat
-                                  </button>
+                                  {canOfferForm && (
+                                    <button
+                                      type="button"
+                                      className="ps-link-button"
+                                      onClick={() => openRepeat(entry)}
+                                    >
+                                      Repeat
+                                    </button>
+                                  )}
                                   {/* Wave 6 item 3: Void only for closers,
                                       or on the recorder's own entry. */}
                                   {canVoidPersonalSpendingEntry(session, entry) && (

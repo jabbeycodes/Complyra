@@ -22,6 +22,7 @@ import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
+import { canEditBinderTemplates } from "./permissions";
 import {
   assertCanCancelTimeOff,
   assertCanDecideTimeOff,
@@ -1307,6 +1308,19 @@ function validateMissedPunchInput(input: MissedPunchReportInput): void {
 }
 
 /**
+ * Binder templates are configuration (wave 3, retest): both stores refuse a
+ * save from anyone but an administrator or program manager. HR's board work
+ * goes through other methods. A store built without a role is refused too.
+ */
+function assertCanEditBinderTemplates(roleKey: string | undefined) {
+  if (!canEditBinderTemplates(roleKey)) {
+    throw new Error(
+      "Only an administrator or program manager can change binder templates.",
+    );
+  }
+}
+
+/**
  * Who the signed-in user may target with a shift swap (simulation batch 47).
  * Callers that know the session pass the full staff directory plus the
  * viewer's role/home; createShiftSwap then applies the same staffVisibleTo
@@ -1891,6 +1905,7 @@ export class SupabaseHrStore implements HrStore {
     templateId: string,
     template: BinderTemplate,
   ): Promise<void> {
+    assertCanEditBinderTemplates(this.actorRoleKey);
     validateBinderTemplate(template);
     const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
     const presetOverrides = { ...stored.presetOverrides };
@@ -5483,6 +5498,7 @@ class LocalHrStore implements HrStore {
     templateId: string,
     template: BinderTemplate,
   ): Promise<void> {
+    assertCanEditBinderTemplates(this.actorRoleKey);
     validateBinderTemplate(template);
     if (templateId === "default") {
       this.mutate((b) => {

@@ -4,10 +4,13 @@ import { JSDOM } from "jsdom";
 import { LocalApi, MemoryStore } from "../../data/localApi";
 import {
   createEvergreenSeed,
+  DEMO_ADMIN_USERNAME,
   DEMO_AGENCY_CODE,
+  DEMO_DSP_USERNAME,
   DEMO_HM_USERNAME,
 } from "../../data/seed";
 import { DEMO_PASSWORD } from "../../data/types";
+import { centralTodayIso } from "../../data/menuRecords";
 
 /**
  * Fix wave 3, item 1(c) (simulation batch 7): the Personal Spending
@@ -120,5 +123,77 @@ describe("PersonalSpendingCard close sign-off", () => {
       "no close was recorded",
     );
     await act(async () => root.unmount());
+  });
+
+  describe("entry form on a signed month (wave 3 retest)", () => {
+    const signedIn = (api: LocalApi, username: string) =>
+      api.signIn({
+        agencyCode: DEMO_AGENCY_CODE,
+        username,
+        password: DEMO_PASSWORD,
+      });
+
+    async function renderFor(username: string, closeFirst: boolean) {
+      const api = new LocalApi(
+        new MemoryStore(structuredClone(createEvergreenSeed())),
+      );
+      const admin = await signedIn(api, DEMO_ADMIN_USERNAME);
+      const adminView = await api.loadWorkspace(admin);
+      const ellis = adminView.individuals.find((i) => i.name === "Ellis Hart")!;
+      if (closeFirst) {
+        await api.closePersonalSpendingMonth({
+          individualId: ellis.id,
+          month: centralTodayIso().slice(0, 7),
+          signatureText: "Sarah Mitchell",
+          individualSignoff: "individual_signed",
+        });
+      }
+      await api.signOut();
+      const session = await signedIn(api, username);
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await React.act(async () => {
+        root.render(
+          React.createElement(Section, {
+            api,
+            session,
+            individualId: ellis.id,
+            individualName: "Ellis Hart",
+            dmhId: "",
+            dateOfBirth: "",
+            siteName: "Cedar House",
+            staffOptions: [],
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+      const form = container.querySelector('section[aria-label="Record an entry"]');
+      const ledger = container.querySelector('section[aria-label="Ledger"]');
+      const text = container.textContent ?? "";
+      await React.act(async () => root.unmount());
+      container.remove();
+      return { form, ledger, text };
+    }
+
+    it("hides the form from a DSP on a closed month, and the ledger stays readable", async () => {
+      const view = await renderFor(DEMO_DSP_USERNAME, true);
+      assert.equal(view.form, null);
+      assert.ok(view.ledger, "the ledger still renders");
+      assert.match(view.text, /closed and signed/);
+      assert.match(view.text, /Choose an open\s+month to record one/);
+    });
+
+    it("keeps the form for a DSP on an open month", async () => {
+      assert.ok((await renderFor(DEMO_DSP_USERNAME, false)).form);
+    });
+
+    for (const username of [DEMO_ADMIN_USERNAME]) {
+      it(`keeps the form for ${username} on a closed month`, async () => {
+        const view = await renderFor(username, true);
+        assert.ok(view.form);
+        assert.doesNotMatch(view.text, /Choose an open\s+month to record one/);
+      });
+    }
   });
 });

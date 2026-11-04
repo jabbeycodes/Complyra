@@ -115,6 +115,7 @@ describe("BinderBoardTab", () => {
     staffList: HubStaffEntry[],
     sites: HubSite[],
     issued: StaffBinder[],
+    session: SessionUser = HM_SESSION,
   ): Promise<string> {
     const act = React.act;
     const container = document.createElement("div");
@@ -124,7 +125,7 @@ describe("BinderBoardTab", () => {
       api: {
         getStaffTrainingProfile: async () => null,
       } as unknown as ComplyraApi,
-      session: HM_SESSION,
+      session,
       workspace: null as WorkspaceView | null,
       loading: false,
       error: "",
@@ -141,7 +142,7 @@ describe("BinderBoardTab", () => {
           DataContext.Provider,
           { value },
           React.createElement(Board, {
-            session: HM_SESSION,
+            session,
             store: makeStore(issued),
             staffList,
             sites,
@@ -220,5 +221,47 @@ describe("BinderBoardTab", () => {
     assert.match(text, /No home assigned/);
     // Exactly one "No home assigned" — the staffer who truly has none.
     assert.equal(text.split("No home assigned").length - 1, 1);
+  });
+
+  describe("wave 3 retest: auditor Chase list and template editor gate", () => {
+    const person: HubStaffEntry = {
+      userId: "dsp-1",
+      fullName: "Drew Ellis",
+      email: "",
+      roleKey: "dsp",
+      siteId: "site-maple",
+      siteName: "Maple House",
+    };
+    const sessionFor = (roleKey: string) =>
+      ({ ...HM_SESSION, userId: "viewer", role: roleKey, roleKey }) as unknown as SessionUser;
+    const boardFor = (roleKey: string) =>
+      renderBoard(
+        [person],
+        [{ id: "site-maple", name: "Maple House" }],
+        [binderFor("dsp-1")],
+        sessionFor(roleKey),
+      );
+
+    it("gives an auditor no Chase list and no template editor", async () => {
+      const text = await boardFor("auditor");
+      assert.match(text, /Read-only — auditor view/);
+      assert.match(text, /Drew Ellis/);
+      assert.doesNotMatch(text, /Chase list/);
+      assert.doesNotMatch(text, /Templates/);
+    });
+
+    it("keeps HR's Chase list and takes away the template editor", async () => {
+      const text = await boardFor("hr");
+      assert.match(text, /Chase list/);
+      assert.doesNotMatch(text, /Templates/);
+    });
+
+    for (const roleKey of ["administrator", "program_manager"]) {
+      it(`offers ${roleKey} both the Chase list and the template editor`, async () => {
+        const text = await boardFor(roleKey);
+        assert.match(text, /Chase list/);
+        assert.match(text, /Templates/);
+      });
+    }
   });
 });
