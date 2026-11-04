@@ -30,6 +30,11 @@ import { isSiteReviewInPlace, normalizeSiteFacts } from "./data/siteReview";
 import { todayIso } from "./data/chart";
 import SiteCoverageBoard from "./features/coverage/SiteCoverageBoard";
 import HouseComplianceDonuts from "./features/overview/HouseComplianceDonuts";
+import {
+  CONSENT_SCORE_EXCLUDED,
+  consentTalliesFromItems,
+  type ConsentScoreInput,
+} from "./features/overview/consentCompliance";
 import PersonalComplianceOverviewCard, {
   PersonalComplianceStrip,
 } from "./features/personalCompliance/PersonalComplianceCard";
@@ -49,6 +54,16 @@ interface SiteCard {
 interface Props {
   items: Requirement[];
   allItems: Requirement[];
+  /**
+   * Consent currency in the house scores (founder decision, 2026-11-02).
+   * Ready items merge into the scored pool for the house donuts, the
+   * status mix, and the program-site cards below; "unknown" withholds
+   * the site-card scores rather than presenting requirements-only
+   * figures as final. Defaults to excluded (the pre-decision
+   * composition). The agency hero keeps riding the API `scorecard`
+   * prop — that composition is a separate tranche.
+   */
+  consentScore?: ConsentScoreInput;
   scorecard?: {
     score: number;
     total: number;
@@ -100,6 +115,7 @@ function scoreTone(score: number, overdue: number) {
 export default function Dashboard({
   items,
   allItems,
+  consentScore = CONSENT_SCORE_EXCLUDED,
   scorecard,
   activity,
   sites,
@@ -119,7 +135,16 @@ export default function Dashboard({
 }: Props) {
   const [sitesOpen, setSitesOpen] = useState(true);
   const focusedSite = sites.find((row) => row.name === site) ?? (sites.length === 1 ? sites[0] : null);
-  const agency = scorecard ?? metrics(allItems);
+  // The scored pool: requirements plus, once the consent register has
+  // loaded, the scored consent items (consentCompliance.ts). While the
+  // register is unknown the pool stays requirements-only and the
+  // site-card scores below are withheld instead of shown as final.
+  const consentUnknown = consentScore.kind === "unknown";
+  const scoredItems =
+    consentScore.kind === "ready"
+      ? [...allItems, ...consentScore.items]
+      : allItems;
+  const agency = scorecard ?? metrics(scoredItems);
   const risks = items.filter((r) => ["Overdue", "Expired"].includes(r.status));
 
   function openPersonal(item: PersonalWorkItem) {
@@ -195,6 +220,7 @@ export default function Dashboard({
         allItems={allItems}
         focusSite={site}
         onSite={onSite}
+        consentScore={consentScore}
       />
       {showCoverageBoard && (
         <SiteCoverageBoard siteId={focusedSite?.id ?? null} />
@@ -303,7 +329,7 @@ export default function Dashboard({
             <h2>Status mix</h2>
           </div>
         </div>
-        <StatusMixDonut items={allItems} />
+        <StatusMixDonut items={scoredItems} />
       </section>
       <section className="panel agency-hero" data-tour="command-center">
         <button
@@ -356,7 +382,9 @@ export default function Dashboard({
             {sites.length ? (
               <div className="site-score-grid">
                 {sites.map((s) => {
-                  const sm = metrics(allItems.filter((r) => r.site === s.name));
+                  const siteItems = scoredItems.filter((r) => r.site === s.name);
+                  const sm = metrics(siteItems);
+                  const consentTallies = consentTalliesFromItems(siteItems);
                   const people = individuals.filter((p) => p.site === s.name).length;
                   const selected = site === s.name;
                   const reviewInPlace = isSiteReviewInPlace(
@@ -369,7 +397,11 @@ export default function Dashboard({
                       type="button"
                       key={s.id || s.name}
                       className={`site-score-card ${scoreTone(sm.score, sm.overdue)}${selected ? " selected" : ""}`}
-                      aria-label={`${s.name} compliance ${sm.score} percent`}
+                      aria-label={
+                        consentUnknown
+                          ? `${s.name} compliance score not final yet`
+                          : `${s.name} compliance ${sm.score} percent`
+                      }
                       onClick={() => onSite(selected ? "All sites" : s.name)}
                     >
                       <div className="site-score-top">
@@ -377,17 +409,23 @@ export default function Dashboard({
                           <Building2 size={18} />
                         </span>
                         <Badge
-                          status={sm.overdue ? "Needs attention" : "On track"}
+                          status={
+                            sm.overdue
+                              ? "Needs attention"
+                              : consentUnknown
+                                ? "Score pending"
+                                : "On track"
+                          }
                         />
                       </div>
                       <strong>{s.name}</strong>
                       <small>{s.program || s.address}</small>
                       <div className="site-score-value">
-                        {sm.score}
+                        {consentUnknown ? "—" : sm.score}
                         <span>%</span>
                       </div>
                       <div className="progress-track">
-                        <span style={{ width: `${sm.score}%` }} />
+                        <span style={{ width: `${consentUnknown ? 0 : sm.score}%` }} />
                       </div>
                       <div className="site-score-meta">
                         <span>
@@ -395,9 +433,17 @@ export default function Dashboard({
                           {" · "}
                           {reviewInPlace ? "Review in place" : "Review open"}
                         </span>
-                        {sm.overdue ? (
+                        {consentUnknown ? (
+                          <span>
+                            Consent records still loading — score is not
+                            final.
+                          </span>
+                        ) : sm.overdue ? (
                           <span className="overdue-text">
                             {sm.overdue} need attention
+                            {consentTallies.notCurrent > 0
+                              ? ` · ${consentTallies.notCurrent} consent${consentTallies.notCurrent === 1 ? "" : "s"} not current`
+                              : ""}
                           </span>
                         ) : (
                           <span className="positive">
@@ -563,6 +609,39 @@ export default function Dashboard({
                 </button>
               );
             })}
+            {consentScore.kind === "ready" &&
+              (() => {
+                // The Consents row: consent currency as its own category
+                // line, over the same site focus as the panel. Rendered
+                // only once the register has loaded — never estimated.
+                const group = consentScore.items.filter(
+                  (r) => site === "All sites" || r.site === site,
+                );
+                if (!group.length) return null;
+                const cm = metrics(group);
+                return (
+                  <button
+                    key="Consents"
+                    className="category-row"
+                    onClick={() => onNavigate("Consents")}
+                  >
+                    <div>
+                      <span>Consents</span>
+                      <strong>{cm.score}%</strong>
+                    </div>
+                    <div className="progress-track">
+                      <span
+                        className={
+                          cm.score === 100
+                            ? "progress-fill done"
+                            : "progress-fill clay"
+                        }
+                        style={{ width: `${cm.score}%` }}
+                      />
+                    </div>
+                  </button>
+                );
+              })()}
           </div>
           <div className="category-key">
             <span>

@@ -1,5 +1,11 @@
 import PublicConsentSigning from "./features/consents/PublicConsentSigning";
 import Consents from "./features/consents/Consents";
+import { useConsentRegister } from "./features/consents/useConsentRegister";
+import {
+  consentRequirementItems,
+  consentTalliesFromItems,
+  type ConsentScoreInput,
+} from "./features/overview/consentCompliance";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
@@ -238,6 +244,12 @@ export default function App() {
     usingHostedBackend,
   } = useData();
   const operating = useOperatingRules(session);
+  // CONSENT SCORE (founder decision, 2026-11-02): the consent register
+  // feeds the compliance scores below; its state is adapted to a
+  // ConsentScoreInput once the visible sites are known (after the
+  // workspace gate). Until it is ready, composites withhold their
+  // consent-inclusive verdicts rather than present partial figures.
+  const consentRegisterState = useConsentRegister();
   const [page, setPage] = useState("Overview");
   const notifications = useWorkspaceNotifications();
   // MESSAGING: unread total for the nav badge + chart deep-link focus.
@@ -575,6 +587,18 @@ export default function App() {
     return <BrandLoader status="Loading workspace…" />;
   }
   const sites = sitesVisibleTo(session, workspace.sites, workspace.staff, workspace.assignmentSiteIds);
+  const consentScore: ConsentScoreInput =
+    consentRegisterState.kind === "ready"
+      ? {
+          kind: "ready",
+          items: consentRequirementItems(
+            consentRegisterState.register,
+            new Map(sites.map((s) => [s.id, s.name] as const)),
+          ),
+        }
+      : consentRegisterState.kind === "excluded"
+        ? { kind: "excluded" }
+        : { kind: "unknown" };
   const individuals = workspace.individuals.filter((person) =>
     sites.some((row) => row.name === person.site),
   );
@@ -1314,6 +1338,7 @@ export default function App() {
             <Dashboard
               items={scoped}
               allItems={visibleRequirements}
+              consentScore={consentScore}
               scorecard={workspace.scorecard}
               activity={data.activity}
               sites={sites}
@@ -1476,9 +1501,26 @@ export default function App() {
                   <div className="people-grid">
                     {visibleIndividuals
                       .map((p) => {
-                        const pm = metrics(
-                          data.requirements.filter((r) => r.person === p.name),
-                        );
+                        // Consent currency counts toward this person's
+                        // readiness (founder decision, 2026-11-02): the
+                        // scored consent items join the person's pool.
+                        // While the register is unknown the card withholds
+                        // its verdict rather than present a partial one.
+                        const personConsentItems =
+                          consentScore.kind === "ready"
+                            ? consentScore.items.filter(
+                                (r) => r.person === p.name,
+                              )
+                            : [];
+                        const consentUnknown = consentScore.kind === "unknown";
+                        const personConsent =
+                          consentTalliesFromItems(personConsentItems);
+                        const pm = metrics([
+                          ...data.requirements.filter(
+                            (r) => r.person === p.name,
+                          ),
+                          ...personConsentItems,
+                        ]);
                         const renewals =
                           session && canSeeRenewals(session.roleKey)
                             ? (
@@ -1516,14 +1558,39 @@ export default function App() {
                             )}
                             <div className="person-card-progress">
                               <span>Compliance readiness</span>
-                              <strong>{pm.score}%</strong>
+                              <strong>
+                                {consentUnknown ? "—" : `${pm.score}%`}
+                              </strong>
                             </div>
                             <div className="progress-track">
-                              <span style={{ width: `${pm.score}%` }} />
+                              <span
+                                style={{
+                                  width: `${consentUnknown ? 0 : pm.score}%`,
+                                }}
+                              />
                             </div>
+                            {personConsent.total > 0 && (
+                              <p className="stack-help">
+                                Consents: {personConsent.current} of{" "}
+                                {personConsent.total} current
+                                {personConsent.notCurrent > 0
+                                  ? ` · ${personConsent.notCurrent} not current`
+                                  : ""}
+                              </p>
+                            )}
                             <div className="person-card-bottom">
-                              <span>{pm.total} requirements</span>
-                              {pm.overdue ? (
+                              <span>
+                                {pm.total}{" "}
+                                {personConsent.total > 0
+                                  ? "tracked items"
+                                  : "requirements"}
+                              </span>
+                              {consentUnknown ? (
+                                <span>
+                                  Consent records still loading — readiness
+                                  is not final.
+                                </span>
+                              ) : pm.overdue ? (
                                 <span className="overdue-text">
                                   {pm.overdue} need attention
                                 </span>

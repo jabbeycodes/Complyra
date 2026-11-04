@@ -3,6 +3,7 @@ import RightsPackets from "./RightsPackets";
 import { useEffect, useState } from 'react';
 import { useData } from '../../data/DataProvider';
 import { canManageConsents, canSeeConsents, consentDisplayText, consentOutcomeLabel, consentGaps, consentStatus, consentStatusFor, scopeConsentRegister, type ConsentDraft, type ConsentRegister, type ConsentType } from '../../data/consents';
+import { consentProblemsText, individualConsentStanding } from '../overview/consentCompliance';
 import { todayStamp } from '../../data/status';
 import { formatDateLong } from '../../components';
 import { startBrandedDoc, stampRecordMark, type ReportBrand } from '../../pdf/brandHeader';
@@ -159,6 +160,19 @@ export default function Consents({ individualId, attentionOnly = false, siteId }
         <button type="button" onClick={() => setConfig([...config, { id: `custom_${crypto.randomUUID().slice(0, 8)}`, label: '', required: false, medication: false }])}>Add type</button><button disabled={busy}>Save agency types</button><button type="button" onClick={() => setConfig(null)}>Cancel</button></form>}
       {people.length === 0 && <p>No Individuals in your scope.</p>}
       {people.map(person => <article key={person.id}><h3>{person.fullName}</h3><button onClick={() => printSummary(data, person.id, { agencyName: session?.agencyName ?? 'Agency', logoDataUrl: workspace?.branding.logoUrl ?? null })}>Print consent summary</button>
+        {individualId && (() => {
+                    // The chart's per-Individual verdict (founder decision,
+                    // 2026-11-02): consent currency counts, so an Individual
+                    // with any expired or missing required consent is NOT
+                    // Compliant here — the same standing the compliance
+                    // scores are built from (consentCompliance.ts).
+                    const standing = individualConsentStanding(data, person.id);
+                    return <p role="status">{standing.required === 0
+                        ? 'No required consent types are configured for this agency.'
+                        : standing.compliant
+                            ? `✓ Compliant — all ${standing.required} required consents are current.`
+                            : `Not compliant — required consents not current: ${consentProblemsText(standing, role === 'dsp')}.`}</p>;
+                })()}
         <div className="consent-table"><table><caption>Consent status for {person.fullName}</caption><thead><tr><th>Consent type</th><th>Status</th><th>Decision</th><th>Expiry/review</th><th>Actions and history</th></tr></thead><tbody>
         {data.types.map(type => {
                     const status = consentStatusFor(data, person.id, type.id);
