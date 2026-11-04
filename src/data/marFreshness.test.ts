@@ -86,7 +86,9 @@ function centralNowMinutes(): number {
 test("the MAR day split: 10:40 p.m. Central is already tomorrow in UTC", () => {
   // Avery's mark: 2026-10-31 22:40 CDT = 2026-11-01T03:40:43Z.
   const instant = new Date("2026-11-01T03:40:43.000Z");
-  assert.equal(todayIso(instant), "2026-11-01", "the old desktop selector");
+  assert.equal(instant.toISOString().slice(0, 10), "2026-11-01", "the UTC date has rolled over");
+  // PR #252: the shared todayIso() is the agency day, like centralTodayIso().
+  assert.equal(todayIso(instant), "2026-10-31", "todayIso is the Central day");
   assert.equal(centralTodayIso(instant), "2026-10-31", "the agency day both surfaces now use");
 });
 

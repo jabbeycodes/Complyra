@@ -104,8 +104,26 @@ export interface CarePlanView {
   assignedCount: number;
 }
 
+/**
+ * Today's calendar date on the AGENCY day (America/Chicago), as YYYY-MM-DD.
+ *
+ * This used to be the UTC date (`toISOString().slice(0, 10)`), which is
+ * already tomorrow from 6 PM CST / 7 PM CDT — so every evening the MAR day,
+ * med-count dates, the supply forecast, order expiry, membership expiry and
+ * month keys all jumped a day early (PR #252 review; the class wave 7Q /
+ * PR #233 closed for files it could touch). The product judges every
+ * day-keyed rule on the agency's Central day, so the shared default does
+ * too; this matches centralTodayIso() in menuRecords.
+ */
 export function todayIso(now = new Date()) {
-  return now.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
 export function daysBetween(from: string, to: string) {

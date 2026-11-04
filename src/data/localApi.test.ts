@@ -808,8 +808,10 @@ test("managers can correct a requirement and the fix is audit-logged", async () 
   );
 });
 
+/** A Central calendar day `days` from today (the app's agency day). */
 function isoPlus(days: number): string {
-  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  const [y, m, d] = todayIso().split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 function pdfFile(name = "cpr.pdf", size = 2048): File {

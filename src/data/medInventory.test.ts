@@ -644,6 +644,11 @@ test("adjustMedInventory corrects the count and requires a reason", async () => 
     client.adjustMedInventory({ medicationId: keppra.medicationId, quantityDelta: 0, reason: "recount" }),
     /non-zero/i,
   );
+  // Same-day counts are ordered by countedAt (compareDeliveryRecency); on a
+  // fast machine the restock above and this correction can share one
+  // millisecond, leaving the order to the random id. Let the clock tick.
+  const restockAt = Date.now();
+  while (Date.now() === restockAt) await new Promise((r) => setTimeout(r, 1));
   await client.adjustMedInventory({
     medicationId: keppra.medicationId,
     quantityDelta: -5,

@@ -45,7 +45,8 @@ function withMockedNow(iso: string, fn: () => void) {
 
 test("7Q: at 19:30 CST the UTC day is already tomorrow; the Central day is not", () => {
   withMockedNow(EVENING_A, () => {
-    assert.equal(todayIso(), "2026-11-02", "the old UTC derivation");
+    // PR #252: the shared todayIso() now IS the agency day, so the two agree.
+    assert.equal(todayIso(), "2026-11-01", "todayIso is the Central day now (was the UTC derivation)");
     assert.equal(centralTodayIso(), "2026-11-01", "the agency day every surface now uses");
   });
 });
@@ -59,7 +60,7 @@ test("7Q: Appointments opens on the Central day (batch 93: it opened on Nov 2)",
       to: "2026-11-30",
     });
     assert.equal(monthStart(centralTodayIso()), "2026-11-01");
-    assert.equal(thirtyDayRange(todayIso()).from, "2026-11-02", "the batch-93 defect, for contrast");
+    assert.equal(thirtyDayRange(todayIso()).from, "2026-11-01", "the batch-93 defect is closed at the source too");
   });
 });
 
@@ -200,9 +201,9 @@ test("7Q: the checklist week and month filters open on the Central week/month", 
   withMockedNow(EVENING_B, () => {
     // ChecklistAssigner's current-week derivation (week of the Central day).
     assert.equal(weekOfSundayIso(centralTodayIso()), "2026-10-25");
-    assert.equal(weekOfSundayIso(todayIso()), "2026-11-01", "the UTC week, for contrast");
+    assert.equal(weekOfSundayIso(todayIso()), "2026-10-25", "todayIso is the Central day now (PR #252)");
     // The month key behind the mileage / reports / monthly-checks defaults.
     assert.equal(monthKeyFrom(centralTodayIso()), "2026-10");
-    assert.equal(monthKeyFrom(todayIso()), "2026-11", "the UTC month, for contrast");
+    assert.equal(monthKeyFrom(todayIso()), "2026-10", "todayIso is the Central day now (PR #252)");
   });
 });
