@@ -265,18 +265,18 @@ test("RN, PM, and HM see renewals; DSP does not", () => {
   assert.equal(canSeeRenewals("dsp"), false);
 });
 
-test("compliance and auditor see renewals but cannot upload renewal evidence", () => {
-  // Read access stays (founder ruling, batch 158): compliance keeps the
-  // read-only chart view, including renewal due dates; so does the auditor.
-  assert.equal(canSeeRenewals("compliance_admin"), true);
+test("the auditor sees renewals but cannot upload renewal evidence", () => {
+  // Read access stays (founder ruling, batch 158): the auditor keeps the
+  // read-only chart view, including renewal due dates. (The compliance_admin
+  // role this test also covered was removed 2026-11-02; its holders are
+  // administrators now.)
   assert.equal(canSeeRenewals("auditor"), true);
   // Uploading evidence (which resets the due date) is limited to the
-  // clinical/manager roles — compliance and auditor are excluded.
+  // clinical/manager roles — the auditor is excluded.
   assert.equal(canUploadRenewal("administrator"), true);
   assert.equal(canUploadRenewal("program_manager"), true);
   assert.equal(canUploadRenewal("house_manager"), true);
   assert.equal(canUploadRenewal("nurse"), true);
-  assert.equal(canUploadRenewal("compliance_admin"), false);
   assert.equal(canUploadRenewal("auditor"), false);
   assert.equal(canUploadRenewal("dsp"), false);
 });
@@ -353,7 +353,7 @@ test("DSP does not see clinical renewal dates", async () => {
   );
 });
 
-test("compliance administrator sees renewal dates but cannot upload evidence", async () => {
+test("the auditor sees renewal dates but cannot upload evidence", async () => {
   const nurseClient = api();
   const nurse = await nurseClient.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -364,13 +364,13 @@ test("compliance administrator sees renewal dates but cannot upload evidence", a
     item.individualName.includes("Ellis"),
   )!.renewals[0];
   const client = api();
-  const compliance = await client.signIn({
+  const auditor = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
-    username: "omar.haddad", // compliance_admin
+    username: "mark.delaney", // auditor (compliance_admin was retired 2026-11-02)
     password: DEMO_PASSWORD,
   });
-  // Compliance still sees the renewal due dates (read-only chart access)…
-  const stack = (await client.loadWorkspace(compliance)).planStacks.find((item) =>
+  // The auditor still sees the renewal due dates (read-only chart access)…
+  const stack = (await client.loadWorkspace(auditor)).planStacks.find((item) =>
     item.individualName.includes("Ellis"),
   )!;
   assert.equal(stack.renewals.length > 0, true);

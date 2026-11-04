@@ -71,7 +71,7 @@ test("QA audit: DSP cannot create or score audits", async () => {
   await assert.rejects(() => api.createQaAudit(maple, 2026, 3), /permission/);
 });
 
-test("QA audit: starting a review belongs to qa.schedule roles — PM yes, auditor / HM / compliance no", async () => {
+test("QA audit: starting a review belongs to qa.schedule roles — PM yes, auditor / HM no", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
   const maple = await siteId(api, admin, "Cedar House");
@@ -101,14 +101,8 @@ test("QA audit: starting a review belongs to qa.schedule roles — PM yes, audit
   // House managers hold qa.dispute only — no start control either.
   await api.signIn(login(DEMO_HM_USERNAME));
   await assert.rejects(() => api.createQaAudit(oakwood, 2026, 3), /permission/);
-
-  // Compliance administrators hold no qa.* permissions.
-  await api.signIn({
-    agencyCode: DEMO_AGENCY_CODE,
-    username: "omar.haddad",
-    password: DEMO_PASSWORD,
-  });
-  await assert.rejects(() => api.createQaAudit(oakwood, 2026, 3), /permission/);
+  // (The compliance_admin case this test once covered was retired with the
+  // role on 2026-11-02; its holders are administrators and may start.)
 });
 
 test("QA audit: scoring, locked enforcement, and finalize gate", async () => {

@@ -18,6 +18,10 @@ import {
 } from "./seed";
 import { DEMO_PASSWORD } from "./types";
 import { canEditShiftNoteRow } from "./shiftNotes";
+import { ESIGN_CONSENT_VERSION } from "../features/signatures/signatureUtils";
+
+const PNG_1X1 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 function store() {
   return new MemoryStore(structuredClone(createEvergreenSeed()));
@@ -71,8 +75,15 @@ test("LocalApi refuses a nurse editing or deleting a DSP's note; the author stil
     /You can only delete your own shift notes/,
   );
 
-  // The author DSP can still edit his own note.
+  // The author DSP can still edit his own note. A re-save stamps the
+  // author's adopted signature (wave 7F), so he adopts one first.
   await api.signIn(login(DEMO_DSP_USERNAME));
+  await api.adoptSignature({
+    signatureDataUrl: PNG_1X1,
+    initialsDataUrl: PNG_1X1,
+    consentTextVersion: ESIGN_CONSENT_VERSION,
+    consentGiven: true,
+  });
   const editedId = await api.saveShiftNote({
     noteId: alexNote.id,
     individualId: ellis.id,
