@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONSENT_TYPES, canManageConsents, canSeeConsents, consentAlerts, consentGaps, consentOnFile, consentStatus, validateConsentDraft, type ConsentDraft, type ConsentRecord, type ConsentRegister } from './consents';
+import { DEFAULT_CONSENT_TYPES, canManageConsents, canSeeConsents, consentAlertEntityIds, consentAlerts, consentGaps, consentOnFile, consentStatus, validateConsentDraft, type ConsentDraft, type ConsentRecord, type ConsentRegister } from './consents';
 import { LocalApi, MemoryStore } from './localApi';
 import { createEvergreenSeed } from './seed';
 import { todayStamp } from './status';
@@ -149,4 +149,30 @@ test('local activation rejects contradictory standalone and future versions; ren
     assert.equal(consentOnFile(all, f.person.id, 'media', '2089-12-31').row?.id, renewed);
     assert.equal(consentOnFile(all, f.person.id, 'media', '2090-01-01').row?.id, scheduled);
     assert.equal(all.records.filter(r => r.individualId === f.person.id && r.typeId === 'media' && ['Active','Expiring soon'].includes(consentStatus(r,all.records,all.revocations,'2090-01-01'))).length, 1);
+});
+test('consentAlertEntityIds names both incarnations of a gap (wave 7B)', () => {
+    assert.deepEqual(consentAlertEntityIds(register, 'c1'), ['c1', 'i1:media']);
+    assert.deepEqual(consentAlertEntityIds(register, 'i1:service'), ['i1:service']);
+    assert.deepEqual(consentAlertEntityIds({ ...register, records: [] }, 'c1'), ['c1']);
+});
+test('local sweep retires the unread Missing alert once the consent exists and is expiring (wave 7B)', async () => {
+    const f = localFixture();
+    const register0 = await f.api.getConsents();
+    const gapType = DEFAULT_CONSENT_TYPES.find(t => t.required && !register0.records.some(r => r.individualId === f.person.id && r.typeId === t.id));
+    assert.ok(gapType, 'fixture person has a required type with no record');
+    const personForm = `${f.person.id}:${gapType.id}`;
+    await f.api.listNotifications();
+    const pmMissing = () => f.db.notifications.filter(n => n.type === 'consent.missing' && n.entityId === personForm && n.roleKey === 'program_manager');
+    assert.equal(pmMissing().length, 1, 'sweep 1 files the person-form Missing alert for the PM');
+    const hmRow = f.db.notifications.find(n => n.type === 'consent.missing' && n.entityId === personForm && n.userId === f.hm.userId);
+    assert.ok(hmRow, 'HM holds the same gap alert personally');
+    hmRow.readAt = new Date().toISOString();
+    const inTenDays = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const id = await f.api.saveConsent({ ...f.draft, typeId: gapType.id, reviewOn: inTenDays });
+    await f.api.activateConsent(id);
+    await f.api.listNotifications();
+    assert.equal(pmMissing().length, 0, 'the unread PM Missing alert is retired');
+    assert.equal(f.db.notifications.filter(n => n.type === 'consent.expiring' && n.entityId === id && n.roleKey === 'program_manager').length, 1, 'PM now holds the Expiring alert');
+    assert.ok(f.db.notifications.some(n => n.id === hmRow.id), 'the READ HM Missing alert stays as history');
+    assert.equal(f.db.notifications.filter(n => n.type === 'consent.expiring' && n.entityId === id && n.userId === f.hm.userId).length, 1, 'HM holds the Expiring alert too');
 });

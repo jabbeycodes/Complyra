@@ -24,11 +24,13 @@ import {
   SERVICE_LOG_KINDS,
   SERVICE_LOG_KIND_LABELS,
   SERVICE_LOG_PROMPTS,
+  checklistSiteOptions,
   computeChecklistStatus,
   deadlineMondayIso,
   deadlinePassed,
   formatDueAt,
   formatShortDate,
+  resolveChecklistSiteId,
   weekOfSundayIso,
   weekRangeLabel,
 } from "../../data/hmChecklist";
@@ -80,15 +82,43 @@ export default function HmWeeklyChecklistPage() {
   const [logStaff, setLogStaff] = useState("");
   const [logDateTime, setLogDateTime] = useState("");
   const [rolloverNotice, setRolloverNotice] = useState("");
+  // Batch 55: the page opened whichever house's open list came first.
+  // The house is now an explicit selection (picker below), defaulting to
+  // the phone shell's remembered pick, then the viewer's membership home.
+  const [chosenSiteId, setChosenSiteId] = useState<string | null>(null);
+  const storedSiteId = useMemo(() => {
+    if (!session) return null;
+    try {
+      return window.localStorage.getItem(`complyrer.mobileSite.${session.userId}`);
+    } catch {
+      return null;
+    }
+  }, [session]);
 
   const currentWeek = weekOfSundayIso(todayIso());
+  const siteOptions = useMemo(
+    () => checklistSiteOptions(lists, workspace?.sites ?? []),
+    [lists, workspace],
+  );
+  const selectedSiteId = resolveChecklistSiteId({
+    options: siteOptions,
+    chosenSiteId,
+    storedSiteId,
+    sessionSiteId: session?.siteId ?? null,
+  });
   const openList = useMemo(
-    () => lists.find((c) => c.status === "open" && c.weekOf === currentWeek),
-    [lists, currentWeek],
+    () =>
+      lists.find(
+        (c) =>
+          c.siteId === selectedSiteId &&
+          c.status === "open" &&
+          c.weekOf === currentWeek,
+      ),
+    [lists, currentWeek, selectedSiteId],
   );
   const past = useMemo(
-    () => lists.filter((c) => c !== openList),
-    [lists, openList],
+    () => lists.filter((c) => c.siteId === selectedSiteId && c !== openList),
+    [lists, openList, selectedSiteId],
   );
   const openSite = openList
     ? workspace?.sites.find((s) => s.id === openList.siteId)
@@ -104,8 +134,19 @@ export default function HmWeeklyChecklistPage() {
       const rollover = await api.rolloverWeeklyChecklists();
       setRolloverNotice(formatRolloverNotice(rollover) ?? "");
       const rows = await api.listWeeklyChecklists();
+      // Refresh item 21 on the SELECTED house's open list — the same
+      // house the page renders — not the first open list in the array.
+      const siteId = resolveChecklistSiteId({
+        options: checklistSiteOptions(rows, workspace?.sites ?? []),
+        chosenSiteId,
+        storedSiteId,
+        sessionSiteId: session?.siteId ?? null,
+      });
       const open = rows.find(
-        (c) => c.status === "open" && c.weekOf === weekOfSundayIso(todayIso()),
+        (c) =>
+          c.siteId === siteId &&
+          c.status === "open" &&
+          c.weekOf === weekOfSundayIso(todayIso()),
       );
       if (open) {
         // Keep item 21 live: recompute from training records on every load.
@@ -174,6 +215,24 @@ export default function HmWeeklyChecklistPage() {
         </p>
       )}
       {loading && <p>Loading your checklist…</p>}
+      {!loading && siteOptions.length > 1 && (
+        <div className="form-row">
+          <label>
+            Home
+            <select
+              aria-label="Home"
+              value={selectedSiteId ?? ""}
+              onChange={(e) => setChosenSiteId(e.target.value)}
+            >
+              {siteOptions.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       {!loading && !openList && (
         <section className="panel">
           <h2>No open checklist for this week</h2>

@@ -43,6 +43,8 @@ import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { createSupabaseBrowserClient } from "../../data/index";
 import { hasPermission, type PermissionKey } from "../../data/permissions";
+import { staffVisibleTo } from "../../data/dashboard";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -157,6 +159,10 @@ interface EmployeeHubShellProps {
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
+  /** Batch 59: training-profile reads for the scheduling clearance warning. */
+  api?: ReturnType<typeof useData>["api"];
   initialTab?: string;
   /** Injected in tests; defaults to the hosted/local open-shift store. */
   openShiftStore?: OpenShiftStore;
@@ -430,6 +436,8 @@ export function EmployeeHubShell({
   store,
   staffList,
   sites,
+  swapPickerStaffList,
+  api,
   initialTab,
   openShiftStore,
   onLateClockIn,
@@ -594,9 +602,9 @@ export function EmployeeHubShell({
       </div>
 
       <div className="hub-panel">
-        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} />}
+        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} />}
         {tab === "staffing" && (
-          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} />
+          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} api={api} />
         )}
         {tab === "open-shifts" && (
           <OpenShiftsTab
@@ -677,7 +685,7 @@ export function EmployeeHubShell({
           />
         )}
         {tab === "team-schedule" && can("hub.manage_schedule") && (
-          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} />
+          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} api={api} />
         )}
         {tab === "attendance" && can("hub.view_team") && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
@@ -711,11 +719,14 @@ function MyScheduleTab({
   store,
   sites,
   staffList,
+  swapPickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   sites: HubSite[];
   staffList: HubStaffEntry[];
+  /** Batch 47: staffVisibleTo-scoped coworkers for the swap target picker. */
+  swapPickerStaffList?: HubStaffEntry[];
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -841,7 +852,7 @@ function MyScheduleTab({
           ))}
         </ul>
       )}
-      <SwapBoard session={session} store={store} staffList={staffList} />
+      <SwapBoard session={session} store={store} staffList={staffList} pickerStaffList={swapPickerStaffList} />
     </section>
   );
 }
@@ -858,11 +869,19 @@ function SwapBoard({
   session,
   store,
   staffList,
+  pickerStaffList,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
+  /**
+   * Batch 47: coworkers this viewer may target with a swap — the
+   * staffVisibleTo-scoped subset of staffList. Name lookups for existing
+   * swap rows keep the full staffList; only the target pickers scope.
+   */
+  pickerStaffList?: HubStaffEntry[];
 }) {
+  const targetChoices = pickerStaffList ?? staffList;
   const notifyClient = useNotifyClient();
   const [swaps, setSwaps] = useState<HrShiftSwap[]>([]);
   const [shifts, setShifts] = useState<HrShift[]>([]);
@@ -1093,7 +1112,7 @@ function SwapBoard({
             Target coworker (optional)
             <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
               <option value="">Open to everyone</option>
-              {staffList
+              {targetChoices
                 .filter((s) => s.userId !== session.userId)
                 .map((s) => (
                   <option key={s.userId} value={s.userId}>
@@ -1196,11 +1215,13 @@ function StaffingTab({
   store,
   staffList,
   sites,
+  api,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
 }) {
   const canManage = hasPermission(session, "hub.manage_staffing");
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
@@ -1288,6 +1309,7 @@ function StaffingTab({
             sites={sites}
             initial={editing}
             busy={busy}
+            api={api}
             onSave={handleSave}
             onCancel={() => {
               setFormOpen(false);
@@ -2849,11 +2871,13 @@ function TeamScheduleTab({
   store,
   staffList,
   sites,
+  api,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  api?: ReturnType<typeof useData>["api"];
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [siteFilter, setSiteFilter] = useState("");
@@ -2865,6 +2889,10 @@ function TeamScheduleTab({
   const [editing, setEditing] = useState<HrShift | null>(null);
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
   const [form, setForm] = useState({ title: "Shift", siteId: "", staffId: "", date: dayStamp(new Date()), start: "08:00", end: "16:00", notes: "", status: "published" as HrShift["status"] });
+  // Batch 59: warn (never block) when the chosen assignee is a DSP who is
+  // not training-cleared yet.
+  const assignee = staffList.find((s) => s.userId === form.staffId);
+  const clearanceWarning = useAssigneeClearanceWarning(api, assignee?.userId ?? null, assignee?.roleKey ?? null);
 
   const weekStart = useMemo(() => addDays(startOfWeek(new Date()), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -3039,6 +3067,11 @@ function TeamScheduleTab({
                 ))}
               </select>
             </label>
+            {clearanceWarning && (
+              <p className="hub-clearance-warning" role="alert">
+                {clearanceWarning}
+              </p>
+            )}
             <label>
               Site
               <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
@@ -4491,10 +4524,43 @@ export default function EmployeeHubPage({
   const store = useMemo(
     () =>
       session
-        ? createHrStore({ agencyId: session.agencyId, userId: session.userId })
+        ? createHrStore({
+            agencyId: session.agencyId,
+            userId: session.userId,
+            // Batch 47: the store enforces the same swap-target scope the
+            // picker shows, so a swap cannot be offered across homes.
+            swapScope: {
+              roleKey: session.roleKey,
+              siteId: session.siteId,
+              staffDirectory: (workspace?.staff ?? []).map((s) => ({
+                id: s.id,
+                siteId: s.siteId,
+              })),
+              assignmentSiteIds: workspace?.assignmentSiteIds ?? [],
+            },
+          })
         : null,
-    [session],
+    [session, workspace],
   );
+  // Batch 47: the swap target picker offers only coworkers this viewer may
+  // see (staffVisibleTo) — a Juniper DSP no longer sees Maple staff.
+  const swapPickerStaffList: HubStaffEntry[] = useMemo(() => {
+    if (!session || !workspace) return [];
+    const visibleIds = new Set(
+      staffVisibleTo(session, workspace.staff, workspace.assignmentSiteIds).map(
+        (s) => s.id,
+      ),
+    );
+    return (workspace.staff ?? [])
+      .filter((s) => visibleIds.has(s.id))
+      .map((s) => ({
+        userId: s.id,
+        fullName: s.name,
+        email: s.email,
+        roleKey: s.roleKey,
+        siteId: s.siteId,
+      }));
+  }, [session, workspace]);
 
   useEffect(() => {
     if (focusTab) onFocusHandled?.();
@@ -4531,6 +4597,8 @@ export default function EmployeeHubPage({
       store={store}
       staffList={staffList}
       sites={sites}
+      swapPickerStaffList={swapPickerStaffList}
+      api={api}
       initialTab={focusTab ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />

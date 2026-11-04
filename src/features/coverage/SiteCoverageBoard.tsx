@@ -7,6 +7,7 @@ import type { HrShift } from "../../data/hr";
 import { createOpenShiftStore } from "../../data/openShiftStore";
 import type { HrOpenShift } from "../../data/openShifts";
 import { useOperatingRules } from "../employeeHub/useOvertimeLines";
+import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import {
   shiftBlocksForSite,
   shiftClockFromFacts,
@@ -136,6 +137,14 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
   }
 
   const houseWriters = people.filter((person) => person.roleKey === "dsp" && person.siteId === siteId);
+  // Batch 59: warn (never block) when the draft's chosen staffer is a DSP
+  // who is not training-cleared yet.
+  const draftPerson = draft ? people.find((person) => person.id === draft.staffId) : undefined;
+  const clearanceWarning = useAssigneeClearanceWarning(
+    api,
+    draftPerson?.id ?? null,
+    draftPerson?.roleKey ?? null,
+  );
   const loadTicket = useRef(0);
 
   async function loadWeek(start: string) {
@@ -611,6 +620,11 @@ export default function SiteCoverageBoard({ siteId }: { siteId: string | null })
                   ))}
                 </select>
               </label>
+              {clearanceWarning && (
+                <p className="coverage-clearance-warning" role="alert">
+                  {clearanceWarning}
+                </p>
+              )}
               <div className="coverage-presets">
                 {(["day", "evening", "overnight"] as const).map((block) => (
                   <button

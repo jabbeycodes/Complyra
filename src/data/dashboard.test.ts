@@ -17,6 +17,7 @@ import {
   lockedSiteIdFor,
   personalQueue,
   sitesVisibleTo,
+  staffVisibleTo,
 } from "./dashboard";
 
 function api() {
@@ -312,4 +313,50 @@ test("a DSP with no home site is NOT agency-wide", () => {
   assert.equal(canAccessSite(dsp, "site-a"), false);
   assert.equal(canAccessSite(dsp, "site-b"), false);
   assert.deepEqual(sitesVisibleTo(dsp, fakeSites, []), []);
+});
+
+test("staffVisibleTo: a site-scoped DSP sees only their home's staff plus themselves (batch 47)", () => {
+  const directory = [
+    { id: "user-dsp", siteId: "site-a" },
+    { id: "hm-a", siteId: "site-a" },
+    { id: "dsp-a2", siteId: "site-a" },
+    { id: "hm-b", siteId: "site-b" },
+    { id: "dsp-b", siteId: "site-b" },
+  ];
+  const dsp = fakeSession("dsp", "site-a");
+  assert.deepEqual(
+    staffVisibleTo(dsp, directory).map((row) => row.id).sort(),
+    ["dsp-a2", "hm-a", "user-dsp"],
+  );
+  // The Juniper-side mirror: a site-b DSP never sees site-a staff.
+  const dspB = { ...fakeSession("dsp", "site-b"), userId: "dsp-b" };
+  assert.deepEqual(
+    staffVisibleTo(dspB, directory).map((row) => row.id).sort(),
+    ["dsp-b", "hm-b"],
+  );
+});
+
+test("staffVisibleTo: agency-wide roles see the whole directory; assignments widen a scoped viewer", () => {
+  const directory = [
+    { id: "user-dsp", siteId: "site-a" },
+    { id: "hm-b", siteId: "site-b" },
+    { id: "floater", siteId: null },
+  ];
+  for (const roleKey of ["administrator", "program_manager", "compliance_admin", "auditor", "hr"]) {
+    const session = fakeSession(roleKey, null);
+    assert.equal(staffVisibleTo(session, directory).length, 3, roleKey);
+  }
+  // A DSP whose own row names no home still sees themselves, and an
+  // assignment home widens what they see.
+  const dsp = fakeSession("dsp", null);
+  assert.deepEqual(
+    staffVisibleTo(dsp, directory, ["site-b"]).map((row) => row.id).sort(),
+    ["hm-b", "user-dsp"],
+  );
+  // A house manager sees their own home's staff, not the other home's.
+  const hm = { ...fakeSession("house_manager", "site-a"), userId: "hm-a" };
+  assert.deepEqual(
+    staffVisibleTo(hm, [...directory, { id: "hm-a", siteId: "site-a" }]).map((row) => row.id).sort(),
+    ["hm-a", "user-dsp"],
+  );
 });

@@ -44,7 +44,10 @@ export type StaffSiteRef = {
   siteId: string | null;
 };
 
-export function isAgencyWideViewer(session: SessionUser): boolean {
+/** The slice of a session the visibility rules below read. */
+export type ViewerRef = Pick<SessionUser, "userId" | "roleKey" | "siteId" | "platformAdmin">;
+
+export function isAgencyWideViewer(session: ViewerRef): boolean {
   if (session.platformAdmin) return true;
   return (AGENCY_WIDE_ROLE_KEYS as readonly string[]).includes(session.roleKey);
 }
@@ -69,7 +72,7 @@ export function canSeeGerDashboardRows(session: SessionUser | null): boolean {
 }
 
 export function assignedSiteIds(
-  session: SessionUser,
+  session: ViewerRef,
   staff: StaffSiteRef[],
   assignmentSiteIds: string[] = [],
 ): string[] {
@@ -95,6 +98,28 @@ export function sitesVisibleTo<T extends { id: string }>(
   if (isAgencyWideViewer(session)) return sites;
   const ids = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
   return sites.filter((site) => ids.has(site.id));
+}
+
+/**
+ * Which staff rows a viewer may see in staff directories and coworker
+ * pickers. Agency-wide viewers (administrator, compliance admin, program
+ * manager, auditor, HR — see AGENCY_WIDE_ROLE_KEYS) see the whole agency
+ * directory. Everyone else sees the staff of the homes they belong to —
+ * their membership home plus any home a current assignment puts them in
+ * (assignedSiteIds) — and always their own row, even when their row names
+ * no home or a home outside that set. Simulation batch 47: a Juniper DSP's
+ * shift-swap coworker picker listed Maple staff because the picker used
+ * the raw agency directory; pickers must scope through this rule, and the
+ * HR stores enforce the same rule server-side (see hrStore swap scope).
+ */
+export function staffVisibleTo<T extends StaffSiteRef>(
+  session: ViewerRef,
+  staff: T[],
+  assignmentSiteIds: string[] = [],
+): T[] {
+  if (isAgencyWideViewer(session)) return staff;
+  const ids = new Set(assignedSiteIds(session, staff, assignmentSiteIds));
+  return staff.filter((row) => row.id === session.userId || (row.siteId != null && ids.has(row.siteId)));
 }
 
 /** Agency-wide roles may act at every site; everyone else is locked to home site. */
