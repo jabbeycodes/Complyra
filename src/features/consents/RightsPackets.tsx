@@ -159,7 +159,7 @@ export default function RightsPackets({ individualId, attentionOnly = false, sit
     }); }}>
       <h3>{completing.paper ? 'File the signed paper Rights packet' : 'Record the Rights packet signature'}</h3>
       <RightsPacketForm paper={completing.paper} value={completion} onChange={setCompletion} />
-      {completing.paper && <label>Signed copy (PDF, PNG, JPEG; up to 10 MB)<input required type="file" accept="application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0])} /></label>}
+      {completing.paper && <label>Signed copy (PDF, PNG, JPEG; up to 4 MB)<input required type="file" accept="application/pdf,image/png,image/jpeg" onChange={e => setFile(e.target.files?.[0])} /></label>}
       <button disabled={busy || (completing.paper && !file)}>{completing.paper ? 'File signed packet' : 'Complete packet'}</button>
       <button type="button" onClick={() => setCompleting(null)}>Cancel</button>
     </form>}

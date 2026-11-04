@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(31);
+select plan(33);
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 insert into agencies(id,name,agency_code,state_code,status) values
  ('a7000000-0000-0000-0000-000000000001','Consent test agency','CONSENT-MO','MO','active');
@@ -71,6 +71,14 @@ select throws_ok($$select complete_consent_packet_token(token,choices,signer,evi
 select throws_ok($$select read_consent_packet_token(token) from packet_values$$,'42501',null,'Used token cannot reopen packet');
 reset role;
 select is((select status from consent_packets where id=(select second_id from packet_values)),'sent','Another packet remains untouched');
+-- Evidence size ceiling: 4 MB decoded bytes (founder instruction, 2026-11-02;
+-- migration 20261031300000). repeat('QUJD',1398102) decodes to 4,194,306 bytes.
+set local role authenticated;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d7000000-0000-0000-0000-000000000001"}',true);
+select throws_ok($$select file_paper_consent_packet(second_id,choices,signer,jsonb_build_object('name','big.pdf','mime','application/pdf','base64',repeat('QUJD',1398102))) from packet_values$$,'P0001','Attach signed evidence up to 4 MB.','Oversized packet evidence refused at 4 MB');
+select is((select status from consent_packets where id=(select second_id from packet_values)),'sent','Refused oversized filing leaves packet untouched');
+reset role;
+select set_config('request.jwt.claims','{"role":"service_role"}',true);
 select is((select count(*)::int from individual_consents where packet_id=(select first_id from packet_values)),9,'All nine packet items tracked');
 select is((select supersedes_id from individual_consents where packet_id=(select first_id from packet_values) and type_id='media'),(select existing_id from packet_values),'Packet completion supersedes the pre-existing current media decision');
 select is((select count(*)::int from individual_consents where type_id='media' and private.consent_current(id)),1,'Packet leaves exactly one current media version');

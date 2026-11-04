@@ -73,7 +73,7 @@ test('manager can download and file a signed paper packet as evidence', async ({
     const pdf = await download;
     await packets.getByRole('button', { name: 'File signed paper copy', exact: true }).click();
     await fillSignature(page, true);
-    await page.getByLabel('Signed copy (PDF, PNG, JPEG; up to 10 MB)', { exact: true }).setInputFiles({ name: 'signed-paper.pdf', mimeType: 'application/pdf', buffer: await readFile((await pdf.path())!) });
+    await page.getByLabel('Signed copy (PDF, PNG, JPEG; up to 4 MB)', { exact: true }).setInputFiles({ name: 'signed-paper.pdf', mimeType: 'application/pdf', buffer: await readFile((await pdf.path())!) });
     await page.getByRole('button', { name: 'File signed packet', exact: true }).click();
     await expect(packets.getByRole('heading', { name: /— filed$/ })).toBeVisible();
     await expect(packets.getByRole('button', { name: 'Download filed signed evidence', exact: true })).toBeVisible();

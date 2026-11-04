@@ -70,9 +70,11 @@ export function assertPacketTypes(types: ConsentType[], itemTypes: readonly {
     typeId: string;
 }[]) { if (itemTypes.some(i => !types.some(t => t.id === i.typeId)))
     throw new Error('Restore the packet consent types in agency settings.'); }
+/** Founder instruction (2026-11-02): signed packet evidence uploads cap at 4 MB. */
+export const PACKET_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024;
 export async function packetFile(file: File): Promise<PacketEvidence> {
-    if (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024 || file.size === 0)
-        throw new Error('Use a PDF, PNG, or JPEG up to 10 MB.');
+    if (!['application/pdf', 'image/png', 'image/jpeg'].includes(file.type) || file.size > PACKET_EVIDENCE_MAX_BYTES || file.size === 0)
+        throw new Error('Use a PDF, PNG, or JPEG up to 4 MB.');
     const bytes = new Uint8Array(await file.arrayBuffer());
     const valid = file.type === 'application/pdf' ? new TextDecoder().decode(bytes.slice(0, 5)) === '%PDF-' : file.type === 'image/png' ? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 : bytes[0] === 255 && bytes[1] === 216;
     if (!valid)
