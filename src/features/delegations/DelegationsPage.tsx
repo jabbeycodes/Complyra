@@ -3,7 +3,7 @@ import { FileBadge2, Plus } from "lucide-react";
 import { Badge, Empty, formatDate, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { individualsAtSite, lockedSiteIdFor } from "../../data/dashboard";
-import { canToggleDelegation, type ObligationItem } from "../../data/planStack";
+import { canToggleDelegation, delegationAssignedToUser, type ObligationItem } from "../../data/planStack";
 import { can } from "../../data/status";
 import {
   blankDelegationForm,
@@ -41,9 +41,15 @@ export default function DelegationsPage() {
     session.role,
     can(session, "requirements.approve"),
   );
+  // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP sees only
+  // delegations assigned to them — never the whole library, and not
+  // the agency template library either. They land on the forms tab.
+  const isDsp = session.roleKey === "dsp";
+  const activeTab = isDsp ? "forms" : tab;
   const delegations = (workspace?.planStacks ?? [])
     .flatMap((stack) => stack.required)
     .filter((view) => view.item.kind === "delegation")
+    .filter((view) => !isDsp || delegationAssignedToUser(view, session))
     .map((view) => {
       const person = workspace?.individuals.find((p) => p.id === view.item.individualId);
       return { view, person };
@@ -65,22 +71,24 @@ export default function DelegationsPage() {
       />
       {error && <p className="form-error">{error}</p>}
 
-      <div className="tabs">
-        <button
-          className={tab === "library" ? "selected" : ""}
-          onClick={() => setTab("library")}
-        >
-          Template library
-        </button>
-        <button
-          className={tab === "forms" ? "selected" : ""}
-          onClick={() => setTab("forms")}
-        >
-          RN delegation forms
-        </button>
-      </div>
+      {!isDsp && (
+        <div className="tabs">
+          <button
+            className={tab === "library" ? "selected" : ""}
+            onClick={() => setTab("library")}
+          >
+            Template library
+          </button>
+          <button
+            className={tab === "forms" ? "selected" : ""}
+            onClick={() => setTab("forms")}
+          >
+            RN delegation forms
+          </button>
+        </div>
+      )}
 
-      {tab === "library" ? (
+      {activeTab === "library" ? (
         <DelegationTemplatesSection />
       ) : (
         <>
@@ -129,7 +137,7 @@ export default function DelegationsPage() {
               </div>
             )}
             {delegations.length === 0 ? (
-              <Empty title="No delegations yet" />
+              <Empty title={isDsp ? "No delegations assigned to you" : "No delegations yet"} />
             ) : (
               <div className="table-scroll">
                 <table className="delegation-table">

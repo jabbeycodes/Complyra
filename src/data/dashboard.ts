@@ -107,6 +107,37 @@ export function canAccessSite(
 }
 
 /**
+ * DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31: "DSPs only see what
+ * they are assigned"): for a DSP the Requirements surface is personal
+ * work — only requirements they own. Every other role keeps the list
+ * the caller already scoped. Ownership is the requirement's owner
+ * name, the same match personalQueue makes (the workspace Requirement
+ * carries no owner user id).
+ */
+export function requirementsVisibleTo<T extends { owner: string }>(
+  session: SessionUser,
+  requirements: T[],
+): T[] {
+  if (session.roleKey !== "dsp") return requirements;
+  return requirements.filter((row) => row.owner === session.fullName);
+}
+
+/**
+ * DSP-ASSIGNED-SCOPE: the Acknowledgments page lists one sheet per
+ * Individual; a DSP sees only sheets that carry a signature row for
+ * them — the acknowledgments assigned to them. Other roles unchanged.
+ */
+export function packetsVisibleTo(
+  session: SessionUser,
+  packets: PacketDetail[],
+): PacketDetail[] {
+  if (session.roleKey !== "dsp") return packets;
+  return packets.filter((packet) =>
+    packet.rows.some((row) => row.userId === session.userId),
+  );
+}
+
+/**
  * People at one program site. Prefer `siteId` when the workspace row has it
  * so two homes with similar names cannot leak into each other.
  */

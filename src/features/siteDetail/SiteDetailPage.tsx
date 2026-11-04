@@ -235,7 +235,17 @@ export default function SiteDetailPage({
     [workspace, siteId],
   );
 
-  const hasAccess = !!session && !!site && !!workspace && canAccessSite(session, siteId);
+  // DSP-ASSIGNED-SCOPE (founder ruling, 2026-10-31): a DSP's assigned
+  // homes are their membership home plus any home an ACTIVE staff
+  // assignment places them at (workspace.assignmentSiteIds) — the
+  // detail page must open for those homes, not just the membership
+  // home canAccessSite knows. Other roles keep the existing gate.
+  const hasAccess =
+    !!session &&
+    !!site &&
+    !!workspace &&
+    (canAccessSite(session, siteId) ||
+      (session.roleKey === "dsp" && workspace.assignmentSiteIds.includes(siteId)));
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? "overview";
 
   const loadTab = useCallback(
@@ -370,7 +380,7 @@ export default function SiteDetailPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
-  if (!site || !workspace || !session || !canAccessSite(session, siteId)) {
+  if (!site || !workspace || !session || !hasAccess) {
     return (
       <div>
         <button type="button" className="button" onClick={onBack}>
