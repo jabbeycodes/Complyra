@@ -5,6 +5,7 @@ import type { CareAction, CareScreeningData } from "./careScreening";
 import { recheckQaItemForScoring } from "./qaAudit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
+import { agencySetupErrorFromBody, agencySetupErrorFromInvoke } from "./agencySetupErrors";
 import type { Activity, Plan, Requirement } from "../domain";
 import {
   computeRequirementStatus,
@@ -2601,13 +2602,8 @@ export class HostedApi implements ComplyraApi {
         provisionedBy: input.provisionedBy ?? "self",
       },
     });
-    if (error) {
-      const body = (data as { error?: string } | null)?.error;
-      throw new Error(body || error.message || "Could not create that agency.");
-    }
-    if ((data as { error?: string } | null)?.error) {
-      throw new Error((data as { error: string }).error);
-    }
+    if (error) throw await agencySetupErrorFromInvoke(error);
+    if ((data as { error?: string } | null)?.error) throw agencySetupErrorFromBody(data);
     const result = data as CreateAgencyResult;
     return {
       agencyCode: result.agencyCode,
