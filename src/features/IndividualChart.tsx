@@ -2,6 +2,7 @@ import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
 import { useEffect, useState } from "react";
 import { formatPillCount, medCountdown } from "./mobile/medcount";
+import { medSupplyDisplayState } from "../data/medInventory";
 import { formatCentralTime } from "./mobile/mar";
 import type {
   MedDoseMark,
@@ -138,6 +139,32 @@ export default function IndividualChart({
   const [prnDraft, setPrnDraft] = useState<
     Record<string, { reason: string; followUp: string }>
   >({});
+  // The inventory views load on their own: they are the board's only
+  // count source (shared with the forecast card), so a dose-marks or
+  // PRN-log failure must not take them down with it — an all-or-nothing
+  // load left the board rendering stored-row figures that persistently
+  // disagreed with the forecast (batch 33).
+  const [medViewsLoad, setMedViewsLoad] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
+  useEffect(() => {
+    if (!medsEnabled) return;
+    let live = true;
+    setMedViewsLoad("loading");
+    api
+      .getMedInventory(individualId)
+      .then((views) => {
+        if (!live) return;
+        setMedViews(views);
+        setMedViewsLoad("ready");
+      })
+      .catch(() => {
+        if (live) setMedViewsLoad("failed");
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, individualId, medsEnabled, workspace]);
   useEffect(() => {
     if (!medsEnabled) return;
     let live = true;
@@ -146,18 +173,17 @@ export default function IndividualChart({
       .toISOString()
       .slice(0, 10);
     Promise.all([
-      api.getMedInventory(individualId),
       api.getMedDoseMarksInRange(individualId, from, today),
       api.listPrnDoses(individualId),
     ])
-      .then(([views, marks, logs]) => {
+      .then(([marks, logs]) => {
         if (!live) return;
-        setMedViews(views);
         setMedMarks(marks);
         setPrnLogs(logs);
       })
       .catch(() => {
-        if (live) setMedViews(null);
+        // Marks/PRN history degrade to empty; the count source above is
+        // unaffected.
       });
     return () => {
       live = false;
@@ -629,12 +655,22 @@ export default function IndividualChart({
                   const view = medViews?.find(
                     (row) => row.medicationId === med.id,
                   );
-                  const countdown = view
-                    ? medCountdown(view, medMarks, todayIso())
-                    : null;
-                  const neverCounted = countdown
-                    ? !countdown.hasBaseline
-                    : false;
+                  // ONE computed count source for this board and the
+                  // forecast card below: the inventory view's count state
+                  // (medSupplyDisplayState). The stored medication row is
+                  // never a count source — its raw pill figure, days-left
+                  // and low flag are maintained by different write paths
+                  // and persistently disagreed with the forecast in steady
+                  // state (batch 33: "0 pills left · 0 days left" here
+                  // while the forecast said "No count recorded yet"). While
+                  // the views load — or if they fail — the card makes no
+                  // supply claim at all.
+                  const display = medSupplyDisplayState(view, medViewsLoad);
+                  const countdown =
+                    view && display.kind === "counted"
+                      ? medCountdown(view, medMarks, todayIso())
+                      : null;
+                  const neverCounted = display.kind === "never-counted";
                   const medLogs = prnLogs.filter(
                     (log) => log.medicationId === med.id,
                   );
@@ -652,52 +688,41 @@ export default function IndividualChart({
                       status the forecast card below renders — never two
                       different states (e.g. "Due soon" here and a
                       different band there), and never "Expired" for a
-                      stocked med. Falls back to the stored-row low flag
-                      only until the inventory views load. */}
-                  {view ? (
-                    !neverCounted && view.status !== "ok" ? (
-                      <StatusBadge
-                        status={medSupplyStatusFromInventory(view.status)}
-                        label={medSupplyBadgeLabel(
-                          view.status,
-                          view.lastCountedOn,
-                        )}
-                        size="sm"
-                      />
-                    ) : null
-                  ) : med.low ? (
-                    <Badge status="Due soon" />
+                      stocked med. No badge exists before the views load:
+                      a badge derived from the stored row was the batch 21
+                      / item 9 "Due soon" flash. */}
+                  {view && display.kind === "counted" && view.status !== "ok" ? (
+                    <StatusBadge
+                      status={medSupplyStatusFromInventory(view.status)}
+                      label={medSupplyBadgeLabel(
+                        view.status,
+                        view.lastCountedOn,
+                      )}
+                      size="sm"
+                    />
                   ) : null}
                 </header>
                 <p>
                   {med.strength} ·{" "}
-                  {countdown
-                    ? neverCounted
-                      ? "No count recorded yet"
-                      : `${formatPillCount(countdown.pillsLeft ?? 0)} pills left`
-                    : `${med.remainingPills} pills left`}
+                  {display.kind === "loading"
+                    ? "Loading supply…"
+                    : display.kind === "unavailable"
+                      ? "Supply count unavailable"
+                      : neverCounted
+                        ? "No count recorded yet"
+                        : `${formatPillCount(countdown?.pillsLeft ?? 0)} pills left`}
                   {med.kind === "scheduled"
-                    ? countdown && !neverCounted
+                    ? countdown
                       ? ` · ${med.pillsPerDay} per day · ${
                           countdown.daysLeft === null
                             ? "—"
                             : `${countdown.daysLeft} days left`
                         }`
-                      : countdown
-                        ? ""
-                        : ` · ${med.pillsPerDay} per day · ${
-                            med.daysLeft === null
-                              ? "—"
-                              : `${med.daysLeft} days left`
-                          }`
-                    : " · PRN, no automatic drop"}
-                  {view
-                    ? view.lastCountedOn
-                      ? ` · Last counted ${formatDate(view.lastCountedOn)}`
                       : ""
-                    : med.lastDeliveryOn
-                      ? ` · Last counted ${formatDate(med.lastDeliveryOn)}`
-                      : ""}
+                    : " · PRN, no automatic drop"}
+                  {view && display.kind === "counted" && view.lastCountedOn
+                    ? ` · Last counted ${formatDate(view.lastCountedOn)}`
+                    : ""}
                 </p>
                 {canRecordDelivery(session.roleKey) && (
                   <DeliveryForm

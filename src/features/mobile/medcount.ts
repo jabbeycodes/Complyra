@@ -46,7 +46,11 @@
  *   PRN dose logs, already netted into the inventory projection's
  *   current count in both backends, so the countdown shows that count
  *   with no day projection — "as needed — no daily rate".
- * - The floor is zero: a count never renders negative.
+ * - The floor is zero: a count never renders negative. A counted med at
+ *   zero is named "Out of stock" in the label (the desktop surfaces' own
+ *   words) — a bare "0 pills left" hides the state, and the phone PRN tab
+ *   has no other badge to carry it. A never-counted med is never called
+ *   out of stock: it has no count, so it has no stock state.
  *
  * This is deliberately a different lens from the desktop chart's
  * supply forecast (projectInventory), which projects by elapsed
@@ -64,6 +68,13 @@ export interface MedCountdown {
   pillsLeft: number | null;
   /** Whole days at the scheduled daily rate (floored); null for PRN. */
   daysLeft: number | null;
+  /**
+   * True when a counted med is at zero — the label names the state
+   * ("Out of stock", the same words the desktop surfaces use) so a
+   * zero count never renders as a bare number. Always false for a
+   * never-counted med: no count means no stock state at all.
+   */
+  outOfStock: boolean;
   /** One-line supply text: "23 pills left · about 11 days at 2 per day". */
   label: string;
   /** "Counted Fri, Sep 1" for the baseline in use; null without one. */
@@ -179,6 +190,7 @@ export function computeMedCountdown(input: MedCountdownInput): MedCountdown {
       hasBaseline: false,
       pillsLeft: null,
       daysLeft: null,
+      outOfStock: false,
       label: "No count recorded yet",
       countedLabel: null,
     };
@@ -197,14 +209,17 @@ export function computeMedCountdown(input: MedCountdownInput): MedCountdown {
         ? Math.floor(pillsLeft / input.dosesPerDay)
         : null;
     const pillsText = `${formatPillCount(pillsLeft)} ${pillWord(pillsLeft)} left`;
+    const outOfStock = pillsLeft === 0;
+    const stateText = outOfStock ? `${pillsText} · Out of stock` : pillsText;
     return {
       hasBaseline: true,
       pillsLeft,
       daysLeft,
+      outOfStock,
       label:
         daysLeft === null
-          ? pillsText
-          : `${pillsText} · about ${daysLeft} ${dayWord(daysLeft)} at ${formatPillCount(input.dosesPerDay)} per day`,
+          ? stateText
+          : `${stateText} · about ${daysLeft} ${dayWord(daysLeft)} at ${formatPillCount(input.dosesPerDay)} per day`,
       countedLabel,
     };
   }
@@ -226,11 +241,13 @@ export function computeMedCountdown(input: MedCountdownInput): MedCountdown {
     const raw =
       input.prnCurrentCount ?? baseline.pills - wastedPills;
     const pillsLeft = Math.max(0, Math.round(raw * 100) / 100);
+    const outOfStock = pillsLeft === 0;
     return {
       hasBaseline: true,
       pillsLeft,
       daysLeft: null,
-      label: `${formatPillCount(pillsLeft)} ${pillWord(pillsLeft)} left · as needed — no daily rate`,
+      outOfStock,
+      label: `${formatPillCount(pillsLeft)} ${pillWord(pillsLeft)} left${outOfStock ? " · Out of stock" : ""} · as needed — no daily rate`,
       countedLabel,
     };
   }
@@ -246,11 +263,13 @@ export function computeMedCountdown(input: MedCountdownInput): MedCountdown {
   const daysLeft =
     input.dosesPerDay > 0 ? Math.floor(pillsLeft / input.dosesPerDay) : null;
   const pillsText = `${formatPillCount(pillsLeft)} ${pillWord(pillsLeft)} left`;
+  const outOfStock = pillsLeft === 0;
+  const stateText = outOfStock ? `${pillsText} · Out of stock` : pillsText;
   const label =
     daysLeft === null
-      ? pillsText
-      : `${pillsText} · about ${daysLeft} ${dayWord(daysLeft)} at ${formatPillCount(input.dosesPerDay)} per day`;
-  return { hasBaseline: true, pillsLeft, daysLeft, label, countedLabel };
+      ? stateText
+      : `${stateText} · about ${daysLeft} ${dayWord(daysLeft)} at ${formatPillCount(input.dosesPerDay)} per day`;
+  return { hasBaseline: true, pillsLeft, daysLeft, outOfStock, label, countedLabel };
 }
 
 /** Adapter: build the countdown for one medication's inventory view. */

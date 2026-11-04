@@ -28,6 +28,7 @@ import {
   type ScoreFacts,
 } from "../data/complianceScore";
 import { collectRisks, riskCounts, type RiskContext } from "../data/riskRegistry";
+import { medHasCountOnFile } from "../data/medInventory";
 import {
   buildTimeline,
   dueNext,
@@ -270,7 +271,11 @@ export function CommandCenterView({
             | "incomplete",
           dueOn: null,
         })),
-      medications: (data.medications ?? []).filter((med) => med.status !== "ok").map((med) => {
+      // Never-counted meds (lastCountedOn === null) have no supply state:
+      // their projection is a fabricated zero, so they must not be tallied
+      // as out of stock here — they surface as "No count recorded yet" on
+      // the med surfaces, not as Audit Me findings.
+      medications: (data.medications ?? []).filter((med) => med.status !== "ok" && medHasCountOnFile(med)).map((med) => {
         const person = data.individuals.find((row) => row.id === med.individualId);
         return { id: med.medicationId, medName: med.medicationName,
           siteId: person?.siteId ?? "", siteName: person?.site ?? "Unknown site",
@@ -322,7 +327,7 @@ export function CommandCenterView({
           dueOn: (list.dueAt as string).slice(0, 10),
           submitted: false,
         })),
-      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null).map((med) => {
+      medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null && medHasCountOnFile(med)).map((med) => {
         const end = new Date();
         end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));
         return { id: med.medicationId, medName: med.medicationName,

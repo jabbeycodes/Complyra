@@ -15,6 +15,7 @@ import {
   canRecordDelivery,
 } from "../../data/chart";
 import { hhmmToMinutes } from "../../data/dueItems";
+import { deliveryHistoryLabel } from "../../data/medInventory";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
 import type { WorkspaceIndividual } from "./types";
@@ -404,12 +405,14 @@ function CountUnavailable({ onRetry }: { onRetry: () => void }) {
 function RefillCountForm({
   api,
   med,
+  individualName,
   countdown,
   onDone,
   onCancel,
 }: {
   api: ComplyraApi;
   med: MedInventoryView;
+  individualName: string;
   countdown: MedCountdown;
   onDone: () => void;
   onCancel: () => void;
@@ -517,8 +520,10 @@ function RefillCountForm({
           <h4>Recent counts</h4>
           {med.deliveries.slice(0, 3).map((delivery) => (
             <p key={delivery.id}>
-              {delivery.countedOn} — {delivery.remainingPills} pills counted ·
-              recorded by {delivery.recordedBy}
+              {deliveryHistoryLabel(delivery, {
+                medicationName: med.medicationName,
+                individualName,
+              })}
             </p>
           ))}
         </div>
@@ -957,6 +962,7 @@ export default function MobileMar({
         <RefillCountForm
           api={api}
           med={refillMed}
+          individualName={person.name}
           countdown={
             countdowns.get(refillMed.medicationId) ??
             medCountdown(refillMed, marksRange, todayIso)
