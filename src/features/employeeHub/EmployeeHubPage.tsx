@@ -459,10 +459,12 @@ interface BadgeCounts {
  * options scoped to their visible homes — membership home + own
  * staff-row home + active assignment sites (mirroring the
  * sitesVisibleTo derivation in src/data/dashboard.ts and the
- * staffVisibleTo model in PR #213; dedupe with #213 when it lands) —
+ * staffVisibleTo model in src/data/dashboard.ts; the site set is
+ * hubRowActionScope's, so the form options and the row actions can
+ * never disagree) —
  * plus the viewer themselves. Agency-wide roles (administrator,
- * program_manager, hr, nurse, auditor, compliance_admin) return null:
- * their forms keep the full lists. Display lists are never scoped —
+ * program_manager, hr, nurse, auditor) return null: their forms keep
+ * the full lists. Display lists are never scoped —
  * name resolution on existing shifts/patterns is unaffected.
  */
 export function hubSchedulingFormScope(
@@ -471,14 +473,8 @@ export function hubSchedulingFormScope(
   sites: HubSite[],
   assignmentSiteIds: string[] = [],
 ): { staffList: HubStaffEntry[]; sites: HubSite[] } | null {
-  if (session.roleKey !== "house_manager" && session.roleKey !== "dsp") {
-    return null;
-  }
-  const ids = new Set<string>();
-  if (session.siteId) ids.add(session.siteId);
-  const own = staffList.find((s) => s.userId === session.userId);
-  if (own?.siteId) ids.add(own.siteId);
-  for (const id of assignmentSiteIds) if (id) ids.add(id);
+  const ids = hubRowActionScope(session, staffList, assignmentSiteIds);
+  if (ids === null) return null;
   return {
     staffList: staffList.filter(
       (s) =>
@@ -487,6 +483,75 @@ export function hubSchedulingFormScope(
     ),
     sites: sites.filter((s) => ids.has(s.id)),
   };
+}
+
+/**
+ * WAVE-7T-3 (simulation batches 174/187) — row-action scope for the
+ * scheduling surfaces.
+ *
+ * The Team Schedule list renders Edit/Delete on EVERY dated shift and
+ * the Staffing board renders Edit/Deactivate on every pattern, but a
+ * site-scoped manager (Juniper HM) could open or delete another house's
+ * records from the "All sites" view: the rows were visible agency-wide
+ * (display scoping is PR #213's separate concern — rows stay visible)
+ * and their actions were ungated. For house_manager / dsp viewers this
+ * returns the site ids their row actions may touch — membership home +
+ * own staff-row home + active assignment sites, the same derivation
+ * hubSchedulingFormScope (PR #237) applies to the create/edit FORM
+ * options — that function reads its site set from here, so the two
+ * cannot drift. Agency-wide roles (administrator, program_manager, hr,
+ * nurse, auditor) return null: their row actions are unchanged.
+ */
+export function hubRowActionScope(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+  assignmentSiteIds: string[] = [],
+): Set<string> | null {
+  if (session.roleKey !== "house_manager" && session.roleKey !== "dsp") {
+    return null;
+  }
+  const ids = new Set<string>();
+  if (session.siteId) ids.add(session.siteId);
+  const own = staffList.find((s) => s.userId === session.userId);
+  if (own?.siteId) ids.add(own.siteId);
+  for (const id of assignmentSiteIds) if (id) ids.add(id);
+  return ids;
+}
+
+/**
+ * Whether a viewer with the given row-action scope may act on a row
+ * anchored at `siteId`. An unscoped (agency-wide) viewer may act on any
+ * row; a scoped viewer only on rows inside their scope — unassigned /
+ * agency rows (siteId null) stay agency-wide-only.
+ */
+export function rowActionAllowed(
+  scope: Set<string> | null,
+  siteId: string | null,
+): boolean {
+  if (scope === null) return true;
+  return siteId != null && scope.has(siteId);
+}
+
+/**
+ * WAVE-7T-3 (simulation batch 187) — Timecards staff-picker default.
+ *
+ * The picker used to initialize on staffList[0] — silently the first
+ * roster row (the agency admin in the sim) — so a house manager or HR
+ * opening Timecards landed on someone else's timecard and their
+ * approvals with it. The review is per-person by design (the picker
+ * offers no "All staff" option), so the honest default is the viewer
+ * themselves; a viewer who is not on the roster gets no preselection
+ * rather than a stranger's timecard. The tab's other picker, Pay
+ * period, defaults to the first row too — but periods come back
+ * newest-first, so that is a current-period default, not a person trap.
+ */
+export function defaultTimecardStaffId(
+  session: SessionUser,
+  staffList: HubStaffEntry[],
+): string {
+  return staffList.some((s) => s.userId === session.userId)
+    ? session.userId
+    : "";
 }
 
 export function EmployeeHubShell({
@@ -509,6 +574,13 @@ export function EmployeeHubShell({
   const canReviewTimecards = hasHubTeamPermission(session, "hub.review_timecards");
   const canApprovePayroll = hasHubTeamPermission(session, "hub.approve_payroll");
   const operating = useOperatingRules(session);
+  // Wave 7T-3: scope Team Schedule / Staffing ROW actions for
+  // site-scoped viewers (see hubRowActionScope). Display lists and
+  // every other tab keep the full lists.
+  const rowActionScope = useMemo(
+    () => hubRowActionScope(session, staffList, assignmentSiteIds ?? []),
+    [session, staffList, assignmentSiteIds],
+  );
   // HMs/PMs post for their sites on hub.manage_schedule; agency-wide posting
   // is the administrator's, on the same key. WAVE-7T (simulation batch 157):
   // HR previously qualified for agency-wide posting through
@@ -684,7 +756,7 @@ export function EmployeeHubShell({
       <div className="hub-panel">
         {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} />}
         {tab === "staffing" && (
-          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} />
+          <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
         )}
         {tab === "open-shifts" && (
           <OpenShiftsTab
@@ -765,7 +837,7 @@ export function EmployeeHubShell({
           />
         )}
         {tab === "team-schedule" && can("hub.manage_schedule") && (
-          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} />
+          <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
         )}
         {tab === "attendance" && canViewTeamHub && (
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
@@ -1310,6 +1382,7 @@ function StaffingTab({
   formStaffList,
   formSites,
   api,
+  rowActionScope,
 }: {
   session: SessionUser;
   store: HrStore;
@@ -1321,6 +1394,8 @@ function StaffingTab({
   formStaffList?: HubStaffEntry[];
   formSites?: HubSite[];
   api?: ReturnType<typeof useData>["api"];
+  /** Wave 7T-3: site ids a site-scoped viewer may act on; null = agency-wide. */
+  rowActionScope?: Set<string> | null;
 }) {
   const canManage = hasPermission(session, "hub.manage_staffing");
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
@@ -1427,6 +1502,7 @@ function StaffingTab({
         staffList={staffList}
         sites={sites}
         editable={canManage}
+        canActOnPattern={(p) => rowActionAllowed(rowActionScope ?? null, p.siteId)}
         loading={loading}
         error=""
         onEdit={(p) => {
@@ -2977,6 +3053,7 @@ function TeamScheduleTab({
   formStaffList,
   formSites,
   api,
+  rowActionScope,
 }: {
   session: SessionUser;
   store: HrStore;
@@ -2988,6 +3065,8 @@ function TeamScheduleTab({
   formStaffList?: HubStaffEntry[];
   formSites?: HubSite[];
   api?: ReturnType<typeof useData>["api"];
+  /** Wave 7T-3: site ids a site-scoped viewer may act on; null = agency-wide. */
+  rowActionScope?: Set<string> | null;
 }) {
   const assignableStaff = formStaffList ?? staffList;
   const formSiteOptions = formSites ?? sites;
@@ -3252,12 +3331,19 @@ function TeamScheduleTab({
                     </div>
                     <div className="hub-row">
                       <span className={statusClass(s.status)}>{s.status}</span>
-                      <button className="hub-btn" aria-label={`Edit shift ${s.title}`} onClick={() => openEdit(s)}>
-                        <Pencil size={16} />
-                      </button>
-                      <button className="hub-btn danger" aria-label={`Delete shift ${s.title}`} disabled={busy} onClick={() => remove(s.id)}>
-                        <Trash2 size={16} />
-                      </button>
+                      {/* Wave 7T-3: rows stay visible agency-wide, but a
+                          site-scoped viewer only gets Edit/Delete on rows
+                          inside their houses (see hubRowActionScope). */}
+                      {rowActionAllowed(rowActionScope ?? null, s.siteId) && (
+                        <>
+                          <button className="hub-btn" aria-label={`Edit shift ${s.title}`} onClick={() => openEdit(s)}>
+                            <Pencil size={16} />
+                          </button>
+                          <button className="hub-btn danger" aria-label={`Delete shift ${s.title}`} disabled={busy} onClick={() => remove(s.id)}>
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -3539,6 +3625,7 @@ function AttendanceTab({
 /* -------------------------------- Timecards -------------------------------- */
 
 function TimecardsTab({
+  session,
   store,
   staffList,
   onChanged,
@@ -3572,8 +3659,13 @@ function TimecardsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
 
+  // Wave 7T-3 (batch 187): default to the viewer's OWN timecard, never
+  // silently to the first roster row — see defaultTimecardStaffId. An
+  // existing selection that is still on the roster is left alone.
   useEffect(() => {
-    if (staffList.length && !staffId) setStaffId(staffList[0].userId);
+    if (!staffList.length) return;
+    if (staffId && staffList.some((s) => s.userId === staffId)) return;
+    setStaffId(defaultTimecardStaffId(session, staffList));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staffList]);
 

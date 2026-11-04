@@ -162,6 +162,12 @@ interface StaffingBoardProps {
   sites: HubSite[];
   /** hub.manage_staffing: shows edit/deactivate controls. */
   editable: boolean;
+  /**
+   * Wave 7T-3: per-row gate on top of `editable` — a site-scoped viewer
+   * keeps the rows visible but only acts on patterns inside their
+   * houses. Defaults to every row actionable.
+   */
+  canActOnPattern?: (p: HrStaffingPattern) => boolean;
   loading: boolean;
   error: string;
   onEdit: (p: HrStaffingPattern) => void;
@@ -173,6 +179,7 @@ export function StaffingBoard({
   staffList,
   sites,
   editable,
+  canActOnPattern,
   loading,
   error,
   onEdit,
@@ -244,7 +251,7 @@ export function StaffingBoard({
                   pattern={p}
                   staffList={staffList}
                   sites={sites}
-                  editable={editable}
+                  editable={editable && (canActOnPattern?.(p) ?? true)}
                   onEdit={onEdit}
                   onToggleActive={onToggleActive}
                 />
