@@ -8,6 +8,14 @@ import { test, expect, type Page } from "./fixtures";
 // 2026-09-12 by the shared fixture.)
 
 async function signIn(page: Page, username: string, password: string) {
+  // The phone test below drives the desktop layout at phone width.
+  // Since PR #134 a phone sign-in lands in the mobile shell; the
+  // desktop layout is what a user gets after picking "Desktop view"
+  // once — the pick persists (the app reads complyrer.viewMode at
+  // boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
@@ -22,8 +30,10 @@ async function openEllis(page: Page) {
   await page.getByRole("button", { name: "Individuals", exact: true }).click();
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
+  // Chart title is the h1; the Consents register section repeats the
+  // name as an h3, so pin the title by level.
   await expect(
-    chart.getByRole("heading", { name: "Ellis Hart", exact: true }),
+    chart.getByRole("heading", { name: "Ellis Hart", exact: true, level: 1 }),
   ).toBeVisible();
   return chart;
 }
@@ -79,7 +89,8 @@ test("the Menu section fits a phone-width chart with no horizontal overflow", as
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "alex.morgan", "Evergreen!demo1");
-  // Phone width: the chart is reached through the navigation drawer.
+  // Phone width, desktop layout (persisted pick seeded in signIn):
+  // the chart is reached through the navigation drawer.
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page
     .locator(".sidebar")
@@ -88,7 +99,7 @@ test("the Menu section fits a phone-width chart with no horizontal overflow", as
   await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
   const chart = page.locator(".individual-chart");
   await expect(
-    chart.getByRole("heading", { name: "Ellis Hart", exact: true }),
+    chart.getByRole("heading", { name: "Ellis Hart", exact: true, level: 1 }),
   ).toBeVisible();
   const menu = chart.locator(".menu-card");
   await menu.scrollIntoViewIfNeeded();

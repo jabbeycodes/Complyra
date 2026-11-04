@@ -1,9 +1,18 @@
 import { test, expect, type Page } from "./fixtures";
 
-// TEMP (fix-141 verification): the History expansion and the Voided list
-// must fit a 390px phone chart with no horizontal overflow.
+// The Menu History expansion and the Voided list must fit a 390px
+// phone chart with no horizontal overflow.
 
 async function signIn(page: Page, username: string, password: string) {
+  // These specs drive the desktop layout, including at phone width
+  // (mid-test resizes included). Since PR #134 a phone sign-in lands
+  // in the mobile shell and a mid-session narrow resize swaps to it;
+  // the desktop layout is what a user gets after picking "Desktop
+  // view" once — the pick persists (the app reads complyrer.viewMode
+  // at boot), so seed it before the app loads.
+  await page.addInitScript(() => {
+    localStorage.setItem("complyrer.viewMode", "desktop");
+  });
   await page.goto("/");
   await page.getByLabel("Provider code").fill("EVERGREEN-MO");
   await page.getByLabel("Username").fill(username);
@@ -19,7 +28,8 @@ test("history + voided surface fits 390px with no horizontal overflow", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, "alex.morgan", "Evergreen!demo1");
-  // Phone width: the chart is reached through the navigation drawer.
+  // Phone width, desktop layout (persisted pick seeded in signIn):
+  // the chart is reached through the navigation drawer.
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page
     .locator(".sidebar")
@@ -47,7 +57,13 @@ test("history + voided surface fits 390px with no horizontal overflow", async ({
   await menu.getByLabel("Food eaten").fill("Yogurt cup");
   await menu.getByLabel("Amount eaten").selectOption("all");
   await menu.getByRole("button", { name: "Save entry" }).click();
-  const snack = menu.locator(".menu-entry", { hasText: "Yogurt cup" });
+  // The demo week already contains a seeded "A yogurt cup and
+  // graham crackers" entry, which a plain "Yogurt cup" text match
+  // also hits — target the entry this test recorded, whose food
+  // line starts with "Yogurt cup".
+  const snack = menu.locator(".menu-entry").filter({
+    has: page.locator(".menu-entry-food", { hasText: /^Yogurt cup/ }),
+  });
   await snack.getByRole("button", { name: "Void" }).click();
   await menu.getByLabel("Reason for voiding").fill("Recorded against the wrong day");
   await menu.getByRole("button", { name: "Void entry" }).click();

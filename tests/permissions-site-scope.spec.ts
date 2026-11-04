@@ -141,7 +141,9 @@ test("a person added on a new site keeps that site on a requirement", async ({
   await personDialog.getByLabel("Legal name").fill("Nia Brooks");
   await personDialog.getByLabel("Date of birth").fill("1990-01-15");
   await personDialog.getByRole("button", { name: "Add Individual", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Nia Brooks" })).toBeVisible();
+  // The chart title is the h1; the Rights packet section heading also
+  // carries the person's name ("… — Rights packet: …").
+  await expect(page.getByRole("heading", { name: "Nia Brooks", exact: true, level: 1 })).toBeVisible();
   await expect(page.locator(".individual-chart")).toContainText("QA Audit House");
 
   await openNav(page);

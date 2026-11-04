@@ -106,6 +106,15 @@ test("platform nav: Overview — sidebar starts collapsed, scroll-collapse cycle
 }) => {
   await signIn(page, "sarah.mitchell");
   await toShellHome(page);
+  // The suite pins the clock (tests/fixtures.ts), and a pinned clock
+  // freezes CSS transitions in this Chromium build — the drawer's
+  // 0.2s close transition would hang mid-flight and the geometry
+  // assertions below would measure a half-closed drawer. Kill
+  // transitions, as the other drawer specs do, so the assertions
+  // measure the end states the product actually settles into.
+  await page.addStyleTag({
+    content: "* { transition: none !important; animation: none !important; }",
+  });
   await toDeepLinkedPage(page);
   await drawerTo(page, "Overview");
 

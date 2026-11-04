@@ -68,10 +68,28 @@ test("health trackers section is distinct from the Health card and its tabs swit
   await expect(panel.getByLabel("Date given")).toBeVisible();
 });
 
+// Phone-width path into the chart: sign-in lands in the mobile shell
+// (PR #134), so the chart is reached through the shell — pick the
+// home, then People, then the person; the shell bridges into the
+// desktop chart.
+async function openEllisChartMobile(page: Page) {
+  const picker = page.getByText("Select your home");
+  if (await picker.isVisible()) {
+    await page.getByRole("button", { name: /Cedar House/ }).click();
+  }
+  await page.getByRole("button", { name: "People", exact: true }).click();
+  await page.getByRole("button", { name: /Ellis Hart/ }).first().click();
+  const chart = page.locator(".individual-chart");
+  await expect(
+    chart.getByRole("heading", { name: "Trackers and logs" }),
+  ).toBeVisible();
+  return chart;
+}
+
 test("health trackers section renders at a mobile width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
-  const chart = await openEllisChart(page);
+  const chart = await openEllisChartMobile(page);
 
   const trackerTabs = chart.getByRole("tablist", { name: "Health trackers" });
   await expect(trackerTabs.getByRole("tab")).toHaveCount(12);
@@ -79,6 +97,8 @@ test("health trackers section renders at a mobile width", async ({ page }) => {
   const panel = chart.getByRole("tabpanel");
   await expect(panel.getByLabel("Test")).toBeVisible();
   await expect(
-    panel.getByLabel("Flag this result abnormal (alerts the home's managers)"),
+    // The Lab results add-form flag reads "concerning"; "Flag this
+    // result abnormal" is the correction form's label.
+    panel.getByLabel("Flag this record as concerning (alerts the home's managers)"),
   ).toBeVisible();
 });
