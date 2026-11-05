@@ -11,9 +11,10 @@
  *
  * Permissions mirror the Binder tab: HR/admin see the whole agency,
  * team viewers (hub.view_team) see the staff list the hub already
- * scopes for them, auditors read. The template editor is HR/admin
- * only (certificates.manage or the administrator/HR roles — the same
- * gate the template table's RLS write policy uses).
+ * scopes for them, auditors read (no Chase list: the board is read-only
+ * for them). The template editor is configuration: administrator and
+ * program manager only, the same gate the template table's RLS write
+ * policy and both HR stores use. HR keeps every board operation.
  *
  * Totals grammar (pass 16 fix): the card grid renders the staff list
  * the hub passed in (house-scoped for house-scoped viewers), but the
@@ -36,7 +37,7 @@ import { useData } from "../../data/DataProvider";
 import { todayIso } from "../../data/chart";
 import type { ComplianceEvidence } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
-import { hasPermission, ROLE_TEMPLATE_BY_KEY } from "../../data/permissions";
+import { canEditBinderTemplates, ROLE_TEMPLATE_BY_KEY } from "../../data/permissions";
 import { documentHasReadableContent } from "../../data/starterDocuments";
 import type { SessionUser } from "../../data/types";
 import {
@@ -98,11 +99,7 @@ export function BinderBoardTab({
 }) {
   const { api } = useData();
   const isAuditor = session.roleKey === "auditor";
-  const canEditTemplates =
-    !isAuditor &&
-    (hasPermission(session, "certificates.manage") ||
-      session.roleKey === "administrator" ||
-      session.roleKey === "hr");
+  const canEditTemplates = canEditBinderTemplates(session.roleKey);
 
   const [view, setView] = useState<"board" | "templates">("board");
   const [rows, setRows] = useState<BoardRow[] | null>(null);
@@ -464,6 +461,7 @@ export function BinderBoardTab({
                       key={row.entry.userId}
                       row={row}
                       expanded={expanded}
+                      readOnly={isAuditor}
                       roleLabel={roleName(row.entry.roleKey)}
                       homeLabel={homeLabel(row.entry)}
                       onToggle={() =>
@@ -494,6 +492,7 @@ export function BinderBoardTab({
 function BoardCard({
   row,
   expanded,
+  readOnly,
   roleLabel,
   homeLabel,
   onToggle,
@@ -501,6 +500,8 @@ function BoardCard({
 }: {
   row: BoardRow;
   expanded: boolean;
+  /** Auditors read the board; the Chase list is an HR working action. */
+  readOnly: boolean;
   roleLabel: string;
   homeLabel: string;
   onToggle: () => void;
@@ -556,20 +557,22 @@ function BoardCard({
         )}
       </div>
       <div className="binder-person-actions">
-        <button
-          className="hub-btn"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          disabled={gaps.length === 0}
-        >
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          Chase list
-        </button>
+        {!readOnly && (
+          <button
+            className="hub-btn"
+            aria-expanded={expanded}
+            onClick={onToggle}
+            disabled={gaps.length === 0}
+          >
+            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            Chase list
+          </button>
+        )}
         <button className="hub-btn primary" onClick={onOpenBinder}>
           <FolderOpen size={15} /> Open binder
         </button>
       </div>
-      {expanded && (
+      {expanded && !readOnly && (
         <div className="binder-board-chase">
           <div className="binder-board-chase-head">
             <strong>

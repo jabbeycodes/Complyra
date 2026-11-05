@@ -94,6 +94,7 @@ import {
   canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canOfferPersonalSpendingEntryForm,
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
   capabilityForRoleKey,
   canGrantRole,
@@ -161,6 +162,7 @@ import {
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
+  closedMonthVoidMessage as personalClosedMonthVoidMessage,
   monthEndIso as personalMonthEndIso,
   validatePersonalSpendingCloseDraft,
   validatePersonalSpendingDraft,
@@ -12768,20 +12770,39 @@ export class LocalApi implements ComplyraApi {
     return view;
   }
 
-  /** A signed close blocks NEW entries dated in the closed month. */
-  private assertPersonalSpendingMonthOpen(
+  private personalSpendingMonthClosed(
     session: { agencyId: string },
     individualId: string,
     entryDate: string,
   ) {
     const month = monthKeyFrom(entryDate);
-    const close = this.personalSpendingCloseRows().find(
+    return this.personalSpendingCloseRows().some(
       (row) =>
         row.agencyId === session.agencyId &&
         row.individualId === individualId &&
         row.month === month,
     );
-    if (close) throw new Error(personalClosedMonthMessage(monthLabel(month)));
+  }
+
+  /**
+   * A signed month takes new entries from month-closers only (founder
+   * decision 2026-11-04; same rule as the database guard).
+   */
+  private assertPersonalSpendingMonthWritable(
+    session: { agencyId: string; roleKey: string },
+    individualId: string,
+    entryDate: string,
+  ) {
+    const closed = this.personalSpendingMonthClosed(
+      session,
+      individualId,
+      entryDate,
+    );
+    if (!canOfferPersonalSpendingEntryForm(session.roleKey, closed)) {
+      throw new Error(
+        personalClosedMonthMessage(monthLabel(monthKeyFrom(entryDate))),
+      );
+    }
   }
 
   async listPersonalSpendingEntries(individualId: string) {
@@ -12798,7 +12819,7 @@ export class LocalApi implements ComplyraApi {
     this.assertPersonalSpendingRecorder(session);
     const person = accessibleIndividual(this.store, session, input.individualId);
     const draft = validatePersonalSpendingDraft(input, centralTodayIso());
-    this.assertPersonalSpendingMonthOpen(session, person.id, draft.entryDate);
+    this.assertPersonalSpendingMonthWritable(session, person.id, draft.entryDate);
     // A spend may not take the person's balance below $0 (batch 7).
     assertPersonalSpendingSpendWithinBalance(
       this.personalSpendingEntryRows().filter(
@@ -12850,10 +12871,18 @@ export class LocalApi implements ComplyraApi {
     accessibleIndividual(this.store, session, row.individualId);
     // Wave 6 item 3: closers may void any entry; other recorders only
     // their own (the mobile Undo path) — a DSP must not void entries
-    // recorded by managers or the admin.
-    if (!sessionCanVoidPersonalSpendingEntry(session, row)) {
+    // recorded by managers or the admin. On a signed month the own-entry
+    // path ends: only closers may void there.
+    const monthClosed = this.personalSpendingMonthClosed(
+      session,
+      row.individualId,
+      row.entryDate,
+    );
+    if (!sessionCanVoidPersonalSpendingEntry(session, row, monthClosed)) {
       throw new Error(
-        "Only the person who recorded an entry can undo it, or a manager can void it.",
+        monthClosed
+          ? personalClosedMonthVoidMessage(monthLabel(monthKeyFrom(row.entryDate)))
+          : "Only the person who recorded an entry can undo it, or a manager can void it.",
       );
     }
     if (row.voidedAt) {
@@ -12874,17 +12903,13 @@ export class LocalApi implements ComplyraApi {
         replacement,
         centralTodayIso(),
       );
-      const originalMonth = monthKeyFrom(row.entryDate);
-      const replacementMonth = monthKeyFrom(draft.entryDate);
-      if (replacementMonth !== originalMonth) {
-        // Moving the entry into a different month is a new entry into
-        // that month: allowed only while that month is still open.
-        this.assertPersonalSpendingMonthOpen(
-          session,
-          row.individualId,
-          draft.entryDate,
-        );
-      }
+      // The replacement is a new entry in its own month, which may
+      // differ from the original's.
+      this.assertPersonalSpendingMonthWritable(
+        session,
+        row.individualId,
+        draft.entryDate,
+      );
       // The replacement is a new spend: it may not take the balance
       // below $0 either (the entry it replaces counts as voided).
       assertPersonalSpendingSpendWithinBalance(

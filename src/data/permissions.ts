@@ -1076,19 +1076,56 @@ export function canRecordPersonalSpending(roleKey: string) {
  * ledger; anyone else who can record may void ONLY their own entry —
  * that is the shipped mobile "Undo right after recording" path, and it
  * must never extend to other people's entries.
+ *
+ * On a signed month the own-entry path ends (founder decision 2026-11-04):
+ * only month-closers may void there. Matches the database guard
+ * (20261104130000) and both APIs.
  */
 export function canVoidPersonalSpendingEntry(
   session: { roleKey: string; userId: string },
   entry: { recordedBy: string },
+  monthClosed: boolean,
 ) {
   if (canClosePersonalSpendingMonth(session.roleKey)) return true;
-  return entry.recordedBy === session.userId;
+  return !monthClosed && entry.recordedBy === session.userId;
 }
 
 /** Personal spending — who may sign a month closed. */
 export function canClosePersonalSpendingMonth(roleKey: string) {
   return (PERSONAL_SPENDING_CLOSER_ROLE_KEYS as readonly string[]).includes(
     roleKey,
+  );
+}
+
+/**
+ * Personal spending — may this person record an entry dated inside a month
+ * with this closed state? A signed month stays open to month-closers, who
+ * may record and void there (founder decision 2026-11-04); it is read-only
+ * for everyone else. The form gate, both APIs, and the database guard
+ * (20261104130000) all follow this one rule.
+ */
+export function canOfferPersonalSpendingEntryForm(
+  roleKey: string,
+  monthClosed: boolean,
+) {
+  if (!canRecordPersonalSpending(roleKey)) return false;
+  return !monthClosed || canClosePersonalSpendingMonth(roleKey);
+}
+
+/**
+ * New hire binder templates are agency configuration (wave 3, retest):
+ * administrators and program managers only. HR runs the binder board
+ * (issuing, the chase list, contacts) from the templates set here.
+ * Matches the hr_binder_templates write policy (20261104110000).
+ */
+export const BINDER_TEMPLATE_EDITOR_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+];
+
+export function canEditBinderTemplates(roleKey: string | undefined) {
+  return (BINDER_TEMPLATE_EDITOR_ROLE_KEYS as readonly string[]).includes(
+    roleKey ?? "",
   );
 }
 

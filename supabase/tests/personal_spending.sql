@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(60);
+select plan(84);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Agency A: Home A (Person One), Home B (Person Two). Agency B for isolation.
@@ -122,9 +122,9 @@ select is((select closing_balance_cents from personal_spending_month_closes wher
 select throws_ok($$insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',to_char(current_date,'YYYY-MM'),9877,'Hannah HM','Hannah HM','d4000000-0000-0000-0000-000000000001','individual_signed')$$,
   '23505',null,'A month can only be signed closed once');
-select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
   values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',current_date,'deposit','Monthly personal funds','',5000,'d4000000-0000-0000-0000-000000000001')$$,
-  'P0001',null,'A closed month refuses new entries');
+  'A manager can record a new entry on a closed month (founder decision 2026-11-04)');
 
 -- Post-close correction, in the app's order: replacement first, then the
 -- void that links to it. Both stay inside the closed month they correct.
@@ -295,6 +295,117 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-
 select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='PM correction'
   where id='f4000000-0000-0000-0000-000000000101'$$,
   'A program manager may void another staff member''s entry');
+
+-- Signed months follow the caller's role (founder decision 2026-11-04,
+-- 20261104130000): managers record and void, everyone else only reads.
+-- Five months back is otherwise unused for Person One. The ledger is seeded
+-- before the close because the service role cannot add to a closed month.
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+insert into auth.users(id,email) values
+ ('d4000000-0000-0000-0000-000000000008','ps-admin@example.invalid');
+update profiles set must_change_password=false,
+  home_agency_id='a4000000-0000-0000-0000-000000000001', full_name='Ada Admin'
+ where id='d4000000-0000-0000-0000-000000000008';
+insert into memberships(agency_id,user_id,role,role_key,site_id) values
+ ('a4000000-0000-0000-0000-000000000001','d4000000-0000-0000-0000-000000000008','administrator','administrator',null);
+insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,recorded_by_name,recorded_by_role) values
+ ('f4000000-0000-0000-0000-000000000201','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed A)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000202','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed B)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000203','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed C)','',500,'d4000000-0000-0000-0000-000000000001','Hannah HM','house_manager'),
+ ('f4000000-0000-0000-0000-000000000204','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed D)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000205','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed E)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp'),
+ ('f4000000-0000-0000-0000-000000000206','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed F)','',500,'d4000000-0000-0000-0000-000000000002','Alex DSP','dsp');
+insert into personal_spending_month_closes(agency_id,site_id,individual_id,month,closing_balance_cents,printed_name,signature_text,signed_by,individual_signoff) values
+ ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',to_char(current_date - interval '5 months','YYYY-MM'),3000,'Hannah HM','Hannah HM','d4000000-0000-0000-0000-000000000001','individual_signed');
+
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Service write','',100,'d4000000-0000-0000-0000-000000000001')$$,
+  'P0001',null,'A service-role write still cannot add a new entry to a closed month');
+set local role authenticated;
+
+-- ---------------- DSP: read-only on the signed month ----------------
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000002"}',true);
+select is((select count(*)::int from personal_spending_entries where individual_id='e4000000-0000-0000-0000-000000000001' and entry_date=(current_date - interval '5 months')::date),6,
+  'A DSP still reads the signed month');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family','',100,'d4000000-0000-0000-0000-000000000002')$$,
+  'P0001',null,'A DSP cannot record a new entry on a closed month');
+select throws_ok($$update personal_spending_entries set voided_at=now(), void_reason='My own typo'
+  where id='f4000000-0000-0000-0000-000000000201'$$,
+  'P0001',null,'A DSP cannot void their own entry on a closed month');
+select is((select voided_at from personal_spending_entries where id='f4000000-0000-0000-0000-000000000201'),null::timestamptz,
+  'The DSP''s refused void changed nothing');
+select throws_ok($$update personal_spending_entries set voided_at=now(), void_reason='Not mine'
+  where id='f4000000-0000-0000-0000-000000000203'$$,
+  'P0001',null,'A DSP cannot void a coworker''s entry on a closed month');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family','',400,'d4000000-0000-0000-0000-000000000002','f4000000-0000-0000-0000-000000000201')$$,
+  'P0001',null,'A DSP cannot place a replacement inside a closed month');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '4 months')::date,'deposit','Family','',400,'d4000000-0000-0000-0000-000000000002','f4000000-0000-0000-0000-000000000201')$$,
+  'P0001',null,'A DSP cannot correct a closed-month entry by dating the replacement in an open month');
+
+-- ---------------- Auditor and nurse: not on a signed month either ----------------
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000005"}',true);
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family','',100,'d4000000-0000-0000-0000-000000000005')$$,
+  'P0001',null,'An auditor cannot record on a closed month');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='Auditor void'
+  where id='f4000000-0000-0000-0000-000000000202'$$,
+  'An auditor void on a closed month runs without error but touches nothing');
+select is((select voided_at from personal_spending_entries where id='f4000000-0000-0000-0000-000000000202'),null::timestamptz,
+  'An auditor cannot void on a closed month');
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000006"}',true);
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family','',100,'d4000000-0000-0000-0000-000000000006')$$,
+  'P0001',null,'A nurse cannot record on a closed month');
+
+-- ---------------- Managers: record and void on the signed month ----------------
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000001"}',true);
+select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','HM late deposit','',100,'d4000000-0000-0000-0000-000000000001')$$,
+  'A house manager records a new entry on a closed month');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='HM post-close correction'
+  where id='f4000000-0000-0000-0000-000000000202'$$,
+  'A house manager voids another staff member''s entry on a closed month');
+select is((select voided_by::text from personal_spending_entries where id='f4000000-0000-0000-0000-000000000202'),'d4000000-0000-0000-0000-000000000001',
+  'That void is stamped with the manager who made it');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='HM own post-close correction'
+  where id='f4000000-0000-0000-0000-000000000203'$$,
+  'A house manager voids their own entry on a closed month');
+select lives_ok($$insert into personal_spending_entries(id,agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by,replaces_entry_id)
+  values ('f4000000-0000-0000-0000-000000000207','a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Family (signed E, corrected)','',450,'d4000000-0000-0000-0000-000000000001','f4000000-0000-0000-0000-000000000205')$$,
+  'A house manager records a replacement on a closed month');
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'spend','Target','More than the balance holds',99999999,'d4000000-0000-0000-0000-000000000001')$$,
+  'P0001',null,'The $0 balance floor still applies to a manager on a closed month');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000002"}',true);
+select throws_ok($$update personal_spending_entries set replaced_by_entry_id='f4000000-0000-0000-0000-000000000207'
+  where id='f4000000-0000-0000-0000-000000000205'$$,
+  'P0001',null,'A DSP cannot link a replacement on a closed month, even a real one');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000003"}',true);
+select throws_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Out of scope','',100,'d4000000-0000-0000-0000-000000000003')$$,
+  '42501',null,'A house manager at another home is still refused on a closed month');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000004"}',true);
+select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','PM late deposit','',100,'d4000000-0000-0000-0000-000000000004')$$,
+  'A program manager records a new entry on a closed month');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='PM post-close correction'
+  where id='f4000000-0000-0000-0000-000000000204'$$,
+  'A program manager voids another staff member''s entry on a closed month');
+
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000008"}',true);
+select lives_ok($$insert into personal_spending_entries(agency_id,site_id,individual_id,entry_date,kind,location,purpose,amount_cents,recorded_by)
+  values ('a4000000-0000-0000-0000-000000000001','c4000000-0000-0000-0000-000000000001','e4000000-0000-0000-0000-000000000001',(current_date - interval '5 months')::date,'deposit','Admin late deposit','',100,'d4000000-0000-0000-0000-000000000008')$$,
+  'An administrator records a new entry on a closed month');
+select lives_ok($$update personal_spending_entries set voided_at=now(), void_reason='Admin post-close correction'
+  where id='f4000000-0000-0000-0000-000000000201'$$,
+  'An administrator voids another staff member''s entry on a closed month');
 
 select * from finish();
 rollback;

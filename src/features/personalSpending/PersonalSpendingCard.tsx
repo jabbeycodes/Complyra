@@ -25,6 +25,7 @@ import {
   canClosePersonalSpendingMonth,
   canRecordPersonalSpending,
   canViewPersonalSpending,
+  canOfferPersonalSpendingEntryForm,
   canVoidPersonalSpendingEntry,
 } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -377,6 +378,10 @@ export function PersonalSpendingSection({
     [entries, month],
   );
   const close = closeForMonth(closes, month);
+  const canOfferForm = canOfferPersonalSpendingEntryForm(
+    session.roleKey,
+    Boolean(close),
+  );
   const locations = useMemo(
     () => (entries ? recentPersonalSpendingLocations(entries) : []),
     [entries],
@@ -610,7 +615,14 @@ export function PersonalSpendingSection({
               </p>
             )}
 
-            {canRecord && (
+            {canRecord && !canOfferForm && (
+              <p className="ps-close-note">
+                This month is signed. Only a manager can record or void entries
+                in it. Choose an open month to record one.
+              </p>
+            )}
+
+            {canOfferForm && (
               <section className="ps-section" aria-label="Record an entry">
                 <h3>Record an entry</h3>
                 <EntryFormFields
@@ -753,8 +765,13 @@ export function PersonalSpendingSection({
                               !entry.voided &&
                               // Wave 6 item 3: Void is a closer action;
                               // other recorders see it only on their own
-                              // entries (their Undo path).
-                              canVoidPersonalSpendingEntry(session, entry) && (
+                              // entries (their Undo path), and only while
+                              // the month is open.
+                              canVoidPersonalSpendingEntry(
+                                session,
+                                entry,
+                                Boolean(close),
+                              ) && (
                                 <button
                                   type="button"
                                   className="ps-link-button"
@@ -836,9 +853,9 @@ export function PersonalSpendingSection({
                 <p className="stack-help">
                   Closing signs the month off as {session.fullName}, with{" "}
                   {individualName}&rsquo;s sign-off recorded alongside.
-                  After closing, new entries cannot be back-dated into
-                  this month; corrections stay possible and are marked as
-                  post-close corrections.
+                  After closing, only managers can record or void entries
+                  in this month, and what they write is marked as a
+                  post-close correction.
                 </p>
                 <div className="ps-form-grid">
                   <label className="ps-field">

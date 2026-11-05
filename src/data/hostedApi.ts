@@ -135,6 +135,7 @@ import {
   balanceThroughCents as personalBalanceThroughCents,
   buildPersonalSpendingViews,
   closedMonthMessage as personalClosedMonthMessage,
+  closedMonthVoidMessage as personalClosedMonthVoidMessage,
   monthEndIso as personalMonthEndIso,
   validatePersonalSpendingCloseDraft,
   validatePersonalSpendingDraft,
@@ -216,6 +217,7 @@ import {
   canViewTrainingRoster,
   canRecordPersonalSpending,
   canClosePersonalSpendingMonth,
+  canOfferPersonalSpendingEntryForm,
   canVoidPersonalSpendingEntry as sessionCanVoidPersonalSpendingEntry,
   canReadAsAuditor,
   defaultPermissions,
@@ -1471,21 +1473,41 @@ export class HostedApi implements ComplyraApi {
     );
   }
 
-  private async assertPersonalSpendingMonthOpen(
+  private async personalSpendingMonthClosed(
     session: SessionUser,
     individualId: string,
     entryDate: string,
   ) {
-    const month = monthKeyFrom(entryDate);
     const { data, error } = await this.client
       .from("personal_spending_month_closes")
       .select("id")
       .eq("agency_id", session.agencyId)
       .eq("individual_id", individualId)
-      .eq("month", month)
+      .eq("month", monthKeyFrom(entryDate))
       .maybeSingle();
     throwIf(error, "Could not check whether the month is closed.");
-    if (data) throw new Error(personalClosedMonthMessage(monthLabel(month)));
+    return Boolean(data);
+  }
+
+  /**
+   * A signed month takes new entries from month-closers only (founder
+   * decision 2026-11-04; same rule as the database guard).
+   */
+  private async assertPersonalSpendingMonthWritable(
+    session: SessionUser,
+    individualId: string,
+    entryDate: string,
+  ) {
+    const closed = await this.personalSpendingMonthClosed(
+      session,
+      individualId,
+      entryDate,
+    );
+    if (!canOfferPersonalSpendingEntryForm(session.roleKey, closed)) {
+      throw new Error(
+        personalClosedMonthMessage(monthLabel(monthKeyFrom(entryDate))),
+      );
+    }
   }
 
   async listPersonalSpendingEntries(individualId: string) {
@@ -1505,7 +1527,7 @@ export class HostedApi implements ComplyraApi {
       input.individualId,
     );
     const draft = validatePersonalSpendingDraft(input, centralTodayIso());
-    await this.assertPersonalSpendingMonthOpen(
+    await this.assertPersonalSpendingMonthWritable(
       session,
       person.id,
       draft.entryDate,
@@ -1565,10 +1587,20 @@ export class HostedApi implements ComplyraApi {
     await this.assertPersonalSpendingReadable(session, existing.individualId);
     // Wave 6 item 3: closers may void any entry; other recorders only
     // their own (the mobile Undo path) — a DSP must not void entries
-    // recorded by managers or the admin.
-    if (!sessionCanVoidPersonalSpendingEntry(session, existing)) {
+    // recorded by managers or the admin. On a signed month the own-entry
+    // path ends: only closers may void there.
+    const monthClosed = await this.personalSpendingMonthClosed(
+      session,
+      existing.individualId,
+      existing.entryDate,
+    );
+    if (!sessionCanVoidPersonalSpendingEntry(session, existing, monthClosed)) {
       throw new Error(
-        "Only the person who recorded an entry can undo it, or a manager can void it.",
+        monthClosed
+          ? personalClosedMonthVoidMessage(
+              monthLabel(monthKeyFrom(existing.entryDate)),
+            )
+          : "Only the person who recorded an entry can undo it, or a manager can void it.",
       );
     }
     if (existing.voidedAt) {
@@ -1589,13 +1621,13 @@ export class HostedApi implements ComplyraApi {
         replacement,
         centralTodayIso(),
       );
-      if (monthKeyFrom(draft.entryDate) !== monthKeyFrom(existing.entryDate)) {
-        await this.assertPersonalSpendingMonthOpen(
-          session,
-          existing.individualId,
-          draft.entryDate,
-        );
-      }
+      // The replacement is a new entry in its own month, which may
+      // differ from the original's.
+      await this.assertPersonalSpendingMonthWritable(
+        session,
+        existing.individualId,
+        draft.entryDate,
+      );
       // The replacement is a new spend: it may not take the balance
       // below $0 either (the entry it replaces counts as voided).
       const currentEntries = await this.personalSpendingViewsFor(

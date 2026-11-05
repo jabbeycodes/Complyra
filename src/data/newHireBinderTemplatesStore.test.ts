@@ -7,7 +7,8 @@
  */
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { createHrStore, type HrStore } from "./hrStore";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHrStore, SupabaseHrStore, type HrStore } from "./hrStore";
 import {
   binderItemCount,
   cloneBinderTemplate,
@@ -18,7 +19,7 @@ import {
 const AGENCY = "agency-binder-templates-test";
 
 function store(userId: string): HrStore {
-  return createHrStore({ agencyId: AGENCY, userId });
+  return createHrStore({ agencyId: AGENCY, userId, roleKey: "administrator" });
 }
 
 function itemOf(template: BinderTemplate | { sections: BinderTemplate["sections"] }, key: string) {
@@ -116,5 +117,44 @@ describe("snapshot semantics", () => {
     const fresh = await hr.getBinder("nurse-10", "nurse");
     assert.equal(isRequiredBinderItem(itemOf(fresh, "mvr")), true);
     assert.equal(itemOf(fresh, "resume").label, "Resume / CV");
+  });
+});
+
+describe("template write gate (wave 3 retest)", () => {
+  const roleStore = (roleKey?: string) =>
+    createHrStore({ agencyId: AGENCY, userId: "gate-user", roleKey });
+  const refused = /administrator or program manager/i;
+
+  for (const roleKey of ["hr", "house_manager", "nurse", "dsp", "auditor", undefined]) {
+    test(`local store refuses a save from ${roleKey ?? "a store with no role"}`, async () => {
+      const template = cloneBinderTemplate((await roleStore().listBinderTemplates()).defaultTemplate);
+      const before = JSON.stringify(await roleStore().getBinderTemplate());
+      template.sections[0].title = "Should not save";
+      await assert.rejects(() => roleStore(roleKey).saveBinderTemplate("default", template), refused);
+      assert.equal(JSON.stringify(await roleStore().getBinderTemplate()), before);
+    });
+  }
+
+  test("hosted store refuses HR before any write reaches the database", async () => {
+    const template = cloneBinderTemplate((await roleStore().listBinderTemplates()).defaultTemplate);
+    const client = {
+      from() {
+        throw new Error("the store must not touch the database");
+      },
+    } as unknown as SupabaseClient;
+    await assert.rejects(
+      () => new SupabaseHrStore(client, AGENCY, "hr-1", "hr").saveBinderTemplate("default", template),
+      refused,
+    );
+  });
+
+  test("administrators and program managers save; HR still reads and issues", async () => {
+    for (const roleKey of ["administrator", "program_manager"]) {
+      const template = cloneBinderTemplate((await roleStore(roleKey).listBinderTemplates()).defaultTemplate);
+      await roleStore(roleKey).saveBinderTemplate("default", template);
+    }
+    const hr = roleStore("hr");
+    assert.ok((await hr.listBinderTemplates()).presets.length > 0);
+    assert.ok((await hr.getBinder("gate-new-hire", "dsp")).sections.length > 0);
   });
 });
