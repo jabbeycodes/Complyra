@@ -15,11 +15,14 @@ import { useData } from "../../data/DataProvider";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
 import { canViewTrainingRoster, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
+import ReauthSheet from "../signatures/ReauthSheet";
+import { saveAndInitialTrainingLine } from "./trainingLineSigning";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import SignatureAdoption from "../signatures/SignatureAdoption";
 import SignatureSeal from "../signatures/SignatureSeal";
 import {
   formatSignatureDate,
+  ReauthRequiredError,
   suggestInitials,
 } from "../signatures/signatureUtils";
 import {
@@ -97,6 +100,8 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
     | { kind: "correct"; countersignatureId: string }
     | { kind: "assign" }
   >(null);
+  // The action to retry once the signer re-enters their password.
+  const [reauthRetry, setReauthRetry] = useState<(() => void) | null>(null);
   // Bumped after every successful save so per-line e-initials stamps reload.
   const [signatureTick, setSignatureTick] = useState(0);
   const staffNames = Object.fromEntries(
@@ -169,7 +174,13 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       setSignatureTick((tick) => tick + 1);
       onSaved(savedMessage);
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof ReauthRequiredError) {
+        // 13 CSR 65-3.050: open the password sheet instead of failing, then
+        // retry the same action, as SignatureField does.
+        setReauthRetry(() => () => void run(action, savedMessage));
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -347,47 +358,33 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           busy={busy}
           onClose={() => setModal(null)}
           onSubmit={(input) =>
-            run(async () => {
-              const requirement = modal.requirement;
-              // Re-read the line so the versioned field name is authoritative
-              // even if an earlier attempt saved the line but failed to stamp.
-              const fresh = await api.getStaffTrainingProfile(
-                profile?.userId ?? "",
-              );
-              const freshLine = fresh.requirements.find(
-                (row) => row.id === requirement.id,
-              );
-              if (!freshLine) throw new Error("Training line not found.");
-              const nextVersion = (freshLine.signoff?.signoffVersion ?? 0) + 1;
-              const adoptedInitialsText = input.initials;
-              await api.initialRequirementLine(requirement.id, {
-                ...input,
-                initials: adoptedInitialsText,
-              });
-              await api.applySignature({
-                documentType: "training_checklist",
-                documentId: trainingChecklistDocId(
-                  profile?.userId ?? "",
-                  requirement.siteId ?? "",
-                ),
-                fieldName: trainingLineFieldName(requirement.id, nextVersion),
-                kind: "initials",
-                documentPayload: trainingLinePayload({
-                  topicId: requirement.topicId,
-                  topicTitle: requirement.topicTitle,
-                  // initialRequirementLine flips the line to complete.
-                  resolvedStatus: "complete",
+            run(
+              () =>
+                saveAndInitialTrainingLine(api, {
+                  sessionUserId: session.userId,
+                  staffUserId: profile?.userId ?? "",
+                  requirement: modal.requirement,
+                  input,
                   trainerName: staffNames[input.trainerUserId] ?? "",
-                  hoursTotal: input.hoursTotal ?? 0,
-                  hoursWithHm: input.hoursWithHm ?? 0,
-                  signedOn: (input.signedOn ?? "").slice(0, 10),
-                  na: false,
-                  naReason: null,
-                  signoffVersion: nextVersion,
+                  reinit: modal.reinit,
                 }),
-              });
-            }, modal.existing ? "Training line updated and re-initialed." : "Training line initialed.")
+              profile?.userId !== session.userId
+                ? "Training line saved. The staff member still needs to initial it."
+                : modal.existing
+                  ? "Training line updated and re-initialed."
+                  : "Training line initialed.",
+            )
           }
+        />
+      )}
+      {reauthRetry && (
+        <ReauthSheet
+          onClose={() => setReauthRetry(null)}
+          onVerified={() => {
+            const retry = reauthRetry;
+            setReauthRetry(null);
+            retry();
+          }}
         />
       )}
       {modal?.kind === "waive" && (
@@ -690,7 +687,7 @@ function ProfilePanel({
                         </td>
                         {(canInitialOwn || canManage) && (
                           <td>
-                            {(!signoff || needsReinitialStamp) && !locked && (
+                            {(!signoff || (needsReinitialStamp && canInitialOwn)) && !locked && (
                               <button
                                 className="button touch"
                                 disabled={busy}
@@ -1073,6 +1070,7 @@ function InitialLineModal({
   // Adopted e-initials — the stamp comes from the adoption, never typed.
   const adoptedInitialsText = suggestInitials(session.fullName);
   const mode = !existing ? "fresh" : reinit ? "reinit" : "edit";
+  const isOwnLine = session.userId === staffUserId;
   const nextVersion = (existing?.signoffVersion ?? 0) + 1;
 
   if (!adoptedLoaded) {
@@ -1103,9 +1101,11 @@ function InitialLineModal({
       {mode === "edit" && (
         <p className="muted">
           You are editing an existing signoff. Saving voids the previous
-          initialing (version {existing?.signoffVersion ?? 1} → {nextVersion}) and
-          re-initials the line with your adopted e-initials below. The old
-          version's stamp stays in the audit history.
+          initialing (version {existing?.signoffVersion ?? 1} → {nextVersion}){" "}
+          {isOwnLine
+            ? "and re-initials the line with your adopted e-initials below."
+            : "and the staff member will need to re-initial the line."}{" "}
+          The old version's stamp stays in the audit history.
         </p>
       )}
       {mode === "reinit" && (
@@ -1229,7 +1229,11 @@ function InitialLineModal({
           <input value={renewalRule} onChange={(e) => setRenewalRule(e.target.value)} />
         </label>
         <button className="button primary touch" type="submit" disabled={busy}>
-          {mode === "fresh"
+          {!isOwnLine
+            ? mode === "fresh"
+              ? "Save training line"
+              : "Save changes"
+            : mode === "fresh"
             ? `Initial as ${session.fullName}`
             : mode === "reinit"
               ? `Re-initial as ${session.fullName}`
