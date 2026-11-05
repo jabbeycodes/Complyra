@@ -45,10 +45,14 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d5000000-
 select is(rearm_unmarked_dose_notices('a5000000-0000-0000-0000-000000000001',
   '[{"dedupe_key":"med.unrecorded:site-1:hm:2026-11-04","body":"Tampered"}]'::jsonb,60),0,
   'A member cannot re-arm another person''s notice');
+-- Read back outside the member's role: the notice belongs to someone else, so
+-- RLS hides it from any authenticated read and the check would see NULL.
+reset role;
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 select is((select body from public.notifications where agency_id='a5000000-0000-0000-0000-000000000001'),
   'Home has 2 unmarked doses past the window.','A member cannot rewrite another person''s notice');
 
+set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d5000000-0000-0000-0000-000000000001"}',true);
 select is(rearm_unmarked_dose_notices('a5000000-0000-0000-0000-000000000001',
   '[{"dedupe_key":"med.unrecorded:site-1:hm:2026-11-04","body":"Home has 2 unmarked doses past the window."}]'::jsonb,60),1,
