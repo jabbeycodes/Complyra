@@ -11,8 +11,13 @@
 --      only got through via role_key_in's retired-key aliasing
 --      (degreed_professional_manager -> program_manager, 20260916060000).
 --      The removal path must not depend on an alias for a retired role, so the
---      three write policies are recreated in their existing role-only shape,
---      naming the surviving roles directly (program_manager included).
+--      three write policies are recreated naming the surviving roles directly
+--      (program_manager included). Each is also held to the Individual access
+--      boundary (private.can_read_individual(agency_id, individual_id)) so a
+--      house manager or nurse at one home cannot insert, re-point or delete
+--      another home's chart_files row (PR #258 review, round 2). On UPDATE the
+--      boundary is checked on both the old row (USING) and the new row
+--      (WITH CHECK), so a row cannot be moved into or out of scope.
 --
 --   2. The care-plan-docs bucket had select / insert / update policies but no
 --      DELETE policy, so every hosted storage removal was refused and the
@@ -40,21 +45,25 @@ create policy chart_files_insert on public.chart_files
 for insert to authenticated
 with check (
   (select private.role_key_in(agency_id, '{administrator,program_manager,nurse,house_manager}'))
+  and (select private.can_read_individual(agency_id, individual_id))
 );
 
 create policy chart_files_update on public.chart_files
 for update to authenticated
 using (
   (select private.role_key_in(agency_id, '{administrator,program_manager,nurse,house_manager}'))
+  and (select private.can_read_individual(agency_id, individual_id))
 )
 with check (
   (select private.role_key_in(agency_id, '{administrator,program_manager,nurse,house_manager}'))
+  and (select private.can_read_individual(agency_id, individual_id))
 );
 
 create policy chart_files_delete on public.chart_files
 for delete to authenticated
 using (
   (select private.role_key_in(agency_id, '{administrator,program_manager,nurse,house_manager}'))
+  and (select private.can_read_individual(agency_id, individual_id))
 );
 
 drop policy if exists care_plan_docs_storage_delete on storage.objects;

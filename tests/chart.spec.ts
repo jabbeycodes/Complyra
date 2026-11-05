@@ -59,7 +59,10 @@ test("Ellis opens as a full chart with widgets, download, and med count", async 
   // a variance reason (PR #207 — the API refuses an unexplained one).
   await keppra.getByLabel(/Count variance/).fill("Pharmacy delivery of 12 arrived");
   await keppra.getByRole("button", { name: "Record delivery count" }).click();
-  await expect(keppra).toContainText("40 pills left");
+  // PR #258: the headline is the labeled on-hand count, and the manual
+  // count sits beneath it with its own label — never a bare number.
+  await expect(keppra).toContainText("On hand: 40 pills");
+  await expect(keppra).toContainText("Recorded count: 40 pills");
 
   const trainingDownload = page.waitForEvent("download");
   await chart

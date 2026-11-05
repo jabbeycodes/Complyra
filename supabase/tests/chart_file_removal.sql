@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(15);
+select plan(26);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- Newer storage builds refuse direct SQL deletes from storage.objects unless
 -- this setting is on; the RLS policy under test still decides every row.
@@ -10,7 +10,9 @@ select set_config('storage.allow_delete_query', 'true', true);
 -- Chart-file removal (20261105100000): administrator, program manager, nurse
 -- and house manager may delete chart_files rows and care-plan-docs objects;
 -- DSPs and auditors may not; storage deletes stay inside the Individual
--- access boundary.
+-- access boundary. The chart_files insert / update / delete policies are held
+-- to the same Individual access boundary: a Home A house manager or nurse
+-- cannot file, change, re-point or remove a Home B chart_files row.
 
 insert into agencies (id, name, agency_code, state_code, status) values
  ('a9100000-0000-0000-0000-000000000001','Chart removal agency','CHARTRM-MO','MO','active');
@@ -55,6 +57,10 @@ select ok(exists(select 1 from pg_policies where schemaname='storage' and tablen
 select ok(exists(select 1 from pg_policies where schemaname='public' and tablename='chart_files'
   and policyname='chart_files_delete' and cmd='DELETE' and qual like '%program_manager%'),
   'chart_files_delete names program_manager directly');
+select is((select count(*)::int from pg_policies where schemaname='public' and tablename='chart_files'
+  and policyname in ('chart_files_insert','chart_files_update','chart_files_delete')
+  and coalesce(qual,'') || coalesce(with_check,'') like '%can_read_individual%'),3,
+  'chart_files insert, update and delete are held to the Individual access boundary');
 
 set local role authenticated;
 
@@ -70,6 +76,8 @@ delete from storage.objects where bucket_id='care-plan-docs'
 -- Nurse at Home A: removes a Home A file and object.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-0000-0000-0000-000000000003"}',true);
 delete from chart_files where id='f9100000-0000-0000-0000-000000000002';
+-- ...but not a Home B record.
+delete from chart_files where id='f9100000-0000-0000-0000-000000000004';
 delete from storage.objects where bucket_id='care-plan-docs'
   and name like 'a9100000-0000-0000-0000-000000000001/e9100000-0000-0000-0000-000000000001/chart/f9100000-0000-0000-0000-000000000002/%';
 
@@ -81,9 +89,27 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-
 delete from chart_files where id='f9100000-0000-0000-0000-000000000003';
 delete from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000003/%';
 
--- House manager at Home A: cannot remove a Home B stored object.
+-- House manager at Home A: cannot remove a Home B stored object, and cannot
+-- file, change, re-point or remove a Home B chart_files row.
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-0000-0000-0000-000000000004"}',true);
 delete from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000004/%';
+select throws_ok($$insert into chart_files(id,agency_id,individual_id,kind,name,storage_path) values
+  ('f9100000-0000-0000-0000-000000000007','a9100000-0000-0000-0000-000000000001','e9100000-0000-0000-0000-000000000002','renewal','hm-home-b.pdf','a9100000-0000-0000-0000-000000000001/e9100000-0000-0000-0000-000000000002/chart/f9100000-0000-0000-0000-000000000007/hm-home-b.pdf')$$,
+  '42501', null,
+  'A Home A house manager cannot file a chart document for a Home B person');
+update chart_files set name='changed-by-home-a.pdf' where id='f9100000-0000-0000-0000-000000000004';
+delete from chart_files where id='f9100000-0000-0000-0000-000000000004';
+select throws_ok($$update chart_files set individual_id='e9100000-0000-0000-0000-000000000002'
+  where id='f9100000-0000-0000-0000-000000000003'$$,
+  '42501', null,
+  'A Home A house manager cannot move a Home A chart file onto a Home B person');
+-- Within their home the same house manager files and updates normally.
+select lives_ok($$insert into chart_files(id,agency_id,individual_id,kind,name,storage_path) values
+  ('f9100000-0000-0000-0000-000000000006','a9100000-0000-0000-0000-000000000001','e9100000-0000-0000-0000-000000000001','renewal','hm-home-a.pdf','a9100000-0000-0000-0000-000000000001/e9100000-0000-0000-0000-000000000001/chart/f9100000-0000-0000-0000-000000000006/hm-home-a.pdf')$$,
+  'A house manager can file a chart document for their home');
+select lives_ok($$update chart_files set name='hm-home-a-renamed.pdf'
+  where id='f9100000-0000-0000-0000-000000000006'$$,
+  'A house manager can update a chart file for their home');
 
 -- Verification reads run as service_role so row visibility cannot mask a result.
 reset role;
@@ -104,11 +130,22 @@ select is((select count(*)::int from storage.objects where bucket_id='care-plan-
   'DSP and auditor deletes leave the stored object');
 select is((select count(*)::int from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000004/%'),1,
   'A house manager cannot remove another home''s stored object');
+select is((select count(*)::int from chart_files where id='f9100000-0000-0000-0000-000000000004'
+  and name='home-b.pdf' and individual_id='e9100000-0000-0000-0000-000000000002'),1,
+  'Home A staff leave the Home B chart file record unchanged and in place');
+select is((select count(*)::int from chart_files where id='f9100000-0000-0000-0000-000000000007'),0,
+  'No Home B chart file was filed by the Home A house manager');
+select is((select individual_id::text from chart_files where id='f9100000-0000-0000-0000-000000000003'),
+  'e9100000-0000-0000-0000-000000000001',
+  'The Home A chart file still belongs to the Home A person');
+select is((select name from chart_files where id='f9100000-0000-0000-0000-000000000006'),'hm-home-a-renamed.pdf',
+  'The house manager''s in-home file was saved and updated');
 
 -- House manager inside the boundary, then administrator agency-wide.
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-0000-0000-0000-000000000004"}',true);
 delete from chart_files where id='f9100000-0000-0000-0000-000000000003';
+delete from chart_files where id='f9100000-0000-0000-0000-000000000006';
 delete from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000003/%';
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d9100000-0000-0000-0000-000000000001"}',true);
 delete from chart_files where id='f9100000-0000-0000-0000-000000000004';
@@ -118,10 +155,14 @@ reset role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 select is((select count(*)::int from chart_files where id='f9100000-0000-0000-0000-000000000003'),0,
   'A house manager removes a chart file record for their home');
+select is((select count(*)::int from chart_files where id='f9100000-0000-0000-0000-000000000006'),0,
+  'A house manager removes the chart file they filed for their home');
 select is((select count(*)::int from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000003/%'),0,
   'A house manager removes a stored object for their home');
 select is((select count(*)::int from storage.objects where bucket_id='care-plan-docs' and name like '%/f9100000-0000-0000-0000-000000000004/%'),0,
   'An administrator removes a stored object agency-wide');
+select is((select count(*)::int from chart_files where id='f9100000-0000-0000-0000-000000000004'),0,
+  'An administrator removes a chart file record agency-wide');
 select is((select count(*)::int from chart_files where agency_id='a9100000-0000-0000-0000-000000000001'),1,
   'Only the program manager''s new chart file remains');
 
