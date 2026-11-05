@@ -1613,6 +1613,16 @@ export interface ComplyraApi {
    */
   verifySigningPassword(password: string): Promise<{ reauthAt: string }>;
   /**
+   * Would this session's e-initials be accepted on this training line? Throws
+   * what a real stamp would throw, ReauthRequiredError included, and writes
+   * nothing. Lets a caller refuse before saving the line.
+   */
+  checkTrainingLineSignable(input: {
+    staffUserId: string;
+    siteId: string;
+    requirementId: string;
+  }): Promise<void>;
+  /**
    * Record a client-observed 13 CSR 65-3.050 audit event (login, logout, or a
    * signed-document view). Re-auth outcomes and applied signatures are logged
    * automatically; the client only reports what it alone can observe.
@@ -13215,22 +13225,7 @@ export class LocalApi implements ComplyraApi {
     ) {
       throw new Error("A document payload is required.");
     }
-    const adopted = this.sigCollections().userSignatures.find(
-      (row) => row.userId === session.userId && row.agencyId === session.agencyId,
-    );
-    if (!adopted) {
-      throw new Error("Adopt your electronic signature before signing.");
-    }
-    if (!adopted.consentAt) {
-      throw new Error(
-        "Electronic-signature consent is required before signing.",
-      );
-    }
-    // 13 CSR 65-3.050 second identification component: even an adopted user
-    // may only affix a signature/initials with a fresh password re-entry on
-    // top of the session. The hosted edge function enforces the same gate
-    // server-side.
-    this.assertFreshReauth(session);
+    this.assertSigningCeremonyReady(session);
     const coll = this.sigCollections();
     const duplicate = coll.signatureEvents.find(
       (row) =>
@@ -13306,6 +13301,47 @@ export class LocalApi implements ComplyraApi {
     this.pushSignatureAudit(session, "reauth_success", {});
     await persistMeta(this.store);
     return { reauthAt };
+  }
+
+  private assertSigningCeremonyReady(session: SessionUser): void {
+    const adopted = this.sigCollections().userSignatures.find(
+      (row) => row.userId === session.userId && row.agencyId === session.agencyId,
+    );
+    if (!adopted) {
+      throw new Error("Adopt your electronic signature before signing.");
+    }
+    if (!adopted.consentAt) {
+      throw new Error(
+        "Electronic-signature consent is required before signing.",
+      );
+    }
+    // 13 CSR 65-3.050 second identification component: even an adopted user
+    // may only affix a signature/initials with a fresh password re-entry on
+    // top of the session. The hosted edge function enforces the same gate
+    // server-side.
+    this.assertFreshReauth(session);
+  }
+
+  async checkTrainingLineSignable(input: {
+    staffUserId: string;
+    siteId: string;
+    requirementId: string;
+  }): Promise<void> {
+    const session = assertSession(this.store);
+    this.assertSigningCeremonyReady(session);
+    const requirement = this.p2Collections().trainingRequirements.find(
+      (row) =>
+        row.agencyId === session.agencyId &&
+        row.id === input.requirementId &&
+        row.userId === input.staffUserId &&
+        (row.siteId ?? "") === input.siteId,
+    );
+    if (!requirement) throw new Error("Unknown signature field.");
+    if (session.userId !== requirement.userId) {
+      throw new Error(
+        "Only the assigned staff member can initial their own training lines.",
+      );
+    }
   }
 
   /** Throw unless the session user re-entered their password recently. */

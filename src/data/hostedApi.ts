@@ -172,6 +172,7 @@ import {
 import {
   legacyTrainingDocId,
   trainingChecklistDocId,
+  trainingLineFieldName,
 } from "../features/signatures/documentPayloads";
 import {
   hasBackfillMarker,
@@ -14771,6 +14772,49 @@ export class HostedApi implements ComplyraApi {
       throw new Error("The signature service returned an unexpected response.");
     }
     return { reauthAt: result.reauth_at };
+  }
+
+  /**
+   * Asks apply-signature to stamp signoff version 0, which never exists
+   * (versions start at 1). The function runs every identity check first
+   * (adoption, password re-entry, line ownership), so those refusals surface
+   * here as they would on a real stamp, and then always stops at no_signoff or
+   * stale_version, before any write. Those two codes therefore mean "ready".
+   * Static pins in trainingLineSigning.test.ts keep that check order in place.
+   */
+  async checkTrainingLineSignable(input: {
+    staffUserId: string;
+    siteId: string;
+    requirementId: string;
+  }): Promise<void> {
+    const session = await this.requireSession();
+    let result: { event_id?: string };
+    try {
+      result = await invokeEdgeFunction<{ event_id?: string }>(
+        this.client,
+        "apply-signature",
+        {
+          document_type: "training_checklist",
+          document_id: trainingChecklistDocId(input.staffUserId, input.siteId),
+          field_name: trainingLineFieldName(input.requirementId, 0),
+          signature_kind: "initials",
+          document_payload: { readiness_check: true },
+          agency_id: session.agencyId,
+          device_id: getDeviceId(),
+        },
+      );
+    } catch (err) {
+      if (
+        err instanceof EdgeFunctionError &&
+        (err.code === "no_signoff" || err.code === "stale_version")
+      ) {
+        return;
+      }
+      throw err;
+    }
+    throw new Error(
+      `The signature service returned an unexpected response${result.event_id ? ` (event ${result.event_id})` : ""}.`,
+    );
   }
 
   /**
