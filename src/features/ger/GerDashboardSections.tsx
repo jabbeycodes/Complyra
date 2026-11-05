@@ -1,3 +1,4 @@
+import EventReportSource from "./EventReportSource";
 import { useEffect, useState } from "react";
 import { Badge, Empty } from "../../components";
 import { useData } from "../../data/DataProvider";
@@ -63,11 +64,7 @@ export default function GerDashboardSections({
           <ul className="record-list">
             {awaitingReview.map((report) => (
               <li key={report.id} className="record-row">
-                <button
-                  type="button"
-                  className="record-row-main"
-                  onClick={() => onOpenPerson(nameOf(report.individualId))}
-                >
+                <EventReportSource report={report} personName={nameOf(report.individualId)} siteName={siteNameOf(report.siteId)} onOpenPerson={() => onOpenPerson(nameOf(report.individualId))}>
                   <strong>
                     {report.eventType} — {nameOf(report.individualId)}
                   </strong>
@@ -75,7 +72,7 @@ export default function GerDashboardSections({
                     {" "}
                     · {siteNameOf(report.siteId)} · {report.eventDate}
                   </span>
-                </button>
+                </EventReportSource>
                 <Badge status={`Severity: ${report.severity}`} />
               </li>
             ))}
@@ -93,11 +90,7 @@ export default function GerDashboardSections({
               const display = deriveGerResolutionDisplay(report);
               return (
                 <li key={report.id} className="record-row">
-                  <button
-                    type="button"
-                    className="record-row-main"
-                    onClick={() => onOpenPerson(nameOf(report.individualId))}
-                  >
+                  <EventReportSource report={report} personName={nameOf(report.individualId)} siteName={siteNameOf(report.siteId)} onOpenPerson={() => onOpenPerson(nameOf(report.individualId))}>
                     <strong>
                       {report.eventType} — {nameOf(report.individualId)}
                     </strong>
@@ -108,7 +101,7 @@ export default function GerDashboardSections({
                         ? ` · due ${report.resolutionDueOn}`
                         : ""}
                     </span>
-                  </button>
+                  </EventReportSource>
                   <Badge
                     status={
                       display === "overdue"
