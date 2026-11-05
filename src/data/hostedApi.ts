@@ -257,7 +257,9 @@ import {
   applyRenewalFileRemoval,
   applyRenewalUpload,
   canRemoveRenewalFile,
+  ChartChangeIncompleteError,
   type RenewalUploadMode,
+  validateRenewalUpload,
   canEditCover,
   canEditExtraction,
   canSeeRenewals,
@@ -5301,16 +5303,20 @@ export class HostedApi implements ComplyraApi {
     throwIf(error, "Renewal not found.");
     const renewal = mapClinicalRenewal(row!);
     const title = input.documentTitle.trim() || input.file?.name || "Clinical evidence";
-    const uploadedOn = (input.uploadedOn ?? new Date().toISOString()).slice(0, 10);
-    let fileId = renewal.fileId;
-    if (input.file) {
-      this.requirePdfFile(input.file, "Upload a PDF for renewal evidence.");
-      fileId = await this.saveChartFile(session, renewal.individualId, "renewal", input.file);
-    }
     const renewing = input.mode === "renewal";
-    if (renewing && uploadedOn > todayIso()) {
-      throw new Error("The date completed cannot be in the future.");
+    // Validate every input BEFORE anything is stored: a rejected renewal
+    // leaves no stored object and no chart record behind.
+    const uploadedOn = validateRenewalUpload(
+      { mode: input.mode, uploadedOn: input.uploadedOn ?? new Date().toISOString() },
+      todayIso(),
+    );
+    if (input.file) this.requirePdfFile(input.file, "Upload a PDF for renewal evidence.");
+    const previousFileId = renewal.fileId;
+    let saved: { id: string; storagePath: string } | null = null;
+    if (input.file) {
+      saved = await this.saveChartFileRecord(session, renewal.individualId, "renewal", input.file);
     }
+    const fileId = saved?.id ?? renewal.fileId;
     // Evidence (the default) never touches the requirement's dates — an
     // upload is not an exam. Only the explicit renewal flow resets them,
     // so the evidence write does not even send the date columns.
@@ -5326,7 +5332,7 @@ export class HostedApi implements ComplyraApi {
           evidenceKind: input.evidenceKind,
           fileId,
         });
-    const { error: updateError } = await this.client
+    const { data: updated, error: updateError } = await this.client
       .from("clinical_renewals")
       .update({
         ...(renewing
@@ -5336,8 +5342,26 @@ export class HostedApi implements ComplyraApi {
         last_evidence_kind: next.lastEvidenceKind,
         file_id: next.fileId,
       })
-      .eq("id", renewal.id);
-    throwIf(updateError, "Could not save the renewal evidence.");
+      .eq("id", renewal.id)
+      .select("id");
+    if (updateError || !updated || updated.length === 0) {
+      const reason = updateError
+        ? "Could not save the renewal evidence."
+        : "Could not save the renewal evidence — your role cannot change this chart item.";
+      // The chart item never pointed at the new file: take it back out so
+      // a refused save leaves nothing stored.
+      if (saved) {
+        try {
+          await this.purgeChartFile({ id: saved.id, storagePath: saved.storagePath });
+        } catch (cleanupError) {
+          await this.recordChartFileCleanupPending(session, saved, (cleanupError as Error).message);
+          throw new Error(
+            `${reason} The uploaded copy could not be deleted either (${(cleanupError as Error).message}); this is recorded in the activity log so it can be cleared.`,
+          );
+        }
+      }
+      throw new Error(reason);
+    }
     await this.audit(
       session,
       renewing ? "renewal.renewed" : "renewal.evidence_uploaded",
@@ -5347,8 +5371,34 @@ export class HostedApi implements ComplyraApi {
       "clinical_renewal",
       renewal.id,
     );
+    // A replacement supersedes the previous file: remove its chart record
+    // and stored object too, unless another chart item still uses it.
+    if (saved && previousFileId && previousFileId !== saved.id) {
+      try {
+        await this.retireUnreferencedRenewalFile(previousFileId);
+      } catch (cleanupError) {
+        await this.recordChartFileCleanupPending(
+          session,
+          { id: previousFileId, storagePath: null },
+          (cleanupError as Error).message,
+        );
+        throw new ChartChangeIncompleteError(
+          `The new file was saved on ${renewal.title}, but the file it replaced could not be deleted (${(cleanupError as Error).message}). This is recorded in the activity log so it can be cleared.`,
+        );
+      }
+    }
   }
 
+  /**
+   * Remove the uploaded file from a clinical renewal. Every step is checked
+   * and ordered so a failure leaves a state the user can retry from:
+   *   1. detach the file from the chart item;
+   *   2. delete the stored object — refused/failed: the item is re-attached
+   *      (nothing changed, Remove can be tried again);
+   *   3. delete the chart record — failed: the stored object is already
+   *      gone, so the leftover record is logged for cleanup.
+   * "renewal.file_removed" is recorded only when every step succeeded.
+   */
   async removeRenewalFile(renewalId: string) {
     const session = await this.requireSession();
     const { data: row, error } = await this.client
@@ -5360,18 +5410,19 @@ export class HostedApi implements ComplyraApi {
     const renewal = mapClinicalRenewal(row!);
     if (!renewal.fileId) throw new Error("There is no uploaded file on this item to remove.");
     // Hosted chart_files carries no uploader column yet, so removal is
-    // gated by role here (every role that may upload a renewal file is
-    // a manager role that may remove one). RLS still applies.
+    // gated by role here (every role that may upload a renewal file is a
+    // manager role that may remove one). RLS (20261105100000) backs it.
     if (!canRemoveRenewalFile(session.roleKey, { userId: session.userId, uploadedBy: null })) {
       throw new Error(
         "Only an administrator, PM, RN, House Manager, or the person who uploaded the file can remove it.",
       );
     }
-    const { data: fileRow } = await this.client
+    const { data: fileRow, error: fileError } = await this.client
       .from("chart_files")
-      .select("id, name, storage_path")
+      .select("id, name, kind, storage_path")
       .eq("id", renewal.fileId)
       .maybeSingle();
+    throwIf(fileError, "Could not load the file to remove. Nothing was changed.");
     const next = applyRenewalFileRemoval(renewal);
     const { data: updated, error: updateError } = await this.client
       .from("clinical_renewals")
@@ -5382,29 +5433,44 @@ export class HostedApi implements ComplyraApi {
       })
       .eq("id", renewal.id)
       .select("id");
-    throwIf(updateError, "Could not remove the file.");
+    throwIf(updateError, "Could not remove the file. Nothing was changed.");
     if (!updated || updated.length === 0) {
-      throw new Error("Could not remove the file — your role cannot change this chart item.");
+      throw new Error("Could not remove the file — your role cannot change this chart item. Nothing was changed.");
     }
-    // Best effort: the chart record and the stored object. The chart
-    // item no longer points at the file either way, so it is gone from
-    // every chart surface even if storage cleanup is refused by policy.
-    if (fileRow) {
-      const { count } = await this.client
-        .from("clinical_renewals")
-        .select("id", { count: "exact", head: true })
-        .eq("file_id", fileRow.id as string);
-      if (!count) {
-        await this.client.from("chart_files").delete().eq("id", fileRow.id as string);
-        if (fileRow.storage_path) {
-          await this.client.storage.from(CHART_BUCKET).remove([fileRow.storage_path as string]);
+    const fileName =
+      (fileRow?.name as string | undefined) ?? renewal.lastDocumentTitle ?? "the uploaded file";
+    if (fileRow && (fileRow.kind as string | undefined) !== "other") {
+      const file = {
+        id: fileRow.id as string,
+        storagePath: (fileRow.storage_path as string | null) ?? null,
+      };
+      const stillUsed = await this.renewalFileReferenceCount(file.id).catch(async (err: Error) => {
+        await this.reattachRenewalFile(renewal, err.message);
+        throw new Error(`Could not remove the file (${err.message}). It is still on ${renewal.title}.`);
+      });
+      if (stillUsed === 0) {
+        try {
+          await this.removeChartObject(file.storagePath);
+        } catch (storageError) {
+          await this.reattachRenewalFile(renewal, (storageError as Error).message);
+          throw new Error(
+            `Could not remove the file: ${(storageError as Error).message} It is still on ${renewal.title}.`,
+          );
+        }
+        try {
+          await this.deleteChartFileRow(file.id);
+        } catch (rowError) {
+          await this.recordChartFileCleanupPending(session, file, (rowError as Error).message);
+          throw new ChartChangeIncompleteError(
+            `${fileName} was taken off ${renewal.title} and its stored copy was deleted, but its file record could not be cleared (${(rowError as Error).message}). This is recorded in the activity log so it can be finished.`,
+          );
         }
       }
     }
     await this.audit(
       session,
       "renewal.file_removed",
-      `${session.fullName} removed ${(fileRow?.name as string | undefined) ?? renewal.lastDocumentTitle ?? "the uploaded file"} from ${renewal.title}`,
+      `${session.fullName} removed ${fileName} from ${renewal.title}`,
       "clinical_renewal",
       renewal.id,
     );
@@ -7073,6 +7139,20 @@ export class HostedApi implements ComplyraApi {
     kind: "renewal" | "discontinue" | "other",
     file: File,
   ): Promise<string> {
+    return (await this.saveChartFileRecord(session, individualId, kind, file)).id;
+  }
+
+  /**
+   * Store a chart file, then its chart record. If the record cannot be
+   * saved, the stored object is deleted again so nothing unreachable is
+   * left in the bucket; a failed cleanup is reported, not swallowed.
+   */
+  private async saveChartFileRecord(
+    session: SessionUser,
+    individualId: string,
+    kind: "renewal" | "discontinue" | "other",
+    file: File,
+  ): Promise<{ id: string; storagePath: string }> {
     const fileId = crypto.randomUUID();
     const storagePath = `${session.agencyId}/${individualId}/chart/${fileId}/${file.name}`;
     const mime = file.type || (kind === "other" ? "application/octet-stream" : "application/pdf");
@@ -7089,8 +7169,133 @@ export class HostedApi implements ComplyraApi {
       mime,
       storage_path: storagePath,
     });
-    throwIf(insertError, "File stored, but the chart record could not be saved.");
-    return fileId;
+    if (insertError) {
+      try {
+        await this.removeChartObject(storagePath);
+      } catch (cleanupError) {
+        await this.recordChartFileCleanupPending(
+          session,
+          { id: fileId, storagePath },
+          (cleanupError as Error).message,
+        ).catch(() => undefined);
+        throw new Error(
+          `The chart record could not be saved, and the stored copy could not be deleted (${(cleanupError as Error).message}).`,
+        );
+      }
+      throw new Error("The chart record could not be saved, so the file was not kept.");
+    }
+    return { id: fileId, storagePath };
+  }
+
+  /**
+   * Delete a stored chart object. Supabase reports a policy refusal as an
+   * empty result rather than an error, so an empty result is confirmed by
+   * looking the object up: already gone is success (a retry after a partial
+   * removal), still present is a refusal.
+   */
+  private async removeChartObject(storagePath: string | null) {
+    if (!storagePath) return;
+    const bucket = this.client.storage.from(CHART_BUCKET);
+    const { data, error } = await bucket.remove([storagePath]);
+    if (error) throw new Error(`The stored copy could not be deleted: ${error.message}.`);
+    if (data && data.length > 0) return;
+    const slash = storagePath.lastIndexOf("/");
+    const folder = storagePath.slice(0, slash);
+    const name = storagePath.slice(slash + 1);
+    const { data: listed, error: listError } = await bucket.list(folder, { search: name });
+    if (listError) {
+      throw new Error(`The stored copy could not be confirmed deleted: ${listError.message}.`);
+    }
+    if ((listed ?? []).some((entry) => entry.name === name)) {
+      throw new Error("Your role cannot delete the stored copy.");
+    }
+  }
+
+  /** Delete a chart_files row, confirming the delete was not silently refused. */
+  private async deleteChartFileRow(fileId: string) {
+    const { data, error } = await this.client
+      .from("chart_files")
+      .delete()
+      .eq("id", fileId)
+      .select("id");
+    if (error) throw new Error(`the chart record could not be deleted: ${error.message}`);
+    if (data && data.length > 0) return;
+    const { data: still, error: lookupError } = await this.client
+      .from("chart_files")
+      .select("id")
+      .eq("id", fileId)
+      .maybeSingle();
+    if (lookupError) {
+      throw new Error(`the chart record could not be confirmed deleted: ${lookupError.message}`);
+    }
+    if (still) throw new Error("your role cannot delete the chart record");
+  }
+
+  /** Stored object first (the document itself), then the chart record. */
+  private async purgeChartFile(file: { id: string; storagePath: string | null }) {
+    await this.removeChartObject(file.storagePath);
+    await this.deleteChartFileRow(file.id);
+  }
+
+  private async renewalFileReferenceCount(fileId: string): Promise<number> {
+    const { count, error } = await this.client
+      .from("clinical_renewals")
+      .select("id", { count: "exact", head: true })
+      .eq("file_id", fileId);
+    if (error) throw new Error(`could not check where the file is used: ${error.message}`);
+    return count ?? 0;
+  }
+
+  /** Remove a superseded renewal file unless another chart item still uses it. */
+  private async retireUnreferencedRenewalFile(fileId: string) {
+    const { data: fileRow, error } = await this.client
+      .from("chart_files")
+      .select("id, kind, storage_path")
+      .eq("id", fileId)
+      .maybeSingle();
+    if (error) throw new Error(`could not load the replaced file: ${error.message}`);
+    if (!fileRow || (fileRow.kind as string | undefined) === "other") return;
+    if ((await this.renewalFileReferenceCount(fileId)) > 0) return;
+    await this.purgeChartFile({
+      id: fileId,
+      storagePath: (fileRow.storage_path as string | null) ?? null,
+    });
+  }
+
+  /** Put a renewal's file back after a removal step failed (no-op state). */
+  private async reattachRenewalFile(renewal: ClinicalRenewal, reason: string) {
+    const { data, error } = await this.client
+      .from("clinical_renewals")
+      .update({
+        file_id: renewal.fileId,
+        last_document_title: renewal.lastDocumentTitle,
+        last_evidence_kind: renewal.lastEvidenceKind,
+      })
+      .eq("id", renewal.id)
+      .select("id");
+    if (error || !data || data.length === 0) {
+      throw new ChartChangeIncompleteError(
+        `Could not remove the file (${reason}), and it could not be put back on ${renewal.title}. The stored copy was not deleted; upload it again or ask an administrator to finish the removal.`,
+      );
+    }
+  }
+
+  /**
+   * Durable record of a chart file that still needs deleting, so a partial
+   * failure is visible in the activity log instead of silently orphaned.
+   */
+  private async recordChartFileCleanupPending(
+    session: SessionUser,
+    file: { id: string; storagePath: string | null },
+    reason: string,
+  ) {
+    await this.audit(
+      session,
+      "chart_file.cleanup_pending",
+      `Chart file ${file.id}${file.storagePath ? ` (${file.storagePath})` : ""} still needs deleting: ${reason}`,
+      "chart_file",
+      file.id,
+    );
   }
 
   private async hostedLogoDataUrl(agencyId: string): Promise<string | null> {

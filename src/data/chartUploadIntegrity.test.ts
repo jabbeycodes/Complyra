@@ -200,3 +200,44 @@ test("applyRenewalEvidence / applyRenewalFileRemoval never touch dates", () => {
   assert.equal(removed.nextDueOn, row.nextDueOn);
   assert.equal(removed.lastUploadedOn, row.lastUploadedOn);
 });
+
+test("local parity: a future-dated renewal stores nothing; a replacement retires the superseded file", async () => {
+  const { store, client } = setup();
+  const nurse = await signIn(client, DEMO_NURSE_USERNAME);
+  const before = await ellisVision(client, nurse);
+  const filesBefore = store.db.chartFiles.length;
+  const future = new Date(`${todayIso()}T00:00:00Z`);
+  future.setUTCDate(future.getUTCDate() + 1);
+  await assert.rejects(
+    () =>
+      client.uploadRenewalEvidence({
+        renewalId: before.id,
+        evidenceKind: "pdf",
+        documentTitle: "Vision exam",
+        file: pdf("future.pdf"),
+        mode: "renewal",
+        uploadedOn: future.toISOString().slice(0, 10),
+      }),
+    /cannot be in the future/,
+  );
+  assert.equal(store.db.chartFiles.length, filesBefore, "no chart record was written");
+  assert.equal((await ellisVision(client, nurse)).fileId, before.fileId);
+
+  await client.uploadRenewalEvidence({
+    renewalId: before.id,
+    evidenceKind: "pdf",
+    documentTitle: "first.pdf",
+    file: pdf("first.pdf"),
+  });
+  const first = (await ellisVision(client, nurse)).fileId!;
+  await client.uploadRenewalEvidence({
+    renewalId: before.id,
+    evidenceKind: "pdf",
+    documentTitle: "second.pdf",
+    file: pdf("second.pdf"),
+  });
+  const second = (await ellisVision(client, nurse)).fileId!;
+  assert.notEqual(first, second);
+  assert.ok(!store.db.chartFiles.some((row) => row.id === first), "the superseded file is gone");
+  assert.ok(store.db.chartFiles.some((row) => row.id === second));
+});

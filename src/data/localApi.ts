@@ -280,6 +280,7 @@ import {
   applyRenewalUpload,
   canRemoveRenewalFile,
   type RenewalUploadMode,
+  validateRenewalUpload,
   blankRnFields,
   allergiesChangeDetail,
   canEditCover,
@@ -2783,6 +2784,20 @@ function ensureClinicalRenewals(store: MemoryStore) {
       }
     }
   }
+}
+
+/**
+ * Delete a renewal chart file (record + stored bytes) once no clinical
+ * renewal points at it. Consultation files ("other") are referenced by
+ * appointments and are never removed here.
+ */
+function discardUnreferencedChartFile(store: MemoryStore, fileId: string) {
+  const file = store.db.chartFiles.find((row) => row.id === fileId);
+  if (!file || file.kind === "other") return;
+  if (store.db.clinicalRenewals.some((row) => row.fileId === fileId)) return;
+  store.db.chartFiles = store.db.chartFiles.filter((row) => row.id !== fileId);
+  browserStore.files.delete(file.storagePath);
+  store.files.delete(file.storagePath);
 }
 
 async function saveChartFile(
@@ -7454,7 +7469,14 @@ export class LocalApi implements ComplyraApi {
       input.documentTitle.trim() ||
       input.file?.name ||
       "Clinical evidence";
-    const uploadedOn = (input.uploadedOn ?? new Date().toISOString()).slice(0, 10);
+    const renewing = input.mode === "renewal";
+    // Validate every input BEFORE anything is stored (hosted parity): a
+    // rejected renewal leaves no stored file and no chart record.
+    const uploadedOn = validateRenewalUpload(
+      { mode: input.mode, uploadedOn: input.uploadedOn ?? new Date().toISOString() },
+      todayIso(),
+    );
+    const previousFileId = renewal.fileId;
     let fileId = renewal.fileId;
     if (input.file) {
       fileId = await saveChartFile(this.store, {
@@ -7464,10 +7486,6 @@ export class LocalApi implements ComplyraApi {
         file: input.file,
         uploadedBy: session.userId,
       });
-    }
-    const renewing = input.mode === "renewal";
-    if (renewing && uploadedOn > todayIso()) {
-      throw new Error("The date completed cannot be in the future.");
     }
     // Evidence (the default) never touches the requirement's dates — an
     // upload is not an exam. Only the explicit renewal flow resets them.
@@ -7486,6 +7504,11 @@ export class LocalApi implements ComplyraApi {
     this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
       row.id === renewal.id ? next : row,
     );
+    // A replacement supersedes the previous file: its chart record and
+    // stored copy go too, unless another chart item still uses it.
+    if (input.file && previousFileId && previousFileId !== fileId) {
+      discardUnreferencedChartFile(this.store, previousFileId);
+    }
     log(
       this.store,
       session,
@@ -7519,13 +7542,7 @@ export class LocalApi implements ComplyraApi {
       row.id === renewal.id ? next : row,
     );
     // The file itself goes too — unless another chart row still points at it.
-    const stillReferenced = this.store.db.clinicalRenewals.some(
-      (row) => row.fileId === renewal.fileId,
-    );
-    if (file && !stillReferenced) {
-      this.store.db.chartFiles = this.store.db.chartFiles.filter((row) => row.id !== file.id);
-      browserStore.files.delete(file.storagePath);
-    }
+    if (file) discardUnreferencedChartFile(this.store, file.id);
     log(
       this.store,
       session,

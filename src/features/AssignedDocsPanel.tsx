@@ -11,6 +11,7 @@ import {
   canSignAsDelegatingRn,
   canToggleDelegation,
   canRemoveRenewalFile,
+  ChartChangeIncompleteError,
   canUploadRenewal,
   isObligationActive,
   renewalBadge,
@@ -83,6 +84,9 @@ export default function AssignedDocsPanel({
       await refresh();
     } catch (err) {
       setError((err as Error).message);
+      // Part of the change was saved: reload so the list shows what is
+      // actually on file, while the message says what did not finish.
+      if (err instanceof ChartChangeIncompleteError) await refresh().catch(() => undefined);
     }
   }
 

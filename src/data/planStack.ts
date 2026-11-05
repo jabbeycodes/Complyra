@@ -751,3 +751,40 @@ export function applyRenewalEvidence(
 export function applyRenewalFileRemoval(row: ClinicalRenewal): ClinicalRenewal {
   return { ...row, fileId: null, lastDocumentTitle: null, lastEvidenceKind: null };
 }
+
+/**
+ * Validate a renewal upload's date BEFORE any file is stored, so a rejected
+ * renewal leaves nothing behind. Returns the date done (YYYY-MM-DD).
+ * Evidence uploads ignore the date entirely; an explicit renewal needs a
+ * real calendar date that is not in the future.
+ */
+export function validateRenewalUpload(
+  input: { mode?: RenewalUploadMode; uploadedOn: string },
+  today: string,
+): string {
+  const uploadedOn = input.uploadedOn.slice(0, 10);
+  if (input.mode !== "renewal") return uploadedOn;
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(uploadedOn)
+    ? new Date(`${uploadedOn}T00:00:00Z`)
+    : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== uploadedOn) {
+    throw new Error("Enter the date completed as a real calendar date.");
+  }
+  if (uploadedOn > today) {
+    throw new Error("The date completed cannot be in the future.");
+  }
+  return uploadedOn;
+}
+
+/**
+ * A chart change that was partly saved: part of the work is committed (so
+ * the screen must reload), and the message says exactly what did not
+ * finish. Never used for a change that fully succeeded.
+ */
+export class ChartChangeIncompleteError extends Error {
+  readonly committed = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "ChartChangeIncompleteError";
+  }
+}
