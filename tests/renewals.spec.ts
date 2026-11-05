@@ -68,7 +68,7 @@ async function drawSignature(page: Page) {
   await page.mouse.up();
 }
 
-test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", async ({
+test("RN/PM/HM see clinical dates that only an explicit renewal moves, and RN signs first", async ({
   page,
 }, testInfo) => {
   const shot = (name: string) =>
@@ -96,16 +96,43 @@ test("RN/PM/HM see clinical dates that reset on upload, and RN signs first", asy
 
   const vision = chart.locator(".renewal-card").filter({ hasText: "Vision exam" });
   const dental = chart.locator(".renewal-card").filter({ hasText: "Dental exam" });
+  const visionDates = vision.locator("p").first();
   const dentalBefore = await dental.locator("p").first().innerText();
+  // Seeded overdue: done Mar 12 last year, due Mar 12 this year.
+  await expect(vision.locator("header")).toContainText("Overdue");
+  await expect(visionDates).toContainText("Date done Mar 12");
+  await expect(visionDates).toContainText("Next due Mar 12");
+
+  // PR #258: a plain upload files evidence only — the date done, the due
+  // date and the Overdue status all stay as they were.
   await vision.getByLabel("Evidence type").selectOption("doctor_notes");
   await vision.getByLabel("Document title").fill("Optometry notes");
-  await vision.getByRole("button", { name: "Upload and reset date" }).click();
-  await expect(vision).toContainText("Optometry notes");
-  await expect(vision).toContainText("Next due Sep 12");
+  await vision.getByRole("button", { name: "Upload file", exact: true }).click();
+  await expect(visionDates).toContainText("Optometry notes");
+  await expect(visionDates).toContainText("Date done Mar 12");
+  await expect(visionDates).toContainText("Next due Mar 12");
+  await expect(vision.locator("header")).toContainText("Overdue");
   await expect(dental.locator("p").first()).toHaveText(dentalBefore);
   await vision.scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: shot("vision_date_reset.png"),
+    path: shot("vision_evidence_upload.png"),
+  });
+
+  // Only the explicit renewal flow (checkbox + date completed) sets a new
+  // date done and moves the next due date 12 months after it.
+  await vision.getByLabel("Document title").fill("Optometry exam report");
+  await vision.getByRole("checkbox", { name: /renew the due date/ }).check();
+  await vision.getByLabel("Date completed").fill("2026-09-10");
+  await vision.getByRole("button", { name: "Upload and renew", exact: true }).click();
+  await expect(visionDates).toContainText("Optometry exam report");
+  await expect(visionDates).toContainText("Date done Sep 10");
+  await expect(visionDates).toContainText("Next due Sep 10");
+  await expect(vision.locator("header")).toContainText("Current");
+  await expect(vision.locator("header")).not.toContainText("Overdue");
+  await expect(dental.locator("p").first()).toHaveText(dentalBefore);
+  await vision.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: shot("vision_date_renewed.png"),
   });
 
   const delegation = chart.locator(".plan-stack .obligation-card:not(.training-card)").filter({

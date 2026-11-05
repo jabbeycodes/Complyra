@@ -190,6 +190,12 @@ export interface PlanStackView {
 
 export interface ClinicalRenewalView extends ClinicalRenewal {
   status: RenewalStatus;
+  /**
+   * Who uploaded the current file, when the backend records it (the
+   * local backend does; hosted chart_files carries no uploader column
+   * yet, so this is null there and removal is gated by role alone).
+   */
+  fileUploadedBy?: string | null;
 }
 
 const KIND_ORDER: Record<ObligationKind, number> = {
@@ -565,9 +571,10 @@ export function canSeeRenewals(roleKey: string) {
   ].includes(roleKey);
 }
 
-/** Who may upload renewal evidence (which resets the due date). Compliance
- * administrators keep read-only chart access via canSeeRenewals but do not
- * upload (founder ruling, batch 158); auditors are read-only throughout. */
+/** Who may upload renewal evidence (and, only through the explicit
+ * renewal flow, reset the due date). Compliance administrators keep
+ * read-only chart access via canSeeRenewals but do not upload (founder
+ * ruling, batch 158); auditors are read-only throughout. */
 export function canUploadRenewal(roleKey: string) {
   return (
     canSeeRenewals(roleKey) &&
@@ -575,6 +582,34 @@ export function canUploadRenewal(roleKey: string) {
     roleKey !== "compliance_admin"
   );
 }
+
+/**
+ * Who may remove an uploaded chart file from a clinical renewal: the
+ * manager roles that manage renewal evidence (administrator, PM, RN,
+ * HM — the same set that may upload), plus the person who uploaded that
+ * file. Auditors and compliance administrators stay read-only. Retest
+ * batches 286/289/291: before this, no role — not even an administrator
+ * — could take a wrong or test file back off a chart.
+ */
+export function canRemoveRenewalFile(
+  roleKey: string,
+  input: { userId: string; uploadedBy: string | null | undefined },
+) {
+  if (canUploadRenewal(roleKey)) return true;
+  if (roleKey === "auditor") return false;
+  return Boolean(input.uploadedBy) && input.uploadedBy === input.userId;
+}
+
+/**
+ * How a renewal upload treats the requirement's dates:
+ * - "evidence" (the default): the file is filed as evidence for the
+ *   EXISTING requirement — the due date, the date done, and the
+ *   overdue state are untouched. Replacing a file is evidence.
+ * - "renewal": an explicit renewal — the exam/visit was completed on
+ *   `uploadedOn`, so the date done moves there and the next due date
+ *   is recomputed from the renewal interval.
+ */
+export type RenewalUploadMode = "evidence" | "renewal";
 
 export function canSignAsDelegatingRn(roleKey: string, role: string) {
   return role === "nurse" || roleKey === "nurse";
@@ -687,4 +722,69 @@ export function applyRenewalUpload(
     lastEvidenceKind: input.evidenceKind,
     fileId: input.fileId ?? row.fileId,
   };
+}
+
+/**
+ * File evidence against the EXISTING requirement: the document title,
+ * evidence kind, and file move; lastUploadedOn (the date done) and
+ * nextDueOn — and therefore the overdue state — do not. Retest batches
+ * 286/289/291: replacing the Vision exam file reset an overdue exam to
+ * "Current" with no exam having happened.
+ */
+export function applyRenewalEvidence(
+  row: ClinicalRenewal,
+  input: {
+    documentTitle: string;
+    evidenceKind: ClinicalEvidenceKind;
+    fileId?: string | null;
+  },
+): ClinicalRenewal {
+  return {
+    ...row,
+    lastDocumentTitle: input.documentTitle,
+    lastEvidenceKind: input.evidenceKind,
+    fileId: input.fileId ?? row.fileId,
+  };
+}
+
+/** Take the uploaded file off a renewal. Dates and due state are untouched. */
+export function applyRenewalFileRemoval(row: ClinicalRenewal): ClinicalRenewal {
+  return { ...row, fileId: null, lastDocumentTitle: null, lastEvidenceKind: null };
+}
+
+/**
+ * Validate a renewal upload's date BEFORE any file is stored, so a rejected
+ * renewal leaves nothing behind. Returns the date done (YYYY-MM-DD).
+ * Evidence uploads ignore the date entirely; an explicit renewal needs a
+ * real calendar date that is not in the future.
+ */
+export function validateRenewalUpload(
+  input: { mode?: RenewalUploadMode; uploadedOn: string },
+  today: string,
+): string {
+  const uploadedOn = input.uploadedOn.slice(0, 10);
+  if (input.mode !== "renewal") return uploadedOn;
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(uploadedOn)
+    ? new Date(`${uploadedOn}T00:00:00Z`)
+    : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== uploadedOn) {
+    throw new Error("Enter the date completed as a real calendar date.");
+  }
+  if (uploadedOn > today) {
+    throw new Error("The date completed cannot be in the future.");
+  }
+  return uploadedOn;
+}
+
+/**
+ * A chart change that was partly saved: part of the work is committed (so
+ * the screen must reload), and the message says exactly what did not
+ * finish. Never used for a change that fully succeeded.
+ */
+export class ChartChangeIncompleteError extends Error {
+  readonly committed = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "ChartChangeIncompleteError";
+  }
 }

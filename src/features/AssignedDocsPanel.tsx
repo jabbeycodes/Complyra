@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { Check, FileText, LockKeyhole, PenLine } from "lucide-react";
+import { Check, FileText, LockKeyhole, PenLine, Trash2 } from "lucide-react";
 import { Badge, DueChip, formatDate } from "../components";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
-import { canSignTrainingAsHm } from "../data/chart";
+import { canSignTrainingAsHm, todayIso } from "../data/chart";
 import { openPrintable } from "../data/openFile";
 import {
   canEditCover,
   canEditExtraction,
   canSignAsDelegatingRn,
   canToggleDelegation,
+  canRemoveRenewalFile,
+  ChartChangeIncompleteError,
   canUploadRenewal,
   isObligationActive,
   renewalBadge,
@@ -82,6 +84,9 @@ export default function AssignedDocsPanel({
       await refresh();
     } catch (err) {
       setError((err as Error).message);
+      // Part of the change was saved: reload so the list shows what is
+      // actually on file, while the message says what did not finish.
+      if (err instanceof ChartChangeIncompleteError) await refresh().catch(() => undefined);
     }
   }
 
@@ -212,13 +217,23 @@ export default function AssignedDocsPanel({
         <ClinicalRenewals
           items={stack.renewals}
           canUpload={uploadRenewal}
-          onUpload={(renewalId, evidenceKind, documentTitle, file) =>
+          canRemove={(row) =>
+            canRemoveRenewalFile(session.roleKey, {
+              userId: session.userId,
+              uploadedBy: row.fileUploadedBy,
+            })
+          }
+          onRemove={(renewalId) => run(() => api.removeRenewalFile(renewalId))}
+          onUpload={(renewalId, evidenceKind, documentTitle, file, renewal) =>
             run(() =>
               api.uploadRenewalEvidence({
                 renewalId,
                 evidenceKind,
                 documentTitle,
                 file,
+                ...(renewal
+                  ? { mode: "renewal" as const, uploadedOn: renewal.completedOn }
+                  : { mode: "evidence" as const }),
               }),
             )
           }
@@ -376,19 +391,35 @@ export default function AssignedDocsPanel({
 function ClinicalRenewals({
   items,
   canUpload,
+  canRemove,
+  onRemove,
   onUpload,
 }: {
   items: ClinicalRenewalView[];
   canUpload: boolean;
+  canRemove: (row: ClinicalRenewalView) => boolean;
+  onRemove: (renewalId: string) => void;
+  /** `renewal` is set only for an explicit completed renewal; otherwise
+   * the file is evidence and the due date is left alone. */
   onUpload: (
     renewalId: string,
     evidenceKind: ClinicalEvidenceKind,
     documentTitle: string,
     file?: File,
+    renewal?: { completedOn: string },
   ) => void;
 }) {
   const [drafts, setDrafts] = useState<
-    Record<string, { kind: ClinicalEvidenceKind; title: string; file?: File }>
+    Record<
+      string,
+      {
+        kind: ClinicalEvidenceKind;
+        title: string;
+        file?: File;
+        renewing?: boolean;
+        completedOn?: string;
+      }
+    >
   >({});
 
   function draft(id: string) {
@@ -399,8 +430,9 @@ function ClinicalRenewals({
     <section className="clinical-renewals">
       <h3 className="section-label">Upcoming clinical renewals</h3>
       <p className="stack-help">
-        Annual physical, vision, dental, and physician orders. The next due date
-        resets only after the required document is uploaded.
+        Annual physical, vision, dental, and physician orders. An uploaded file is
+        evidence and leaves the due date as it is; the next due date moves only
+        when the upload is marked as a completed renewal.
       </p>
       <div className="obligation-list">
         {items.map((row) => {
@@ -422,6 +454,27 @@ function ClinicalRenewals({
                   : ""}
                 {row.lastDocumentTitle ? ` · ${row.lastDocumentTitle}` : ""}
               </p>
+              {row.fileId && canRemove(row) && (
+                <p>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      const name = row.lastDocumentTitle ?? "this file";
+                      if (
+                        !window.confirm(
+                          `Remove ${name} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      onRemove(row.id);
+                    }}
+                  >
+                    <Trash2 size={16} /> Remove file
+                  </button>
+                </p>
+              )}
               {canUpload && (
                 <form
                   className="renewal-upload"
@@ -432,6 +485,9 @@ function ClinicalRenewals({
                       current.kind,
                       current.title || current.file?.name || row.title,
                       current.file,
+                      current.renewing
+                        ? { completedOn: current.completedOn ?? todayIso() }
+                        : undefined,
                     );
                   }}
                 >
@@ -486,8 +542,43 @@ function ClinicalRenewals({
                       }
                     />
                   </label>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(current.renewing)}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [row.id]: { ...current, renewing: e.target.checked },
+                        }))
+                      }
+                    />
+                    This is a new completed exam — renew the due date
+                  </label>
+                  {current.renewing && (
+                    <label>
+                      Date completed
+                      <input
+                        type="date"
+                        required
+                        max={todayIso()}
+                        value={current.completedOn ?? todayIso()}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [row.id]: { ...current, completedOn: e.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                  <p className="stack-help" style={{ margin: 0 }}>
+                    {current.renewing
+                      ? "The date done becomes the date completed and the next due date moves 12 months after it."
+                      : "Filed as evidence for the current requirement — the due date and status stay as they are."}
+                  </p>
                   <button className="button primary" type="submit">
-                    Upload and reset date
+                    {current.renewing ? "Upload and renew" : "Upload file"}
                   </button>
                 </form>
               )}

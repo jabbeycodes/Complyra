@@ -10,6 +10,8 @@ export interface ChartFile {
   name: string;
   mime: string;
   storagePath: string;
+  /** User id of the uploader (local backend); absent on legacy rows. */
+  uploadedBy?: string | null;
 }
 
 export type MedicationKind = "scheduled" | "prn";

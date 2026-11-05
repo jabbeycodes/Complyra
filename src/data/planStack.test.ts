@@ -402,7 +402,7 @@ test("nurse, PM/admin, and HM see physical, vision, and dental dates", async () 
   }
 });
 
-test("uploading a consult resets only that renewal date", async () => {
+test("an explicit renewal upload resets only that renewal date", async () => {
   const client = api();
   const nurse = await client.signIn({
     agencyCode: DEMO_AGENCY_CODE,
@@ -419,6 +419,8 @@ test("uploading a consult resets only that renewal date", async () => {
     evidenceKind: "doctor_notes",
     documentTitle: "Optometry notes",
     uploadedOn: "2026-09-12",
+    // Only an explicit renewal moves the date (retest batches 286/289/291).
+    mode: "renewal",
   });
   const after = (await client.loadWorkspace(nurse)).planStacks.find(
     (item) => item.individualId === stack.individualId,

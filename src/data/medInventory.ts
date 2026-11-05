@@ -375,6 +375,39 @@ export function medSupplyDisplayState(
   return { kind: "counted", status: view.status };
 }
 
+/**
+ * The last manual count on file for a med: the newest delivery/count
+ * record (view.deliveries is already newest-first by
+ * compareDeliveryRecency). Null when no count record exists — a med
+ * carried on its maintained row count, or never counted, has no
+ * manual count to show, and none is invented.
+ *
+ * Display only: this is NOT the on-hand figure. Every med surface
+ * headlines the computed on-hand count (the countdown — newest count
+ * baseline minus doses recorded Given since); this record is shown
+ * beneath it, always labeled "Recorded count:", so a reader never has
+ * to guess which figure a bare number is (sim retest batches 286/289/291).
+ */
+export function lastRecordedCount(
+  view: Pick<MedInventoryView, "deliveries">,
+): { pills: number; countedOn: string } | null {
+  const latest = view.deliveries?.[0];
+  if (!latest) return null;
+  return { pills: latest.remainingPills, countedOn: latest.countedOn.slice(0, 10) };
+}
+
+/** "Recorded count: 30 pills · counted Mon, Nov 2" — the label is never dropped. */
+export function recordedCountLabel(record: { pills: number; countedOn: string }): string {
+  const pills = formatPillCount(record.pills);
+  return `Recorded count: ${pills} ${record.pills === 1 ? "pill" : "pills"} · counted ${formatIsoDay(record.countedOn)}`;
+}
+
+/** "On hand: 23 pills" — the computed headline figure, always labeled. */
+export function onHandLabel(pillsLeft: number): string {
+  const pills = formatPillCount(pillsLeft);
+  return `On hand: ${pills} ${pillsLeft === 1 ? "pill" : "pills"}`;
+}
+
 /** Human-readable countdown, e.g. "24 pills remaining · ~12 days left". */
 export function inventoryCountdownLabel(view: MedInventoryView): string {
   const pills = `${view.currentCount} pill${view.currentCount === 1 ? "" : "s"} remaining`;
