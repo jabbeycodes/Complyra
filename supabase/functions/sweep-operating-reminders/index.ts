@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { zonedWallTimeMs } from "../../../src/data/dueItems.ts";
-import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency, prnNoticeKeys } from "../../../src/data/operatingReminders.ts";
+import { AGENCY_TIME_ZONE, agencyClock, noticesForAgency, prnNoticeKeys, unmarkedDoseRefreshes } from "../../../src/data/operatingReminders.ts";
 import { operatingRulesFrom, type EffectiveRule } from "../../../src/data/rules.ts";
 
 /**
@@ -270,6 +270,14 @@ async function sweepAgency(admin: SupabaseClient, agencyId: string) {
       p_dedupe_key: notice.dedupeKey,
     });
     if (!error) queued += Number(data ?? 0);
+  }
+  const unmarkedRefreshes = unmarkedDoseRefreshes(notices);
+  if (unmarkedRefreshes.length) {
+    await admin.rpc("rearm_unmarked_dose_notices", {
+      p_agency_id: agencyId,
+      p_notices: unmarkedRefreshes,
+      p_repeat_minutes: rules.unrecordedReminderMinutes,
+    });
   }
   const prnKeys = prnNoticeKeys(notices);
   if (prnKeys.length) {

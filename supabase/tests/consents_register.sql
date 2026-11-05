@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(38);
+select plan(39);
 select set_config('request.jwt.claims','{"role":"service_role"}',true);
 insert into agencies(id,name,agency_code,state_code,status) values
  ('a7000000-0000-0000-0000-000000000001','Consent test agency','CONSENT-MO','MO','active');
@@ -79,9 +79,10 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d7000000-
 select lives_ok($$select sweep_consent_alerts('a7000000-0000-0000-0000-000000000001')$$,'Manager sweep detects missing required consents');
 select lives_ok($$select sweep_consent_alerts('a7000000-0000-0000-0000-000000000001')$$,'Repeated sweep is safe');
 reset role;
-select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type like 'consent.%'),19,'Alerts dedupe per consent and target');
+select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and type like 'consent.%'),28,'Alerts dedupe per consent and target');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and user_id='d7000000-0000-0000-0000-000000000001' and type like 'consent.%'),9,'Home House Manager receives direct alerts');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and role_key='program_manager' and type like 'consent.%'),9,'Program Manager receives broadcast alerts');
+select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and role_key='administrator' and type like 'consent.%'),9,'Administrator receives broadcast alerts');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and role_key='nurse' and type like 'consent.%'),1,'Medication consent alerts nurses');
 select is((select count(*)::int from notifications where agency_id='a7000000-0000-0000-0000-000000000001' and body like 'Individual Two:%' and type like 'consent.%'),0,'Manager sweep does not expose another home');
 insert into notifications(agency_id,user_id,type,title,body,deep_link) values('a7000000-0000-0000-0000-000000000001','d7000000-0000-0000-0000-000000000003','consent.missing','Old manager notice','Legacy notice','/consents');

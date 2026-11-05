@@ -252,6 +252,7 @@ export function consentAlerts(register: ConsentRegister, memberships: Membership
                 targets.set(m.userId, { userId: m.userId, roleKey: null });
         }
         targets.set('role:program_manager', { userId: null, roleKey: 'program_manager' });
+        targets.set('role:administrator', { userId: null, roleKey: 'administrator' });
         if (gap.type.medication)
             targets.set('role:nurse', { userId: null, roleKey: 'nurse' });
         return [...targets].map(([target, address]) => ({

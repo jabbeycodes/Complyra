@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeShiftNoteDueItems } from "./dueItems";
-import { agencyClock, dueItemClock, houseManagerRecipientIds, noticesForAgency, operatingReminderNotices, reminderRecipientIds } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, noticesForAgency, operatingReminderNotices, refreshUnmarkedDoseRows, reminderRecipientIds, unmarkedDoseRefreshes } from "./operatingReminders";
 import type { SiteDueItem } from "./dueItems";
 
 const missing: SiteDueItem = {
@@ -25,7 +25,6 @@ const missing: SiteDueItem = {
 test("a closed app still names the writer and the house manager once", () => {
   const notices = operatingReminderNotices({
     now: new Date("2026-10-15T18:00:00.000Z"),
-    unrecordedReminderMinutes: 60,
     prnReminderRepeatMinutes: 15,
     prnFollowupMinutes: 60,
     sites: [
@@ -46,7 +45,6 @@ test("a closed app still names the writer and the house manager once", () => {
   assert.match(notices[1]?.body ?? "", /Cedar House/);
   const again = operatingReminderNotices({
     now: new Date("2026-10-15T18:00:00.000Z"),
-    unrecordedReminderMinutes: 60,
     prnReminderRepeatMinutes: 15,
     prnFollowupMinutes: 60,
     sites: [
@@ -173,4 +171,88 @@ test("a closed app names yesterday's missing note on the Central day", () => {
   assert.ok(notices.some((notice) => notice.userId === "sarah" && notice.type === "med.unrecorded"));
   const again = noticesForAgency(input);
   assert.equal(again[0]?.dedupeKey, notices[0]?.dedupeKey);
+});
+
+const site = (id: string) => ({
+  id,
+  name: "Cedar House",
+  items: [
+    { kind: "medication", severity: "overdue", line2: "Morgan: levetiracetam 8:00 AM" },
+  ] as unknown as SiteDueItem[],
+  medRecipients: ["alex", "sarah"],
+  noteManagers: [],
+});
+const sweep = (now: string, noteDay: string) =>
+  operatingReminderNotices({
+    now: new Date(now),
+    noteDay,
+    prnReminderRepeatMinutes: 15,
+    prnFollowupMinutes: 60,
+    sites: [site("cedar")],
+    prnFollowups: [],
+  });
+
+test("unmarked-dose notices keep one key per home, recipient, and day across sweeps", () => {
+  const morning = sweep("2026-11-04T14:00:00.000Z", "2026-11-04");
+  const later = sweep("2026-11-04T19:30:00.000Z", "2026-11-04");
+  assert.deepEqual(morning.map((n) => n.dedupeKey), [
+    "med.unrecorded:cedar:alex:2026-11-04",
+    "med.unrecorded:cedar:sarah:2026-11-04",
+  ]);
+  assert.deepEqual(later.map((n) => n.dedupeKey), morning.map((n) => n.dedupeKey));
+  const tomorrow = sweep("2026-11-05T14:00:00.000Z", "2026-11-05");
+  assert.equal(tomorrow[0]?.dedupeKey, "med.unrecorded:cedar:alex:2026-11-05");
+});
+
+test("the refresh list carries every unmarked notice and nothing else", () => {
+  const notices = sweep("2026-11-04T14:00:00.000Z", "2026-11-04");
+  const prn = { ...notices[0], type: "med.prn_repeat" as const, dedupeKey: "med.prn_repeat:x" };
+  assert.deepEqual(unmarkedDoseRefreshes([...notices, prn]).map((row) => row.dedupe_key), [
+    "med.unrecorded:cedar:alex:2026-11-04",
+    "med.unrecorded:cedar:sarah:2026-11-04",
+  ]);
+});
+
+function storedRow(overrides: Partial<{ dedupeKey: string; body: string; readAt: string | null; createdAt: string; userId: string; entityId: string }>) {
+  return {
+    type: "med.unrecorded",
+    userId: "alex",
+    entityId: "cedar",
+    dedupeKey: "med.unrecorded:cedar:alex:2026-11-04",
+    body: "Cedar House has 1 unmarked dose past the window.",
+    readAt: null as string | null,
+    createdAt: "2026-11-04T14:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("a read row stays read inside the interval and goes unread after it, on the same row", () => {
+  const notice = sweep("2026-11-04T15:00:00.000Z", "2026-11-04")[0];
+  const row = storedRow({ readAt: "2026-11-04T14:30:00.000Z", body: notice.body });
+  assert.equal(refreshUnmarkedDoseRows([row], notice, new Date("2026-11-04T15:00:00.000Z"), 60), false);
+  assert.equal(row.readAt, "2026-11-04T14:30:00.000Z");
+  assert.equal(refreshUnmarkedDoseRows([row], notice, new Date("2026-11-04T15:30:00.000Z"), 60), true);
+  assert.equal(row.readAt, null);
+  assert.equal(row.createdAt, "2026-11-04T15:30:00.000Z");
+});
+
+test("an unread row picks up the current wording and stays unread", () => {
+  const notice = sweep("2026-11-04T15:00:00.000Z", "2026-11-04")[0];
+  const row = storedRow({ body: "Old count" });
+  assert.equal(refreshUnmarkedDoseRows([row], notice, new Date("2026-11-04T15:00:00.000Z"), 60), true);
+  assert.equal(row.body, notice.body);
+  assert.equal(row.readAt, null);
+  assert.equal(row.createdAt, "2026-11-04T14:00:00.000Z");
+});
+
+test("a new day retires only that recipient's earlier unread row for that home", () => {
+  const notice = sweep("2026-11-05T14:00:00.000Z", "2026-11-05")[0];
+  const now = new Date("2026-11-05T14:00:00.000Z");
+  const yesterday = storedRow({});
+  const otherHome = storedRow({ entityId: "willow", dedupeKey: "med.unrecorded:willow:alex:2026-11-04" });
+  const otherPerson = storedRow({ userId: "sarah", dedupeKey: "med.unrecorded:cedar:sarah:2026-11-04" });
+  refreshUnmarkedDoseRows([yesterday, otherHome, otherPerson], notice, now, 60);
+  assert.equal(yesterday.readAt, now.toISOString());
+  assert.equal(otherHome.readAt, null);
+  assert.equal(otherPerson.readAt, null);
 });

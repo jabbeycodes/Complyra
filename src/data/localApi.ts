@@ -423,7 +423,7 @@ import {
   type LatenessPostResult,
   type RecognitionAward,
 } from "./lateness";
-import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeRearmDue, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
+import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeRearmDue, refreshUnmarkedDoseRows, siteHasOverdueMedDose, type ReminderMembership } from "./operatingReminders";
 import {
   accountabilityDates,
   checklistAccountabilityItems,
@@ -13890,7 +13890,6 @@ export class LocalApi implements ComplyraApi {
     for (const notice of operatingReminderNotices({
       now,
       noteDay: dueItemClock(now).noteDay,
-      unrecordedReminderMinutes: rules.unrecordedReminderMinutes,
       prnReminderRepeatMinutes: rules.prnReminderRepeatMinutes,
       prnFollowupMinutes: rules.prnFollowupMinutes,
       sites,
@@ -13910,6 +13909,9 @@ export class LocalApi implements ComplyraApi {
     })) {
       if (!notice.userId) continue;
       const existing = (this.store.db.notifications ?? []).find((row) => row.dedupeKey === notice.dedupeKey);
+      if (notice.type === "med.unrecorded") {
+        added = refreshUnmarkedDoseRows(this.store.db.notifications ?? [], notice, now, rules.unrecordedReminderMinutes) || added;
+      }
       if (existing) {
         if (notice.type === "med.prn_repeat" && prnNoticeRearmDue(existing.readAt, now, rules.prnReminderRepeatMinutes)) {
           existing.readAt = null;

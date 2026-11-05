@@ -11,7 +11,7 @@ import {
   shiftBlocksForSite,
   type SiteDueItem,
 } from "./dueItems";
-import { reminderSlot, prnFollowupStillOpen } from "./lateness";
+import { prnFollowupStillOpen } from "./lateness";
 import { normalizeSiteFacts } from "./siteReview";
 import type { OperatingRules } from "./rules";
 import type { AloneTimeWindow } from "./types";
@@ -121,10 +121,9 @@ export function agencyClock(now: Date, timeZone = AGENCY_TIME_ZONE) {
 
 export function operatingReminderNotices(input: {
   now: Date;
-  unrecordedReminderMinutes: number;
   prnReminderRepeatMinutes: number;
   prnFollowupMinutes: number;
-  /** Dedupe day. The signed-in app leaves this empty and uses the UTC date. */
+  /** Dedupe day for notes and unmarked doses. Falls back to the UTC date. */
   noteDay?: string;
   sites: Array<{
     id: string;
@@ -143,7 +142,6 @@ export function operatingReminderNotices(input: {
   }>;
 }): OperatingNotice[] {
   const notices: OperatingNotice[] = [];
-  const medSlot = reminderSlot(input.now.getTime(), input.unrecordedReminderMinutes);
   const noteDay = input.noteDay ?? input.now.toISOString().slice(0, 10);
   for (const site of input.sites) {
     const overdue = site.items.filter((item) => item.kind === "medication" && item.severity === "overdue");
@@ -160,7 +158,7 @@ export function operatingReminderNotices(input: {
           deepLink: "/meds",
           entityId: site.id,
           entityType: "medication",
-          dedupeKey: `med.unrecorded:${site.id}:${userId}:${medSlot}`,
+          dedupeKey: unmarkedDoseDedupeKey(site.id, userId, noteDay),
         });
       }
     }
@@ -252,6 +250,63 @@ export function prnNoticeRearmDue(readAt: string | null | undefined, now: Date, 
 
 export function prnNoticeKeys(notices: OperatingNotice[]): string[] {
   return notices.filter((notice) => notice.type === "med.prn_repeat").map((notice) => notice.dedupeKey);
+}
+
+/**
+ * Retest batches 277-293: one row per home, per recipient, per agency day (62
+ * rows in one bell). The notice summarizes a home's unmarked doses, so that is
+ * its event. The old key ended in a reminder slot and minted a new row every
+ * interval while a dose stayed unmarked.
+ */
+export function unmarkedDoseDedupeKey(siteId: string, userId: string, day: string): string {
+  return `med.unrecorded:${siteId}:${userId}:${day}`;
+}
+
+/** The current wording for each live unmarked-dose row, which the sweep refreshes. */
+export function unmarkedDoseRefreshes(notices: OperatingNotice[]): Array<{ dedupe_key: string; body: string }> {
+  return notices
+    .filter((notice) => notice.type === "med.unrecorded")
+    .map((notice) => ({ dedupe_key: notice.dedupeKey, body: notice.body }));
+}
+
+/**
+ * The local store's copy of rearm_unmarked_dose_notices: refresh the wording,
+ * make the row unread again once the recipient read it a full interval ago,
+ * and retire the recipient's unread row for this home from an earlier day.
+ * Returns true when anything changed.
+ */
+export function refreshUnmarkedDoseRows<
+  Row extends {
+    type: string;
+    userId?: string | null;
+    entityId?: string | null;
+    dedupeKey?: string | null;
+    body: string;
+    readAt?: string | null;
+    createdAt: string;
+  },
+>(rows: Row[], notice: OperatingNotice, now: Date, repeatMinutes: number): boolean {
+  let changed = false;
+  for (const row of rows) {
+    if (row.type !== "med.unrecorded" || row.userId !== notice.userId || row.entityId !== notice.entityId) continue;
+    if (row.dedupeKey !== notice.dedupeKey) {
+      if (!row.readAt) {
+        row.readAt = now.toISOString();
+        changed = true;
+      }
+      continue;
+    }
+    if (row.body !== notice.body) {
+      row.body = notice.body;
+      changed = true;
+    }
+    if (prnNoticeRearmDue(row.readAt, now, repeatMinutes)) {
+      row.readAt = null;
+      row.createdAt = now.toISOString();
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export interface UnattendedAgencyInput {
@@ -386,7 +441,6 @@ export function noticesForAgency(input: UnattendedAgencyInput): OperatingNotice[
   return operatingReminderNotices({
     now: input.now,
     noteDay: clock.noteDay,
-    unrecordedReminderMinutes: input.rules.unrecordedReminderMinutes,
     prnReminderRepeatMinutes: input.rules.prnReminderRepeatMinutes,
     prnFollowupMinutes: input.rules.prnFollowupMinutes,
     sites,

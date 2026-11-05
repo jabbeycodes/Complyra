@@ -41,6 +41,8 @@ test('alert targets are home HM direct, PM broadcast, medication nurse broadcast
     assert.deepEqual(alerts, consentAlerts(register, memberships, '2026-10-28'));
     assert.ok(!alerts.some(a => a.userId === 'other-hm' || a.userId === 'auditor' || a.roleKey === 'auditor'));
     assert.equal(alerts.filter(a => a.roleKey === 'nurse').length, 1);
+    assert.equal(alerts.filter(a => a.roleKey === 'administrator').length, alerts.filter(a => a.roleKey === 'program_manager').length);
+    assert.ok(alerts.some(a => a.roleKey === 'administrator'));
     assert.ok(alerts.filter(a => a.roleKey === 'nurse').every(a => a.entityId.endsWith(':medication')));
     assert.equal(notificationPage('/consents'), 'Consents');
 });
