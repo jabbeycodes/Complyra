@@ -253,7 +253,11 @@ import {
 import { isValidRating } from "../recognition/scoring";
 import {
   allergiesChangeDetail,
+  applyRenewalEvidence,
+  applyRenewalFileRemoval,
   applyRenewalUpload,
+  canRemoveRenewalFile,
+  type RenewalUploadMode,
   canEditCover,
   canEditExtraction,
   canSeeRenewals,
@@ -5283,6 +5287,7 @@ export class HostedApi implements ComplyraApi {
     documentTitle: string;
     uploadedOn?: string;
     file?: File;
+    mode?: RenewalUploadMode;
   }) {
     const session = await this.requireSession();
     if (!canUploadRenewal(session.roleKey)) {
@@ -5302,17 +5307,31 @@ export class HostedApi implements ComplyraApi {
       this.requirePdfFile(input.file, "Upload a PDF for renewal evidence.");
       fileId = await this.saveChartFile(session, renewal.individualId, "renewal", input.file);
     }
-    const next = applyRenewalUpload(renewal, {
-      uploadedOn,
-      documentTitle: title,
-      evidenceKind: input.evidenceKind,
-      fileId,
-    });
+    const renewing = input.mode === "renewal";
+    if (renewing && uploadedOn > todayIso()) {
+      throw new Error("The date completed cannot be in the future.");
+    }
+    // Evidence (the default) never touches the requirement's dates — an
+    // upload is not an exam. Only the explicit renewal flow resets them,
+    // so the evidence write does not even send the date columns.
+    const next = renewing
+      ? applyRenewalUpload(renewal, {
+          uploadedOn,
+          documentTitle: title,
+          evidenceKind: input.evidenceKind,
+          fileId,
+        })
+      : applyRenewalEvidence(renewal, {
+          documentTitle: title,
+          evidenceKind: input.evidenceKind,
+          fileId,
+        });
     const { error: updateError } = await this.client
       .from("clinical_renewals")
       .update({
-        last_uploaded_on: next.lastUploadedOn,
-        next_due_on: next.nextDueOn,
+        ...(renewing
+          ? { last_uploaded_on: next.lastUploadedOn, next_due_on: next.nextDueOn }
+          : {}),
         last_document_title: next.lastDocumentTitle,
         last_evidence_kind: next.lastEvidenceKind,
         file_id: next.fileId,
@@ -5321,8 +5340,71 @@ export class HostedApi implements ComplyraApi {
     throwIf(updateError, "Could not save the renewal evidence.");
     await this.audit(
       session,
-      "renewal.evidence_uploaded",
-      `${session.fullName} uploaded ${title} for ${renewal.title}`,
+      renewing ? "renewal.renewed" : "renewal.evidence_uploaded",
+      renewing
+        ? `${session.fullName} renewed ${renewal.title} (completed ${uploadedOn}) with ${title}`
+        : `${session.fullName} uploaded ${title} for ${renewal.title}`,
+      "clinical_renewal",
+      renewal.id,
+    );
+  }
+
+  async removeRenewalFile(renewalId: string) {
+    const session = await this.requireSession();
+    const { data: row, error } = await this.client
+      .from("clinical_renewals")
+      .select("*")
+      .eq("id", renewalId)
+      .single();
+    throwIf(error, "Renewal not found.");
+    const renewal = mapClinicalRenewal(row!);
+    if (!renewal.fileId) throw new Error("There is no uploaded file on this item to remove.");
+    // Hosted chart_files carries no uploader column yet, so removal is
+    // gated by role here (every role that may upload a renewal file is
+    // a manager role that may remove one). RLS still applies.
+    if (!canRemoveRenewalFile(session.roleKey, { userId: session.userId, uploadedBy: null })) {
+      throw new Error(
+        "Only an administrator, PM, RN, House Manager, or the person who uploaded the file can remove it.",
+      );
+    }
+    const { data: fileRow } = await this.client
+      .from("chart_files")
+      .select("id, name, storage_path")
+      .eq("id", renewal.fileId)
+      .maybeSingle();
+    const next = applyRenewalFileRemoval(renewal);
+    const { data: updated, error: updateError } = await this.client
+      .from("clinical_renewals")
+      .update({
+        file_id: next.fileId,
+        last_document_title: next.lastDocumentTitle,
+        last_evidence_kind: next.lastEvidenceKind,
+      })
+      .eq("id", renewal.id)
+      .select("id");
+    throwIf(updateError, "Could not remove the file.");
+    if (!updated || updated.length === 0) {
+      throw new Error("Could not remove the file — your role cannot change this chart item.");
+    }
+    // Best effort: the chart record and the stored object. The chart
+    // item no longer points at the file either way, so it is gone from
+    // every chart surface even if storage cleanup is refused by policy.
+    if (fileRow) {
+      const { count } = await this.client
+        .from("clinical_renewals")
+        .select("id", { count: "exact", head: true })
+        .eq("file_id", fileRow.id as string);
+      if (!count) {
+        await this.client.from("chart_files").delete().eq("id", fileRow.id as string);
+        if (fileRow.storage_path) {
+          await this.client.storage.from(CHART_BUCKET).remove([fileRow.storage_path as string]);
+        }
+      }
+    }
+    await this.audit(
+      session,
+      "renewal.file_removed",
+      `${session.fullName} removed ${(fileRow?.name as string | undefined) ?? renewal.lastDocumentTitle ?? "the uploaded file"} from ${renewal.title}`,
       "clinical_renewal",
       renewal.id,
     );

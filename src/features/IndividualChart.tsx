@@ -2,7 +2,12 @@ import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatPillCount, medCountdown } from "./mobile/medcount";
-import { medSupplyDisplayState } from "../data/medInventory";
+import {
+  lastRecordedCount,
+  medSupplyDisplayState,
+  onHandLabel,
+  recordedCountLabel,
+} from "../data/medInventory";
 import { scrollToSectionId } from "./sectionLinks";
 import { formatCentralTime } from "./mobile/mar";
 import type {
@@ -17,6 +22,7 @@ import {
   Pill,
   Printer,
   ShieldAlert,
+  Trash2,
 } from "lucide-react";
 import { Badge, DueChip, Empty, formatDate, PageHeading } from "../components";
 import StatusBadge from "../components/StatusBadge";
@@ -53,6 +59,7 @@ import { openPrintable } from "../data/openFile";
 import {
   canSeeRenewals,
   canToggleDelegation,
+  canRemoveRenewalFile,
   canUploadRenewal,
   isObligationActive,
   renewalBadge,
@@ -596,8 +603,10 @@ export default function IndividualChart({
           <section className="chart-widget" aria-labelledby="annuals-heading">
             <h2 id="annuals-heading">Upcoming clinical renewals</h2>
             <p className="stack-help">
-              Date completed plus days until the exam expires. Uploading a new
-              document resets the due date to 12 months later.
+              Date completed plus days until the exam expires. Uploading a file
+              files it as evidence and leaves the due date as it is; only marking
+              the upload as a completed renewal sets a new date done and moves
+              the next due date to 12 months after it.
             </p>
             {stack.renewals.map((row) => (
               <article key={row.id} className="obligation-card renewal-card">
@@ -632,18 +641,42 @@ export default function IndividualChart({
                     >
                       <Printer size={16} /> Print
                     </button>
+                    {canRemoveRenewalFile(session.roleKey, {
+                      userId: session.userId,
+                      uploadedBy: row.fileUploadedBy,
+                    }) && (
+                      <button
+                        className="button"
+                        onClick={() => {
+                          const name = row.lastDocumentTitle ?? "this file";
+                          if (
+                            !window.confirm(
+                              `Remove ${name} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          void run(() => api.removeRenewalFile(row.id));
+                        }}
+                      >
+                        <Trash2 size={16} /> Remove file
+                      </button>
+                    )}
                   </div>
                 )}
                 {canUploadRenewal(session.roleKey) && (
                   <RenewalUpload
                     defaultTitle={row.title}
-                    onUpload={(evidenceKind, documentTitle, file) =>
+                    onUpload={(evidenceKind, documentTitle, file, renewal) =>
                       run(() =>
                         api.uploadRenewalEvidence({
                           renewalId: row.id,
                           evidenceKind,
                           documentTitle,
                           file,
+                          ...(renewal
+                            ? { mode: "renewal" as const, uploadedOn: renewal.completedOn }
+                            : { mode: "evidence" as const }),
                         }),
                       )
                     }
@@ -737,6 +770,8 @@ export default function IndividualChart({
                       ? medCountdown(view, medMarks, todayIso())
                       : null;
                   const neverCounted = display.kind === "never-counted";
+                  const recorded =
+                    view && display.kind === "counted" ? lastRecordedCount(view) : null;
                   const medLogs = prnLogs.filter(
                     (log) => log.medicationId === med.id,
                   );
@@ -785,7 +820,7 @@ export default function IndividualChart({
                       ? "Supply count unavailable"
                       : neverCounted
                         ? "No count recorded yet"
-                        : `${formatPillCount(countdown?.pillsLeft ?? 0)} pills left`}
+                        : onHandLabel(countdown?.pillsLeft ?? 0)}
                   {med.kind === "scheduled"
                     ? countdown
                       ? ` · ${med.pillsPerDay} per day · ${
@@ -795,10 +830,20 @@ export default function IndividualChart({
                         }`
                       : ""
                     : " · PRN, no automatic drop"}
-                  {view && display.kind === "counted" && view.lastCountedOn
+                  {view && display.kind === "counted" && view.lastCountedOn && !recorded
                     ? ` · Last counted ${formatDate(view.lastCountedOn)}`
                     : ""}
                 </p>
+                {/* Retest batches 286/289/291: the headline above is the
+                    computed on-hand count (the same figure the supply
+                    forecast and the MAR lead with); the last manual
+                    count sits beneath it, always labeled — never a
+                    bare number a reader could take for the headline. */}
+                {recorded && (
+                  <p className="stack-help" style={{ marginTop: 2 }}>
+                    {recordedCountLabel(recorded)}
+                  </p>
+                )}
                 {orderExpiryNote && (
                   <p className="form-error" role="status">
                     {orderExpiryNote} — a prescriber review is needed.
@@ -1226,21 +1271,32 @@ function RenewalUpload({
   onUpload,
 }: {
   defaultTitle: string;
+  /** `renewal` is set only when the uploader explicitly marks the
+   * upload as a completed renewal — otherwise the file is evidence and
+   * the requirement's due date is left alone. */
   onUpload: (
     evidenceKind: ClinicalEvidenceKind,
     documentTitle: string,
     file?: File,
+    renewal?: { completedOn: string },
   ) => void;
 }) {
   const [kind, setKind] = useState<ClinicalEvidenceKind>("consultation");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | undefined>();
+  const [renewing, setRenewing] = useState(false);
+  const [completedOn, setCompletedOn] = useState(todayIso());
   return (
     <form
       className="renewal-upload"
       onSubmit={(e) => {
         e.preventDefault();
-        onUpload(kind, title || file?.name || defaultTitle, file);
+        onUpload(
+          kind,
+          title || file?.name || defaultTitle,
+          file,
+          renewing ? { completedOn } : undefined,
+        );
       }}
     >
       <label>
@@ -1276,8 +1332,33 @@ function RenewalUpload({
           }}
         />
       </label>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={renewing}
+          onChange={(e) => setRenewing(e.target.checked)}
+        />
+        This is a new completed exam — renew the due date
+      </label>
+      {renewing && (
+        <label>
+          Date completed
+          <input
+            type="date"
+            required
+            max={todayIso()}
+            value={completedOn}
+            onChange={(e) => setCompletedOn(e.target.value)}
+          />
+        </label>
+      )}
+      <p className="stack-help" style={{ margin: 0 }}>
+        {renewing
+          ? "The date done becomes the date completed and the next due date moves 12 months after it."
+          : "Filed as evidence for the current requirement — the due date and status stay as they are."}
+      </p>
       <button className="button primary" type="submit">
-        Upload and reset date
+        {renewing ? "Upload and renew" : "Upload file"}
       </button>
     </form>
   );

@@ -275,7 +275,11 @@ import {
   scoreHmWeek,
 } from "../recognition/scoring";
 import {
+  applyRenewalEvidence,
+  applyRenewalFileRemoval,
   applyRenewalUpload,
+  canRemoveRenewalFile,
+  type RenewalUploadMode,
   blankRnFields,
   allergiesChangeDetail,
   canEditCover,
@@ -1037,13 +1041,26 @@ export interface ComplyraApi {
     signatureName: string,
     signatureMark: string,
   ): Promise<void>;
+  /**
+   * File evidence for a clinical renewal. `mode` defaults to "evidence":
+   * the file is filed against the existing requirement and the due date
+   * / overdue state do NOT change. Only `mode: "renewal"` (an explicit
+   * renewal: the exam was completed on `uploadedOn`) moves the date done
+   * and recomputes the next due date.
+   */
   uploadRenewalEvidence(input: {
     renewalId: string;
     evidenceKind: ClinicalEvidenceKind;
     documentTitle: string;
     uploadedOn?: string;
     file?: File;
+    mode?: RenewalUploadMode;
   }): Promise<void>;
+  /**
+   * Remove the uploaded file from a clinical renewal (manager roles or
+   * the file's uploader). The renewal's dates and due state are untouched.
+   */
+  removeRenewalFile(renewalId: string): Promise<void>;
   discontinueDelegation(input: {
     obligationId: string;
     title: string;
@@ -2775,6 +2792,7 @@ async function saveChartFile(
     individualId: string;
     kind: ChartFileKind;
     file: File;
+    uploadedBy?: string;
   },
 ) {
   const id = crypto.randomUUID();
@@ -2788,6 +2806,7 @@ async function saveChartFile(
     name: input.file.name,
     mime: input.file.type || "application/pdf",
     storagePath,
+    uploadedBy: input.uploadedBy ?? null,
   });
   return id;
 }
@@ -2928,7 +2947,13 @@ function mapPlanStack(
     renewals: canSeeRenewals(session.roleKey)
       ? (store.db.clinicalRenewals ?? [])
           .filter((row) => row.individualId === person.id)
-          .map((row) => ({ ...row, status: renewalStatus(row.nextDueOn, undefined, orderReminderDays) }))
+          .map((row) => ({
+            ...row,
+            status: renewalStatus(row.nextDueOn, undefined, orderReminderDays),
+            fileUploadedBy: row.fileId
+              ? (store.db.chartFiles.find((file) => file.id === row.fileId)?.uploadedBy ?? null)
+              : null,
+          }))
           .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
       : [],
     carePlan: (() => {
@@ -7416,6 +7441,7 @@ export class LocalApi implements ComplyraApi {
     documentTitle: string;
     uploadedOn?: string;
     file?: File;
+    mode?: RenewalUploadMode;
   }) {
     const session = assertSession(this.store);
     if (!canUploadRenewal(session.roleKey)) {
@@ -7436,22 +7462,75 @@ export class LocalApi implements ComplyraApi {
         individualId: renewal.individualId,
         kind: "renewal",
         file: input.file,
+        uploadedBy: session.userId,
       });
     }
-    const next = applyRenewalUpload(renewal, {
-      uploadedOn,
-      documentTitle: title,
-      evidenceKind: input.evidenceKind,
-      fileId,
-    });
+    const renewing = input.mode === "renewal";
+    if (renewing && uploadedOn > todayIso()) {
+      throw new Error("The date completed cannot be in the future.");
+    }
+    // Evidence (the default) never touches the requirement's dates — an
+    // upload is not an exam. Only the explicit renewal flow resets them.
+    const next = renewing
+      ? applyRenewalUpload(renewal, {
+          uploadedOn,
+          documentTitle: title,
+          evidenceKind: input.evidenceKind,
+          fileId,
+        })
+      : applyRenewalEvidence(renewal, {
+          documentTitle: title,
+          evidenceKind: input.evidenceKind,
+          fileId,
+        });
     this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
       row.id === renewal.id ? next : row,
     );
     log(
       this.store,
       session,
-      "renewal.evidence_uploaded",
-      `${session.fullName} uploaded ${title} for ${renewal.title}`,
+      renewing ? "renewal.renewed" : "renewal.evidence_uploaded",
+      renewing
+        ? `${session.fullName} renewed ${renewal.title} (completed ${uploadedOn}) with ${title}`
+        : `${session.fullName} uploaded ${title} for ${renewal.title}`,
+      "clinical_renewal",
+      renewal.id,
+    );
+    await persistMeta(this.store);
+  }
+
+  async removeRenewalFile(renewalId: string) {
+    const session = assertSession(this.store);
+    const renewal = this.store.db.clinicalRenewals.find((row) => row.id === renewalId);
+    if (!renewal) throw new Error("Renewal not found.");
+    accessibleIndividual(this.store, session, renewal.individualId);
+    if (!renewal.fileId) throw new Error("There is no uploaded file on this item to remove.");
+    const file = this.store.db.chartFiles.find((row) => row.id === renewal.fileId);
+    if (
+      !canRemoveRenewalFile(session.roleKey, {
+        userId: session.userId,
+        uploadedBy: file?.uploadedBy ?? null,
+      })
+    ) {
+      throw new Error("Only an administrator, PM, RN, House Manager, or the person who uploaded the file can remove it.");
+    }
+    const next = applyRenewalFileRemoval(renewal);
+    this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
+      row.id === renewal.id ? next : row,
+    );
+    // The file itself goes too — unless another chart row still points at it.
+    const stillReferenced = this.store.db.clinicalRenewals.some(
+      (row) => row.fileId === renewal.fileId,
+    );
+    if (file && !stillReferenced) {
+      this.store.db.chartFiles = this.store.db.chartFiles.filter((row) => row.id !== file.id);
+      browserStore.files.delete(file.storagePath);
+    }
+    log(
+      this.store,
+      session,
+      "renewal.file_removed",
+      `${session.fullName} removed ${file?.name ?? renewal.lastDocumentTitle ?? "the uploaded file"} from ${renewal.title}`,
       "clinical_renewal",
       renewal.id,
     );
