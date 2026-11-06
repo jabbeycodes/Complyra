@@ -179,4 +179,179 @@ describe("training sign-off password re-entry", () => {
     await React.act(async () => root.unmount());
     container.remove();
   });
+
+  async function renderPage(api: LocalApi, session: Awaited<ReturnType<LocalApi["signIn"]>>) {
+    const workspace = await api.loadWorkspace(session);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await React.act(async () => {
+      root.render(
+        React.createElement(
+          DataContext.Provider,
+          {
+            value: {
+              api,
+              session,
+              workspace,
+              loading: false,
+              error: "",
+              usingHostedBackend: false,
+              loadStalled: false,
+              signIn: async () => {},
+              changePassword: async () => {},
+              signOut: async () => {},
+              refresh: async () => {},
+            } as never,
+          },
+          React.createElement(Page, { onSaved: () => undefined }),
+        ),
+      );
+      await settle();
+    });
+    await React.act(settle);
+    await React.act(settle);
+    return {
+      container,
+      async unmount() {
+        await React.act(async () => root.unmount());
+        container.remove();
+      },
+    };
+  }
+
+  const buttonsNamed = (root: ParentNode, text: string) =>
+    [...root.querySelectorAll("button")].filter((b) => b.textContent === text);
+
+  async function stampedLineFixture() {
+    const store = new MemoryStore(structuredClone(createEvergreenSeed()));
+    const api = new LocalApi(store);
+    const admin = await api.signIn(login(DEMO_ADMIN_USERNAME));
+    const adminView = await api.loadWorkspace(admin);
+    const trainee = adminView.staff.find((p) => p.username === "taylor.reed")!;
+    const hm = adminView.staff.find((p) => p.roleKey === "house_manager")!;
+    const [line] = await api.assignTraining({
+      userId: trainee.id,
+      siteId: adminView.sites[0].id,
+      source: "checklist",
+      topicIds: siteChecklistTopics()
+        .slice(0, 1)
+        .map((topic) => topic.id),
+    });
+    await api.signOut();
+    const session = await api.signIn(login("taylor.reed"));
+    await api.adoptSignature({
+      signatureDataUrl: PNG_1X1,
+      initialsDataUrl: PNG_1X1,
+      consentTextVersion: ESIGN_CONSENT_VERSION,
+      consentGiven: true,
+    });
+    await api.verifySigningPassword(DEMO_PASSWORD);
+    const { saveAndInitialTrainingLine } = await import("./trainingLineSigning");
+    const requirement = (await api.getStaffTrainingProfile(trainee.id)).requirements.find(
+      (row) => row.id === line.id,
+    )!;
+    await saveAndInitialTrainingLine(api, {
+      sessionUserId: trainee.id,
+      staffUserId: trainee.id,
+      requirement,
+      trainerName: hm.name,
+      input: {
+        initials: "TR",
+        signedOn: "2026-10-10",
+        trainerUserId: hm.id,
+        hoursTotal: 2,
+        hoursWithHm: 1,
+      },
+    } as never);
+    return { store, api, session, trainee, line };
+  }
+
+  it("a valid stamp shows Verified and offers no Re-initial", async () => {
+    const fx = await stampedLineFixture();
+    const view = await renderPage(fx.api, fx.session);
+    assert.match(view.container.textContent ?? "", /Verified — unchanged since signing/);
+    assert.equal(buttonsNamed(view.container, "Re-initial").length, 0);
+    await view.unmount();
+  });
+
+  it("an INVALID stamp offers its owner Re-initial, and managers still get none", async () => {
+    const fx = await stampedLineFixture();
+    const signoffs = (fx.store.db as unknown as {
+      trainingSignoffs: Array<{ requirementId: string; hoursTotal: number }>;
+    }).trainingSignoffs;
+    signoffs.find((row) => row.requirementId === fx.line.id)!.hoursTotal = 3;
+
+    const owner = await renderPage(fx.api, fx.session);
+    assert.match(owner.container.textContent ?? "", /Signature invalid/);
+    assert.equal(
+      buttonsNamed(owner.container, "Re-initial").length,
+      1,
+      "the owner can retry an invalid line",
+    );
+    await owner.unmount();
+
+    await fx.api.signOut();
+    const admin = await fx.api.signIn(login(DEMO_ADMIN_USERNAME));
+    const manager = await renderPage(fx.api, admin);
+    const open = [...manager.container.querySelectorAll("button")].find(
+      (b) =>
+        b.textContent === "Open profile" &&
+        b.closest("tr, li")?.textContent?.includes(fx.trainee.name),
+    );
+    assert.ok(open, "the manager can open the trainee's profile");
+    await React.act(async () => {
+      open!.click();
+      await settle();
+    });
+    await React.act(settle);
+    await React.act(settle);
+    assert.match(manager.container.textContent ?? "", /Signature invalid/);
+    assert.equal(buttonsNamed(manager.container, "Re-initial").length, 0);
+    await manager.unmount();
+  });
+
+  it("a slow own-profile load says loading, and a failed one offers Try again", async () => {
+    const api = new LocalApi(new MemoryStore(structuredClone(createEvergreenSeed())));
+    const session = await api.signIn(login("taylor.reed"));
+    const real = api.getStaffTrainingProfile.bind(api);
+    let release: () => void = () => {};
+    let failNext = false;
+    api.getStaffTrainingProfile = async (userId: string) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      if (failNext) {
+        failNext = false;
+        throw new Error("Could not load training lines.");
+      }
+      return real(userId);
+    };
+    failNext = true;
+    const view = await renderPage(api, session);
+    const text = () => view.container.textContent ?? "";
+    assert.doesNotMatch(text(), /Ask your house manager/, "in flight is not a failure");
+    assert.match(text(), /Loading training profile/);
+
+    await React.act(async () => {
+      release();
+      await settle();
+    });
+    assert.match(text(), /Training profile couldn't be loaded/);
+    assert.match(text(), /Could not load training lines/);
+    const retry = buttonsNamed(view.container, "Try again");
+    assert.equal(retry.length, 1);
+
+    await React.act(async () => {
+      retry[0].click();
+      await settle();
+      release();
+      await settle();
+    });
+    await React.act(settle);
+    assert.doesNotMatch(text(), /couldn't be loaded/);
+    assert.match(text(), /training profile|Training hours/i);
+    assert.ok(view.container.querySelector('[aria-label$="training profile"]'));
+    await view.unmount();
+  });
 });

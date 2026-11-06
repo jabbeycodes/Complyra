@@ -587,6 +587,7 @@ import {
   computeNextDueOn,
   evaluateInRatioGate,
   LOCKED_TRAINING_SHEET_MESSAGE,
+  lineStatusWithSignoff,
   resolveRequirementStatus,
   sumHours,
   validateTrainingLineInput,
@@ -8252,7 +8253,14 @@ export class HostedApi implements ComplyraApi {
       perIndividual: topic?.perIndividual ?? false,
       individualName,
       signoff,
-      resolvedStatus: resolveRequirementStatus(requirement.status, requirement.dueOn, today),
+      // A saved non-N/A sign-off is the completion record: a DSP's own
+      // status update is filtered by RLS (training_requirements_update is
+      // manager-only), so the stored column alone can lag the sign-off.
+      resolvedStatus: resolveRequirementStatus(
+        lineStatusWithSignoff(requirement.status, signoff),
+        requirement.dueOn,
+        today,
+      ),
     };
   }
 
