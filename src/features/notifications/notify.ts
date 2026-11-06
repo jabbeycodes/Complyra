@@ -623,6 +623,31 @@ export function groupNotifications(rows: NotificationRow[]): NotificationGroup[]
   return groups;
 }
 
+/** How many of the newest rows (read or unread) the bell loads. */
+export const NOTIFICATION_RECENT_WINDOW = 100;
+
+/**
+ * The bell's load window (Wave 4A, retest batches 305-306): the newest
+ * `recentLimit` rows of any state, PLUS every unread row however old.
+ * A plain newest-100 cut let hundreds of read med.prn_repeat /
+ * med.unrecorded rows push a nurse's unread consent alerts to rank ~367,
+ * so the bell never showed them. Unread work is never cut off by the
+ * window; read history is. Input may hold duplicates (the hosted fetch
+ * merges two passes); the result is deduped by id and ordered newest
+ * first, the same order the single-pass fetch produced.
+ */
+export function windowNotifications(
+  rows: NotificationRow[],
+  recentLimit = NOTIFICATION_RECENT_WINDOW,
+): NotificationRow[] {
+  const byId = new Map<string, NotificationRow>();
+  for (const row of rows) if (!byId.has(row.id)) byId.set(row.id, row);
+  const ordered = [...byId.values()].sort(
+    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id),
+  );
+  return ordered.filter((row, index) => index < recentLimit || isUnread(row));
+}
+
 /** Sort newest first, unread before read when equal — the panel's order. */
 export function sortNotifications(rows: NotificationRow[]): NotificationRow[] {
   return [...rows].sort((a, b) => {
