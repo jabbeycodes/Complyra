@@ -11,15 +11,16 @@ import { canLogDoseException, canRecordDelivery, todayIso } from "../../data/cha
 import {
   deliveryHistoryLabel,
   doseExceptionKindLabel,
-  inventoryCountdownLabel,
   lastRecordedCount,
   medHasCountOnFile,
-  onHandLabel,
+  medOnHand,
+  onHandDaysLeftLabel,
+  onHandHeadline,
   recordedCountLabel,
+  scheduledRateOutlook,
 } from "../../data/medInventory";
 import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
 import { useMedAdminLock } from "../medAdminLock";
-import { medCountdown } from "../mobile/medcount";
 import type {
   DoseExceptionKind,
   MedDoseMark,
@@ -80,11 +81,11 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
   const medLocked = useMedAdminLock(api, session);
   // The on-hand headline: the countdown (newest count baseline minus
   // the doses actually recorded Given since) is the figure the MAR and
-  // the chart board headline, so the forecast leads with it too and
-  // shows its projection beneath, labeled — the two figures answer different
-  // questions and a reader must never have to guess which one a bare
-  // number is (sim batches 82–86: the projection charged a day's doses
-  // at the day boundary and read as if a dose had been recorded). The
+  // the chart board headline, so the forecast leads with it too — and it
+  // is the card's ONLY current figure (Wave 4C, batch 311: a second
+  // "Projection" count beside it disagreed by the scheduled burn since
+  // the last count; sim batches 82–86: the projection charged a day's
+  // doses at the day boundary and read as if a dose had been recorded). The
   // range read mirrors MobileMar: from the earliest baseline through
   // today. A failed read names the on-hand count unavailable — never
   // substitute an empty range and invent a count.
@@ -142,9 +143,9 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
       <h2 id="med-inventory-heading">Medication supply forecast</h2>
       <p className="stack-help">
         Pills on hand — <strong>not a medication administration record</strong>. The on-hand
-        count is the last recorded count minus doses recorded Given since; the projection below
-        it drops scheduled meds by pills-per-day each calendar day, and logged PRN doses and
-        refused / held / wasted dose exceptions decrement too. No manual recounts needed.
+        count is the last recorded count minus doses recorded Given since (logged PRN doses and
+        wasted dose exceptions decrement too); days left and the run-out date follow from it at
+        the scheduled rate.
       </p>
       {error && <p className="form-error">{error}</p>}
       {views === null && <p>Loading forecast…</p>}
@@ -152,9 +153,26 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
         <Empty title="No medications" text="No medications are on this chart yet." />
       )}
       {views?.map((view) => {
+        // Wave 4C: ONE figure — the on-hand countdown (medOnHand), the
+        // same one the board, the count-entry prefill and both MARs
+        // render. The time-based projection is no longer shown as a
+        // current count; the scheduled rate survives only as the
+        // future-framed run-out line derived from this figure.
+        const today = todayIso();
+        const onHand = medOnHand(
+          view,
+          marksRange,
+          today,
+          countsUnavailable ? "failed" : marksRange ? "ready" : "loading",
+        );
+        const daysLeftText = onHandDaysLeftLabel(onHand);
+        const outlook =
+          view.kind === "scheduled"
+            ? scheduledRateOutlook(onHand, view.dosesPerDay, today)
+            : null;
         const depletion =
-          view.quantityOnDelivery > 0
-            ? Math.max(0, Math.min(100, (view.currentCount / view.quantityOnDelivery) * 100))
+          onHand.kind === "counted" && view.quantityOnDelivery > 0
+            ? Math.max(0, Math.min(100, (onHand.pillsLeft / view.quantityOnDelivery) * 100))
             : 0;
         const expanded = openMed === view.medicationId;
         // A medication with no count on file has no supply figure to
@@ -162,13 +180,6 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
         // The predicate is the shared one (medHasCountOnFile) — the same
         // computed source the chart board and the tallies use.
         const neverCounted = !medHasCountOnFile(view);
-        // The recorded count for scheduled meds (PRN counts already
-        // net their dose logs into the projection, so the two figures
-        // are one there). Null until the dose records load.
-        const countdown =
-          marksRange && view.kind === "scheduled"
-            ? medCountdown(view, marksRange, todayIso())
-            : null;
         // The last manual count, shown labeled under the on-hand
         // headline (retest batches 286/289/291) — display only.
         const recorded = lastRecordedCount(view);
@@ -195,14 +206,8 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             ) : (
               <>
             <p>
-              {view.strength} ·{" "}
-              {view.kind === "prn"
-                ? onHandLabel(view.currentCount)
-                : countdown?.hasBaseline
-                  ? onHandLabel(countdown.pillsLeft ?? 0)
-                  : countsUnavailable
-                    ? "On-hand count unavailable"
-                    : "Loading on-hand count…"}
+              {view.strength} · {onHandHeadline(onHand)}
+              {daysLeftText ? ` · ${daysLeftText}` : ""}
               {!recorded && view.deliveredOn ? ` · Counted ${formatDate(view.deliveredOn)}` : ""}
               {view.kind === "prn" && view.prnDosesSinceDelivery > 0
                 ? ` · ${view.prnDosesSinceDelivery} PRN dose${view.prnDosesSinceDelivery === 1 ? "" : "s"} since`
@@ -216,14 +221,20 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 {recordedCountLabel(recorded)}
               </p>
             )}
-            {view.kind === "scheduled" && (
+            {outlook && (
               <p className="stack-help" style={{ marginTop: 2 }}>
-                Projection: {inventoryCountdownLabel(view)}
-                {countsUnavailable
-                  ? " — the on-hand count could not load, so this projection is the only figure right now."
-                  : ""}
+                {outlook}
               </p>
             )}
+            {onHand.kind === "unavailable" && (
+              <p className="stack-help" style={{ marginTop: 2 }}>
+                The dose records could not load, so no on-hand figure is shown.
+                Reload the chart to try again.
+              </p>
+            )}
+            {/* The bar draws the on-hand figure; with no figure (loading,
+                unavailable) it is omitted — an empty bar reads "out". */}
+            {onHand.kind === "counted" && (
             <div
               role="progressbar"
               aria-label={`${view.medicationName} supply: ${STATUS_LABEL[view.status]}`}
@@ -248,6 +259,7 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                 }}
               />
             </div>
+            )}
             <p className="stack-help" style={{ marginTop: 2 }}>
               {STATUS_LABEL[view.status]}
               {view.status !== "ok" && view.status !== "out"

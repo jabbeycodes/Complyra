@@ -15,6 +15,12 @@ import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
 import { useMedAdminLock } from "./medAdminLock";
 import { centralTodayIso } from "../data/menuRecords";
 import { formatClock, hhmmToMinutes } from "../data/dueItems";
+import {
+  medOnHand,
+  onHandDaysLeftLabel,
+  onHandHeadline,
+  type MedOnHand,
+} from "../data/medInventory";
 import type {
   MedDoseMark,
   MedDoseMarkStatus,
@@ -64,6 +70,30 @@ export default function MarCard({
   } | null>(null);
   // Clearance gate: an uncleared DSP sees the record but no mark buttons.
   const medLocked = useMedAdminLock(api, session);
+  // Wave 4C: the same on-hand countdown the phone MAR shows under each
+  // med — newest count baseline minus doses recorded Given since — so
+  // the chart MAR reads one figure with the board and the forecast. The
+  // range read mirrors MobileMar: earliest baseline through today. A
+  // failed read names the figure unavailable; it never shows the raw
+  // recorded count as on hand.
+  const [marksRange, setMarksRange] = useState<MedDoseMark[] | null>(null);
+  const [rangeLoad, setRangeLoad] = useState<"loading" | "ready" | "failed">(
+    "loading",
+  );
+
+  async function reloadRange(inv: MedInventoryView[]) {
+    const earliest =
+      inv
+        .map((view) => (view.lastCountedOn ?? view.deliveredOn ?? today).slice(0, 10))
+        .sort()[0] ?? today;
+    try {
+      setMarksRange(await api.getMedDoseMarksInRange(individualId, earliest, today));
+      setRangeLoad("ready");
+    } catch {
+      setMarksRange(null);
+      setRangeLoad("failed");
+    }
+  }
 
   async function reloadMarks() {
     try {
@@ -71,12 +101,15 @@ export default function MarCard({
     } catch (err) {
       setError((err as Error).message);
     }
+    if (views) await reloadRange(views);
   }
 
   useEffect(() => {
     let live = true;
     setViews(null);
     setError("");
+    setMarksRange(null);
+    setRangeLoad("loading");
     Promise.all([
       api.getMedInventory(individualId),
       api.getMedDoseMarks(individualId, today),
@@ -85,6 +118,7 @@ export default function MarCard({
         if (!live) return;
         setViews(inv);
         setMarks(m);
+        void reloadRange(inv);
       })
       .catch((err) => live && setError((err as Error).message));
     return () => {
@@ -109,6 +143,12 @@ export default function MarCard({
     }
     return rows.sort((a, b) => a.minutes - b.minutes);
   }, [views]);
+
+  const onHandByMed = new Map<string, MedOnHand>();
+  for (const view of views ?? []) {
+    if (view.kind !== "scheduled") continue;
+    onHandByMed.set(view.medicationId, medOnHand(view, marksRange, today, rangeLoad));
+  }
 
   if (!session) return null;
   const roleCanMark = canLogDoseException(session.roleKey);
@@ -191,6 +231,28 @@ export default function MarCard({
           title="No scheduled doses"
           text="No scheduled medications with dose times for today."
         />
+      )}
+
+      {onHandByMed.size > 0 && (
+        <ul className="record-list mar-supply" aria-label="Pills on hand">
+          {(views ?? [])
+            .filter((view) => onHandByMed.has(view.medicationId))
+            .map((view) => {
+              const state = onHandByMed.get(view.medicationId)!;
+              const days = onHandDaysLeftLabel(state);
+              return (
+                <li key={view.medicationId} className="record-row mar-supply-row">
+                  <span>
+                    <strong>
+                      {view.medicationName} {view.strength}
+                    </strong>{" "}
+                    · {onHandHeadline(state)}
+                    {days ? ` · ${days}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+        </ul>
       )}
 
       {doses.length > 0 && (
