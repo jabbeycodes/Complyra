@@ -7,7 +7,7 @@
  *   countersignatures, and the prominent NOT CLEARED banner when the gate fails.
  * - Certificate tracking hook: a marked extension point below (Phase 4 fills it).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
@@ -31,9 +31,13 @@ import {
   trainingChecklistDocId,
   trainingCountersignPayload,
   trainingLineFieldName,
-  trainingLinePayload,
   trainingLinePayloadFromView,
 } from "../signatures/documentPayloads";
+import {
+  sealNeedsReinitial,
+  trainingLineSealState,
+  type TrainingLineSealState,
+} from "./lineSeal";
 import { can } from "../../data/status";
 import { trainingRosterView } from "./rosterState";
 import { downloadBlob } from "../../data/openFile";
@@ -91,6 +95,13 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   const [rowsFailed, setRowsFailed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [profile, setProfile] = useState<StaffTrainingProfile | null>(null);
+  // Whether the selected profile is loading or its last load failed. A DSP
+  // used to see "could not be loaded — ask your house manager to assign your
+  // checklist" while the load was merely in flight (batch 307), and the same
+  // dead end, with no retry, when it really failed.
+  const [profileLoad, setProfileLoad] = useState<"idle" | "loading" | "failed">("idle");
+  const [profileError, setProfileError] = useState("");
+  const profileRequest = useRef(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<
@@ -131,11 +142,20 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
   }
 
   async function loadProfile(userId: string) {
-    setError("");
+    // Only the newest request may land: a slow earlier load must not
+    // overwrite (or fail over) the profile a later one already showed.
+    const request = ++profileRequest.current;
+    setProfileLoad("loading");
+    setProfileError("");
     try {
-      setProfile(await api.getStaffTrainingProfile(userId));
+      const loaded = await api.getStaffTrainingProfile(userId);
+      if (request !== profileRequest.current) return;
+      setProfile(loaded);
+      setProfileLoad("idle");
     } catch (err) {
-      setError((err as Error).message);
+      if (request !== profileRequest.current) return;
+      setProfileError((err as Error).message);
+      setProfileLoad("failed");
     }
   }
 
@@ -365,7 +385,6 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
                   staffUserId: profile?.userId ?? "",
                   requirement: modal.requirement,
                   input,
-                  trainerName: staffNames[input.trainerUserId] ?? "",
                   reinit: modal.reinit,
                 }),
               profile?.userId !== session.userId
@@ -425,11 +444,23 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
           }
         />
       )}
-      {rowsFailed && !canRoster && !profile && (
-        <Empty
-          title="No training profile"
-          text="Your training profile could not be loaded. Ask your house manager to assign your in-home checklist."
-        />
+      {selected && !profile && profileLoad === "loading" && (
+        <section className="panel" aria-label="Training profile">
+          <p className="muted">Loading training profile…</p>
+        </section>
+      )}
+      {selected && profileLoad === "failed" && (
+        <section className="panel" aria-label="Training profile">
+          <Empty
+            title="Training profile couldn't be loaded"
+            text={`${
+              selected === session.userId ? "Your training profile" : "This training profile"
+            } didn't load${profileError ? ` (${profileError})` : ""}. Nothing was changed — try again.`}
+          />
+          <button className="button" onClick={() => void loadProfile(selected)}>
+            Try again
+          </button>
+        </section>
       )}
     </div>
   );
@@ -520,6 +551,26 @@ function ProfilePanel({
 
   // All per-line initials events across the profile's site checklists.
   const allLineEvents = Object.values(siteEvents).flat();
+
+  // Seal verdict per line (missing / invalid / valid). An invalid seal is as
+  // unusable as a missing one, so the owner gets Re-initial for both —
+  // before, an invalid line offered no control at all and could never be
+  // completed (batches 307-310).
+  const [sealStates, setSealStates] = useState<Record<string, TrainingLineSealState>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const events = Object.values(siteEvents).flat();
+      const next: Record<string, TrainingLineSealState> = {};
+      for (const line of profile.requirements) {
+        next[line.id] = await trainingLineSealState(line, events);
+      }
+      if (!cancelled) setSealStates(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, siteEvents]);
 
   /** Paper rule: every line initialed or N/A — no blanks. */
   function linesGate(siteId: string): { allResolved: boolean; openCount: number } {
@@ -634,6 +685,9 @@ function ProfilePanel({
                     const locked = line.siteId != null && lockedSiteIds.has(line.siteId);
                     const signoff = line.signoff;
                     const needsReinitialStamp = needsReinitial(line);
+                    const ownerMustReinitial =
+                      canInitialOwn &&
+                      (needsReinitialStamp || sealNeedsReinitial(sealStates[line.id]));
                     const latestEvent = latestLineEvent(allLineEvents, line.id);
                     const signerName =
                       (signoff?.signedByUserId && staffNames[signoff.signedByUserId]) ??
@@ -687,7 +741,7 @@ function ProfilePanel({
                         </td>
                         {(canInitialOwn || canManage) && (
                           <td>
-                            {(!signoff || (needsReinitialStamp && canInitialOwn)) && !locked && (
+                            {(!signoff || ownerMustReinitial) && !locked && (
                               <button
                                 className="button touch"
                                 disabled={busy}
@@ -697,7 +751,7 @@ function ProfilePanel({
                                     : onInitial(line)
                                 }
                               >
-                                {needsReinitialStamp ? "Re-initial" : "Initial"}
+                                {signoff ? "Re-initial" : "Initial"}
                               </button>
                             )}
                             {!signoff && !locked && canManage && (
