@@ -12,6 +12,17 @@ export interface ChartFile {
   storagePath: string;
   /** User id of the uploader (local backend); absent on legacy rows. */
   uploadedBy?: string | null;
+  /**
+   * The clinical renewal this file is attached to (Wave 4E), when it
+   * was uploaded as renewal evidence. Null for other kinds and for
+   * legacy renewal files saved before the link existed — those stay
+   * reachable through the renewal's file pointer.
+   */
+  renewalId?: string | null;
+  /** Evidence kind chosen at upload, for renewal files. */
+  evidenceKind?: string | null;
+  /** Date the file was uploaded (YYYY-MM-DD); absent on legacy rows. */
+  uploadedOn?: string | null;
 }
 
 export type MedicationKind = "scheduled" | "prn";
