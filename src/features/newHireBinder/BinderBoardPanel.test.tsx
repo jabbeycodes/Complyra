@@ -250,10 +250,12 @@ describe("BinderBoardTab", () => {
       assert.doesNotMatch(text, /Templates/);
     });
 
-    it("keeps HR's Chase list and takes away the template editor", async () => {
+    it("keeps HR's Chase list and offers the templates as a read-only view", async () => {
       const text = await boardFor("hr");
       assert.match(text, /Chase list/);
-      assert.doesNotMatch(text, /Templates/);
+      // Wave 4D: HR can open the Templates view (read-only viewer);
+      // editing stays administrator/PM — covered by the viewer tests.
+      assert.match(text, /Templates/);
     });
 
     for (const roleKey of ["administrator", "program_manager"]) {
