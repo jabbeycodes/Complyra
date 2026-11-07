@@ -37,7 +37,11 @@ import { useData } from "../../data/DataProvider";
 import { todayIso } from "../../data/chart";
 import type { ComplianceEvidence } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
-import { canEditBinderTemplates, ROLE_TEMPLATE_BY_KEY } from "../../data/permissions";
+import {
+  canEditBinderTemplates,
+  canViewBinderTemplates,
+  ROLE_TEMPLATE_BY_KEY,
+} from "../../data/permissions";
 import { documentHasReadableContent } from "../../data/starterDocuments";
 import type { SessionUser } from "../../data/types";
 import {
@@ -51,6 +55,7 @@ import {
 } from "../../data/newHireBinder";
 import type { HubSite, HubStaffEntry } from "../employeeHub/EmployeeHubPage";
 import { BinderTemplateEditor } from "./BinderTemplateEditor";
+import { BinderTemplateViewer } from "./BinderTemplateViewer";
 import BinderDonut from "./BinderDonut";
 import {
   binderDonutSegments,
@@ -100,6 +105,7 @@ export function BinderBoardTab({
   const { api } = useData();
   const isAuditor = session.roleKey === "auditor";
   const canEditTemplates = canEditBinderTemplates(session.roleKey);
+  const canViewTemplates = canViewBinderTemplates(session.roleKey);
 
   const [view, setView] = useState<"board" | "templates">("board");
   const [rows, setRows] = useState<BoardRow[] | null>(null);
@@ -301,7 +307,7 @@ export function BinderBoardTab({
             {isAuditor ? " Read-only — auditor view." : ""}
           </p>
         </div>
-        {canEditTemplates && (
+        {canViewTemplates && (
           <div className="binder-board-views" role="group" aria-label="Board views">
             <button
               className={`hub-btn${view === "board" ? " primary" : ""}`}
@@ -319,8 +325,12 @@ export function BinderBoardTab({
         )}
       </div>
 
-      {view === "templates" && canEditTemplates ? (
-        <BinderTemplateEditor store={store} />
+      {view === "templates" && canViewTemplates ? (
+        canEditTemplates ? (
+          <BinderTemplateEditor store={store} />
+        ) : (
+          <BinderTemplateViewer store={store} />
+        )
       ) : (
         <>
           {error && (
