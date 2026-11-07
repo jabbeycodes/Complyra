@@ -40,6 +40,13 @@ insert into training_signoffs(agency_id,requirement_id,initials,signed_on,traine
  ('a2000000-0000-0000-0000-000000000001','f3200000-0000-0000-0000-000000000003','DD',current_date - 10,'Hana HM',6,2);
 insert into training_countersignatures(agency_id,user_id,site_id,staff_signature_name,staff_signed_at,hm_signature_name,hm_signed_at) values
  ('a2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000002','c2000000-0000-0000-0000-000000000001','Dev DSP',now(),'Hana HM',now());
+-- Owner e-initials on every line at its current signoff version
+-- (20261105120000: a line counts toward clearance only with the owner's
+-- initials event, not the status column alone).
+insert into signature_events(document_type,document_id,field_name,kind,signer_user_id,document_hash,consent_version,agency_id) values
+ ('training_checklist','staff:d2000000-0000-0000-0000-000000000002:c2000000-0000-0000-0000-000000000001','line:f3200000-0000-0000-0000-000000000001:v1','initials','d2000000-0000-0000-0000-000000000002','hash-dd-1','v2','a2000000-0000-0000-0000-000000000001'),
+ ('training_checklist','staff:d2000000-0000-0000-0000-000000000002:c2000000-0000-0000-0000-000000000001','line:f3200000-0000-0000-0000-000000000002:v1','initials','d2000000-0000-0000-0000-000000000002','hash-dd-2','v2','a2000000-0000-0000-0000-000000000001'),
+ ('training_checklist','staff:d2000000-0000-0000-0000-000000000002:c2000000-0000-0000-0000-000000000001','line:f3200000-0000-0000-0000-000000000003:v1','initials','d2000000-0000-0000-0000-000000000002','hash-dd-3','v2','a2000000-0000-0000-0000-000000000001');
 insert into medications(id,agency_id,individual_id,name,kind,pills_per_day,remaining_pills,last_delivery_on) values
  ('f2200000-0000-0000-0000-000000000001','a2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001','Sched Med','scheduled',2,30,current_date),
  ('f2200000-0000-0000-0000-000000000002','a2000000-0000-0000-0000-000000000001','e2000000-0000-0000-0000-000000000001','Prn Med','prn',0,5,current_date),
