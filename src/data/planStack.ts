@@ -196,6 +196,61 @@ export interface ClinicalRenewalView extends ClinicalRenewal {
    * yet, so this is null there and removal is gated by role alone).
    */
   fileUploadedBy?: string | null;
+  /**
+   * EVERY file attached to this renewal, oldest first — not just the
+   * latest. Wave 4E (retest batch 312): an evidence upload used to hide
+   * the file it replaced, leaving it on the chart with no surface able
+   * to reach or remove it. `isCurrent` marks the file the renewal
+   * points at (fileId); removing it re-points to the newest remaining.
+   */
+  files: RenewalFileView[];
+}
+
+export interface RenewalFileView {
+  id: string;
+  title: string;
+  uploadedOn: string | null;
+  uploadedBy: string | null;
+  isCurrent: boolean;
+}
+
+/** One attached file as the backends store it, before view assembly. */
+export interface RenewalFileRecord {
+  id: string;
+  title: string;
+  uploadedOn?: string | null;
+  uploadedBy?: string | null;
+  evidenceKind?: ClinicalEvidenceKind | null;
+}
+
+/**
+ * Assemble a renewal's file list for the view: the files linked to the
+ * renewal, oldest first, with the pointed-at file flagged current. A
+ * legacy pointed file with no link row yet is appended so it stays
+ * reachable (it is by definition the newest — it was current when the
+ * link column arrived).
+ */
+export function renewalFileViews(
+  row: ClinicalRenewal,
+  linked: RenewalFileRecord[],
+): RenewalFileView[] {
+  const files = [...linked];
+  if (row.fileId && !files.some((file) => file.id === row.fileId)) {
+    files.push({
+      id: row.fileId,
+      title: row.lastDocumentTitle ?? "Uploaded file",
+      uploadedOn: row.lastUploadedOn,
+      uploadedBy: null,
+      evidenceKind: row.lastEvidenceKind,
+    });
+  }
+  return files.map((file) => ({
+    id: file.id,
+    title: file.title,
+    uploadedOn: file.uploadedOn ?? null,
+    uploadedBy: file.uploadedBy ?? null,
+    isCurrent: file.id === row.fileId,
+  }));
 }
 
 const KIND_ORDER: Record<ObligationKind, number> = {
@@ -750,6 +805,29 @@ export function applyRenewalEvidence(
 /** Take the uploaded file off a renewal. Dates and due state are untouched. */
 export function applyRenewalFileRemoval(row: ClinicalRenewal): ClinicalRenewal {
   return { ...row, fileId: null, lastDocumentTitle: null, lastEvidenceKind: null };
+}
+
+/**
+ * Remove ONE attached file from a renewal that may hold several
+ * (Wave 4E). Removing a non-current file leaves the renewal row
+ * untouched. Removing the current file re-points the renewal to the
+ * newest remaining file (the last of `remaining`, oldest-first), or
+ * clears the pointer when none remain. Dates and due state never move.
+ */
+export function applyRenewalFileRemovalFromList(
+  row: ClinicalRenewal,
+  removedFileId: string,
+  remaining: RenewalFileRecord[],
+): ClinicalRenewal {
+  if (row.fileId !== removedFileId) return row;
+  const next = remaining[remaining.length - 1];
+  if (!next) return applyRenewalFileRemoval(row);
+  return {
+    ...row,
+    fileId: next.id,
+    lastDocumentTitle: next.title,
+    lastEvidenceKind: next.evidenceKind ?? row.lastEvidenceKind,
+  };
 }
 
 /**

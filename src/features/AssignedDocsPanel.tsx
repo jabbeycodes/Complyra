@@ -217,13 +217,13 @@ export default function AssignedDocsPanel({
         <ClinicalRenewals
           items={stack.renewals}
           canUpload={uploadRenewal}
-          canRemove={(row) =>
+          canRemove={(row, file) =>
             canRemoveRenewalFile(session.roleKey, {
               userId: session.userId,
-              uploadedBy: row.fileUploadedBy,
+              uploadedBy: file.uploadedBy ?? row.fileUploadedBy,
             })
           }
-          onRemove={(renewalId) => run(() => api.removeRenewalFile(renewalId))}
+          onRemove={(renewalId, fileId) => run(() => api.removeRenewalFile(renewalId, fileId))}
           onUpload={(renewalId, evidenceKind, documentTitle, file, renewal) =>
             run(() =>
               api.uploadRenewalEvidence({
@@ -397,8 +397,11 @@ function ClinicalRenewals({
 }: {
   items: ClinicalRenewalView[];
   canUpload: boolean;
-  canRemove: (row: ClinicalRenewalView) => boolean;
-  onRemove: (renewalId: string) => void;
+  canRemove: (
+    row: ClinicalRenewalView,
+    file: ClinicalRenewalView["files"][number],
+  ) => boolean;
+  onRemove: (renewalId: string, fileId: string) => void;
   /** `renewal` is set only for an explicit completed renewal; otherwise
    * the file is evidence and the due date is left alone. */
   onUpload: (
@@ -454,27 +457,34 @@ function ClinicalRenewals({
                   : ""}
                 {row.lastDocumentTitle ? ` · ${row.lastDocumentTitle}` : ""}
               </p>
-              {row.fileId && canRemove(row) && (
-                <p>
-                  <button
-                    type="button"
-                    className="button"
-                    onClick={() => {
-                      const name = row.lastDocumentTitle ?? "this file";
-                      if (
-                        !window.confirm(
-                          `Remove ${name} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
-                        )
-                      ) {
-                        return;
-                      }
-                      onRemove(row.id);
-                    }}
-                  >
-                    <Trash2 size={16} /> Remove file
-                  </button>
+              {row.files.map((file) => (
+                <p key={file.id}>
+                  {file.title}
+                  {file.uploadedOn ? ` · ${formatDate(file.uploadedOn)}` : ""}
+                  {file.isCurrent ? " · Current file" : ""}
+                  {canRemove(row, file) && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              `Remove ${file.title} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          onRemove(row.id, file.id);
+                        }}
+                      >
+                        <Trash2 size={16} /> Remove file
+                      </button>
+                    </>
+                  )}
                 </p>
-              )}
+              ))}
               {canUpload && (
                 <form
                   className="renewal-upload"

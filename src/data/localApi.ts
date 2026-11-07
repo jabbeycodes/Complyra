@@ -276,9 +276,10 @@ import {
 } from "../recognition/scoring";
 import {
   applyRenewalEvidence,
-  applyRenewalFileRemoval,
+  applyRenewalFileRemovalFromList,
   applyRenewalUpload,
   canRemoveRenewalFile,
+  renewalFileViews,
   type RenewalUploadMode,
   validateRenewalUpload,
   blankRnFields,
@@ -1061,7 +1062,7 @@ export interface ComplyraApi {
    * Remove the uploaded file from a clinical renewal (manager roles or
    * the file's uploader). The renewal's dates and due state are untouched.
    */
-  removeRenewalFile(renewalId: string): Promise<void>;
+  removeRenewalFile(renewalId: string, fileId?: string): Promise<void>;
   discontinueDelegation(input: {
     obligationId: string;
     title: string;
@@ -2818,6 +2819,9 @@ async function saveChartFile(
     kind: ChartFileKind;
     file: File;
     uploadedBy?: string;
+    renewalId?: string | null;
+    evidenceKind?: string | null;
+    uploadedOn?: string | null;
   },
 ) {
   const id = crypto.randomUUID();
@@ -2832,6 +2836,9 @@ async function saveChartFile(
     mime: input.file.type || "application/pdf",
     storagePath,
     uploadedBy: input.uploadedBy ?? null,
+    renewalId: input.renewalId ?? null,
+    evidenceKind: input.evidenceKind ?? null,
+    uploadedOn: input.uploadedOn ?? null,
   });
   return id;
 }
@@ -2978,6 +2985,18 @@ function mapPlanStack(
             fileUploadedBy: row.fileId
               ? (store.db.chartFiles.find((file) => file.id === row.fileId)?.uploadedBy ?? null)
               : null,
+            files: renewalFileViews(
+              row,
+              (store.db.chartFiles ?? [])
+                .filter((file) => file.renewalId === row.id)
+                .map((file) => ({
+                  id: file.id,
+                  title: file.name,
+                  uploadedOn: file.uploadedOn ?? null,
+                  uploadedBy: file.uploadedBy ?? null,
+                  evidenceKind: (file.evidenceKind as ClinicalEvidenceKind | null) ?? null,
+                })),
+            ),
           }))
           .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
       : [],
@@ -7486,7 +7505,6 @@ export class LocalApi implements ComplyraApi {
       { mode: input.mode, uploadedOn: input.uploadedOn ?? new Date().toISOString() },
       todayIso(),
     );
-    const previousFileId = renewal.fileId;
     let fileId = renewal.fileId;
     if (input.file) {
       fileId = await saveChartFile(this.store, {
@@ -7495,6 +7513,9 @@ export class LocalApi implements ComplyraApi {
         kind: "renewal",
         file: input.file,
         uploadedBy: session.userId,
+        renewalId: renewal.id,
+        evidenceKind: input.evidenceKind,
+        uploadedOn: todayIso(),
       });
     }
     // Evidence (the default) never touches the requirement's dates — an
@@ -7514,11 +7535,10 @@ export class LocalApi implements ComplyraApi {
     this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
       row.id === renewal.id ? next : row,
     );
-    // A replacement supersedes the previous file: its chart record and
-    // stored copy go too, unless another chart item still uses it.
-    if (input.file && previousFileId && previousFileId !== fileId) {
-      discardUnreferencedChartFile(this.store, previousFileId);
-    }
+    // Wave 4E: the previous file STAYS on the renewal — every attached
+    // file is listed on the card and removed one by one. (Before, a
+    // replacement quietly discarded it, stranding anything it pointed
+    // at with no surface able to reach it.)
     log(
       this.store,
       session,
@@ -7532,13 +7552,22 @@ export class LocalApi implements ComplyraApi {
     await persistMeta(this.store);
   }
 
-  async removeRenewalFile(renewalId: string) {
+  async removeRenewalFile(renewalId: string, fileId?: string) {
     const session = assertSession(this.store);
     const renewal = this.store.db.clinicalRenewals.find((row) => row.id === renewalId);
     if (!renewal) throw new Error("Renewal not found.");
     accessibleIndividual(this.store, session, renewal.individualId);
-    if (!renewal.fileId) throw new Error("There is no uploaded file on this item to remove.");
-    const file = this.store.db.chartFiles.find((row) => row.id === renewal.fileId);
+    // Wave 4E: removal is per-file. Without a fileId the target is the
+    // file the renewal currently points at (the pre-list behaviour).
+    const targetId = fileId ?? renewal.fileId;
+    if (!targetId) throw new Error("There is no uploaded file on this item to remove.");
+    const attached = (this.store.db.chartFiles ?? []).filter(
+      (row) => row.renewalId === renewal.id,
+    );
+    const file = this.store.db.chartFiles.find((row) => row.id === targetId);
+    if (!file && renewal.fileId !== targetId && !attached.some((row) => row.id === targetId)) {
+      throw new Error("That file is not attached to this item.");
+    }
     if (
       !canRemoveRenewalFile(session.roleKey, {
         userId: session.userId,
@@ -7547,7 +7576,14 @@ export class LocalApi implements ComplyraApi {
     ) {
       throw new Error("Only an administrator, PM, RN, House Manager, or the person who uploaded the file can remove it.");
     }
-    const next = applyRenewalFileRemoval(renewal);
+    const remaining = attached
+      .filter((row) => row.id !== targetId)
+      .map((row) => ({
+        id: row.id,
+        title: row.name,
+        evidenceKind: (row.evidenceKind as ClinicalEvidenceKind | null) ?? null,
+      }));
+    const next = applyRenewalFileRemovalFromList(renewal, targetId, remaining);
     this.store.db.clinicalRenewals = this.store.db.clinicalRenewals.map((row) =>
       row.id === renewal.id ? next : row,
     );
