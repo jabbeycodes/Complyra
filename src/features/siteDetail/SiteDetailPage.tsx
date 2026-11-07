@@ -37,7 +37,7 @@ import { monthKeyOf, monthLabel } from "../../data/mileage";
 import HouseCardPanel from "../houseCard/HouseCardPanel";
 import { useConsentScoreInput } from "../consents/useConsentRegister";
 import { consentTalliesFromItems } from "../overview/consentCompliance";
-import { inventoryCountdownLabel } from "../../data/medInventory";
+import { supplyAlertDetail } from "../../data/medInventory";
 import { todayIso } from "../../data/chart";
 import {
   siteFactRows,
@@ -1356,7 +1356,7 @@ export default function SiteDetailPage({
                             </strong>
                             <span className="muted">
                               {" "}
-                              · {alert.strength} · Projected: {inventoryCountdownLabel(alert)}
+                              · {alert.strength} · {supplyAlertDetail(alert)}
                             </span>
                           </div>
                           <Badge

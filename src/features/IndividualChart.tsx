@@ -1,11 +1,13 @@
 import Consents from "./consents/Consents";
 import CareScreeningSection from "./CareScreeningSection";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatPillCount, medCountdown } from "./mobile/medcount";
+import { formatPillCount } from "./mobile/medcount";
 import {
+  boardSupplyText,
+  countEntryPrefill,
   lastRecordedCount,
+  medOnHand,
   medSupplyDisplayState,
-  onHandLabel,
   recordedCountLabel,
 } from "../data/medInventory";
 import { scrollToSectionId } from "./sectionLinks";
@@ -198,6 +200,12 @@ export default function IndividualChart({
   const [medViewsLoad, setMedViewsLoad] = useState<
     "loading" | "ready" | "failed"
   >("loading");
+  // Wave 4C: the board's on-hand countdown burns Given marks, so a marks
+  // failure must read "On-hand count unavailable" — degrading to an empty
+  // list silently rendered the raw recorded count as the on-hand figure.
+  const [medMarksLoad, setMedMarksLoad] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
   // Wave 7M: the load is a callback so the MAR check-off card can ask for
   // a reload after it records a mark — the countdown and PRN sections
   // read this state, not the card's, and must not wait for a workspace
@@ -231,16 +239,19 @@ export default function IndividualChart({
         if (!current()) return;
         setMedMarks(marks);
         setPrnLogs(logs);
+        setMedMarksLoad("ready");
       })
       .catch(() => {
-        // Marks/PRN history degrade to empty; the count source above is
-        // unaffected.
+        // PRN history degrades to empty; the scheduled on-hand figure
+        // reads unavailable (medOnHand) rather than an un-burned count.
+        if (current()) setMedMarksLoad("failed");
       });
     await Promise.all([inventory, history]);
   }, [api, individualId, medsEnabled]);
 
   useEffect(() => {
     setMedViewsLoad("loading");
+    setMedMarksLoad("loading");
     void loadMedData();
     return () => {
       // Unmount or a new Individual: any in-flight load is now stale.
@@ -769,11 +780,18 @@ export default function IndividualChart({
                   // the views load — or if they fail — the card makes no
                   // supply claim at all.
                   const display = medSupplyDisplayState(view, medViewsLoad);
-                  const countdown =
+                  // Wave 4C: THE on-hand figure (medOnHand) — headline,
+                  // days left and the count-entry prefill all read it.
+                  const onHand =
                     view && display.kind === "counted"
-                      ? medCountdown(view, medMarks, todayIso())
+                      ? medOnHand(
+                          view,
+                          medMarksLoad === "ready" ? medMarks : null,
+                          todayIso(),
+                          medMarksLoad,
+                        )
                       : null;
-                  const neverCounted = display.kind === "never-counted";
+                  const prefill = onHand ? countEntryPrefill(onHand) : null;
                   const recorded =
                     view && display.kind === "counted" ? lastRecordedCount(view) : null;
                   const medLogs = prnLogs.filter(
@@ -818,22 +836,12 @@ export default function IndividualChart({
                 </header>
                 <p>
                   {med.strength} ·{" "}
-                  {display.kind === "loading"
-                    ? "Loading supply…"
-                    : display.kind === "unavailable"
-                      ? "Supply count unavailable"
-                      : neverCounted
-                        ? "No count recorded yet"
-                        : onHandLabel(countdown?.pillsLeft ?? 0)}
-                  {med.kind === "scheduled"
-                    ? countdown
-                      ? ` · ${med.pillsPerDay} per day · ${
-                          countdown.daysLeft === null
-                            ? "—"
-                            : `${countdown.daysLeft} days left`
-                        }`
-                      : ""
-                    : " · PRN, no automatic drop"}
+                  {boardSupplyText(
+                    display,
+                    onHand,
+                    med.kind,
+                    view?.dosesPerDay ?? med.pillsPerDay,
+                  )}
                   {view && display.kind === "counted" && view.lastCountedOn && !recorded
                     ? ` · Last counted ${formatDate(view.lastCountedOn)}`
                     : ""}
@@ -855,16 +863,10 @@ export default function IndividualChart({
                 )}
                 {canRecordDelivery(session.roleKey) && (
                   <DeliveryForm
-                    defaultRemaining={
-                      countdown && !neverCounted
-                        ? (countdown.pillsLeft ?? med.remainingPills)
-                        : med.remainingPills
-                    }
+                    defaultRemaining={prefill}
                     defaultPerDay={med.pillsPerDay}
                     scheduled={med.kind === "scheduled"}
-                    expectedPills={
-                      countdown && !neverCounted ? countdown.pillsLeft : null
-                    }
+                    expectedPills={prefill}
                     onSave={(remainingPills, pillsPerDay, varianceReason) =>
                       run(() =>
                         api.recordMedDelivery({
@@ -1368,14 +1370,15 @@ function RenewalUpload({
   );
 }
 
-function DeliveryForm({
+export function DeliveryForm({
   defaultRemaining,
   defaultPerDay,
   scheduled,
   expectedPills,
   onSave,
 }: {
-  defaultRemaining: number;
+  /** The on-hand figure (countEntryPrefill); null = no figure yet → empty box. */
+  defaultRemaining: number | null;
   defaultPerDay: number;
   scheduled: boolean;
   /** The countdown's expected on-hand figure; a count that differs from
@@ -1383,7 +1386,16 @@ function DeliveryForm({
   expectedPills: number | null;
   onSave: (remaining: number, perDay: number, varianceReason: string) => void;
 }) {
-  const [remaining, setRemaining] = useState(String(defaultRemaining));
+  const seed = defaultRemaining === null ? "" : formatPillCount(defaultRemaining);
+  const [remaining, setRemaining] = useState(seed);
+  // Wave 4C (batch 311): the box was seeded once, on the first render —
+  // before the countdown had loaded — so it kept the stored row's figure
+  // (the projection-like 18 / 5) while the headline said 28 / 10. Until
+  // the user types, the box follows the on-hand figure.
+  const [edited, setEdited] = useState(false);
+  useEffect(() => {
+    if (!edited) setRemaining(seed);
+  }, [seed, edited]);
   const [perDay, setPerDay] = useState(String(defaultPerDay || 1));
   const [varianceReason, setVarianceReason] = useState("");
   const differs =
@@ -1395,6 +1407,10 @@ function DeliveryForm({
       className="renewal-upload"
       onSubmit={(e) => {
         e.preventDefault();
+        // An empty box (no on-hand figure yet) is not a count of zero.
+        if (remaining.trim() === "") return;
+        // After a save the reloaded on-hand figure re-seeds the box.
+        setEdited(false);
         onSave(
           Number(remaining),
           scheduled ? Number(perDay) : 0,
@@ -1407,8 +1423,12 @@ function DeliveryForm({
         <input
           type="number"
           min="0"
+          required
           value={remaining}
-          onChange={(e) => setRemaining(e.target.value)}
+          onChange={(e) => {
+            setEdited(true);
+            setRemaining(e.target.value);
+          }}
         />
       </label>
       {expectedPills !== null && (
@@ -1439,7 +1459,7 @@ function DeliveryForm({
       <button
         className="button primary"
         type="submit"
-        disabled={differs && !varianceReason.trim()}
+        disabled={remaining.trim() === "" || (differs && !varianceReason.trim())}
       >
         Record delivery count
       </button>

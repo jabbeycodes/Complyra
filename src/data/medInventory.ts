@@ -408,6 +408,150 @@ export function onHandLabel(pillsLeft: number): string {
   return `On hand: ${pills} ${pillsLeft === 1 ? "pill" : "pills"}`;
 }
 
+/**
+ * THE on-hand figure for one med, as every surface must render it (chart
+ * Medication board headline + days left, supply forecast headline, the
+ * "Pills remaining" count-entry prefill, the chart and mobile MAR). It is
+ * the countdown — newest count baseline minus doses recorded Given since
+ * (medCountdown) — and nothing else. Wave 4C (sim retest batch 311): the
+ * forecast card showed the time-based projection (projectInventory's
+ * currentCount) as a second "remaining" figure, and the count-entry box
+ * was seeded from the stored medication row before the countdown loaded,
+ * so one card carried two or three different numbers.
+ *
+ * `marks` are the med's dose marks from its baseline through today; null
+ * while they load or when they failed. Scheduled meds cannot be counted
+ * down without them, so the state is "loading" / "unavailable" — the raw
+ * recorded count and the projection are never substituted. PRN meds net
+ * their dose logs into the view already and do not need marks.
+ */
+export type MedOnHand =
+  | { kind: "loading" }
+  | { kind: "unavailable" }
+  | { kind: "never-counted" }
+  | {
+      kind: "counted";
+      pillsLeft: number;
+      /** Whole days at the scheduled rate (floored); null for PRN. */
+      daysLeft: number | null;
+      outOfStock: boolean;
+    };
+
+export function medOnHand(
+  view: MedInventoryView | null | undefined,
+  marks: MedDoseMark[] | null,
+  today: string,
+  marksLoad: "loading" | "ready" | "failed" = marks ? "ready" : "loading",
+): MedOnHand {
+  if (!view || !medHasCountOnFile(view)) return { kind: "never-counted" };
+  if (view.kind === "scheduled" && (!marks || marksLoad !== "ready")) {
+    return { kind: marksLoad === "failed" ? "unavailable" : "loading" };
+  }
+  const countdown = medCountdown(view, marks ?? [], today);
+  if (!countdown.hasBaseline || countdown.pillsLeft === null) {
+    return { kind: "never-counted" };
+  }
+  return {
+    kind: "counted",
+    pillsLeft: countdown.pillsLeft,
+    daysLeft: countdown.daysLeft,
+    outOfStock: countdown.outOfStock,
+  };
+}
+
+/** The headline text for an on-hand state — "On hand: N pills" when counted. */
+export function onHandHeadline(state: MedOnHand): string {
+  if (state.kind === "counted") return onHandLabel(state.pillsLeft);
+  if (state.kind === "never-counted") return "No count recorded yet";
+  if (state.kind === "unavailable") return "On-hand count unavailable";
+  return "Loading on-hand count…";
+}
+
+/** "14 days left" from the on-hand figure; null when there is no figure or no daily rate. */
+export function onHandDaysLeftLabel(state: MedOnHand): string | null {
+  if (state.kind !== "counted" || state.daysLeft === null) return null;
+  return `${state.daysLeft} ${state.daysLeft === 1 ? "day" : "days"} left`;
+}
+
+/**
+ * The chart Medication board's supply line (after the strength):
+ * "On hand: 28 pills · 2 per day · 14 days left". The headline and the
+ * days left both come from the on-hand figure; the rate shown is the
+ * same rate days-left divides by (the view's dosesPerDay — the newest
+ * count's rate), never a second stored figure. No supply claim renders
+ * while the views load or after they fail.
+ */
+export function boardSupplyText(
+  display: MedSupplyDisplayState,
+  onHand: MedOnHand | null,
+  kind: "scheduled" | "prn",
+  dosesPerDay: number,
+): string {
+  const head =
+    display.kind === "loading"
+      ? "Loading supply…"
+      : display.kind === "unavailable"
+        ? "Supply count unavailable"
+        : display.kind === "never-counted" || !onHand
+          ? "No count recorded yet"
+          : onHandHeadline(onHand);
+  if (kind !== "scheduled") return `${head} · PRN, no automatic drop`;
+  if (onHand?.kind !== "counted") return head;
+  return `${head} · ${formatPillCount(dosesPerDay)} per day · ${onHandDaysLeftLabel(onHand) ?? "—"}`;
+}
+
+/**
+ * The count-entry prefill: the expected figure a fresh count is checked
+ * against, i.e. the on-hand figure. Null (an empty box) when there is no
+ * figure yet — never the stored row or the projection.
+ */
+export function countEntryPrefill(state: MedOnHand): number | null {
+  return state.kind === "counted" ? state.pillsLeft : null;
+}
+
+function addIsoDays(iso: string, days: number): string {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * The only form the scheduled rate may take beside the headline: an
+ * explicitly future-framed line derived FROM the on-hand figure, e.g.
+ * "At the scheduled rate (2 per day), this supply runs out around
+ * Fri, Nov 20." Never a competing current count. Null for PRN, for
+ * meds without a figure, and for a med already out.
+ */
+export function scheduledRateOutlook(
+  state: MedOnHand,
+  dosesPerDay: number,
+  today: string,
+): string | null {
+  if (state.kind !== "counted" || dosesPerDay <= 0 || state.daysLeft === null) return null;
+  if (state.outOfStock) return null;
+  const runsOutOn = addIsoDays(today, state.daysLeft);
+  return `At the scheduled rate (${formatPillCount(dosesPerDay)} per day), this supply runs out around ${formatIsoDay(runsOutOn)}.`;
+}
+
+/**
+ * The detail line for a supply-tally alert row (site page, inventory
+ * page). Those surfaces hold views without dose records, so they cannot
+ * compute the on-hand countdown — and must not stand the time-based
+ * projection in for it (Wave 4C). They name the labeled recorded count
+ * instead and point at the chart for the on-hand figure.
+ */
+export function supplyAlertDetail(
+  view: Pick<MedInventoryView, "deliveries" | "lastCountedOn">,
+): string {
+  if (view.lastCountedOn === null) return "No count recorded yet";
+  const recorded = lastRecordedCount(view);
+  const base = recorded
+    ? recordedCountLabel(recorded)
+    : view.lastCountedOn
+      ? `Last counted ${formatIsoDay(view.lastCountedOn.slice(0, 10))}`
+      : "Count on file";
+  return `${base} · on-hand count on the chart`;
+}
+
 /** Human-readable countdown, e.g. "24 pills remaining · ~12 days left". */
 export function inventoryCountdownLabel(view: MedInventoryView): string {
   const pills = `${view.currentCount} pill${view.currentCount === 1 ? "" : "s"} remaining`;
