@@ -22,7 +22,7 @@ import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
 import { createSupabaseBrowserClient } from "./index";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
-import { canEditBinderTemplates } from "./permissions";
+import { canEditBinderTemplates, canViewBinderTemplates } from "./permissions";
 import {
   assertCanCancelTimeOff,
   assertCanDecideTimeOff,
@@ -1321,6 +1321,22 @@ function assertCanEditBinderTemplates(roleKey: string | undefined) {
 }
 
 /**
+ * The template LIBRARY read is gated at the store boundary too (PR #263
+ * re-review): the Binder Board toggle alone was not a boundary — any
+ * role's store could return the full library. Viewers are the editors
+ * plus HR. The internal snapshot lookup (readBinderTemplateLibrary)
+ * stays ungated: opening a binder for its subject must work for every
+ * role, exactly as getBinder has always behaved.
+ */
+function assertCanViewBinderTemplates(roleKey: string | undefined) {
+  if (!canViewBinderTemplates(roleKey)) {
+    throw new Error(
+      "Only an administrator, program manager, or HR can view binder templates.",
+    );
+  }
+}
+
+/**
  * Who the signed-in user may target with a shift swap (simulation batch 47).
  * Callers that know the session pass the full staff directory plus the
  * viewer's role/home; createShiftSwap then applies the same staffVisibleTo
@@ -1890,6 +1906,12 @@ export class SupabaseHrStore implements HrStore {
   }
 
   async listBinderTemplates(): Promise<BinderTemplateLibrary> {
+    assertCanViewBinderTemplates(this.actorRoleKey);
+    return this.readBinderTemplateLibrary();
+  }
+
+  /** Ungated library read for internal use (binder snapshotting). */
+  private async readBinderTemplateLibrary(): Promise<BinderTemplateLibrary> {
     const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
     const library = defaultBinderTemplateLibrary();
     return {
@@ -1946,7 +1968,7 @@ export class SupabaseHrStore implements HrStore {
       .maybeSingle();
     throwIf(error, "Could not load the binder");
     if (data) return mapBinder(data as Record<string, unknown>);
-    const library = await this.listBinderTemplates();
+    const library = await this.readBinderTemplateLibrary();
     const template = binderTemplateForRole(library, roleKey);
     const { data: created, error: insertError } = await this.client
       .from("hr_binders")
@@ -5472,6 +5494,12 @@ class LocalHrStore implements HrStore {
   }
 
   async listBinderTemplates(): Promise<BinderTemplateLibrary> {
+    assertCanViewBinderTemplates(this.actorRoleKey);
+    return this.readBinderTemplateLibrary();
+  }
+
+  /** Ungated library read for internal use (binder snapshotting). */
+  private async readBinderTemplateLibrary(): Promise<BinderTemplateLibrary> {
     const library = defaultBinderTemplateLibrary();
     // First bucket holding an override wins, per template — the same
     // merge-across-buckets rule the rest of the binder state follows.
@@ -5518,7 +5546,7 @@ class LocalHrStore implements HrStore {
   async getBinder(staffId: string, roleKey?: string): Promise<StaffBinder> {
     const existing = this.mergedBinders()[staffId];
     if (existing) return existing;
-    const library = await this.listBinderTemplates();
+    const library = await this.readBinderTemplateLibrary();
     const template = binderTemplateForRole(library, roleKey);
     const now = nowIso();
     const binder: StaffBinder = {
