@@ -127,16 +127,16 @@ describe("template write gate (wave 3 retest)", () => {
 
   for (const roleKey of ["hr", "house_manager", "nurse", "dsp", "auditor", undefined]) {
     test(`local store refuses a save from ${roleKey ?? "a store with no role"}`, async () => {
-      const template = cloneBinderTemplate((await roleStore().listBinderTemplates()).defaultTemplate);
-      const before = JSON.stringify(await roleStore().getBinderTemplate());
+      const template = cloneBinderTemplate((await roleStore("administrator").listBinderTemplates()).defaultTemplate);
+      const before = JSON.stringify(await roleStore("administrator").getBinderTemplate());
       template.sections[0].title = "Should not save";
       await assert.rejects(() => roleStore(roleKey).saveBinderTemplate("default", template), refused);
-      assert.equal(JSON.stringify(await roleStore().getBinderTemplate()), before);
+      assert.equal(JSON.stringify(await roleStore("administrator").getBinderTemplate()), before);
     });
   }
 
   test("hosted store refuses HR before any write reaches the database", async () => {
-    const template = cloneBinderTemplate((await roleStore().listBinderTemplates()).defaultTemplate);
+    const template = cloneBinderTemplate((await roleStore("administrator").listBinderTemplates()).defaultTemplate);
     const client = {
       from() {
         throw new Error("the store must not touch the database");
@@ -156,5 +156,71 @@ describe("template write gate (wave 3 retest)", () => {
     const hr = roleStore("hr");
     assert.ok((await hr.listBinderTemplates()).presets.length > 0);
     assert.ok((await hr.getBinder("gate-new-hire", "dsp")).sections.length > 0);
+  });
+});
+
+describe("template library view gate (PR #263 re-review)", () => {
+  const viewRefused = /administrator, program manager, or HR/i;
+  const roleStore = (roleKey?: string) =>
+    createHrStore({ agencyId: AGENCY, userId: "view-gate-user", roleKey });
+
+  for (const roleKey of ["auditor", "dsp", "house_manager", "nurse", undefined]) {
+    test(`local store refuses the template library to ${roleKey ?? "a store with no role"}`, async () => {
+      await assert.rejects(() => roleStore(roleKey).listBinderTemplates(), viewRefused);
+    });
+  }
+
+  for (const roleKey of ["administrator", "program_manager", "hr"]) {
+    test(`local store serves the template library to ${roleKey}`, async () => {
+      const library = await roleStore(roleKey).listBinderTemplates();
+      assert.equal(library.presets.length, 3);
+    });
+  }
+
+  test("hosted store refuses a non-viewer before any read reaches the database", async () => {
+    const client = {
+      from() {
+        throw new Error("the store must not touch the database");
+      },
+    } as unknown as SupabaseClient;
+    await assert.rejects(
+      () => new SupabaseHrStore(client, AGENCY, "auditor-1", "auditor").listBinderTemplates(),
+      viewRefused,
+    );
+  });
+
+  test("a non-viewer's own binder still opens — the snapshot lookup is not gated", async () => {
+    const dsp = roleStore("dsp");
+    const binder = await dsp.getBinder("view-gate-new-hire", "dsp");
+    assert.ok(binder.sections.length > 0);
+    assert.equal(binder.staffId, "view-gate-new-hire");
+  });
+
+  // The default-template read carries the same boundary (PR #263,
+  // second review): getBinderTemplate() is a public template read, so
+  // it asserts the view rule in both stores too.
+  for (const roleKey of ["auditor", "dsp", "house_manager", "nurse", undefined]) {
+    test(`local store refuses getBinderTemplate to ${roleKey ?? "a store with no role"}`, async () => {
+      await assert.rejects(() => roleStore(roleKey).getBinderTemplate(), viewRefused);
+    });
+  }
+
+  for (const roleKey of ["administrator", "program_manager", "hr"]) {
+    test(`local store serves getBinderTemplate to ${roleKey}`, async () => {
+      const template = await roleStore(roleKey).getBinderTemplate();
+      assert.ok(template.sections.length > 0);
+    });
+  }
+
+  test("hosted store refuses getBinderTemplate to a non-viewer before any database read", async () => {
+    const client = {
+      from() {
+        throw new Error("the store must not touch the database");
+      },
+    } as unknown as SupabaseClient;
+    await assert.rejects(
+      () => new SupabaseHrStore(client, AGENCY, "auditor-1", "auditor").getBinderTemplate(),
+      viewRefused,
+    );
   });
 });

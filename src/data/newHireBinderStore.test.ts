@@ -25,7 +25,13 @@ function pdfFile(name = "resume.pdf"): File {
 describe("binder snapshots", () => {
   test("getBinder creates a binder from the default template, once", async () => {
     const store = staffStore();
-    const template = await store.getBinderTemplate();
+    // The template read itself is viewer-gated (PR #263 re-review); a
+    // viewer-role store reads it, the staff store opens the binder.
+    const template = await createHrStore({
+      agencyId: AGENCY,
+      userId: STAFF,
+      roleKey: "administrator",
+    }).getBinderTemplate();
     assert.equal(template.sections.length, DEFAULT_BINDER_TEMPLATE.sections.length);
     const binder = await store.getBinder(STAFF);
     assert.equal(binder.staffId, STAFF);

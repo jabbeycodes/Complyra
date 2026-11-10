@@ -1129,6 +1129,28 @@ export function canEditBinderTemplates(roleKey: string | undefined) {
   );
 }
 
+/**
+ * Who may VIEW the binder templates (read-only) from the Binder Board:
+ * the editors, plus HR — HR works every binder the templates produce
+ * and needs to see what a complete binder requires, but template
+ * editing stays administrator/PM (the hr_binder_templates write policy,
+ * 20261104110000; reads are open to agency members at the DB layer).
+ * Wave 4D (retest batches 299–302): HR previously got no Templates
+ * control at all, so read-only viewing was impossible. Auditors keep
+ * the board-only view — no template access (retest batch 303).
+ */
+export const BINDER_TEMPLATE_VIEWER_ROLE_KEYS: RoleKey[] = [
+  "administrator",
+  "program_manager",
+  "hr",
+];
+
+export function canViewBinderTemplates(roleKey: string | undefined) {
+  return (BINDER_TEMPLATE_VIEWER_ROLE_KEYS as readonly string[]).includes(
+    roleKey ?? "",
+  );
+}
+
 /** Menu records — who may record what an Individual ate (daily-care staff). */
 export function canEnterMenuEntries(roleKey: string) {
   return [
