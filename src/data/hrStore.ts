@@ -1901,6 +1901,12 @@ export class SupabaseHrStore implements HrStore {
   }
 
   async getBinderTemplate(): Promise<BinderTemplate> {
+    assertCanViewBinderTemplates(this.actorRoleKey);
+    return this.readBinderTemplate();
+  }
+
+  /** Ungated default-template read for internal use (binder flows). */
+  private async readBinderTemplate(): Promise<BinderTemplate> {
     const stored = this.binderLibraryFromRaw(await this.readBinderLibraryRaw());
     return stored.defaultTemplate;
   }
@@ -5487,6 +5493,12 @@ class LocalHrStore implements HrStore {
   }
 
   async getBinderTemplate(): Promise<BinderTemplate> {
+    assertCanViewBinderTemplates(this.actorRoleKey);
+    return this.readBinderTemplate();
+  }
+
+  /** Ungated default-template read for internal use (binder flows). */
+  private async readBinderTemplate(): Promise<BinderTemplate> {
     for (const bucket of this.allAgencyBuckets()) {
       if (bucket.binderTemplate) return bucket.binderTemplate;
     }
