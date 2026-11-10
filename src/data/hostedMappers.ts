@@ -218,6 +218,9 @@ export function mapChartFile(row: Row): ChartFile {
     name: str(row.name),
     mime: str(row.mime) || "application/pdf",
     storagePath: str(row.storage_path),
+    renewalId: (row.renewal_id as string | null) ?? null,
+    evidenceKind: (row.evidence_kind as string | null) ?? null,
+    uploadedOn: row.created_at ? str(row.created_at).slice(0, 10) : null,
   };
 }
 

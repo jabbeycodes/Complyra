@@ -642,43 +642,47 @@ export default function IndividualChart({
                   {countdownLabel(row.nextDueOn)} · Next due {formatDate(row.nextDueOn)}
                   {row.lastDocumentTitle ? ` · ${row.lastDocumentTitle}` : ""}
                 </p>
-                {row.fileId && (
-                  <div className="chart-actions">
+                {row.files.map((file) => (
+                  <div key={file.id} className="chart-actions">
+                    <span>
+                      {file.title}
+                      {file.uploadedOn ? ` · ${formatDate(file.uploadedOn)}` : ""}
+                      {file.isCurrent ? " · Current file" : ""}
+                    </span>
                     <button
                       className="button"
-                      onClick={() => openFile("renewal", row.fileId!, "download")}
+                      onClick={() => openFile("renewal", file.id, "download")}
                     >
                       <Download size={16} /> Download
                     </button>
                     <button
                       className="button"
-                      onClick={() => openFile("renewal", row.fileId!, "print")}
+                      onClick={() => openFile("renewal", file.id, "print")}
                     >
                       <Printer size={16} /> Print
                     </button>
                     {canRemoveRenewalFile(session.roleKey, {
                       userId: session.userId,
-                      uploadedBy: row.fileUploadedBy,
+                      uploadedBy: file.uploadedBy ?? row.fileUploadedBy,
                     }) && (
                       <button
                         className="button"
                         onClick={() => {
-                          const name = row.lastDocumentTitle ?? "this file";
                           if (
                             !window.confirm(
-                              `Remove ${name} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
+                              `Remove ${file.title} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
                             )
                           ) {
                             return;
                           }
-                          void run(() => api.removeRenewalFile(row.id));
+                          void run(() => api.removeRenewalFile(row.id, file.id));
                         }}
                       >
                         <Trash2 size={16} /> Remove file
                       </button>
                     )}
                   </div>
-                )}
+                ))}
                 {canUploadRenewal(session.roleKey) && (
                   <RenewalUpload
                     defaultTitle={row.title}

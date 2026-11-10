@@ -9,9 +9,12 @@ import type { SessionUser } from "./types";
 /**
  * PR #258 review HOLD: hosted chart-file removal must never report "removed"
  * unless the chart item, the chart record, AND the stored object are gone;
- * a superseded file is cleaned up the same way; a rejected renewal stores
- * nothing. The double is a small in-memory Supabase: tables, a storage
- * bucket, and switches for each failure the hosted backend can return.
+ * a rejected renewal stores nothing. Wave 4E: a renewal holds every file
+ * attached to it — a replacement upload no longer retires the file it
+ * supersedes, and removal is per-file (removing the pointed-at file
+ * re-points the renewal to the newest remaining one). The double is a
+ * small in-memory Supabase: tables, a storage bucket, and switches for
+ * each failure the hosted backend can return.
  */
 
 type Row = Record<string, unknown>;
@@ -276,7 +279,7 @@ test("hosted: a chart-record delete failure is reported as incomplete and logged
   assert.deepEqual(fake.actions(), ["chart_file.cleanup_pending"]);
 });
 
-test("hosted: a replacement upload cleans up the superseded file and keeps the dates", async () => {
+test("hosted: a replacement upload keeps both files attached and keeps the dates", async () => {
   const fake = hostedApi("nurse");
   await fake.api.uploadRenewalEvidence({
     renewalId: "renewal-1",
@@ -288,26 +291,70 @@ test("hosted: a replacement upload cleans up the superseded file and keeps the d
   const fileId = fake.renewal().file_id as string;
   assert.notEqual(fileId, "file-old");
   assert.equal(fake.renewal().next_due_on, "2026-01-10");
-  assert.deepEqual(fake.tables.chart_files.map((row) => row.id), [fileId]);
-  assert.deepEqual([...fake.objects], [path(fileId, "new-vision.pdf")]);
+  // Wave 4E: the replaced file stays attached to the renewal (listed on
+  // the card, removable on its own) instead of being quietly retired.
+  assert.deepEqual(
+    fake.tables.chart_files.map((row) => row.id).sort(),
+    ["file-old", fileId].sort(),
+  );
+  assert.deepEqual(
+    [...fake.objects].sort(),
+    [path("file-old", "old-vision.pdf"), path(fileId, "new-vision.pdf")].sort(),
+  );
+  const attached = fake.tables.chart_files.find((row) => row.id === fileId);
+  assert.equal(attached?.renewal_id, "renewal-1");
+  assert.equal(attached?.evidence_kind, "pdf");
   assert.deepEqual(fake.actions(), ["renewal.evidence_uploaded"]);
 });
 
-test("hosted: a superseded-file cleanup failure keeps the new file and says what did not finish", async () => {
-  const fake = hostedApi("nurse", { storageError: true });
-  await assert.rejects(
-    () =>
-      fake.api.uploadRenewalEvidence({
-        renewalId: "renewal-1",
-        evidenceKind: "pdf",
-        documentTitle: "Vision exam",
-        file: pdf("new-vision.pdf"),
-      }),
-    (err: unknown) =>
-      err instanceof ChartChangeIncompleteError && /new file was saved/.test(err.message),
-  );
-  assert.notEqual(fake.renewal().file_id, "file-old");
-  assert.deepEqual(fake.actions(), ["renewal.evidence_uploaded", "chart_file.cleanup_pending"]);
+test("hosted: removing one of several attached files leaves the others and the dates", async () => {
+  const fake = hostedApi("nurse");
+  // The migration backfill links the seeded file to its renewal.
+  fake.tables.chart_files[0].renewal_id = "renewal-1";
+  await fake.api.uploadRenewalEvidence({
+    renewalId: "renewal-1",
+    evidenceKind: "pdf",
+    documentTitle: "Vision exam",
+    file: pdf("new-vision.pdf"),
+    mode: "evidence",
+  });
+  const currentId = fake.renewal().file_id as string;
+  // Remove the OLDER file: the current pointer and the dates stay put.
+  await fake.api.removeRenewalFile("renewal-1", "file-old");
+  assert.equal(fake.renewal().file_id, currentId);
+  assert.equal(fake.renewal().next_due_on, "2026-01-10");
+  assert.deepEqual(fake.tables.chart_files.map((row) => row.id), [currentId]);
+  assert.deepEqual([...fake.objects], [path(currentId, "new-vision.pdf")]);
+  // Remove the current file: the pointer clears, nothing else remains.
+  await fake.api.removeRenewalFile("renewal-1", currentId);
+  assert.equal(fake.renewal().file_id, null);
+  assert.deepEqual(fake.tables.chart_files, []);
+  assert.deepEqual([...fake.objects], []);
+  assert.deepEqual(fake.actions(), [
+    "renewal.evidence_uploaded",
+    "renewal.file_removed",
+    "renewal.file_removed",
+  ]);
+});
+
+test("hosted: removing the current file re-points the renewal to the newest remaining file", async () => {
+  const fake = hostedApi("program_manager");
+  fake.tables.chart_files[0].renewal_id = "renewal-1";
+  fake.tables.chart_files[0].evidence_kind = "pdf";
+  await fake.api.uploadRenewalEvidence({
+    renewalId: "renewal-1",
+    evidenceKind: "consultation",
+    documentTitle: "Vision consult",
+    file: pdf("consult.pdf"),
+    mode: "evidence",
+  });
+  const consultId = fake.renewal().file_id as string;
+  await fake.api.removeRenewalFile("renewal-1", consultId);
+  assert.equal(fake.renewal().file_id, "file-old");
+  assert.equal(fake.renewal().last_document_title, "old-vision.pdf");
+  assert.equal(fake.renewal().last_evidence_kind, "pdf");
+  assert.equal(fake.renewal().next_due_on, "2026-01-10");
+  assert.deepEqual(fake.tables.chart_files.map((row) => row.id), ["file-old"]);
 });
 
 test("hosted: a file another chart item still uses is detached but not deleted", async () => {

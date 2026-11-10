@@ -201,7 +201,7 @@ test("applyRenewalEvidence / applyRenewalFileRemoval never touch dates", () => {
   assert.equal(removed.lastUploadedOn, row.lastUploadedOn);
 });
 
-test("local parity: a future-dated renewal stores nothing; a replacement retires the superseded file", async () => {
+test("local parity: a future-dated renewal stores nothing; every uploaded file stays listed and is removable on its own", async () => {
   const { store, client } = setup();
   const nurse = await signIn(client, DEMO_NURSE_USERNAME);
   const before = await ellisVision(client, nurse);
@@ -238,6 +238,73 @@ test("local parity: a future-dated renewal stores nothing; a replacement retires
   });
   const second = (await ellisVision(client, nurse)).fileId!;
   assert.notEqual(first, second);
-  assert.ok(!store.db.chartFiles.some((row) => row.id === first), "the superseded file is gone");
+  // Wave 4E: the first file is NOT discarded — the card lists both,
+  // oldest first, with the newest flagged current.
+  const listed = await ellisVision(client, nurse);
+  assert.deepEqual(
+    listed.files.map((file) => file.id),
+    [first, second],
+  );
+  assert.deepEqual(
+    listed.files.map((file) => file.isCurrent),
+    [false, true],
+  );
+  assert.ok(store.db.chartFiles.some((row) => row.id === first));
   assert.ok(store.db.chartFiles.some((row) => row.id === second));
+
+  // Removing the older file leaves the current one and the dates alone.
+  await client.removeRenewalFile(before.id, first);
+  const afterFirst = await ellisVision(client, nurse);
+  assert.equal(afterFirst.fileId, second);
+  assert.equal(afterFirst.nextDueOn, listed.nextDueOn);
+  assert.deepEqual(
+    afterFirst.files.map((file) => file.id),
+    [second],
+  );
+  assert.ok(!store.db.chartFiles.some((row) => row.id === first));
+
+  // Removing the last file clears the card.
+  await client.removeRenewalFile(before.id, second);
+  const cleared = await ellisVision(client, nurse);
+  assert.equal(cleared.fileId, null);
+  assert.deepEqual(cleared.files, []);
+});
+
+test("local removal refuses a file that belongs to another renewal, individual, or site", async () => {
+  const { store, client } = setup();
+  const admin = await signIn(client, DEMO_ADMIN_USERNAME);
+  // Ellis Hart is at Cedar; Harper Soto is at Willow — different
+  // individual, different site. The administrator can open both renewals,
+  // so the association gate is the only thing that may stop the call.
+  const ellis = await ellisVision(client, admin, "Ellis");
+  const harper = await ellisVision(client, admin, "Harper");
+  await client.uploadRenewalEvidence({
+    renewalId: harper.id,
+    evidenceKind: "pdf",
+    documentTitle: "harper-vision.pdf",
+    file: pdf("harper-vision.pdf"),
+  });
+  const harperFileId = (await ellisVision(client, admin, "Harper")).fileId!;
+  const harperRowBefore = store.db.chartFiles.find((row) => row.id === harperFileId);
+  assert.ok(harperRowBefore, "Harper's file row exists before the attempt");
+
+  await assert.rejects(
+    client.removeRenewalFile(ellis.id, harperFileId),
+    /not attached to this item/,
+  );
+
+  // Harper's file row, her renewal's pointer, and her file list are
+  // exactly as they were; Ellis's renewal is untouched too.
+  assert.deepEqual(
+    store.db.chartFiles.find((row) => row.id === harperFileId),
+    harperRowBefore,
+  );
+  const harperAfter = await ellisVision(client, admin, "Harper");
+  assert.equal(harperAfter.fileId, harperFileId);
+  assert.deepEqual(
+    harperAfter.files.map((file) => file.id),
+    [harperFileId],
+  );
+  const ellisAfter = await ellisVision(client, admin, "Ellis");
+  assert.equal(ellisAfter.fileId, ellis.fileId);
 });

@@ -255,10 +255,11 @@ import { isValidRating } from "../recognition/scoring";
 import {
   allergiesChangeDetail,
   applyRenewalEvidence,
-  applyRenewalFileRemoval,
+  applyRenewalFileRemovalFromList,
   applyRenewalUpload,
   canRemoveRenewalFile,
   ChartChangeIncompleteError,
+  renewalFileViews,
   type RenewalUploadMode,
   validateRenewalUpload,
   canEditCover,
@@ -306,6 +307,7 @@ import {
   todayIso,
   trainingLinesFromObligations,
   trainingStatus,
+  type ChartFile,
   type Medication,
   type TrainingChecklist,
 } from "./chart";
@@ -2990,6 +2992,7 @@ export class HostedApi implements ComplyraApi {
       obligationSigsRes,
       submissionsRes,
       renewalsRes,
+      chartFilesRes,
       medsRes,
       checklistsRes,
       monthlyDueRes,
@@ -3026,6 +3029,12 @@ export class HostedApi implements ComplyraApi {
       this.client.from("obligation_signatures").select("*").eq("agency_id", agencyId),
       this.client.from("packet_submissions").select("*").eq("agency_id", agencyId),
       this.client.from("clinical_renewals").select("*").eq("agency_id", agencyId),
+      this.client
+        .from("chart_files")
+        .select("*")
+        .eq("agency_id", agencyId)
+        .eq("kind", "renewal")
+        .order("created_at", { ascending: true }),
       this.client.from("medications").select("*").eq("agency_id", agencyId),
       this.client.from("training_checklists").select("*").eq("agency_id", agencyId),
       this.client.from("agency_monthly_due").select("*").eq("agency_id", agencyId).maybeSingle(),
@@ -3059,6 +3068,7 @@ export class HostedApi implements ComplyraApi {
       obligationSigsRes,
       submissionsRes,
       renewalsRes,
+      chartFilesRes,
       medsRes,
       checklistsRes,
       monthlyDueRes,
@@ -3209,6 +3219,7 @@ export class HostedApi implements ComplyraApi {
               submittedAt: (row.submitted_at as string | null) ?? null,
             })),
             renewals: (renewalsRes.data ?? []).map(mapClinicalRenewal),
+            chartFiles: (chartFilesRes.data ?? []).map(mapChartFile),
             medications: (medsRes.data ?? [])
               .map(mapMedication)
               .filter((med) => medicationStaysOnMar(med, medOrderStatuses)),
@@ -5312,10 +5323,12 @@ export class HostedApi implements ComplyraApi {
       todayIso(),
     );
     if (input.file) this.requirePdfFile(input.file, "Upload a PDF for renewal evidence.");
-    const previousFileId = renewal.fileId;
     let saved: { id: string; storagePath: string } | null = null;
     if (input.file) {
-      saved = await this.saveChartFileRecord(session, renewal.individualId, "renewal", input.file);
+      saved = await this.saveChartFileRecord(session, renewal.individualId, "renewal", input.file, {
+        renewalId: renewal.id,
+        evidenceKind: input.evidenceKind,
+      });
     }
     const fileId = saved?.id ?? renewal.fileId;
     // Evidence (the default) never touches the requirement's dates — an
@@ -5372,35 +5385,27 @@ export class HostedApi implements ComplyraApi {
       "clinical_renewal",
       renewal.id,
     );
-    // A replacement supersedes the previous file: remove its chart record
-    // and stored object too, unless another chart item still uses it.
-    if (saved && previousFileId && previousFileId !== saved.id) {
-      try {
-        await this.retireUnreferencedRenewalFile(previousFileId);
-      } catch (cleanupError) {
-        await this.recordChartFileCleanupPending(
-          session,
-          { id: previousFileId, storagePath: null },
-          (cleanupError as Error).message,
-        );
-        throw new ChartChangeIncompleteError(
-          `The new file was saved on ${renewal.title}, but the file it replaced could not be deleted (${(cleanupError as Error).message}). This is recorded in the activity log so it can be cleared.`,
-        );
-      }
-    }
+    // Wave 4E: the previous file STAYS on the renewal — every attached
+    // file is listed on the card and removed one by one. (Before, a
+    // replacement quietly retired it, stranding anything it pointed at
+    // with no surface able to reach it.)
   }
 
   /**
-   * Remove the uploaded file from a clinical renewal. Every step is checked
-   * and ordered so a failure leaves a state the user can retry from:
-   *   1. detach the file from the chart item;
-   *   2. delete the stored object — refused/failed: the item is re-attached
-   *      (nothing changed, Remove can be tried again);
+   * Remove ONE attached file from a clinical renewal (Wave 4E: a
+   * renewal can hold several files; without a fileId the target is the
+   * file the renewal currently points at). Every step is checked and
+   * ordered so a failure leaves a state the user can retry from:
+   *   1. if the target is the pointed-at file, re-point the renewal to
+   *      the newest remaining attached file (or clear the pointer);
+   *   2. delete the stored object — refused/failed: the pointer is
+   *      restored (nothing changed, Remove can be tried again);
    *   3. delete the chart record — failed: the stored object is already
    *      gone, so the leftover record is logged for cleanup.
-   * "renewal.file_removed" is recorded only when every step succeeded.
+   * The due date and status never move. "renewal.file_removed" is
+   * recorded only when every step succeeded.
    */
-  async removeRenewalFile(renewalId: string) {
+  async removeRenewalFile(renewalId: string, fileId?: string) {
     const session = await this.requireSession();
     const { data: row, error } = await this.client
       .from("clinical_renewals")
@@ -5409,7 +5414,8 @@ export class HostedApi implements ComplyraApi {
       .single();
     throwIf(error, "Renewal not found.");
     const renewal = mapClinicalRenewal(row!);
-    if (!renewal.fileId) throw new Error("There is no uploaded file on this item to remove.");
+    const targetId = fileId ?? renewal.fileId;
+    if (!targetId) throw new Error("There is no uploaded file on this item to remove.");
     // Hosted chart_files carries no uploader column yet, so removal is
     // gated by role here (every role that may upload a renewal file is a
     // manager role that may remove one). RLS (20261105100000) backs it.
@@ -5420,23 +5426,51 @@ export class HostedApi implements ComplyraApi {
     }
     const { data: fileRow, error: fileError } = await this.client
       .from("chart_files")
-      .select("id, name, kind, storage_path")
-      .eq("id", renewal.fileId)
+      .select("id, name, kind, storage_path, renewal_id")
+      .eq("id", targetId)
       .maybeSingle();
     throwIf(fileError, "Could not load the file to remove. Nothing was changed.");
-    const next = applyRenewalFileRemoval(renewal);
-    const { data: updated, error: updateError } = await this.client
-      .from("clinical_renewals")
-      .update({
-        file_id: next.fileId,
-        last_document_title: next.lastDocumentTitle,
-        last_evidence_kind: next.lastEvidenceKind,
-      })
-      .eq("id", renewal.id)
-      .select("id");
-    throwIf(updateError, "Could not remove the file. Nothing was changed.");
-    if (!updated || updated.length === 0) {
-      throw new Error("Could not remove the file — your role cannot change this chart item. Nothing was changed.");
+    if (
+      fileId &&
+      fileRow &&
+      (fileRow.renewal_id as string | null) !== renewal.id &&
+      renewal.fileId !== targetId
+    ) {
+      throw new Error("That file is not attached to this item.");
+    }
+    const { data: attachedRows, error: attachedError } = await this.client
+      .from("chart_files")
+      .select("id, name, evidence_kind, created_at")
+      .eq("renewal_id", renewal.id);
+    throwIf(attachedError, "Could not load the files on this item. Nothing was changed.");
+    const remaining = (attachedRows ?? [])
+      .sort((a, b) =>
+        String((a as Record<string, unknown>).created_at ?? "").localeCompare(
+          String((b as Record<string, unknown>).created_at ?? ""),
+        ),
+      )
+      .filter((attached) => (attached.id as string) !== targetId)
+      .map((attached) => ({
+        id: attached.id as string,
+        title: (attached.name as string) ?? "Uploaded file",
+        evidenceKind: (attached.evidence_kind as ClinicalEvidenceKind | null) ?? null,
+      }));
+    const next = applyRenewalFileRemovalFromList(renewal, targetId, remaining);
+    const repointed = next.fileId !== renewal.fileId;
+    if (repointed) {
+      const { data: updated, error: updateError } = await this.client
+        .from("clinical_renewals")
+        .update({
+          file_id: next.fileId,
+          last_document_title: next.lastDocumentTitle,
+          last_evidence_kind: next.lastEvidenceKind,
+        })
+        .eq("id", renewal.id)
+        .select("id");
+      throwIf(updateError, "Could not remove the file. Nothing was changed.");
+      if (!updated || updated.length === 0) {
+        throw new Error("Could not remove the file — your role cannot change this chart item. Nothing was changed.");
+      }
     }
     const fileName =
       (fileRow?.name as string | undefined) ?? renewal.lastDocumentTitle ?? "the uploaded file";
@@ -5446,14 +5480,14 @@ export class HostedApi implements ComplyraApi {
         storagePath: (fileRow.storage_path as string | null) ?? null,
       };
       const stillUsed = await this.renewalFileReferenceCount(file.id).catch(async (err: Error) => {
-        await this.reattachRenewalFile(renewal, err.message);
+        if (repointed) await this.reattachRenewalFile(renewal, err.message);
         throw new Error(`Could not remove the file (${err.message}). It is still on ${renewal.title}.`);
       });
       if (stillUsed === 0) {
         try {
           await this.removeChartObject(file.storagePath);
         } catch (storageError) {
-          await this.reattachRenewalFile(renewal, (storageError as Error).message);
+          if (repointed) await this.reattachRenewalFile(renewal, (storageError as Error).message);
           throw new Error(
             `Could not remove the file: ${(storageError as Error).message} It is still on ${renewal.title}.`,
           );
@@ -7153,6 +7187,7 @@ export class HostedApi implements ComplyraApi {
     individualId: string,
     kind: "renewal" | "discontinue" | "other",
     file: File,
+    link?: { renewalId: string; evidenceKind: string },
   ): Promise<{ id: string; storagePath: string }> {
     const fileId = crypto.randomUUID();
     const storagePath = `${session.agencyId}/${individualId}/chart/${fileId}/${file.name}`;
@@ -7169,6 +7204,9 @@ export class HostedApi implements ComplyraApi {
       name: file.name,
       mime,
       storage_path: storagePath,
+      ...(link
+        ? { renewal_id: link.renewalId, evidence_kind: link.evidenceKind }
+        : {}),
     });
     if (insertError) {
       try {
@@ -7245,22 +7283,6 @@ export class HostedApi implements ComplyraApi {
       .eq("file_id", fileId);
     if (error) throw new Error(`could not check where the file is used: ${error.message}`);
     return count ?? 0;
-  }
-
-  /** Remove a superseded renewal file unless another chart item still uses it. */
-  private async retireUnreferencedRenewalFile(fileId: string) {
-    const { data: fileRow, error } = await this.client
-      .from("chart_files")
-      .select("id, kind, storage_path")
-      .eq("id", fileId)
-      .maybeSingle();
-    if (error) throw new Error(`could not load the replaced file: ${error.message}`);
-    if (!fileRow || (fileRow.kind as string | undefined) === "other") return;
-    if ((await this.renewalFileReferenceCount(fileId)) > 0) return;
-    await this.purgeChartFile({
-      id: fileId,
-      storagePath: (fileRow.storage_path as string | null) ?? null,
-    });
   }
 
   /** Put a renewal's file back after a removal step failed (no-op state). */
@@ -7447,6 +7469,7 @@ export class HostedApi implements ComplyraApi {
       signatures: ObligationSignature[];
       submissions: { individualId: string; userId: string; submittedAt: string | null }[];
       renewals: ClinicalRenewal[];
+      chartFiles: ChartFile[];
       medications: Medication[];
       appointments: Appointment[];
       checklists: TrainingChecklist[];
@@ -7492,6 +7515,18 @@ export class HostedApi implements ComplyraApi {
             .map((row) => ({
               ...row,
               status: renewalStatus(row.nextDueOn, undefined, input.orderReminderDays),
+              files: renewalFileViews(
+                row,
+                input.chartFiles
+                  .filter((file) => file.renewalId === row.id)
+                  .map((file) => ({
+                    id: file.id,
+                    title: file.name,
+                    uploadedOn: file.uploadedOn ?? null,
+                    uploadedBy: null,
+                    evidenceKind: (file.evidenceKind as ClinicalEvidenceKind | null) ?? null,
+                  })),
+              ),
             }))
             .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn))
         : [],
