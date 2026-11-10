@@ -12048,7 +12048,7 @@ export class LocalApi implements ComplyraApi {
   async getMedicationSupplyStatus(
     siteId: string,
   ): Promise<import("./types").MedSupplyStatus> {
-    const { summarizeMedSupply } = await this.p6lib();
+    const { summarizeMedSupply, medOnHand, medHasCountOnFile } = await this.p6lib();
     const session = assertSession(this.store);
     if (!canSeeMeds(session.roleKey)) {
       throw new Error("You cannot view medication inventory.");
@@ -12060,10 +12060,28 @@ export class LocalApi implements ComplyraApi {
     const people = this.store.db.individuals.filter(
       (row) => row.siteId === siteId && row.agencyId === session.agencyId,
     );
-    const views = (
-      await Promise.all(people.map((person) => this.getMedInventory(person.id)))
-    ).flat();
-    return summarizeMedSupply(siteId, site.name, views, todayIso());
+    // PR #261: the site tally classifies by the on-hand countdown, so
+    // dose marks load per person (from their oldest count baseline
+    // through today) and every view gets its medOnHand figure. A marks
+    // load failure fails the whole status — the panels render their
+    // unavailable state rather than a projection-based claim.
+    const today = todayIso();
+    const views: import("./types").MedInventoryView[] = [];
+    const onHandByMed = new Map<string, ReturnType<typeof medOnHand>>();
+    for (const person of people) {
+      const personViews = await this.getMedInventory(person.id);
+      views.push(...personViews);
+      const countedViews = personViews.filter((view) => medHasCountOnFile(view));
+      if (countedViews.length === 0) continue;
+      const from = countedViews
+        .map((view) => (view.lastCountedOn ?? today).slice(0, 10))
+        .sort()[0]!;
+      const marks = await this.getMedDoseMarksInRange(person.id, from, today);
+      for (const view of personViews) {
+        onHandByMed.set(view.medicationId, medOnHand(view, marks, today));
+      }
+    }
+    return summarizeMedSupply(siteId, site.name, views, today, onHandByMed);
   }
 
   async adjustMedInventory(input: {

@@ -288,20 +288,64 @@ export function compareMedInventory(a: MedInventoryView, b: MedInventoryView) {
 /**
  * Aggregate one home's medication supply for the HM weekly checklist
  * ("Adequate supply of medications in the home").
+ *
+ * When the caller supplies on-hand figures (`onHandByMed`, keyed by
+ * medicationId), the tally classifies by the countdown — the same
+ * figure the chart board headlines — never by the view's time-based
+ * projection status (PR #261 re-review: the site "Reorder needed"
+ * panel fired from the projected count while the chart's countdown
+ * said otherwise). Alert rows then carry the countdown's status,
+ * pills, and days left, so the badge, the tally, and the chart cannot
+ * disagree. A med whose on-hand state is loading or unavailable makes
+ * no claim in either direction: it is excluded from every bucket and
+ * from the alerts, the home does not read all-clear, and the summary
+ * says its count is unavailable. Without the map, classification falls
+ * back to the views' own status (unit fixtures and legacy callers).
  */
 export function summarizeMedSupply(
   siteId: string,
   siteName: string,
   views: MedInventoryView[],
   today = todayIso(),
+  onHandByMed?: ReadonlyMap<string, MedOnHand>,
 ): MedSupplyStatus {
   // A medication with no count on file (lastCountedOn === null) has no
   // supply state at all: its projection is a fabricated zero, so it must
   // never be counted as "out", never appear as a reorder alert, and never
   // make the home read as stocked or as needing a reorder. It is surfaced
   // as "No count recorded yet" on the per-med surfaces instead.
-  const counted = views.filter((view) => medHasCountOnFile(view));
-  const uncounted = views.length - counted.length;
+  const counted: MedInventoryView[] = [];
+  let uncounted = 0;
+  let unknown = 0;
+  for (const view of views) {
+    if (!medHasCountOnFile(view)) {
+      uncounted += 1;
+      continue;
+    }
+    if (!onHandByMed) {
+      counted.push(view);
+      continue;
+    }
+    const onHand = onHandByMed.get(view.medicationId);
+    if (!onHand || onHand.kind === "never-counted") {
+      uncounted += 1;
+      continue;
+    }
+    if (onHand.kind !== "counted") {
+      unknown += 1;
+      continue;
+    }
+    const status = medOnHandStatus(view, onHand) ?? view.status;
+    counted.push({
+      ...view,
+      status,
+      currentCount: onHand.pillsLeft,
+      daysRemaining: onHand.daysLeft,
+      alertActive:
+        status !== "ok" &&
+        (view.reorderAcknowledgedOn == null || view.reorderAcknowledgedOn < today),
+    });
+  }
   const counts = { ok: 0, low: 0, critical: 0, out: 0 };
   for (const view of counted) {
     if (view.status === "low") counts.low += 1;
@@ -312,16 +356,24 @@ export function summarizeMedSupply(
   const alerts = counted
     .filter((view) => view.status !== "ok")
     .sort(compareMedInventory);
-  const allClear = alerts.length === 0;
-  const summary = allClear
-    ? counted.length === 0 && uncounted > 0
-      ? `${siteName}: no medication counts recorded yet (${uncounted} medication${uncounted === 1 ? "" : "s"} not counted).`
-      : `${siteName}: all ${counted.length} medication${counted.length === 1 ? "" : "s"} stocked.` +
-        (uncounted > 0
-          ? ` ${uncounted} medication${uncounted === 1 ? "" : "s"} not counted yet.`
-          : "")
-    : `${siteName}: ${alerts.length} of ${counted.length} medication${counted.length === 1 ? "" : "s"} need${alerts.length === 1 ? "s" : ""} reorder` +
-      ` (${counts.out} out, ${counts.critical} critical, ${counts.low} low).`;
+  const allClear = alerts.length === 0 && unknown === 0;
+  const unknownNote =
+    unknown > 0
+      ? ` On-hand counts are unavailable for ${unknown} medication${unknown === 1 ? "" : "s"} — check the chart.`
+      : "";
+  const summary = (
+    allClear
+      ? counted.length === 0 && uncounted > 0
+        ? `${siteName}: no medication counts recorded yet (${uncounted} medication${uncounted === 1 ? "" : "s"} not counted).`
+        : `${siteName}: all ${counted.length} medication${counted.length === 1 ? "" : "s"} stocked.` +
+          (uncounted > 0
+            ? ` ${uncounted} medication${uncounted === 1 ? "" : "s"} not counted yet.`
+            : "")
+      : alerts.length === 0
+        ? `${siteName}: ${counted.length} medication${counted.length === 1 ? "" : "s"} stocked.`
+        : `${siteName}: ${alerts.length} of ${counted.length} medication${counted.length === 1 ? "" : "s"} need${alerts.length === 1 ? "s" : ""} reorder` +
+          ` (${counts.out} out, ${counts.critical} critical, ${counts.low} low).`
+  ) + unknownNote;
   return {
     siteId,
     siteName,
@@ -459,6 +511,37 @@ export function medOnHand(
   };
 }
 
+/**
+ * The supply status implied by an on-hand figure, using the same bands
+ * projectInventory applies to its projection (out at zero; critical at
+ * <= 2 days — or <= 2 pills for PRN; low at or under the med's reorder
+ * threshold; else ok). Null when the on-hand state carries no figure —
+ * a loading or unavailable count makes NO status claim.
+ */
+export function medOnHandStatus(
+  view: MedInventoryView,
+  onHand: MedOnHand,
+): MedInventoryStatus | null {
+  if (onHand.kind !== "counted") return null;
+  const threshold = Math.max(
+    1,
+    Math.floor(view.lowThresholdDays ?? DEFAULT_MED_LOW_THRESHOLD_DAYS),
+  );
+  if (onHand.pillsLeft <= 0) return "out";
+  if (onHand.daysLeft !== null) {
+    return onHand.daysLeft <= 2
+      ? "critical"
+      : onHand.daysLeft <= threshold
+        ? "low"
+        : "ok";
+  }
+  return onHand.pillsLeft <= 2
+    ? "critical"
+    : onHand.pillsLeft <= threshold
+      ? "low"
+      : "ok";
+}
+
 /** The headline text for an on-hand state — "On hand: N pills" when counted. */
 export function onHandHeadline(state: MedOnHand): string {
   if (state.kind === "counted") return onHandLabel(state.pillsLeft);
@@ -534,10 +617,11 @@ export function scheduledRateOutlook(
 
 /**
  * The detail line for a supply-tally alert row (site page, inventory
- * page). Those surfaces hold views without dose records, so they cannot
- * compute the on-hand countdown — and must not stand the time-based
- * projection in for it (Wave 4C). They name the labeled recorded count
- * instead and point at the chart for the on-hand figure.
+ * page). The alert DECISION is the countdown's (the API loads dose
+ * marks and classifies through medOnHand — PR #261), but the row's
+ * detail still names the labeled recorded count and points at the
+ * chart for the on-hand figure itself, so no second current-count
+ * number is printed here (Wave 4C).
  */
 export function supplyAlertDetail(
   view: Pick<MedInventoryView, "deliveries" | "lastCountedOn">,
