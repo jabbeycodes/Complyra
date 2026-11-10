@@ -7564,10 +7564,19 @@ export class LocalApi implements ComplyraApi {
     const attached = (this.store.db.chartFiles ?? []).filter(
       (row) => row.renewalId === renewal.id,
     );
-    const file = this.store.db.chartFiles.find((row) => row.id === targetId);
-    if (!file && renewal.fileId !== targetId && !attached.some((row) => row.id === targetId)) {
+    // Association gate (PR #262 re-review): the target must BE this
+    // renewal's file — either its legacy current pointer or a row linked
+    // to this renewal — checked before any role, storage, or delete work.
+    // An id that merely exists (another renewal's, another individual's,
+    // another site's file) is refused here, exactly as the hosted path
+    // refuses it.
+    if (
+      renewal.fileId !== targetId &&
+      !attached.some((row) => row.id === targetId)
+    ) {
       throw new Error("That file is not attached to this item.");
     }
+    const file = this.store.db.chartFiles.find((row) => row.id === targetId);
     if (
       !canRemoveRenewalFile(session.roleKey, {
         userId: session.userId,
