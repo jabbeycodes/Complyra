@@ -13,13 +13,15 @@ import {
   deliveryHistoryLabel,
   inventoryCountdownLabel,
   medHasCountOnFile,
+  medOnHand,
   medSupplyDisplayState,
   projectInventory,
   projectMedInventory,
   summarizeMedSupply,
+  type MedOnHand,
 } from "./medInventory";
 import { medCountdown } from "../features/mobile/medcount";
-import type { MedDeliverySummary, MedInventoryView } from "./types";
+import type { MedDeliverySummary, MedDoseMark, MedInventoryView } from "./types";
 
 function hmLogin() {
   return {
@@ -396,6 +398,177 @@ test("a home whose meds are all uncounted reads as uncounted, not stocked or out
   assert.equal(summary.outCount, 0);
   assert.equal(summary.okCount, 0);
   assert.match(summary.summary, /no medication counts recorded yet/);
+});
+
+// ---------- summarizeMedSupply with on-hand figures (PR #261) ----------
+// The site tally must take its reorder decision from the same countdown
+// the chart board headlines. These fixtures straddle the reorder
+// threshold in both directions: the time-based projection and the
+// dose-mark countdown land on opposite sides, and the tally must follow
+// the countdown.
+
+const STRADDLE_TODAY = "2026-10-31";
+
+function straddleView(
+  overrides: Partial<MedInventoryView> & { medicationId: string },
+): MedInventoryView {
+  return {
+    ...viewWithStatus("ok", overrides.medicationId),
+    doseTimes: ["08:00", "20:00"],
+    doseExceptions: [],
+    ...overrides,
+  };
+}
+
+function givenMarks(
+  medicationId: string,
+  doses: Array<[string, string]>,
+): MedDoseMark[] {
+  return doses.map(([doseDate, doseTime], i) => ({
+    id: `mark-${medicationId}-${i}`,
+    agencyId: "a",
+    individualId: "i",
+    medicationId,
+    doseDate,
+    doseTime,
+    status: "given",
+    markedBy: "u-dsp",
+    markedByName: "Dee Staff",
+    markedAt: `${doseDate}T14:00:00.000Z`,
+  }));
+}
+
+test("site tally follows the countdown when the projection says reorder but doses were barely given", () => {
+  // Counted 28 pills on Oct 21 at 2/day. The projection burns by the
+  // calendar: 8 pills, 4 days left — "low", a reorder alert. Only two
+  // doses were actually charted Given, so the countdown — the chart's
+  // headline — says 26 on hand, 13 days left: no reorder.
+  const view = straddleView({
+    medicationId: "med-straddle-a",
+    status: "low",
+    currentCount: 8,
+    daysRemaining: 4,
+    reorderPointPills: 14,
+    alertActive: true,
+    dosesPerDay: 2,
+    lastCountedOn: "2026-10-21",
+    deliveries: [
+      {
+        id: "da",
+        countedOn: "2026-10-21",
+        countedAt: "2026-10-21T13:00:00.000Z",
+        remainingPills: 28,
+        pillsPerDay: 2,
+        recordedBy: "u",
+        recordedByName: null,
+        expectedPills: null,
+        varianceReason: null,
+      },
+    ],
+  });
+  const marks = givenMarks("med-straddle-a", [
+    ["2026-10-25", "08:00"],
+    ["2026-10-25", "20:00"],
+  ]);
+  const onHand = medOnHand(view, marks, STRADDLE_TODAY);
+  assert.deepEqual(
+    onHand.kind === "counted" ? [onHand.pillsLeft, onHand.daysLeft] : null,
+    [26, 13],
+  );
+  const byProjection = summarizeMedSupply("s1", "Cedar House", [view], STRADDLE_TODAY);
+  assert.equal(byProjection.lowCount, 1);
+  assert.equal(byProjection.alerts.length, 1);
+  const byCountdown = summarizeMedSupply(
+    "s1",
+    "Cedar House",
+    [view],
+    STRADDLE_TODAY,
+    new Map<string, MedOnHand>([[view.medicationId, onHand]]),
+  );
+  assert.equal(byCountdown.lowCount, 0);
+  assert.equal(byCountdown.okCount, 1);
+  assert.equal(byCountdown.alerts.length, 0);
+  assert.equal(byCountdown.allClear, true);
+});
+
+test("site tally follows the countdown when the projection says stocked but doses burned through the supply", () => {
+  // Counted 28 pills on Oct 30 at 2/day in one 2-pill dose. The
+  // projection burns one calendar day: 26 pills, 13 days — "ok". Twelve
+  // doses were actually charted Given, so the countdown says 4 on hand,
+  // 2 days left: critical, a reorder alert.
+  const view = straddleView({
+    medicationId: "med-straddle-b",
+    status: "ok",
+    currentCount: 26,
+    daysRemaining: 13,
+    reorderPointPills: 14,
+    alertActive: false,
+    dosesPerDay: 2,
+    doseTimes: ["08:00"],
+    lastCountedOn: "2026-10-30",
+    deliveries: [
+      {
+        id: "db",
+        countedOn: "2026-10-30",
+        countedAt: "2026-10-30T13:00:00.000Z",
+        remainingPills: 28,
+        pillsPerDay: 2,
+        recordedBy: "u",
+        recordedByName: null,
+        expectedPills: null,
+        varianceReason: null,
+      },
+    ],
+  });
+  const marks = givenMarks(
+    "med-straddle-b",
+    Array.from({ length: 12 }, (_, i) => [
+      "2026-10-31",
+      `${String(6 + i).padStart(2, "0")}:00`,
+    ] as [string, string]),
+  );
+  const onHand = medOnHand(view, marks, STRADDLE_TODAY);
+  assert.deepEqual(
+    onHand.kind === "counted" ? [onHand.pillsLeft, onHand.daysLeft] : null,
+    [4, 2],
+  );
+  const byProjection = summarizeMedSupply("s1", "Cedar House", [view], STRADDLE_TODAY);
+  assert.equal(byProjection.okCount, 1);
+  assert.equal(byProjection.alerts.length, 0);
+  const byCountdown = summarizeMedSupply(
+    "s1",
+    "Cedar House",
+    [view],
+    STRADDLE_TODAY,
+    new Map<string, MedOnHand>([[view.medicationId, onHand]]),
+  );
+  assert.equal(byCountdown.criticalCount, 1);
+  assert.equal(byCountdown.okCount, 0);
+  assert.equal(byCountdown.allClear, false);
+  assert.equal(byCountdown.alerts.length, 1);
+  assert.equal(byCountdown.alerts[0].status, "critical");
+  assert.equal(byCountdown.alerts[0].currentCount, 4);
+  assert.equal(byCountdown.alerts[0].daysRemaining, 2);
+});
+
+test("an unavailable on-hand figure makes no claim: no alert, no all-clear", () => {
+  const view = straddleView({
+    medicationId: "med-straddle-c",
+    status: "low",
+    lastCountedOn: "2026-10-21",
+  });
+  const summary = summarizeMedSupply(
+    "s1",
+    "Cedar House",
+    [view],
+    STRADDLE_TODAY,
+    new Map<string, MedOnHand>([[view.medicationId, { kind: "unavailable" }]]),
+  );
+  assert.equal(summary.alerts.length, 0);
+  assert.equal(summary.lowCount, 0);
+  assert.equal(summary.okCount, 0);
+  assert.equal(summary.allClear, false);
+  assert.match(summary.summary, /unavailable for 1 medication/);
 });
 
 // ---------- deliveryHistoryLabel (wave 5A item 1) ----------

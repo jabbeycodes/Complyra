@@ -8,7 +8,7 @@ import {
 } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
 import { canRecordDelivery, canSeeMeds } from "../../data/chart";
-import { inventoryCountdownLabel } from "../../data/medInventory";
+import { supplyAlertDetail } from "../../data/medInventory";
 import type { MedSupplyStatus } from "../../data/types";
 import MedInventoryCard from "./MedInventoryCard";
 
@@ -117,9 +117,7 @@ export default function MedInventoryPage() {
                 <span>
                   <strong>{nameById[alert.individualId] ?? "Unknown"}</strong> —{" "}
                   {alert.medicationName} ({alert.strength}):{" "}
-                  {alert.lastCountedOn === null
-                    ? "No count recorded yet"
-                    : `Projected: ${inventoryCountdownLabel(alert)}`}
+                  {supplyAlertDetail(alert)}
                 </span>
                 {alert.alertActive && canManage && (
                   <button className="button" onClick={() => acknowledge(alert.medicationId)}>

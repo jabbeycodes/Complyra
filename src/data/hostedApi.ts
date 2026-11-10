@@ -12512,7 +12512,7 @@ export class HostedApi implements ComplyraApi {
   async getMedicationSupplyStatus(
     siteId: string,
   ): Promise<import("./types").MedSupplyStatus> {
-    const { summarizeMedSupply } = await this.p6lib();
+    const { summarizeMedSupply, medOnHand, medHasCountOnFile } = await this.p6lib();
     const session = await this.requireSession();
     if (!canSeeMeds(session.roleKey)) {
       throw new Error("You cannot view medication inventory.");
@@ -12532,19 +12532,33 @@ export class HostedApi implements ComplyraApi {
       .eq("agency_id", session.agencyId)
       .eq("site_id", siteId);
     throwIf(peopleError, "Could not load individuals.");
+    // PR #261: the site tally classifies by the on-hand countdown, so
+    // dose marks load per person (from their oldest count baseline
+    // through today) and every view gets its medOnHand figure. A marks
+    // load failure fails the whole status — the panels render their
+    // unavailable state rather than a projection-based claim.
     const today = todayIso();
-    const views = (
-      await Promise.all(
-        ((people ?? []) as Array<{ id: string }>).map((person) =>
-          this.p6inventoryViews(session, person.id as string, today),
-        ),
-      )
-    ).flat();
+    const views: import("./types").MedInventoryView[] = [];
+    const onHandByMed = new Map<string, ReturnType<typeof medOnHand>>();
+    for (const person of (people ?? []) as Array<{ id: string }>) {
+      const personViews = await this.p6inventoryViews(session, person.id, today);
+      views.push(...personViews);
+      const countedViews = personViews.filter((view) => medHasCountOnFile(view));
+      if (countedViews.length === 0) continue;
+      const from = countedViews
+        .map((view) => (view.lastCountedOn ?? today).slice(0, 10))
+        .sort()[0]!;
+      const marks = await this.getMedDoseMarksInRange(person.id, from, today);
+      for (const view of personViews) {
+        onHandByMed.set(view.medicationId, medOnHand(view, marks, today));
+      }
+    }
     return summarizeMedSupply(
       siteId,
       (site!.name as string) ?? "Site",
       views,
       today,
+      onHandByMed,
     );
   }
 
