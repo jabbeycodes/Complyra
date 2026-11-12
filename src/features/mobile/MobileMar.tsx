@@ -17,6 +17,8 @@ import {
 import { hhmmToMinutes } from "../../data/dueItems";
 import { deliveryHistoryLabel } from "../../data/medInventory";
 import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
+import { canSeeConsents, type ConsentRegister } from "../../data/consents";
+import { MedConsentWarning } from "../consents/MedConsentWarning";
 import { useMedAdminLock } from "../medAdminLock";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
@@ -674,6 +676,26 @@ export default function MobileMar({
   const [countsUnavailable, setCountsUnavailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Founder decision 2026-11-11: the phone MAR carries the same
+  // loud, non-blocking medication-consent warning as the chart.
+  // The register is agency-wide, so it loads once per mount; an
+  // excluded role never requests it, and a failed read leaves it
+  // null — no banner rather than a guessed verdict.
+  const [consentRegister, setConsentRegister] =
+    useState<ConsentRegister | null>(null);
+  useEffect(() => {
+    if (!canSeeConsents(session.roleKey)) return;
+    let live = true;
+    api
+      .getConsents()
+      .then((register) => {
+        if (live) setConsentRegister(register);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, session.roleKey]);
 
   const person = people.find((row) => row.id === personId) ?? null;
   // Clearance gate: an uncleared DSP keeps the MAR view but cannot open
@@ -794,6 +816,11 @@ export default function MobileMar({
         ‹ All Individuals
       </button>
       <PersonHeader person={person} onOpenChart={onOpenChart} />
+      <MedConsentWarning
+        register={consentRegister}
+        individualId={person.id}
+        roleKey={session.roleKey}
+      />
       <button
         type="button"
         className="msh-row msh-medcount-row"

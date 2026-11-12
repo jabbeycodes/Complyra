@@ -2,6 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { todayIso, type Medication, type MedicationDelivery } from "../../data/chart";
+import { DEFAULT_CONSENT_TYPES } from "../../data/consents";
 import {
   boardSupplyText,
   countEntryPrefill,
@@ -329,6 +330,37 @@ describe("one med-count figure on every surface (rendered)", () => {
         return marks;
       },
       getStaffTrainingProfile: async () => ({ clearedForInRatio: true }),
+      // The MAR card also loads the consent register (the 2026-11-11
+      // medication-consent warning). These fixtures' Individuals hold
+      // a current medication consent, so no banner renders and the
+      // count assertions below see the card exactly as before.
+      getConsents: async () => ({
+        types: DEFAULT_CONSENT_TYPES,
+        records: [
+          {
+            id: "c-med-fixture",
+            individualId: view.individualId,
+            agencyId: "a",
+            typeId: "medication",
+            covers: "Medication administration",
+            giver: "guardian",
+            giverName: "Sam Rivera",
+            relationship: "Parent and guardian",
+            signedOn: "2026-01-12",
+            effectiveOn: "2026-01-12",
+            reviewOn: "2027-01-12",
+            supersedesId: null,
+            createdBy: "hm",
+            createdAt: "2026-01-12T15:00:00.000Z",
+            activatedBy: "hm",
+            activatedAt: "2026-01-12T15:05:00.000Z",
+          },
+        ],
+        revocations: [],
+        individuals: [
+          { id: view.individualId, agencyId: "a", siteId: "s1", fullName: "Fixture Person" },
+        ],
+      }),
     };
     return new Proxy(known, {
       get: (target, prop: string) => target[prop] ?? (async () => []),
