@@ -1,4 +1,5 @@
 import Consents from "./consents/Consents";
+import MedConsentWarningGate from "./consents/MedConsentWarning";
 import CareScreeningSection from "./CareScreeningSection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatPillCount } from "./mobile/medcount";
@@ -496,6 +497,12 @@ export default function IndividualChart({
       </PageHeading>
 
       {error && <p className="form-error">{error}</p>}
+
+      {/* Founder decision 2026-11-11: an expired/missing/revoked
+          medication consent warns loudly at the top of the chart
+          and never blocks anything. Renders nothing while the
+          consent register loads. */}
+      <MedConsentWarningGate individualId={individualId} />
 
       {showOverview && workspace && (
         <ChartOverview

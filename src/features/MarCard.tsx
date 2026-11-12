@@ -13,6 +13,7 @@ import { useData } from "../data/DataProvider";
 import { canLogDoseException } from "../data/chart";
 import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
 import { useMedAdminLock } from "./medAdminLock";
+import MedConsentWarningGate from "./consents/MedConsentWarning";
 import { centralTodayIso } from "../data/menuRecords";
 import { formatClock, hhmmToMinutes } from "../data/dueItems";
 import {
@@ -218,6 +219,11 @@ export default function MarCard({
       {medLocked && roleCanMark && (
         <p className="muted mar-lock-note">{MED_ADMIN_CLEARANCE_MESSAGE}.</p>
       )}
+
+      {/* Founder decision 2026-11-11: an expired/missing/revoked
+          medication consent warns loudly here and never blocks a
+          mark. Renders nothing while the register loads. */}
+      <MedConsentWarningGate individualId={individualId} />
 
       {error && (
         <p className="form-error" role="alert">

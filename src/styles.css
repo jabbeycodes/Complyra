@@ -5113,6 +5113,22 @@ th {
   color: var(--color-h-8a5340);
   font-weight: 600;
 }
+.med-consent-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-h-92400e);
+  border-radius: 10px;
+  background: var(--color-h-fef3c7);
+  color: var(--color-h-92400e);
+  font-weight: 600;
+}
+.med-consent-warning svg {
+  flex: none;
+  margin-top: 2px;
+}
 .clinical-renewals {
   display: grid;
   gap: 10px;

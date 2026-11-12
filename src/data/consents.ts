@@ -192,6 +192,35 @@ export function consentDisplayText(status: ConsentStatusResult, roleKey: string)
         return null;
     return roleKey === 'dsp' && status.kind === 'missing' ? 'No active consent available' : status.text;
 }
+/**
+ * The medication-administration consent warning (founder decision
+ * 2026-11-11): when an Individual's medication consent is expired,
+ * missing, or revoked, the medication surfaces (chart banner, chart
+ * MAR card, phone MAR) show a LOUD warning — and nothing else
+ * changes. Medication actions are never blocked by consent state.
+ * Every other status returns null: current and expiring soon (which
+ * counts as current — the bells and lists carry that warning),
+ * draft, scheduled, superseded, and the unknown/load state (an
+ * unloaded register must never read as a consent problem). The DSP
+ * wording follows the register's own display rule above: a DSP
+ * never reads "Missing"; their register only carries usable
+ * consents, so for them the warning uses the available-consent
+ * wording.
+ */
+export function medConsentWarningText(status: ConsentStatusResult, roleKey: string): string | null {
+    switch (status.kind) {
+        case 'expired':
+            return 'The medication administration consent has expired. Doses can still be recorded — this consent needs renewal.';
+        case 'revoked':
+            return 'The medication administration consent was revoked. Doses can still be recorded — check with your house manager.';
+        case 'missing':
+            return roleKey === 'dsp'
+                ? 'No active medication administration consent is available. Doses can still be recorded — tell your house manager.'
+                : 'No medication administration consent is on file. Doses can still be recorded — this consent is required.';
+        default:
+            return null;
+    }
+}
 export function consentGaps(register: ConsentRegister, today = centralTodayIso()) {
     return register.individuals.flatMap(person => register.types.filter(t => t.required).flatMap(type => {
         const { row, text: status } = consentStatusFor(register, person.id, type.id, today);
