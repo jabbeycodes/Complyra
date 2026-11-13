@@ -2,6 +2,10 @@
  * nav: sidebar, kept · signature: the house week · states: empty, error, full
  * axes: warm paper/sans/moss · posture: restrained · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V3 · weakest: E, the week columns clipped Add someone, so a day wraps at 11rem */
+/* ui-sdk layer, declared empty for the @ui-sdk adoption (slice 0): no rules
+ * are assigned to it yet and web.css is not imported, so this changes no
+ * existing computed style. Layer statements may precede @import. */
+@layer ui-sdk;
 @import url("./tokens.css");
 
 :root {
