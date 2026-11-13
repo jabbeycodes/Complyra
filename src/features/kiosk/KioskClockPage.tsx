@@ -508,7 +508,17 @@ export default function KioskClockPage({ token }: { token: string }) {
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value.replace(/\D/g, ""))}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleIdContinue();
+                // IME-safe Enter (modern-web-guidance: ime-safe-enter-submit):
+                // an Enter that confirms an IME composition candidate must not
+                // submit. React's synthetic event does not copy isComposing,
+                // so read it from nativeEvent. keyCode 229 covers Safari's
+                // out-of-order delivery.
+                if (
+                  e.key === "Enter" &&
+                  !e.nativeEvent.isComposing &&
+                  e.keyCode !== 229
+                )
+                  handleIdContinue();
               }}
               placeholder="Enter your ID"
             />
