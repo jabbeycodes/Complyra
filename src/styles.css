@@ -8442,3 +8442,196 @@ button.qa-row:hover {
   /* Room for the floating bottom navigation: content never sits under it. */
   padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
 }
+
+/* PCSP-DOCUMENTS-MOUNT (2026-11-12): AI document ingestion surfaces —
+   Document upload, Extraction review, AI settings. Additive only: every
+   selector is scoped to the doc-* classes these pages own, so no existing
+   screen's computed styles change. Status is never carried by color
+   alone — the components pair every state with an icon and text. */
+.doc-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 18px var(--panel-inline) 0;
+}
+.doc-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--color-h-ffffff);
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.doc-step.current {
+  border-color: var(--color-h-92400e);
+  background: var(--color-h-fef3c7);
+  color: var(--color-h-92400e);
+}
+.doc-step.done {
+  border-color: var(--color-h-166534);
+  color: var(--color-h-166534);
+}
+.doc-form {
+  display: grid;
+  gap: 14px;
+  max-width: 680px;
+  padding: 18px var(--panel-inline) 22px;
+}
+.doc-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.doc-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.panel > .doc-hint {
+  padding: 14px var(--panel-inline);
+}
+.doc-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px var(--panel-inline);
+  padding: 10px 14px;
+  border: 1px solid var(--color-h-b91c1c);
+  border-radius: 10px;
+  background: var(--color-h-ffffff);
+  color: var(--color-h-b91c1c);
+  font-size: 14px;
+  font-weight: 600;
+}
+.doc-item .doc-error,
+.doc-form .doc-error {
+  margin: 0;
+}
+.doc-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px var(--panel-inline);
+  padding: 12px 14px;
+  border: 1px solid var(--color-h-92400e);
+  border-radius: 10px;
+  background: var(--color-h-fef3c7);
+  color: var(--color-h-92400e);
+  font-size: 14px;
+}
+.doc-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px var(--panel-inline);
+}
+.doc-queue-row + .doc-queue-row {
+  border-top: 1px solid var(--color-h-e9e6e1);
+}
+.doc-queue-main {
+  flex: 1;
+  min-width: 220px;
+}
+.doc-review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .doc-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.doc-review-grid .panel > .button {
+  margin: 0 var(--panel-inline) 18px;
+}
+.doc-section {
+  margin-top: 16px;
+  padding: 0 var(--panel-inline);
+}
+.doc-section:last-child {
+  padding-bottom: 20px;
+}
+.doc-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.doc-section ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+.doc-confidence {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+.doc-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-h-92400e);
+}
+.doc-item {
+  margin: 0 var(--panel-inline) 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-h-e9e6e1);
+  border-radius: 10px;
+  background: var(--color-h-ffffff);
+}
+.doc-item-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.doc-item-kind {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+.doc-item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.panel > .doc-item-actions {
+  margin-top: 0;
+  padding: 0 var(--panel-inline) 18px;
+}
+.doc-key-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 var(--panel-inline) 18px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.doc-key-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-h-b91c1c);
+}
+.doc-key-dot.set {
+  background: var(--color-h-166534);
+}
