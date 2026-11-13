@@ -1749,6 +1749,7 @@ export default function App() {
                       />
                     ) : (
                     <div className="table-scroll">
+                    <p>Open requirements counts the visible requirement register only. Staff readiness and New Hire Binder completion are separate; zero open requirements is not an all-clear result.</p>
                       <table>
                         <thead>
                           <tr>
@@ -1789,13 +1790,13 @@ export default function App() {
                                   )}
                                 </td>
                                 <td>
-                                  {
+                                  {can(session, "individuals.view") ? (
                                     data.requirements.filter(
                                       (r) =>
                                         r.owner === s.name &&
                                         r.status !== "Compliant",
                                     ).length
-                                  }
+                                  ) : "Unavailable in your access"}
                                 </td>
                                 {/* Body cells must follow the header order:
                                     Certificates, Assign role, Password. */}

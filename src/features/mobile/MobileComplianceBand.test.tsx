@@ -14,6 +14,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Requirement } from "../../domain";
 import { houseComplianceRows } from "../overview/houseCompliance";
+import { CONSENT_ITEM_CATEGORY } from "../overview/consentCompliance";
 import { MobileComplianceBandHouse } from "./MobileComplianceBand";
 
 function req(id: string, site: string, status: Requirement["status"]): Requirement {
@@ -78,4 +79,27 @@ test("house card: tracked house still renders its score, counts, and label", () 
     html,
     /aria-label="Willow House: 67% current, 2 of 3 complete\. Switch the mobile view to this home"/,
   );
+  // Requirements-only pool: the mini donut keeps the original prefix.
+  assert.match(html, /aria-label="Requirement status mix\./);
+  assert.ok(!html.includes("consents status mix"));
+});
+
+test("house card: combined requirement-and-consent pool names both in the mini donut's aria prefix", () => {
+  const consent: Requirement = {
+    ...req("c1", "Willow House", "Expired"),
+    category: CONSENT_ITEM_CATEGORY,
+  };
+  const row = houseComplianceRows(
+    [{ id: "site-willow", name: "Willow House" }],
+    [req("w1", "Willow House", "Compliant")],
+    "All sites",
+    { kind: "ready", items: [consent] },
+  )[0];
+  // The row's pool really is combined: 1 requirement + 1 consent.
+  assert.equal(row.total, 2);
+  assert.equal(row.consentTotal, 1);
+  const html = renderToStaticMarkup(
+    <MobileComplianceBandHouse row={row} onOpen={noop} />,
+  );
+  assert.match(html, /aria-label="Requirements and consents status mix\./);
 });

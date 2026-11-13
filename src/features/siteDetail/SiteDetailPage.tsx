@@ -1,3 +1,4 @@
+import { requirementPopulation } from "../overview/requirementPopulation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -186,6 +187,7 @@ export default function SiteDetailPage({
   const [medStatus, setMedStatus] = useState<MedSupplyStatus | null>(null);
   const [trips, setTrips] = useState<MileageTripView[] | null>(null);
   const [siteNotes, setSiteNotes] = useState<SiteShiftNoteView[] | null>(null);
+  const [dueItemsError, setDueItemsError] = useState("");
   const [dueItems, setDueItems] = useState<SiteDueItemsResult | null>(null);
   const [loading, setLoading] = useState<Partial<Record<SiteDetailTabId, boolean>>>({});
   const [tabError, setTabError] = useState<Partial<Record<SiteDetailTabId, string>>>({});
@@ -276,16 +278,10 @@ export default function SiteDetailPage({
           // #75 + #76: the Overview due-items list (missing Shift notes +
           // unmarked scheduled meds). Never leaves the panel blank.
           try {
+            setDueItemsError("");
             setDueItems(await api.getSiteDueItems(siteId));
           } catch {
-            setDueItems({
-              items: [],
-              shiftNoteCount: 0,
-              medCount: 0,
-              basedOnAssignedStaff: false,
-              serviceDate: "",
-              doseDate: "",
-            });
+            setDueItemsError("Due items unavailable. This is not an all-clear result.");
           }
         }
         if (tabId === "overview" || tabId === "audits") {
@@ -424,6 +420,7 @@ export default function SiteDetailPage({
   const siteReqMetrics = metrics(siteRequirements);
   const consentUnknown = consentScore.kind === "unknown";
   const siteConsentTallies = consentTalliesFromItems(siteRequirements);
+  const sitePopulation = requirementPopulation(siteRequirements, true, consentUnknown);
   // The same monthly site-review status the Overview site card summarizes as
   // "Review in place / Review open", carried here inside the home itself.
   const reviewInPlace = site
@@ -552,33 +549,39 @@ export default function SiteDetailPage({
           </div>
           <Badge
             status={
-              openRequirements.length || (dueItems?.items.length ?? 0)
+              dueItemsError ? "Unavailable" : !dueItems ? "Not assessed" : openRequirements.length || (dueItems?.items.length ?? 0)
                 ? "Needs attention"
                 : consentUnknown
                   ? "Checking consents"
-                  : "On track"
+                  : sitePopulation.status
             }
           />
         </div>
+        <p>{sitePopulation.explanation}</p>
         <div className="site-hero-dash">
-          <StatusMixDonut items={siteRequirements} />
+          <StatusMixDonut
+            items={siteRequirements}
+            includesConsents={sitePopulation.includesConsents}
+          />
           <div className="site-hero-scores site-hero-kpis" aria-label={`${site.name} status`}>
             <div className="site-hero-score">
               <strong>
                 {consentUnknown ? (
                   "—"
-                ) : (
+                ) : siteReqMetrics.total ? (
                   <>
                     {siteReqMetrics.score}
                     <small>%</small>
                   </>
+                ) : (
+                  sitePopulation.scoreText
                 )}
               </strong>
-              <span>Ready</span>
+              <span>{sitePopulation.includesConsents ? "Requirements and consents" : "Requirement register only"}</span>
               <div className="progress-track" aria-hidden="true">
                 <span
                   style={{
-                    width: `${consentUnknown ? 0 : siteReqMetrics.score}%`,
+                    width: `${consentUnknown || !siteReqMetrics.total ? 0 : siteReqMetrics.score}%`,
                   }}
                 />
               </div>
@@ -610,7 +613,7 @@ export default function SiteDetailPage({
               <span>Open</span>
             </div>
             <div className="site-hero-stat">
-              <strong>{dueItems ? dueItems.items.length : "—"}</strong>
+              <strong>{dueItemsError ? "Unavailable" : dueItems ? dueItems.items.length : "Loading…"}</strong>
               <span>Due items</span>
             </div>
             <div className="site-hero-stat">
@@ -704,7 +707,7 @@ export default function SiteDetailPage({
                 dueItems.shiftNoteCount > 0 && (
                   <p className="muted site-detail-note">Based on assigned house staff.</p>
                 )}
-              {!dueItems || dueItems.items.length === 0 ? (
+              {dueItemsError ? <p role="alert">{dueItemsError}</p> : !dueItems ? <p role="status">Loading due items…</p> : dueItems.items.length === 0 ? (
                 <p className="muted due-items-empty">{DUE_ITEMS_EMPTY_COPY}</p>
               ) : (
                 <ul className="record-list">

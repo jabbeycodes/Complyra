@@ -67,7 +67,7 @@ export function PersonalComplianceCardView({
       ) : summary.total === 0 ? (
         <p className="personal-compliance-note">
           No requirements assigned — nothing is tracking against your role
-          right now.
+          right now. Readiness is not assessed; your New Hire Binder is separate.
         </p>
       ) : (
         <>
@@ -150,7 +150,7 @@ export function PersonalComplianceStripView({
         ) : loading ? (
           <span>Loading your compliance…</span>
         ) : summary.total === 0 ? (
-          <span>No requirements assigned to your role right now.</span>
+          <span>No requirements assigned to your role right now. Readiness is not assessed; your New Hire Binder is separate.</span>
         ) : (
           <span>
             <strong>{summary.percentCurrent}%</strong> current ·{" "}

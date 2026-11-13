@@ -414,12 +414,12 @@ test("overview shows agency scores, assigned site cards, and personal work", asy
     page.getByRole("heading", { name: "Agency compliance" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Cedar House compliance/ }),
+    page.getByRole("button", { name: /Cedar House requirements and consents/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: /Willow House compliance/ }),
+    page.getByRole("button", { name: /Willow House requirements and consents/ }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Willow House compliance/ }).click();
+  await page.getByRole("button", { name: /Willow House requirements and consents/ }).click();
   await expect(
     page.getByRole("heading", { name: "No overdue items" }),
   ).toBeVisible();
