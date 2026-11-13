@@ -7,7 +7,7 @@
  * uses "eMAR" / "T-Log" jargon; Individuals wording only.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Pill } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pill } from "lucide-react";
 import { Empty } from "../components";
 import { useData } from "../data/DataProvider";
 import { canLogDoseException } from "../data/chart";
@@ -15,6 +15,11 @@ import { MED_ADMIN_CLEARANCE_MESSAGE } from "../data/medClearance";
 import { useMedAdminLock } from "./medAdminLock";
 import MedConsentWarningGate from "./consents/MedConsentWarning";
 import { centralTodayIso } from "../data/menuRecords";
+import {
+  formatCentralTime,
+  marDayHeading,
+  shiftIsoDate,
+} from "./mobile/mar";
 import { formatClock, hhmmToMinutes } from "../data/dueItems";
 import {
   medOnHand,
@@ -23,6 +28,7 @@ import {
   type MedOnHand,
 } from "../data/medInventory";
 import type {
+  DoseExceptionKind,
   MedDoseMark,
   MedDoseMarkStatus,
   MedInventoryView,
@@ -34,6 +40,11 @@ const STATUS_LABEL: Record<MedDoseMarkStatus, string> = {
   missed: "Missed",
   loa: "LOA",
   on_hold: "On hold",
+};
+const EXCEPTION_LABEL: Record<DoseExceptionKind, string> = {
+  refused: "Refused",
+  held: "Held",
+  wasted: "Wasted",
 };
 
 interface DoseRow {
@@ -58,6 +69,10 @@ export default function MarCard({
   // phone MAR writes and the due-item clock uses. The old UTC day made
   // every dose read "Not marked" from 7 p.m. on, though the mark existed.
   const today = centralTodayIso();
+  // Dated view (mirrors the phone MAR): the card opens on Central today
+  // and can page to any other day; marks and exceptions load for the
+  // viewed day, while the on-hand countdown stays a today fact.
+  const [dateIso, setDateIso] = useState(today);
   const [views, setViews] = useState<MedInventoryView[] | null>(null);
   const [marks, setMarks] = useState<MedDoseMark[]>([]);
   const [error, setError] = useState("");
@@ -98,7 +113,7 @@ export default function MarCard({
 
   async function reloadMarks() {
     try {
-      setMarks(await api.getMedDoseMarks(individualId, today));
+      setMarks(await api.getMedDoseMarks(individualId, dateIso));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -113,7 +128,7 @@ export default function MarCard({
     setRangeLoad("loading");
     Promise.all([
       api.getMedInventory(individualId),
-      api.getMedDoseMarks(individualId, today),
+      api.getMedDoseMarks(individualId, dateIso),
     ])
       .then(([inv, m]) => {
         if (!live) return;
@@ -126,7 +141,7 @@ export default function MarCard({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, individualId, today]);
+  }, [api, individualId, dateIso]);
 
   const doses = useMemo<DoseRow[]>(() => {
     const rows: DoseRow[] = [];
@@ -144,6 +159,18 @@ export default function MarCard({
     }
     return rows.sort((a, b) => a.minutes - b.minutes);
   }, [views]);
+
+  // Exceptions (refused / held / wasted) recorded on the viewed day —
+  // the phone MAR's "Other" list, filtered the same way.
+  const dayExceptions = useMemo(
+    () =>
+      (views ?? []).flatMap((view) =>
+        view.doseExceptions
+          .filter((exception) => exception.occurredOn === dateIso)
+          .map((exception) => ({ view, exception })),
+      ),
+    [views, dateIso],
+  );
 
   const onHandByMed = new Map<string, MedOnHand>();
   for (const view of views ?? []) {
@@ -173,7 +200,13 @@ export default function MarCard({
     try {
       await api.markMedDose({
         medicationId,
-        doseDate: today,
+        // The viewed day, exactly as the phone MAR passes it: the API
+        // judges the recording window from this date, so a past day's
+        // first mark comes back "past its recording window" and lands
+        // through the late-reason retry below — never silently
+        // back-dated — and an early/future mark is refused by the API
+        // and shown as an error.
+        doseDate: dateIso,
         doseTime,
         status,
         lateReason,
@@ -208,12 +241,22 @@ export default function MarCard({
     <section className="chart-widget mar-card" aria-labelledby="mar-heading">
       <div className="chart-widget-head">
         <h2 id="mar-heading">
-          <Pill size={16} aria-hidden="true" /> Medication administration — today
+          <Pill size={16} aria-hidden="true" /> Medication administration —{" "}
+          {dateIso === today ? "today" : marDayHeading(dateIso, today)}
         </h2>
       </div>
       <p className="muted mar-help">
-        Scheduled doses for today. Marking Given, Missed, LOA, or On hold clears
-        the dose from the site due-items list.
+        {dateIso === today ? (
+          <>
+            Scheduled doses for today. Marking Given, Missed, LOA, or On hold
+            clears the dose from the site due-items list.
+          </>
+        ) : (
+          <>
+            Scheduled doses for {marDayHeading(dateIso, today)}. Recording a
+            dose for a past day asks for a late-entry reason.
+          </>
+        )}
       </p>
 
       {medLocked && roleCanMark && (
@@ -225,6 +268,49 @@ export default function MarCard({
           mark. Renders nothing while the register loads. */}
       <MedConsentWarningGate individualId={individualId} />
 
+      {/* Day navigation, mirroring the phone MAR: page by day, with a
+          one-tap return to today whenever another day is on screen. */}
+      <div className="mar-daynav">
+        <button
+          type="button"
+          className="button mar-daynav-button"
+          aria-label="Previous day"
+          onClick={() => {
+            setDateIso((value) => shiftIsoDate(value, -1));
+            setLatePrompt(null);
+          }}
+        >
+          <ChevronLeft size={18} aria-hidden="true" />
+        </button>
+        <span className="mar-daynav-label">
+          <strong>{marDayHeading(dateIso, today)}</strong>
+          <span className="muted"> · All times Central</span>
+        </span>
+        <button
+          type="button"
+          className="button mar-daynav-button"
+          aria-label="Next day"
+          onClick={() => {
+            setDateIso((value) => shiftIsoDate(value, 1));
+            setLatePrompt(null);
+          }}
+        >
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+        {dateIso !== today && (
+          <button
+            type="button"
+            className="button mar-daynav-today"
+            onClick={() => {
+              setDateIso(today);
+              setLatePrompt(null);
+            }}
+          >
+            Back to today
+          </button>
+        )}
+      </div>
+
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -235,7 +321,9 @@ export default function MarCard({
         <Empty
           mark="none"
           title="No scheduled doses"
-          text="No scheduled medications with dose times for today."
+          text={`No scheduled medications with dose times for ${
+            dateIso === today ? "today" : "this day"
+          }.`}
         />
       )}
 
@@ -343,6 +431,35 @@ export default function MarCard({
             );
           })}
         </ul>
+      )}
+
+      {dayExceptions.length > 0 && (
+        <div>
+          <h3 className="stack-subhead">
+            Exceptions — {marDayHeading(dateIso, today)}
+          </h3>
+          <ul className="record-list">
+            {dayExceptions.map(({ view, exception }) => (
+              <li key={exception.id} className="record-row">
+                <div className="mar-row-body">
+                  <strong>
+                    {view.medicationName} {view.strength}
+                  </strong>
+                  <span className="muted">
+                    {" "}
+                    · {EXCEPTION_LABEL[exception.kind]}
+                  </span>
+                  <p className="muted mar-status">
+                    {exception.pillsAffected} pill
+                    {exception.pillsAffected === 1 ? "" : "s"} ·{" "}
+                    {exception.reason} · {formatCentralTime(exception.createdAt)}{" "}
+                    Central
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );
