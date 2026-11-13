@@ -5388,6 +5388,22 @@ th {
   margin: 4px 0 8px;
   font-size: 13px;
 }
+/* Desktop MAR dated view: the phone MAR's day paging, in chart chrome. */
+.mar-daynav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.mar-daynav-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+}
+.mar-daynav-label {
+  font-size: 14px;
+}
 .alone-time-form {
   display: flex;
   flex-direction: column;
