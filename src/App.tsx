@@ -31,6 +31,8 @@ import {
   Upload,
   Check,
   FileText,
+  FileUp,
+  FileSearch,
   LockKeyhole,
   X,
   Send,
@@ -114,7 +116,12 @@ import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
 import SignatureSettingsSection from "./features/signatures/SignatureSettingsSection";
 import AiSettingsPage from "./features/documents/AiSettingsPage";
-import { canManageAiSettings } from "./features/documents/documents";
+import DocumentUploadCard from "./features/documents/DocumentUploadCard";
+import ExtractionReviewPage from "./features/documents/ExtractionReviewPage";
+import {
+  canManageAiSettings,
+  canReviewDocuments,
+} from "./features/documents/documents";
 import { downloadBlob } from "./data/openFile";
 import {
   buildComplianceReportPdf,
@@ -251,6 +258,12 @@ export default function App() {
   // consent-inclusive verdicts rather than present partial figures.
   const consentRegisterState = useConsentRegister();
   const [page, setPage] = useState("Overview");
+  // PCSP-DOCUMENTS-MOUNT (2026-11-12): the upload card hands a finished
+  // extraction to the review page through this selection; null shows the
+  // review queue itself.
+  const [extractionUploadId, setExtractionUploadId] = useState<string | null>(
+    null,
+  );
   const notifications = useWorkspaceNotifications();
   // MESSAGING: unread total for the nav badge + chart deep-link focus.
   const messageUnread = useMessageUnread();
@@ -751,6 +764,19 @@ export default function App() {
     window.history.replaceState(null, "", `#${encodeURIComponent(next)}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+  // PCSP-DOCUMENTS-MOUNT (2026-11-12): upload completion hands off to the
+  // extraction review page with the new upload selected — for roles that
+  // also hold documents.review. Upload-only roles (house managers) stay on
+  // the upload card's ready state with a toast; the review page is gated
+  // on documents.review, so navigate() would refuse them anyway.
+  function handleDocumentUploaded(uploadId: string) {
+    setExtractionUploadId(uploadId);
+    if (session && canReviewDocuments(session)) {
+      navigate("Extraction review");
+    } else {
+      notify("Extraction is ready for review.");
+    }
+  }
   function openPersonChart(name: string, sectionId?: string) {
     setPerson(name);
     setChartSection(sectionId ?? null);
@@ -938,7 +964,11 @@ export default function App() {
       items: [
         ["Requirements", ListChecks],
         ["Documents", FolderOpen],
+        // PCSP-DOCUMENTS-MOUNT (2026-11-12): AI document ingestion —
+        // pageVisible gates on documents.upload / documents.review.
+        ["Document upload", FileUp],
         ["Review queue", ClipboardCheck],
+        ["Extraction review", FileSearch],
         ["Audit center", ShieldCheck],
         ["Audit Me", ClipboardCheck],
         // QA-AUDIT-NAV (2026-09-14): quarterly site QA audits with
@@ -1081,6 +1111,9 @@ export default function App() {
                   key={name}
                   onClick={() => {
                     if (name === "Report Library") setReportSitePreset(null);
+                    // A fresh nav entry lands on the review queue, not on
+                    // whichever extraction was last selected.
+                    if (name === "Extraction review") setExtractionUploadId(null);
                     navigate(name);
                   }}
                   aria-current={page === name ? "page" : undefined}
@@ -2271,6 +2304,19 @@ export default function App() {
               )}
               {page === "Recognition" && <RecognitionPage />}
               {page === "AI settings" && <AiSettingsPage />}
+              {/* PCSP-DOCUMENTS-MOUNT (2026-11-12): AI document ingestion.
+                  Page gates live in pageVisible (documents.upload for the
+                  upload card, documents.review for the review queue); the
+                  components re-check the same permissions themselves. */}
+              {page === "Document upload" && (
+                <DocumentUploadCard onUploaded={handleDocumentUploaded} />
+              )}
+              {page === "Extraction review" && (
+                <ExtractionReviewPage
+                  initialUploadId={extractionUploadId}
+                  onSelectUpload={setExtractionUploadId}
+                />
+              )}
               {/* QA-AUDIT-PAGE (2026-09-14) */}
               {page === "QA Review" && <QaAuditsPage />}
               {page === "Report Library" && (
