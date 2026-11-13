@@ -331,6 +331,7 @@ import {
 import { clockInIsLate, prnFollowupStillOpen, recognitionAwardProblem } from "./lateness";
 import { agencyClock, dueItemClock, houseManagerRecipientIds, medUnrecordedRowRetired, operatingReminderNotices, prnNoticeKeys, reminderRecipientIds, siteHasOverdueMedDose, unmarkedDoseRefreshes, type ReminderMembership } from "./operatingReminders";
 import { canRetireStaleMissingNoteNotices, operatingNoticeBlockReason } from "./operatingNoticeGate";
+import { NOTIFICATION_RECENT_WINDOW, windowNotifications } from "../features/notifications/notify";
 import {
   MED_ADMIN_CLEARANCE_MESSAGE,
   roleRequiresMedClearance,
@@ -1993,21 +1994,63 @@ export class HostedApi implements ComplyraApi {
       for (const person of people ?? [])
         await this.retireStaleConsentNotices(session, (person as { id: string }).id);
     }
-    const { data, error } = await this.client.from("notifications")
-      .select("*, notification_reads!left(read_at)").eq("agency_id", session.agencyId)
-      .order("created_at", { ascending: false }).limit(100);
-    throwIf(error, "Could not load notifications.");
-    const mapped = (data ?? [])
+    const fetched = await this.fetchNotificationWindow(session);
+    const mapped = fetched
       // Wave 7M: an "Unmarked medication" row retires once the sweep in
       // this same call verified the site has no overdue unmarked dose.
       .filter((row) => !medUnrecordedRowRetired(
         { type: String(row.type ?? ""), entityId: row.entity_id ? String(row.entity_id) : null },
         medClearSiteIds,
-      ))
-      .map((row) => ({ ...row,
-        read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
-      })) as import("../features/notifications/notify").NotificationRow[];
+      ));
     return this.filterStaleConsentNotifications(session, mapped);
+  }
+
+  /** Page size and page cap for the unread pass of the bell fetch. */
+  private static readonly UNREAD_PAGE_SIZE = 200;
+  private static readonly UNREAD_PAGE_CAP = 5;
+
+  /**
+   * Wave 4A (retest batches 305-306): the bell fetched only the newest
+   * 100 visible rows. A nurse's visible set was 547 rows — hundreds of
+   * read med.prn_repeat / med.unrecorded rows — and her unread consent
+   * alerts ranked ~367, so they never loaded. Two passes now:
+   *   1. the newest NOTIFICATION_RECENT_WINDOW rows of any state (the old
+   *      fetch, so recent history reads the same), and
+   *   2. rows whose own read_at is null, newest first, paged. For
+   *      role-addressed rows the per-reader read lives in
+   *      notification_reads, so a row can be null here yet read by this
+   *      user; those are dropped after mapping and only truly unread rows
+   *      are kept from this pass. Paging stops at a short page or after
+   *      UNREAD_PAGE_CAP pages.
+   * windowNotifications merges both by id, newest first. read_at is
+   * mapped from notification_reads exactly as before.
+   */
+  private async fetchNotificationWindow(
+    session: SessionUser,
+  ): Promise<import("../features/notifications/notify").NotificationRow[]> {
+    const select = "*, notification_reads!left(read_at)";
+    const mapRow = (row: Record<string, any>) => ({ ...row,
+      read_at: row.read_at ?? row.notification_reads?.[0]?.read_at ?? null,
+    }) as import("../features/notifications/notify").NotificationRow;
+    const recent = await this.client.from("notifications")
+      .select(select).eq("agency_id", session.agencyId)
+      .order("created_at", { ascending: false }).limit(NOTIFICATION_RECENT_WINDOW);
+    throwIf(recent.error, "Could not load notifications.");
+    const rows = (recent.data ?? []).map(mapRow);
+    // A short recent page holds every visible row already.
+    if ((recent.data ?? []).length >= NOTIFICATION_RECENT_WINDOW) {
+      const size = HostedApi.UNREAD_PAGE_SIZE;
+      for (let page = 0; page < HostedApi.UNREAD_PAGE_CAP; page++) {
+        const { data, error } = await this.client.from("notifications")
+          .select(select).eq("agency_id", session.agencyId).is("read_at", null)
+          .order("created_at", { ascending: false }).order("id", { ascending: false })
+          .range(page * size, page * size + size - 1);
+        throwIf(error, "Could not load notifications.");
+        for (const row of (data ?? []).map(mapRow)) if (!row.read_at) rows.push(row);
+        if ((data ?? []).length < size) break;
+      }
+    }
+    return windowNotifications(rows, NOTIFICATION_RECENT_WINDOW);
   }
 
   /**

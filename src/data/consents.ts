@@ -304,8 +304,14 @@ export const CONSENT_ALERT_TYPES = ['consent.missing', 'consent.expiring', 'cons
  * outside this set are stale and must retire (batch 24: the bell kept
  * saying "Consent needs attention — Missing" for consents the chart
  * already showed Active, because nothing ever retired the row).
+ *
+ * "Today" is the agency's Central day, the same day consentGaps and the
+ * SQL sweep (America/Chicago) judge. It used to default to the device's
+ * local day, so a viewer outside Central near midnight judged a consent
+ * reviewed "today" as Expired and dropped the sweep's live expiring row
+ * as stale (Wave 4A).
  */
-export function consentAlertPairs(register: ConsentRegister, today = todayStamp()): Set<string> {
+export function consentAlertPairs(register: ConsentRegister, today = centralTodayIso()): Set<string> {
     return new Set(consentGaps(register, today).map(gap => `consent.${gap.alert}:${gap.row?.id ?? `${gap.person.id}:${gap.type.id}`}`));
 }
 export function consentAlertPairKey(type: string, entityId: string | null): string {

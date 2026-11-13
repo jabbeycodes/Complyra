@@ -261,6 +261,7 @@ import {
   delegationPublishedPayload,
   delegationAckOverduePayload,
   shiftNoteDeepLink,
+  NOTIFICATION_RECENT_WINDOW,
 } from "../features/notifications/notify";
 import {
   addDaysIso,
@@ -4084,7 +4085,10 @@ export class LocalApi implements ComplyraApi {
         title: row.title, body: row.body, deep_link: row.deepLink, entity_type: row.entityType,
         entity_id: row.entityId, dedupe_key: row.dedupeKey, created_at: row.createdAt,
         read_at: row.userId ? row.readAt : this.store.db.notificationReads?.[`${session.userId}:${row.id}`] ?? null,
-      })).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100);
+      })).sort((a, b) => b.created_at.localeCompare(a.created_at))
+      // Wave 4A: newest 100 plus every unread row — unread alerts are
+      // never buried past the window by bulk read history.
+      .filter((row, index) => index < NOTIFICATION_RECENT_WINDOW || !row.read_at);
   }
 
   async markNotificationsRead(ids: string[]) {
