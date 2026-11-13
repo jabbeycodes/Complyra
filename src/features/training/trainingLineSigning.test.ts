@@ -20,6 +20,9 @@ import {
 } from "../signatures/signatureUtils";
 import { siteChecklistTopics } from "./topics";
 import { saveAndInitialTrainingLine } from "./trainingLineSigning";
+import { trainingLineSealState } from "./lineSeal";
+import type { ComplyraApi } from "../../data/localApi";
+import type { TrainingRequirementView } from "../../data/types";
 
 const TRAINEE = "taylor.reed";
 const PNG_1X1 =
@@ -64,6 +67,8 @@ async function fixture() {
         staffUserId: trainee.id,
         requirement,
         reinit,
+        // What the pre-fix page passed (ignored now: the stamp seals the
+        // stored trainer name). Kept so this file also runs on old trees.
         trainerName: hm.name,
         input: {
           initials: "TR",
@@ -73,9 +78,45 @@ async function fixture() {
           hoursTotal: 2,
           hoursWithHm: 1,
         },
-      }),
+      } as Parameters<typeof saveAndInitialTrainingLine>[1]),
     );
-  return { api, store, session, trainee, hm, lineFor, sign };
+  const events = (line: TrainingRequirementView) =>
+    api.getSignatureEvents("training_checklist", `staff:${trainee.id}:${line.siteId}`);
+  /** The seal verdict the Training page would render for the line now. */
+  const seal = async () => {
+    const line = await lineFor(trainee.id);
+    return trainingLineSealState(line, await events(line));
+  };
+  return { api, store, session, trainee, hm, lineFor, sign, events, seal, created };
+}
+
+/**
+ * The hosted save, as the DSP actually experiences it: the sign-off row is
+ * written, but the follow-up training_requirements status UPDATE is filtered
+ * by RLS (manager-only update policy) and silently matches zero rows.
+ */
+function withHostedRlsStatusDrop(api: LocalApi, store: MemoryStore): ComplyraApi {
+  return new Proxy(api, {
+    get(target, prop, receiver) {
+      if (prop === "initialRequirementLine") {
+        return async (requirementId: string, input: unknown) => {
+          const coll = (store.db as unknown as {
+            trainingRequirements?: Array<{ id: string; status: string }>;
+          }).trainingRequirements;
+          const row = coll?.find((r) => r.id === requirementId);
+          const statusBefore = row?.status;
+          await (target.initialRequirementLine as (a: string, b: unknown) => Promise<void>).call(
+            target,
+            requirementId,
+            input,
+          );
+          if (row && statusBefore) row.status = statusBefore;
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as ComplyraApi;
 }
 
 test("signing with no fresh password prompts for one and writes nothing", async () => {
@@ -221,4 +262,143 @@ test("edge function: identity checks run before the version check, which runs be
     /signoff_version !== version/,
     "a version that does not exist is always refused",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Wave 4B (batches 307-310): a correct-password initialing invalidated itself.
+// ---------------------------------------------------------------------------
+
+test("save -> stamp -> verify: a correct initialing seals VALID, reads complete and counts", async () => {
+  const fx = await fixture();
+  await fx.api.verifySigningPassword(DEMO_PASSWORD);
+  assert.equal(await fx.sign(fx.trainee.id), "initialed");
+  const line = await fx.lineFor(fx.trainee.id);
+  assert.equal(line.resolvedStatus, "complete");
+  assert.equal(await fx.seal(), "valid");
+  const profile = await fx.api.getStaffTrainingProfile(fx.trainee.id);
+  assert.equal(profile.counts.complete, 1);
+  assert.equal(profile.counts.pending, 0);
+  assert.equal(profile.hoursTotal, 2);
+  assert.equal(profile.hoursWithHm, 1);
+});
+
+test("hosted RLS drop: the DSP's line still reads complete with a valid seal after save + stamp", async () => {
+  const fx = await fixture();
+  await fx.api.verifySigningPassword(DEMO_PASSWORD);
+  const hostedLike = withHostedRlsStatusDrop(fx.api, fx.store);
+  const requirement = await fx.lineFor(fx.trainee.id);
+  await saveAndInitialTrainingLine(hostedLike, {
+    sessionUserId: fx.trainee.id,
+    staffUserId: fx.trainee.id,
+    requirement,
+    trainerName: fx.hm.name,
+    input: {
+      initials: "TR",
+      signedOn: "2026-10-10",
+      trainerUserId: fx.hm.id,
+      method: "shadowing",
+      hoursTotal: 1,
+      hoursWithHm: 1,
+    },
+  } as Parameters<typeof saveAndInitialTrainingLine>[1]);
+  const line = await fx.lineFor(fx.trainee.id);
+  assert.equal(line.resolvedStatus, "complete", "a saved sign-off completes the line");
+  assert.equal(await fx.seal(), "valid", "the seal survives a reload");
+  const profile = await fx.api.getStaffTrainingProfile(fx.trainee.id);
+  assert.equal(profile.counts.pending, 0, "the line no longer counts as open");
+});
+
+test("the stamp seals the STORED sign-off, not the caller's trainer name or a missing date", async () => {
+  const fx = await fixture();
+  await fx.api.verifySigningPassword(DEMO_PASSWORD);
+  const requirement = await fx.lineFor(fx.trainee.id);
+  // A DSP's hosted workspace roster can name the trainer "Unknown" (profiles
+  // RLS); the save re-resolves the name server-side. The modal's date may
+  // also be absent, which the save turns into today.
+  const args = {
+    sessionUserId: fx.trainee.id,
+    staffUserId: fx.trainee.id,
+    requirement,
+    trainerName: "Unknown",
+    input: {
+      initials: "TR",
+      trainerUserId: fx.hm.id,
+      hoursTotal: 1,
+      hoursWithHm: 0,
+    },
+  } as Parameters<typeof saveAndInitialTrainingLine>[1];
+  assert.equal(await saveAndInitialTrainingLine(fx.api, args), "initialed");
+  const line = await fx.lineFor(fx.trainee.id);
+  assert.equal(line.signoff?.trainerName, fx.hm.name);
+  assert.equal(await fx.seal(), "valid");
+});
+
+test("an invalid seal on the owner's line is repaired by Re-initial (fresh version, valid seal)", async () => {
+  const fx = await fixture();
+  await fx.api.verifySigningPassword(DEMO_PASSWORD);
+  await fx.sign(fx.trainee.id);
+  // The signed content changes underneath the stamp.
+  const coll = (fx.store.db as unknown as {
+    trainingSignoffs: Array<{ requirementId: string; hoursTotal: number }>;
+  }).trainingSignoffs;
+  coll.find((row) => row.requirementId === fx.created.id)!.hoursTotal = 3;
+  assert.equal(await fx.seal(), "invalid");
+  assert.equal(await fx.sign(fx.trainee.id, true), "initialed");
+  const line = await fx.lineFor(fx.trainee.id);
+  assert.equal(line.signoff?.signoffVersion, 2);
+  assert.equal(await fx.seal(), "valid");
+});
+
+test("a manager-saved line reads 'missing' until its owner stamps it", async () => {
+  const fx = await fixture();
+  await fx.api.signOut();
+  const admin = await fx.api.signIn(login(DEMO_ADMIN_USERNAME));
+  assert.equal(await fx.sign(admin.userId), "saved_for_staff");
+  assert.equal(await fx.seal(), "missing");
+});
+
+test("hosted view: a saved non-N/A sign-off completes a line whose stored status lagged", async () => {
+  const api = new HostedApi({} as SupabaseClient);
+  const view = (api as unknown as {
+    p2RequirementView(
+      requirement: Record<string, unknown>,
+      signoffs: Map<string, unknown>,
+      individualNames: Map<string, string>,
+      today: string,
+    ): Promise<TrainingRequirementView>;
+  }).p2RequirementView.bind(api);
+  const requirement = {
+    id: "r1",
+    agencyId: "a1",
+    userId: "u1",
+    topicId: siteChecklistTopics()[0].id,
+    individualId: null,
+    siteId: "s1",
+    source: "checklist",
+    status: "pending",
+    dueOn: "2026-01-01",
+  };
+  const signoff = { requirementId: "r1", na: false, signoffVersion: 1 };
+  const done = await view(requirement, new Map([["r1", signoff]]), new Map(), "2026-11-05");
+  assert.equal(done.resolvedStatus, "complete");
+  const open = await view(requirement, new Map(), new Map(), "2026-11-05");
+  assert.equal(open.resolvedStatus, "overdue", "no sign-off: the stored status still rules");
+  const waived = await view(
+    { ...requirement, status: "waived_na" },
+    new Map([["r1", { ...signoff, na: true }]]),
+    new Map(),
+    "2026-11-05",
+  );
+  assert.equal(waived.resolvedStatus, "waived_na");
+});
+
+test("migration 20261105120000 completes lines from sign-offs and backfills stranded ones", () => {
+  const sql = readFileSync(
+    "supabase/migrations/20261105120000_training_signoff_completes_line.sql",
+    "utf8",
+  );
+  assert.match(sql, /security definer/);
+  assert.match(sql, /after insert or update of na, signoff_version on public\.training_signoffs/);
+  assert.match(sql, /status not in \('complete', 'waived_na'\)/);
+  assert.match(sql, /update public\.training_requirements r\s+set status = 'complete'\s+from public\.training_signoffs s/);
 });

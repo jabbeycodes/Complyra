@@ -371,6 +371,7 @@ import {
   computeNextDueOn,
   evaluateInRatioGate,
   LOCKED_TRAINING_SHEET_MESSAGE,
+  lineStatusWithSignoff,
   resolveRequirementStatus,
   sumHours,
   validateTrainingLineInput,
@@ -9445,7 +9446,11 @@ export class LocalApi implements ComplyraApi {
       signoff: signoff
         ? { ...signoff, signoffVersion: signoff.signoffVersion ?? 1 }
         : null,
-      resolvedStatus: resolveRequirementStatus(requirement.status, requirement.dueOn, today),
+      resolvedStatus: resolveRequirementStatus(
+        lineStatusWithSignoff(requirement.status, signoff),
+        requirement.dueOn,
+        today,
+      ),
     };
   }
 
