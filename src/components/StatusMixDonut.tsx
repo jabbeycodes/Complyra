@@ -11,7 +11,21 @@ const SLICES = [
 const RADIUS = 36;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export default function StatusMixDonut({ items }: { items: Requirement[] }) {
+export default function StatusMixDonut({
+  items,
+  includesConsents = false,
+}: {
+  items: Requirement[];
+  /**
+   * True when the rendered pool includes scored consent items. Callers
+   * pass requirementPopulation(items).includesConsents (the population
+   * contract in features/overview) — this component sits below features
+   * and cannot import it. The label then names both populations,
+   * matching the population's scopeName; the default keeps the
+   * requirements-only wording byte-identical.
+   */
+  includesConsents?: boolean;
+}) {
   const mix = statusMix(items);
   const rows = SLICES.map((slice) => ({
     ...slice,
@@ -35,7 +49,10 @@ export default function StatusMixDonut({ items }: { items: Requirement[] }) {
     .join(", ");
 
   return (
-    <figure className="status-mix" aria-label={`Requirement status mix. ${summary}`}>
+    <figure
+      className="status-mix"
+      aria-label={`${includesConsents ? "Requirements and consents" : "Requirement"} status mix. ${summary}`}
+    >
       <svg
         className="status-mix-chart"
         viewBox="0 0 96 96"

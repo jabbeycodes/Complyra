@@ -126,6 +126,8 @@ export interface TeamComplianceSummary {
   fullyCurrent: number;
   /** Staff with at least one missing/expired item. */
   needAttention: number;
+  /** No applicable readiness requirements: never a passing assessment. */
+  unassessed: number;
 }
 
 export function teamComplianceSummary(
@@ -137,8 +139,9 @@ export function teamComplianceSummary(
   }
   return {
     total: rollupsByStaff.length,
-    fullyCurrent: rollupsByStaff.length - needAttention,
+    fullyCurrent: rollupsByStaff.filter(items => items.length > 0 && !items.some(i => i.status === "missing_or_expired")).length,
     needAttention,
+    unassessed: rollupsByStaff.filter(items => items.length === 0).length,
   };
 }
 

@@ -1,3 +1,4 @@
+import { requirementPopulation } from "../overview/requirementPopulation";
 /**
  * Mobile home compliance band — the visualization the founder asked
  * never to leave off a homepage (2026-10-31): the personal compliance
@@ -143,7 +144,20 @@ const RING_C = 2 * Math.PI * RING_R;
  * track, slice colors, and center total) drawn from the same statusMix
  * counts, sized to sit in a mini card.
  */
-function HouseMiniDonut({ slices }: { slices: HouseSlice[] }) {
+function HouseMiniDonut({
+  slices,
+  includesConsents = false,
+}: {
+  slices: HouseSlice[];
+  /**
+   * True when the slices were counted from a pool that includes scored
+   * consent items — the caller passes
+   * requirementPopulation(row.items).includesConsents, the same
+   * detection the desktop StatusMixDonut label uses, so the aria
+   * prefix names the population the ring actually renders.
+   */
+  includesConsents?: boolean;
+}) {
   const total = houseSliceTotal(slices);
   let offset = 0;
   const arcs = slices.map((slice) => {
@@ -165,7 +179,7 @@ function HouseMiniDonut({ slices }: { slices: HouseSlice[] }) {
       width="76"
       height="76"
       role="img"
-      aria-label={`Requirement status mix. ${summary}`}
+      aria-label={`${includesConsents ? "Requirements and consents" : "Requirement"} status mix. ${summary}`}
     >
       <circle
         cx="48"
@@ -248,7 +262,10 @@ export function MobileComplianceBandHouse({
       <span className="msh-band-house-name">{row.siteName}</span>
       {hasDonut ? (
         <>
-          <HouseMiniDonut slices={houseSlices(row)} />
+          <HouseMiniDonut
+            slices={houseSlices(row)}
+            includesConsents={requirementPopulation(row.items).includesConsents}
+          />
           <span className="msh-band-house-score">
             <strong>{row.score}%</strong> current
           </span>
@@ -258,7 +275,9 @@ export function MobileComplianceBandHouse({
           <small className="msh-status-text">
             {row.overdue > 0
               ? `${row.overdue} need${row.overdue === 1 ? "s" : ""} attention`
-              : "Nothing overdue"}
+              : row.total
+                ? "No overdue requirements"
+                : "Not assessed — consents, monthly checks and binders are separate"}
             {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
           </small>
           {row.consentTotal > 0 && (
@@ -272,7 +291,9 @@ export function MobileComplianceBandHouse({
         </>
       ) : (
         <span className="msh-band-house-empty">
-          No requirements are tracked for this house yet.
+          {requirementPopulation(row.items).scoreText}. No requirements are
+          tracked for this house yet. Consents, monthly checks and binders
+          are assessed separately.
         </span>
       )}
     </button>

@@ -1,3 +1,4 @@
+import { requirementPopulation } from "./requirementPopulation";
 /**
  * HouseComplianceDonuts — the first content on the manager Overview
  * (founder directive, 2026-10-28: "Manager overview should have the donut
@@ -102,7 +103,7 @@ export default function HouseComplianceDonuts({
                 {row.siteName}
               </button>
               {!row.consentUnknown && row.total + row.review > 0 && (
-                <Badge status={row.overdue ? "Needs attention" : "On track"} />
+                <Badge status={requirementPopulation(row.items).status} />
               )}
             </div>
             {row.consentUnknown ? (
@@ -120,7 +121,10 @@ export default function HouseComplianceDonuts({
                     : " · nothing overdue"}
                   {row.dueSoon > 0 ? ` · ${row.dueSoon} due soon` : ""}
                 </p>
-                <StatusMixDonut items={row.items} />
+                <StatusMixDonut
+                  items={row.items}
+                  includesConsents={requirementPopulation(row.items).includesConsents}
+                />
                 {row.consentTotal > 0 && (
                   <p className="house-compliance-team">
                     Consents: {row.consentCurrent} of {row.consentTotal}{" "}
@@ -134,17 +138,17 @@ export default function HouseComplianceDonuts({
             ) : (
               // #179 follow-up: an untracked house never claims 100%.
               <p className="house-compliance-empty">
-                No requirements are tracked for this house yet.
+                No requirements are tracked for this house yet. Consents, monthly checks, binders and DMH readiness are assessed separately.
               </p>
             )}
             {(() => {
               const team = teamBySite.get(row.siteId);
-              if (!team || team.total === 0) return null;
+              if (!team || team.total === 0) return <p>Team readiness unavailable or no staff population in this scope.</p>;
               return (
                 <p className="house-compliance-team">
                   Team compliance: {team.fullyCurrent} of {team.total} staff
-                  fully current · {team.needAttention} need
-                  {team.needAttention === 1 ? "s" : ""} attention
+                  current in assigned readiness checks · {team.needAttention} need
+                  {team.needAttention === 1 ? "s" : ""} attention · {team.unassessed} not assessed
                 </p>
               );
             })()}

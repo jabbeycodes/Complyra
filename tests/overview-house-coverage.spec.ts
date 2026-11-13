@@ -49,10 +49,11 @@ test("house manager Overview has no coverage board and is scoped to their home",
     .allTextContents();
   expect(options.map((o) => o.trim())).toEqual(["All sites", "Willow House"]);
 
-  // Every number on the page is their home's: 11 active requirements for
-  // Willow House, not the agency-wide 22.
-  await expect(page.getByText("11 active requirements").first()).toBeVisible();
-  await expect(page.getByText("22 active requirements")).toHaveCount(0);
+  // Every number on the page is their home's: Willow House's combined
+  // population — 11 requirements + 18 consents = 29 active requirements
+  // and consents — not the agency-wide 58.
+  await expect(page.getByText("29 active requirements and consents").first()).toBeVisible();
+  await expect(page.getByText("58 active requirements and consents")).toHaveCount(0);
 
   // The program-site card row is just their home.
   const grid = page.locator(".site-score-grid");
