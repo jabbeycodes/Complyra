@@ -35,7 +35,22 @@ test('Audit Me persists corrective actions and opens their risk sources', async 
   await page.reload();
   await expect(page.locator('.cc-item').filter({ hasText: 'Verify emergency contact folder' })).toContainText('Resolved');
   await page.screenshot({ path: `${process.env.WALKTHROUGH_DIR}/audit-me-desktop.png`, fullPage: true });
-  await page.locator('.cc-wrap a[href]').first().click();
+  // The slice replaced the feed's deep-link anchors with buttons that
+  // open the record's source evidence in place: open the corrective
+  // action's source records from its title button and check the modal
+  // shows that record's evidence, including its resolved status.
+  const actionAfterReload = page.locator('.cc-item').filter({ hasText: 'Verify emergency contact folder' });
+  await actionAfterReload.getByRole('button', { name: 'Verify emergency contact folder' }).click();
+  const sources = page.getByRole('dialog', { name: 'Source records', exact: true });
+  await expect(sources).toBeVisible();
+  await expect(sources).toContainText('Read-only evidence');
+  await expect(sources.locator('section').first()).toContainText('Verify emergency contact folder');
+  await expect(sources.locator('section').first()).toContainText('Record ');
+  await expect(sources.locator('.audit-source-value', { hasText: 'resolved' })).toBeVisible();
+  await sources.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(sources).not.toBeVisible();
+  // Leave Audit Me via the sidebar so the Command Center unmounts.
+  await page.locator('.sidebar').getByRole('button', { name: 'Overview', exact: true }).click();
   await expect(page.locator('.cc-wrap')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
