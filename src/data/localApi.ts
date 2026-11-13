@@ -4511,9 +4511,14 @@ export class LocalApi implements ComplyraApi {
     await hydrate();
     const agencyCode = normalizeAgencyCode(input.agencyCode);
     const username = normalizeUsername(input.username);
-    const agency = this.store.db.agencies.find(
-      (row) => row.agencyCode === agencyCode,
-    );
+    // F-2: two rows can share a code once a rejected application frees
+    // it. Prefer the live row (mirrors resolve_login's ordering); the
+    // rejected row is the fallback so its people still reach the
+    // "not approved" screen until the code is re-issued.
+    const agency =
+      this.store.db.agencies.find(
+        (row) => row.agencyCode === agencyCode && row.status !== "rejected",
+      ) ?? this.store.db.agencies.find((row) => row.agencyCode === agencyCode);
     const profile = this.store.db.profiles.find(
       (row) =>
         row.homeAgencyId === agency?.id &&
@@ -4583,7 +4588,18 @@ export class LocalApi implements ComplyraApi {
     const invalid = validateAgencyCodeParts(input.slug, input.stateCode);
     if (invalid) throw new Error(invalid);
     const agencyCode = buildAgencyCode(input.slug, input.stateCode);
-    if (this.store.db.agencies.some((row) => row.agencyCode === agencyCode)) {
+    // F-2: a rejected application does not hold its code. Only a live row
+    // (pending or active) makes the code taken; a rejected row still
+    // showing the code means the new administrator's email needs a
+    // distinct local part (below).
+    const rejectedHolder = this.store.db.agencies.some(
+      (row) => row.agencyCode === agencyCode && row.status === "rejected",
+    );
+    if (
+      this.store.db.agencies.some(
+        (row) => row.agencyCode === agencyCode && row.status !== "rejected",
+      )
+    ) {
       throw new Error("That agency code is already in use. Try a different short name.");
     }
     const username = normalizeUsername(input.adminUsername);
@@ -4598,7 +4614,11 @@ export class LocalApi implements ComplyraApi {
     }
     const agencyId = crypto.randomUUID();
     const userId = crypto.randomUUID();
-    const email = `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
+    // F-2: the rejected administrator still owns the plain address, so a
+    // re-issued code gives the new administrator a distinct local part.
+    const email = rejectedHolder
+      ? `${username}+${agencyId.slice(0, 8)}@${agencyCode.toLowerCase()}.complyrer.user`
+      : `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
     const provisionedBy =
       input.provisionedBy === "platform" && currentSession(this.store)?.platformAdmin
         ? "platform"
@@ -4885,6 +4905,13 @@ export class LocalApi implements ComplyraApi {
     }
     const agency = this.store.db.agencies.find((row) => row.id === agencyId);
     if (!agency) throw new Error("Agency not found.");
+    // F-2: rejected is terminal. Re-activating a rejected row whose code
+    // was re-issued would collide with the code's live holder.
+    if (agency.status === "rejected" && status !== "rejected") {
+      throw new Error(
+        "A rejection is final — that agency can't change status. Its code is free for a new application.",
+      );
+    }
     agency.status = status;
     log(
       this.store,
