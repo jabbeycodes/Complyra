@@ -780,3 +780,89 @@ with check (
   )
   or (select private.role_key_in(agency_id, '{hr}'))
 );
+
+-- ----------------------------------------------------------------------------
+-- binder-documents STORAGE policies: scoping the tables is not enough —
+-- the wallet files themselves live in the private binder-documents
+-- bucket under their own policies (20261030120000), and the storage
+-- insert/update policies there still admit ANY hub.view_team holder
+-- agency-wide, so a site-bound house manager could upload to or replace
+-- another home's wallet files by path, bypassing the table policies.
+-- (Object reads route through private.binder_subject_visible, redefined
+-- above, so they were scoped by that redefinition; the select policy is
+-- restated here so the bucket's rule set reads as one scoped whole.)
+-- Insert/update keep every legitimate path — the subject themselves and
+-- certificates.manage holders agency-wide, exactly as before — and
+-- narrow the manager path to hub.view_team AND hr_scope_subject, the
+-- same branch the hr_binder_documents table policies use. The delete
+-- policy (certificates.manage only) needs no change. Object paths
+-- encode the agency (folder segment 2) and the binder subject / staff
+-- member (segment 4), the same derivation the original policies used.
+-- ----------------------------------------------------------------------------
+
+drop policy if exists binder_documents_storage_select on storage.objects;
+create policy binder_documents_storage_select on storage.objects
+for select to authenticated
+using (
+  bucket_id = 'binder-documents'
+  and (select private.binder_subject_visible(
+    (storage.foldername(name))[2]::uuid,
+    (storage.foldername(name))[4]::uuid
+  ))
+);
+
+drop policy if exists binder_documents_storage_insert on storage.objects;
+create policy binder_documents_storage_insert on storage.objects
+for insert to authenticated
+with check (
+  bucket_id = 'binder-documents'
+  and (select private.has_agency((storage.foldername(name))[2]::uuid))
+  and (
+    (storage.foldername(name))[4]::uuid = (select auth.uid())
+    or (select private.has_permission(
+      (storage.foldername(name))[2]::uuid, 'certificates.manage'))
+    or (
+      (select private.has_permission(
+        (storage.foldername(name))[2]::uuid, 'hub.view_team'))
+      and (select private.hr_scope_subject(
+        (storage.foldername(name))[2]::uuid,
+        (storage.foldername(name))[4]::uuid))
+    )
+  )
+);
+
+drop policy if exists binder_documents_storage_update on storage.objects;
+create policy binder_documents_storage_update on storage.objects
+for update to authenticated
+using (
+  bucket_id = 'binder-documents'
+  and (select private.has_agency((storage.foldername(name))[2]::uuid))
+  and (
+    (storage.foldername(name))[4]::uuid = (select auth.uid())
+    or (select private.has_permission(
+      (storage.foldername(name))[2]::uuid, 'certificates.manage'))
+    or (
+      (select private.has_permission(
+        (storage.foldername(name))[2]::uuid, 'hub.view_team'))
+      and (select private.hr_scope_subject(
+        (storage.foldername(name))[2]::uuid,
+        (storage.foldername(name))[4]::uuid))
+    )
+  )
+)
+with check (
+  bucket_id = 'binder-documents'
+  and (select private.has_agency((storage.foldername(name))[2]::uuid))
+  and (
+    (storage.foldername(name))[4]::uuid = (select auth.uid())
+    or (select private.has_permission(
+      (storage.foldername(name))[2]::uuid, 'certificates.manage'))
+    or (
+      (select private.has_permission(
+        (storage.foldername(name))[2]::uuid, 'hub.view_team'))
+      and (select private.hr_scope_subject(
+        (storage.foldername(name))[2]::uuid,
+        (storage.foldername(name))[4]::uuid))
+    )
+  )
+);

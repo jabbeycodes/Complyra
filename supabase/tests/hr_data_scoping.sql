@@ -8,11 +8,15 @@
 -- of that manager's people); administrator / program_manager keep
 -- agency-wide reach; HR keeps exactly its current reach (pay-settings
 -- ledger writes, staffing, binders — but NOT the team-visibility reads);
--- DSPs keep their own-rows-only view.
+-- DSPs keep their own-rows-only view. The binder-documents STORAGE
+-- policies are covered too: the same manager can neither list/download
+-- nor upload/replace another home's wallet files by object path, while
+-- the subject themselves and certificates.manage holders keep their
+-- object access.
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(44);
+select plan(60);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into agencies (id, name, agency_code, state_code, status) values
@@ -319,6 +323,108 @@ select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-
 set local role authenticated;
 select is((select count(*)::int from hr_binder_documents where id='e4000000-0000-0000-0000-000000000122'), 1,
   'HM-A reads wallet documents of Home B staff assigned to Home A (subject scope)');
+reset role;
+
+-- ── binder-documents storage policies ──
+-- The hosted platform grants authenticated table access to
+-- storage.objects and lets the bucket policies gate it; mirror that
+-- platform grant here (the policies are the gate under test).
+grant select, insert, update, delete on storage.objects to authenticated, service_role;
+insert into storage.objects(id, bucket_id, name, owner) values
+ ('f4000000-0000-0000-0000-000000000001','binder-documents',
+  'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/id_card/id-a.pdf',
+  'd4000000-0000-0000-0000-000000000001'),
+ ('f4000000-0000-0000-0000-000000000002','binder-documents',
+  'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000002/id_card/id-b.pdf',
+  'd4000000-0000-0000-0000-000000000002');
+
+-- The replaced policies carry the scoped predicates.
+select ok(exists(select 1 from pg_policies
+  where schemaname='storage' and tablename='objects'
+    and policyname='binder_documents_storage_select'
+    and qual like '%binder_subject_visible%'),
+  'Storage select policy reads via binder_subject_visible');
+select ok(exists(select 1 from pg_policies
+  where schemaname='storage' and tablename='objects'
+    and policyname='binder_documents_storage_insert'
+    and with_check like '%hr_scope_subject%'),
+  'Storage insert policy scopes the manager path with hr_scope_subject');
+select ok(exists(select 1 from pg_policies
+  where schemaname='storage' and tablename='objects'
+    and policyname='binder_documents_storage_update'
+    and qual like '%hr_scope_subject%'),
+  'Storage update policy scopes the manager path with hr_scope_subject');
+
+-- ── HM-B (Home B): storage objects ──
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000004"}',true);
+set local role authenticated;
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000001'), 0,
+  'HM-B cannot list/download a Home A wallet file from storage');
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000002'), 1,
+  'HM-B can read a Home B wallet file from storage');
+select throws_ok($$insert into storage.objects(bucket_id, name, owner)
+  values ('binder-documents',
+    'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/passport/pass-a.pdf',
+    'd4000000-0000-0000-0000-000000000004')$$,
+  '42501', null, 'HM-B cannot upload a wallet file into a Home A binder path');
+select lives_ok($$insert into storage.objects(bucket_id, name, owner)
+  values ('binder-documents',
+    'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000002/passport/pass-b.pdf',
+    'd4000000-0000-0000-0000-000000000004')$$,
+  'HM-B can upload a wallet file into a Home B binder path');
+update storage.objects
+  set name='agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/id_card/tampered.pdf'
+  where id='f4000000-0000-0000-0000-000000000001';
+update storage.objects
+  set name='agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000002/id_card/id-b-renamed.pdf'
+  where id='f4000000-0000-0000-0000-000000000002';
+reset role;
+
+-- ── HM-A (Home A + assignment to B): storage objects ──
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000003"}',true);
+set local role authenticated;
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000002'), 1,
+  'HM-A reads a Home B wallet file from storage (subject scope)');
+reset role;
+set local role service_role;
+select is((select name from storage.objects where id='f4000000-0000-0000-0000-000000000001'),
+  'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/id_card/id-a.pdf',
+  'HM-B storage update on a Home A wallet file did not land');
+select is((select name from storage.objects where id='f4000000-0000-0000-0000-000000000002'),
+  'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000002/id_card/id-b-renamed.pdf',
+  'HM-B storage update on a Home B wallet file lands');
+reset role;
+
+-- ── DSP-A: storage self access ──
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000001"}',true);
+set local role authenticated;
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000001'), 1,
+  'DSP reads their own wallet file from storage (self access kept)');
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000002'), 0,
+  'DSP cannot read another staff member''s wallet file from storage');
+select lives_ok($$insert into storage.objects(bucket_id, name, owner)
+  values ('binder-documents',
+    'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/passport/own-pass.pdf',
+    'd4000000-0000-0000-0000-000000000001')$$,
+  'DSP can upload a wallet file into their own binder path (self access kept)');
+reset role;
+
+-- ── HR: storage agency-wide paths (certificates.manage) ──
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d4000000-0000-0000-0000-000000000006"}',true);
+set local role authenticated;
+select is((select count(*)::int from storage.objects where id='f4000000-0000-0000-0000-000000000001'), 1,
+  'HR keeps agency-wide wallet file read from storage');
+select lives_ok($$insert into storage.objects(bucket_id, name, owner)
+  values ('binder-documents',
+    'agency/a4000000-0000-0000-0000-000000000001/binder/d4000000-0000-0000-0000-000000000001/diploma/dip-a.pdf',
+    'd4000000-0000-0000-0000-000000000006')$$,
+  'HR can upload a wallet file into any binder path (certificates.manage path kept)');
+update storage.objects set metadata='{"verified_copy":true}'::jsonb
+  where id='f4000000-0000-0000-0000-000000000001';
+reset role;
+set local role service_role;
+select is((select metadata->>'verified_copy' from storage.objects where id='f4000000-0000-0000-0000-000000000001'), 'true',
+  'HR storage update on a wallet file lands (certificates.manage path kept)');
 reset role;
 
 select * from finish();
