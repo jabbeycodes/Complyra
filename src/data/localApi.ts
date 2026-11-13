@@ -3231,7 +3231,7 @@ function toWorkspace(store: MemoryStore, session: SessionUser): WorkspaceView {
     (isAgencyWideViewer(session) || row.userId === session.userId || (row.siteId && siteIds.has(row.siteId))));
   const allRequirements = store.db.requirements.filter(
     (row) => row.agencyId === session.agencyId && canViewPeople &&
-      (row.individualId ? personIds.has(row.individualId) : siteIds.has(row.siteId)),
+      siteIds.has(row.siteId) && (!row.individualId || personIds.has(row.individualId)),
   );
   const scorecard = metrics((session.roleKey === "hr"
     ? store.db.requirements.filter((row) => row.agencyId === session.agencyId)

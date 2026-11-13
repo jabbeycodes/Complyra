@@ -1,3 +1,4 @@
+import { parseRequirementScorecard } from "./scorecard";
 import { assertPacketDates, packetOutstanding, validatePacketSubmission, packetFile, type ConsentPacket, type PacketCreateInput, type PacketEvidence, type PacketChoices, type PacketSignature, type PacketPublicView } from "./consentPackets";
 import { RIGHTS_PACKET_COPY_VERSION, rightsCompletionFields, validateRightsCompletion, validateRightsPacketStart } from "./rightsPackets";
 import { DEFAULT_CONSENT_TYPES, assertConsentRole, canManageConsents, canSeeConsents, consentAlertPairs, isStaleConsentNotification, validateConsentTypes, type ConsentDraft, type ConsentRegister, type ConsentType } from "./consents";
@@ -3424,14 +3425,7 @@ export class HostedApi implements ComplyraApi {
       }),
       roles: mapAgencyRoles(agencyId, rolesRes.data ?? []),
       planStacks,
-      scorecard: {
-        score: Number((scoreRes.data as { score?: number } | null)?.score ?? 100),
-        total: Number((scoreRes.data as { total?: number } | null)?.total ?? 0),
-        done: Number((scoreRes.data as { done?: number } | null)?.done ?? 0),
-        overdue: Number((scoreRes.data as { overdue?: number } | null)?.overdue ?? 0),
-        dueSoon: Number((scoreRes.data as { dueSoon?: number } | null)?.dueSoon ?? 0),
-        review: Number((scoreRes.data as { review?: number } | null)?.review ?? 0),
-      },
+      scorecard: parseRequirementScorecard(scoreRes.data),
       monthly,
       monthlyDue,
       siteReviews,
