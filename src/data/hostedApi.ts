@@ -2964,6 +2964,20 @@ export class HostedApi implements ComplyraApi {
     if (!session.platformAdmin) {
       throw new Error("Only the Complyrer operator can approve agency setups.");
     }
+    const { data: current, error: readError } = await this.client
+      .from("agencies")
+      .select("status")
+      .eq("id", agencyId)
+      .maybeSingle();
+    throwIf(readError, "Could not update that agency.");
+    if (!current) throw new Error("Agency not found.");
+    // F-2: rejected is terminal. Re-activating a rejected row whose code
+    // was re-issued would collide with the code's live holder.
+    if (current.status === "rejected" && status !== "rejected") {
+      throw new Error(
+        "A rejection is final — that agency can't change status. Its code is free for a new application.",
+      );
+    }
     const { error } = await this.client
       .from("agencies")
       .update({ status })
