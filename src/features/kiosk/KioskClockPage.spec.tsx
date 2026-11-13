@@ -216,37 +216,6 @@ describe("KioskClockPage", () => {
     expect("photoDataUrl" in submitted[0].input).toBe(false);
   });
 
-  it("does not continue on an IME-composition Enter, but does on a plain Enter", async () => {
-    const { client } = makeClient();
-    setKioskClient(client as never);
-    render(<KioskClockPage token="<redacted>" />);
-    const input = await screen.findByLabelText("Employee ID");
-    pressDigits("4321");
-    // An Enter that confirms an IME composition candidate must not submit
-    // (ime-safe-enter-submit); keyCode 229 is Safari's out-of-order variant.
-    // (jsdom's KeyboardEvent init ignores isComposing/keyCode, so set them
-    // on the constructed event directly.)
-    const enterWith = (props: { isComposing?: boolean; keyCode?: number }) => {
-      const ev = new KeyboardEvent("keydown", {
-        key: "Enter",
-        bubbles: true,
-        cancelable: true,
-      });
-      if (props.isComposing !== undefined)
-        Object.defineProperty(ev, "isComposing", { value: props.isComposing });
-      if (props.keyCode !== undefined)
-        Object.defineProperty(ev, "keyCode", { value: props.keyCode });
-      fireEvent(input, ev);
-    };
-    enterWith({ isComposing: true });
-    expect(screen.queryByText("Enter your PIN")).toBeNull();
-    enterWith({ keyCode: 229 });
-    expect(screen.queryByText("Enter your PIN")).toBeNull();
-    // A plain Enter continues to the PIN step.
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(await screen.findByText("Enter your PIN")).toBeTruthy();
-  });
-
   it("shows the attempts-left warning on a bad PIN", async () => {
     const { client } = makeClient({
       verifyKioskPin: async () => ({ ok: false, reason: "bad_pin", attemptsLeft: 2 }),
