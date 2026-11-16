@@ -174,6 +174,25 @@ export function resolveRequirementStatus(
   return stored;
 }
 
+/**
+ * The status a training line actually holds once its sign-off is taken into
+ * account. A saved, non-N/A sign-off IS the completion record: hosted RLS only
+ * lets manager roles update training_requirements, so a DSP initialing their
+ * own line used to save the sign-off (hours counted) while the stored status
+ * stayed "pending" — the line read Pending and its e-initials seal, which
+ * signs resolvedStatus "complete", read invalid. Deriving completion from the
+ * sign-off keeps LocalApi and HostedApi identical whatever the column says
+ * (migration 20261105120000 also repairs the column server-side).
+ */
+export function lineStatusWithSignoff(
+  stored: TrainingRequirementStatus,
+  signoff: { na: boolean } | null,
+): TrainingRequirementStatus {
+  if (stored === "waived_na") return stored;
+  if (signoff && !signoff.na) return "complete";
+  return stored;
+}
+
 /** Compute the next-due date for simple renewal rules like "annual" or "6-month". */
 export function computeNextDueOn(renewalRule: string | null, signedOn: string): string | null {
   if (!renewalRule) return null;

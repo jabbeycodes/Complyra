@@ -62,6 +62,13 @@ insert into training_signoffs(agency_id,requirement_id,initials,signed_on,traine
  ('a7000000-0000-0000-0000-000000000001','f7300000-0000-0000-0000-000000000013','CC',current_date - 10,'Hana HM',6,2);
 insert into training_countersignatures(agency_id,user_id,site_id,staff_signature_name,staff_signed_at,hm_signature_name,hm_signed_at) values
  ('a7000000-0000-0000-0000-000000000001','d7000000-0000-0000-0000-000000000003','c7000000-0000-0000-0000-000000000001','Cleo Cleared',now(),'Hana HM',now());
+-- Owner e-initials on every line at its current signoff version
+-- (20261105120000: a line counts toward clearance only with the owner's
+-- initials event, not the status column alone).
+insert into signature_events(document_type,document_id,field_name,kind,signer_user_id,document_hash,consent_version,agency_id) values
+ ('training_checklist','staff:d7000000-0000-0000-0000-000000000003:c7000000-0000-0000-0000-000000000001','line:f7300000-0000-0000-0000-000000000011:v1','initials','d7000000-0000-0000-0000-000000000003','hash-cc-1','v2','a7000000-0000-0000-0000-000000000001'),
+ ('training_checklist','staff:d7000000-0000-0000-0000-000000000003:c7000000-0000-0000-0000-000000000001','line:f7300000-0000-0000-0000-000000000012:v1','initials','d7000000-0000-0000-0000-000000000003','hash-cc-2','v2','a7000000-0000-0000-0000-000000000001'),
+ ('training_checklist','staff:d7000000-0000-0000-0000-000000000003:c7000000-0000-0000-0000-000000000001','line:f7300000-0000-0000-0000-000000000013:v1','initials','d7000000-0000-0000-0000-000000000003','hash-cc-3','v2','a7000000-0000-0000-0000-000000000001');
 
 -- No-record DSP (…0004) intentionally gets no training rows at all.
 

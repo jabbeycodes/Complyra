@@ -1,5 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  countOpenTrainingLines,
+  type TrainingLineEventRow,
+  type TrainingLineRow,
+  type TrainingSignoffRow,
+} from "./trainingLines.ts";
 
 /**
  * apply-signature — the server-side authority for the e-signature ceremony.
@@ -740,14 +746,21 @@ Deno.serve(async (req) => {
     return checkCertificate();
   }
 
-  /** All requirements for a staffer+site with an unresolved line count. */
+  /**
+   * All requirements for a staffer+site with an unresolved line count.
+   * A line is resolved only when waived N/A, or when its non-N/A sign-off
+   * carries the OWNER's e-initials event at the CURRENT signoff version
+   * (trainingLines.ts) — the status column alone never resolves a line, so a
+   * saved-but-unstamped line ("Needs re-initialing") keeps the sheet open.
+   * Any lookup failure returns -1/-1, which both callers refuse (fail closed).
+   */
   async function openTrainingLines(
     traineeUserId: string,
     siteId: string,
   ): Promise<{ total: number; open: number }> {
     const { data: lines, error } = await admin
       .from("training_requirements")
-      .select("id,status")
+      .select("id,user_id,status")
       .eq("agency_id", agencyId)
       .eq("user_id", traineeUserId)
       .eq("site_id", siteId);
@@ -755,10 +768,31 @@ Deno.serve(async (req) => {
       console.error("apply-signature: training_requirements lookup failed", error.message);
       return { total: -1, open: -1 };
     }
-    const rows = (lines ?? []) as Array<{ id: string; status: string }>;
-    const open = rows.filter(
-      (r) => r.status !== "complete" && r.status !== "waived_na",
-    ).length;
+    const rows = (lines ?? []) as TrainingLineRow[];
+    if (rows.length === 0) return { total: 0, open: 0 };
+    const { data: signoffs, error: signoffError } = await admin
+      .from("training_signoffs")
+      .select("requirement_id,na,signoff_version")
+      .in("requirement_id", rows.map((r) => r.id));
+    if (signoffError) {
+      console.error("apply-signature: training_signoffs lookup failed", signoffError.message);
+      return { total: -1, open: -1 };
+    }
+    const { data: events, error: eventError } = await admin
+      .from("signature_events")
+      .select("field_name,kind,signer_user_id")
+      .eq("document_type", "training_checklist")
+      .eq("document_id", `staff:${traineeUserId}:${siteId}`)
+      .like("field_name", "line:%");
+    if (eventError) {
+      console.error("apply-signature: line initials lookup failed", eventError.message);
+      return { total: -1, open: -1 };
+    }
+    const open = countOpenTrainingLines(
+      rows,
+      (signoffs ?? []) as TrainingSignoffRow[],
+      (events ?? []) as TrainingLineEventRow[],
+    );
     return { total: rows.length, open };
   }
 
@@ -843,6 +877,9 @@ Deno.serve(async (req) => {
         return fail("Staff must sign their own training sheet.", 403, "not_line_owner");
       }
       const { total, open } = await openTrainingLines(traineeUserId, siteId);
+      if (total < 0 || open < 0) {
+        return fail("Could not check the training lines. Try again.", 500);
+      }
       if (total === 0) {
         return fail("No training lines assigned for this site yet.", 400);
       }
@@ -893,6 +930,9 @@ Deno.serve(async (req) => {
         );
       }
       const { total, open } = await openTrainingLines(traineeUserId, siteId);
+      if (total < 0 || open < 0) {
+        return fail("Could not check the training lines. Try again.", 500);
+      }
       if (total === 0) {
         return fail("No training lines assigned for this site yet.", 400);
       }
