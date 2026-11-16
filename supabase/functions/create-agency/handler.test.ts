@@ -17,6 +17,7 @@ const GOOD_BODY = {
 
 interface StubOptions {
   existing?: boolean;
+  rejectedHolder?: boolean;
   insertError?: { code?: string; message: string } | null;
   createUserError?: { code?: string; message: string } | null;
   memberError?: { code?: string; message: string } | null;
@@ -25,11 +26,18 @@ interface StubOptions {
 
 function stubAdmin(options: StubOptions = {}) {
   const calls: string[] = [];
+  const createdEmails: string[] = [];
   const from = (table: string) => {
     let op = "select";
+    let statusFilter: "eq-rejected" | null = null;
     const query = {
       select: () => query,
-      eq: () => query,
+      eq: (column: string, value: unknown) => {
+        if (column === "status" && value === "rejected") statusFilter = "eq-rejected";
+        return query;
+      },
+      neq: () => query,
+      limit: () => query,
       insert: () => {
         op = "insert";
         calls.push(`insert:${table}`);
@@ -45,7 +53,17 @@ function stubAdmin(options: StubOptions = {}) {
         calls.push(`delete:${table}`);
         return query;
       },
-      maybeSingle: async () => ({ data: options.existing ? { id: "agency-old" } : null, error: null }),
+      maybeSingle: async () => ({
+        data:
+          statusFilter === "eq-rejected"
+            ? options.rejectedHolder
+              ? { id: "agency-rejected" }
+              : null
+            : options.existing
+              ? { id: "agency-old" }
+              : null,
+        error: null,
+      }),
       single: async () =>
         options.insertError
           ? { data: null, error: options.insertError }
@@ -60,14 +78,17 @@ function stubAdmin(options: StubOptions = {}) {
   };
   return {
     calls,
+    createdEmails,
     client: {
       from,
       auth: {
         admin: {
-          createUser: async () =>
-            options.createUserError
+          createUser: async (args: { email: string }) => {
+            createdEmails.push(args.email);
+            return options.createUserError
               ? { data: { user: null }, error: options.createUserError }
-              : { data: { user: { id: "user-1" } }, error: null },
+              : { data: { user: { id: "user-1" } }, error: null };
+          },
           deleteUser: async (id: string) => {
             calls.push(`deleteUser:${id}`);
             return { error: null };
@@ -91,7 +112,12 @@ function run(body: unknown, options: StubOptions = {}, envOverride?: Record<stri
   return handleCreateAgency(request, {
     env: (key) => env[key],
     createClient: () => stub.client,
-  }).then(async (response) => ({ response, text: await response.text(), calls: stub.calls }));
+  }).then(async (response) => ({
+    response,
+    text: await response.text(),
+    calls: stub.calls,
+    createdEmails: stub.createdEmails,
+  }));
 }
 
 function quietly<T>(work: () => Promise<T>) {
@@ -147,6 +173,20 @@ test("a provider code already taken is code_in_use, including the insert race", 
   });
   assert.equal(race.response.status, 409);
   assert.deepEqual(JSON.parse(race.text), { error: AGENCY_CODE_IN_USE, code: "code_in_use" });
+});
+
+test("a code held only by a rejected application can be claimed (F-2)", async () => {
+  const { response, createdEmails } = await run(GOOD_BODY, { rejectedHolder: true });
+  assert.equal(response.status, 200);
+  // The rejected administrator still owns ada.admin@cedarcare-mo…, so the
+  // new administrator's auth email carries the new agency's id prefix.
+  assert.deepEqual(createdEmails, ["ada.admin+agency-1@cedarcare-mo.complyrer.user"]);
+});
+
+test("a live holder still blocks the code even when a rejected row also shows it (F-2)", async () => {
+  const { response, text } = await run(GOOD_BODY, { existing: true, rejectedHolder: true });
+  assert.equal(response.status, 409);
+  assert.deepEqual(JSON.parse(text), { error: AGENCY_CODE_IN_USE, code: "code_in_use" });
 });
 
 test("server faults answer the safe retry message and never the internal text", async () => {

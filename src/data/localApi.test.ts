@@ -759,6 +759,56 @@ test("the platform owner can approve a pending agency", async () => {
   assert.equal(admin.agencyStatus, "active");
 });
 
+test("a rejected agency is terminal, and its code can be claimed again (F-2)", async () => {
+  const api = new LocalApi(store());
+  const first = await api.createAgency({
+    name: "Cedar Ridge",
+    stateCode: "MO",
+    slug: "cedarridge",
+    adminFullName: "Pat Admin",
+    adminUsername: "pat.admin",
+    adminTempPassword: "TempPass!1",
+    provisionedBy: "self",
+  });
+  assert.equal(first.status, "pending");
+  const owner = await api.signIn({
+    agencyCode: "COMPLYRER-MO",
+    username: "platform.owner",
+    password: DEMO_PASSWORD,
+  });
+  assert.equal(owner.platformAdmin, true);
+  const pending = await api.listPendingAgencies();
+  const cedar = pending.find((row) => row.agencyCode === "CEDARRIDGE-MO");
+  assert.ok(cedar);
+  await api.setAgencyStatus(cedar.id, "rejected");
+  // Rejected is terminal: no transition out, not even back to active.
+  await assert.rejects(() => api.setAgencyStatus(cedar.id, "active"), /rejection is final/);
+  await assert.rejects(() => api.setAgencyStatus(cedar.id, "pending"), /rejection is final/);
+  const listed = await api.listAgencies();
+  assert.equal(listed.find((row) => row.id === cedar.id)?.status, "rejected");
+  await api.signOut();
+  // The freed code can be claimed by a new application, even with the
+  // same administrator username.
+  const second = await api.createAgency({
+    name: "Cedar Ridge",
+    stateCode: "MO",
+    slug: "cedarridge",
+    adminFullName: "Pat Admin Two",
+    adminUsername: "pat.admin",
+    adminTempPassword: "NewPass!2",
+    provisionedBy: "self",
+  });
+  assert.equal(second.status, "pending");
+  assert.equal(second.agencyCode, "CEDARRIDGE-MO");
+  const admin = await api.signIn({
+    agencyCode: "CEDARRIDGE-MO",
+    username: "pat.admin",
+    password: "NewPass!2",
+  });
+  assert.equal(admin.agencyStatus, "pending");
+  assert.equal(admin.fullName, "Pat Admin Two");
+});
+
 test("managers can correct a requirement and the fix is audit-logged", async () => {
   const api = new LocalApi(store());
   const admin = await api.signIn(adminLogin());

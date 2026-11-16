@@ -161,12 +161,26 @@ async function createAgency(
     platformAdmin && body.provisionedBy === "platform" ? "platform" : "self";
   const status = provisionedBy === "platform" ? "active" : "pending";
   const agencyCode = `${slug.toUpperCase()}-${stateCode}`;
+  // F-2: a rejected application does not hold its code. Only a live row
+  // (pending or active) makes the code taken. A rejected row still
+  // showing the code is remembered below: its administrator's auth
+  // email still occupies the plain address, so the new administrator
+  // needs a distinct local part.
   const { data: existing } = await admin
     .from("agencies")
     .select("id")
     .eq("agency_code", agencyCode)
+    .neq("status", "rejected")
     .maybeSingle();
   if (existing) return codeInUse();
+
+  const { data: rejectedHolder } = await admin
+    .from("agencies")
+    .select("id")
+    .eq("agency_code", agencyCode)
+    .eq("status", "rejected")
+    .limit(1)
+    .maybeSingle();
 
   const { data: agency, error: agencyError } = await admin
     .from("agencies")
@@ -183,7 +197,14 @@ async function createAgency(
   if (agencyError || !agency) return serverFailure("agency insert failed", agencyError);
   provisional.agencyId = agency.id;
 
-  const email = `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
+  // F-2: when a rejected row holds this code, its administrator's auth
+  // email is still `${username}@${code}.complyrer.user`, so the new
+  // administrator's email carries this agency's id prefix to stay
+  // distinct. Login is unaffected: resolve_login matches the stored
+  // username first and returns the stored email.
+  const email = rejectedHolder
+    ? `${username}+${String(agency.id).slice(0, 8)}@${agencyCode.toLowerCase()}.complyrer.user`
+    : `${username}@${agencyCode.toLowerCase()}.complyrer.user`;
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
     password: tempPassword,
