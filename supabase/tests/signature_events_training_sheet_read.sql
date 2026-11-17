@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(15);
+select plan(18);
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- Wave 5, Item 2 (migration 20261117090000): the training profile page
@@ -12,12 +12,23 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- the true state. The training-sheet policy admits exactly the viewers
 -- who may already read the owner's training rows — and nobody else,
 -- and only for training_checklist documents.
+--
+-- HOLD fix-up (PR #273): the house-manager branch is scoped PER EVENT
+-- to the sheet owner (private.hr_hm_subject_in_scope on the owner
+-- resolved from the document id). The fixture therefore carries TWO
+-- homes — Home A (owner …006, HM …002) and Home B (owner …010, HM
+-- …009) — and the training counts below are scoped to a single sheet's
+-- document_id, because the agency-wide readers (PM / nurse / auditor /
+-- administrator) legitimately see BOTH homes' sheets while each HM
+-- must see only their own home's.
 insert into agencies (id, name, agency_code, state_code, status) values
  ('a1700000-0000-0000-0000-000000000001','Sheet read agency','SHEETRD-MO','MO','active');
 select public.provision_agency_roles('a1700000-0000-0000-0000-000000000001');
--- Pin the two permission-driven branches so the test does not drift
--- with template defaults: HM reads via hr.view_staff, auditor via
--- audit.read. PM / nurse / house_manager also hold role branches.
+-- Pin the permission-driven branches so the test does not drift with
+-- template defaults: hr.view_staff is the administrator / HR branch
+-- (house managers are deliberately pinned to it too, proving the
+-- policy's scoped HM branch — not the permission — is what admits
+-- them), auditor via audit.read. PM / nurse hold role branches.
 update public.agency_roles set permissions = '{"hr.view_staff":true}'::jsonb
  where agency_id = 'a1700000-0000-0000-0000-000000000001' and template_key = 'house_manager';
 update public.agency_roles set permissions = '{"audit.read":true}'::jsonb
@@ -25,7 +36,8 @@ update public.agency_roles set permissions = '{"audit.read":true}'::jsonb
 insert into programs (id,agency_id,name) values
  ('b1700000-0000-0000-0000-000000000001','a1700000-0000-0000-0000-000000000001','Program');
 insert into sites(id,agency_id,program_id,name) values
- ('c1700000-0000-0000-0000-000000000001','a1700000-0000-0000-0000-000000000001','b1700000-0000-0000-0000-000000000001','Home A');
+ ('c1700000-0000-0000-0000-000000000001','a1700000-0000-0000-0000-000000000001','b1700000-0000-0000-0000-000000000001','Home A'),
+ ('c1700000-0000-0000-0000-000000000002','a1700000-0000-0000-0000-000000000001','b1700000-0000-0000-0000-000000000001','Home B');
 insert into auth.users(id,email) values
  ('d1700000-0000-0000-0000-000000000001','sheet-admin@example.invalid'),
  ('d1700000-0000-0000-0000-000000000002','sheet-hm@example.invalid'),
@@ -34,7 +46,9 @@ insert into auth.users(id,email) values
  ('d1700000-0000-0000-0000-000000000005','sheet-auditor@example.invalid'),
  ('d1700000-0000-0000-0000-000000000006','sheet-owner@example.invalid'),
  ('d1700000-0000-0000-0000-000000000007','sheet-peer@example.invalid'),
- ('d1700000-0000-0000-0000-000000000008','sheet-outsider@example.invalid');
+ ('d1700000-0000-0000-0000-000000000008','sheet-outsider@example.invalid'),
+ ('d1700000-0000-0000-0000-000000000009','sheet-hm-b@example.invalid'),
+ ('d1700000-0000-0000-0000-000000000010','sheet-owner-b@example.invalid');
 insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000001','administrator','administrator',null),
  ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000002','manager','house_manager','c1700000-0000-0000-0000-000000000001'),
@@ -42,7 +56,9 @@ insert into memberships(agency_id,user_id,role,role_key,site_id) values
  ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000004','nurse','nurse',null),
  ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000005','auditor','auditor',null),
  ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000006','dsp','dsp','c1700000-0000-0000-0000-000000000001'),
- ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000007','dsp','dsp','c1700000-0000-0000-0000-000000000001');
+ ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000007','dsp','dsp','c1700000-0000-0000-0000-000000000001'),
+ ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000009','manager','house_manager','c1700000-0000-0000-0000-000000000002'),
+ ('a1700000-0000-0000-0000-000000000001','d1700000-0000-0000-0000-000000000010','dsp','dsp','c1700000-0000-0000-0000-000000000002');
 -- The outsider (…008) deliberately holds no membership anywhere.
 
 -- One training line stamp by the owner DSP, plus one NON-training
@@ -52,12 +68,17 @@ insert into signature_events(document_type,document_id,field_name,kind,signer_us
  ('training_checklist','staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001',
   'line:f1700000-0000-0000-0000-000000000001:v1','initials','d1700000-0000-0000-0000-000000000006','hash-line','v2','a1700000-0000-0000-0000-000000000001'),
  ('consent_form','consent:d1700000-0000-0000-0000-000000000099',
-  'signature','signature','d1700000-0000-0000-0000-000000000006','hash-consent','v2','a1700000-0000-0000-0000-000000000001');
+  'signature','signature','d1700000-0000-0000-0000-000000000006','hash-consent','v2','a1700000-0000-0000-0000-000000000001'),
+ -- One training line stamp by the Home B owner DSP (…010): the event
+ -- the Home A house manager must NOT be able to read.
+ ('training_checklist','staff:d1700000-0000-0000-0000-000000000010:c1700000-0000-0000-0000-000000000002',
+  'line:f1700000-0000-0000-0000-000000000002:v1','initials','d1700000-0000-0000-0000-000000000010','hash-line-b','v2','a1700000-0000-0000-0000-000000000001');
 
 -- ---------------- the owner (signer) ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000006"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
   'owner reads her own line stamp (select_own, unchanged)');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 1,
   'owner reads her own non-training event (select_own, unchanged)');
@@ -67,17 +88,34 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- ---------------- house manager ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000002"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
-  'HM reads the training sheet events (same set the owner derives state from)');
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
+  'HM reads her own home''s training sheet events (same set the owner derives state from)');
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000010:c1700000-0000-0000-0000-000000000002'), 0,
+  'HM at Home A cannot read another home''s training sheet events');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 0,
   'HM still cannot read non-training signature events');
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+-- ---------------- house manager, Home B ----------------
+set local role authenticated;
+select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000009"}',true);
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000010:c1700000-0000-0000-0000-000000000002'), 1,
+  'HM reads her own home''s (Home B) training sheet events');
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 0,
+  'HM at Home B cannot read Home A''s training sheet events');
 reset role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 -- ---------------- program manager ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000003"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
   'PM reads the training sheet events');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 0,
   'PM still cannot read non-training signature events');
@@ -87,7 +125,8 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- ---------------- nurse ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000004"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
   'nurse reads the training sheet events');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 0,
   'nurse still cannot read non-training signature events');
@@ -97,7 +136,8 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- ---------------- auditor ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000005"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
   'auditor reads the training sheet events (auditor read path)');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 0,
   'auditor still cannot read non-training signature events under this policy');
@@ -117,7 +157,8 @@ select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 -- ---------------- administrator (pre-existing verifier path) ----------------
 set local role authenticated;
 select set_config('request.jwt.claims','{"role":"authenticated","sub":"d1700000-0000-0000-0000-000000000001"}',true);
-select is((select count(*)::int from signature_events where document_type = 'training_checklist'), 1,
+select is((select count(*)::int from signature_events where document_type = 'training_checklist'
+    and document_id = 'staff:d1700000-0000-0000-0000-000000000006:c1700000-0000-0000-0000-000000000001'), 1,
   'administrator still reads the training sheet events');
 select is((select count(*)::int from signature_events where document_type = 'consent_form'), 1,
   'administrator still reads non-training events (verifier policy unchanged)');
