@@ -542,6 +542,42 @@ export function medOnHandStatus(
       : "ok";
 }
 
+export interface MedSupplyClaim {
+  status: MedInventoryStatus;
+  alertActive: boolean;
+}
+
+/**
+ * The supply claim a surface may make about a med — the status band and
+ * the reorder-alert state, both implied by the ON-HAND figure (the
+ * countdown), never by the view's time-based projection status. The
+ * projection burns the scheduled rate by calendar time alone, so days
+ * after a count it reads zero for a med whose doses were never recorded
+ * Given: wave-4 retest batch 318 showed an "Out of stock" badge and an
+ * "Acknowledge reorder" button on forecasts carrying 10 pills / 10 days
+ * and 28 pills / 14 days of actual stock. Null when the on-hand state
+ * carries no figure — a loading, unavailable, or never-counted med
+ * makes NO supply claim (the honest-load rule), so no badge, status
+ * line, or reorder button may render from it. This is the same
+ * reclassification summarizeMedSupply applies to the site tallies
+ * (PR #261); the forecast card and the chart board read it from here so
+ * every surface bands a med the same way.
+ */
+export function medSupplyClaim(
+  view: MedInventoryView,
+  onHand: MedOnHand,
+  today: string,
+): MedSupplyClaim | null {
+  const status = medOnHandStatus(view, onHand);
+  if (status === null) return null;
+  return {
+    status,
+    alertActive:
+      status !== "ok" &&
+      (view.reorderAcknowledgedOn == null || view.reorderAcknowledgedOn < today),
+  };
+}
+
 /** The headline text for an on-hand state — "On hand: N pills" when counted. */
 export function onHandHeadline(state: MedOnHand): string {
   if (state.kind === "counted") return onHandLabel(state.pillsLeft);

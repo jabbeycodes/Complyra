@@ -8,6 +8,7 @@ import {
   countEntryPrefill,
   lastRecordedCount,
   medOnHand,
+  medSupplyClaim,
   medSupplyDisplayState,
   recordedCountLabel,
 } from "../data/medInventory";
@@ -803,6 +804,13 @@ export default function IndividualChart({
                         )
                       : null;
                   const prefill = onHand ? countEntryPrefill(onHand) : null;
+                  // The board badge bands the SAME claim the forecast
+                  // card below renders (medSupplyClaim — the countdown's
+                  // band), never the view's time-based projection
+                  // status, which read "out" for stocked meds in the
+                  // wave-4 retest (batch 318).
+                  const supplyClaim =
+                    view && onHand ? medSupplyClaim(view, onHand, todayIso()) : null;
                   const recorded =
                     view && display.kind === "counted" ? lastRecordedCount(view) : null;
                   const medLogs = prnLogs.filter(
@@ -827,18 +835,18 @@ export default function IndividualChart({
                     </span>
                   )}
                   <h3>{med.name}</h3>
-                  {/* One supply state per med, from the same inventory
-                      status the forecast card below renders — never two
+                  {/* One supply state per med, from the same on-hand
+                      claim the forecast card below renders — never two
                       different states (e.g. "Due soon" here and a
                       different band there), and never "Expired" for a
                       stocked med. No badge exists before the views load:
                       a badge derived from the stored row was the batch 21
                       / item 9 "Due soon" flash. */}
-                  {view && display.kind === "counted" && view.status !== "ok" ? (
+                  {view && supplyClaim && supplyClaim.status !== "ok" ? (
                     <StatusBadge
-                      status={medSupplyStatusFromInventory(view.status)}
+                      status={medSupplyStatusFromInventory(supplyClaim.status)}
                       label={medSupplyBadgeLabel(
-                        view.status,
+                        supplyClaim.status,
                         view.lastCountedOn,
                       )}
                       size="sm"

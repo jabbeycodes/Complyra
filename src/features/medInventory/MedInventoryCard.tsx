@@ -14,6 +14,7 @@ import {
   lastRecordedCount,
   medHasCountOnFile,
   medOnHand,
+  medSupplyClaim,
   onHandDaysLeftLabel,
   onHandHeadline,
   recordedCountLabel,
@@ -183,18 +184,27 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
         // The last manual count, shown labeled under the on-hand
         // headline (retest batches 286/289/291) — display only.
         const recorded = lastRecordedCount(view);
+        // The badge, the status line and the reorder button all read
+        // THIS claim: the band implied by the on-hand countdown, never
+        // the view's time-based projection status. The projection burns
+        // the scheduled rate by calendar time alone, so 16 days after
+        // an Oct 31 count it read "out" — an "Out of stock" badge and
+        // an acknowledge button — for meds holding 10 and 28 pills
+        // (wave-4 retest batch 318). Null while the figure loads or
+        // after it fails: no supply claim renders at all.
+        const claim = medSupplyClaim(view, onHand, today);
         return (
           <article key={view.medicationId} className="obligation-card med-card">
             <header>
               <span className={`kind-pill ${view.kind}`}>{view.kind}</span>
               <h3>{view.medicationName}</h3>
               {/* WS3 (accessible status system): shared badge — the band is
-                  the inventory status itself (days-based medSupplyStatus
+                  the on-hand claim's status (days-based medSupplyStatus
                   calls an uncounted PRN med "expired", which is wrong). */}
-              {!neverCounted && (
+              {claim && (
                 <StatusBadge
-                  status={medSupplyStatusFromInventory(view.status)}
-                  label={medSupplyBadgeLabel(view.status, view.lastCountedOn)}
+                  status={medSupplyStatusFromInventory(claim.status)}
+                  label={medSupplyBadgeLabel(claim.status, view.lastCountedOn)}
                 />
               )}
             </header>
@@ -234,10 +244,10 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
             )}
             {/* The bar draws the on-hand figure; with no figure (loading,
                 unavailable) it is omitted — an empty bar reads "out". */}
-            {onHand.kind === "counted" && (
+            {onHand.kind === "counted" && claim && (
             <div
               role="progressbar"
-              aria-label={`${view.medicationName} supply: ${STATUS_LABEL[view.status]}`}
+              aria-label={`${view.medicationName} supply: ${STATUS_LABEL[claim.status]}`}
               aria-valuenow={Math.round(depletion)}
               aria-valuemin={0}
               aria-valuemax={100}
@@ -254,24 +264,26 @@ export default function MedInventoryCard({ individualId }: { individualId: strin
                   width: `${depletion}%`,
                   height: "100%",
                   borderRadius: 999,
-                  background: statusTone(view.status),
+                  background: statusTone(claim.status),
                   transition: "width 300ms ease",
                 }}
               />
             </div>
             )}
+            {claim && (
             <p className="stack-help" style={{ marginTop: 2 }}>
-              {STATUS_LABEL[view.status]}
-              {view.status !== "ok" && view.status !== "out"
+              {STATUS_LABEL[claim.status]}
+              {claim.status !== "ok" && claim.status !== "out"
                 ? ` — reorder at ${view.reorderPointPills} pills (${view.lowThresholdDays}-day threshold)`
-                : view.status === "out"
+                : claim.status === "out"
                   ? " — reorder immediately"
                   : ` — reorder at ${view.reorderPointPills} pills`}
-              {view.alertActive && view.reorderAcknowledgedOn
+              {claim.alertActive && view.reorderAcknowledgedOn
                 ? ` · acknowledged ${formatDate(view.reorderAcknowledgedOn)}, still low`
                 : ""}
             </p>
-            {view.alertActive && canManage && (
+            )}
+            {claim?.alertActive && canManage && (
               <p>
                 <button
                   className="button primary"
