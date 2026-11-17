@@ -171,6 +171,69 @@ function marksFor(f: Fixture): MedDoseMark[] {
 
 const pillsText = (n: number) => `On hand: ${n} ${n === 1 ? "pill" : "pills"}`;
 
+/**
+ * Wave-5 (wave-4 retest batch 318): a view counted `daysAgo` days back.
+ * At 16 days the time-based projection runs dry for any med stocked for
+ * fewer days than that, while the countdown — no Given marks charted —
+ * still holds the recorded count. `givenDaysAgo` lists the days-ago
+ * offsets of 08:00 Given marks (one pill each at these fixtures' rates).
+ */
+function agedView(opts: {
+  key: string;
+  name: string;
+  recorded: number;
+  perDay: number;
+  doseTimes: string[];
+  daysAgo: number;
+  givenDaysAgo?: number[];
+}): { view: MedInventoryView; marks: MedDoseMark[] } {
+  const countedOn = isoDaysAgo(TODAY, opts.daysAgo);
+  const med: Medication = {
+    id: `med-${opts.key}`,
+    agencyId: "a",
+    individualId: `ind-${opts.key}`,
+    name: opts.name,
+    strength: "10 mg tablet",
+    kind: "scheduled",
+    controlled: false,
+    pillsPerDay: opts.perDay,
+    remainingPills: opts.recorded,
+    lastDeliveryOn: countedOn,
+    lastCountdownOn: TODAY,
+  };
+  const delivery: MedicationDelivery = {
+    id: `del-${opts.key}`,
+    medicationId: med.id,
+    countedOn,
+    countedAt: `${countedOn}T15:00:00.000Z`,
+    remainingPills: opts.recorded,
+    pillsPerDay: opts.perDay,
+    recordedBy: "u-hm",
+    recordedByName: "Hollis Manager",
+  };
+  const view = projectMedInventory({
+    med,
+    inventory: null,
+    deliveries: [delivery],
+    prnDoses: [],
+    doseExceptions: [],
+    today: TODAY,
+  });
+  const marks: MedDoseMark[] = (opts.givenDaysAgo ?? []).map((daysAgo, i) => ({
+    id: `mark-${opts.key}-${i}`,
+    agencyId: "a",
+    individualId: med.individualId,
+    medicationId: med.id,
+    doseDate: isoDaysAgo(TODAY, daysAgo),
+    doseTime: "08:00",
+    status: "given",
+    markedBy: "u-dsp",
+    markedByName: "Dee Staff",
+    markedAt: `${isoDaysAgo(TODAY, daysAgo)}T14:00:00.000Z`,
+  }));
+  return { view: { ...view, doseTimes: opts.doseTimes }, marks };
+}
+
 describe("one med-count figure on every surface (data layer)", () => {
   for (const [label, fixtures] of [
     ["partially Given", PARTIAL],
@@ -487,6 +550,78 @@ describe("one med-count figure on every surface (rendered)", () => {
     await render(24);
     assert.equal(box().value, "24");
 
+    await React.act(async () => root.unmount());
+    container.remove();
+  });
+
+  // Wave-5 (batch 318): the forecast badge and the reorder button read
+  // the on-hand claim, not the time-based projection status. Counted 16
+  // days ago, the projection is dry (status "out", alert active) for
+  // both retest meds — the card must not say so.
+  for (const f of [
+    { key: "bailey318", name: "Expirocin", recorded: 10, perDay: 1, doseTimes: ["08:00"], daysLeft: 10 },
+    { key: "dana318", name: "Testoprofen", recorded: 28, perDay: 2, doseTimes: ["08:00", "20:00"], daysLeft: 14 },
+  ]) {
+    it(`forecast card never badges ${f.name} Out of stock while the countdown holds ${f.recorded} pills (batch 318)`, async () => {
+      const { view, marks } = agedView({ ...f, daysAgo: 16 });
+      // Precondition: the projection really does claim "out" + alert.
+      assert.equal(view.status, "out");
+      assert.equal(view.alertActive, true);
+      const { container, root } = await mount(
+        React.createElement(MedInventoryCard, { individualId: view.individualId }),
+        stubApi(view, marks),
+      );
+      const text = container.textContent ?? "";
+      assert.ok(text.includes(pillsText(f.recorded)), text);
+      assert.ok(text.includes(`${f.daysLeft} days left`), text);
+      assert.ok(!text.includes("Out of stock"), `stocked med badged out: ${text}`);
+      assert.ok(!text.includes("Acknowledge reorder"), `reorder alert fired on stock: ${text}`);
+      assert.ok(text.includes("Stocked"), text);
+      await React.act(async () => root.unmount());
+      container.remove();
+    });
+  }
+
+  it("forecast card badges Out of stock and offers the acknowledgment when the countdown truly reaches zero", async () => {
+    const { view, marks } = agedView({
+      key: "zero318",
+      name: "Zerocillin",
+      recorded: 4,
+      perDay: 1,
+      doseTimes: ["08:00"],
+      daysAgo: 5,
+      givenDaysAgo: [4, 3, 2, 1],
+    });
+    const { container, root } = await mount(
+      React.createElement(MedInventoryCard, { individualId: view.individualId }),
+      stubApi(view, marks),
+    );
+    const text = container.textContent ?? "";
+    assert.ok(text.includes(pillsText(0)), text);
+    assert.ok(text.includes("Out of stock"), text);
+    assert.ok(text.includes("Acknowledge reorder"), text);
+    await React.act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("forecast card at the reorder threshold offers the acknowledgment without reading Out of stock", async () => {
+    const { view, marks } = agedView({
+      key: "edge318",
+      name: "Edgecin",
+      recorded: 7,
+      perDay: 1,
+      doseTimes: ["08:00"],
+      daysAgo: 2,
+    });
+    const { container, root } = await mount(
+      React.createElement(MedInventoryCard, { individualId: view.individualId }),
+      stubApi(view, marks),
+    );
+    const text = container.textContent ?? "";
+    assert.ok(text.includes(pillsText(7)), text);
+    assert.ok(text.includes("Reorder soon"), text);
+    assert.ok(text.includes("Acknowledge reorder"), text);
+    assert.ok(!text.includes("Out of stock"), text);
     await React.act(async () => root.unmount());
     container.remove();
   });

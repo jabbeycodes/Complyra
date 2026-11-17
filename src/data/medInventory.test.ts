@@ -14,6 +14,7 @@ import {
   inventoryCountdownLabel,
   medHasCountOnFile,
   medOnHand,
+  medSupplyClaim,
   medSupplyDisplayState,
   projectInventory,
   projectMedInventory,
@@ -893,4 +894,179 @@ test("DSP can view inventory but cannot adjust it", async () => {
     client.setReorderThreshold({ medicationId: views[0].medicationId, lowThresholdDays: 10 }),
     /House manager, RN, or PM/,
   );
+});
+
+// ---------- medSupplyClaim: the forecast badge follows the countdown (wave-5, batch 318) ----------
+// The forecast card's badge, status line and reorder button used to read
+// the view's time-based projection status. The projection burns the
+// scheduled rate by calendar time alone, so in the wave-4 retest the
+// meds counted on Oct 31 read "out" on Nov 16 — an "Out of stock" badge
+// and an "Acknowledge reorder" button — while the countdown (the card's
+// own headline) held 10 and 28 pills. The claim must band the countdown.
+
+const CLAIM_TODAY = "2026-11-16";
+
+function claimView(opts: {
+  recorded: number;
+  perDay: number;
+  doseTimes: string[];
+  countedOn: string;
+  today: string;
+}): MedInventoryView {
+  const view = projectMedInventory({
+    med: med({
+      id: "med-claim",
+      pillsPerDay: opts.perDay,
+      remainingPills: opts.recorded,
+      lastDeliveryOn: opts.countedOn,
+      lastCountdownOn: opts.today,
+    }),
+    inventory: null,
+    deliveries: [
+      {
+        id: "del-claim",
+        medicationId: "med-claim",
+        countedOn: opts.countedOn,
+        countedAt: `${opts.countedOn}T15:00:00.000Z`,
+        remainingPills: opts.recorded,
+        pillsPerDay: opts.perDay,
+        recordedBy: "u-hm",
+        recordedByName: "Hollis Manager",
+      },
+    ],
+    prnDoses: [],
+    doseExceptions: [],
+    today: opts.today,
+  });
+  return { ...view, doseTimes: opts.doseTimes };
+}
+
+test("forecast claim: stocked meds never read out of stock when the projection runs dry (batch 318)", () => {
+  // Bailey Expirocin: 10 recorded Oct 31 at 1/day, no Given marks since.
+  const bailey = claimView({
+    recorded: 10,
+    perDay: 1,
+    doseTimes: ["08:00"],
+    countedOn: "2026-10-31",
+    today: CLAIM_TODAY,
+  });
+  // Precondition: the projection really does read "out" — 10 − 16 days × 1.
+  assert.equal(bailey.status, "out");
+  assert.equal(bailey.alertActive, true);
+  const baileyOnHand = medOnHand(bailey, [], CLAIM_TODAY);
+  assert.deepEqual(
+    baileyOnHand.kind === "counted"
+      ? [baileyOnHand.pillsLeft, baileyOnHand.daysLeft]
+      : null,
+    [10, 10],
+  );
+  assert.deepEqual(medSupplyClaim(bailey, baileyOnHand, CLAIM_TODAY), {
+    status: "ok",
+    alertActive: false,
+  });
+
+  // Dana Testoprofen: 28 recorded Oct 31 at 2/day, no Given marks since.
+  const dana = claimView({
+    recorded: 28,
+    perDay: 2,
+    doseTimes: ["08:00", "20:00"],
+    countedOn: "2026-10-31",
+    today: CLAIM_TODAY,
+  });
+  // Precondition: 28 − 16 days × 2 also runs the projection dry.
+  assert.equal(dana.status, "out");
+  const danaOnHand = medOnHand(dana, [], CLAIM_TODAY);
+  assert.deepEqual(
+    danaOnHand.kind === "counted" ? [danaOnHand.pillsLeft, danaOnHand.daysLeft] : null,
+    [28, 14],
+  );
+  assert.deepEqual(medSupplyClaim(dana, danaOnHand, CLAIM_TODAY), {
+    status: "ok",
+    alertActive: false,
+  });
+});
+
+test("forecast claim: a med truly at zero on hand is out, with the reorder alert active", () => {
+  // 4 recorded Nov 11 at 1/day; all four doses charted Given since.
+  const view = claimView({
+    recorded: 4,
+    perDay: 1,
+    doseTimes: ["08:00"],
+    countedOn: "2026-11-11",
+    today: CLAIM_TODAY,
+  });
+  const marks = givenMarks("med-claim", [
+    ["2026-11-12", "08:00"],
+    ["2026-11-13", "08:00"],
+    ["2026-11-14", "08:00"],
+    ["2026-11-15", "08:00"],
+  ]);
+  const onHand = medOnHand(view, marks, CLAIM_TODAY);
+  assert.deepEqual(
+    onHand.kind === "counted" ? [onHand.pillsLeft, onHand.outOfStock] : null,
+    [0, true],
+  );
+  assert.deepEqual(medSupplyClaim(view, onHand, CLAIM_TODAY), {
+    status: "out",
+    alertActive: true,
+  });
+});
+
+test("forecast claim: the reorder threshold boundary bands by days left on hand", () => {
+  // Exactly at the 7-day threshold: low, alert active.
+  const atThreshold = claimView({
+    recorded: 7,
+    perDay: 1,
+    doseTimes: ["08:00"],
+    countedOn: "2026-11-14",
+    today: CLAIM_TODAY,
+  });
+  const atOnHand = medOnHand(atThreshold, [], CLAIM_TODAY);
+  assert.equal(atOnHand.kind === "counted" ? atOnHand.daysLeft : null, 7);
+  assert.deepEqual(medSupplyClaim(atThreshold, atOnHand, CLAIM_TODAY), {
+    status: "low",
+    alertActive: true,
+  });
+
+  // One day above the threshold: ok, no alert — even though the
+  // projection (8 − 2 elapsed days = 6 left) still says "low".
+  const above = claimView({
+    recorded: 8,
+    perDay: 1,
+    doseTimes: ["08:00"],
+    countedOn: "2026-11-14",
+    today: CLAIM_TODAY,
+  });
+  assert.equal(above.status, "low", "precondition: the projection disagrees");
+  const aboveOnHand = medOnHand(above, [], CLAIM_TODAY);
+  assert.equal(aboveOnHand.kind === "counted" ? aboveOnHand.daysLeft : null, 8);
+  assert.deepEqual(medSupplyClaim(above, aboveOnHand, CLAIM_TODAY), {
+    status: "ok",
+    alertActive: false,
+  });
+});
+
+test("forecast claim: acknowledging silences the alert until the next day; no figure, no claim", () => {
+  const low = claimView({
+    recorded: 7,
+    perDay: 1,
+    doseTimes: ["08:00"],
+    countedOn: "2026-11-14",
+    today: CLAIM_TODAY,
+  });
+  const onHand = medOnHand(low, [], CLAIM_TODAY);
+  const ackedToday = { ...low, reorderAcknowledgedOn: CLAIM_TODAY };
+  assert.deepEqual(medSupplyClaim(ackedToday, onHand, CLAIM_TODAY), {
+    status: "low",
+    alertActive: false,
+  });
+  const ackedYesterday = { ...low, reorderAcknowledgedOn: "2026-11-15" };
+  assert.deepEqual(medSupplyClaim(ackedYesterday, onHand, CLAIM_TODAY), {
+    status: "low",
+    alertActive: true,
+  });
+
+  assert.equal(medSupplyClaim(low, { kind: "loading" }, CLAIM_TODAY), null);
+  assert.equal(medSupplyClaim(low, { kind: "unavailable" }, CLAIM_TODAY), null);
+  assert.equal(medSupplyClaim(low, { kind: "never-counted" }, CLAIM_TODAY), null);
 });
