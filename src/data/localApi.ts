@@ -280,6 +280,7 @@ import {
   applyRenewalFileRemovalFromList,
   applyRenewalUpload,
   canRemoveRenewalFile,
+  chartFileDisplayTitle,
   renewalFileViews,
   type RenewalUploadMode,
   validateRenewalUpload,
@@ -2823,6 +2824,7 @@ async function saveChartFile(
     uploadedBy?: string;
     renewalId?: string | null;
     evidenceKind?: string | null;
+    title?: string | null;
     uploadedOn?: string | null;
   },
 ) {
@@ -2840,6 +2842,7 @@ async function saveChartFile(
     uploadedBy: input.uploadedBy ?? null,
     renewalId: input.renewalId ?? null,
     evidenceKind: input.evidenceKind ?? null,
+    title: input.title ?? null,
     uploadedOn: input.uploadedOn ?? null,
   });
   return id;
@@ -2993,7 +2996,7 @@ function mapPlanStack(
                 .filter((file) => file.renewalId === row.id)
                 .map((file) => ({
                   id: file.id,
-                  title: file.name,
+                  title: chartFileDisplayTitle(file),
                   uploadedOn: file.uploadedOn ?? null,
                   uploadedBy: file.uploadedBy ?? null,
                   evidenceKind: (file.evidenceKind as ClinicalEvidenceKind | null) ?? null,
@@ -7547,6 +7550,7 @@ export class LocalApi implements ComplyraApi {
         uploadedBy: session.userId,
         renewalId: renewal.id,
         evidenceKind: input.evidenceKind,
+        title,
         uploadedOn: todayIso(),
       });
     }
@@ -7621,7 +7625,7 @@ export class LocalApi implements ComplyraApi {
       .filter((row) => row.id !== targetId)
       .map((row) => ({
         id: row.id,
-        title: row.name,
+        title: chartFileDisplayTitle(row),
         evidenceKind: (row.evidenceKind as ClinicalEvidenceKind | null) ?? null,
       }));
     const next = applyRenewalFileRemovalFromList(renewal, targetId, remaining);

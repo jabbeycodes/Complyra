@@ -15,6 +15,7 @@ import {
   applyRenewalEvidence,
   applyRenewalFileRemoval,
   canRemoveRenewalFile,
+  chartFileDisplayTitle,
   type ClinicalRenewal,
 } from "./planStack";
 
@@ -307,4 +308,60 @@ test("local removal refuses a file that belongs to another renewal, individual, 
   );
   const ellisAfter = await ellisVision(client, admin, "Ellis");
   assert.equal(ellisAfter.fileId, ellis.fileId);
+});
+
+test("chartFileDisplayTitle: the saved title wins; legacy rows fall back to the filename", () => {
+  assert.equal(chartFileDisplayTitle({ title: "W4 B323 evidence 1", name: "w4-b323-evidence-1.pdf" }), "W4 B323 evidence 1");
+  assert.equal(chartFileDisplayTitle({ title: null, name: "legacy.pdf" }), "legacy.pdf");
+  assert.equal(chartFileDisplayTitle({ title: "   ", name: "blank.pdf" }), "blank.pdf");
+  assert.equal(chartFileDisplayTitle({ name: "notitle.pdf" }), "notitle.pdf");
+});
+
+test("the title typed at upload is saved per file and shown on the card, not the filename (batch 323)", async () => {
+  const { store, client } = setup();
+  const nurse = await signIn(client, DEMO_NURSE_USERNAME);
+  const vision = await ellisVision(client, nurse);
+  // The wave-4 retest typed titles that differed from the filenames;
+  // the card listed only the filenames.
+  await client.uploadRenewalEvidence({
+    renewalId: vision.id,
+    evidenceKind: "pdf",
+    documentTitle: "W4 B323 evidence 1",
+    file: pdf("w4-b323-evidence-1.pdf"),
+  });
+  const first = (await ellisVision(client, nurse)).fileId!;
+  await client.uploadRenewalEvidence({
+    renewalId: vision.id,
+    evidenceKind: "pdf",
+    documentTitle: "W4 B323 evidence 2",
+    file: pdf("w4-b323-evidence-2.pdf"),
+  });
+  const second = (await ellisVision(client, nurse)).fileId!;
+
+  // Each stored row keeps its own typed title alongside the filename.
+  assert.equal(store.db.chartFiles.find((row) => row.id === first)?.title, "W4 B323 evidence 1");
+  assert.equal(store.db.chartFiles.find((row) => row.id === first)?.name, "w4-b323-evidence-1.pdf");
+  assert.equal(store.db.chartFiles.find((row) => row.id === second)?.title, "W4 B323 evidence 2");
+
+  // The card lists the typed titles, oldest first, newest current.
+  const listed = await ellisVision(client, nurse);
+  assert.deepEqual(
+    listed.files.map((file) => file.title),
+    ["W4 B323 evidence 1", "W4 B323 evidence 2"],
+  );
+  assert.deepEqual(
+    listed.files.map((file) => file.isCurrent),
+    [false, true],
+  );
+
+  // Removing the current file re-points the renewal at the remaining
+  // file's OWN title — not its filename, and not a stale "latest" title.
+  await client.removeRenewalFile(vision.id, second);
+  const after = await ellisVision(client, nurse);
+  assert.equal(after.fileId, first);
+  assert.equal(after.lastDocumentTitle, "W4 B323 evidence 1");
+  assert.deepEqual(
+    after.files.map((file) => file.title),
+    ["W4 B323 evidence 1"],
+  );
 });

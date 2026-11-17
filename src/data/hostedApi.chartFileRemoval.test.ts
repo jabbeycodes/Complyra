@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { HostedApi } from "./hostedApi";
 import { todayIso } from "./chart";
 import { ChartChangeIncompleteError, validateRenewalUpload } from "./planStack";
+import { mapChartFile } from "./hostedMappers";
 import type { SessionUser } from "./types";
 
 /**
@@ -375,4 +376,43 @@ test("validateRenewalUpload: evidence ignores the date; a renewal needs a real, 
   );
   assert.throws(() => validateRenewalUpload({ mode: "renewal", uploadedOn: "2026-11-06" }, "2026-11-05"), /future/);
   assert.throws(() => validateRenewalUpload({ mode: "renewal", uploadedOn: "11/05/2026" }, "2026-11-05"), /calendar date/);
+});
+
+test("hosted: the title typed at upload is stored on the chart file row itself (batch 323)", async () => {
+  const fake = hostedApi("nurse");
+  await fake.api.uploadRenewalEvidence({
+    renewalId: "renewal-1",
+    evidenceKind: "pdf",
+    documentTitle: "W4 B323 evidence 1",
+    file: pdf("w4-b323-evidence-1.pdf"),
+    mode: "evidence",
+  });
+  const firstId = fake.renewal().file_id as string;
+  await fake.api.uploadRenewalEvidence({
+    renewalId: "renewal-1",
+    evidenceKind: "pdf",
+    documentTitle: "W4 B323 evidence 2",
+    file: pdf("w4-b323-evidence-2.pdf"),
+    mode: "evidence",
+  });
+  const secondId = fake.renewal().file_id as string;
+
+  // Before this fix the row carried only the filename; the typed title
+  // survived solely as the renewal's "latest" title, so the per-file
+  // list could never show it.
+  const first = fake.tables.chart_files.find((row) => row.id === firstId);
+  assert.equal(first?.name, "w4-b323-evidence-1.pdf");
+  assert.equal(first?.title, "W4 B323 evidence 1");
+  const second = fake.tables.chart_files.find((row) => row.id === secondId);
+  assert.equal(second?.name, "w4-b323-evidence-2.pdf");
+  assert.equal(second?.title, "W4 B323 evidence 2");
+  // The mapper surfaces the stored title for the view.
+  assert.equal(mapChartFile(first!).title, "W4 B323 evidence 1");
+  assert.equal(mapChartFile(second!).title, "W4 B323 evidence 2");
+
+  // Removing the current file re-points the renewal at the remaining
+  // file's OWN title.
+  await fake.api.removeRenewalFile("renewal-1", secondId);
+  assert.equal(fake.renewal().file_id, firstId);
+  assert.equal(fake.renewal().last_document_title, "W4 B323 evidence 1");
 });
