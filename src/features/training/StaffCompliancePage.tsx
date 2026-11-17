@@ -517,11 +517,19 @@ function ProfilePanel({
 
   // Per-line e-initials events, loaded ONCE per site checklist (not one
   // SignatureField per row — 60 rows × 2 API calls would hammer mobile).
+  // eventsLoaded gates every verdict derived from the events (the
+  // "Needs re-initialing" hint, the stamp, the owner's Re-initial
+  // button): until the sheet's events land, the empty set must not read
+  // as "no stamp exists" — that flash was half of the wave-5 item-2
+  // mismatch, and a previous profile's events must never verdict a
+  // newly opened profile's lines either.
   const [siteEvents, setSiteEvents] = useState<Record<string, SignatureEvent[]>>(
     {},
   );
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    setEventsLoaded(false);
     (async () => {
       const siteIds = [
         ...new Set(
@@ -542,7 +550,10 @@ function ProfilePanel({
           loaded[siteId] = [];
         }
       }
-      if (!cancelled) setSiteEvents(loaded);
+      if (!cancelled) {
+        setSiteEvents(loaded);
+        setEventsLoaded(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -684,10 +695,12 @@ function ProfilePanel({
                   {lines.map((line) => {
                     const locked = line.siteId != null && lockedSiteIds.has(line.siteId);
                     const signoff = line.signoff;
-                    const needsReinitialStamp = needsReinitial(line);
+                    const needsReinitialStamp =
+                      eventsLoaded && needsReinitial(line);
                     const ownerMustReinitial =
                       canInitialOwn &&
-                      (needsReinitialStamp || sealNeedsReinitial(sealStates[line.id]));
+                      (needsReinitialStamp ||
+                        (eventsLoaded && sealNeedsReinitial(sealStates[line.id])));
                     const latestEvent = latestLineEvent(allLineEvents, line.id);
                     const signerName =
                       (signoff?.signedByUserId && staffNames[signoff.signedByUserId]) ??
@@ -706,6 +719,8 @@ function ProfilePanel({
                                   <br />
                                   <small className="muted">{signoff.naReason}</small>
                                 </>
+                              ) : !eventsLoaded ? (
+                                <span className="muted">Checking initials…</span>
                               ) : needsReinitialStamp || !latestEvent ? (
                                 <span className="reinitial-hint">
                                   Needs re-initialing
