@@ -21,6 +21,12 @@ export interface ChartFile {
   renewalId?: string | null;
   /** Evidence kind chosen at upload, for renewal files. */
   evidenceKind?: string | null;
+  /**
+   * The document title typed at upload, resolved by the uploader's
+   * backend (typed title, else the filename). Null on rows saved before
+   * per-file titles existed — displays fall back to `name`.
+   */
+  title?: string | null;
   /** Date the file was uploaded (YYYY-MM-DD); absent on legacy rows. */
   uploadedOn?: string | null;
 }

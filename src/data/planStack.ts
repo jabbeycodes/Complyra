@@ -253,6 +253,21 @@ export function renewalFileViews(
   }));
 }
 
+/**
+ * What a chart file is called on screen: the title typed at upload when
+ * one was saved, else the stored filename. Retest batch 323: the upload
+ * form's per-file titles were kept only as the renewal's "latest" title,
+ * so the per-file list could show nothing but filenames. Both backends
+ * resolve row titles through here so the two can never drift apart.
+ */
+export function chartFileDisplayTitle(file: {
+  title?: string | null;
+  name: string;
+}): string {
+  const title = file.title?.trim();
+  return title ? title : file.name;
+}
+
 const KIND_ORDER: Record<ObligationKind, number> = {
   pcsp: 0,
   protocol: 1,

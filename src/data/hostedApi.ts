@@ -259,6 +259,7 @@ import {
   applyRenewalUpload,
   canRemoveRenewalFile,
   ChartChangeIncompleteError,
+  chartFileDisplayTitle,
   renewalFileViews,
   type RenewalUploadMode,
   validateRenewalUpload,
@@ -5386,6 +5387,7 @@ export class HostedApi implements ComplyraApi {
       saved = await this.saveChartFileRecord(session, renewal.individualId, "renewal", input.file, {
         renewalId: renewal.id,
         evidenceKind: input.evidenceKind,
+        title,
       });
     }
     const fileId = saved?.id ?? renewal.fileId;
@@ -5498,7 +5500,7 @@ export class HostedApi implements ComplyraApi {
     }
     const { data: attachedRows, error: attachedError } = await this.client
       .from("chart_files")
-      .select("id, name, evidence_kind, created_at")
+      .select("id, name, title, evidence_kind, created_at")
       .eq("renewal_id", renewal.id);
     throwIf(attachedError, "Could not load the files on this item. Nothing was changed.");
     const remaining = (attachedRows ?? [])
@@ -5510,7 +5512,10 @@ export class HostedApi implements ComplyraApi {
       .filter((attached) => (attached.id as string) !== targetId)
       .map((attached) => ({
         id: attached.id as string,
-        title: (attached.name as string) ?? "Uploaded file",
+        title: chartFileDisplayTitle({
+          title: (attached.title as string | null) ?? null,
+          name: (attached.name as string) ?? "Uploaded file",
+        }),
         evidenceKind: (attached.evidence_kind as ClinicalEvidenceKind | null) ?? null,
       }));
     const next = applyRenewalFileRemovalFromList(renewal, targetId, remaining);
@@ -7245,7 +7250,7 @@ export class HostedApi implements ComplyraApi {
     individualId: string,
     kind: "renewal" | "discontinue" | "other",
     file: File,
-    link?: { renewalId: string; evidenceKind: string },
+    link?: { renewalId: string; evidenceKind: string; title?: string | null },
   ): Promise<{ id: string; storagePath: string }> {
     const fileId = crypto.randomUUID();
     const storagePath = `${session.agencyId}/${individualId}/chart/${fileId}/${file.name}`;
@@ -7263,7 +7268,11 @@ export class HostedApi implements ComplyraApi {
       mime,
       storage_path: storagePath,
       ...(link
-        ? { renewal_id: link.renewalId, evidence_kind: link.evidenceKind }
+        ? {
+            renewal_id: link.renewalId,
+            evidence_kind: link.evidenceKind,
+            title: link.title ?? null,
+          }
         : {}),
     });
     if (insertError) {
@@ -7579,7 +7588,7 @@ export class HostedApi implements ComplyraApi {
                   .filter((file) => file.renewalId === row.id)
                   .map((file) => ({
                     id: file.id,
-                    title: file.name,
+                    title: chartFileDisplayTitle(file),
                     uploadedOn: file.uploadedOn ?? null,
                     uploadedBy: null,
                     evidenceKind: (file.evidenceKind as ClinicalEvidenceKind | null) ?? null,
