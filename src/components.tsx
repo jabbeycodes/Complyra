@@ -1,5 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
+} from "@ui-sdk/react/dialog";
 import {
   X,
   ChevronRight,
@@ -52,47 +59,48 @@ export function Modal({
   onClose: () => void;
   wide?: boolean;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
+  // Callers mount Modal only while it is open, so the Dialog is controlled
+  // open for its whole life and every dismissal ui-sdk offers (Escape,
+  // backdrop press, the close button) routes to the caller's onClose,
+  // which unmounts it. The parts keep the house markup and classes; the
+  // title part wires the dialog's accessible name to the visible heading.
+  // There is no trigger for ui-sdk to return focus to, so the element
+  // focused at first render (before the dialog takes focus) is captured
+  // and handed back as the content's finalFocus.
+  const [returnFocusTo] = useState<HTMLElement | null>(() =>
+    typeof document !== "undefined"
+      ? (document.activeElement as HTMLElement | null)
+      : null,
+  );
+  // Unmount is how every close lands (onClose removes Modal), which can
+  // outrun the Dialog's own focus return; restore it here so focus never
+  // falls to <body> — the native <dialog> did this itself on removal.
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // showModal() throws InvalidStateError when the element is already in
-    // the top layer (a remount race would otherwise surface as an uncaught
-    // error mid-open). An already-open dialog is the desired end state.
-    try {
-      if (!el.open) el.showModal();
-    } catch {
-      /* the dialog is already modal; nothing else to do */
-    }
-    // Teardown is deterministic: unmount always takes the dialog out of
-    // the top layer, so no backdrop or focus trap can outlive the dialog
-    // (simulation batch 3).
     return () => {
-      if (el.open) el.close();
+      if (returnFocusTo?.isConnected) returnFocusTo.focus();
     };
-  }, []);
+  }, [returnFocusTo]);
   return (
-    <dialog
-      ref={ref}
-      className={`modal ${wide ? "wide" : ""}`}
-      onCancel={onClose}
-      onClick={(e) => {
-        if (e.target === ref.current) onClose();
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
-      aria-label={title}
     >
-      <div className="modal-head">
-        <h2>{title}</h2>
-        <button
-          className="icon-button"
-          onClick={onClose}
-          aria-label="Close dialog"
-        >
-          <X size={20} />
-        </button>
-      </div>
-      <div className="modal-body">{children}</div>
-    </dialog>
+      <DialogBackdrop className="modal-backdrop" />
+      <DialogContent
+        className={`modal ${wide ? "wide" : ""}`}
+        finalFocus={() => returnFocusTo}
+      >
+        <div className="modal-head">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogClose className="icon-button" aria-label="Close dialog">
+            <X size={20} />
+          </DialogClose>
+        </div>
+        <div className="modal-body">{children}</div>
+      </DialogContent>
+    </Dialog>
   );
 }
 export function Empty({

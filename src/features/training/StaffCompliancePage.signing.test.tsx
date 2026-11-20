@@ -44,6 +44,61 @@ describe("training sign-off password re-entry", () => {
     setGlobal("HTMLElement", dom.window.HTMLElement);
     setGlobal("Element", dom.window.Element);
     setGlobal("Node", dom.window.Node);
+    // The shared Modal is backed by ui-sdk's Dialog, whose presence
+    // animation and modal machinery (inert/focus work on timers after
+    // open) reference DOM constructors as bare globals. Install the
+    // same set the slice-0 foundation test (uiSdkFoundation.test.tsx)
+    // already installs, plus its jsdom stubs for the top layer.
+    setGlobal(
+      "requestAnimationFrame",
+      dom.window.requestAnimationFrame.bind(dom.window),
+    );
+    setGlobal(
+      "cancelAnimationFrame",
+      dom.window.cancelAnimationFrame.bind(dom.window),
+    );
+    for (const name of [
+      "ShadowRoot",
+      "DocumentFragment",
+      "HTMLInputElement",
+      "HTMLButtonElement",
+      "HTMLAnchorElement",
+      "HTMLSelectElement",
+      "HTMLTextAreaElement",
+      "MutationObserver",
+      "CustomEvent",
+      "Event",
+      "MouseEvent",
+      "KeyboardEvent",
+      "FocusEvent",
+      "NodeFilter",
+    ]) {
+      setGlobal(name, (dom.window as unknown as Record<string, unknown>)[name]);
+    }
+    setGlobal(
+      "getComputedStyle",
+      dom.window.getComputedStyle.bind(dom.window),
+    );
+    const win = dom.window as unknown as {
+      HTMLElement: { prototype: Record<string, unknown> };
+      Element: { prototype: Record<string, unknown> };
+    };
+    win.HTMLElement.prototype.showPopover = function () {};
+    win.HTMLElement.prototype.hidePopover = function () {};
+    win.Element.prototype.getAnimations = () => [];
+    win.Element.prototype.scrollIntoView = function () {};
+    win.Element.prototype.checkVisibility = () => true;
+    win.Element.prototype.getClientRects = () => [];
+    dom.window.document.elementFromPoint = () => null;
+    dom.window.document.elementsFromPoint = () => [];
+    setGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     React = await import("react");
     createRoot = (await import("react-dom/client")).createRoot;
