@@ -94,12 +94,21 @@ export function BinderBoardTab({
   store,
   staffList,
   sites,
+  initialView,
   onOpenBinder,
 }: {
   session: SessionUser;
   store: HrStore;
   staffList: HubStaffEntry[];
   sites: HubSite[];
+  /** Deep-link initial view (Settings discovery's Binder templates
+   * link passes "templates" so it lands on the template editor).
+   * Ordinary navigation passes nothing and lands on the board, as
+   * before. The templates view still renders only for
+   * canViewBinderTemplates sessions, and the editor inside it only
+   * for canEditBinderTemplates — an initial view never widens either
+   * gate; for anyone else this falls back to the board below. */
+  initialView?: "board" | "templates";
   onOpenBinder: (staffId: string) => void;
 }) {
   const { api } = useData();
@@ -107,7 +116,7 @@ export function BinderBoardTab({
   const canEditTemplates = canEditBinderTemplates(session.roleKey);
   const canViewTemplates = canViewBinderTemplates(session.roleKey);
 
-  const [view, setView] = useState<"board" | "templates">("board");
+  const [view, setView] = useState<"board" | "templates">(initialView ?? "board");
   const [rows, setRows] = useState<BoardRow[] | null>(null);
   // Derived binders for agency staff NOT in the card rows (the totals
   // population — see the load effect). Cards never render for these;
