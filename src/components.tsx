@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import {
   Dialog,
@@ -64,22 +64,28 @@ export function Modal({
   // backdrop press, the close button) routes to the caller's onClose,
   // which unmounts it. The parts keep the house markup and classes; the
   // title part wires the dialog's accessible name to the visible heading.
-  // There is no trigger for ui-sdk to return focus to, so the element
-  // focused at first render (before the dialog takes focus) is captured
-  // and handed back as the content's finalFocus.
-  const [returnFocusTo] = useState<HTMLElement | null>(() =>
-    typeof document !== "undefined"
-      ? (document.activeElement as HTMLElement | null)
-      : null,
-  );
-  // Unmount is how every close lands (onClose removes Modal), which can
-  // outrun the Dialog's own focus return; restore it here so focus never
-  // falls to <body> — the native <dialog> did this itself on removal.
-  useEffect(() => {
+  // There is no trigger for ui-sdk to return focus to, so we snapshot the
+  // focused element ourselves and hand it back as the content's finalFocus.
+  const returnFocusTo = useRef<HTMLElement | null>(null);
+  // Snapshot the opener in a layout effect, not during render: when one
+  // Modal replaces another (e.g. the sign-off flow's loading → adoption →
+  // form swap), the render phase still sees the outgoing dialog holding
+  // focus, so it would record a node that is about to unmount and leave
+  // focus on <body> at close. The outgoing Modal's cleanup below runs
+  // first (also a layout effect) and returns focus to the real opener, so
+  // by the time this runs the opener is focused again — and ui-sdk re-takes
+  // focus for this dialog on its own timer afterwards. Restoring on unmount
+  // is how every close lands (onClose removes Modal); it keeps focus off
+  // <body>, as the native <dialog> did on removal.
+  useLayoutEffect(() => {
+    returnFocusTo.current =
+      typeof document !== "undefined"
+        ? (document.activeElement as HTMLElement | null)
+        : null;
     return () => {
-      if (returnFocusTo?.isConnected) returnFocusTo.focus();
+      if (returnFocusTo.current?.isConnected) returnFocusTo.current.focus();
     };
-  }, [returnFocusTo]);
+  }, []);
   return (
     <Dialog
       open
@@ -90,7 +96,7 @@ export function Modal({
       <DialogBackdrop className="modal-backdrop" />
       <DialogContent
         className={`modal ${wide ? "wide" : ""}`}
-        finalFocus={() => returnFocusTo}
+        finalFocus={() => returnFocusTo.current}
       >
         <div className="modal-head">
           <DialogTitle>{title}</DialogTitle>
