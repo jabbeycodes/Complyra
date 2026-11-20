@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Send, X } from "lucide-react";
 import { Empty } from "../../components";
 import type { SessionUser } from "../../data/types";
+import { centralTodayIso } from "../../data/menuRecords";
 import {
   describeOpenShiftWhen,
   isOpenForResponses,
@@ -51,7 +52,8 @@ function errMessage(err: unknown, fallback: string): string {
 }
 
 function todayStamp(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // The agency day (America/Chicago), never the device-local day.
+  return centralTodayIso(d);
 }
 
 /** Local date + "HH:MM" start/end → ISO instants; an earlier end runs to the next day. */

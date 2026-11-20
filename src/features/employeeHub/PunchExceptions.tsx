@@ -27,6 +27,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Flag } from "lucide-react";
 import { Empty } from "../../components";
 import { createSupabaseBrowserClient } from "../../data/index";
+import { centralTodayIso } from "../../data/menuRecords";
 import { detectExceptions, weeklyHoursStatus, workWeekStart } from "../../data/hr";
 import { formatHours, overtimeFlagHours, workWeekRangeLabel } from "../../data/rules";
 import { useOperatingRules, useOvertimeLines } from "./useOvertimeLines";
@@ -138,7 +139,7 @@ export function PunchExceptions({
   const weekRange = workWeekRangeLabel(overtimeLines.weekStartsOn);
   const kiosk = useMemo(() => adaptKioskStore(store), [store]);
   const kioskAvailable = isKioskStoreAvailable(store);
-  const [date, setDate] = useState(dayStamp(new Date()));
+  const [date, setDate] = useState(centralTodayIso());
   const [siteFilter, setSiteFilter] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | DisplayKind>("all");
   const [exceptions, setExceptions] = useState<PunchException[]>(initialExceptions ?? []);

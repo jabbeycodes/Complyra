@@ -83,7 +83,7 @@ export default function MileagePage() {
   const [siteId, setSiteId] = useState("");
   const [month, setMonth] = useState(() => monthKeyOf(centralTodayIso()));
   const [tab, setTab] = useState<"weekly" | "monthly" | "yearly">("monthly");
-  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [year, setYear] = useState(() => Number(centralTodayIso().slice(0, 4)));
   const [trips, setTrips] = useState<MileageTripView[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);

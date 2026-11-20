@@ -1,4 +1,5 @@
 import type { Category, Status } from "../domain";
+import { centralTodayIso } from "./menuRecords";
 
 export type AppRole =
   | "administrator"
@@ -640,7 +641,7 @@ export function delegationFormStatus(form: DelegationForm): {
  */
 export function delegationReviewState(
   form: DelegationForm,
-  today = new Date().toISOString().slice(0, 10),
+  today = centralTodayIso(),
 ): { label: string; overdue: boolean; dueSoon: boolean } | null {
   if (!form.reviewDate) return null;
   const days = Math.round(

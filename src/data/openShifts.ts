@@ -21,6 +21,7 @@
 
 import { computePatternWeeklyHours, STAFFING_DAY_LABELS, workWeekStart, type HrShift } from "./hr";
 import { DEFAULT_OVERTIME_LINES, type OvertimeLines } from "./rules";
+import { centralTodayIso } from "./menuRecords";
 
 export type OpenShiftKind = "temporary" | "permanent";
 export type OpenShiftAudience = "site" | "agency";
@@ -111,7 +112,7 @@ export function validateOpenShiftInput(input: OpenShiftInput, now = new Date()):
       problems.push("Set the daily start and end times.");
     }
     if (!input.effectiveFrom) problems.push("Choose the date the permanent shift starts.");
-    else if (input.effectiveFrom < localDate(now)) problems.push("Permanent shifts need a start date today or later.");
+    else if (input.effectiveFrom < centralTodayIso(now)) problems.push("Permanent shifts need a start date today or later.");
   }
   return problems;
 }
@@ -234,13 +235,6 @@ export function pickupActionLabel(
 }
 
 /* ------------------------------- helpers ------------------------------- */
-
-function localDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function clock(d: Date): string {
   const h = d.getHours();

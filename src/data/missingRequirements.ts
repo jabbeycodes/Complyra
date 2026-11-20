@@ -13,6 +13,7 @@
  */
 
 import { cpiPbsDueOn } from "./rules";
+import { centralTodayIso } from "./menuRecords";
 
 export type MissingScope = "site" | "staff" | "individual";
 
@@ -72,16 +73,12 @@ export interface MissingInput {
   }>;
 }
 
-function iso(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function expiredOn(expiresOn: string, nowIso: string): boolean {
   return expiresOn < nowIso;
 }
 
 export function findMissing(input: MissingInput): MissingRequirement[] {
-  const nowIso = iso(input.now);
+  const nowIso = centralTodayIso(input.now);
   const missing: MissingRequirement[] = [];
 
   const certByUser = new Map<string, Map<string, string>>();

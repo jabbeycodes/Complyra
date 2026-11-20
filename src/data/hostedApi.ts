@@ -2348,7 +2348,7 @@ export class HostedApi implements ComplyraApi {
    * agency's configured role map) — auditors are out on both checks.
    */
   private async messagingMemberships(session: SessionUser) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const [membershipsRes, rolesRes] = await Promise.all([
       this.client.from("memberships").select("*").eq("agency_id", session.agencyId),
       this.client.from("agency_roles").select("*").eq("agency_id", session.agencyId),
@@ -3831,7 +3831,7 @@ export class HostedApi implements ComplyraApi {
       user_id: userId,
       individual_id: individualId,
       site_id: individual!.site_id,
-      starts_on: new Date().toISOString().slice(0, 10),
+      starts_on: centralTodayIso(),
     });
     throwIf(assignError, "Could not assign that staff member.");
     const { data: packets } = await this.client
@@ -5329,7 +5329,7 @@ export class HostedApi implements ComplyraApi {
     {
       const { item: freshItem, form } = await this.delegationRow(session, obligationId);
       form.delegatingRn.signatureName = signatureName.trim();
-      form.delegatingRn.dateSigned = new Date().toISOString().slice(0, 10);
+      form.delegatingRn.dateSigned = centralTodayIso();
       if (!form.delegatingRn.name.trim()) {
         form.delegatingRn.name = signatureName.trim();
       }
@@ -5962,7 +5962,7 @@ export class HostedApi implements ComplyraApi {
     if (!reason) throw new Error("Say why you are awarding the points.");
     const points = Math.trunc(input.points);
     const rules = await this.loadOperatingRules(session);
-    const month = new Date().toISOString().slice(0, 7);
+    const month = centralTodayIso().slice(0, 7);
     const { data, error } = await this.client
       .from("audit_events")
       .select("detail, created_at")
@@ -5971,7 +5971,12 @@ export class HostedApi implements ComplyraApi {
       .eq("action", "recognition.award");
     throwIf(error, "Could not check this month's recognition points.");
     const used = ((data ?? []) as Array<{ detail?: string; created_at?: string }>)
-      .filter((row) => String(row.created_at ?? "").startsWith(month))
+      // created_at is a UTC instant; compare its Central calendar month so the
+      // cap matches the agency month even for evening awards near a boundary.
+      .filter((row) => {
+        const createdAt = String(row.created_at ?? "");
+        return createdAt !== "" && centralTodayIso(new Date(createdAt)).slice(0, 7) === month;
+      })
       .reduce((sum, row) => {
         const match = /^points=(\d+)/.exec(String(row.detail ?? ""));
         return sum + (match ? Number(match[1]) : 0);
@@ -6937,11 +6942,11 @@ export class HostedApi implements ComplyraApi {
         title: `${fullName} · PCSP`,
         kind: "pcsp",
         pageCount: input.pageCount || 1,
-        effectiveOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        effectiveOn: input.effectiveOn || centralTodayIso(),
         requirementTitle: `Acknowledge PCSP for ${fullName}`,
         category: "PCSP acknowledgments",
         ownerUserId: session.userId,
-        dueOn: input.effectiveOn || new Date().toISOString().slice(0, 10),
+        dueOn: input.effectiveOn || centralTodayIso(),
         frequency: "On plan update",
         sourcePage: 1,
       });
@@ -7980,7 +7985,7 @@ export class HostedApi implements ComplyraApi {
     if (!profile || !membership) return null;
     if (
       membership.expires_on &&
-      String(membership.expires_on).slice(0, 10) < new Date().toISOString().slice(0, 10)
+      String(membership.expires_on).slice(0, 10) < centralTodayIso()
     ) {
       return null;
     }
@@ -8402,7 +8407,7 @@ export class HostedApi implements ComplyraApi {
     userId: string,
   ): Promise<StaffTrainingProfile> {
     const fullName = await this.profileName(userId);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data: reqRows, error: reqError } = await this.client
       .from("training_requirements")
       .select("*")
@@ -8752,7 +8757,7 @@ export class HostedApi implements ComplyraApi {
       agency_id: session.agencyId,
       requirement_id: requirementId,
       initials: "N/A",
-      signed_on: new Date().toISOString().slice(0, 10),
+      signed_on: centralTodayIso(),
       na: true,
       na_reason: trimmed,
       signoff_version: 1,
@@ -8848,7 +8853,7 @@ export class HostedApi implements ComplyraApi {
     throwIf(reqError, "Could not load training lines.");
     const lines = reqRows ?? [];
     if (lines.length === 0) throw new Error("No training lines assigned for this site yet.");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const requirementIds = lines.map((row) => String(row.id));
     const { data: signoffRows } = await this.client
       .from("training_signoffs")
@@ -8971,7 +8976,7 @@ export class HostedApi implements ComplyraApi {
     assignments: StaffAssignment[],
     individuals: { id: string; siteId: string }[],
   ): Promise<DelegationRecipient[]> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data: memberships } = await this.client
       .from("memberships")
       .select("user_id, site_id, expires_on")
@@ -9688,7 +9693,7 @@ export class HostedApi implements ComplyraApi {
     }
     // Roster: active memberships at the site (agency-wide members included),
     // acknowledgments read through the RLS roster-viewer policy.
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data: membershipData, error: membershipError } = await this.client
       .from("memberships")
       .select("user_id")
@@ -10762,7 +10767,7 @@ export class HostedApi implements ComplyraApi {
     }
     if (assigneeId) {
       const member = await this.correctiveActionMembership(session, assigneeId);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = centralTodayIso();
       if (
         !member ||
         (member.expiresOn && member.expiresOn < today) ||
@@ -11048,7 +11053,7 @@ export class HostedApi implements ComplyraApi {
       .eq("role_key", "house_manager")
       .eq("site_id", siteId);
     if (error) return [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     return (data ?? [])
       .filter((row) => {
         const expires = (row as { expires_on?: string | null }).expires_on;
@@ -11112,7 +11117,7 @@ export class HostedApi implements ComplyraApi {
 
   /** Overdue follow-ups alert the assigned manager (or HM/PM/nurse set). */
   private async queueGerOverdueAlerts(session: SessionUser, rows: GerReport[]) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     for (const report of rows) {
       if (!gerNeedsFollowUp(report)) continue;
       if (!report.resolutionDueOn || report.resolutionDueOn >= today) continue;
@@ -11829,19 +11834,27 @@ export class HostedApi implements ComplyraApi {
     const session = await this.requireSession();
     this.requireCorrectiveActionWrite(session);
     const siteId = input.siteId ?? null;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     // One snapshot per day per scope — replace today's if it exists.
+    // computed_at is a UTC instant, so bound the fetch to a window that fully
+    // covers the Central day and compare its Central calendar day precisely;
+    // a raw UTC prefix would miss evening snapshots near a day boundary.
     let existingQuery = this.client
       .from("compliance_score_snapshots")
-      .select("id")
+      .select("id, computed_at")
       .eq("agency_id", session.agencyId)
       .gte("computed_at", `${today}T00:00:00`)
-      .lt("computed_at", `${today}T23:59:59.999`);
+      .lt("computed_at", `${addDaysIso(today, 1)}T12:00:00`);
     existingQuery = siteId
       ? existingQuery.eq("site_id", siteId)
       : existingQuery.is("site_id", null);
-    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    const { data: candidates, error: existingError } = await existingQuery;
     throwIf(existingError, "Could not check today's snapshot.");
+    const existing = ((candidates ?? []) as Array<{ id: string; computed_at?: string }>).find(
+      (snap) =>
+        snap.computed_at != null &&
+        centralTodayIso(new Date(String(snap.computed_at))) === today,
+    );
     const row = buildScoreSnapshotRow({
       agencyId: session.agencyId,
       siteId,
@@ -11966,7 +11979,7 @@ export class HostedApi implements ComplyraApi {
     session: SessionUser,
     siteId: string,
   ): Promise<TrainingReadiness[]> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data: memberships, error: memberError } = await this.client
       .from("memberships")
       .select("user_id, role_key, expires_on")
@@ -12295,7 +12308,7 @@ export class HostedApi implements ComplyraApi {
     locked: number;
   }> {
     const session = await this.requireSession();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const currentWeek = weekOfSundayIso(today);
     // The checklist page runs this under every viewer's own session,
     // including the assigned HM's. Creation/update scope mirrors the RLS
@@ -15437,7 +15450,7 @@ export class HostedApi implements ComplyraApi {
     userId: string,
     roleKey: string,
   ): Promise<boolean> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data } = await this.client
       .from("memberships")
       .select("user_id")
@@ -15467,7 +15480,7 @@ export class HostedApi implements ComplyraApi {
     ) {
       return null;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data: m } = await this.client
       .from("memberships")
       .select("site_id")
@@ -15499,7 +15512,7 @@ export class HostedApi implements ComplyraApi {
   ): Promise<Map<string, Set<string>>> {
     const map = new Map<string, Set<string>>();
     if (userIds.length === 0) return map;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const add = (userId: string, siteId: unknown) => {
       if (!siteId) return;
       let set = map.get(userId);
@@ -15538,7 +15551,7 @@ export class HostedApi implements ComplyraApi {
     userA: string,
     userB: string,
   ): Promise<boolean> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const { data } = await this.client
       .from("memberships")
       .select("user_id, site_id")
@@ -15904,7 +15917,7 @@ export class HostedApi implements ComplyraApi {
           ? "dsp"
           : null;
     if (!counterpart) return [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const active = `expires_on.is.null,expires_on.gte.${today}`;
     const asgActive = `ends_on.is.null,ends_on.gte.${today}`;
     const { data: mySites } = await this.client

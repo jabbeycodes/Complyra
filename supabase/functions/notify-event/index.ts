@@ -33,6 +33,18 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/** Today's date in America/Chicago (the agency day), as YYYY-MM-DD. */
+function centralTodayIso(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -159,7 +171,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // The caller must hold an ACTIVE membership in this agency.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   const { data: membership } = await admin
     .from("memberships")
     .select("id")

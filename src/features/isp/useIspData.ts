@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ComplyraApi } from "../../data/localApi";
+import { centralTodayIso } from "../../data/menuRecords";
 import type {
   IspProgramView,
   IspScoringMethod,
@@ -57,5 +58,5 @@ export function useIspData(
 
 /** The plan year staff note against: the current calendar year. */
 export function currentPlanYear(): string {
-  return String(new Date().getFullYear());
+  return centralTodayIso().slice(0, 4);
 }

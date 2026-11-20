@@ -14,6 +14,7 @@ import {
   type PermissionKey,
 } from "./permissions";
 import { canSeeAppointments } from "./appointments";
+import { centralTodayIso } from "./menuRecords";
 
 const MS_PER_DAY = 86400000;
 
@@ -22,10 +23,9 @@ export function startOfDay(isoDate: string) {
 }
 
 export function todayStamp(now = new Date()) {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  // The agency day (America/Chicago), never the device-local day — every
+  // status judgment that defaults to "today" reads the Central calendar.
+  return centralTodayIso(now);
 }
 
 export function computeRequirementStatus(

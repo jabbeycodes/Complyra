@@ -48,6 +48,18 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/** Today's date in America/Chicago (the agency day), as YYYY-MM-DD. */
+function centralTodayIso(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 const HM_ROLE_KEY = "house_manager";
 const DSP_ROLE_KEY = "dsp";
 
@@ -187,7 +199,7 @@ Deno.serve(async (req) => {
   if (!bearer) return fail("Missing authorization", 401);
 
   const admin = createClient(url, service);
-  const today = toIsoDate(new Date());
+  const today = centralTodayIso();
   let authorized = false;
   let actor = "service_role";
   // Agencies this caller may run selection for (service_role: unrestricted).

@@ -7,6 +7,18 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/** Today's date in America/Chicago (the agency day), as YYYY-MM-DD. */
+function centralTodayIso(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -222,7 +234,7 @@ Deno.serve(async (req) => {
           agency_id: agency.id,
           user_id: created.user.id,
           site_id: assignmentSiteId,
-          starts_on: new Date().toISOString().slice(0, 10),
+          starts_on: centralTodayIso(),
         })),
       );
     if (assignmentError) {
