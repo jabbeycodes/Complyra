@@ -273,6 +273,11 @@ export default function App() {
   // PERSONAL-COMPLIANCE: deep-link into the Employee Hub's My Compliance
   // tab from the dashboards' personal compliance card/strip.
   const [hubFocusTab, setHubFocusTab] = useState<string | null>(null);
+  // SETTINGS-DISCOVERY: a hub deep-link may also name a subview inside
+  // the tab (the Binder Board's "templates" view, where the binder
+  // template editor lives). Set only by the Settings discovery links,
+  // alongside hubFocusTab, and consumed/cleared with it on hub mount.
+  const [hubFocusSubview, setHubFocusSubview] = useState<string | null>(null);
   const openMyCompliance = () => {
     setHubFocusTab("compliance");
     navigate("Employee Hub");
@@ -2289,7 +2294,11 @@ export default function App() {
               {page === "Employee Hub" && (
                 <EmployeeHubPage
                   focusTab={hubFocusTab}
-                  onFocusHandled={() => setHubFocusTab(null)}
+                  focusSubview={hubFocusSubview}
+                  onFocusHandled={() => {
+                    setHubFocusTab(null);
+                    setHubFocusSubview(null);
+                  }}
                 />
               )}
               {/* MESSAGING-PAGE: staff inbox (participants only). */}
@@ -2410,6 +2419,7 @@ export default function App() {
                       onOpen={(target) => {
                         if (target.kind === "hub-tab") {
                           setHubFocusTab(target.tab);
+                          setHubFocusSubview(target.subview ?? null);
                           navigate("Employee Hub");
                         } else {
                           navigate(target.page);

@@ -24,6 +24,11 @@ import {
 import { RULE_CATALOG } from "../data/rules";
 import { defaultPermissions } from "../data/permissions";
 import { DEFAULT_OVERTIME_RULES, DEFAULT_PUNCH_RULES } from "../data/hr";
+import {
+  defaultBinderTemplateLibrary,
+  type StaffBinder,
+} from "../data/newHireBinder";
+import type { HrStore } from "../data/hrStore";
 import type { SessionUser } from "../data/types";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -255,6 +260,231 @@ test("ownership copy is wired into both panels, and the stale claim is gone", ()
     "utf8",
   );
   assert.ok(punch.includes("PUNCH_RULES_OWNERSHIP"));
+});
+
+test("binder-templates link carries the templates subview; no other link does", () => {
+  // Reviewer HOLD on PR #278: the Binder Board tab opens on its board
+  // view, so a tab-only target made "Binder templates" a false
+  // destination. The link now names the Templates subview explicitly —
+  // the editor's own view — while every other hub-tab link stays a
+  // plain tab target (their editors render inside the tab itself).
+  const links = settingsDiscoveryLinks(session({}));
+  const binder = links.find((l) => l.id === "binder-templates");
+  assert.deepEqual(binder?.target, {
+    kind: "hub-tab",
+    tab: "binder-board",
+    subview: "templates",
+  });
+  for (const id of ["pay-settings", "clock-settings"] as const) {
+    const link = links.find((l) => l.id === id);
+    assert.ok(link?.target.kind === "hub-tab", id);
+    assert.equal(link.target.subview, undefined, id);
+  }
+  // The subview never outruns the gate: a session that cannot edit
+  // binder templates (HR views them read-only from the board itself)
+  // receives no binder-templates link at all, so it can never be
+  // deep-linked into the editor.
+  assert.equal(
+    settingsDiscoveryLinks(session({ role: "hr", roleKey: "hr" })).some(
+      (l) => l.id === "binder-templates",
+    ),
+    false,
+  );
+});
+
+test("the subview is wired from the link through the hub to the board", () => {
+  // Source wiring, in the same style as the ownership checks above:
+  // App carries the subview beside the focus tab and hands both to the
+  // hub page; the hub forwards it to the Binder Board; the board takes
+  // it as its initial view and still defaults to "board" without it.
+  const app = readFileSync(join(root, "src/App.tsx"), "utf8");
+  assert.ok(app.includes("setHubFocusSubview(target.subview ?? null)"));
+  assert.ok(app.includes("focusSubview={hubFocusSubview}"));
+  const hub = readFileSync(
+    join(root, "src/features/employeeHub/EmployeeHubPage.tsx"),
+    "utf8",
+  );
+  assert.ok(hub.includes("focusSubview={focusSubview ?? undefined}"));
+  assert.ok(
+    hub.includes(
+      'initialView={focusSubview === "templates" ? "templates" : undefined}',
+    ),
+  );
+  const board = readFileSync(
+    join(root, "src/features/newHireBinder/BinderBoardPanel.tsx"),
+    "utf8",
+  );
+  assert.ok(board.includes('initialView ?? "board"'));
+});
+
+test("BinderBoardTab honors the templates initial view and defaults to the board", async () => {
+  // jsdom render, mirroring BinderBoardPanel.test.tsx's setup. The
+  // decisive in-browser proof is the Playwright spec; this pins the
+  // component contract the deep link relies on.
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    pretendToBeVisual: true,
+  });
+  const setGlobal = (name: string, value: unknown) => {
+    Object.defineProperty(globalThis, name, {
+      value,
+      configurable: true,
+      writable: true,
+    });
+  };
+  setGlobal("window", dom.window);
+  setGlobal("document", dom.window.document);
+  setGlobal("navigator", dom.window.navigator);
+  setGlobal("HTMLElement", dom.window.HTMLElement);
+  setGlobal("HTMLCanvasElement", dom.window.HTMLCanvasElement);
+  setGlobal("Element", dom.window.Element);
+  setGlobal("Node", dom.window.Node);
+  setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  try {
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { BinderBoardTab } = await import(
+      "./newHireBinder/BinderBoardPanel"
+    );
+    const { DataContext } = await import("../data/DataProvider");
+    const act = React.act;
+
+    const binder: StaffBinder = {
+      id: "binder-u1",
+      agencyId: "a1",
+      staffId: "u1",
+      sections: [
+        {
+          key: "docs",
+          title: "Documents",
+          items: [
+            { key: "id-copy", label: "ID copy", kind: "document", matchKeys: ["id"] },
+          ],
+        },
+      ],
+      createdAt: "2026-10-31T00:00:00.000Z",
+      updatedAt: "2026-10-31T00:00:00.000Z",
+    };
+    const store = {
+      listDocuments: async () => [],
+      listDocumentAcks: async () => [],
+      getBinder: async () => binder,
+      listBinders: async () => [binder],
+      listBinderDocuments: async () => [],
+      getEmergencyContact: async () => null,
+      getComplianceEvidence: async () => ({
+        certs: [],
+        trainings: [],
+        delegations: [],
+        docAcks: [],
+      }),
+      listBinderTemplates: async () => defaultBinderTemplateLibrary(),
+    } as unknown as HrStore;
+    const staffList = [
+      {
+        userId: "u1",
+        fullName: "Sarah Mitchell",
+        email: "",
+        roleKey: "administrator",
+        siteId: null,
+        siteName: null,
+      },
+    ];
+
+    async function renderBoard(
+      sess: SessionUser,
+      initialView?: "board" | "templates",
+    ): Promise<{
+      text: string;
+      html: string;
+      templatesBtnClass: string;
+      boardBtnClass: string;
+    }> {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const value = {
+        api: {
+          getStaffTrainingProfile: async () => null,
+        } as unknown as import("../data/localApi").ComplyraApi,
+        session: sess,
+        workspace: null as import("../data/localApi").WorkspaceView | null,
+        loading: false,
+        error: "",
+        usingHostedBackend: true,
+        loadStalled: false,
+        signIn: async () => {},
+        changePassword: async () => {},
+        signOut: async () => {},
+        refresh: async () => {},
+      };
+      await act(async () => {
+        root.render(
+          React.createElement(
+            DataContext.Provider,
+            { value },
+            React.createElement(BinderBoardTab, {
+              session: sess,
+              store,
+              staffList,
+              sites: [],
+              initialView,
+              onOpenBinder: () => {},
+            }),
+          ),
+        );
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      });
+      const viewButtons = Array.from(
+        container.querySelectorAll(".binder-board-views button"),
+      );
+      const btnClass = (label: string) =>
+        viewButtons.find((b) => b.textContent?.includes(label))?.className ??
+        "";
+      const out = {
+        text: container.textContent ?? "",
+        html: container.innerHTML,
+        templatesBtnClass: btnClass("Templates"),
+        boardBtnClass: btnClass("Board"),
+      };
+      await act(async () => root.unmount());
+      container.remove();
+      return out;
+    }
+
+    // Deep-linked (administrator, a template editor): the template
+    // EDITOR renders — its snapshot-rule note and Reset to starter
+    // control exist only in the editor — the Templates toggle is the
+    // active view, and the board itself is not shown.
+    const deepLinked = await renderBoard(session({}), "templates");
+    assert.match(deepLinked.text, /Snapshot rule/);
+    assert.match(deepLinked.text, /Reset to starter/);
+    assert.ok(!deepLinked.html.includes("binder-board-summary"));
+    assert.ok(deepLinked.templatesBtnClass.includes("primary"));
+    assert.ok(!deepLinked.boardBtnClass.includes("primary"));
+
+    // Ordinary arrival (no initial view): the board renders exactly as
+    // before and the editor does not.
+    const ordinary = await renderBoard(session({}));
+    assert.ok(ordinary.html.includes("binder-board-summary"));
+    assert.ok(!ordinary.text.includes("Snapshot rule"));
+    assert.ok(ordinary.boardBtnClass.includes("primary"));
+
+    // A house manager handed the subview anyway (no template access at
+    // all): the board renders and no editor — the initial view never
+    // widens the templates gate.
+    const hm = await renderBoard(
+      session({ roleKey: "house_manager" }),
+      "templates",
+    );
+    assert.ok(hm.html.includes("binder-board-summary"));
+    assert.ok(!hm.text.includes("Snapshot rule"));
+    assert.ok(!hm.text.includes("Reset to starter"));
+  } finally {
+    dom.window.close();
+  }
 });
 
 test("no threshold moved: catalog and HR defaults are unchanged", () => {

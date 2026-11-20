@@ -181,6 +181,12 @@ interface EmployeeHubShellProps {
   /** Agency logo (data URL) for printout headers, from the page's workspace branding. */
   logoDataUrl?: string | null;
   initialTab?: string;
+  /** Deep-link subview inside initialTab, from the Settings discovery
+   * links: "templates" opens the Binder Board on its Templates view
+   * (the binder template editor) instead of the board. Consumed as the
+   * BinderBoardTab's initial view on mount; absent on every ordinary
+   * navigation, which keeps landing on the board exactly as before. */
+  focusSubview?: string;
   /** The viewer's active staff-assignment site ids (WorkspaceView). Used to
    * scope the scheduling forms' staff/site options for site-scoped roles. */
   assignmentSiteIds?: string[];
@@ -572,6 +578,7 @@ export function EmployeeHubShell({
   api,
   logoDataUrl,
   initialTab,
+  focusSubview,
   assignmentSiteIds,
   openShiftStore,
   onLateClockIn,
@@ -821,6 +828,7 @@ export function EmployeeHubShell({
               store={store}
               staffList={staffList}
               sites={sites}
+              initialView={focusSubview === "templates" ? "templates" : undefined}
               onOpenBinder={(staffId) => {
                 setBinderFocusId(staffId);
                 setTab("binder");
@@ -4730,12 +4738,16 @@ function AccrualPoliciesCard({ store }: { store: HrStore }) {
 
 export default function EmployeeHubPage({
   focusTab,
+  focusSubview,
   onFocusHandled,
 }: {
   /** Deep-link: open the Hub with this tab selected (e.g. "compliance"
    * from the dashboards' "View my compliance"). Consumed on mount — the
    * page remounts on every navigation here, so the tab lands fresh. */
   focusTab?: string | null;
+  /** Deep-link subview inside focusTab (Settings discovery: "templates"
+   * for the Binder Board's template editor). Consumed with focusTab. */
+  focusSubview?: string | null;
   onFocusHandled?: () => void;
 } = {}) {
   const { api, session, workspace } = useData();
@@ -4830,6 +4842,7 @@ export default function EmployeeHubPage({
       api={api}
       logoDataUrl={workspace?.branding.logoUrl ?? null}
       initialTab={focusTab ?? undefined}
+      focusSubview={focusSubview ?? undefined}
       onLateClockIn={(input) => api.noteLateClockIn(input)}
     />
   );

@@ -19,7 +19,15 @@ import { pageVisible } from "../data/status";
 import type { SessionUser } from "../data/types";
 
 export type SettingsDiscoveryTarget =
-  | { kind: "hub-tab"; tab: "binder-board" | "payroll" }
+  | {
+      kind: "hub-tab";
+      tab: "binder-board" | "payroll";
+      /** Deep-link subview inside the tab. Only the Binder Board has
+       * one today: its "templates" view is where the template editor
+       * lives, and the Binder templates link must land on the editor
+       * itself — not on the board the tab opens to by default. */
+      subview?: "templates";
+    }
   | { kind: "page"; page: "Consents" | "Delegations" };
 
 export interface SettingsDiscoveryLink {
@@ -45,7 +53,11 @@ export function settingsDiscoveryLinks(
   // view (Employee Hub → Binder Board). The board tab opens on
   // hub.view_team or its roleAny list (MANAGER_TABS in EmployeeHubPage);
   // editing the templates themselves is canEditBinderTemplates
-  // (administrator / program manager). The link mirrors both.
+  // (administrator / program manager). The link mirrors both, and it
+  // carries the "templates" subview so it lands on the editor itself —
+  // the board alone would be a false destination for this label. The
+  // subview rides the same gate: only a session that passes both
+  // checks above ever receives it.
   const binderBoardTabOpens =
     hasPermission(session, "hub.view_team") ||
     ["hr", "administrator", "auditor"].includes(session.roleKey);
@@ -59,7 +71,7 @@ export function settingsDiscoveryLinks(
       label: "Binder templates",
       description:
         "The master checklists behind every New Hire Binder, edited from the Binder Board's Templates view in the Employee Hub.",
-      target: { kind: "hub-tab", tab: "binder-board" },
+      target: { kind: "hub-tab", tab: "binder-board", subview: "templates" },
     });
   }
 
