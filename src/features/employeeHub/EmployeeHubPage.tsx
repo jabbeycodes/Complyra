@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { addDaysIso, centralTodayIso } from "../../data/menuRecords";
 import { createSupabaseBrowserClient } from "../../data/index";
 import {
   hasHubTeamPermission,
@@ -660,7 +661,7 @@ export function EmployeeHubShell({
       const counts: BadgeCounts = { attendance: 0, timecards: 0, timeoff: 0, documents: 0 };
       try {
         if (canViewTeamHub) {
-          const stamp = dayStamp(new Date());
+          const stamp = centralTodayIso();
           const [shiftsToday, perStaff] = await Promise.all([
             store
               .listShifts(`${stamp}T00:00:00`, `${stamp}T23:59:59`)
@@ -1560,7 +1561,7 @@ export function TimeClockTab({
     () => initialGrant ?? (isRemotePunchAvailable(store) ? "unknown" : "allowed"),
   );
 
-  const stamp = dayStamp(new Date());
+  const stamp = centralTodayIso();
 
   useEffect(() => {
     let cancelled = false;
@@ -2342,8 +2343,8 @@ function TimeOffTab({
   const [busy, setBusy] = useState(false);
   // Request form.
   const [kind, setKind] = useState<LeaveType>("pto");
-  const [startsOn, setStartsOn] = useState(dayStamp(new Date()));
-  const [endsOn, setEndsOn] = useState(dayStamp(new Date()));
+  const [startsOn, setStartsOn] = useState(centralTodayIso());
+  const [endsOn, setEndsOn] = useState(centralTodayIso());
   const [dayHours, setDayHours] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
   // Decide / cancel / history.
@@ -2364,7 +2365,7 @@ function TimeOffTab({
   const [adjReason, setAdjReason] = useState("");
 
   const canSeeTeam = canApprove || canViewTeam;
-  const today = dayStamp(new Date());
+  const today = centralTodayIso();
 
   const load = () => {
     setLoading(true);
@@ -2635,7 +2636,7 @@ function TimeOffTab({
   };
 
   /* ------------------------------ who's out ------------------------------ */
-  const horizon = dayStamp(addDays(new Date(), 30));
+  const horizon = addDaysIso(centralTodayIso(), 30);
   const whosOut = new Map<string, { name: string; type: string }[]>();
   if (canSeeTeam) {
     for (const r of team) {
@@ -3088,7 +3089,7 @@ function TeamScheduleTab({
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<HrShift | null>(null);
   const [patterns, setPatterns] = useState<HrStaffingPattern[]>([]);
-  const [form, setForm] = useState({ title: "Shift", siteId: "", staffId: "", date: dayStamp(new Date()), start: "08:00", end: "16:00", notes: "", status: "published" as HrShift["status"] });
+  const [form, setForm] = useState({ title: "Shift", siteId: "", staffId: "", date: centralTodayIso(), start: "08:00", end: "16:00", notes: "", status: "published" as HrShift["status"] });
   // Batch 59: warn (never block) when the chosen assignee is a DSP who is
   // not training-cleared yet.
   const assignee = staffList.find((s) => s.userId === form.staffId);

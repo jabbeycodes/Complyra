@@ -159,7 +159,7 @@ export function activeIspProgram<TProgram extends IspProgram>(
   programs: TProgram[],
   individualId: string,
   planYear: string,
-  today = new Date().toISOString().slice(0, 10),
+  today = centralTodayIso(),
 ): TProgram | null {
   const candidates = programs.filter(
     (program) =>

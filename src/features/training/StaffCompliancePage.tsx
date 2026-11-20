@@ -12,6 +12,7 @@ import { Badge, Empty, Modal, PageHeading, formatDate } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { fromRequirementStatus } from "../../data/complianceStatus";
 import { useData } from "../../data/DataProvider";
+import { centralTodayIso } from "../../data/menuRecords";
 import StaffCertificatesModal from "../certificates/StaffCertificatesModal";
 import { canViewTrainingRoster, hasPermission } from "../../data/permissions";
 import { SignatureField } from "../signatures/SignatureField";
@@ -1095,7 +1096,7 @@ function InitialLineModal({
   }) => void;
 }) {
   const { api, session } = useData();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   const [signedOn, setSignedOn] = useState(existing?.signedOn ?? today);
   const [trainerUserId, setTrainerUserId] = useState(existing?.trainerUserId ?? "");
   const [method, setMethod] = useState<TrainingMethod | "">(existing?.method ?? "");

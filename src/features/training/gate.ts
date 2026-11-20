@@ -7,6 +7,7 @@
  * countersigned by staff and the House Manager.
  */
 import { canOverseeTraining } from "../../data/chart";
+import { centralTodayIso } from "../../data/menuRecords";
 import type { RequirementLineSignoffInput, TrainingRequirementStatus } from "../../data/types";
 
 /**
@@ -67,7 +68,7 @@ export interface ValidatedTrainingLineInput {
  */
 export function validateTrainingLineInput(
   input: RequirementLineSignoffInput,
-  today = new Date().toISOString().slice(0, 10),
+  today = centralTodayIso(),
 ): ValidatedTrainingLineInput {
   const initials = input.initials.trim();
   if (!initials) throw new Error("Type your initials — checkmarks are not allowed.");
@@ -167,7 +168,7 @@ export function evaluateInRatioGate(input: GateInputs): GateResult {
 export function resolveRequirementStatus(
   stored: TrainingRequirementStatus,
   dueOn: string | null,
-  today = new Date().toISOString().slice(0, 10),
+  today = centralTodayIso(),
 ): TrainingRequirementStatus {
   if (stored === "complete" || stored === "waived_na") return stored;
   if (dueOn && dueOn < today) return "overdue";

@@ -334,7 +334,7 @@ Deno.serve(async (req) => {
     });
     const { data: { user } } = await caller.auth.getUser();
     if (user) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = agencyClock(new Date()).today;
       const { data: membership } = await admin
         .from("memberships")
         .select("id")

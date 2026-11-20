@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Clock } from "lucide-react";
 import { Empty } from "../../components";
 import { hasPermission } from "../../data/permissions";
+import { centralTodayIso } from "../../data/menuRecords";
 import type { HrPunch, HrShift } from "../../data/hr";
 import type { SessionUser } from "../../data/types";
 import type { HrStore } from "../../data/hrStore";
@@ -53,13 +54,6 @@ function verificationLabel(method: string): string {
   return method.replace(/_/g, " ");
 }
 
-function dayStamp(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 export function WhosHereNow({
   session,
   store,
@@ -90,7 +84,7 @@ export function WhosHereNow({
     let cancelled = false;
     const load = () => {
       setError("");
-      const today = dayStamp(new Date());
+      const today = centralTodayIso();
       const siteIds = siteId ? [siteId] : sites.map((s) => s.id);
       Promise.all([
         Promise.all(siteIds.map((id) => kiosk.listOpenPunches(id).catch(() => [] as HrPunch[]))),

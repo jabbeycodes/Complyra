@@ -1,4 +1,5 @@
 import PublicConsentSigning from "./features/consents/PublicConsentSigning";
+import { centralTodayIso } from "./data/menuRecords";
 import Consents from "./features/consents/Consents";
 import { useConsentRegister } from "./features/consents/useConsentRegister";
 import {
@@ -812,7 +813,7 @@ export default function App() {
   }
   function exportComplianceReport(items: Requirement[] = scoped) {
     if (!session || !workspace) return;
-    const asOf = new Date().toISOString().slice(0, 10);
+    const asOf = centralTodayIso();
     const card = metrics(items);
     const pdf = buildComplianceReportPdf({
       agencyName: session.agencyName,

@@ -142,7 +142,7 @@ export function operatingReminderNotices(input: {
   }>;
 }): OperatingNotice[] {
   const notices: OperatingNotice[] = [];
-  const noteDay = input.noteDay ?? input.now.toISOString().slice(0, 10);
+  const noteDay = input.noteDay ?? agencyClock(input.now).today;
   for (const site of input.sites) {
     const overdue = site.items.filter((item) => item.kind === "medication" && item.severity === "overdue");
     if (overdue.length > 0) {

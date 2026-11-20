@@ -37,6 +37,18 @@ const cors = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/** Today's date in America/Chicago (the agency day), as YYYY-MM-DD. */
+function centralTodayIso(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 const SCHEDULER_UNIQUE_CONSTRAINT = "hm_weekly_checklists_site_week_uniq";
 const HM_ROLE_KEY = "house_manager";
 const ADMIN_ROLE_KEYS = ["administrator"];
@@ -127,7 +139,7 @@ Deno.serve(async (req) => {
       data: { user },
     } = await caller.auth.getUser();
     if (user) {
-      const today = toIsoDate(new Date());
+      const today = centralTodayIso();
       const { data: membership } = await admin
         .from("memberships")
         .select("id")
@@ -146,7 +158,7 @@ Deno.serve(async (req) => {
   }
 
   const warnings: string[] = [];
-  const today = toIsoDate(new Date());
+  const today = centralTodayIso();
   const weekStart = nextMondayIso(today); // upcoming week, Monday-based
   const weekOf = addDaysIso(weekStart, -1); // Sunday opening the same week
   const dueAt = dueAtIsoForWeekStart(weekStart);

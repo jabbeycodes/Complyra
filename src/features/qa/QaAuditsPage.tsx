@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, CalendarDays, Download, Plus, TrendingDown, TrendingUp } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
+import { centralTodayIso } from "../../data/menuRecords";
 import {
   CORRECTIVE_ACTION_STATUS_META,
   deriveCorrectiveActionStatus,
@@ -59,7 +60,7 @@ export default function QaAuditsPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newSiteId, setNewSiteId] = useState("");
-  const [newYear, setNewYear] = useState(String(new Date().getUTCFullYear()));
+  const [newYear, setNewYear] = useState(centralTodayIso().slice(0, 4));
   const [newQuarter, setNewQuarter] = useState(String(currentQuarter().quarter));
   const [siteFilter, setSiteFilter] = useState("");
   // Schedule editing state
@@ -238,7 +239,7 @@ export default function QaAuditsPage() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = centralTodayIso();
   const { year: cy, quarter: cq } = currentQuarter();
 
   return (

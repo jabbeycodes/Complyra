@@ -47,6 +47,7 @@ import {
   todayIso,
 } from "../data/chart";
 import { shiftClockFromFacts } from "../data/dueItems";
+import { addDaysIso } from "../data/menuRecords";
 import {
   clinicianScheduleLabel,
   displayStaffTitle,
@@ -220,9 +221,7 @@ export default function IndividualChart({
     const seq = ++medLoadSeq.current;
     const current = () => seq === medLoadSeq.current;
     const today = todayIso();
-    const from = new Date(Date.now() - 370 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    const from = addDaysIso(today, -370);
     const inventory = api
       .getMedInventory(individualId)
       .then((views) => {

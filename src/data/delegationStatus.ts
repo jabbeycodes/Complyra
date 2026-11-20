@@ -41,6 +41,7 @@ import type {
 } from "../delegation/delegation";
 import type { ObligationItem } from "./planStack";
 import { delegationFormStatus, type DelegationForm } from "./types";
+import { centralTodayIso } from "./menuRecords";
 
 export type DelegationStatus = "pending" | "active" | "completed" | "expired";
 
@@ -87,7 +88,7 @@ export function delegationStatusForObligation(
 ): DelegationStatus {
   const form: DelegationForm | null | undefined = item.delegationForm;
   if (form && delegationFormStatus(form).rescinded) return "expired";
-  const today = options?.today ?? new Date().toISOString().slice(0, 10);
+  const today = options?.today ?? centralTodayIso();
   if (options?.delegationsExpire && item.expiresOn && item.expiresOn < today) {
     return "expired";
   }

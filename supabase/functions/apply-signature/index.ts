@@ -50,6 +50,18 @@ const cors = {
 };
 
 /** 13 CSR 65-3.050 second-ID-component window: 5 minutes of signing per re-entry. */
+/** Today's date in America/Chicago (the agency day), as YYYY-MM-DD. */
+function centralTodayIso(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 const REAUTH_WINDOW_SECONDS = 300;
 /** Re-auth brute-force guard: max failures before a temporary lockout. */
 const REAUTH_MAX_ATTEMPTS = 5;
@@ -212,7 +224,7 @@ Deno.serve(async (req) => {
     preferred: string | null,
     requireActive: boolean,
   ): Promise<string | null> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = centralTodayIso();
     const activeFilter = `expires_on.is.null,expires_on.gte.${today}`;
     if (preferred) {
       const { data } = await admin
@@ -281,7 +293,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .eq("agency_id", agencyId)
       .in("role_key", roleKeys)
-      .or("expires_on.is.null,expires_on.gte." + new Date().toISOString().slice(0, 10))
+      .or("expires_on.is.null,expires_on.gte." + centralTodayIso())
       .limit(1);
     return (data?.length ?? 0) > 0;
   }

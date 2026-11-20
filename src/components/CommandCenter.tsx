@@ -1,5 +1,6 @@
 import { Modal } from "../components";
 import { auditSourceRecords, selectAuditSources } from "../data/auditSourceRecords";
+import { centralTodayIso } from "../data/menuRecords";
 /**
  * CommandCenter — the audit-readiness command center.
  *
@@ -185,7 +186,8 @@ export function buildScoreFactsForData(data: CommandCenterData): ScoreFacts[] {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  // The agency day (America/Chicago), never the UTC day.
+  return centralTodayIso();
 }
 
 function bandMeta(band: string): { icon: string; label: string; className: string } {
@@ -359,7 +361,8 @@ export function CommandCenterView({
       // risk rows above: their projected daysRemaining is 0 from a
       // fabricated zero, which would invent a run-out date today.
       medications: (data.medications ?? []).filter((med) => med.daysRemaining !== null && medHasCountOnFile(med)).map((med) => {
-        const end = new Date();
+        // Project the run-out date from the agency (Central) day.
+        const end = new Date(`${centralTodayIso()}T12:00:00Z`);
         end.setUTCDate(end.getUTCDate() + (med.daysRemaining ?? 0));
         return { id: med.medicationId, medName: med.medicationName,
           siteName: data.individuals.find((row) => row.id === med.individualId)?.site ?? "Unknown site",

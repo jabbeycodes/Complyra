@@ -17,6 +17,8 @@
  * guards) come from ./hr, owned by the domain workstream.
  */
 import { scheduledStartIso } from "./lateness";
+import { centralTodayIso } from "./menuRecords";
+import { zonedWallTimeMs } from "./dueItems";
 import { claimedCoverageShifts } from "./localSchedule";
 import { staffVisibleTo, type StaffSiteRef } from "./dashboard";
 import { createSupabaseBrowserClient } from "./index";
@@ -116,23 +118,23 @@ import {
 
 
 /**
- * Today's punch window as real UTC instants: the device's local calendar
- * day, from 00:00:00.000 to 23:59:59.999 local time.
+ * Today's punch window as real UTC instants: the AGENCY calendar day
+ * (America/Chicago), from 00:00:00.000 to 23:59:59.999 Central time.
  *
  * Punches store punchedAt as a UTC ISO string. The old range was the
  * zone-less text `${today}T00:00:00` … `${today}T23:59:59.999`, compared
  * as text (local store) or read in the server's UTC session zone (hosted
  * store). After 6 PM Central the UTC date has already rolled over, so an
  * evening clock-in fell outside "today" and the clock-out was refused with
- * "No open clock-in to close." — exactly the evening-shift case.
+ * "No open clock-in to close." — exactly the evening-shift case. The day
+ * is the Central day (not the device's local day), like every other
+ * "today" in the product.
  */
 export function punchDayRange(d: Date = new Date()): { from: string; to: string } {
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const day = d.getDate();
+  const today = centralTodayIso(d);
   return {
-    from: new Date(y, m, day, 0, 0, 0, 0).toISOString(),
-    to: new Date(y, m, day, 23, 59, 59, 999).toISOString(),
+    from: new Date(zonedWallTimeMs(today, 0, "America/Chicago")).toISOString(),
+    to: new Date(zonedWallTimeMs(today, 24 * 60, "America/Chicago") - 1).toISOString(),
   };
 }
 
@@ -647,10 +649,8 @@ function nowIso(): string {
 }
 
 function todayStamp(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  // The agency day (America/Chicago), never the device-local day.
+  return centralTodayIso(d);
 }
 
 /* ------------------------- Supabase implementation ---------------------- */
@@ -4146,14 +4146,14 @@ const DEMO_CEDAR_ID = "00000000-0000-4000-8000-000000000011";
 const DEMO_WILLOW_ID = "00000000-0000-4000-8000-000000000012";
 
 function demoDayIso(offsetDays: number, from = new Date()): string {
-  const base = from.toISOString().slice(0, 10);
+  const base = centralTodayIso(from);
   const ms = Date.parse(`${base}T12:00:00Z`) + offsetDays * 86_400_000;
   return new Date(ms).toISOString().slice(0, 10);
 }
 
 function demoMonthStartIso(monthsAgo: number): string {
-  const now = new Date();
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, 1));
+  const [year, month] = centralTodayIso().split("-").map(Number);
+  const first = new Date(Date.UTC(year, (month || 1) - 1 - monthsAgo, 1));
   return first.toISOString().slice(0, 10);
 }
 
