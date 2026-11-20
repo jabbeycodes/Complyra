@@ -77,6 +77,42 @@
   margin-bottom: 16px;
 }
 
+/* Panel rhythm: the calendar panel zeroes its own inline padding
+   (styles.css), which left the nav, weekday header and grid flush with
+   the panel border while the footer text below them sits inset by
+   --panel-inline (via .panel > .stack-help). Inset the calendar's
+   children the same way so the whole panel reads on the panel rhythm,
+   and give the footer the standard 12px step down from the grid. */
+.appointments-calendar-nav,
+.appointments-weekdays,
+.appointments-grid {
+  margin-inline: var(--panel-inline);
+}
+
+.appointments-calendar .stack-help {
+  margin-top: 12px;
+}
+
+/* Day-detail panel: .panel pads only the h2 (.panel > h2); the actions
+   row, the empty-day line, appointment cards and the add form carry no
+   panel padding of their own, and the global reset zeroes p margins —
+   so they sat flush against the panel's sides and bottom border. Lay
+   the panel out as a gapped column on the panel rhythm: children inset
+   by --panel-inline, 12px steps between them, and a real bottom pad. */
+.appointments-day {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 20px;
+}
+
+.appointments-day > .chart-actions,
+.appointments-day > p,
+.appointments-day > .appointment-card,
+.appointments-day > .appointment-form {
+  margin-inline: var(--panel-inline);
+}
+
 .appointments-calendar-nav {
   display: flex;
   align-items: center;
@@ -132,6 +168,13 @@
   border-color: transparent;
   background: transparent;
   cursor: default;
+  /* The global .empty empty-state rule (styles.css) adds 50px/25px padding.
+     Under border-box sizing that padding cannot shrink away, so a filler
+     cell's box floors at 102px tall / 52px wide — taller than the 56px day
+     buttons beside it. The filler stretches its grid row and leaves a dead
+     band under the real cells (and overflows its column). Fillers carry no
+     content, so they take no padding. */
+  padding: 0;
 }
 
 .appointments-cell.muted {
@@ -185,7 +228,9 @@
 @media (max-width: 860px) {
   .appointments-cell {
     aspect-ratio: auto;
-    height: 56px;
+    /* 48px: denser than the old 56px so the month grid stops dominating
+       the phone viewport, still above the 44px minimum tap target. */
+    height: 48px;
     padding: 6px;
   }
   .appointments-filters label,
