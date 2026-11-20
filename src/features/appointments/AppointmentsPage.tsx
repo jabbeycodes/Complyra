@@ -350,7 +350,7 @@ export default function AppointmentsPage({
         </p>
       </section>
 
-      <section className="panel" aria-labelledby="appointments-day-heading">
+      <section className="panel appointments-day" aria-labelledby="appointments-day-heading">
         <h2 id="appointments-day-heading">{formatAppointmentDate(selectedDay)}</h2>
         {canAdd && !addingAppointment && (
           <div className="chart-actions">
