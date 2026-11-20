@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { DEFAULT_PUNCH_RULES } from "../../data/hr";
+import { PUNCH_RULES_OWNERSHIP } from "../ruleOwnership";
 import type { HrPunchRules } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
 import {
@@ -201,6 +202,7 @@ export function PunchRulesConfig({
         How kiosk punches are rounded, when lateness is flagged, when the
         system clocks people out, and which timecards can auto-approve.
       </p>
+      <p className="hub-sub">{PUNCH_RULES_OWNERSHIP}</p>
       {error && <div className="hub-error" role="alert">{error}</div>}
       {loading ? (
         <p>Loading clock settings…</p>

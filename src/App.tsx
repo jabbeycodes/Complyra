@@ -110,6 +110,7 @@ import SiteMonthlyChecks from "./features/SiteMonthlyChecks";
 import SiteReviewPanel from "./features/SiteReviewPanel";
 import MonthlyDueSettings from "./features/MonthlyDueSettings";
 import { AgencyAdminRules } from "./features/AgencyRulesPanel";
+import { SettingsDiscoverySection } from "./features/SettingsDiscovery";
 import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
 import BrandLoader from "./components/BrandLoader";
@@ -2404,6 +2405,17 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                    <SettingsDiscoverySection
+                      session={session}
+                      onOpen={(target) => {
+                        if (target.kind === "hub-tab") {
+                          setHubFocusTab(target.tab);
+                          navigate("Employee Hub");
+                        } else {
+                          navigate(target.page);
+                        }
+                      }}
+                    />
                     <AgencyLogoSettings onSaved={notify} />
                     <MonthlyDueSettings onSaved={notify} />
                     {session.roleKey === "administrator" && (

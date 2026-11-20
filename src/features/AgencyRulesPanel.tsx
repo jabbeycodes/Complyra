@@ -5,8 +5,14 @@
  * backdated) and a reason; history is kept. Rules live in src/data/rules.ts
  * and the database functions in 20260926120000_rule_settings.sql.
  *
- * Overtime lines are live (open-shift pickups, weekly-hour flags, approaching
- * notices). The other categories are saved now and read as those checks connect.
+ * Every category is live today — there are no save-only categories.
+ * Overtime lines drive open-shift pickups, weekly-hour flags, and
+ * approaching notices. The other categories are read through
+ * operatingRulesFrom (src/data/rules.ts) by both APIs (LocalApi and
+ * HostedApi) and by the checks built on it: the operating-reminder
+ * sweep (src/data/operatingReminders.ts, shared with the
+ * sweep-operating-reminders edge function), due items, delegation
+ * status, recognition, and the hub's attendance exceptions.
  */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -24,6 +30,10 @@ import {
   type RuleValueRow,
 } from "../data/rules";
 import { createRulesStore, type RulesStore } from "../data/rulesStore";
+import {
+  RULES_ACCOUNTABILITY_OWNERSHIP,
+  RULES_OVERTIME_OWNERSHIP,
+} from "./ruleOwnership";
 import type { PendingAgency, SessionUser } from "../data/types";
 
 function localDateTimeValue(d: Date): string {
@@ -202,6 +212,12 @@ export function AgencyRulesPanel({
       {grouped.map(({ category, defs }) => (
         <div key={category} style={{ marginTop: 18 }}>
           <h3>{RULE_CATEGORY_LABELS[category]}</h3>
+          {category === "overtime" && (
+            <p className="muted">{RULES_OVERTIME_OWNERSHIP}</p>
+          )}
+          {category === "accountability" && (
+            <p className="muted">{RULES_ACCOUNTABILITY_OWNERSHIP}</p>
+          )}
           <div className="table-scroll">
             <table>
               <thead>

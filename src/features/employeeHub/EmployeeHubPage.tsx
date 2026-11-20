@@ -50,6 +50,7 @@ import {
 } from "../../data/permissions";
 import { staffVisibleTo } from "../../data/dashboard";
 import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
+import { PAYROLL_OVERTIME_OWNERSHIP } from "../ruleOwnership";
 import type { SessionUser } from "../../data/types";
 import type { HrStaffingPattern } from "../../data/hr";
 import { emitHrEvent } from "../notifications/useNotifications";
@@ -4302,6 +4303,7 @@ function PaySettingsSection({ store }: { store: HrStore }) {
         Overtime rules feed every timecard summary and payroll export; accrual
         policies feed leave balances on the Time Off tab.
       </p>
+      <p className="hub-sub">{PAYROLL_OVERTIME_OWNERSHIP}</p>
       <div className="hub-pay-grid">
         <OvertimeRulesCard store={store} />
         <AccrualPoliciesCard store={store} />
