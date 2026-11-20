@@ -2616,6 +2616,24 @@ td > svg {
   background: var(--color-h-60514350);
   backdrop-filter: blur(4px);
 }
+/* The ui-sdk Dialog backdrop is a real element rather than the native
+ * dialog's ::backdrop; same paint, so the swap changes no pixels. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-h-60514350);
+  backdrop-filter: blur(4px);
+}
+/* The ui-sdk content is a div in the top layer, not a native <dialog>,
+ * so it misses the UA behavior the native element had: centered by
+ * inset + auto margins, and overflow auto (long modals scroll at the
+ * dialog level, under the sticky head). Restore the same values. */
+.modal[data-slot="dialog-content"] {
+  inset: 0;
+  margin: auto;
+  overflow: auto;
+  height: fit-content;
+}
 .modal-head {
   display: flex;
   align-items: center;
