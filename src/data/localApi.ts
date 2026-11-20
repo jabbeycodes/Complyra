@@ -11539,7 +11539,9 @@ export class LocalApi implements ComplyraApi {
       (row) =>
         row.agencyId === session.agencyId &&
         row.siteId === siteId &&
-        row.computedAt.slice(0, 10) === today,
+        // computedAt is a UTC instant; match on its Central calendar day so
+        // evening snapshots near a day boundary still count as today.
+        centralTodayIso(new Date(row.computedAt)) === today,
     );
     const snapshot: ScoreSnapshot = {
       id: existing?.id ?? crypto.randomUUID(),

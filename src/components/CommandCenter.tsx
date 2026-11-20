@@ -1074,7 +1074,7 @@ export default function CommandCenter() {
 
   // Record today's agency snapshot once data is loaded (managers only).
   useEffect(() => {
-    if (!data || !canManage || data.unavailable?.length || data.snapshots.some((row) => row.computedAt.slice(0, 10) === todayIso())) return;
+    if (!data || !canManage || data.unavailable?.length || data.snapshots.some((row) => centralTodayIso(new Date(row.computedAt)) === todayIso())) return;
     let cancelled = false;
     (async () => {
       try {

@@ -5971,7 +5971,12 @@ export class HostedApi implements ComplyraApi {
       .eq("action", "recognition.award");
     throwIf(error, "Could not check this month's recognition points.");
     const used = ((data ?? []) as Array<{ detail?: string; created_at?: string }>)
-      .filter((row) => String(row.created_at ?? "").startsWith(month))
+      // created_at is a UTC instant; compare its Central calendar month so the
+      // cap matches the agency month even for evening awards near a boundary.
+      .filter((row) => {
+        const createdAt = String(row.created_at ?? "");
+        return createdAt !== "" && centralTodayIso(new Date(createdAt)).slice(0, 7) === month;
+      })
       .reduce((sum, row) => {
         const match = /^points=(\d+)/.exec(String(row.detail ?? ""));
         return sum + (match ? Number(match[1]) : 0);
@@ -11831,17 +11836,25 @@ export class HostedApi implements ComplyraApi {
     const siteId = input.siteId ?? null;
     const today = centralTodayIso();
     // One snapshot per day per scope — replace today's if it exists.
+    // computed_at is a UTC instant, so bound the fetch to a window that fully
+    // covers the Central day and compare its Central calendar day precisely;
+    // a raw UTC prefix would miss evening snapshots near a day boundary.
     let existingQuery = this.client
       .from("compliance_score_snapshots")
-      .select("id")
+      .select("id, computed_at")
       .eq("agency_id", session.agencyId)
       .gte("computed_at", `${today}T00:00:00`)
-      .lt("computed_at", `${today}T23:59:59.999`);
+      .lt("computed_at", `${addDaysIso(today, 1)}T12:00:00`);
     existingQuery = siteId
       ? existingQuery.eq("site_id", siteId)
       : existingQuery.is("site_id", null);
-    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    const { data: candidates, error: existingError } = await existingQuery;
     throwIf(existingError, "Could not check today's snapshot.");
+    const existing = ((candidates ?? []) as Array<{ id: string; computed_at?: string }>).find(
+      (snap) =>
+        snap.computed_at != null &&
+        centralTodayIso(new Date(String(snap.computed_at))) === today,
+    );
     const row = buildScoreSnapshotRow({
       agencyId: session.agencyId,
       siteId,
