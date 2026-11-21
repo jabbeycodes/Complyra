@@ -882,11 +882,11 @@ h1 {
 .stat-foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
   font-size: 10px;
   color: var(--color-h-4a4036);
   min-height: 15px;
-  white-space: nowrap;
 }
 .stat-foot > svg:last-child {
   margin-left: auto;
@@ -1110,6 +1110,7 @@ h1 {
 .category-panel {
   display: flex;
   flex-direction: column;
+  align-self: start;
 }
 .subtle-icon {
   color: var(--color-h-bab5b0);
@@ -1159,7 +1160,6 @@ h1 {
   background: var(--color-h-8b5e3c);
 }
 .category-key {
-  margin-top: auto;
   padding: 0 var(--panel-inline) 18px;
   display: flex;
   gap: 13px;
@@ -1513,7 +1513,7 @@ h1 {
   border-top: 1px solid var(--color-h-f0ebe3);
 }
 .house-compliance-card {
-  padding: 14px var(--panel-inline) 6px;
+  padding: 14px var(--panel-inline);
   border-right: 1px solid var(--color-h-f0ebe3);
   min-width: 0;
 }
