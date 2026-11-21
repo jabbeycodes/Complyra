@@ -12,12 +12,13 @@
   justify-content: flex-end;
 }
 
-/* Headings, forms, and sheets share --panel-inline so nothing sits on the card edge. */
+/* The .panel now supplies its own --panel-inline inset (spacing sweep P1),
+   so these children must not add it again or they sit at twice the inset. */
 .mileage-page .panel > h2,
 .mileage-page .panel > p,
 .mileage-page .panel > ul,
 .mileage-page .panel > .empty {
-  padding-inline: var(--panel-inline);
+  padding-inline: 0;
 }
 
 .mileage-sheet-head {

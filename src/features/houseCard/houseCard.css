@@ -3,12 +3,11 @@
    table; the print block at the bottom swaps the screen ledger for the
    monthly statement (mileage-style body flag set by the print button). */
 
-/* The .panel chrome carries no padding of its own: sibling panels pad
-   their bodies with --panel-inline (see mileage.css — "so nothing sits
-   on the card edge"). The house card body does the same, so its content
-   shares the heading/intro rhythm instead of running to the card edge. */
+/* The .panel now supplies its own inset (spacing sweep P1), so the house
+   card body adds none of its own — otherwise its content sits at twice
+   the panel inset and stacks extra space below the panel's bottom pad. */
 .house-card {
-  padding: 2px var(--panel-inline) 22px;
+  padding: 0;
 }
 
 /* In the mobile shell the view already pads the screen (.msh-main);

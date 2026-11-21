@@ -252,9 +252,10 @@
   outline-color: var(--color-h-2f4630);
 }
 
-/* Panel children already use --panel-inline. Do not pad the card again. */
+/* The .panel now supplies its own --panel-inline inset (spacing sweep P1),
+   so panel children must not add it again or they sit at twice the inset. */
 .site-detail-panel .empty {
-  padding: 20px var(--panel-inline) 24px;
+  padding: 20px 0 24px;
 }
 
 .site-kpi-grid {
@@ -262,7 +263,7 @@
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px 16px;
   margin: 8px 0 12px;
-  padding: 0 var(--panel-inline);
+  padding: 0;
 }
 
 .site-kpi-grid > div {
@@ -303,11 +304,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 var(--panel-inline) 16px;
+  padding: 0 0 16px;
 }
 
 .site-qa-body {
-  padding: 0 var(--panel-inline) 20px;
+  padding: 0 0 20px;
 }
 
 .site-qa-body .qa-filter-row {
@@ -315,11 +316,11 @@
 }
 
 .site-detail-panel .qa-badge-sections {
-  padding: 0 var(--panel-inline) 16px;
+  padding: 0 0 16px;
 }
 
 .site-detail-panel .panel-heading {
-  padding-inline: var(--panel-inline);
+  padding-inline: 0;
 }
 
 .site-detail-panel .panel-heading input[type="month"] {
@@ -465,13 +466,13 @@
 
 .section-note {
   margin: 4px 0 0;
-  padding-inline: var(--panel-inline);
+  padding-inline: 0;
   font-size: 13px;
 }
 
 .export-scope {
   margin: 2px 0 0;
-  padding-inline: var(--panel-inline);
+  padding-inline: 0;
   font-size: 12px;
 }
 
