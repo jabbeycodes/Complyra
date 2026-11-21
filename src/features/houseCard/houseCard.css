@@ -17,6 +17,32 @@
   padding: 0 0 12px;
 }
 
+/* The screen itself owns the standard inset (spacing audit P9): the
+   sections used to depend on the wrapper's padding — measured against
+   the screen they sat flush (inset 0) and the last section's bottom
+   gap was 0. The screen now carries the same values the wrapper did
+   (2px / --panel-inline / 22px; shell variant 0 0 12px), so page
+   geometry is unchanged while the screen's own clearance is real in
+   every mount. The wrapper keeps its padding for the bare
+   loading/error states that render without a screen. Print is
+   unaffected: the screen is display:none in the print block below and
+   the printout is a separate element. */
+.house-card:has(> .house-card-screen) {
+  padding: 0;
+}
+
+.house-card-screen {
+  padding: 2px var(--panel-inline) 22px;
+}
+
+.msh-main .house-card:has(> .house-card-screen) {
+  padding: 0;
+}
+
+.msh-main .house-card-screen {
+  padding: 0 0 12px;
+}
+
 .house-card .hc-stats {
   display: flex;
   flex-wrap: wrap;

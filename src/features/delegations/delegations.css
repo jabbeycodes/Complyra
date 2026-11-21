@@ -1,0 +1,46 @@
+/* Delegation template + activation cards.
+   These card classes were never styled anywhere, so the cards rendered
+   as bare text blocks on the page background — no padding, no surface,
+   each card's title ~4px under the previous card's buttons (spacing
+   audit P2). They now carry the platform's standard card treatment:
+   the .panel chrome (surface / border / radius / shadow) with the
+   report-card padding rhythm — the same composition Report Library
+   cards use as `panel report-card` (18px var(--panel-inline), 10px
+   column gap, 16px list gap as in .report-library-grid / .stat-grid). */
+
+.delegation-template-list {
+  display: grid;
+  gap: 16px;
+}
+
+.delegation-template-card,
+.delegation-activation-card {
+  background: var(--color-h-faf6ef);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 3px var(--color-h-5f514502);
+  padding: 18px var(--panel-inline);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Activation cards stack directly in .delegation-sites, under the site
+   picker — the standard 16px card-list gap separates them. */
+.delegation-activation-card {
+  margin-top: 16px;
+}
+
+.delegation-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.delegation-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
