@@ -153,7 +153,11 @@
   flex-wrap: wrap;
 }
 
-.muted {
+/* The checklist feature's muted tone. This was named `.muted` and lost
+   the cascade to the global `.muted` in styles.css on every element —
+   dead code. As `.hm-muted` it applies to the feature's own elements
+   only; the global `.muted` elsewhere is unchanged. */
+.hm-muted {
   color: var(--color-h-5f5145);
   font-size: 13px;
 }

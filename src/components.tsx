@@ -116,13 +116,13 @@ export function Empty({
   actions?: ReactNode;
 }) {
   return (
-    <div className={`empty${mark === "none" ? " empty-bare" : ""}${mark === "quiet" ? " empty-quiet" : ""}`}>
+    <div className={`empty-state${mark === "none" ? " empty-state-bare" : ""}${mark === "quiet" ? " empty-state-quiet" : ""}`}>
       {mark !== "none" && (
         <span aria-hidden="true">{mark === "check" ? <Check size={26} /> : null}</span>
       )}
       <h3>{title}</h3>
       {text ? <p>{text}</p> : null}
-      {actions ? <div className="empty-actions">{actions}</div> : null}
+      {actions ? <div className="empty-state-actions">{actions}</div> : null}
     </div>
   );
 }

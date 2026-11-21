@@ -169,7 +169,7 @@ test("every site-detail tab at 1280 and 390: overflow, Staff last, no People", a
         ).toBeVisible();
       }
       if (label === "QA Review") {
-        await expect(page.locator(".site-detail-panel .empty svg")).toHaveCount(0);
+        await expect(page.locator(".site-detail-panel .empty-state svg")).toHaveCount(0);
         await expect(page.getByRole("button", { name: /Start review/ })).toBeVisible();
       }
       if (label === "Shift notes") {

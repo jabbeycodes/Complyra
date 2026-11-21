@@ -184,7 +184,7 @@ export default function ChecklistAssigner() {
             <RefreshCw size={16} /> Run weekly rollover
           </button>
         </div>
-        {notice && <p className="muted">{notice}</p>}
+        {notice && <p className="hm-muted">{notice}</p>}
       </section>
 
       <section className="panel" aria-label="Assignment status board">
@@ -240,7 +240,7 @@ export default function ChecklistAssigner() {
                             />
                           )
                         ) : (
-                          <span className="muted">Not assigned</span>
+                          <span className="hm-muted">Not assigned</span>
                         )}
                       </td>
                       <td>{c ? formatDueAt(c.dueAt) : "—"}</td>

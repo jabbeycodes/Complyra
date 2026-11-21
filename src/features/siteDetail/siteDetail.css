@@ -253,7 +253,7 @@
 }
 
 /* Panel children already use --panel-inline. Do not pad the card again. */
-.site-detail-panel .empty {
+.site-detail-panel .empty-state {
   padding: 20px var(--panel-inline) 24px;
 }
 

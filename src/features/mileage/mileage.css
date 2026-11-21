@@ -16,7 +16,7 @@
 .mileage-page .panel > h2,
 .mileage-page .panel > p,
 .mileage-page .panel > ul,
-.mileage-page .panel > .empty {
+.mileage-page .panel > .empty-state {
   padding-inline: var(--panel-inline);
 }
 
