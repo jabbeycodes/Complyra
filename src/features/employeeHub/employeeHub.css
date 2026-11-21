@@ -63,6 +63,12 @@
   border: 1px solid var(--border, var(--color-h-b59a74));
   border-radius: 12px;
   padding: 20px;
+  /* Cards are grid items of .hub-panel: without min-width: 0 a card
+     sizes itself to a wide table inside it and the table's own
+     .hub-table-scroll never engages (the ≤860px block below already
+     carries this guard for phone widths; it is needed at every width). */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .hub-card > h2 {

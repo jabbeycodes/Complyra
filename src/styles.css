@@ -1715,6 +1715,12 @@ h1 {
   overflow-x: auto;
   overflow-y: hidden;
   contain: inline-size;
+  /* The scroller is the containing block for absolutely positioned
+     descendants (e.g. .sr-only header labels). Without a positioned
+     ancestor their overflow contribution escapes to the root scroller
+     and the whole page side-scrolls at phone width, even though the
+     table itself is fully contained here. */
+  position: relative;
 }
 table {
   width: 100%;

@@ -301,6 +301,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
       {canRoster && roster.kind === "ready" && (
         <section className="panel" aria-label="All staff training status">
           <h2>All staff</h2>
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -340,6 +341,7 @@ export default function StaffCompliancePage({ onSaved }: { onSaved: (message: st
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
 
@@ -681,6 +683,7 @@ function ProfilePanel({
               <h3>
                 Section {section} — {SECTION_NAMES[section]}
               </h3>
+              <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -802,6 +805,7 @@ function ProfilePanel({
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           ),
       )}
