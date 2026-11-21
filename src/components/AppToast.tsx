@@ -51,11 +51,16 @@ export function dismissToast(id?: string): void {
 // exact structure and classes (.toast, its CheckCheck icon, and the
 // "Dismiss notification" close button), so a single toast renders with
 // the same computed styles as before; the region only adds stacking.
-export function ToastHost() {
+//
+// `mobile` opts into the mobile-context anchor: the region is a sibling
+// of the app shell, so it cannot inherit `.app-shell.mobile-context`'s
+// zeroed `--sidebar`, and the mobile shell has no sidebar at all. The
+// modifier re-centers the stack and lifts it above the bottom nav pill.
+export function ToastHost({ mobile = false }: { mobile?: boolean } = {}) {
   return (
     <ToastRegion
       toaster={toaster}
-      className="toast-region"
+      className={`toast-region${mobile ? " toast-region-mobile" : ""}`}
       aria-label="Notifications"
       maxVisible={3}
       expanded

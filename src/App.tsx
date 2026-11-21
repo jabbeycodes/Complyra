@@ -1017,7 +1017,7 @@ export default function App() {
     return (
       <InactivityGuard onSignOut={() => void signOut()}>
         <ConfirmDialogHost />
-        <ToastHost />
+        <ToastHost mobile />
         <MobileShell
           api={api}
           session={session}
@@ -1072,7 +1072,7 @@ export default function App() {
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
     <ConfirmDialogHost />
-    <ToastHost />
+    <ToastHost mobile={inMobileContext} />
     <div className={`app-shell${inMobileContext ? " mobile-context" : ""}`}>
       {mobileOpen && (
         <button

@@ -2717,6 +2717,15 @@ td > svg {
   margin: 0;
   padding: 0;
 }
+/* Mobile-context anchor: the region sits outside the app shell, so the
+ * sidebar half-offset no longer belongs (the shell collapses its sidebar
+ * and the mobile shell has none) and the stack would land on top of the
+ * fixed bottom nav pill. Centre it and clear the pill's full height. The
+ * two-class selector keeps this above the 720px width override below. */
+.toast-region.toast-region-mobile {
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+}
 .toast-region [data-slot="toast-list"] {
   display: flex;
   flex-direction: column;
