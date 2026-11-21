@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Badge, Empty } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import type { ComplyraApi } from "../../data/localApi";
 import {
   ispScheduleLabel,
@@ -381,8 +382,13 @@ function ProgramCard({
             <button
               type="button"
               className="button primary"
-              onClick={() => {
-                if (window.confirm(`Approve "${program.name}"? Staff will be able to enter shift notes against it.`)) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: `Approve "${program.name}"?`,
+                    body: "Staff will be able to enter shift notes against it.",
+                  })
+                ) {
                   void runIsp(() => api.approveIspProgram(program.id));
                 }
               }}

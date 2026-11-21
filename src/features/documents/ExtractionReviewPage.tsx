@@ -31,6 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Badge, Empty, formatDate, PageHeading } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { useData } from "../../data/DataProvider";
 import {
@@ -154,7 +155,13 @@ function TrackableItemCard({
   }
 
   async function remove() {
-    if (!window.confirm(`Remove "${item.title}" from the proposed items?`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Remove "${item.title}" from the proposed items?`,
+      }))
+    ) {
+      return;
+    }
     setSaving(true);
     setError("");
     try {
