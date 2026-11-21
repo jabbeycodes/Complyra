@@ -1102,6 +1102,18 @@ h1 {
 .panel > .empty:only-child {
   margin: -21px calc(-1 * var(--panel-inline)) -20px;
 }
+/* The weekly checklist's phone layout (hmChecklist.css, at or below
+   860px) puts the prompt on its own row at calc(100% - 38px) of the
+   item row — a geometry designed against the old flush panel, and the
+   width the mobile-responsive spec pins (the prompt measured 280px on
+   main, 232px with the panel inset). At that breakpoint the items list
+   takes its inline bleed back, like the table scrollers above; wider
+   viewports keep the standard panel inset. */
+@media (max-width: 860px) {
+  .panel > .checklist-items {
+    margin-inline: calc(-1 * var(--panel-inline));
+  }
+}
 .count-pill {
   font-size: 11px;
   display: inline-flex;
