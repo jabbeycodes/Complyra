@@ -1,16 +1,25 @@
-import { useId, useState } from "react";
+import { useId } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import {
+  PasswordInput,
+  PasswordInputControl,
+  PasswordInputToggle,
+} from "@ui-sdk/react/password-input";
 
 /**
- * PasswordField — the app's single password-entry control.
- *
- * Masked by default (type="password"), following the sign-in screen's
- * pattern: the person typing may reveal their own entry with the eye
- * toggle, but a password is never rendered in plain text just because a
- * form happens to hold it. Used for every temporary-password entry
- * (agency setup, platform agency creation, staff account creation) so a
+ * PasswordField — the app's single password-entry control, on
+ * @ui-sdk/react's Password Input (slice 4). Masked by default: the
+ * person typing may reveal their own entry with the eye toggle, but a
+ * password is never rendered in plain text just because a form happens
+ * to hold it. Used for every temporary-password entry (agency setup,
+ * platform agency creation, staff account creation) and sign-in, so a
  * credential being handed to someone else is not left readable on
  * screen while the rest of the form is filled in.
+ *
+ * The SDK toggle keeps the caret and focus in the field on a pointer
+ * press, wires its own aria-pressed/aria-controls, and re-hides the
+ * password when the form submits. The toggle's name follows the app's
+ * existing pattern — "Show password" / "Hide password" by state.
  */
 export default function PasswordField({
   id,
@@ -29,36 +38,35 @@ export default function PasswordField({
   required?: boolean;
   autoComplete?: string;
 }) {
-  const [showPassword, setShowPassword] = useState(false);
   const autoId = useId();
   const inputId = id ?? autoId;
   return (
     <div className="form-label">
       <label htmlFor={inputId}>{label}</label>
-      <span className="password-field">
-        <input
-          id={inputId}
-          type={showPassword ? "text" : "password"}
-          autoComplete={autoComplete}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          minLength={minLength}
-          required={required}
-        />
-        <button
-          type="button"
-          className="password-toggle"
-          aria-label={showPassword ? "Hide password" : "Show password"}
-          aria-pressed={showPassword}
-          onClick={() => setShowPassword((v) => !v)}
-        >
-          {showPassword ? (
-            <EyeOff size={20} aria-hidden="true" />
-          ) : (
-            <Eye size={20} aria-hidden="true" />
+      <PasswordInput
+        className="password-field"
+        value={value}
+        onValueChange={(next) => onChange(next)}
+        autoComplete={autoComplete}
+        required={required}
+      >
+        <PasswordInputControl id={inputId} minLength={minLength} />
+        <PasswordInputToggle
+          render={(props, state) => (
+            <button
+              {...props}
+              className="password-toggle"
+              aria-label={state.visible ? "Hide password" : "Show password"}
+            >
+              {state.visible ? (
+                <EyeOff size={20} aria-hidden="true" />
+              ) : (
+                <Eye size={20} aria-hidden="true" />
+              )}
+            </button>
           )}
-        </button>
-      </span>
+        />
+      </PasswordInput>
     </div>
   );
 }
