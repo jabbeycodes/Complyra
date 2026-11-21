@@ -2701,11 +2701,31 @@ td > svg {
   gap: 8px;
   margin-top: 14px;
 }
-.toast {
+/* The ui-sdk Toast region carries the hand-rolled toast's fixed
+ * anchor; each toast inside it keeps the .toast paint below. */
+.toast-region {
   position: fixed;
   bottom: 24px;
   left: calc(50% + var(--sidebar) / 2);
   transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 40px);
+  margin: 0;
+  padding: 0;
+}
+.toast-region [data-slot="toast-list"] {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.toast {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -2715,8 +2735,7 @@ td > svg {
   border: 1px solid var(--color-h-887462);
   border-radius: 8px;
   box-shadow: 0 8px 35px var(--color-h-5f514530);
-  z-index: 1000;
-  max-width: calc(100% - 40px);
+  max-width: 100%;
   font-size: 14px;
 }
 .toast > button {
@@ -4521,6 +4540,8 @@ td {
     font-size: 12px;
     padding: 13px 15px;
     min-width: 300px;
+  }
+  .toast-region {
     bottom: 17px;
   }
   .notification-row {
@@ -6629,6 +6650,9 @@ body.nav-open {
   }
   .toast {
     min-width: 0;
+    width: 100%;
+  }
+  .toast-region {
     width: calc(100% - 24px);
     left: 50%;
     bottom: max(12px, env(safe-area-inset-bottom));
