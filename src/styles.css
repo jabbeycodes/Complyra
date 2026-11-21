@@ -1367,7 +1367,12 @@ h1 {
   padding: 8px 18px 20px;
   background: var(--color-h-faf6ef);
 }
-.site-score-heading {
+/* Specificity raised (Spacing sweep P1): this heading lives inside the
+   agency-hero panel's score block, not at a panel's head. The global
+   .panel-heading media restatements (wider breakpoints below) used to
+   override its designed padding on narrow screens; as a compound
+   selector its own padding now wins at every width. */
+.panel-heading.site-score-heading {
   padding: 12px 4px 8px;
 }
 .site-score-heading h3 {
@@ -7858,9 +7863,10 @@ button.qa-row:hover {
 .appointments-filters {
   padding: 16px var(--panel-inline) 18px;
 }
-.appointments-page .appointments-calendar {
-  padding-inline: 0;
-}
+/* Spacing sweep P1: PR #279 zeroed the calendar panel's inline padding
+   and inset its children with margins instead. The panel carries real
+   padding now, so the zeroing is retired and the children sit on the
+   panel's own inset (their margins are retired in appointments.css). */
 
 .health-widget {
   grid-column: 1 / -1;
