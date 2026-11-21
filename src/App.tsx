@@ -114,6 +114,7 @@ import { SettingsDiscoverySection } from "./features/SettingsDiscovery";
 import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
 import { ConfirmDialogHost } from "./components/ConfirmDialog";
+import { ToastHost, showToast } from "./components/AppToast";
 import BrandLoader from "./components/BrandLoader";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
@@ -310,7 +311,6 @@ export default function App() {
   // pure function of the query text, so it stayed rendered (over unrelated
   // pages) until the query was manually cleared (batch 13).
   const [searchOpen, setSearchOpen] = useState(false);
-  const [toast, setToast] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   // Mobile shell view mode: "auto" follows the viewport width, "mobile" and
   // "desktop" are the user's explicit picks (persisted). forceDesktop covers
@@ -409,11 +409,6 @@ export default function App() {
   // KIOSK-TIME-CLOCK: track the raw hash so the kiosk page mounts/unmounts
   // as a standalone screen without touching the app's own hash routing.
   const [kioskHash, setKioskHash] = useState(() => window.location.hash);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(""), 4500);
-    return () => clearTimeout(t);
-  }, [toast]);
   useEffect(() => {
     setModal(null);
     setPacket(null);
@@ -816,7 +811,7 @@ export default function App() {
     setFormError("");
   }
   function notify(message: string) {
-    setToast(message);
+    showToast(message);
   }
   function exportComplianceReport(items: Requirement[] = scoped) {
     if (!session || !workspace) return;
@@ -1022,6 +1017,7 @@ export default function App() {
     return (
       <InactivityGuard onSignOut={() => void signOut()}>
         <ConfirmDialogHost />
+        <ToastHost />
         <MobileShell
           api={api}
           session={session}
@@ -1076,6 +1072,7 @@ export default function App() {
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
     <ConfirmDialogHost />
+    <ToastHost />
     <div className={`app-shell${inMobileContext ? " mobile-context" : ""}`}>
       {mobileOpen && (
         <button
@@ -2496,18 +2493,6 @@ export default function App() {
           </div>
         )}
       </div>
-      {toast && (
-        <div role="status" className="toast">
-          <CheckCheck size={18} />
-          {toast}
-          <button
-            onClick={() => setToast("")}
-            aria-label="Dismiss notification"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
       {demoMode && tourOpen && (
         <DemoTour onNavigate={navigate} onExit={closeTour} />
       )}
