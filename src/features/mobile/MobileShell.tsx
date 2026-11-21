@@ -244,6 +244,10 @@ export default function MobileShell({
   const [sheetOpen, setSheetOpen] = useState<boolean>(
     () => startSheetOpen ?? false,
   );
+  // Set true just before closing the More sheet to navigate (as
+  // opposed to dismissing it), so MobileSheet leaves focus free for
+  // the destination instead of snapping it back to the More control.
+  const moreSheetNavigatingRef = useRef(false);
   const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
 
   const tiles = useMemo(
@@ -453,6 +457,7 @@ export default function MobileShell({
 
   const goNav = (id: BottomNavId) => {
     if (id === "more") {
+      moreSheetNavigatingRef.current = false;
       setSheetOpen(true);
       return;
     }
@@ -1098,6 +1103,7 @@ export default function MobileShell({
         <MobileSheet
           title="More"
           backdropLabel="Close more menu"
+          suppressFocusReturnRef={moreSheetNavigatingRef}
           onClose={() => setSheetOpen(false)}
         >
           <div className="msh-list">
@@ -1109,6 +1115,7 @@ export default function MobileShell({
                     type="button"
                     className="msh-row"
                     onClick={() => {
+                      moreSheetNavigatingRef.current = true;
                       setSheetOpen(false);
                       openTile(tile.id);
                     }}
@@ -1131,6 +1138,7 @@ export default function MobileShell({
                 type="button"
                 className="msh-row"
                 onClick={() => {
+                  moreSheetNavigatingRef.current = true;
                   setSheetOpen(false);
                   setView("sites");
                 }}
@@ -1148,6 +1156,7 @@ export default function MobileShell({
                 type="button"
                 className="msh-row"
                 onClick={() => {
+                  moreSheetNavigatingRef.current = true;
                   setSheetOpen(false);
                   onDesktopView({ view, siteId: scopedSite?.id ?? null });
                 }}

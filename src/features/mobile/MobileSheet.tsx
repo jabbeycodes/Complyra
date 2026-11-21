@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   Drawer,
   DrawerBackdrop,
@@ -39,6 +39,7 @@ export default function MobileSheet({
   backdropLabel,
   className,
   initialFocus,
+  suppressFocusReturnRef,
   onClose,
   children,
 }: {
@@ -55,6 +56,18 @@ export default function MobileSheet({
    * focusable element and override it). Omit for the default.
    */
   initialFocus?: string;
+  /**
+   * For a surface that unmounts the sheet to navigate elsewhere
+   * rather than to dismiss it (the More menu's rows), a ref whose
+   * current value is set true — synchronously, just before the close
+   * — so focus is NOT returned to the opener and can fall to the
+   * destination instead of snapping back to the control that opened
+   * the sheet. It must be a ref because a navigation unmounts the
+   * sheet in the same commit that requests the close, so a plain prop
+   * could never reach this component in time. Omit it (the default)
+   * to always return focus, as every dismissal should.
+   */
+  suppressFocusReturnRef?: RefObject<boolean>;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -65,9 +78,10 @@ export default function MobileSheet({
   );
   useEffect(() => {
     return () => {
+      if (suppressFocusReturnRef?.current) return;
       if (returnFocusTo?.isConnected) returnFocusTo.focus();
     };
-  }, [returnFocusTo]);
+  }, [returnFocusTo, suppressFocusReturnRef]);
   return (
     <Drawer
       open
