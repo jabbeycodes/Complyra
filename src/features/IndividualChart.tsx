@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Badge, DueChip, Empty, formatDate, PageHeading } from "../components";
+import { confirmDialog } from "../components/ConfirmDialog";
 import StatusBadge from "../components/StatusBadge";
 import {
   medSupplyBadgeLabel,
@@ -674,11 +675,12 @@ export default function IndividualChart({
                     }) && (
                       <button
                         className="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            !window.confirm(
-                              `Remove ${file.title} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
-                            )
+                            !(await confirmDialog({
+                              title: `Remove ${file.title} from ${row.title}?`,
+                              body: "The due date does not change. This is recorded in the audit trail.",
+                            }))
                           ) {
                             return;
                           }

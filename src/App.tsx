@@ -113,6 +113,7 @@ import { AgencyAdminRules } from "./features/AgencyRulesPanel";
 import { SettingsDiscoverySection } from "./features/SettingsDiscovery";
 import RecognitionPage from "./features/recognition/RecognitionPage";
 import Disclosure from "./components/Disclosure";
+import { ConfirmDialogHost } from "./components/ConfirmDialog";
 import BrandLoader from "./components/BrandLoader";
 import AgencyLogoSettings, { AgencyMark } from "./features/AgencyLogoSettings";
 import ProfileSignatureSection from "./features/signatures/ProfileSignatureSection";
@@ -1020,6 +1021,7 @@ export default function App() {
   if (mobileActive) {
     return (
       <InactivityGuard onSignOut={() => void signOut()}>
+        <ConfirmDialogHost />
         <MobileShell
           api={api}
           session={session}
@@ -1073,6 +1075,7 @@ export default function App() {
   }
   return (
     <InactivityGuard onSignOut={() => void signOut()}>
+    <ConfirmDialogHost />
     <div className={`app-shell${inMobileContext ? " mobile-context" : ""}`}>
       {mobileOpen && (
         <button

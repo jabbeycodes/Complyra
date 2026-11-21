@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Trophy } from "lucide-react";
 import { PageHeading } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
@@ -269,9 +270,10 @@ export default function RecognitionPage() {
 
   async function runWeeklySelection() {
     if (
-      !window.confirm(
-        "Run the weekly winner selection now? It is idempotent — weeks that already have winners are skipped.",
-      )
+      !(await confirmDialog({
+        title: "Run the weekly winner selection now?",
+        body: "It is idempotent — weeks that already have winners are skipped.",
+      }))
     ) {
       return;
     }

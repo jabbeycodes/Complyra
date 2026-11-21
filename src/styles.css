@@ -2764,6 +2764,14 @@ td > svg {
   overflow: auto;
   height: fit-content;
 }
+/* Same top-layer geometry for the Alert Dialog content (slice 2's
+ * confirm host carries the same .modal classes under its own data-slot). */
+.modal[data-slot="alert-dialog-content"] {
+  inset: 0;
+  margin: auto;
+  overflow: auto;
+  height: fit-content;
+}
 .modal-head {
   display: flex;
   align-items: center;
@@ -7797,6 +7805,15 @@ button.qa-row:hover {
   max-width: 480px;
   width: 100%;
   padding: 20px;
+}
+/* The ui-sdk Alert Dialog content (slice 2) is a top-layer div, not the
+ * old flex-centered overlay child: restore the same centered geometry,
+ * keeping the overlay's 16px page gutters in the width. */
+.qa-blocked[data-slot="alert-dialog-content"] {
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  width: calc(100% - 32px);
 }
 .qa-blocked h2 {
   margin: 0 0 8px;

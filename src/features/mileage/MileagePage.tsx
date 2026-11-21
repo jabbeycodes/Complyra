@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { CarFront, Download, Pencil, Printer, Trash2 } from "lucide-react";
 import { Empty, PageHeading, formatDate } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import { useData } from "../../data/DataProvider";
 import { hasPermission } from "../../data/permissions";
 import { downloadBlob } from "../../data/openFile";
@@ -291,7 +292,14 @@ export default function MileagePage() {
   }
 
   async function removeTrip(tripId: string) {
-    if (!window.confirm("Remove this mileage trip? This cannot be undone.")) return;
+    if (
+      !(await confirmDialog({
+        title: "Remove this mileage trip?",
+        body: "This cannot be undone.",
+      }))
+    ) {
+      return;
+    }
     setError("");
     try {
       await api.deleteMileageTrip(tripId);

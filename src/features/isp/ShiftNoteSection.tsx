@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, Printer } from "lucide-react";
 import { Empty } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import { todayIso } from "../../data/chart";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
 import type { ComplyraApi } from "../../data/localApi";
@@ -411,8 +412,13 @@ function NoteCard({
             <button
               type="button"
               className="button"
-              onClick={() => {
-                if (window.confirm("Delete this shift note? It will be kept as a soft-deleted record.")) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Delete this shift note?",
+                    body: "It will be kept as a soft-deleted record.",
+                  })
+                ) {
                   void runIsp(() => api.deleteShiftNote(note.id));
                 }
               }}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CalendarDays, Download, Pencil, Printer, Trash2, Upload } from "lucide-react";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import {
   appointmentStatus,
   appointmentStatusLabel,
@@ -137,9 +138,12 @@ export function AppointmentActions({
             <button
               className="button"
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 if (
-                  window.confirm("Remove this appointment? It stays on the chart as removed.")
+                  await confirmDialog({
+                    title: "Remove this appointment?",
+                    body: "It stays on the chart as removed.",
+                  })
                 ) {
                   onDelete();
                 }
