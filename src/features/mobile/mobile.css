@@ -621,6 +621,11 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  /* Tiles size to their own content — the default stretch added a void
+     under tiles whose subtitle wraps to one line when their row sibling's
+     wraps to two. (Quick log tiles keep their fitted height via the
+     .ql-tile min-height, which still binds under start alignment.) */
+  align-items: start;
 }
 
 .msh-tile {

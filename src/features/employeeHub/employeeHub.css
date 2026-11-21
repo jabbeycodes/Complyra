@@ -757,6 +757,9 @@
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  /* Cards size to their own content — the default stretch left the
+     shorter pay card (Accrual policies) with a ~376px bottom void. */
+  align-items: start;
 }
 
 .hub-pay-card > .hub-row > h3,
