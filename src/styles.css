@@ -8190,6 +8190,15 @@ button.qa-row:hover {
   font-size: 13px;
   color: var(--muted);
   flex: 1 1 140px;
+  /* A label must be allowed to shrink below its field's min-content width,
+     or a long select (e.g. "Staff member") pushes it past the card edge
+     on phone widths. */
+  min-width: 0;
+}
+.report-card-controls label select,
+.report-card-controls label input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
 }
 .report-card-controls label.report-card-check {
   flex-direction: row;
@@ -8202,7 +8211,6 @@ button.qa-row:hover {
 .report-card-actions {
   display: flex;
   gap: 10px;
-  margin-top: auto;
   padding-top: 4px;
 }
 /* THERAP-CORE-GAPS-1: event reports, behavior supports, health trackers.
