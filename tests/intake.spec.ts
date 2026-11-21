@@ -43,8 +43,13 @@ test("admin Intake adds an Individual and opens the chart", async ({ page }, tes
   // carries the person's name ("… — Rights packet: …").
   await expect(page.getByRole("heading", { name: "Casey Nguyen", exact: true, level: 1 })).toBeVisible();
   // The chart also carries a consent-standing status line (PR #248); the
-  // confirmation is the toast.
-  await expect(page.locator(".toast")).toContainText("Individual added to Poplar House.");
+  // confirmation is the toast. Toasts queue since the UI SDK slice 3
+  // migration, so the site-creation toast ("Poplar House is ready…") is
+  // still on screen alongside this one — target the expected toast
+  // specifically instead of assuming a single toast exists.
+  await expect(
+    page.locator(".toast").filter({ hasText: "Individual added to Poplar House." }),
+  ).toContainText("Individual added to Poplar House.");
   await expect(page.locator(".individual-chart")).toBeVisible();
 });
 

@@ -59,7 +59,12 @@ test("admin adds a site, then a person by hand and from a PCSP", async ({
   // The confirmation is the toast; the app also carries transient
   // role="status" loading lines ("Loading care records…" etc.), so a
   // bare getByRole("status") is ambiguous while they are on screen.
-  await expect(page.locator(".toast")).toContainText("Review queue");
+  // Toasts queue since the UI SDK slice 3 migration, so the earlier
+  // site-creation and add-by-hand toasts may still be on screen —
+  // target the PCSP confirmation toast specifically.
+  await expect(
+    page.locator(".toast").filter({ hasText: "The PCSP is in Review queue." }),
+  ).toContainText("Review queue");
 });
 
 test("DSP does not see add-site, add-person, or Intake", async ({ page }) => {
