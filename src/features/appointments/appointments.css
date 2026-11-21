@@ -81,11 +81,11 @@
    .panel had no padding of its own. Spacing sweep P1 gives .panel real
    padding (styles.css), which now provides the inset — the margins are
    retired so the calendar reads on the same panel rhythm without
-   double-insetting. The footer keeps its 12px step down from the grid;
-   its bottom inset is the panel's 20px. */
+   double-insetting. The footer keeps its 12px step down from the grid,
+   and below it the standard stack-help rhythm: its own 12px bottom
+   separation (styles.css .panel > .stack-help) over the panel's 20px. */
 .appointments-calendar .stack-help {
   margin-top: 12px;
-  padding-bottom: 0;
 }
 
 /* Day-detail panel: PR #279 laid this panel out as a gapped column and
