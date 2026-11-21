@@ -383,7 +383,7 @@ export default function HmWeeklyChecklistPage() {
           </ol>
 
           <h3>Service log</h3>
-          <p className="muted">
+          <p className="hm-muted">
             Second-page fill-ins, as structured entries.
           </p>
           <div className="service-log-form">
@@ -400,7 +400,7 @@ export default function HmWeeklyChecklistPage() {
                 ))}
               </select>
             </label>
-            <p className="muted">{SERVICE_LOG_PROMPTS[logKind]}</p>
+            <p className="hm-muted">{SERVICE_LOG_PROMPTS[logKind]}</p>
             <textarea
               className="input"
               rows={3}

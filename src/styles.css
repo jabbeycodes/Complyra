@@ -1099,7 +1099,7 @@ h1 {
 .panel > table.data-table:last-child {
   margin-bottom: -20px;
 }
-.panel > .empty:only-child {
+.panel > .empty-state:only-child {
   margin: -21px calc(-1 * var(--panel-inline)) -20px;
 }
 /* The weekly checklist's phone layout (hmChecklist.css, at or below
@@ -2654,12 +2654,20 @@ td > svg {
 .settings-panel > .button {
   margin-top: 24px;
 }
-.empty {
+.empty-state {
   padding: 50px 25px;
   text-align: center;
   color: var(--color-h-bcb4ab);
 }
-.empty > span {
+/* The filed-nothing variants (mark="quiet" / mark="none" on the shared
+   Empty component) are section-level notes, not full-panel states: they
+   take a compact 24px vertical padding. The all-clear check variant
+   keeps the 50px full-state presence above. */
+.empty-state-bare,
+.empty-state-quiet {
+  padding: 24px 25px;
+}
+.empty-state > span {
   display: inline-flex;
   padding: 13px;
   background: var(--color-h-f2f5f2);
@@ -2667,26 +2675,26 @@ td > svg {
   border-radius: 50%;
   margin-bottom: 15px;
 }
-.empty h3 {
+.empty-state h3 {
   font-size: 17px;
   font-weight: 500;
   color: var(--color-h-4a4036);
 }
-.empty p {
+.empty-state p {
   font-size: 13px;
   margin-top: 8px;
 }
-.empty-quiet > span {
+.empty-state-quiet > span {
   width: 10px;
   height: 10px;
   padding: 0;
   background: var(--color-h-d2c2a8);
   margin-bottom: 12px;
 }
-.empty-bare > span {
+.empty-state-bare > span {
   display: none;
 }
-.empty-actions {
+.empty-state-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

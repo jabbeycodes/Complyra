@@ -105,8 +105,8 @@ test("staff search with no matches shows an empty state (D-09)", async ({
   await expect(page.locator("table tbody tr")).toHaveCount(0);
   // Shared <Empty> component: an empty-state message inside the same panel,
   // not just a bare empty table.
-  await expect(page.locator(".panel .empty")).toBeVisible();
-  await expect(page.locator(".panel .empty")).toContainText(
+  await expect(page.locator(".panel .empty-state")).toBeVisible();
+  await expect(page.locator(".panel .empty-state")).toContainText(
     /no staff|no matching|no team members/i,
   );
 });
