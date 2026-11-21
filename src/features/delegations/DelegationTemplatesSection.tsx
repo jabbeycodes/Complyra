@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, PenLine } from "lucide-react";
+import "./delegations.css";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
