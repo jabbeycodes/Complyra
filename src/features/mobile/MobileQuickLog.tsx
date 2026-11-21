@@ -72,6 +72,7 @@ import {
   type FieldLogDomain,
 } from "./fieldLogs";
 import MobilePeopleList from "./MobilePeopleList";
+import MobileSheet from "./MobileSheet";
 import { PersonHeader } from "./MobileMar";
 import MobileGerLog from "./MobileGerLog";
 import MobileHealth from "./MobileHealth";
@@ -676,15 +677,11 @@ function MenuLogSheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close menu form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet" role="dialog" aria-label="Record a meal">
-        <h3 className="msh-sheet-title">Record a meal — {person.name}</h3>
+    <MobileSheet
+      title={<>Record a meal — {person.name}</>}
+      backdropLabel="Close menu form"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -763,8 +760,7 @@ function MenuLogSheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }
 
@@ -920,15 +916,11 @@ function MileageLogSheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close mileage form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet" role="dialog" aria-label="Log a trip">
-        <h3 className="msh-sheet-title">Log a trip</h3>
+    <MobileSheet
+      title="Log a trip"
+      backdropLabel="Close mileage form"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -1025,8 +1017,7 @@ function MileageLogSheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }
 
@@ -1161,17 +1152,11 @@ function DrillLogSheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close drill form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet" role="dialog" aria-label="Record a drill">
-        <h3 className="msh-sheet-title">
-          {DRILL_LABELS[drill.drillType]} drill
-        </h3>
+    <MobileSheet
+      title={<>{DRILL_LABELS[drill.drillType]} drill</>}
+      backdropLabel="Close drill form"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -1257,8 +1242,7 @@ function DrillLogSheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }
 
