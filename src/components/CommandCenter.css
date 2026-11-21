@@ -327,6 +327,9 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.75rem;
+  /* Cards size to their own content — the default stretch left shorter
+     cards in a row with large bottom voids under their facts line. */
+  align-items: start;
 }
 
 @media (min-width: 40rem) {
