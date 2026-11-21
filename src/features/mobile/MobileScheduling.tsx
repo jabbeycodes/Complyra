@@ -18,6 +18,7 @@ import {
   weekDates,
 } from "../coverage/coverageWeek";
 import { centralTodayIso, formatCentralTime } from "./mar";
+import MobileSheet from "./MobileSheet";
 import { useAssigneeClearanceWarning } from "../training/clearanceWarning";
 import {
   accountabilityLine,
@@ -372,17 +373,11 @@ function AssignSheet({
   const dayLabel = dayHeading(chicagoWallClock(shift.startsAt).date);
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close staff picker"
-        onClick={onClose}
-      />
-      <div className="msh-sheet" role="dialog" aria-label="Assign this shift">
-        <h3 className="msh-sheet-title">
-          {currentName ? "Change who is on this shift" : "Assign this shift"}
-        </h3>
+    <MobileSheet
+      title={currentName ? "Change who is on this shift" : "Assign this shift"}
+      backdropLabel="Close staff picker"
+      onClose={onClose}
+    >
         <p className="msh-section-note">
           {shift.title ? `${shift.title} · ` : ""}
           {dayLabel} · {shiftTimeLabel(shift.startsAt, shift.endsAt)}
@@ -440,8 +435,7 @@ function AssignSheet({
             {busy ? "Saving…" : "Save assignment"}
           </button>
         </div>
-      </div>
-    </>
+    </MobileSheet>
   );
 }
 

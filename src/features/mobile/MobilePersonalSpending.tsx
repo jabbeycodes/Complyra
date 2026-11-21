@@ -26,6 +26,7 @@ import {
 } from "../../data/personalSpending";
 import { parseAmountToCents } from "../houseCard/HouseCardPanel";
 import MoneyEntrySheet from "./MoneyEntrySheet";
+import MobileSheet from "./MobileSheet";
 import { PersonHeader } from "./MobileMar";
 import {
   blankMoneyValues,
@@ -855,23 +856,18 @@ export default function MobilePersonalSpending({
             )}
 
             {voidTarget && (
-              <>
-                <button
-                  type="button"
-                  className="msh-sheet-backdrop"
-                  aria-label="Close void form"
-                  onClick={() => setVoidTarget(null)}
-                />
-                <div
-                  className="msh-sheet mq-sheet"
-                  role="dialog"
-                  aria-label="Void entry"
-                >
-                  <h3 className="msh-sheet-title">
+              <MobileSheet
+                title={
+                  <>
                     Void entry — {formatDate(voidTarget.entryDate)} ·{" "}
                     {personalEntryTitle(voidTarget)} ·{" "}
                     {formatCents(voidTarget.amountCents)}
-                  </h3>
+                  </>
+                }
+                backdropLabel="Close void form"
+                className="mq-sheet"
+                onClose={() => setVoidTarget(null)}
+              >
                   <p className="msh-section-note">
                     Voiding never deletes the entry: it stays on the record
                     with your reason and stops counting toward the balance
@@ -916,8 +912,7 @@ export default function MobilePersonalSpending({
                       {saving ? "Voiding…" : "Void entry"}
                     </button>
                   </div>
-                </div>
-              </>
+              </MobileSheet>
             )}
           </>
         )}

@@ -39,6 +39,7 @@ import {
   type BottomNavId,
 } from "./bottomNav";
 import BottomNavPill from "./BottomNavPill";
+import MobileSheet from "./MobileSheet";
 import {
   centralHour,
   greetingForHour,
@@ -1094,16 +1095,12 @@ export default function MobileShell({
       )}
 
       {sheetOpen && (
-        <>
-          <button
-            type="button"
-            className="msh-sheet-backdrop"
-            aria-label="Close more menu"
-            onClick={() => setSheetOpen(false)}
-          />
-          <div className="msh-sheet" role="dialog" aria-label="More">
-            <h3 className="msh-sheet-title">More</h3>
-            <div className="msh-list">
+        <MobileSheet
+          title="More"
+          backdropLabel="Close more menu"
+          onClose={() => setSheetOpen(false)}
+        >
+          <div className="msh-list">
               {sheetTiles.map((tile) => {
                 const Icon = TILE_ICONS[tile.id];
                 return (
@@ -1163,9 +1160,8 @@ export default function MobileShell({
                   ›
                 </span>
               </button>
-            </div>
           </div>
-        </>
+        </MobileSheet>
       )}
     </div>
   );

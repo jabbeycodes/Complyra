@@ -8,6 +8,7 @@ import {
 } from "../../data/lifeEvents";
 import { canRecordLifeEvents } from "../../data/permissions";
 import { PersonHeader } from "./MobileMar";
+import MobileSheet from "./MobileSheet";
 import { groupLifeEventsByYear } from "./chartSections";
 import type { WorkspaceIndividual } from "./types";
 
@@ -169,15 +170,11 @@ function LifeEventSheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close life event form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet" role="dialog" aria-label="Add a life event">
-        <h3 className="msh-sheet-title">Add a life event — {person.name}</h3>
+    <MobileSheet
+      title={<>Add a life event — {person.name}</>}
+      backdropLabel="Close life event form"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -249,7 +246,6 @@ function LifeEventSheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }

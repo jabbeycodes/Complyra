@@ -27,6 +27,7 @@ import {
   initialHealthDetails,
 } from "./health";
 import MobilePeopleList from "./MobilePeopleList";
+import MobileSheet from "./MobileSheet";
 import { PersonHeader } from "./MobileMar";
 import type { WorkspaceIndividual } from "./types";
 
@@ -436,17 +437,16 @@ function HealthLogSheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close log form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet msh-health-sheet" role="dialog" aria-label="Log health entry">
-        <h3 className="msh-sheet-title">
+    <MobileSheet
+      title={
+        <>
           Log {healthKindLabel(kind).toLowerCase()} — {person.name}
-        </h3>
+        </>
+      }
+      backdropLabel="Close log form"
+      className="msh-health-sheet"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -525,7 +525,6 @@ function HealthLogSheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }

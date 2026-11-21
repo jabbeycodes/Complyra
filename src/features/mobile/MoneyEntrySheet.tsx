@@ -10,6 +10,7 @@ import type {
   HouseCardCategory,
   HouseCardReceiptPhoto,
 } from "../../data/houseCard";
+import MobileSheet from "./MobileSheet";
 import type { MoneySheetValues } from "./money";
 
 /**
@@ -125,15 +126,13 @@ export default function MoneyEntrySheet({
   };
 
   return (
-    <>
-      <button
-        type="button"
-        className="msh-sheet-backdrop"
-        aria-label="Close entry form"
-        onClick={onClose}
-      />
-      <div className="msh-sheet mq-sheet" role="dialog" aria-label={title}>
-        <h3 className="msh-sheet-title">{title}</h3>
+    <MobileSheet
+      title={title}
+      backdropLabel="Close entry form"
+      className="mq-sheet"
+      initialFocus=".mq-amount-box input"
+      onClose={onClose}
+    >
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -320,7 +319,6 @@ export default function MoneyEntrySheet({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </MobileSheet>
   );
 }

@@ -17,6 +17,7 @@ import {
 import { buildConsentPacketPdf } from "../../pdf/consentPacketPdf";
 import { buildRightsPacketPdf } from "../../pdf/rightsPacketPdf";
 import { downloadBlob, openPrintable } from "../../data/openFile";
+import MobileSheet from "./MobileSheet";
 import { todayStamp } from "../../data/status";
 import PacketForm from "../consents/PacketForm";
 import RightsPacketForm from "../consents/RightsPacketForm";
@@ -686,17 +687,12 @@ export default function MobileConsents({
       )}
 
       {paper && (
-        <>
-          <button
-            type="button"
-            className="msh-sheet-backdrop"
-            aria-label="Close paper packet form"
-            onClick={() => setPaper(null)}
-          />
-          <div className="msh-sheet msh-packet-sheet" role="dialog" aria-label="File signed paper packet">
-            <h3 className="msh-sheet-title">
-              Confirm paper packet choices and signatures
-            </h3>
+        <MobileSheet
+          title="Confirm paper packet choices and signatures"
+          backdropLabel="Close paper packet form"
+          className="msh-packet-sheet"
+          onClose={() => setPaper(null)}
+        >
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -746,24 +742,20 @@ export default function MobileConsents({
                 </button>
               </div>
             </form>
-          </div>
-        </>
+        </MobileSheet>
       )}
 
       {rightsCompleting && (
-        <>
-          <button
-            type="button"
-            className="msh-sheet-backdrop"
-            aria-label="Close rights packet form"
-            onClick={() => setRightsCompleting(null)}
-          />
-          <div className="msh-sheet msh-packet-sheet" role="dialog" aria-label="Complete rights packet">
-            <h3 className="msh-sheet-title">
-              {rightsCompleting.paper
-                ? "File the signed paper Rights packet"
-                : "Record the Rights packet signature"}
-            </h3>
+        <MobileSheet
+          title={
+            rightsCompleting.paper
+              ? "File the signed paper Rights packet"
+              : "Record the Rights packet signature"
+          }
+          backdropLabel="Close rights packet form"
+          className="msh-packet-sheet"
+          onClose={() => setRightsCompleting(null)}
+        >
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -825,8 +817,7 @@ export default function MobileConsents({
                 </button>
               </div>
             </form>
-          </div>
-        </>
+        </MobileSheet>
       )}
     </div>
   );
