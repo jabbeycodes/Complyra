@@ -974,13 +974,21 @@ h1 {
   box-shadow: 0 2px 3px var(--color-h-5f514502);
   overflow: hidden;
   min-width: 0;
+  /* Spacing sweep P1: the panel carries its own inset. Before this,
+     only h2-class children were inset and every other child (text,
+     lists, forms, cards) sat flush against the panel border. The
+     per-child insets that compensated for the missing padding are
+     retired in the block after .panel > .stack-help below. */
+  padding: 21px var(--panel-inline) 20px;
 }
 .panel-heading {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
-  padding: 21px var(--panel-inline) 19px;
+  /* Top/inline insets come from .panel now; the 19px bottom is the
+     heading-to-content separation and stays. */
+  padding: 0 0 19px;
 }
 .panel-heading h2 {
   font-family: var(--font-body);
@@ -997,11 +1005,114 @@ h1 {
   margin-top: 7px;
 }
 .panel > h2 {
-  padding: 21px var(--panel-inline) 8px;
+  /* Top/inline insets come from .panel now; the 8px bottom is the
+     heading-to-content separation and stays. */
+  padding: 0 0 8px;
 }
 .panel > .stack-help {
-  padding-inline: var(--panel-inline);
   padding-bottom: 12px;
+}
+/* Spacing sweep P1 (continued): retire the per-child insets that used
+   to compensate for .panel's missing padding, so compensated children
+   keep their current geometry now that the panel insets them itself.
+   Children designed to touch the panel border (table scrollers, the
+   agency hero, the scheduler footer strip, a sole empty state) get
+   their full bleed back through negative margins. */
+.panel.status-mix-panel {
+  padding-bottom: 8px;
+}
+.panel.agency-hero {
+  padding: 0;
+}
+.panel > .filter-bar {
+  padding: 0 0 17px;
+}
+.panel > .risk-list,
+.panel > .category-list,
+.panel > .activity-list,
+.panel > .delegation-create,
+.panel > .delegation-reminder,
+.panel > .priority-footer,
+.panel > .personal-compliance-score,
+.panel > .personal-compliance-note,
+.panel > .personal-compliance-attention {
+  padding-inline: 0;
+}
+.panel > .category-key {
+  padding-inline: 0;
+  padding-bottom: 0;
+}
+.panel > .activity-link {
+  padding: 11px 0 0;
+}
+.panel > figure.status-mix {
+  padding-inline: 0;
+}
+.panel > .right-now-attention {
+  padding-inline: 0;
+}
+.panel > .right-now-allclear {
+  padding: 4px 0 0;
+}
+.panel > .doc-notice {
+  margin: 0;
+}
+.panel > .doc-item,
+.panel > .doc-error {
+  margin-inline: 0;
+}
+.panel > .doc-section {
+  padding-inline: 0;
+}
+.panel > .doc-section:last-child {
+  padding-bottom: 0;
+}
+.panel > .doc-key-status {
+  padding: 0;
+}
+.panel > .personal-compliance-error {
+  margin-inline: 0;
+}
+.panel > .mileage-form,
+.panel > .mileage-sheet-head {
+  padding: 0;
+}
+.panel > .help-list {
+  padding-left: 0;
+}
+.panel > .clearance-list {
+  padding-left: calc(40px - var(--panel-inline));
+}
+.panel > .scheduler-next-run:last-child {
+  margin-inline: calc(-1 * var(--panel-inline));
+  margin-bottom: -20px;
+}
+.panel > .table-scroll,
+.panel > table.data-table {
+  margin-inline: calc(-1 * var(--panel-inline));
+}
+.panel > .table-scroll:first-child,
+.panel > table.data-table:first-child {
+  margin-top: -21px;
+}
+.panel > .table-scroll:last-child,
+.panel > table.data-table:last-child {
+  margin-bottom: -20px;
+}
+.panel > .empty:only-child {
+  margin: -21px calc(-1 * var(--panel-inline)) -20px;
+}
+/* The weekly checklist's phone layout (hmChecklist.css, at or below
+   860px) puts the prompt on its own row at calc(100% - 38px) of the
+   item row — a geometry designed against the old flush panel, and the
+   width the mobile-responsive spec pins (the prompt measured 280px on
+   main, 232px with the panel inset). At that breakpoint the items list
+   takes its inline bleed back, like the table scrollers above; wider
+   viewports keep the standard panel inset. */
+@media (max-width: 860px) {
+  .panel > .checklist-items {
+    margin-inline: calc(-1 * var(--panel-inline));
+  }
 }
 .count-pill {
   font-size: 11px;
@@ -1268,7 +1379,12 @@ h1 {
   padding: 8px 18px 20px;
   background: var(--color-h-faf6ef);
 }
-.site-score-heading {
+/* Specificity raised (Spacing sweep P1): this heading lives inside the
+   agency-hero panel's score block, not at a panel's head. The global
+   .panel-heading media restatements (wider breakpoints below) used to
+   override its designed padding on narrow screens; as a compound
+   selector its own padding now wins at every width. */
+.panel-heading.site-score-heading {
   padding: 12px 4px 8px;
 }
 .site-score-heading h3 {
@@ -3486,7 +3602,7 @@ td {
     font-size: 9px;
   }
   .panel-heading {
-    padding: 18px var(--panel-inline);
+    padding: 0 0 18px;
   }
   .panel-heading h2 {
     font-size: 14px;
@@ -4010,7 +4126,7 @@ td {
     margin-bottom: 18px;
   }
   .panel-heading {
-    padding: 18px var(--panel-inline);
+    padding: 0 0 18px;
     gap: 10px;
   }
   .panel-heading h2 {
@@ -7765,9 +7881,10 @@ button.qa-row:hover {
 .appointments-filters {
   padding: 16px var(--panel-inline) 18px;
 }
-.appointments-page .appointments-calendar {
-  padding-inline: 0;
-}
+/* Spacing sweep P1: PR #279 zeroed the calendar panel's inline padding
+   and inset its children with margins instead. The panel carries real
+   padding now, so the zeroing is retired and the children sit on the
+   panel's own inset (their margins are retired in appointments.css). */
 
 .health-widget {
   grid-column: 1 / -1;
@@ -8549,7 +8666,7 @@ button.qa-row:hover {
   color: var(--color-muted);
 }
 .panel > .doc-hint {
-  padding: 14px var(--panel-inline);
+  padding: 14px 0;
 }
 .doc-error {
   display: flex;
@@ -8606,7 +8723,7 @@ button.qa-row:hover {
   }
 }
 .doc-review-grid .panel > .button {
-  margin: 0 var(--panel-inline) 18px;
+  margin: 0;
 }
 .doc-section {
   margin-top: 16px;
@@ -8669,7 +8786,6 @@ button.qa-row:hover {
 }
 .panel > .doc-item-actions {
   margin-top: 0;
-  padding: 0 var(--panel-inline) 18px;
 }
 .doc-key-status {
   display: flex;
