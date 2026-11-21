@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, FileText, LockKeyhole, PenLine, Trash2 } from "lucide-react";
 import { Badge, DueChip, formatDate } from "../components";
+import { confirmDialog } from "../components/ConfirmDialog";
 import { useData } from "../data/DataProvider";
 import { can } from "../data/status";
 import { canSignTrainingAsHm, todayIso } from "../data/chart";
@@ -468,11 +469,12 @@ function ClinicalRenewals({
                       <button
                         type="button"
                         className="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            !window.confirm(
-                              `Remove ${file.title} from ${row.title}? The due date does not change. This is recorded in the audit trail.`,
-                            )
+                            !(await confirmDialog({
+                              title: `Remove ${file.title} from ${row.title}?`,
+                              body: "The due date does not change. This is recorded in the audit trail.",
+                            }))
                           ) {
                             return;
                           }

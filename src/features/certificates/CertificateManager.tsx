@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { Modal, PageHeading } from "../../components";
+import { confirmDialog } from "../../components/ConfirmDialog";
 import { useData } from "../../data/DataProvider";
 import { furthestReminderDay } from "../../data/rules";
 import { useOperatingRules } from "../employeeHub/useOvertimeLines";
@@ -158,9 +159,10 @@ export default function CertificateManager() {
 
   async function remove(cert: StaffCertificate) {
     if (
-      !window.confirm(
-        `Delete ${cert.certName} (renews ${cert.expiresOn})? This cannot be undone.`,
-      )
+      !(await confirmDialog({
+        title: `Delete ${cert.certName} (renews ${cert.expiresOn})?`,
+        body: "This cannot be undone.",
+      }))
     ) {
       return;
     }

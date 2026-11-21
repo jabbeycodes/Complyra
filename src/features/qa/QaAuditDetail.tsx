@@ -9,6 +9,14 @@ import {
   Minus,
   X,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogBackdrop,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@ui-sdk/react/alert-dialog";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { can } from "../../data/status";
@@ -372,6 +380,64 @@ function ItemCard({
   );
 }
 
+// The "Can't mark this missing" prompt on ui-sdk Alert Dialog parts,
+// carrying the same classes the hand-rolled overlay used. Mounted only
+// while a score is blocked (the shared Modal's pattern): the element
+// focused at first render is captured so focus returns to it on close.
+function BlockedAlert({
+  evidence,
+  busy,
+  onCancel,
+  onMarkPresent,
+}: {
+  evidence: string;
+  busy: boolean;
+  onCancel: () => void;
+  onMarkPresent: () => void;
+}) {
+  const [returnFocusTo] = useState<HTMLElement | null>(() =>
+    typeof document !== "undefined"
+      ? (document.activeElement as HTMLElement | null)
+      : null,
+  );
+  useEffect(() => {
+    return () => {
+      if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    };
+  }, [returnFocusTo]);
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel();
+      }}
+    >
+      <AlertDialogBackdrop className="qa-blocked-overlay" />
+      <AlertDialogContent
+        className="qa-blocked"
+        finalFocus={() => returnFocusTo}
+      >
+        <AlertDialogTitle>Can't mark this missing</AlertDialogTitle>
+        <AlertDialogDescription>
+          The system detected this item is already present:{" "}
+          <strong>{evidence}</strong>. It can't be marked missing.
+        </AlertDialogDescription>
+        <div className="qa-dispute-form-actions">
+          <AlertDialogClose className="button">Cancel</AlertDialogClose>
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy}
+            onClick={onMarkPresent}
+          >
+            Mark as present
+          </button>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export default function QaAuditDetail({
   audit,
   siteName,
@@ -679,42 +745,16 @@ export default function QaAuditDetail({
       </div>
 
       {blocked && (
-        <div
-          className="qa-blocked-overlay"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="qa-blocked-title"
-          aria-describedby="qa-blocked-desc"
-        >
-          <div className="qa-blocked">
-            <h2 id="qa-blocked-title">Can't mark this missing</h2>
-            <p id="qa-blocked-desc">
-              The system detected this item is already present:{" "}
-              <strong>{blocked.evidence}</strong>. It can't be marked missing.
-            </p>
-            <div className="qa-dispute-form-actions">
-              <button
-                type="button"
-                className="button"
-                onClick={() => setBlocked(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="button primary"
-                disabled={busy}
-                onClick={() => {
-                  const b = blocked;
-                  setBlocked(null);
-                  void handleScore(b.key, "yes", b.comment);
-                }}
-              >
-                Mark as present
-              </button>
-            </div>
-          </div>
-        </div>
+        <BlockedAlert
+          evidence={blocked.evidence}
+          busy={busy}
+          onCancel={() => setBlocked(null)}
+          onMarkPresent={() => {
+            const b = blocked;
+            setBlocked(null);
+            void handleScore(b.key, "yes", b.comment);
+          }}
+        />
       )}
     </div>
   );
