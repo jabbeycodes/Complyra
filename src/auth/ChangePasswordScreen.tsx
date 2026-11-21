@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
 import { LockKeyhole } from "lucide-react";
 import { useData } from "../data/DataProvider";
+import PasswordField from "../components/PasswordField";
 
 export default function ChangePasswordScreen() {
   const { session, changePassword, signOut } = useData();
@@ -41,38 +42,29 @@ export default function ChangePasswordScreen() {
             }
           }}
         >
-          <label className="form-label">
-            Temporary password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-            />
-          </label>
-          <label className="form-label">
-            New password
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={nextPassword}
-              onChange={(e) => setNextPassword(e.target.value)}
-              minLength={8}
-              required
-            />
-          </label>
-          <label className="form-label">
-            Confirm new password
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              minLength={8}
-              required
-            />
-          </label>
+          <PasswordField
+            label="Temporary password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            autoComplete="current-password"
+            required
+          />
+          <PasswordField
+            label="New password"
+            value={nextPassword}
+            onChange={setNextPassword}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+          <PasswordField
+            label="Confirm new password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
           {error && (
             <p className="inline-error" role="alert">
               {error}

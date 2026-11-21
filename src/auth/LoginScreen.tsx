@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ComplyRerWordmark } from "../brand/ComplyrerBrand";
-import { Eye, EyeOff, Play, ShieldCheck } from "lucide-react";
+import { Play, ShieldCheck } from "lucide-react";
+import PasswordField from "../components/PasswordField";
 import { useData } from "../data/DataProvider";
 import { DEMO_ADMIN_USERNAME, DEMO_AGENCY_CODE } from "../data/seed";
 import { DEMO_PASSWORD } from "../data/types";
@@ -18,7 +19,6 @@ export default function LoginScreen({
   const [agencyCode, setAgencyCode] = useState(prefill?.agencyCode ?? "");
   const [username, setUsername] = useState(prefill?.username ?? "");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
@@ -82,32 +82,14 @@ export default function LoginScreen({
               required
             />
           </label>
-          <div className="form-label">
-            <label htmlFor="login-password">Password</label>
-            <span className="password-field">
-              <input
-                id="login-password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="button"
-                className="password-toggle"
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                aria-pressed={showPassword}
-                onClick={() => setShowPassword((v) => !v)}
-              >
-                {showPassword ? (
-                  <EyeOff size={20} aria-hidden="true" />
-                ) : (
-                  <Eye size={20} aria-hidden="true" />
-                )}
-              </button>
-            </span>
-          </div>
+          <PasswordField
+            id="login-password"
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+            required
+          />
           {error && (
             <p className="inline-error" role="alert">
               {error}
