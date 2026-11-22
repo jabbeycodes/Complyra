@@ -123,7 +123,14 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
   // Requirement rows carry .search-meta; the directory groups above them
   // (Individuals / Staff / Homes, PR #202) are a separate, separately
   // capped list and are not what this dedupe test pins.
-  const results = page.locator(".search-results > button").filter({ has: page.locator(".search-meta") });
+  // Since UI SDK slice 10b the rows render inside the Command
+  // listbox/group structure and carry role="option" (real <button>
+  // elements with listbox semantics), so they are no longer direct
+  // children of .search-results.
+  const results = page
+    .locator(".search-results")
+    .getByRole("option")
+    .filter({ has: page.locator(".search-meta") });
   await expect(results.first()).toBeVisible();
   const count = await results.count();
   expect(count).toBeGreaterThan(0);
@@ -144,7 +151,11 @@ test("searching Ellis does not list five identical current PCSP rows", async ({
 test("search empty state copy is unchanged", async ({ page }) => {
   await signIn(page);
   await page.getByLabel("Search people, homes, and requirements").fill("zzzz-no-such-record");
-  await expect(page.locator(".search-results p")).toHaveText(
-    "No matching records. Try a name or site.",
-  );
+  // Since UI SDK slice 10b the empty state is the Command empty
+  // element (a role="status" div), not a <p>; pin the exact copy.
+  await expect(
+    page
+      .locator(".search-results")
+      .getByText("No matching records. Try a name or site.", { exact: true }),
+  ).toHaveText("No matching records. Try a name or site.");
 });

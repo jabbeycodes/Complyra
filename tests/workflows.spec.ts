@@ -190,9 +190,11 @@ test("search and copilot answers lead to the correct sample records", async ({
 }) => {
   await signIn(page);
   await page.getByLabel("Search people, homes, and requirements").fill("medication");
+  // Since UI SDK slice 10b the search rows carry role="option"
+  // (real <button> elements inside the Command listbox).
   await page
     .locator(".search-results")
-    .getByRole("button", { name: /Renew medication delegation Morgan Pruitt/ })
+    .getByRole("option", { name: /Renew medication delegation Morgan Pruitt/ })
     .click();
   await expect(page.getByRole("dialog")).toContainText("Taylor Reed");
   await page.getByRole("button", { name: "Close dialog" }).click();
