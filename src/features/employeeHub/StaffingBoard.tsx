@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 import { Pencil, Plus, X } from "lucide-react";
 import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
+import { AppSelect } from "../../components/AppSelect";
 import {
   STAFFING_DAY_LABELS,
   computePatternWeeklyHours,
@@ -363,14 +364,14 @@ export function StaffingConfigForm({
       )}
       <label>
         Staff member
-        <select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-          <option value="">Choose staff…</option>
-          {staffList.map((s) => (
-            <option key={s.userId} value={s.userId}>
-              {s.fullName}
-            </option>
-          ))}
-        </select>
+        <AppSelect
+          value={staffId}
+          onChange={setStaffId}
+          options={[
+            { value: "", label: "Choose staff…" },
+            ...staffList.map((s) => ({ value: s.userId, label: s.fullName })),
+          ]}
+        />
       </label>
       {clearanceWarning && (
         <p className="hub-clearance-warning hub-form-wide" role="alert">
@@ -387,14 +388,14 @@ export function StaffingConfigForm({
       </label>
       <label>
         Site / house
-        <select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-          <option value="">No house assigned</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <AppSelect
+          value={siteId}
+          onChange={setSiteId}
+          options={[
+            { value: "", label: "No house assigned" },
+            ...sites.map((s) => ({ value: s.id, label: s.name })),
+          ]}
+        />
       </label>
       <fieldset className="hub-form-wide hub-fieldset">
         <legend>Days</legend>

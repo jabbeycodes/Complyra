@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clock } from "lucide-react";
 import { Empty } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import { hasPermission } from "../../data/permissions";
 import { centralTodayIso } from "../../data/menuRecords";
 import type { HrPunch, HrShift } from "../../data/hr";
@@ -159,14 +160,14 @@ export function WhosHereNow({
           <div className="hub-form">
             <label>
               Site
-              <select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-                <option value="">All sites</option>
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                value={siteId}
+                onChange={setSiteId}
+                options={[
+                  { value: "", label: "All sites" },
+                  ...sites.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+              />
             </label>
           </div>
         )}

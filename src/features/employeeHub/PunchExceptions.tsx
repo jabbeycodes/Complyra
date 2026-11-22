@@ -27,6 +27,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Flag } from "lucide-react";
 import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { Empty } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import { createSupabaseBrowserClient } from "../../data/index";
 import { centralTodayIso } from "../../data/menuRecords";
 import { detectExceptions, weeklyHoursStatus, workWeekStart } from "../../data/hr";
@@ -465,12 +466,14 @@ export function PunchExceptions({
         </label>
         <label>
           Site
-          <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
-            <option value="">All sites</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <AppSelect
+            value={siteFilter}
+            onChange={setSiteFilter}
+            options={[
+              { value: "", label: "All sites" },
+              ...sites.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+          />
         </label>
       </div>
       <ToggleGroup
@@ -530,10 +533,14 @@ export function PunchExceptions({
                       <div className="hub-form">
                         <label>
                           Correct punch type
-                          <select value={flagKind} onChange={(e) => setFlagKind(e.target.value as "in" | "out")}>
-                            <option value="in">Clock in</option>
-                            <option value="out">Clock out</option>
-                          </select>
+                          <AppSelect
+                            value={flagKind}
+                            onChange={(next) => setFlagKind(next as "in" | "out")}
+                            options={[
+                              { value: "in", label: "Clock in" },
+                              { value: "out", label: "Clock out" },
+                            ]}
+                          />
                         </label>
                         <label>
                           Correct time

@@ -41,6 +41,7 @@ import {
   X,
 } from "lucide-react";
 import { Empty, PageHeading } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import { useData } from "../../data/DataProvider";
 import { addDaysIso, centralTodayIso } from "../../data/menuRecords";
 import { createSupabaseBrowserClient } from "../../data/index";
@@ -1271,44 +1272,41 @@ function SwapBoard({
         <div className="hub-form">
           <label>
             My shift to offer
-            <select value={offeredId} onChange={(e) => setOfferedId(e.target.value)}>
-              <option value="">Pick a shift…</option>
-              {myUpcoming.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {describeShift(s)}
-                </option>
-              ))}
-            </select>
+            <AppSelect
+              value={offeredId}
+              onChange={setOfferedId}
+              options={[
+                { value: "", label: "Pick a shift…" },
+                ...myUpcoming.map((s) => ({ value: s.id, label: describeShift(s) })),
+              ]}
+            />
           </label>
           <label>
             Request in exchange (optional)
-            <select
+            <AppSelect
               value={requestedId}
-              onChange={(e) => setRequestedId(e.target.value)}
+              onChange={setRequestedId}
               disabled={targetId === ""}
-            >
-              <option value="">Open claim — no specific shift</option>
-              {targetShifts
-                .filter((s) => s.id !== offeredId)
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {describeShift(s)}
-                  </option>
-                ))}
-            </select>
+              options={[
+                { value: "", label: "Open claim — no specific shift" },
+                ...targetShifts
+                  .filter((s) => s.id !== offeredId)
+                  .map((s) => ({ value: s.id, label: describeShift(s) })),
+              ]}
+            />
           </label>
           <label>
             Target coworker (optional)
-            <select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-              <option value="">Open to everyone</option>
-              {targetChoices
-                .filter((s) => s.userId !== session.userId)
-                .map((s) => (
-                  <option key={s.userId} value={s.userId}>
-                    {s.fullName}
-                  </option>
-                ))}
-            </select>
+            <AppSelect
+              value={targetId}
+              onChange={setTargetId}
+              options={[
+                { value: "", label: "Open to everyone" },
+                ...targetChoices
+                  .filter((s) => s.userId !== session.userId)
+                  .map((s) => ({ value: s.userId, label: s.fullName })),
+              ]}
+            />
           </label>
           <p className="hub-form-wide hub-sub">
             {targetId === ""
@@ -1833,13 +1831,14 @@ function MyTimecardTab({
       <div className="hub-form" style={{ marginBottom: 16 }}>
         <label>
           Pay period
-          <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {fmtDate(p.startsOn)} – {fmtDate(p.endsOn)} ({p.status})
-              </option>
-            ))}
-          </select>
+          <AppSelect
+            value={periodId}
+            onChange={setPeriodId}
+            options={periods.map((p) => ({
+              value: p.id,
+              label: `${fmtDate(p.startsOn)} – ${fmtDate(p.endsOn)} (${p.status})`,
+            }))}
+          />
         </label>
       </div>
       {!period ? (
@@ -1907,10 +1906,14 @@ function MyTimecardTab({
               <div className="hub-form">
                 <label>
                   Correct punch type
-                  <select value={corrKind} onChange={(e) => setCorrKind(e.target.value as "in" | "out")}>
-                    <option value="in">Clock in</option>
-                    <option value="out">Clock out</option>
-                  </select>
+                  <AppSelect
+                    value={corrKind}
+                    onChange={(next) => setCorrKind(next as "in" | "out")}
+                    options={[
+                      { value: "in", label: "Clock in" },
+                      { value: "out", label: "Clock out" },
+                    ]}
+                  />
                 </label>
                 <label>
                   Correct time
@@ -2293,25 +2296,27 @@ function EditorDialog(props: {
         </label>
         <label>
           Category
-          <select
+          <AppSelect
             value={props.formCategory}
-            onChange={(e) => props.setFormCategory(e.target.value as HrDocument["category"])}
-          >
-            <option value="handbook">Handbook</option>
-            <option value="policy">Policy</option>
-            <option value="form">Form</option>
-            <option value="notice">Notice</option>
-          </select>
+            onChange={(next) => props.setFormCategory(next as HrDocument["category"])}
+            options={[
+              { value: "handbook", label: "Handbook" },
+              { value: "policy", label: "Policy" },
+              { value: "form", label: "Form" },
+              { value: "notice", label: "Notice" },
+            ]}
+          />
         </label>
         <label>
           Requires acknowledgment
-          <select
+          <AppSelect
             value={props.formRequiresAck ? "yes" : "no"}
-            onChange={(e) => props.setFormRequiresAck(e.target.value === "yes")}
-          >
-            <option value="yes">Yes — every staff member must acknowledge</option>
-            <option value="no">No</option>
-          </select>
+            onChange={(next) => props.setFormRequiresAck(next === "yes")}
+            options={[
+              { value: "yes", label: "Yes — every staff member must acknowledge" },
+              { value: "no", label: "No" },
+            ]}
+          />
         </label>
       </div>
       <div className="hub-form-actions">
@@ -2774,13 +2779,11 @@ function TimeOffTab({
         <div className="hub-form">
           <label>
             Type
-            <select value={kind} onChange={(e) => setKind(e.target.value as LeaveType)}>
-              {LEAVE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {LEAVE_TYPE_LABELS[type]}
-                </option>
-              ))}
-            </select>
+            <AppSelect
+              value={kind}
+              onChange={(next) => setKind(next as LeaveType)}
+              options={LEAVE_TYPES.map((type) => ({ value: type, label: LEAVE_TYPE_LABELS[type] }))}
+            />
           </label>
           <label>
             Start date
@@ -2905,24 +2908,25 @@ function TimeOffTab({
           <div className="hub-form">
             <label>
               Employee
-              <select value={adjStaffId} onChange={(e) => setAdjStaffId(e.target.value)}>
-                <option value="">Choose an employee…</option>
-                {staffList.map((s) => (
-                  <option key={s.userId} value={s.userId}>
-                    {s.fullName}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                value={adjStaffId}
+                onChange={setAdjStaffId}
+                options={[
+                  { value: "", label: "Choose an employee…" },
+                  ...staffList.map((s) => ({ value: s.userId, label: s.fullName })),
+                ]}
+              />
             </label>
             <label>
               Type
-              <select value={adjType} onChange={(e) => setAdjType(e.target.value as LeaveType)}>
-                {LEAVE_TYPES.filter((t) => leaveTypeDebitsBalance(t)).map((type) => (
-                  <option key={type} value={type}>
-                    {LEAVE_TYPE_LABELS[type]}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                value={adjType}
+                onChange={(next) => setAdjType(next as LeaveType)}
+                options={LEAVE_TYPES.filter((t) => leaveTypeDebitsBalance(t)).map((type) => ({
+                  value: type,
+                  label: LEAVE_TYPE_LABELS[type],
+                }))}
+              />
             </label>
             <label>
               Hours (+ adds, − removes)
@@ -3253,12 +3257,14 @@ function TeamScheduleTab({
         </div>
         <label>
           Site
-          <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
-            <option value="">All sites</option>
-            {formSiteOptions.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <AppSelect
+            value={siteFilter}
+            onChange={setSiteFilter}
+            options={[
+              { value: "", label: "All sites" },
+              ...formSiteOptions.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+          />
         </label>
       </div>
       <h3 style={{ margin: "20px 0 8px" }}>Recurring coverage this week</h3>
@@ -3277,12 +3283,14 @@ function TeamScheduleTab({
             </label>
             <label>
               Assign to
-              <select value={form.staffId} onChange={(e) => setForm({ ...form, staffId: e.target.value })}>
-                <option value="">Open shift (unassigned)</option>
-                {assignableStaff.map((s) => (
-                  <option key={s.userId} value={s.userId}>{s.fullName}</option>
-                ))}
-              </select>
+              <AppSelect
+                value={form.staffId}
+                onChange={(next) => setForm({ ...form, staffId: next })}
+                options={[
+                  { value: "", label: "Open shift (unassigned)" },
+                  ...assignableStaff.map((s) => ({ value: s.userId, label: s.fullName })),
+                ]}
+              />
             </label>
             {clearanceWarning && (
               <p className="hub-clearance-warning" role="alert">
@@ -3291,12 +3299,14 @@ function TeamScheduleTab({
             )}
             <label>
               Site
-              <select value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
-                <option value="">All sites</option>
-                {formSiteOptions.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <AppSelect
+                value={form.siteId}
+                onChange={(next) => setForm({ ...form, siteId: next })}
+                options={[
+                  { value: "", label: "All sites" },
+                  ...formSiteOptions.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+              />
             </label>
             <label>
               Date
@@ -3312,11 +3322,15 @@ function TeamScheduleTab({
             </label>
             <label>
               Status
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as HrShift["status"] })}>
-                <option value="published">Published — visible to staff</option>
-                <option value="scheduled">Scheduled — not yet published</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
+              <AppSelect
+                value={form.status}
+                onChange={(next) => setForm({ ...form, status: next as HrShift["status"] })}
+                options={[
+                  { value: "published", label: "Published — visible to staff" },
+                  { value: "scheduled", label: "Scheduled — not yet published" },
+                  { value: "cancelled", label: "Cancelled" },
+                ]}
+              />
             </label>
             <label className="hub-form-wide">
               Notes
@@ -3606,12 +3620,14 @@ function AttendanceTab({
           </label>
           <label>
             Site
-            <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}>
-              <option value="">All sites</option>
-              {sites.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <AppSelect
+              value={siteFilter}
+              onChange={setSiteFilter}
+              options={[
+                { value: "", label: "All sites" },
+                ...sites.map((s) => ({ value: s.id, label: s.name })),
+              ]}
+            />
           </label>
         </div>
         {loading ? (
@@ -3783,21 +3799,22 @@ function TimecardsTab({
       <div className="hub-form" style={{ marginBottom: 16 }}>
         <label>
           Pay period
-          <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {fmtDate(p.startsOn)} – {fmtDate(p.endsOn)} ({p.status})
-              </option>
-            ))}
-          </select>
+          <AppSelect
+            value={periodId}
+            onChange={setPeriodId}
+            options={periods.map((p) => ({
+              value: p.id,
+              label: `${fmtDate(p.startsOn)} – ${fmtDate(p.endsOn)} (${p.status})`,
+            }))}
+          />
         </label>
         <label>
           Staff
-          <select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-            {staffList.map((s) => (
-              <option key={s.userId} value={s.userId}>{s.fullName}</option>
-            ))}
-          </select>
+          <AppSelect
+            value={staffId}
+            onChange={setStaffId}
+            options={staffList.map((s) => ({ value: s.userId, label: s.fullName }))}
+          />
         </label>
       </div>
       {!period ? (
@@ -4050,12 +4067,16 @@ function TeamComplianceTab({
             </label>
             <label>
               Kind
-              <select value={reqKind} onChange={(e) => setReqKind(e.target.value as HrReadinessRequirement["kind"])}>
-                <option value="certificate">Certificate</option>
-                <option value="training">Training</option>
-                <option value="document">Document</option>
-                <option value="acknowledgment">Acknowledgment</option>
-              </select>
+              <AppSelect
+                value={reqKind}
+                onChange={(next) => setReqKind(next as HrReadinessRequirement["kind"])}
+                options={[
+                  { value: "certificate", label: "Certificate" },
+                  { value: "training", label: "Training" },
+                  { value: "document", label: "Document" },
+                  { value: "acknowledgment", label: "Acknowledgment" },
+                ]}
+              />
             </label>
           </div>
           <div className="hub-form-actions">
@@ -4582,20 +4603,22 @@ function AccrualPoliciesCard({ store }: { store: HrStore }) {
           <div className="hub-form">
             <label>
               Leave type
-              <select value={leaveType} onChange={(e) => setLeaveType(e.target.value as LeaveType)}>
-                {LEAVE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {LEAVE_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                value={leaveType}
+                onChange={(next) => setLeaveType(next as LeaveType)}
+                options={LEAVE_TYPES.map((t) => ({ value: t, label: LEAVE_TYPE_LABELS[t] }))}
+              />
             </label>
             <label>
               Carryover basis
-              <select value={basis} onChange={(e) => setBasis(e.target.value as "calendar_year" | "anniversary")}>
-                <option value="calendar_year">Calendar year</option>
-                <option value="anniversary">Anniversary</option>
-              </select>
+              <AppSelect
+                value={basis}
+                onChange={(next) => setBasis(next as "calendar_year" | "anniversary")}
+                options={[
+                  { value: "calendar_year", label: "Calendar year" },
+                  { value: "anniversary", label: "Anniversary" },
+                ]}
+              />
             </label>
             <label>
               Carryover cap (hours)

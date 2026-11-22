@@ -20,6 +20,7 @@ type AppSelectProps = {
   options: (string | AppSelectOption)[];
   ariaLabel?: string;
   className?: string;
+  id?: string;
   name?: string;
   required?: boolean;
   disabled?: boolean;
@@ -37,6 +38,7 @@ export function AppSelect({
   options,
   ariaLabel,
   className,
+  id,
   name,
   required,
   disabled,
@@ -57,6 +59,7 @@ export function AppSelect({
       disabled={disabled}
     >
       <SelectTrigger
+        id={id}
         className={`app-select-trigger${className ? ` ${className}` : ""}`}
         aria-label={ariaLabel}
       >
@@ -71,7 +74,22 @@ export function AppSelect({
         </span>
         <ChevronDown size={12} aria-hidden="true" />
       </SelectTrigger>
-      <SelectContent className="app-select-popup">
+      <SelectContent
+        className="app-select-popup"
+        onClick={(event) => {
+          // A click inside the popup must not become a second click on the
+          // trigger. When the select sits inside a <label> (the Employee
+          // Hub's field pattern), the browser forwards any click on a
+          // non-control descendant of the label to the labeled control —
+          // the trigger — toggling it back open after the pick commits
+          // and closes it. Preventing the click's default action stops
+          // the forwarding. This runs in the bubble phase, after the
+          // item's own handlers: the SDK treats a click that is already
+          // default-prevented as vetoed, so preventing in the capture
+          // phase would block the commit itself (slice 11b browser QA).
+          event.preventDefault();
+        }}
+      >
         {normalized.map((option) => (
           <SelectItem
             key={option.value}

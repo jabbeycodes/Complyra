@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ban, Check, Copy, KeyRound, Plus, RefreshCw } from "lucide-react";
 import { Empty } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import { hasPermission } from "../../data/permissions";
 import type { HrStore } from "../../data/hrStore";
 import type { SessionUser } from "../../data/types";
@@ -353,11 +354,11 @@ export function KioskAdmin({
                 <div className="hub-form">
                   <label>
                     Site
-                    <select value={tokenSiteId} onChange={(e) => setTokenSiteId(e.target.value)}>
-                      {sites.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
+                    <AppSelect
+                      value={tokenSiteId}
+                      onChange={setTokenSiteId}
+                      options={sites.map((s) => ({ value: s.id, label: s.name }))}
+                    />
                   </label>
                   <label>
                     Label
@@ -434,12 +435,14 @@ export function KioskAdmin({
                 <div className="hub-form">
                   <label>
                     Staff member
-                    <select value={credStaffId} onChange={(e) => setCredStaffId(e.target.value)}>
-                      <option value="">Pick…</option>
-                      {staffList.map((s) => (
-                        <option key={s.userId} value={s.userId}>{s.fullName}</option>
-                      ))}
-                    </select>
+                    <AppSelect
+                      value={credStaffId}
+                      onChange={setCredStaffId}
+                      options={[
+                        { value: "", label: "Pick…" },
+                        ...staffList.map((s) => ({ value: s.userId, label: s.fullName })),
+                      ]}
+                    />
                   </label>
                   <label>
                     Employee ID number
