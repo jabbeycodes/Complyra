@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { Toggle } from "@ui-sdk/react/toggle";
 
 /**
  * OneTimeSecret — the ONLY way a credential is ever shown after creation.
@@ -52,11 +53,10 @@ export default function OneTimeSecret({
         </>
       )}
       <span className="onetime-secret-actions">
-        <button
-          type="button"
+        <Toggle
           className="text-button"
-          aria-pressed={revealed}
-          onClick={() => setRevealed((v) => !v)}
+          pressed={revealed}
+          onPressedChange={setRevealed}
         >
           {revealed ? (
             <EyeOff size={15} aria-hidden="true" />
@@ -64,7 +64,7 @@ export default function OneTimeSecret({
             <Eye size={15} aria-hidden="true" />
           )}{" "}
           {revealed ? "Hide" : "Show"}
-        </button>
+        </Toggle>
         <button type="button" className="text-button" onClick={() => void copy()}>
           {copied ? (
             <Check size={15} aria-hidden="true" />

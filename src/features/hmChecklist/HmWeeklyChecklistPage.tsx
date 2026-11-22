@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Radio, RadioGroup } from "@ui-sdk/react/radio";
 import { Badge, PageHeading } from "../../components";
 import StatusBadge from "../../components/StatusBadge";
 import { useData } from "../../data/DataProvider";
@@ -96,21 +97,27 @@ function AnswerControl({
   disabled: boolean;
 }) {
   return (
-    <div className="answer-segment" role="radiogroup" aria-label="Answer">
+    <RadioGroup
+      className="answer-segment"
+      aria-label="Answer"
+      value={value}
+      disabled={disabled}
+      onValueChange={(v) => {
+        if (v) onChange(v as ChecklistAnswer);
+      }}
+    >
       {ANSWERS.map((a) => (
-        <button
+        <Radio
           key={a}
-          type="button"
-          role="radio"
-          aria-checked={value === a}
-          className={`answer-option ${value === a ? "selected" : ""}`}
-          disabled={disabled}
-          onClick={() => onChange(a)}
+          value={a}
+          className={({ checked }) =>
+            checked ? "answer-option selected" : "answer-option"
+          }
         >
           {a}
-        </button>
+        </Radio>
       ))}
-    </div>
+    </RadioGroup>
   );
 }
 

@@ -25,6 +25,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Flag } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { Empty } from "../../components";
 import { createSupabaseBrowserClient } from "../../data/index";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -472,25 +473,33 @@ export function PunchExceptions({
           </select>
         </label>
       </div>
-      <div className="hub-chip-row" role="group" aria-label="Filter by exception kind" style={{ marginBottom: 12 }}>
-        <button
-          className={`hub-chip${kindFilter === "all" ? " selected" : ""}`}
-          onClick={() => setKindFilter("all")}
-          aria-pressed={kindFilter === "all"}
+      <ToggleGroup
+        className="hub-chip-row"
+        aria-label="Filter by exception kind"
+        style={{ marginBottom: 12 }}
+        deselectable={false}
+        value={[kindFilter]}
+        onValueChange={(next) => {
+          const v = next[0];
+          if (v) setKindFilter(v as "all" | DisplayKind);
+        }}
+      >
+        <Toggle
+          value="all"
+          className={({ pressed }) => (pressed ? "hub-chip selected" : "hub-chip")}
         >
           All ({exceptions.length})
-        </button>
+        </Toggle>
         {kindsPresent.map((kind) => (
-          <button
+          <Toggle
             key={kind}
-            className={`hub-chip${kindFilter === kind ? " selected" : ""}`}
-            onClick={() => setKindFilter(kind)}
-            aria-pressed={kindFilter === kind}
+            value={kind}
+            className={({ pressed }) => (pressed ? "hub-chip selected" : "hub-chip")}
           >
             {KIND_LABELS[kind]} ({exceptions.filter((e) => e.kind === kind).length})
-          </button>
+          </Toggle>
         ))}
-      </div>
+      </ToggleGroup>
       {loading ? (
         <p>Loading exceptions…</p>
       ) : filtered.length === 0 ? (

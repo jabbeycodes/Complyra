@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Plus } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -250,7 +251,16 @@ export default function GerTab({
 
         {!draft && (
           <>
-            <div className="ger-filters" role="group" aria-label="Filter reports">
+            <ToggleGroup
+              className="ger-filters"
+              aria-label="Filter reports"
+              deselectable={false}
+              value={[filter]}
+              onValueChange={(next) => {
+                const v = next[0];
+                if (v) setFilter(v as typeof filter);
+              }}
+            >
               {(
                 [
                   ["all", "All"],
@@ -259,17 +269,17 @@ export default function GerTab({
                   ["resolved", "Resolved"],
                 ] as const
               ).map(([id, label]) => (
-                <button
+                <Toggle
                   key={id}
-                  type="button"
-                  className={`chip ${filter === id ? "selected" : ""}`}
-                  aria-pressed={filter === id}
-                  onClick={() => setFilter(id)}
+                  value={id}
+                  className={({ pressed }) =>
+                    pressed ? "chip selected" : "chip"
+                  }
                 >
                   {label}
-                </button>
+                </Toggle>
               ))}
-            </div>
+            </ToggleGroup>
             {reports === null ? (
               <p className="muted">Loading…</p>
             ) : visible.length === 0 ? (

@@ -7,6 +7,7 @@
  * remaining med passes (from the MAR data) with the user's personal queue.
  */
 import { useMemo, useState } from "react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import type { PersonalWorkItem } from "../../data/dashboard";
 import { formatDoseTime } from "./mar";
 import {
@@ -235,7 +236,16 @@ export default function MobileToday({
           </button>
         </div>
         {hasBothStates && (
-          <div className="msh-chips" role="group" aria-label="Filter up next">
+          <ToggleGroup
+            className="msh-chips"
+            aria-label="Filter up next"
+            deselectable={false}
+            value={[filter]}
+            onValueChange={(next) => {
+              const v = next[0];
+              if (v) setFilter(v as UpFilter);
+            }}
+          >
             {(
               [
                 ["all", "All"],
@@ -243,17 +253,17 @@ export default function MobileToday({
                 ["done", "Done"],
               ] as [UpFilter, string][]
             ).map(([value, label]) => (
-              <button
+              <Toggle
                 key={value}
-                type="button"
-                className={`msh-chip${filter === value ? " active" : ""}`}
-                aria-pressed={filter === value}
-                onClick={() => setFilter(value)}
+                value={value}
+                className={({ pressed }) =>
+                  pressed ? "msh-chip active" : "msh-chip"
+                }
               >
                 {label}
-              </button>
+              </Toggle>
             ))}
-          </div>
+          </ToggleGroup>
         )}
         {items.length === 0 && (
           <p className="msh-empty">Everything due is done.</p>

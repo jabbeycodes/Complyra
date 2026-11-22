@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -144,22 +145,29 @@ export default function MoneyEntrySheet({
             if (!busy) onSave(values);
           }}
         >
-          <div className="mq-kinds" role="group" aria-label="Entry type">
+          <ToggleGroup
+            className="mq-kinds"
+            aria-label="Entry type"
+            deselectable={false}
+            value={[values.kind]}
+            onValueChange={(next) => {
+              const v = next[0];
+              if (v) set({ kind: v });
+            }}
+          >
             {kinds.map((kind) => (
-              <button
+              <Toggle
                 key={kind.value}
-                type="button"
-                className={
-                  values.kind === kind.value ? "mq-kind on" : "mq-kind"
+                value={kind.value}
+                className={({ pressed }) =>
+                  pressed ? "mq-kind on" : "mq-kind"
                 }
-                aria-pressed={values.kind === kind.value}
-                onClick={() => set({ kind: kind.value })}
               >
                 {values.kind === kind.value ? "✓ " : ""}
                 {kind.label}
-              </button>
+              </Toggle>
             ))}
-          </div>
+          </ToggleGroup>
 
           <label className="mq-amount">
             <span className="mq-field-label">Amount</span>
@@ -181,27 +189,33 @@ export default function MoneyEntrySheet({
           {showDetail && categories && (
             <div className="mq-block">
               <span className="mq-field-label">What was it for?</span>
-              <div className="mq-cat-grid">
+              <ToggleGroup
+                className="mq-cat-grid"
+                deselectable={false}
+                value={[values.category]}
+                onValueChange={(next) => {
+                  const v = next[0];
+                  if (v) set({ category: v });
+                }}
+              >
                 {categories.map((category) => {
                   const Icon = category.icon;
                   const selected = values.category === category.value;
                   return (
-                    <button
+                    <Toggle
                       key={category.value}
-                      type="button"
+                      value={category.value}
                       className={selected ? "mq-cat on" : "mq-cat"}
-                      aria-pressed={selected}
-                      onClick={() => set({ category: category.value })}
                     >
                       <Icon size={24} aria-hidden="true" />
                       <span>
                         {selected ? "✓ " : ""}
                         {category.label}
                       </span>
-                    </button>
+                    </Toggle>
                   );
                 })}
-              </div>
+              </ToggleGroup>
             </div>
           )}
 
@@ -220,25 +234,31 @@ export default function MoneyEntrySheet({
           {showIndividual && people && (
             <div className="mq-block">
               <span className="mq-field-label">Individual</span>
-              <div className="mq-chips">
+              <ToggleGroup
+                className="mq-chips"
+                deselectable={false}
+                value={[values.individualId]}
+                onValueChange={(next) => {
+                  const v = next[0];
+                  if (v) set({ individualId: v });
+                }}
+              >
                 {people.map((person) => {
                   const selected = values.individualId === person.id;
                   return (
-                    <button
+                    <Toggle
                       key={person.id}
-                      type="button"
+                      value={person.id}
                       className={
                         selected ? "msh-chip-button mq-chip-on" : "msh-chip-button"
                       }
-                      aria-pressed={selected}
-                      onClick={() => set({ individualId: person.id })}
                     >
                       {selected ? "✓ " : ""}
                       {person.name}
-                    </button>
+                    </Toggle>
                   );
                 })}
-              </div>
+              </ToggleGroup>
             </div>
           )}
 

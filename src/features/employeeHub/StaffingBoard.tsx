@@ -10,6 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { Pencil, Plus, X } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import {
   STAFFING_DAY_LABELS,
   computePatternWeeklyHours,
@@ -312,9 +313,6 @@ export function StaffingConfigForm({
 
   const weeklyHours = computePatternWeeklyHours(days, windows);
 
-  const toggleDay = (d: number) =>
-    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
-
   const toggleTag = (t: string) =>
     setTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
 
@@ -400,19 +398,25 @@ export function StaffingConfigForm({
       </label>
       <fieldset className="hub-form-wide hub-fieldset">
         <legend>Days</legend>
-        <div className="hub-day-chips interactive" role="group" aria-label="Days of week">
+        <ToggleGroup
+          className="hub-day-chips interactive"
+          aria-label="Days of week"
+          multiple
+          value={days.map(String)}
+          onValueChange={(next) => setDays(next.map(Number).sort())}
+        >
           {WEEK_ORDER.map((d) => (
-            <button
+            <Toggle
               key={d}
-              type="button"
-              className={`hub-day-chip${days.includes(d) ? " on" : ""}`}
-              aria-pressed={days.includes(d)}
-              onClick={() => toggleDay(d)}
+              value={String(d)}
+              className={({ pressed }) =>
+                pressed ? "hub-day-chip on" : "hub-day-chip"
+              }
             >
               {STAFFING_DAY_LABELS[d]}
-            </button>
+            </Toggle>
           ))}
-        </div>
+        </ToggleGroup>
       </fieldset>
       <fieldset className="hub-form-wide hub-fieldset">
         <legend>Time windows</legend>

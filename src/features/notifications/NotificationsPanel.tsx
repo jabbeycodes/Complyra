@@ -13,6 +13,7 @@ import {
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "@ui-sdk/react/collapsible";
+import { Toggle } from "@ui-sdk/react/toggle";
 import {
   AlertTriangle,
   BadgeCheck,
@@ -167,14 +168,13 @@ export default function NotificationsPanel({
       <div className="notif-panel-head">
         <h2>Notifications</h2>
         <div className="notif-panel-actions">
-          <button
-            type="button"
+          <Toggle
             className="notif-filter-toggle"
-            aria-pressed={showUnreadOnly}
-            onClick={() => setShowUnreadOnly((v) => !v)}
+            pressed={showUnreadOnly}
+            onPressedChange={setShowUnreadOnly}
           >
             {showUnreadOnly ? `Unread only (${unread})` : "Unread only"}
-          </button>
+          </Toggle>
           {unread > 0 && (
             <button
               type="button"

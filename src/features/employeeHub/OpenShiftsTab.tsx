@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Send, X } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { Empty } from "../../components";
 import type { SessionUser } from "../../data/types";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -231,8 +232,10 @@ export function OpenShiftsTab({
         : `Posted. Staff trained at ${siteName(siteId)} were notified.`;
     });
 
-  const toggleDay = (d: number) =>
-    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)));
+  // A preset reads as pressed exactly while the (independently editable)
+  // start/end fields equal its times; the ToggleGroup value derives from
+  // the fields, never the other way round.
+  const activePreset = SHIFT_PRESETS.find((p) => p.start === start && p.end === end);
 
   return (
     <section className="hub-card" aria-label="Open shifts">
@@ -328,23 +331,25 @@ export function OpenShiftsTab({
               </label>
               <div className="hub-form-wide">
                 <span className="hub-sub">Usual shifts</span>
-                <div className="hub-chip-row" role="group" aria-label="Usual shift times">
+                <ToggleGroup
+                  className="hub-chip-row"
+                  aria-label="Usual shift times"
+                  deselectable={false}
+                  value={activePreset ? [activePreset.label] : []}
+                  onValueChange={(next) => {
+                    const preset = SHIFT_PRESETS.find((p) => p.label === next[0]);
+                    if (!preset) return;
+                    setStart(preset.start);
+                    setEnd(preset.end);
+                    if (!title.trim()) setTitle(preset.label);
+                  }}
+                >
                   {SHIFT_PRESETS.map((p) => (
-                    <button
-                      type="button"
-                      key={p.label}
-                      className="hub-chip"
-                      aria-pressed={start === p.start && end === p.end}
-                      onClick={() => {
-                        setStart(p.start);
-                        setEnd(p.end);
-                        if (!title.trim()) setTitle(p.label);
-                      }}
-                    >
+                    <Toggle key={p.label} value={p.label} className="hub-chip">
                       {p.label}
-                    </button>
+                    </Toggle>
                   ))}
-                </div>
+                </ToggleGroup>
               </div>
               {kind === "temporary" ? (
                 <label>
@@ -368,13 +373,21 @@ export function OpenShiftsTab({
               {kind === "permanent" && (
                 <div className="hub-form-wide">
                   <span className="hub-sub">Days</span>
-                  <div className="hub-chip-row" role="group" aria-label="Days of the week">
+                  <ToggleGroup
+                    className="hub-chip-row"
+                    aria-label="Days of the week"
+                    multiple
+                    value={days.map(String)}
+                    onValueChange={(next) =>
+                      setDays(next.map(Number).sort((a, b) => a - b))
+                    }
+                  >
                     {STAFFING_DAY_LABELS.map((label, d) => (
-                      <button type="button" key={label} className="hub-chip" aria-pressed={days.includes(d)} onClick={() => toggleDay(d)}>
+                      <Toggle key={label} value={String(d)} className="hub-chip">
                         {label}
-                      </button>
+                      </Toggle>
                     ))}
-                  </div>
+                  </ToggleGroup>
                 </div>
               )}
               {kind === "temporary" && (

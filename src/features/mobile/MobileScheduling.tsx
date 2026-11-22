@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Radio, RadioGroup } from "@ui-sdk/react/radio";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import type { HrShift, HrTimeOffRequest } from "../../data/hr";
@@ -390,17 +391,21 @@ function AssignSheet({
             is on approved time off.
           </p>
         ) : (
-          <div className="msh-list" role="radiogroup" aria-label="Who is working">
+          <RadioGroup
+            className="msh-list"
+            aria-label="Who is working"
+            value={picked === "" ? null : picked}
+            onValueChange={(v) => setPicked(v ?? "")}
+          >
             {picks.map((pick) => {
               const selected = picked === pick.id;
               return (
-                <button
+                <Radio
                   key={pick.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  className={`msh-row msh-sched-pick${selected ? " selected" : ""}`}
-                  onClick={() => setPicked(pick.id)}
+                  value={pick.id}
+                  className={({ checked }) =>
+                    `msh-row msh-sched-pick${checked ? " selected" : ""}`
+                  }
                 >
                   <span className="msh-row-main">
                     <strong>{pick.label}</strong>
@@ -409,10 +414,10 @@ function AssignSheet({
                     )}
                   </span>
                   {selected && <span className="msh-current">Selected</span>}
-                </button>
+                </Radio>
               );
             })}
-          </div>
+          </RadioGroup>
         )}
         <p className="msh-section-note">
           Staff on approved time off for this shift are not listed.

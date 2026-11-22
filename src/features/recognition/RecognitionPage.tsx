@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { ChevronDown, Trophy } from "lucide-react";
+import { Radio, RadioGroup } from "@ui-sdk/react/radio";
 import { PageHeading } from "../../components";
 import { confirmDialog } from "../../components/ConfirmDialog";
 import ComplyrerRecordMark from "../../components/ComplyrerRecordMark";
@@ -55,26 +56,28 @@ function RatingControl({
 }) {
   return (
     <div className="recognition-rating-group">
-      <div
+      <RadioGroup
         className="recognition-rating-segment"
-        role="radiogroup"
         aria-label={name}
+        value={value === null ? null : String(value)}
+        onValueChange={(v) => {
+          if (v) onChange(Number(v));
+        }}
       >
         {RATINGS.map((r) => (
-          <button
+          <Radio
             key={r}
-            type="button"
-            role="radio"
-            aria-checked={value === r}
-            className={`recognition-rating-option ${
-              value === r ? "selected" : ""
-            }`}
-            onClick={() => onChange(r)}
+            value={String(r)}
+            className={({ checked }) =>
+              checked
+                ? "recognition-rating-option selected"
+                : "recognition-rating-option"
+            }
           >
             {r}
-          </button>
+          </Radio>
         ))}
-      </div>
+      </RadioGroup>
       <p className="recognition-rating-label" aria-live="polite">
         {value !== null ? `${value} — ${ratingLabel(value)}` : "Not rated yet"}
       </p>

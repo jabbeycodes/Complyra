@@ -4,6 +4,7 @@ import {
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "@ui-sdk/react/collapsible";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import {
   Camera,
   Check,
@@ -147,20 +148,29 @@ function ItemCard({
       )}
 
       {!item.locked && canScore && item.status !== "disputed" && (
-        <div className="qa-score-row" role="group" aria-label="Score this item">
+        <ToggleGroup
+          className="qa-score-row"
+          aria-label="Score this item"
+          deselectable={false}
+          disabled={busy}
+          value={item.result ? [item.result] : []}
+          onValueChange={(next) => {
+            const v = next[0];
+            if (v) onScore(item.key, v as Exclude<QaItemResult, null>, comment);
+          }}
+        >
           {(["yes", "no", "na", "skipped"] as const).map((r) => (
-            <button
+            <Toggle
               key={r}
-              type="button"
-              disabled={busy}
-              aria-pressed={item.result === r}
-              className={`qa-score-btn ${item.result === r ? "active" : ""} ${r === "no" ? "qa-score-btn--no" : ""}`}
-              onClick={() => onScore(item.key, r, comment)}
+              value={r}
+              className={({ pressed }) =>
+                `qa-score-btn${pressed ? " active" : ""}${r === "no" ? " qa-score-btn--no" : ""}`
+              }
             >
               {RESULT_LABEL[r]}
-            </button>
+            </Toggle>
           ))}
-        </div>
+        </ToggleGroup>
       )}
 
       {!item.locked && (canScore || item.comment) && (

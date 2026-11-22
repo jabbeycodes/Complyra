@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EyeOff, MessageSquare, Plus, Search, Send, UserPlus } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -18,7 +19,6 @@ import {
   messageTimeLabel,
   pickedNames,
   threadUnreadText,
-  togglePicked,
   totalUnreadText,
 } from "./messages";
 
@@ -371,7 +371,12 @@ export default function MobileMessages({
               Selected: {names.join(", ")}
             </p>
           )}
-          <div className="msh-list">
+          <ToggleGroup
+            className="msh-list"
+            multiple
+            value={picked}
+            onValueChange={setPicked}
+          >
             {contacts.length === 0 && (
               <p className="msh-empty">
                 No other staff members can use messaging yet.
@@ -383,14 +388,10 @@ export default function MobileMessages({
             {visibleContacts.map((contact) => {
               const selected = picked.includes(contact.userId);
               return (
-                <button
+                <Toggle
                   key={contact.userId}
-                  type="button"
+                  value={contact.userId}
                   className="msh-row"
-                  aria-pressed={selected}
-                  onClick={() =>
-                    setPicked((current) => togglePicked(current, contact.userId))
-                  }
                 >
                   <span className="msh-row-main">
                     <strong>{contact.fullName}</strong>
@@ -401,10 +402,10 @@ export default function MobileMessages({
                       Selected
                     </span>
                   )}
-                </button>
+                </Toggle>
               );
             })}
-          </div>
+          </ToggleGroup>
 
           <label className="msh-field">
             <span>Subject (optional)</span>

@@ -1366,6 +1366,13 @@
   cursor: pointer;
 }
 
+/* UI SDK slice 9: the MAR view switch is a ToggleGroup inside the nav;
+ * display:contents keeps the toggle buttons as the nav grid's direct
+ * items, exactly where the plain buttons sat. */
+.msh-tabbar > [data-slot="toggle-group"] {
+  display: contents;
+}
+
 .msh-shell.with-mar-tabs .msh-tabbar {
   bottom: calc(102px + env(safe-area-inset-bottom, 0px));
 }

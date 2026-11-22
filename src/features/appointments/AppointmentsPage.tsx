@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { PageHeading } from "../../components";
 import Disclosure from "../../components/Disclosure";
 import { useData } from "../../data/DataProvider";
@@ -18,7 +19,6 @@ import {
   monthCells,
   monthLabel,
   monthStart,
-  nextStatusChip,
   shiftMonth,
   thirtyDayRange,
   uniqueProgramNames,
@@ -178,24 +178,21 @@ export default function AppointmentsPage({
         <div className="appointments-filters-primary">
           <div className="appointments-filter-group">
             <span>Status</span>
-            <div className="appointments-status-chips" role="group" aria-label="Filter by status">
-              <button
-                type="button"
-                className="appointments-status-chip"
-                aria-pressed={status === "scheduled"}
-                onClick={() => setStatus((current) => nextStatusChip(current, "scheduled"))}
-              >
+            <ToggleGroup
+              className="appointments-status-chips"
+              aria-label="Filter by status"
+              value={status === "all" ? [] : [status]}
+              onValueChange={(next) =>
+                setStatus((next[0] as AppointmentStatus | undefined) ?? "all")
+              }
+            >
+              <Toggle className="appointments-status-chip" value="scheduled">
                 Scheduled
-              </button>
-              <button
-                type="button"
-                className="appointments-status-chip"
-                aria-pressed={status === "completed"}
-                onClick={() => setStatus((current) => nextStatusChip(current, "completed"))}
-              >
+              </Toggle>
+              <Toggle className="appointments-status-chip" value="completed">
                 Completed
-              </button>
-            </div>
+              </Toggle>
+            </ToggleGroup>
           </div>
           <label>
             From
