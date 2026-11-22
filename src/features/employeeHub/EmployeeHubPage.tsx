@@ -11,6 +11,7 @@
  * push-notification API for these, so the counts live on the tabs themselves.
  */
 import { useEffect, useMemo, useState } from "react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import {
   ArrowLeftRight,
   CalendarCheck,
@@ -746,17 +747,16 @@ export function EmployeeHubShell({
         title="Employee Hub"
         description="Schedules, time clock, timecards, compliance, and HR documents — one place."
       />
-      <div className="hub-tabs-wrap" role="tablist" aria-label="Employee Hub sections">
+      <Tabs value={tab} onValueChange={(value) => { if (value !== null) setTab(value); }}>
+      <TabsList className="hub-tabs-wrap" aria-label="Employee Hub sections">
         {tabs.map((t) => {
           const Icon = t.icon;
           const badge = tabBadges[t.id] ?? 0;
           return (
-            <button
+            <TabsTab
               key={t.id}
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`hub-tab${tab === t.id ? " selected" : ""}`}
-              onClick={() => setTab(t.id)}
+              value={t.id}
+              className={({ selected }) => `hub-tab${selected ? " selected" : ""}`}
             >
               <Icon size={18} aria-hidden="true" />
               {t.label}
@@ -765,17 +765,17 @@ export function EmployeeHubShell({
                   {badge}
                 </span>
               )}
-            </button>
+            </TabsTab>
           );
         })}
-      </div>
+      </TabsList>
 
       <div className="hub-panel">
-        {tab === "schedule" && <MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} />}
-        {tab === "staffing" && (
+        <TabsPanel value="schedule"><MyScheduleTab session={session} store={store} sites={sites} staffList={staffList} swapPickerStaffList={swapPickerStaffList} /></TabsPanel>
+        <TabsPanel value="staffing">
           <StaffingTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
-        )}
-        {tab === "open-shifts" && (
+        </TabsPanel>
+        <TabsPanel value="open-shifts">
           <OpenShiftsTab
             session={session}
             store={shiftStore}
@@ -783,20 +783,20 @@ export function EmployeeHubShell({
             canPostSite={can("hub.manage_schedule")}
             canPostAgency={canPostAgencyWide}
           />
-        )}
-        {tab === "timeclock" && (
+        </TabsPanel>
+        <TabsPanel value="timeclock">
           <TimeClockTab
             session={session}
             store={store}
             onChanged={refresh}
             onLateClockIn={onLateClockIn}
           />
-        )}
-        {tab === "timecard" && (
+        </TabsPanel>
+        <TabsPanel value="timecard">
           <MyTimecardTab session={session} store={store} onChanged={refresh} />
-        )}
-        {tab === "compliance" && <MyComplianceTab session={session} store={store} />}
-        {tab === "binder" && (
+        </TabsPanel>
+        <TabsPanel value="compliance"><MyComplianceTab session={session} store={store} /></TabsPanel>
+        <TabsPanel value="binder">
           <BinderTab
             key={binderFocusId ?? "self"}
             session={session}
@@ -809,8 +809,8 @@ export function EmployeeHubShell({
               setTab("performance");
             }}
           />
-        )}
-        {tab === "performance" && (
+        </TabsPanel>
+        <TabsPanel value="performance">
           <PerformanceTab
             key={performanceFocusId ?? "self"}
             session={session}
@@ -819,10 +819,9 @@ export function EmployeeHubShell({
             initialSubjectId={performanceFocusId ?? undefined}
             logoDataUrl={logoDataUrl}
           />
-        )}
-        {tab === "binder-board" &&
-          (can("hub.view_team") ||
-            ["hr", "administrator", "auditor"].includes(session.roleKey)) && (
+        </TabsPanel>
+        <TabsPanel value="binder-board">{(can("hub.view_team") ||
+            ["hr", "administrator", "auditor"].includes(session.roleKey)) && 
             <BinderBoardTab
               session={session}
               store={store}
@@ -834,16 +833,17 @@ export function EmployeeHubShell({
                 setTab("binder");
               }}
             />
-          )}
-        {tab === "documents" && (
+          
+        }</TabsPanel>
+        <TabsPanel value="documents">
           <DocumentsTab
             session={session}
             store={store}
             canManage={can("hub.manage_documents")}
             onChanged={refresh}
           />
-        )}
-        {tab === "timeoff" && (
+        </TabsPanel>
+        <TabsPanel value="timeoff">
           <TimeOffTab
             session={session}
             store={store}
@@ -854,31 +854,38 @@ export function EmployeeHubShell({
             canAdjust={can("hub.manage_pay_settings")}
             onChanged={refresh}
           />
-        )}
-        {tab === "team-schedule" && can("hub.manage_schedule") && (
+        </TabsPanel>
+        <TabsPanel value="team-schedule">{can("hub.manage_schedule") && 
           <TeamScheduleTab session={session} store={store} staffList={staffList} sites={sites} formStaffList={formStaffList} formSites={formSites} api={api} rowActionScope={rowActionScope} />
-        )}
-        {tab === "attendance" && canViewTeamHub && (
+        
+        }</TabsPanel>
+        <TabsPanel value="attendance">{canViewTeamHub && 
           <AttendanceTab session={session} store={store} staffList={staffList} sites={sites} />
-        )}
-        {tab === "timecards" && canReviewTimecards && (
+        
+        }</TabsPanel>
+        <TabsPanel value="timecards">{canReviewTimecards && 
           <TimecardsTab session={session} store={store} staffList={staffList} onChanged={refresh} />
-        )}
-        {tab === "team-compliance" && can("hub.view_team") && (
+        
+        }</TabsPanel>
+        <TabsPanel value="team-compliance">{can("hub.view_team") && 
           <TeamComplianceTab
             session={session}
             store={store}
             staffList={staffList}
             canManage={can("hub.manage_documents")}
           />
-        )}
-        {tab === "payroll" && canApprovePayroll && (
+        
+        }</TabsPanel>
+        <TabsPanel value="payroll">{canApprovePayroll && 
           <PayrollTab session={session} store={store} staffList={staffList} />
-        )}
-        {tab === "kiosk" && (can("hub.manage_staffing") || can("hub.manage_pay_settings")) && (
+        
+        }</TabsPanel>
+        <TabsPanel value="kiosk">{(can("hub.manage_staffing") || can("hub.manage_pay_settings")) && 
           <KioskAdmin session={session} store={store} sites={sites} staffList={staffList} />
-        )}
+        
+        }</TabsPanel>
       </div>
+      </Tabs>
     </div>
   );
 }

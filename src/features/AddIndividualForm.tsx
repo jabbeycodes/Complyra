@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, UserPlus } from "lucide-react";
+import { Tabs, TabsList, TabsTab } from "@ui-sdk/react/tabs";
 import { useData } from "../data/DataProvider";
 import { centralTodayIso } from "../data/menuRecords";
 import { countIndividualsAtSite, siteAtCapacityMessage, siteIndividualCap } from "../data/siteCapacity";
@@ -84,30 +85,26 @@ export default function AddIndividualForm({
         Start from a PCSP when you have one. Or add the Individual now and
         attach the plan later.
       </p>
-      <div className="choice-row" role="tablist" aria-label="How to add this Individual">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "pcsp"}
-          className={`choice-card ${mode === "pcsp" ? "active" : ""}`}
-          onClick={() => setMode("pcsp")}
-        >
-          <FileText size={20} />
-          <strong>Upload a PCSP</strong>
-          <span>Creates the Individual and a plan draft for review.</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "manual"}
-          className={`choice-card ${mode === "manual" ? "active" : ""}`}
-          onClick={() => setMode("manual")}
-        >
-          <UserPlus size={20} />
-          <strong>Add by hand</strong>
-          <span>Name, date of birth, and site. No file required.</span>
-        </button>
-      </div>
+      <Tabs value={mode} onValueChange={(value) => setMode(value as Mode)}>
+        <TabsList className="choice-row" aria-label="How to add this Individual">
+          <TabsTab
+            value="pcsp"
+            className={({ selected }) => `choice-card${selected ? " active" : ""}`}
+          >
+            <FileText size={20} />
+            <strong>Upload a PCSP</strong>
+            <span>Creates the Individual and a plan draft for review.</span>
+          </TabsTab>
+          <TabsTab
+            value="manual"
+            className={({ selected }) => `choice-card${selected ? " active" : ""}`}
+          >
+            <UserPlus size={20} />
+            <strong>Add by hand</strong>
+            <span>Name, date of birth, and site. No file required.</span>
+          </TabsTab>
+        </TabsList>
+      </Tabs>
       <label className="form-label">
         Legal name
         <input

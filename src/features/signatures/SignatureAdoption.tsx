@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Tabs, TabsList, TabsTab } from "@ui-sdk/react/tabs";
 import { Modal } from "../../components";
 import { useData } from "../../data/DataProvider";
 import type { SignatureSettings } from "../../data/types";
@@ -341,24 +342,19 @@ function MethodTabs({
   return (
     <div className="sig-method-block">
       <h4 id={`${id}-label`}>{label}</h4>
-      <div
-        className="sig-methods"
-        role="tablist"
-        aria-labelledby={`${id}-label`}
-      >
-        {methods.map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="tab"
-            aria-selected={active === m}
-            className={active === m ? "active" : ""}
-            onClick={() => onPick(m)}
-          >
-            {METHOD_LABELS[m]}
-          </button>
-        ))}
-      </div>
+      <Tabs value={active} onValueChange={(value) => onPick(value as Method)}>
+        <TabsList className="sig-methods" aria-labelledby={`${id}-label`}>
+          {methods.map((m) => (
+            <TabsTab
+              key={m}
+              value={m}
+              className={({ selected }) => (selected ? "active" : "")}
+            >
+              {METHOD_LABELS[m]}
+            </TabsTab>
+          ))}
+        </TabsList>
+      </Tabs>
     </div>
   );
 }

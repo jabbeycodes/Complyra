@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Printer, Search } from "lucide-react";
+import { Tabs, TabsList, TabsTab } from "@ui-sdk/react/tabs";
 import { useData } from "../../data/DataProvider";
 import { openPrintable } from "../../data/openFile";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -106,19 +107,22 @@ export default function ReportLibraryPage({
             aria-label="Search reports"
           />
         </label>
-        <div className="tabs" role="tablist" aria-label="Report groups">
-          {modules.map((name) => (
-            <button
-              key={name}
-              role="tab"
-              aria-selected={moduleFilter === name}
-              className={moduleFilter === name ? "selected" : ""}
-              onClick={() => setModuleFilter(name)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={moduleFilter}
+          onValueChange={(value) => setModuleFilter(value as typeof moduleFilter)}
+        >
+          <TabsList className="tabs" aria-label="Report groups">
+            {modules.map((name) => (
+              <TabsTab
+                key={name}
+                value={name}
+                className={({ selected }) => (selected ? "selected" : "")}
+              >
+                {name}
+              </TabsTab>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
 
       {groups.length === 0 && (
