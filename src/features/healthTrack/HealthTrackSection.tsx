@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Printer } from "lucide-react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import { Badge, Empty, formatDate } from "../../components";
 import { useData } from "../../data/DataProvider";
 import { centralTodayIso } from "../../data/menuRecords";
@@ -119,33 +120,32 @@ export default function HealthTrackSection({
       aria-labelledby="health-track-heading"
     >
       <h2 id="health-track-heading">Trackers and logs</h2>
-      <div className="tabs health-track-tabs" role="tablist" aria-label="Health trackers">
+      <Tabs
+        value={kind}
+        onValueChange={(value) => {
+          setKind(value as HealthTrackKind);
+          setDetails({});
+          setFlaggedAbnormal(false);
+          setNote("");
+          setLoaded(false);
+        }}
+      >
+      <TabsList className="tabs health-track-tabs" aria-label="Health trackers">
         {HEALTH_TRACK_KINDS.map((k) => (
-          <button
+          <TabsTab
             key={k}
-            role="tab"
-            type="button"
             id={`health-track-tab-${k}`}
-            aria-controls="health-track-panel"
-            aria-selected={kind === k}
-            className={kind === k ? "selected" : ""}
-            onClick={() => {
-              setKind(k);
-              setDetails({});
-              setFlaggedAbnormal(false);
-              setNote("");
-              setLoaded(false);
-            }}
+            value={k}
+            className={({ selected }) => (selected ? "selected" : "")}
           >
             {HEALTH_TRACK_KIND_LABELS[k]}
-          </button>
+          </TabsTab>
         ))}
-      </div>
-      <div
-        role="tabpanel"
-        id="health-track-panel"
-        aria-labelledby={`health-track-tab-${kind}`}
-      >
+      </TabsList>
+      {HEALTH_TRACK_KINDS.map((k) => (
+        <TabsPanel key={k} id="health-track-panel" value={k}>
+          {k === kind && (
+            <>
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -489,7 +489,11 @@ export default function HealthTrackSection({
           </div>
         </form>
       )}
-      </div>
+            </>
+          )}
+        </TabsPanel>
+      ))}
+      </Tabs>
     </section>
   );
 }

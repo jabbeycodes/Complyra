@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pencil, Plus } from "lucide-react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import {
   APPOINTMENT_TIMEZONES,
   DEFAULT_APPOINTMENT_TIMEZONE,
@@ -52,37 +53,28 @@ export default function HealthCard({
   return (
     <section className="chart-widget health-widget" aria-labelledby="health-heading">
       <h2 id="health-heading">Health</h2>
-      <div className="tabs health-tabs" role="tablist" aria-label="Health sections">
-        <button
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as "overview" | "appointments")}
+      >
+      <TabsList className="tabs health-tabs" aria-label="Health sections">
+        <TabsTab
           id="health-tab-overview"
-          role="tab"
-          type="button"
-          aria-selected={tab === "overview"}
-          aria-controls="health-panel-overview"
-          className={tab === "overview" ? "selected" : ""}
-          onClick={() => setTab("overview")}
+          value="overview"
+          className={({ selected }) => (selected ? "selected" : "")}
         >
           Overview
-        </button>
-        <button
+        </TabsTab>
+        <TabsTab
           id="health-tab-appointments"
-          role="tab"
-          type="button"
-          aria-selected={tab === "appointments"}
-          aria-controls="health-panel-appointments"
-          className={tab === "appointments" ? "selected" : ""}
-          onClick={() => setTab("appointments")}
+          value="appointments"
+          className={({ selected }) => (selected ? "selected" : "")}
         >
           Appointments
-        </button>
-      </div>
+        </TabsTab>
+      </TabsList>
 
-      {tab === "overview" && (
-        <div
-          id="health-panel-overview"
-          role="tabpanel"
-          aria-labelledby="health-tab-overview"
-        >
+      <TabsPanel id="health-panel-overview" value="overview">
           <p className="stack-help">
             Allergies for {individualName} live on this Overview. Consultation
             packets read them from the live chart.
@@ -99,15 +91,9 @@ export default function HealthCard({
               setEditingAllergies(false);
             }}
           />
-        </div>
-      )}
+      </TabsPanel>
 
-      {tab === "appointments" && (
-        <div
-          id="health-panel-appointments"
-          role="tabpanel"
-          aria-labelledby="health-tab-appointments"
-        >
+      <TabsPanel id="health-panel-appointments" value="appointments">
       <p className="stack-help">
         Appointments for {individualName} only. Generate a consultation packet
         before a visit. Upload the form after to complete it.
@@ -176,8 +162,8 @@ export default function HealthCard({
           </article>
         );
       })}
-        </div>
-      )}
+      </TabsPanel>
+      </Tabs>
     </section>
   );
 }

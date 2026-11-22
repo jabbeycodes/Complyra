@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { CarFront, Download, Pencil, Printer, Trash2 } from "lucide-react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import { Empty, PageHeading, formatDate } from "../../components";
 import { confirmDialog } from "../../components/ConfirmDialog";
 import { useData } from "../../data/DataProvider";
@@ -550,34 +551,29 @@ export default function MileagePage() {
       <PageHeading title="Mileage" />
       {error && <p className="form-error mileage-no-print">{error}</p>}
 
-      <div className="tabs mileage-no-print" role="tablist" aria-label="Mileage views">
-        <button
-          role="tab"
-          aria-selected={tab === "monthly"}
-          className={tab === "monthly" ? "selected" : ""}
-          onClick={() => setTab("monthly")}
+      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
+      <TabsList className="tabs mileage-no-print" aria-label="Mileage views">
+        <TabsTab
+          value="monthly"
+          className={({ selected }) => (selected ? "selected" : "")}
         >
           Monthly log
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "weekly"}
-          className={tab === "weekly" ? "selected" : ""}
-          onClick={() => setTab("weekly")}
+        </TabsTab>
+        <TabsTab
+          value="weekly"
+          className={({ selected }) => (selected ? "selected" : "")}
         >
           Weekly sheet
-        </button>
+        </TabsTab>
         {showYearly && (
-          <button
-            role="tab"
-            aria-selected={tab === "yearly"}
-            className={tab === "yearly" ? "selected" : ""}
-            onClick={() => setTab("yearly")}
+          <TabsTab
+            value="yearly"
+            className={({ selected }) => (selected ? "selected" : "")}
           >
             Yearly summary
-          </button>
+          </TabsTab>
         )}
-      </div>
+      </TabsList>
 
       <div className="mileage-toolbar mileage-no-print">
         {tab === "yearly" ? (
@@ -642,7 +638,7 @@ export default function MileagePage() {
         )}
       </div>
 
-      {tab === "weekly" && (
+      <TabsPanel value="weekly">
         <section className="panel mileage-print-weekly" aria-label="Weekly mileage sheet">
           <div className="mileage-sheet-head">
             <h2>Weekly sheet — {monthLabel(month)}</h2>
@@ -675,9 +671,10 @@ export default function MileagePage() {
             </table>
           </div>
         </section>
-      )}
+      </TabsPanel>
 
-      {tab === "yearly" && showYearly && (
+      {showYearly && (
+      <TabsPanel value="yearly">
         <>
           <section className="panel" aria-label={`Yearly mileage summary ${year}`}>
             <h2>
@@ -790,9 +787,10 @@ export default function MileagePage() {
           </section>
 
         </>
+      </TabsPanel>
       )}
 
-      {tab === "monthly" && (
+      <TabsPanel value="monthly">
         <>
           <section className="panel mileage-no-print" aria-label={editingId ? "Edit trip" : "Log a trip"}>
             <h2>
@@ -996,7 +994,8 @@ export default function MileagePage() {
             )}
           </section>
         </>
-      )}
+      </TabsPanel>
+      </Tabs>
     </div>
   );
 }

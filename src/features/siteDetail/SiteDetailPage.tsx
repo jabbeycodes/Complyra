@@ -1,5 +1,6 @@
 import { requirementPopulation } from "../overview/requirementPopulation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -438,21 +439,6 @@ export default function SiteDetailPage({
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
-  const onTabKeyDown = (e: React.KeyboardEvent, id: SiteDetailTabId) => {
-    const idx = tabs.findIndex((t) => t.id === id);
-    let next: number | null = null;
-    if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
-    else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = tabs.length - 1;
-    if (next !== null) {
-      e.preventDefault();
-      const nextId = tabs[next].id;
-      setTab(nextId);
-      document.getElementById(`sited-tab-${nextId}`)?.focus();
-    }
-  };
-
   const serviceLogs: Array<ServiceLogEntry & { weekOf: string }> = (checklists ?? [])
     .flatMap((c) => c.serviceLogs.map((log) => ({ ...log, weekOf: c.weekOf })))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
@@ -645,40 +631,40 @@ export default function SiteDetailPage({
         </div>
       </header>
 
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => selectTab(value as SiteDetailTabId)}
+      >
       <div className="site-detail-tabstrip">
-      <div
+      <TabsList
         className="tabs site-detail-tabs"
-        role="tablist"
         aria-label={`${site.name} sections`}
       >
         {tabs.map((t) => {
           const Icon = TAB_ICONS[t.id];
-          const selected = t.id === activeTab;
           return (
-            <button
+            <TabsTab
               key={t.id}
               id={`sited-tab-${t.id}`}
-              role="tab"
-              aria-selected={selected}
-              aria-controls={`sited-panel-${t.id}`}
-              tabIndex={selected ? 0 : -1}
-              className={selected ? "selected" : ""}
-              onClick={() => selectTab(t.id)}
-              onKeyDown={(e) => onTabKeyDown(e, t.id)}
+              value={t.id}
+              className={({ selected }) => (selected ? "selected" : "")}
             >
               <Icon className="site-tab-icon" size={15} aria-hidden="true" /> {t.label}
-            </button>
+            </TabsTab>
           );
         })}
-      </div>
+      </TabsList>
       </div>
 
-      <section
-        id={`sited-panel-${activeTab}`}
-        role="tabpanel"
-        aria-labelledby={`sited-tab-${activeTab}`}
-        className="site-detail-panel"
-      >
+      {tabs.map((t) => (
+        <TabsPanel
+          key={t.id}
+          id={`sited-panel-${t.id}`}
+          value={t.id}
+          className="site-detail-panel"
+        >
+          {t.id === activeTab && (
+            <>
         {tabError[activeTab] && (
           <div className="panel site-detail-error" role="alert">
             {tabError[activeTab]}
@@ -1554,7 +1540,11 @@ export default function SiteDetailPage({
             )}
           </div>
         )}
-      </section>
+            </>
+          )}
+        </TabsPanel>
+      ))}
+      </Tabs>
     </div>
   );
 }

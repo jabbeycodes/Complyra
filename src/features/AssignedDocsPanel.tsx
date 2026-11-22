@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, FileText, LockKeyhole, PenLine, Trash2 } from "lucide-react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import { Badge, DueChip, formatDate } from "../components";
 import { confirmDialog } from "../components/ConfirmDialog";
 import { useData } from "../data/DataProvider";
@@ -241,30 +242,25 @@ export default function AssignedDocsPanel({
         />
       )}
 
-      <div className="stack-tabs" role="tablist" aria-label="Plan document sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "required"}
-          className={tab === "required" ? "active" : ""}
-          onClick={() => setTab("required")}
+      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
+      <TabsList className="stack-tabs" aria-label="Plan document sections">
+        <TabsTab
+          value="required"
+          className={({ selected }) => (selected ? "active" : "")}
         >
           Must acknowledge
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "checked"}
-          className={tab === "checked" ? "active" : ""}
-          onClick={() => setTab("checked")}
+        </TabsTab>
+        <TabsTab
+          value="checked"
+          className={({ selected }) => (selected ? "active" : "")}
         >
           Checked in plan
-        </button>
-      </div>
+        </TabsTab>
+      </TabsList>
 
       {error && <p className="form-error">{error}</p>}
 
-      {tab === "required" ? (
+      <TabsPanel value="required">
         <RequiredList
           items={stack.required}
           training={stack.myTraining}
@@ -341,7 +337,8 @@ export default function AssignedDocsPanel({
           }
           canSignTrainingHm={canSignTrainingAsHm(session.roleKey)}
         />
-      ) : (
+      </TabsPanel>
+      <TabsPanel value="checked">
         <CheckedList
           items={stack.checked}
           editExtract={editExtract}
@@ -359,7 +356,8 @@ export default function AssignedDocsPanel({
             )
           }
         />
-      )}
+      </TabsPanel>
+      </Tabs>
 
       {editExtract && (
         <form

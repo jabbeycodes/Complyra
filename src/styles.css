@@ -2112,6 +2112,23 @@ td > svg {
   gap: 9px;
   align-items: center;
 }
+/* UI SDK slice 7 (Tabs): on the chart widgets and the plan stack, the
+   tab list and its panels were direct grid items of the parent grid.
+   The SDK Tabs root now stands in their place as the single grid item,
+   so it reproduces the parent grid (same gap) and, on chart widgets,
+   the shrink the strip's own min-width: 0 used to give its slot —
+   without this, the 12-tracker strip's min-content sizes the widget
+   column again (the spill the chart-tabs repair fixed). Additive and
+   scoped to the two migrated grid parents; no existing rule changes. */
+.chart-widget > [data-slot="tabs"] {
+  display: grid;
+  gap: inherit;
+  min-width: 0;
+}
+.plan-stack > [data-slot="tabs"] {
+  display: grid;
+  gap: inherit;
+}
 .tabs {
   display: flex;
   gap: 24px;
