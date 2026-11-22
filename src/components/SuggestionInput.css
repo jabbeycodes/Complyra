@@ -1,0 +1,46 @@
+/* Suggestion popup for SuggestionInput (UI SDK slice 10). The native
+   datalist popup was browser chrome with no app styling to preserve, so
+   this surface follows the app's existing popup language (.search-results
+   in styles.css). The input itself is styled by each site's own rules,
+   exactly as before. */
+
+.suggestion-popup {
+  z-index: 60;
+  min-width: var(--anchor-width);
+  max-width: min(440px, var(--available-width));
+  max-height: min(264px, var(--available-height));
+  overflow-y: auto;
+  /* The UA popover stylesheet draws its own white surface and solid
+     border; the app box below replaces it, and the empty state (no
+     visible suggestion) must show nothing at all. */
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+/* The box shows only while at least one suggestion is visible: with no
+   match the SDK keeps the popup open with every item hidden, and the
+   datalist showed nothing at all in that state. */
+.suggestion-popup:has([data-slot="autocomplete-item"]:not([hidden])) {
+  padding: 6px;
+  background: var(--color-h-ffffff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 45px var(--color-h-39513320);
+}
+
+.suggestion-option {
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.suggestion-option[data-highlighted] {
+  background: var(--color-h-f9f8f7);
+}

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { PageHeading } from "../../components";
 import Disclosure from "../../components/Disclosure";
+import { SuggestionInput } from "../../components/SuggestionInput";
 import { useData } from "../../data/DataProvider";
 import {
   APPOINTMENT_TIMEZONES,
@@ -235,20 +236,15 @@ export default function AppointmentsPage({
             </label>
             <label>
               Individual
-              <input
+              <SuggestionInput
                 type="search"
                 value={individualQuery}
-                onChange={(e) => setIndividualQuery(e.target.value)}
+                onChange={setIndividualQuery}
                 placeholder="All Individuals"
-                aria-label="Filter by individual"
-                list="appointment-individual-options"
+                ariaLabel="Filter by individual"
+                suggestions={individuals.map((person) => person.name)}
                 autoComplete="off"
               />
-              <datalist id="appointment-individual-options">
-                {individuals.map((person) => (
-                  <option key={person.id} value={person.name} />
-                ))}
-              </datalist>
             </label>
             {sites.length > 1 ? (
               <label>

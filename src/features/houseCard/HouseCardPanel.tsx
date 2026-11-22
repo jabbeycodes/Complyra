@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import PrintBrandHeader from "../../components/PrintBrandHeader";
+import { SuggestionInput } from "../../components/SuggestionInput";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -115,14 +116,12 @@ function EntryFormFields({
   people,
   locations,
   userId,
-  idPrefix,
 }: {
   form: EntryFormState;
   setForm: (next: EntryFormState) => void;
   people: HouseCardPerson[];
   locations: string[];
   userId: string;
-  idPrefix: string;
 }) {
   const needsIndividual =
     form.kind === "purchase" &&
@@ -176,20 +175,15 @@ function EntryFormFields({
       </label>
       <label className="hc-field hc-f-location">
         <span>{form.kind === "credit" ? "Received from" : "Location"}</span>
-        <input
+        <SuggestionInput
           type="text"
           value={form.location}
-          list={`${idPrefix}-locations`}
           placeholder={
             form.kind === "credit" ? "e.g. Monthly house funds" : "Where was it spent?"
           }
-          onChange={(e) => setForm({ ...form, location: e.target.value })}
+          onChange={(next) => setForm({ ...form, location: next })}
+          suggestions={locations}
         />
-        <datalist id={`${idPrefix}-locations`}>
-          {locations.map((location) => (
-            <option key={location} value={location} />
-          ))}
-        </datalist>
       </label>
       <label className="hc-field hc-f-amount">
         <span>Amount</span>
@@ -558,7 +552,6 @@ export default function HouseCardPanel({
               people={people}
               locations={locations}
               userId={session.userId}
-              idPrefix="hc-new"
             />
             <div className="hc-actions">
               <button
@@ -769,7 +762,6 @@ export default function HouseCardPanel({
                 people={people}
                 locations={locations}
                 userId={session.userId}
-                idPrefix="hc-replace"
               />
             )}
             <div className="hc-actions">

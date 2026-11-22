@@ -81,6 +81,43 @@ describe("MobilePersonalSpending close sign-off", () => {
     // jsdom has no Web Animations API; the SDK's presence watcher calls
     // el.getAnimations() when a panel unmounts (same stub as slices 1–8).
     dom.window.Element.prototype.getAnimations = () => [];
+    // Slice 10: the location field now mounts the SDK Autocomplete, whose
+    // popup parts need the rest of the canonical block (same source as
+    // above: components/CollapsibleMigration.test.tsx).
+    setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
+    const win = dom.window as unknown as {
+      HTMLElement: { prototype: Record<string, unknown> };
+      Element: { prototype: Record<string, unknown> };
+    };
+    win.HTMLElement.prototype.showPopover = function () {};
+    win.HTMLElement.prototype.hidePopover = function () {};
+    setGlobal("AbortController", dom.window.AbortController);
+    setGlobal("AbortSignal", dom.window.AbortSignal);
+    if (typeof dom.window.matchMedia !== "function") {
+      setGlobal("matchMedia", (query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => false,
+      }));
+    }
+    win.Element.prototype.scrollIntoView = function () {};
+    win.Element.prototype.checkVisibility = () => true;
+    win.Element.prototype.getClientRects = () => [];
+    dom.window.document.elementFromPoint = () => null;
+    dom.window.document.elementsFromPoint = () => [];
+    setGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
     React = await import("react");

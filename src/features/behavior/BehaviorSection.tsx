@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer } from "lucide-react";
 import { Empty, formatDate } from "../../components";
+import { SuggestionInput } from "../../components/SuggestionInput";
 import { useData } from "../../data/DataProvider";
 import { addDaysIso, centralTodayIso } from "../../data/menuRecords";
 import { openPrintable } from "../../data/openFile";
@@ -311,20 +312,14 @@ export default function BehaviorSection({
                 </label>
                 <label>
                   Behavior
-                  <input
+                  <SuggestionInput
                     value={entryDraft.behavior}
-                    onChange={(e) =>
-                      setEntryDraft({ ...entryDraft, behavior: e.target.value })
+                    onChange={(next) =>
+                      setEntryDraft({ ...entryDraft, behavior: next })
                     }
-                    list="behavior-targets"
+                    suggestions={plan ? targetBehaviorList(plan) : []}
                     required
                   />
-                  <datalist id="behavior-targets">
-                    {plan &&
-                      targetBehaviorList(plan).map((behavior) => (
-                        <option key={behavior} value={behavior} />
-                      ))}
-                  </datalist>
                 </label>
                 <label>
                   Intensity

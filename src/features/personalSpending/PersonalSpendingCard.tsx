@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import PrintBrandHeader from "../../components/PrintBrandHeader";
+import { SuggestionInput } from "../../components/SuggestionInput";
 import { useData } from "../../data/DataProvider";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
@@ -111,13 +112,11 @@ function EntryFormFields({
   setForm,
   locations,
   userId,
-  idPrefix,
 }: {
   form: EntryFormState;
   setForm: (next: EntryFormState) => void;
   locations: string[];
   userId: string;
-  idPrefix: string;
 }) {
   const onReceiptFile = (file: File | null) => {
     if (!file) {
@@ -167,22 +166,17 @@ function EntryFormFields({
       </label>
       <label className="ps-field">
         <span>{form.kind === "deposit" ? "Received from" : "Location"}</span>
-        <input
+        <SuggestionInput
           type="text"
           value={form.location}
-          list={`${idPrefix}-locations`}
           placeholder={
             form.kind === "deposit"
               ? "e.g. Monthly personal funds"
               : "Where was it spent?"
           }
-          onChange={(e) => setForm({ ...form, location: e.target.value })}
+          onChange={(next) => setForm({ ...form, location: next })}
+          suggestions={locations}
         />
-        <datalist id={`${idPrefix}-locations`}>
-          {locations.map((location) => (
-            <option key={location} value={location} />
-          ))}
-        </datalist>
       </label>
       <label className="ps-field">
         <span>Amount</span>
@@ -630,7 +624,6 @@ export function PersonalSpendingSection({
                   setForm={setForm}
                   locations={locations}
                   userId={session.userId}
-                  idPrefix="ps-new"
                 />
                 <div className="ps-actions">
                   <button
@@ -823,7 +816,6 @@ export function PersonalSpendingSection({
                     setForm={setReplacementForm}
                     locations={locations}
                     userId={session.userId}
-                    idPrefix="ps-replace"
                   />
                 )}
                 <div className="ps-actions">
