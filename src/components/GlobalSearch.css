@@ -1,0 +1,32 @@
+/* UI SDK slice 10b (Command): the styles.css rules for the search
+   rows were child-combinator rules (.search-results > button,
+   > button:hover, > button > span, .search-results p) written when
+   the rows and the empty text were direct children of the panel.
+   On the Command structure the rows sit inside the listbox and
+   group divs, so the same declarations are re-scoped here onto the
+   parts. The hover background is keyed to [data-highlighted]: the
+   SDK highlights the row under the pointer, so a hover looks the
+   same as the old :hover rule, and a keyboard highlight gains the
+   same background. Every other search rule in styles.css (panel,
+   headings, strong/small/meta, container, phone presentation) is
+   class- or descendant-based and keeps matching untouched. */
+.search-results [data-slot="command-item"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+  padding: 13px 8px;
+  border-radius: 6px;
+}
+.search-results [data-slot="command-item"][data-highlighted] {
+  background: var(--color-h-f9f8f7);
+}
+.search-results [data-slot="command-item"] > span {
+  flex: 1;
+  min-width: 0;
+}
+.search-results [data-slot="command-empty"] {
+  padding: 15px;
+  font-size: 14px;
+}

@@ -60,6 +60,7 @@ import PlatformBottomNav from "./features/mobile/PlatformBottomNav";
 import type { BottomNavId } from "./features/mobile/bottomNav";
 import { desktopTargetFor } from "./features/mobile/desktopSwitch";
 import "./features/mobile/mobile.css";
+import GlobalSearch from "./components/GlobalSearch";
 import NotificationBell from "./features/notifications/NotificationBell";
 import NotificationsPanel from "./features/notifications/NotificationsPanel";
 import { useWorkspaceNotifications } from "./features/notifications/useWorkspaceNotifications";
@@ -1237,133 +1238,36 @@ export default function App() {
             <strong>{isCategory ? "Requirements" : page}</strong>
           </div>
           <div className="topbar-actions">
-            <div
-              className="global-search"
-              onClick={() => searchRef.current?.focus()}
-              onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                  setSearchOpen(false);
-                }
+            <GlobalSearch
+              inputRef={searchRef}
+              query={globalQuery}
+              onQueryChange={setGlobalQuery}
+              open={searchOpen}
+              onOpenChange={setSearchOpen}
+              directoryHits={directoryHits}
+              requirementHits={searchHits}
+              onSelectIndividual={(h) => {
+                setSearchOpen(false);
+                setGlobalQuery("");
+                openPersonChart(h.name);
               }}
-            >
-              <Search size={16} aria-hidden="true" />
-              <input
-                ref={searchRef}
-                value={globalQuery}
-                onChange={(e) => {
-                  setGlobalQuery(e.target.value);
-                  setSearchOpen(true);
-                }}
-                onFocus={() => setSearchOpen(true)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setSearchOpen(false);
-                }}
-                placeholder="Search anything…"
-                aria-label="Search people, homes, and requirements"
-              />
-              <kbd>⌘ K</kbd>
-              {searchOpen && globalQuery && (
-                <div className="search-results">
-                  {directoryHits.some((h) => h.kind === "individual") && (
-                    <div className="search-heading">Individuals</div>
-                  )}
-                  {directoryHits
-                    .filter((h) => h.kind === "individual")
-                    .map((h) => (
-                      <button
-                        key={`individual-${h.id}`}
-                        onClick={() => {
-                          setSearchOpen(false);
-                          setGlobalQuery("");
-                          openPersonChart(h.name);
-                        }}
-                      >
-                        <Users size={17} />
-                        <span>
-                          <strong>{h.name}</strong>
-                          <small>{h.kind === "individual" ? h.site : ""}</small>
-                        </span>
-                        <ChevronRight size={15} />
-                      </button>
-                    ))}
-                  {directoryHits.some((h) => h.kind === "staff") && (
-                    <div className="search-heading">Staff</div>
-                  )}
-                  {directoryHits
-                    .filter((h) => h.kind === "staff")
-                    .map((h) => (
-                      <button
-                        key={`staff-${h.id}`}
-                        onClick={() => {
-                          setSearchOpen(false);
-                          setGlobalQuery("");
-                          navigate("Staff");
-                          if (h.kind === "staff") setQuery(h.name);
-                        }}
-                      >
-                        <Users size={17} />
-                        <span>
-                          <strong>{h.name}</strong>
-                          <small>
-                            {h.kind === "staff" ? `${h.role}, ${h.site}` : ""}
-                          </small>
-                        </span>
-                        <ChevronRight size={15} />
-                      </button>
-                    ))}
-                  {directoryHits.some((h) => h.kind === "site") && (
-                    <div className="search-heading">Homes</div>
-                  )}
-                  {directoryHits
-                    .filter((h) => h.kind === "site")
-                    .map((h) => (
-                      <button
-                        key={`site-${h.id}`}
-                        onClick={() => {
-                          setSearchOpen(false);
-                          setGlobalQuery("");
-                          openSiteDetail(h.id);
-                        }}
-                      >
-                        <Building2 size={17} />
-                        <span>
-                          <strong>{h.name}</strong>
-                          <small>Home</small>
-                        </span>
-                        <ChevronRight size={15} />
-                      </button>
-                    ))}
-                  {searchHits.length > 0 && (
-                    <div className="search-heading">Requirements and records</div>
-                  )}
-                  {searchHits.map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => {
-                          selectRequirement(r);
-                          setGlobalQuery("");
-                          setSearchOpen(false);
-                        }}
-                      >
-                        <FileText size={17} />
-                        <span>
-                          <strong>{r.title}</strong>
-                          <small>
-                            {r.person}, {r.site}
-                          </small>
-                          <small className="search-meta">
-                            {r.category}, {r.status}, due {formatDate(r.due)}, page {r.page}
-                          </small>
-                        </span>
-                        <ChevronRight size={15} />
-                      </button>
-                    ))}
-                  {searchHits.length === 0 && directoryHits.length === 0 && (
-                    <p>No matching records. Try a name or site.</p>
-                  )}
-                </div>
-              )}
-            </div>
+              onSelectStaff={(h) => {
+                setSearchOpen(false);
+                setGlobalQuery("");
+                navigate("Staff");
+                setQuery(h.name);
+              }}
+              onSelectSite={(h) => {
+                setSearchOpen(false);
+                setGlobalQuery("");
+                openSiteDetail(h.id);
+              }}
+              onSelectRequirement={(r) => {
+                selectRequirement(r);
+                setGlobalQuery("");
+                setSearchOpen(false);
+              }}
+            />
             <span className="topbar-divider" />
             <NotificationBell unread={notifications.unread} onOpen={() => {
               setModal("notifications");
