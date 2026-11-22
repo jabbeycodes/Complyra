@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   Camera,
   Check,
   Download,
@@ -354,16 +359,15 @@ function ItemCard({
       )}
 
       {item.history.length > 0 && (
-        <div className="qa-history">
-          <button
-            type="button"
-            className="qa-history-toggle"
-            onClick={() => setShowHistory((v) => !v)}
-            aria-expanded={showHistory}
-          >
+        <Collapsible
+          className="qa-history"
+          open={showHistory}
+          onOpenChange={(next) => setShowHistory(next)}
+        >
+          <CollapsibleTrigger className="qa-history-toggle">
             <History size={14} /> Change history ({item.history.length})
-          </button>
-          {showHistory && (
+          </CollapsibleTrigger>
+          <CollapsiblePanel>
             <ul>
               {item.history.map((h, i) => (
                 <li key={i}>
@@ -373,8 +377,8 @@ function ItemCard({
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          </CollapsiblePanel>
+        </Collapsible>
       )}
     </div>
   );
@@ -635,14 +639,13 @@ export default function QaAuditDetail({
           ).length;
           return (
             <section key={section.id} className="qa-section">
-              <button
-                type="button"
-                className="qa-section-head"
-                aria-expanded={open}
-                onClick={() =>
-                  setOpenSections((prev) => ({ ...prev, [section.id]: !open }))
+              <Collapsible
+                open={open}
+                onOpenChange={(next) =>
+                  setOpenSections((prev) => ({ ...prev, [section.id]: next }))
                 }
               >
+              <CollapsibleTrigger className="qa-section-head">
                 <span>
                   <strong>{section.title}</strong>
                   <span className="qa-section-count">
@@ -650,9 +653,8 @@ export default function QaAuditDetail({
                   </span>
                 </span>
                 <span aria-hidden>{open ? "▾" : "▸"}</span>
-              </button>
-              {open && (
-                <div className="qa-section-items">
+              </CollapsibleTrigger>
+              <CollapsiblePanel className="qa-section-items">
                   {sectionItems.map((item) => (
                     <ItemCard
                       key={item.key}
@@ -672,8 +674,8 @@ export default function QaAuditDetail({
                       }
                     />
                   ))}
-                </div>
-              )}
+              </CollapsiblePanel>
+              </Collapsible>
             </section>
           );
         })

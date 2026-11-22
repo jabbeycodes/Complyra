@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -397,18 +402,17 @@ export default function MobileConsents({
                   {row.status} · {row.decision}
                 </small>
                 <small>Expiry/review: {row.reviewOn ?? "—"}</small>
-                <button
-                  type="button"
-                  className="msh-text-button"
-                  aria-expanded={openHistory === row.type.id}
-                  onClick={() =>
-                    setOpenHistory(openHistory === row.type.id ? null : row.type.id)
+                <Collapsible
+                  open={openHistory === row.type.id}
+                  onOpenChange={(open) =>
+                    setOpenHistory(open ? row.type.id : null)
                   }
                 >
+                <CollapsibleTrigger className="msh-text-button">
                   {row.historyLabel}
-                </button>
-                {openHistory === row.type.id &&
-                  (row.history.length === 0 ? (
+                </CollapsibleTrigger>
+                <CollapsiblePanel>
+                  {row.history.length === 0 ? (
                     <small>No versions on file.</small>
                   ) : (
                     row.history.map((record) => (
@@ -455,7 +459,9 @@ export default function MobileConsents({
                           ))}
                       </span>
                     ))
-                  ))}
+                  )}
+                </CollapsiblePanel>
+                </Collapsible>
               </span>
             </div>
           ))}
@@ -534,19 +540,17 @@ export default function MobileConsents({
                     </small>
                   )}
                   {packet.audit && packet.audit.length > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        className="msh-text-button"
-                        aria-expanded={openAudit === packet.id}
-                        onClick={() =>
-                          setOpenAudit(openAudit === packet.id ? null : packet.id)
-                        }
-                      >
+                    <Collapsible
+                      open={openAudit === packet.id}
+                      onOpenChange={(open) =>
+                        setOpenAudit(open ? packet.id : null)
+                      }
+                    >
+                      <CollapsibleTrigger className="msh-text-button">
                         Packet audit trail
-                      </button>
-                      {openAudit === packet.id &&
-                        packet.audit.map((entry, index) => (
+                      </CollapsibleTrigger>
+                      <CollapsiblePanel>
+                        {packet.audit.map((entry, index) => (
                           <small key={index}>
                             {entry.event} — {entry.at.slice(0, 10)}
                             {entry.signerName
@@ -554,7 +558,8 @@ export default function MobileConsents({
                               : ""}
                           </small>
                         ))}
-                    </>
+                      </CollapsiblePanel>
+                    </Collapsible>
                   )}
                   <span className="msh-row-actions">
                     {manage && packet.status === "draft" && (

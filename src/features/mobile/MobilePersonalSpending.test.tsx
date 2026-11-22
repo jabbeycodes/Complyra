@@ -43,6 +43,44 @@ describe("MobilePersonalSpending close sign-off", () => {
     setGlobal("HTMLCanvasElement", dom.window.HTMLCanvasElement);
     setGlobal("Element", dom.window.Element);
     setGlobal("Node", dom.window.Node);
+    setGlobal(
+      "requestAnimationFrame",
+      dom.window.requestAnimationFrame.bind(dom.window),
+    );
+    setGlobal(
+      "cancelAnimationFrame",
+      dom.window.cancelAnimationFrame.bind(dom.window),
+    );
+    // @ui-sdk/core's form/field watchers reference these constructors as
+    // bare globals; jsdom only exposes them on its window. Same list as
+    // PasswordField.test.tsx (slice 4) / CollapsibleMigration.test.tsx
+    // (slice 8) — required since the migrated Collapsible mounts here.
+    for (const name of [
+      "ShadowRoot",
+      "DocumentFragment",
+      "HTMLInputElement",
+      "HTMLButtonElement",
+      "HTMLAnchorElement",
+      "HTMLSelectElement",
+      "HTMLTextAreaElement",
+      "HTMLFieldSetElement",
+      "HTMLFormElement",
+      "HTMLLabelElement",
+      "HTMLOptionElement",
+      "HTMLDataListElement",
+      "MutationObserver",
+      "CustomEvent",
+      "Event",
+      "MouseEvent",
+      "KeyboardEvent",
+      "FocusEvent",
+      "NodeFilter",
+    ]) {
+      setGlobal(name, (dom.window as unknown as Record<string, unknown>)[name]);
+    }
+    // jsdom has no Web Animations API; the SDK's presence watcher calls
+    // el.getAnimations() when a panel unmounts (same stub as slices 1–8).
+    dom.window.Element.prototype.getAnimations = () => [];
     setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
     React = await import("react");

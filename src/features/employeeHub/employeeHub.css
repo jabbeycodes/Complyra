@@ -1573,3 +1573,13 @@
     font-size: 9.5pt;
   }
 }
+
+/* UI SDK slice 8: the Collapsible root wrapping a binder card's actions +
+   chase panel reproduces the card's own flex rhythm, so the actions row
+   and the chase panel keep the article's 10px gap. */
+.binder-person-collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}

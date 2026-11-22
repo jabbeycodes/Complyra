@@ -1,4 +1,9 @@
 import { useState } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { Badge, Empty } from "../../components";
 import { confirmDialog } from "../../components/ConfirmDialog";
 import type { ComplyraApi } from "../../data/localApi";
@@ -363,7 +368,11 @@ function ProgramCard({
     program.status === "draft" || !(program.goalService ?? "").trim(),
   );
   return (
-    <div className="isp-program-card">
+    <Collapsible
+      className="isp-program-card"
+      open={open}
+      onOpenChange={(next) => setOpen(next)}
+    >
       <div className="isp-program-head">
         <div>
           <strong>{program.name}</strong>
@@ -375,9 +384,9 @@ function ProgramCard({
         </div>
         <div className="chart-actions">
           <Badge status={statusLabel(program.status)} />
-          <button type="button" className="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <CollapsibleTrigger className="button">
             {open ? "Collapse" : "Configure"}
-          </button>
+          </CollapsibleTrigger>
           {program.status === "draft" && (
             <button
               type="button"
@@ -398,8 +407,7 @@ function ProgramCard({
           )}
         </div>
       </div>
-      {open && (
-        <div className="isp-program-body">
+      <CollapsiblePanel className="isp-program-body">
           <p className="muted">
             {program.effectiveOn} → {program.expiresOn}
             {" · "}Scoring: {program.scoringMethod?.name ?? "—"}
@@ -430,9 +438,8 @@ function ProgramCard({
             pcspSeedTitles={pcspSeedTitles}
             onSave={(tasks) => runIsp(() => api.saveIspProgramTasks(program.id, tasks))}
           />
-        </div>
-      )}
-    </div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }
 

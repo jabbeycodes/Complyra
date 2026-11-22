@@ -17,6 +17,11 @@
  */
 import { useEffect, useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   ChevronLeft,
   ChevronRight,
   Download,
@@ -484,22 +489,19 @@ export default function MenuSection({
                           </span>
                         )}
                       {(versionsByEntry.get(entry.id) ?? []).length > 0 && (
-                        <div className="menu-entry-history-wrap">
-                          <button
-                            type="button"
-                            className="text-button"
-                            aria-expanded={historyOpenFor === entry.id}
-                            onClick={() =>
-                              setHistoryOpenFor(
-                                historyOpenFor === entry.id ? null : entry.id,
-                              )
-                            }
-                          >
+                        <Collapsible
+                          className="menu-entry-history-wrap"
+                          open={historyOpenFor === entry.id}
+                          onOpenChange={(open) =>
+                            setHistoryOpenFor(open ? entry.id : null)
+                          }
+                        >
+                          <CollapsibleTrigger className="text-button">
                             <History size={14} /> History (
                             {(versionsByEntry.get(entry.id) ?? []).length})
-                          </button>
-                          {historyOpenFor === entry.id &&
-                            (versionsByEntry.get(entry.id) ?? []).map(
+                          </CollapsibleTrigger>
+                          <CollapsiblePanel>
+                            {(versionsByEntry.get(entry.id) ?? []).map(
                               (version) => (
                                 <p
                                   className="menu-history-line"
@@ -513,7 +515,8 @@ export default function MenuSection({
                                 </p>
                               ),
                             )}
-                        </div>
+                          </CollapsiblePanel>
+                        </Collapsible>
                       )}
                     </div>
                   ))}
@@ -534,16 +537,15 @@ export default function MenuSection({
       )}
 
       {entries && history && voidedThisWeek.length > 0 && (
-        <div className="menu-voided">
-          <button
-            type="button"
-            className="text-button"
-            aria-expanded={voidedOpen}
-            onClick={() => setVoidedOpen(!voidedOpen)}
-          >
+        <Collapsible
+          className="menu-voided"
+          open={voidedOpen}
+          onOpenChange={(open) => setVoidedOpen(open)}
+        >
+          <CollapsibleTrigger className="text-button">
             <XCircle size={14} /> Voided this week ({voidedThisWeek.length})
-          </button>
-          {voidedOpen && (
+          </CollapsibleTrigger>
+          <CollapsiblePanel>
             <ul className="menu-voided-list">
               {voidedThisWeek.map((row) => (
                 <li key={row.id}>
@@ -554,8 +556,8 @@ export default function MenuSection({
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          </CollapsiblePanel>
+        </Collapsible>
       )}
     </section>
   );

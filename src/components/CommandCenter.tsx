@@ -22,6 +22,11 @@ import { centralTodayIso } from "../data/menuRecords";
  * a live API.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { useData } from "../data/DataProvider";
 import { hasPermission } from "../data/permissions";
 import {
@@ -806,14 +811,15 @@ export function CommandCenterView({
           )}
         </p>
         {readinessByCat.map((group) => (
-          <details key={group.key} className="cc-details">
-            <summary className="cc-details-summary">
+          <Collapsible key={group.key} className="cc-details">
+            <CollapsibleTrigger className="cc-details-summary">
               {group.label}
               <span className="cc-count">
                 {group.items.filter((item) => item.status === "met").length}/{group.items.length}{" "}
                 met
               </span>
-            </summary>
+            </CollapsibleTrigger>
+            <CollapsiblePanel keepMounted>
             <ul className="cc-list">
               {group.items.map((item) => {
                 const meta = READINESS_STATUS_META[item.status];
@@ -833,7 +839,8 @@ export function CommandCenterView({
                 );
               })}
             </ul>
-          </details>
+            </CollapsiblePanel>
+          </Collapsible>
         ))}
       </section>
 
@@ -884,8 +891,9 @@ export function CommandCenterView({
       </section>
 
       {/* Workflow library */}
-      <details className="cc-section" aria-labelledby="cc-workflows">
-        <summary id="cc-workflows" className="cc-details-summary">Workflow library</summary>
+      <Collapsible className="cc-section" aria-labelledby="cc-workflows">
+        <CollapsibleTrigger id="cc-workflows" className="cc-details-summary">Workflow library</CollapsibleTrigger>
+        <CollapsiblePanel keepMounted>
         <p className="cc-section-note">
           Reference templates for notices and reminders. Delivery depends on the agency’s configured automation services.
         </p>
@@ -900,7 +908,8 @@ export function CommandCenterView({
             </article>
           ))}
         </div>
-      </details>
+        </CollapsiblePanel>
+      </Collapsible>
 
       {/* Score trend */}
       <section className="cc-section" aria-labelledby="cc-trend">

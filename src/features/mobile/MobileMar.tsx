@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { ChevronLeft, ChevronRight, Pill } from "lucide-react";
 import type { ComplyraApi } from "../../data/localApi";
 import type {
@@ -95,16 +100,11 @@ export function PersonHeader({
           Open chart
         </button>
       </div>
-      <button
-        type="button"
-        className="msh-facts-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
+      <Collapsible open={open} onOpenChange={(next) => setOpen(next)}>
+      <CollapsibleTrigger className="msh-facts-toggle">
         Contacts · Allergies · Diagnoses {open ? "▴" : "▾"}
-      </button>
-      {open && (
-        <div className="msh-facts">
+      </CollapsibleTrigger>
+      <CollapsiblePanel className="msh-facts">
           <div>
             <h4>Allergies</h4>
             {allergies.length === 0 && <p>No active allergies on file.</p>}
@@ -140,8 +140,8 @@ export function PersonHeader({
               </p>
             ))}
           </div>
-        </div>
-      )}
+      </CollapsiblePanel>
+      </Collapsible>
     </section>
   );
 }
