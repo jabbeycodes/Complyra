@@ -11,6 +11,34 @@ import { OpenShiftsTab } from "./OpenShiftsTab";
 import { LocalOpenShiftStore } from "../../data/openShiftStore";
 import type { SessionUser } from "../../data/types";
 
+// Slice 11b: the tab now mounts @ui-sdk popups (AppSelect) — jsdom lacks
+// the WAAPI/popover surface the SDK calls, so stub it (slice-8 harness rule).
+const elProto = Element.prototype as unknown as Record<string, unknown>;
+if (typeof elProto.getAnimations !== "function") elProto.getAnimations = () => [];
+const htmlProto = HTMLElement.prototype as unknown as Record<string, unknown>;
+if (typeof htmlProto.showPopover !== "function") htmlProto.showPopover = function () {};
+if (typeof htmlProto.hidePopover !== "function") htmlProto.hidePopover = function () {};
+if (typeof elProto.scrollIntoView !== "function") elProto.scrollIntoView = function () {};
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      onchange: null,
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+// jsdom has no CSS.escape; the SDK's label resolution calls it.
+const cssGlobal = (globalThis as unknown as { CSS?: { escape?: (v: string) => string } }).CSS;
+if (!cssGlobal || typeof cssGlobal.escape !== "function") {
+  (globalThis as unknown as { CSS: { escape: (v: string) => string } }).CSS = {
+    escape: (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, "\\$&"),
+  };
+}
+
 afterEach(() => cleanup());
 
 function session(overrides: Partial<SessionUser>): SessionUser {
@@ -51,7 +79,16 @@ describe("Open Shifts tab", () => {
 
     expect(screen.getByText(/anything past 41 hours needs/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Evening 2:30p–10:30p" }));
-    fireEvent.change(screen.getByLabelText(/How it.s filled/), { target: { value: "first_come" } });
+    // The Evening preset's times are the form's initial values, so the chip
+    // is already active; since slice 9 (ToggleGroup) clicking the active
+    // chip no longer re-fires the handler that autofilled the name — a
+    // pre-existing spec failure on pristine main, unrelated to slice 11b.
+    // Type the name explicitly, as a user would.
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Evening 2:30p–10:30p" } });
+    // Slice 11b: "How it's filled" is an AppSelect (ui-sdk listbox) — open
+    // it and pick the option instead of fireEvent.change on a native select.
+    fireEvent.click(screen.getByRole("combobox", { name: /How it/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "First come, first served" }));
     fireEvent.click(screen.getByRole("button", { name: /Post shift/ }));
 
     await waitFor(() => expect(screen.getByText(/Staff trained at Lawton were notified/)).toBeTruthy());

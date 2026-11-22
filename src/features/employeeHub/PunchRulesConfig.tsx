@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { DEFAULT_PUNCH_RULES } from "../../data/hr";
+import { AppSelect } from "../../components/AppSelect";
 import { PUNCH_RULES_OWNERSHIP } from "../ruleOwnership";
 import type { HrPunchRules } from "../../data/hr";
 import type { HrStore } from "../../data/hrStore";
@@ -215,26 +216,25 @@ export function PunchRulesConfig({
           <div className="hub-form">
             <label>
               Rounding
-              <select
-                value={roundingMinutes}
-                onChange={(e) => setRoundingMinutes(Number(e.target.value) as RoundingMinutes)}
-              >
-                {ROUNDING_OPTIONS.map((n) => (
-                  <option key={n} value={n}>
-                    {n === 0 ? "No rounding — exact times" : `Nearest ${n} minutes`}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                value={String(roundingMinutes)}
+                onChange={(next) => setRoundingMinutes(Number(next) as RoundingMinutes)}
+                options={ROUNDING_OPTIONS.map((n) => ({
+                  value: String(n),
+                  label: n === 0 ? "No rounding — exact times" : `Nearest ${n} minutes`,
+                }))}
+              />
             </label>
             <label>
               Rounding applies to
-              <select
+              <AppSelect
                 value={roundingApplies}
-                onChange={(e) => setRoundingApplies(e.target.value as HrPunchRules["roundingApplies"])}
-              >
-                <option value="payroll">Payroll only — staff see exact times</option>
-                <option value="display_and_payroll">Display + payroll — staff see rounded times</option>
-              </select>
+                onChange={(next) => setRoundingApplies(next as HrPunchRules["roundingApplies"])}
+                options={[
+                  { value: "payroll", label: "Payroll only — staff see exact times" },
+                  { value: "display_and_payroll", label: "Display + payroll — staff see rounded times" },
+                ]}
+              />
             </label>
             <label>
               Grace minutes (late/early flags)

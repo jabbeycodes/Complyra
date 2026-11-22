@@ -7,6 +7,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EmployeeHubShell, defaultTimecardStaffId, describeOvertimeRules, hubRowActionScope, hubSchedulingFormScope, rowActionAllowed, swapClaimable, type HubStaffEntry, type HubSite } from "./EmployeeHubPage";
@@ -942,7 +943,13 @@ describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
     }
   });
 
-  it("item 5: the HM's Team Schedule site filter offers only their own house", () => {
+  it("item 5: the HM's Team Schedule site filter offers only their own house", async () => {
+    // Slice 11b: the site filter is an AppSelect (ui-sdk) — its options live
+    // in the open listbox, not in static markup, so this test mounts the
+    // shell interactively (jsdom + the slice-8 SDK harness, installed for
+    // this test only) and reads the open list per role. Stronger than the
+    // pre-migration static includes() checks: the full option sets, in
+    // order, for both roles.
     const hm = makeSession({
       userId: "user-hm",
       fullName: "Jordan Reyes",
@@ -951,11 +958,139 @@ describe("coverage posting gates (wave 7T, simulation batch 157)", () => {
       siteId: "site-1",
       permissions: { "hub.access": true, "hub.manage_schedule": true, "hub.view_team": true },
     });
-    const html = render(hm, "team-schedule");
-    assert.ok(html.includes("Maple House"), "own house in the site filter");
-    assert.ok(!html.includes("Oak House"), "the other house is not offered");
-    const pmHtml = render(pmSession, "team-schedule");
-    assert.ok(pmHtml.includes("Oak House"), "PM keeps every house in the filter");
+
+    const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+      pretendToBeVisual: true,
+    });
+    const setNames: string[] = [];
+    const setGlobal = (name: string, value: unknown) => {
+      setNames.push(name);
+      Object.defineProperty(globalThis, name, {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    };
+    setGlobal("window", dom.window);
+    setGlobal("document", dom.window.document);
+    setGlobal("navigator", dom.window.navigator);
+    setGlobal("HTMLElement", dom.window.HTMLElement);
+    setGlobal("HTMLCanvasElement", dom.window.HTMLCanvasElement);
+    setGlobal("Element", dom.window.Element);
+    setGlobal("Node", dom.window.Node);
+    setGlobal("requestAnimationFrame", dom.window.requestAnimationFrame.bind(dom.window));
+    setGlobal("cancelAnimationFrame", dom.window.cancelAnimationFrame.bind(dom.window));
+    for (const name of [
+      "ShadowRoot",
+      "DocumentFragment",
+      "HTMLInputElement",
+      "HTMLButtonElement",
+      "HTMLAnchorElement",
+      "HTMLSelectElement",
+      "HTMLTextAreaElement",
+      "HTMLFieldSetElement",
+      "HTMLFormElement",
+      "HTMLLabelElement",
+      "HTMLOptionElement",
+      "HTMLDataListElement",
+      "MutationObserver",
+      "CustomEvent",
+      "Event",
+      "MouseEvent",
+      "KeyboardEvent",
+      "FocusEvent",
+      "NodeFilter",
+    ]) {
+      setGlobal(name, (dom.window as unknown as Record<string, unknown>)[name]);
+    }
+    setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
+    setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const win = dom.window as unknown as {
+      HTMLElement: { prototype: Record<string, unknown> };
+      Element: { prototype: Record<string, unknown> };
+    };
+    win.HTMLElement.prototype.showPopover = function () {};
+    win.HTMLElement.prototype.hidePopover = function () {};
+    setGlobal("AbortController", dom.window.AbortController);
+    setGlobal("AbortSignal", dom.window.AbortSignal);
+    if (typeof dom.window.matchMedia !== "function") {
+      setGlobal("matchMedia", (query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => false,
+      }));
+    }
+    win.Element.prototype.getAnimations = () => [];
+    win.Element.prototype.scrollIntoView = function () {};
+    win.Element.prototype.checkVisibility = () => true;
+    win.Element.prototype.getClientRects = () => [];
+    dom.window.document.elementFromPoint = () => null;
+    dom.window.document.elementsFromPoint = () => [];
+    setGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+    const { createRoot } = await import("react-dom/client");
+    const openFilterOptions = async (session: SessionUser): Promise<string[]> => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await React.act(async () => {
+        root.render(
+          <EmployeeHubShell session={session} store={makeStubStore()} staffList={staffList} sites={sites} initialTab="team-schedule" />,
+        );
+        await settle();
+      });
+      await React.act(async () => {
+        await settle();
+      });
+      const trigger = [...container.querySelectorAll('[data-slot="select-trigger"]')].find((el) =>
+        el.closest("label")?.textContent?.includes("Site"),
+      );
+      assert.ok(trigger, "site filter trigger renders");
+      await React.act(async () => {
+        (trigger as HTMLElement).click();
+        await settle();
+      });
+      const items = [...container.querySelectorAll('[data-slot="select-item"]')].map(
+        (el) => el.textContent,
+      );
+      await React.act(async () => {
+        root.unmount();
+        await settle();
+      });
+      container.remove();
+      return items as string[];
+    };
+
+    try {
+      assert.deepEqual(
+        await openFilterOptions(hm),
+        ["All sites", "Maple House"],
+        "HM is offered only their own house in the site filter",
+      );
+      assert.deepEqual(
+        await openFilterOptions(pmSession),
+        ["All sites", "Maple House", "Oak House"],
+        "PM keeps every house in the filter",
+      );
+    } finally {
+      for (const name of setNames) {
+        delete (globalThis as Record<string, unknown>)[name];
+      }
+      dom.window.close();
+    }
   });
 
   it("HR keeps its staffing-pattern power (hub.manage_staffing, a deliberate template grant)", () => {

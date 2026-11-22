@@ -85,3 +85,76 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Employee Hub (slice 11b) — additive scoped rules; the native rules they
+   mirror in styles.css are untouched. A trigger inside a .hub-form label
+   field reproduces .hub-form select declaration-for-declaration: 12px
+   padding, 8px radius, 16px text, white field, --border edge. */
+.hub-form .app-select-trigger {
+  padding: 12px;
+  border: 1px solid var(--border, var(--color-h-b59a74));
+  border-radius: 8px;
+  background: var(--color-h-fff);
+  font-size: 16px;
+  /* The native select inherits the label's text colour; the global button
+     rule would otherwise paint the trigger a lighter brown. */
+  color: var(--text);
+  /* Native hub selects measure 49px tall (12px padding + the 16px line +
+     border); the trigger's line box runs 2px shorter, so pin the floor
+     the same way .binder-subject select does below. */
+  min-height: 49px;
+}
+
+/* Performance subject picker: .binder-subject select carries only
+   min-height/font-size in styles.css and otherwise paints the browser's
+   native control chrome — reproduce that chrome (38px floor, 15px text,
+   UA border/background, square corners) so the trigger measures the same. */
+.binder-subject .app-select-trigger {
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid #767676;
+  border-radius: 0;
+  background: #efefef;
+  font-size: 15px;
+  color: var(--text);
+}
+
+/* A disabled native hub select keeps its solid box (the browser only
+   greys the text painting); the global button:disabled rule would fade
+   the whole trigger and switch the cursor. Restore both, scoped to the
+   hub contexts. */
+.hub-form .app-select-trigger:disabled,
+.binder-subject .app-select-trigger:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* Mirrors the .hub-page select shrink escape in styles.css (@media 860px):
+   a long selected label must not stretch a phone-width hub panel. */
+@media (max-width: 860px) {
+  .hub-page .app-select-trigger {
+    max-width: 100%;
+    min-width: 0;
+  }
+  /* The cap alone leaves the trigger's inner content full-width: the
+     value stack is a flex item whose default min-width:auto pins it to
+     its min-content (the widest label), so it spilled past the capped
+     trigger and pushed the chevron off a 390px viewport (Payroll
+     "Rounding applies to", 328px sizer; PR #298 CI,
+     mobile-responsive.spec.ts:96). The native control has no inner
+     elements — the cap shrinks the box and the UA clips its text.
+     Mirror that here, scoped to exactly the cap's own context so
+     desktop trigger boxes (which overflow their form column to the
+     widest label, exactly like the native control) are untouched. */
+  .hub-page .app-select-value-stack {
+    min-width: 0;
+  }
+  .hub-page .app-select-value-stack > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hub-page .app-select-trigger > svg {
+    flex: none;
+  }
+}

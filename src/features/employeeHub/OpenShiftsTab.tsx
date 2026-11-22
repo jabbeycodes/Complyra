@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Send, X } from "lucide-react";
 import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { Empty } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import type { SessionUser } from "../../data/types";
 import { centralTodayIso } from "../../data/menuRecords";
 import {
@@ -303,26 +304,37 @@ export function OpenShiftsTab({
             <div className="hub-form">
               <label>
                 Type
-                <select id="open-shift-kind" value={kind} onChange={(e) => setKind(e.target.value as OpenShiftKind)}>
-                  <option value="temporary">Temporary: one shift</option>
-                  <option value="permanent">Permanent: every week</option>
-                </select>
+                <AppSelect
+                  id="open-shift-kind"
+                  value={kind}
+                  onChange={(next) => setKind(next as OpenShiftKind)}
+                  options={[
+                    { value: "temporary", label: "Temporary: one shift" },
+                    { value: "permanent", label: "Permanent: every week" },
+                  ]}
+                />
               </label>
               <label>
                 Program site
-                <select id="open-shift-site" value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-                  {sites.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                <AppSelect
+                  id="open-shift-site"
+                  value={siteId}
+                  onChange={setSiteId}
+                  options={sites.map((s) => ({ value: s.id, label: s.name }))}
+                />
               </label>
               {kind === "permanent" && canPostAgency && (
                 <label>
                   Who can apply
-                  <select id="open-shift-audience" value={agencyWide ? "agency" : "site"} onChange={(e) => setAgencyWide(e.target.value === "agency")}>
-                    <option value="site">Staff trained at this site</option>
-                    <option value="agency">Everyone in the agency</option>
-                  </select>
+                  <AppSelect
+                    id="open-shift-audience"
+                    value={agencyWide ? "agency" : "site"}
+                    onChange={(next) => setAgencyWide(next === "agency")}
+                    options={[
+                      { value: "site", label: "Staff trained at this site" },
+                      { value: "agency", label: "Everyone in the agency" },
+                    ]}
+                  />
                 </label>
               )}
               <label className="hub-form-wide">
@@ -393,10 +405,15 @@ export function OpenShiftsTab({
               {kind === "temporary" && (
                 <label>
                   How it&rsquo;s filled
-                  <select id="open-shift-mode" value={pickupMode} onChange={(e) => setPickupMode(e.target.value as OpenShiftPickupMode)}>
-                    <option value="approval">Bids: I choose who gets it</option>
-                    <option value="first_come">First come, first served</option>
-                  </select>
+                  <AppSelect
+                    id="open-shift-mode"
+                    value={pickupMode}
+                    onChange={(next) => setPickupMode(next as OpenShiftPickupMode)}
+                    options={[
+                      { value: "approval", label: "Bids: I choose who gets it" },
+                      { value: "first_come", label: "First come, first served" },
+                    ]}
+                  />
                 </label>
               )}
               <label>

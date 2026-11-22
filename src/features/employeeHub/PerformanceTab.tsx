@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, PenLine, Printer, Scale, Star } from "lucide-react";
 import { centralTodayIso } from "../../data/menuRecords";
 import PrintBrandHeader from "../../components/PrintBrandHeader";
+import { AppSelect } from "../../components/AppSelect";
 import type { HrStore } from "../../data/hrStore";
 import { hasPermission } from "../../data/permissions";
 import {
@@ -611,20 +612,14 @@ export function PerformanceTab({
             <div className="hub-form">
               <label>
                 Outcome
-                <select
+                <AppSelect
                   value={outcomeChoice}
-                  onChange={(e) =>
-                    setOutcomeChoice(e.target.value as CorrectiveActionOutcome)
-                  }
-                >
-                  {CORRECTIVE_ACTION_OUTCOMES.filter((o) => o !== "open").map(
-                    (o) => (
-                      <option key={o} value={o}>
-                        {CORRECTIVE_ACTION_OUTCOME_LABELS[o]}
-                      </option>
-                    ),
-                  )}
-                </select>
+                  onChange={(next) => setOutcomeChoice(next as CorrectiveActionOutcome)}
+                  options={CORRECTIVE_ACTION_OUTCOMES.filter((o) => o !== "open").map((o) => ({
+                    value: o,
+                    label: CORRECTIVE_ACTION_OUTCOME_LABELS[o],
+                  }))}
+                />
               </label>
               <label>
                 Note — how was this outcome reached?
@@ -684,17 +679,14 @@ export function PerformanceTab({
           {viewableStaff.length > 1 && (
             <label className="binder-subject">
               Staff member
-              <select
+              <AppSelect
                 value={subjectId}
-                onChange={(e) => setSubjectId(e.target.value)}
-              >
-                {viewableStaff.map((s) => (
-                  <option key={s.userId} value={s.userId}>
-                    {s.fullName}
-                    {s.userId === session.userId ? " (you)" : ""}
-                  </option>
-                ))}
-              </select>
+                onChange={setSubjectId}
+                options={viewableStaff.map((s) => ({
+                  value: s.userId,
+                  label: `${s.fullName}${s.userId === session.userId ? " (you)" : ""}`,
+                }))}
+              />
             </label>
           )}
         </div>
@@ -776,37 +768,32 @@ export function PerformanceTab({
                   </label>
                   <label>
                     Rating
-                    <select
+                    <AppSelect
                       value={reviewForm.rating}
-                      onChange={(e) =>
+                      onChange={(next) =>
                         setReviewForm((f) => ({
                           ...f,
-                          rating: e.target.value as PerformanceReview["rating"],
+                          rating: next as PerformanceReview["rating"],
                         }))
                       }
-                    >
-                      {PERFORMANCE_RATINGS.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
+                      options={PERFORMANCE_RATINGS.map((r) => ({ value: r, label: r }))}
+                    />
                   </label>
                   <label>
                     Corrects an earlier review (optional)
-                    <select
+                    <AppSelect
                       value={reviewForm.supersedesId}
-                      onChange={(e) =>
-                        setReviewForm((f) => ({ ...f, supersedesId: e.target.value }))
+                      onChange={(next) =>
+                        setReviewForm((f) => ({ ...f, supersedesId: next }))
                       }
-                    >
-                      <option value="">No — this is a new review</option>
-                      {reviews.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          Review dated {fmtDate(r.reviewDate)} — {r.rating}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: "No — this is a new review" },
+                        ...reviews.map((r) => ({
+                          value: r.id,
+                          label: `Review dated ${fmtDate(r.reviewDate)} — ${r.rating}`,
+                        })),
+                      ]}
+                    />
                   </label>
                 </div>
                 <div className="hub-form performance-textareas">
@@ -872,21 +859,16 @@ export function PerformanceTab({
                   </label>
                   <label>
                     Level
-                    <select
+                    <AppSelect
                       value={actionForm.level}
-                      onChange={(e) =>
+                      onChange={(next) =>
                         setActionForm((f) => ({
                           ...f,
-                          level: e.target.value as StaffCorrectiveAction["level"],
+                          level: next as StaffCorrectiveAction["level"],
                         }))
                       }
-                    >
-                      {CORRECTIVE_ACTION_LEVELS.map((l) => (
-                        <option key={l} value={l}>
-                          {l}
-                        </option>
-                      ))}
-                    </select>
+                      options={CORRECTIVE_ACTION_LEVELS.map((l) => ({ value: l, label: l }))}
+                    />
                   </label>
                   <label>
                     Follow-up date (required for a PIP)
@@ -900,19 +882,19 @@ export function PerformanceTab({
                   </label>
                   <label>
                     Corrects an earlier action (optional)
-                    <select
+                    <AppSelect
                       value={actionForm.supersedesId}
-                      onChange={(e) =>
-                        setActionForm((f) => ({ ...f, supersedesId: e.target.value }))
+                      onChange={(next) =>
+                        setActionForm((f) => ({ ...f, supersedesId: next }))
                       }
-                    >
-                      <option value="">No — this is a new action</option>
-                      {actions.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {fmtDate(a.actionDate)} — {a.level}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: "No — this is a new action" },
+                        ...actions.map((a) => ({
+                          value: a.id,
+                          label: `${fmtDate(a.actionDate)} — ${a.level}`,
+                        })),
+                      ]}
+                    />
                   </label>
                 </div>
                 <div className="hub-form performance-textareas">
