@@ -14,6 +14,7 @@
  * binder keeps the template snapshot it was opened with.
  */
 import { useEffect, useState } from "react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import type { HrStore } from "../../data/hrStore";
 import {
   isRequiredBinderItem,
@@ -99,18 +100,28 @@ export function BinderTemplateViewer({ store }: { store: HrStore }) {
       {!library && !error && <p>Loading templates…</p>}
       {library && selected && (
         <>
-          <div className="binder-board-views" role="group" aria-label="Templates">
+          <ToggleGroup
+            className="binder-board-views"
+            aria-label="Templates"
+            deselectable={false}
+            value={[selectedId]}
+            onValueChange={(next) => {
+              const v = next[0];
+              if (v) setSelectedId(v);
+            }}
+          >
             {choices.map((choice) => (
-              <button
+              <Toggle
                 key={choice.id}
-                type="button"
-                className={`hub-btn${choice.id === selected.id ? " primary" : ""}`}
-                onClick={() => setSelectedId(choice.id)}
+                value={choice.id}
+                className={({ pressed }) =>
+                  pressed ? "hub-btn primary" : "hub-btn"
+                }
               >
                 {choice.name}
-              </button>
+              </Toggle>
             ))}
-          </div>
+          </ToggleGroup>
           <p className="hub-sub">{selected.meta}</p>
           {selected.template.sections.map((section) => (
             <section key={section.key} className="binder-template-section">

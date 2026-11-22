@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -1154,27 +1155,33 @@ export default function MobileMar({
       )}
 
       <nav className="msh-tabbar" aria-label="Medication views">
-        {(
-          [
-            ["scheduled", "Scheduled"],
-            ["prn", "PRN"],
-            ["other", "Other"],
-          ] as [MarTab, string][]
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            className={tab === value ? "active" : ""}
-            aria-pressed={tab === value}
-            onClick={() => {
-              setTab(value);
-              setAdminister(null);
-              setRefillMed(null);
-            }}
-          >
-            {label}
-          </button>
-        ))}
+        <ToggleGroup
+          deselectable={false}
+          value={[tab]}
+          onValueChange={(next) => {
+            const v = next[0];
+            if (!v) return;
+            setTab(v as MarTab);
+            setAdminister(null);
+            setRefillMed(null);
+          }}
+        >
+          {(
+            [
+              ["scheduled", "Scheduled"],
+              ["prn", "PRN"],
+              ["other", "Other"],
+            ] as [MarTab, string][]
+          ).map(([value, label]) => (
+            <Toggle
+              key={value}
+              value={value}
+              className={({ pressed }) => (pressed ? "active" : "")}
+            >
+              {label}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       </nav>
     </div>
   );

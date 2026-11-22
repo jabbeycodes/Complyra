@@ -13,6 +13,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import type { HrStore } from "../../data/hrStore";
 import {
   BINDER_TEMPLATE_PRESETS,
@@ -227,7 +228,16 @@ export function BinderTemplateEditor({ store }: { store: HrStore }) {
         opened from now on — binders already issued never change.
       </p>
 
-      <div className="hub-chip-row binder-editor-picker" role="group" aria-label="Choose a template">
+      <ToggleGroup
+        className="hub-chip-row binder-editor-picker"
+        aria-label="Choose a template"
+        deselectable={false}
+        value={[selectedId]}
+        onValueChange={(next) => {
+          const v = next[0];
+          if (v) pickTemplate(v);
+        }}
+      >
         {choices.map((c) => {
           const tpl =
             c.id === selectedId
@@ -237,16 +247,18 @@ export function BinderTemplateEditor({ store }: { store: HrStore }) {
                 : library.presets.find((p) => p.key === c.id)?.template;
           const count = tpl ? tpl.sections.flatMap((s) => s.items).length : 0;
           return (
-            <button
+            <Toggle
               key={c.id}
-              className={`hub-chip${c.id === selectedId ? " selected" : ""}`}
-              onClick={() => pickTemplate(c.id)}
+              value={c.id}
+              className={({ pressed }) =>
+                pressed ? "hub-chip selected" : "hub-chip"
+              }
             >
               {c.name} · {count} items
-            </button>
+            </Toggle>
           );
         })}
-      </div>
+      </ToggleGroup>
 
       <div className="binder-editor-head">
         <div>

@@ -32,8 +32,78 @@ before(async () => {
   setGlobal("document", dom.window.document);
   setGlobal("navigator", dom.window.navigator);
   setGlobal("HTMLElement", dom.window.HTMLElement);
+  setGlobal("HTMLCanvasElement", dom.window.HTMLCanvasElement);
   setGlobal("Element", dom.window.Element);
   setGlobal("Node", dom.window.Node);
+  setGlobal(
+    "requestAnimationFrame",
+    dom.window.requestAnimationFrame.bind(dom.window),
+  );
+  setGlobal(
+    "cancelAnimationFrame",
+    dom.window.cancelAnimationFrame.bind(dom.window),
+  );
+  // Full SDK harness block (slice-8 rule): the viewer's template chooser
+  // mounts @ui-sdk Toggle/ToggleGroup since slice 9, whose form-watch
+  // code reads these constructors from the global scope.
+  for (const name of [
+    "ShadowRoot",
+    "DocumentFragment",
+    "HTMLInputElement",
+    "HTMLButtonElement",
+    "HTMLAnchorElement",
+    "HTMLSelectElement",
+    "HTMLTextAreaElement",
+    "HTMLFieldSetElement",
+    "HTMLFormElement",
+    "HTMLLabelElement",
+    "HTMLOptionElement",
+    "HTMLDataListElement",
+    "MutationObserver",
+    "CustomEvent",
+    "Event",
+    "MouseEvent",
+    "KeyboardEvent",
+    "FocusEvent",
+    "NodeFilter",
+  ]) {
+    setGlobal(name, (dom.window as unknown as Record<string, unknown>)[name]);
+  }
+  setGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
+  const win = dom.window as unknown as {
+    HTMLElement: { prototype: Record<string, unknown> };
+    Element: { prototype: Record<string, unknown> };
+  };
+  win.HTMLElement.prototype.showPopover = function () {};
+  win.HTMLElement.prototype.hidePopover = function () {};
+  setGlobal("AbortController", dom.window.AbortController);
+  setGlobal("AbortSignal", dom.window.AbortSignal);
+  if (typeof dom.window.matchMedia !== "function") {
+    setGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      onchange: null,
+      dispatchEvent: () => false,
+    }));
+  }
+  win.Element.prototype.getAnimations = () => [];
+  win.Element.prototype.scrollIntoView = function () {};
+  win.Element.prototype.checkVisibility = () => true;
+  win.Element.prototype.getClientRects = () => [];
+  dom.window.document.elementFromPoint = () => null;
+  dom.window.document.elementsFromPoint = () => [];
+  setGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   React = await import("react");
   ({ createRoot } = await import("react-dom/client"));

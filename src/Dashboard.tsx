@@ -1,3 +1,4 @@
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { useData } from "./data/DataProvider";
 import { hasPermission } from "./data/permissions";
 import { requirementPopulation } from "./features/overview/requirementPopulation";
@@ -400,29 +401,33 @@ export default function Dashboard({
               </button>
             </div>
             {sites.length ? (
-              <div className="site-score-grid">
+              <ToggleGroup
+                className="site-score-grid"
+                value={site === "All sites" ? [] : [site]}
+                onValueChange={(next) => onSite(next[0] ?? "All sites")}
+              >
                 {focusedSites.map((s) => {
                   const siteItems = scopedItems.filter((r) => r.site === s.name);
                   const sm = requirementPopulation(siteItems);
                   const consentTallies = consentTalliesFromItems(siteItems);
                   const people = individuals.filter((p) => p.site === s.name).length;
-                  const selected = site === s.name;
                   const reviewInPlace = isSiteReviewInPlace(
                     siteReviews.find((row) => row.siteId === s.id),
                     normalizeSiteFacts(s),
                     todayIso(),
                   );
                   return (
-                    <button
-                      type="button"
+                    <Toggle
                       key={s.id || s.name}
-                      className={`site-score-card ${sm.assessed ? scoreTone(sm.score, sm.overdue) : "watch"}${selected ? " selected" : ""}`}
+                      value={s.name}
+                      className={({ pressed }) =>
+                        `site-score-card ${sm.assessed ? scoreTone(sm.score, sm.overdue) : "watch"}${pressed ? " selected" : ""}`
+                      }
                       aria-label={
                         consentUnknown
                           ? `${s.name} compliance score not final yet`
                           : `${s.name} ${sm.includesConsents ? "requirements and consents" : "requirement register"} ${sm.scoreText}`
                       }
-                      onClick={() => onSite(selected ? "All sites" : s.name)}
                     >
                       <div className="site-score-top">
                         <span className={`house-icon ${s.color ?? "purple"}`}>
@@ -470,10 +475,10 @@ export default function Dashboard({
                           </span>
                         )}
                       </div>
-                    </button>
+                    </Toggle>
                   );
                 })}
-              </div>
+              </ToggleGroup>
             ) : (
               <Empty
                 title="No assigned program sites"

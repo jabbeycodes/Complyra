@@ -38,6 +38,7 @@ import {
   CollapsibleTrigger,
 } from "@ui-sdk/react/collapsible";
 import { ChevronDown, ChevronRight, FolderOpen, Settings2 } from "lucide-react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { useData } from "../../data/DataProvider";
 import { todayIso } from "../../data/chart";
 import type { ComplianceEvidence } from "../../data/hr";
@@ -456,26 +457,41 @@ export function BinderBoardTab({
                   </div>
                 </>
               )}
-              <div className="hub-chip-row binder-board-filters" role="group" aria-label="Board filters">
-                <button
-                  className={`hub-chip${filter === "all" ? " selected" : ""}`}
-                  onClick={() => setFilter("all")}
+              <ToggleGroup
+                className="hub-chip-row binder-board-filters"
+                aria-label="Board filters"
+                deselectable={false}
+                value={[filter]}
+                onValueChange={(next) => {
+                  const v = next[0];
+                  if (v) setFilter(v as BoardFilter);
+                }}
+              >
+                <Toggle
+                  value="all"
+                  className={({ pressed }) =>
+                    pressed ? "hub-chip selected" : "hub-chip"
+                  }
                 >
                   All staff
-                </button>
-                <button
-                  className={`hub-chip${filter === "incomplete" ? " selected" : ""}`}
-                  onClick={() => setFilter("incomplete")}
+                </Toggle>
+                <Toggle
+                  value="incomplete"
+                  className={({ pressed }) =>
+                    pressed ? "hub-chip selected" : "hub-chip"
+                  }
                 >
                   Incomplete only
-                </button>
-                <button
-                  className={`hub-chip${filter === "awaiting" ? " selected" : ""}`}
-                  onClick={() => setFilter("awaiting")}
+                </Toggle>
+                <Toggle
+                  value="awaiting"
+                  className={({ pressed }) =>
+                    pressed ? "hub-chip selected" : "hub-chip"
+                  }
                 >
                   Awaiting verification
-                </button>
-              </div>
+                </Toggle>
+              </ToggleGroup>
 
               <div className="binder-cards">
                 {visible.map((row) => {

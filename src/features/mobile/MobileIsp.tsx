@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -368,23 +369,24 @@ function EntryForm({
               {task.instructions && (
                 <p className="msh-task-instructions">{task.instructions}</p>
               )}
-              <div className="msh-segmented" role="group" aria-label={`Score for ${task.title}`}>
+              <ToggleGroup
+                className="msh-segmented"
+                aria-label={`Score for ${task.title}`}
+                value={draft?.levelId ? [draft.levelId] : []}
+                onValueChange={(next) =>
+                  setScore(task.id, { levelId: next[0] ?? "" })
+                }
+              >
                 {levels.map((level) => (
-                  <button
+                  <Toggle
                     key={level.id}
-                    type="button"
-                    className={draft?.levelId === level.id ? "active" : ""}
-                    aria-pressed={draft?.levelId === level.id}
-                    onClick={() =>
-                      setScore(task.id, {
-                        levelId: draft?.levelId === level.id ? "" : level.id,
-                      })
-                    }
+                    value={level.id}
+                    className={({ pressed }) => (pressed ? "active" : "")}
                   >
                     {level.caption}
-                  </button>
+                  </Toggle>
                 ))}
-              </div>
+              </ToggleGroup>
               <label className="msh-field">
                 <span>Comment for this task</span>
                 <input
