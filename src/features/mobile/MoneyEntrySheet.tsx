@@ -1,5 +1,10 @@
 import { useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   Fuel,
   HeartPulse,
   ShoppingBasket,
@@ -249,16 +254,14 @@ export default function MoneyEntrySheet({
             </label>
           </div>
 
-          <button
-            type="button"
-            className="mq-more-toggle"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((open) => !open)}
+          <Collapsible
+            open={moreOpen}
+            onOpenChange={(next) => setMoreOpen(next)}
           >
+          <CollapsibleTrigger className="mq-more-toggle">
             More details {moreOpen ? "▴" : "▾"}
-          </button>
-          {moreOpen && (
-            <div className="mq-more">
+          </CollapsibleTrigger>
+          <CollapsiblePanel className="mq-more">
               <label className="msh-field">
                 <span>Date</span>
                 <input
@@ -298,8 +301,8 @@ export default function MoneyEntrySheet({
                   </span>
                 )}
               </label>
-            </div>
-          )}
+          </CollapsiblePanel>
+          </Collapsible>
 
           {error && (
             <p className="msh-alert" role="alert">

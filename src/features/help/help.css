@@ -66,3 +66,29 @@
   line-height: 1.55;
   color: var(--color-h-4a4036);
 }
+
+/* UI SDK slice 8: the FAQ disclosure is now a Collapsible; these rules
+   reproduce the old <summary> styling on the trigger button, including
+   the +/– glyph that keyed off [open] (now the root's [data-open]). */
+.help-faq [data-slot="collapsible-trigger"] {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+.help-faq [data-slot="collapsible-trigger"]::before {
+  content: "+";
+  margin-right: 10px;
+  font-weight: 700;
+  color: var(--color-h-6f815c);
+}
+.help-faq[data-open] [data-slot="collapsible-trigger"]::before {
+  content: "–";
+}

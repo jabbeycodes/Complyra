@@ -9,6 +9,11 @@
  */
 import { useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   AlertTriangle,
   BadgeCheck,
   BellOff,
@@ -229,6 +234,12 @@ export default function NotificationsPanel({
             const expanded = expandedGroups.has(group.key);
             return (
               <li key={group.key} className="notif-group">
+                <Collapsible
+                  open={expanded}
+                  onOpenChange={(next) => {
+                    if (next !== expanded) toggleGroup(group.key);
+                  }}
+                >
                 <div className={`notif-row notif-group-head${group.unreadCount > 0 ? " unread" : ""}`}>
                   <button
                     type="button"
@@ -258,23 +269,21 @@ export default function NotificationsPanel({
                       ×{group.rows.length}
                     </span>
                   </button>
-                  <button
-                    type="button"
+                  <CollapsibleTrigger
                     className="notif-group-toggle"
-                    aria-expanded={expanded}
                     aria-label={expanded ? "Hide the individual notices" : `Show all ${group.rows.length} notices`}
-                    onClick={() => toggleGroup(group.key)}
                   >
                     {expanded ? "Hide" : "Show all"}
-                  </button>
+                  </CollapsibleTrigger>
                 </div>
-                {expanded && (
+                <CollapsiblePanel>
                   <ul className="notif-group-members">
                     {group.rows.map((n) => (
                       <li key={n.id}>{renderRow(n)}</li>
                     ))}
                   </ul>
-                )}
+                </CollapsiblePanel>
+                </Collapsible>
               </li>
             );
           })}

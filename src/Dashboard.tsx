@@ -6,6 +6,11 @@ import Consents from "./features/consents/Consents";
 import CareScreeningAttention from "./features/CareScreeningAttention";
 import { useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   ArrowUpRight,
   ArrowRight,
   ShieldCheck,
@@ -352,12 +357,10 @@ export default function Dashboard({
         <StatusMixDonut items={scopedItems} includesConsents={agency.includesConsents} />
       </section>}
       {canReadRequirements && <section className="panel agency-hero" data-tour="command-center">
-        <button
-          type="button"
+        <Collapsible open={sitesOpen} onOpenChange={(open) => setSitesOpen(open)}>
+        <CollapsibleTrigger
           className="agency-hero-toggle"
-          aria-expanded={sitesOpen}
           aria-controls="site-compliance-grid"
-          onClick={() => setSitesOpen((open) => !open)}
         >
           <div className="agency-hero-copy">
             <h2>Agency compliance</h2>
@@ -375,12 +378,11 @@ export default function Dashboard({
             {sitesOpen ? "Hide site scores" : "View program site scores"}{" "}
             <ChevronRight size={16} />
           </span>
-        </button>
+        </CollapsibleTrigger>
         <div className="agency-hero-bar" aria-hidden="true">
           <span style={{ width: `${agency.assessed ? agency.score : 0}%` }} />
         </div>
-        {sitesOpen && (
-          <div className="site-score-block" id="site-compliance-grid">
+        <CollapsiblePanel className="site-score-block" id="site-compliance-grid">
             <div className="panel-heading site-score-heading">
               <div>
                 <h3>Program site compliance</h3>
@@ -478,8 +480,8 @@ export default function Dashboard({
                 text="When you are assigned to a home, its compliance score will show here."
               />
             )}
-          </div>
-        )}
+        </CollapsiblePanel>
+        </Collapsible>
       </section>}
       <section className="panel personal-queue">
         <div className="panel-heading">

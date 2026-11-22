@@ -32,6 +32,11 @@
  * exactly as before.
  */
 import { useEffect, useMemo, useState } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { ChevronDown, ChevronRight, FolderOpen, Settings2 } from "lucide-react";
 import { useData } from "../../data/DataProvider";
 import { todayIso } from "../../data/chart";
@@ -575,24 +580,29 @@ function BoardCard({
           "Nothing outstanding"
         )}
       </div>
+      <Collapsible
+        className="binder-person-collapsible"
+        open={expanded}
+        onOpenChange={(next) => {
+          if (next !== expanded) onToggle();
+        }}
+      >
       <div className="binder-person-actions">
         {!readOnly && (
-          <button
+          <CollapsibleTrigger
             className="hub-btn"
-            aria-expanded={expanded}
-            onClick={onToggle}
             disabled={gaps.length === 0}
           >
             {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
             Chase list
-          </button>
+          </CollapsibleTrigger>
         )}
         <button className="hub-btn primary" onClick={onOpenBinder}>
           <FolderOpen size={15} /> Open binder
         </button>
       </div>
-      {expanded && !readOnly && (
-        <div className="binder-board-chase">
+      {!readOnly && (
+        <CollapsiblePanel className="binder-board-chase">
           <div className="binder-board-chase-head">
             <strong>
               {gaps.length} item{gaps.length === 1 ? "" : "s"} to chase
@@ -611,8 +621,9 @@ function BoardCard({
               </li>
             ))}
           </ul>
-        </div>
+        </CollapsiblePanel>
       )}
+      </Collapsible>
     </article>
   );
 }

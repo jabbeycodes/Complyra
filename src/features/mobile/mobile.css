@@ -2343,3 +2343,16 @@
 .ql-notes-form {
   padding-bottom: 96px;
 }
+
+/* UI SDK slice 8: Collapsible roots inside .msh-row-main stay layout-inert
+   (the trigger remains a direct flex item of the row, as the hand-rolled
+   button was), and the panel reproduces the row's flex rhythm for the
+   record fragments it wraps. */
+.msh-row-main [data-slot="collapsible"] {
+  display: contents;
+}
+.msh-row-main [data-slot="collapsible-panel"] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

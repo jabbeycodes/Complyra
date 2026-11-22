@@ -5,6 +5,11 @@
  * delegations, mileage, weekly checklists, certificates, documents), an FAQ,
  * and where to get support. Plain Complyrer wording; English only.
  */
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { PageHeading } from "../../components";
 import { sectionClickHandler } from "../sectionLinks";
 import "./help.css";
@@ -178,10 +183,12 @@ export default function HelpPage({
       <section id="help-faq" className="panel" aria-label="Frequently asked questions">
         <h2>Frequently asked questions</h2>
         {FAQS.map((faq, i) => (
-          <details key={i} className="help-faq">
-            <summary>{faq.q}</summary>
-            <p>{faq.a}</p>
-          </details>
+          <Collapsible key={i} className="help-faq">
+            <CollapsibleTrigger>{faq.q}</CollapsibleTrigger>
+            <CollapsiblePanel keepMounted>
+              <p>{faq.a}</p>
+            </CollapsiblePanel>
+          </Collapsible>
         ))}
       </section>
       <section id="help-support" className="panel" aria-label="Where to get support">

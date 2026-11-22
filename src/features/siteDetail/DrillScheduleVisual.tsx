@@ -1,5 +1,10 @@
 import { useState } from "react";
 import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
+import {
   Activity,
   CalendarClock,
   CalendarDays,
@@ -144,12 +149,10 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
 
   return (
     <li className={`dsv-drill${done ? " dsv-drill-done" : ""}${state.late ? " dsv-drill-late" : ""}`}>
-      <button
-        type="button"
+      <Collapsible open={open} onOpenChange={(next) => setOpen(next)}>
+      <CollapsibleTrigger
         className="dsv-drill-toggle"
-        aria-expanded={open}
         aria-controls={detailId}
-        onClick={() => setOpen((v) => !v)}
       >
         <span className="dsv-drill-icon" aria-hidden="true">
           <DrillIcon size={17} />
@@ -174,9 +177,8 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
             className={`dsv-chevron${open ? " dsv-chevron-open" : ""}`}
           />
         </span>
-      </button>
-      {open && (
-        <div id={detailId} className="dsv-drill-detail">
+      </CollapsibleTrigger>
+      <CollapsiblePanel id={detailId} className="dsv-drill-detail">
           {record ? (
             <dl className="dsv-facts">
               <div>
@@ -224,8 +226,8 @@ export function DrillRow({ state }: { state: ScheduledDrillState }) {
           ) : (
             <p className="dsv-drill-empty">Not logged for this month yet.</p>
           )}
-        </div>
-      )}
+      </CollapsiblePanel>
+      </Collapsible>
     </li>
   );
 }

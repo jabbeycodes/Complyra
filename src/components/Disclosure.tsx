@@ -1,4 +1,9 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger,
+} from "@ui-sdk/react/collapsible";
 import { ChevronDown } from "lucide-react";
 
 /**
@@ -13,6 +18,15 @@ import { ChevronDown } from "lucide-react";
  * toggles `aria-expanded`, and points at the region via `aria-controls`. Focus
  * order is preserved because the panel follows the trigger in the DOM. Secondary
  * groups default to collapsed per the craft brief.
+ *
+ * UI SDK slice 8: the internals ride @ui-sdk/react's Collapsible. The panel
+ * uses `keepMounted` so it stays mounted and `hidden` while closed, exactly
+ * as the hand-rolled version behaved (panel content — e.g. the Appointments
+ * secondary filter controls — never unmounts). The panel id and the
+ * trigger's `aria-controls` are passed explicitly so the wiring is present
+ * in the rendered markup exactly as before; the root's `is-open` class is
+ * derived from the Collapsible state so the caret rotation rule in
+ * styles.css keeps working unchanged.
  */
 export default function Disclosure({
   label,
@@ -30,24 +44,29 @@ export default function Disclosure({
   summary?: string;
   className?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
   const panelId = useId();
   return (
-    <div className={`disclosure${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}>
-      <button
-        type="button"
+    <Collapsible
+      defaultOpen={defaultOpen}
+      className={(state) =>
+        `disclosure${state.open ? " is-open" : ""}${className ? ` ${className}` : ""}`
+      }
+    >
+      <CollapsibleTrigger
         className="disclosure-trigger"
-        aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((prev) => !prev)}
       >
         <ChevronDown size={16} className="disclosure-caret" aria-hidden="true" />
         <span className="disclosure-label">{label}</span>
         {summary ? <span className="disclosure-summary">{summary}</span> : null}
-      </button>
-      <div id={panelId} className="disclosure-panel" hidden={!open}>
+      </CollapsibleTrigger>
+      <CollapsiblePanel
+        id={panelId}
+        keepMounted
+        className="disclosure-panel"
+      >
         {children}
-      </div>
-    </div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }
