@@ -1162,8 +1162,6 @@ export default function MobileMar({
             const v = next[0];
             if (!v) return;
             setTab(v as MarTab);
-            setAdminister(null);
-            setRefillMed(null);
           }}
         >
           {(
@@ -1177,6 +1175,13 @@ export default function MobileMar({
               key={value}
               value={value}
               className={({ pressed }) => (pressed ? "active" : "")}
+              // Dismiss the open sheets on every tab press — including a
+              // re-press of the active tab, which deselectable={false} keeps
+              // out of onValueChange.
+              onClick={() => {
+                setAdminister(null);
+                setRefillMed(null);
+              }}
             >
               {label}
             </Toggle>
