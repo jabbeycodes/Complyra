@@ -25,6 +25,7 @@ import { deliveryHistoryLabel } from "../../data/medInventory";
 import { MED_ADMIN_CLEARANCE_MESSAGE } from "../../data/medClearance";
 import { canSeeConsents, type ConsentRegister } from "../../data/consents";
 import { MedConsentWarning } from "../consents/MedConsentWarning";
+import { AppSelect } from "../../components/AppSelect";
 import { useMedAdminLock } from "../medAdminLock";
 import { formatPillCount, medCountdown, type MedCountdown } from "./medcount";
 import MobilePeopleList, { PersonAvatar } from "./MobilePeopleList";
@@ -277,22 +278,17 @@ function AdministerForm({
 
       <label className="msh-field">
         <span>Record type</span>
-        <select
+        <AppSelect
           value={recordType}
-          onChange={(event) =>
-            setRecordType(event.target.value as RecordChoice)
-          }
-        >
-          {RECORD_GROUPS.map((group) => (
-            <optgroup key={group.legend} label={group.legend}>
-              {group.choices.map((choice) => (
-                <option key={choice.value} value={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          onChange={(next) => setRecordType(next as RecordChoice)}
+          options={RECORD_GROUPS.map((group) => ({
+            label: group.legend,
+            options: group.choices.map((choice) => ({
+              value: choice.value,
+              label: choice.label,
+            })),
+          }))}
+        />
       </label>
 
       {isException && (

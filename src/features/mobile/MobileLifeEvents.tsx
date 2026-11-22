@@ -7,6 +7,7 @@ import {
   type LifeEventView,
 } from "../../data/lifeEvents";
 import { canRecordLifeEvents } from "../../data/permissions";
+import { AppSelect } from "../../components/AppSelect";
 import { PersonHeader } from "./MobileMar";
 import MobileSheet from "./MobileSheet";
 import { groupLifeEventsByYear } from "./chartSections";
@@ -194,18 +195,16 @@ function LifeEventSheet({
           </label>
           <label className="msh-field">
             <span>Category</span>
-            <select
+            <AppSelect
               value={draft.category}
-              onChange={(event) =>
-                setDraft({ ...draft, category: event.target.value })
+              onChange={(next) =>
+                setDraft({ ...draft, category: next })
               }
-            >
-              {LIFE_EVENT_CATEGORIES.map((category) => (
-                <option key={category.key} value={category.key}>
-                  {category.label}
-                </option>
-              ))}
-            </select>
+              options={LIFE_EVENT_CATEGORIES.map((category) => ({
+                value: category.key,
+                label: category.label,
+              }))}
+            />
           </label>
           <label className="msh-field">
             <span>Title</span>

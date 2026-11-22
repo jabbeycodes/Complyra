@@ -11,6 +11,7 @@ import {
   type MessageThreadView,
 } from "../../data/messaging";
 import { canUseMessaging } from "../../data/permissions";
+import { AppSelect } from "../../components/AppSelect";
 import {
   addableContacts,
   canSendReply,
@@ -306,17 +307,17 @@ export default function MobileMessages({
             </p>
             <label className="msh-field">
               <span>Staff member</span>
-              <select
+              <AppSelect
                 value={addUserId}
-                onChange={(event) => setAddUserId(event.target.value)}
-              >
-                <option value="">Choose a staff member…</option>
-                {addable.map((contact) => (
-                  <option key={contact.userId} value={contact.userId}>
-                    {contact.fullName} — {contact.roleLabel}
-                  </option>
-                ))}
-              </select>
+                onChange={(next) => setAddUserId(next)}
+                options={[
+                  { value: "", label: "Choose a staff member…" },
+                  ...addable.map((contact) => ({
+                    value: contact.userId,
+                    label: `${contact.fullName} — ${contact.roleLabel}`,
+                  })),
+                ]}
+              />
             </label>
             <button
               type="submit"
@@ -419,17 +420,17 @@ export default function MobileMessages({
           </label>
           <label className="msh-field">
             <span>About an Individual (optional)</span>
-            <select
+            <AppSelect
               value={individualId}
-              onChange={(event) => setIndividualId(event.target.value)}
-            >
-              <option value="">Not linked to an Individual</option>
-              {individuals.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.name}
-                </option>
-              ))}
-            </select>
+              onChange={(next) => setIndividualId(next)}
+              options={[
+                { value: "", label: "Not linked to an Individual" },
+                ...individuals.map((person) => ({
+                  value: person.id,
+                  label: person.name,
+                })),
+              ]}
+            />
           </label>
           <label className="msh-field">
             <span>First message</span>

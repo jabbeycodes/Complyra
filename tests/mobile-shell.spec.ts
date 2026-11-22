@@ -104,8 +104,16 @@ test("mobile shell: home picker, role tiles, and the MAR pass flow", async ({
   await expect(page.getByText("Scheduled time")).toBeVisible();
   await expect(page.getByText("Administered by")).toBeVisible();
   const recordType = page.getByLabel("Record type");
-  await expect(recordType).toHaveValue("given");
-  await expect(recordType.locator("option")).toHaveCount(7);
+  await expect(recordType).toContainText("Given");
+  await recordType.click();
+  const recordList = page.locator(".app-select-popup");
+  await expect(recordList.getByRole("option")).toHaveCount(7);
+  await expect(recordList.locator(".app-select-group-label")).toHaveText([
+    "Dose marks",
+    "Exceptions",
+  ]);
+  await page.keyboard.press("Escape");
+  await expect(recordList).toBeHidden();
   const save = page.getByRole("button", { name: "Save record" });
   await expect(save).toBeDisabled();
   await page
@@ -134,8 +142,13 @@ test("mobile MAR: a Refused record needs a reason and lands on the Other tab", a
   // Picking the Refused exception from the Record type dropdown reveals the
   // required reason; confirming the time alone does not enable the save.
   const recordType = page.getByLabel("Record type");
-  await expect(recordType).toHaveValue("given");
-  await recordType.selectOption("refused");
+  await expect(recordType).toContainText("Given");
+  await recordType.click();
+  await page
+    .locator(".app-select-popup")
+    .getByRole("option", { name: "Refused" })
+    .click();
+  await expect(recordType).toContainText("Refused");
   const save = page.getByRole("button", { name: "Save record" });
   const reason = page.getByLabel(/Reason \(required\)/);
   await expect(reason).toBeVisible();
@@ -525,7 +538,13 @@ test("mobile home: a Refused exception does NOT move the donut, and home refresh
   await page.getByRole("button", { name: /Ellis Hart/ }).click();
   await page.getByRole("button", { name: /8:00 AM/ }).click();
   await page.getByRole("button", { name: /Levetiracetam/ }).click();
-  await page.getByLabel("Record type").selectOption("refused");
+  const recordTypeHome = page.getByLabel("Record type");
+  await recordTypeHome.click();
+  await page
+    .locator(".app-select-popup")
+    .getByRole("option", { name: "Refused" })
+    .click();
+  await expect(recordTypeHome).toContainText("Refused");
   await page
     .getByLabel(/Reason \(required\)/)
     .fill("Refused the morning dose and spat out the tablet.");

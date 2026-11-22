@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import type { ComplyraApi, WorkspaceView } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import { openPrintable } from "../../data/openFile";
+import { AppSelect } from "../../components/AppSelect";
 import { centralTodayIso } from "./mar";
 import { monthKeyFrom } from "../../data/monthlyChecks";
 import {
@@ -257,59 +258,71 @@ function ReportScopeForm({
       {has("site") && (
         <label className="msh-field">
           <span>Home</span>
-          <select value={siteId} onChange={(event) => setSiteId(event.target.value)}>
-            {siteOptional && <option value="">All homes</option>}
-            {sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
+          <AppSelect
+            value={siteId}
+            onChange={(next) => setSiteId(next)}
+            options={[
+              ...(siteOptional
+                ? [{ value: "", label: "All homes" }]
+                : []),
+              ...sites.map((site) => ({
+                value: site.id,
+                label: site.name,
+              })),
+            ]}
+          />
         </label>
       )}
       {has("individual") && (
         <label className="msh-field">
           <span>Individual</span>
-          <select
+          <AppSelect
             value={individualId}
-            onChange={(event) => setIndividualId(event.target.value)}
-          >
-            {individuals.length === 0 && <option value="">No Individuals in this home</option>}
-            {individuals.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => setIndividualId(next)}
+            options={[
+              ...(individuals.length === 0
+                ? [{ value: "", label: "No Individuals in this home" }]
+                : []),
+              ...individuals.map((person) => ({
+                value: person.id,
+                label: person.name,
+              })),
+            ]}
+          />
         </label>
       )}
       {has("staff") && (
         <label className="msh-field">
           <span>Staff member</span>
-          <select
+          <AppSelect
             value={staffUserId}
-            onChange={(event) => setStaffUserId(event.target.value)}
-          >
-            <option value="">Choose a staff member</option>
-            {workspace.staff.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.name} · {member.role}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => setStaffUserId(next)}
+            options={[
+              { value: "", label: "Choose a staff member" },
+              ...workspace.staff.map((member) => ({
+                value: member.id,
+                label: `${member.name} · ${member.role}`,
+              })),
+            ]}
+          />
         </label>
       )}
       {has("record") && (
         <label className="msh-field">
           <span>{recordLabel}</span>
-          <select value={recordId} onChange={(event) => setRecordId(event.target.value)}>
-            {recordOptions.length === 0 && <option value="">Nothing on file yet</option>}
-            {recordOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <AppSelect
+            value={recordId}
+            onChange={(next) => setRecordId(next)}
+            options={[
+              ...(recordOptions.length === 0
+                ? [{ value: "", label: "Nothing on file yet" }]
+                : []),
+              ...recordOptions.map((option) => ({
+                value: option.id,
+                label: option.label,
+              })),
+            ]}
+          />
         </label>
       )}
       {has("month") && (

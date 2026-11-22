@@ -21,6 +21,7 @@ import {
   HEALTH_KIND_FIELDS,
 } from "../healthTrack/kindFields";
 import { centralTodayIso, formatIsoDay } from "./mar";
+import { AppSelect } from "../../components/AppSelect";
 import {
   healthHomeStatuses,
   healthKindLabel,
@@ -466,19 +467,19 @@ function HealthLogSheet({
             field.type === "select" ? (
               <label key={field.key} className="msh-field">
                 <span>{field.label}</span>
-                <select
+                <AppSelect
                   value={details[field.key] ?? ""}
-                  onChange={(event) =>
-                    setDetails({ ...details, [field.key]: event.target.value })
+                  onChange={(next) =>
+                    setDetails({ ...details, [field.key]: next })
                   }
-                >
-                  <option value="">—</option>
-                  {(field.options ?? []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: "—" },
+                    ...(field.options ?? []).map((option) => ({
+                      value: option,
+                      label: option,
+                    })),
+                  ]}
+                />
               </label>
             ) : (
               <label key={field.key} className="msh-field">
