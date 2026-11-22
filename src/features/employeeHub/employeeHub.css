@@ -1576,10 +1576,14 @@
 
 /* UI SDK slice 8: the Collapsible root wrapping a binder card's actions +
    chase panel reproduces the card's own flex rhythm, so the actions row
-   and the chase panel keep the article's 10px gap. */
+   and the chase panel keep the article's 10px gap. margin-top: auto absorbs
+   extra height on stretched grid cards, pinning the actions row to the bottom
+   so Chase list / Open binder align across a row (as .binder-person-actions
+   did before it was nested inside this wrapper). */
 .binder-person-collapsible {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  margin-top: auto;
 }
