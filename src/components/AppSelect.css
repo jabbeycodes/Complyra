@@ -1,0 +1,87 @@
+/* AppSelect (UI SDK slice 11 pilot). The trigger reproduces the global
+   native-select declarations (.tabs select / .list-controls select /
+   .filter-right select in styles.css) declaration-for-declaration; the
+   global rules are not edited. The popup follows the app's existing
+   popup language (.search-results / SuggestionInput). */
+
+.app-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-h-eceae6);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  color: var(--color-h-4a4036);
+  /* Native selects compute cursor: default and a 36px box at this
+     padding/font; the global button rule would give pointer + 34px. */
+  cursor: default;
+  min-height: 36px;
+  text-align: left;
+}
+
+/* The native control sizes to its widest option; the stack keeps the
+   trigger that wide whichever option is selected. The sizer is
+   visibility:hidden, so it never paints or enters innerText. */
+.app-select-value-stack {
+  display: grid;
+}
+
+.app-select-value-stack > * {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+
+.app-select-sizer {
+  visibility: hidden;
+}
+
+/* The FilterBar override: .filter-right select computes 12px. */
+.filter-right .app-select-trigger {
+  font-size: 12px;
+}
+
+/* Native select:focus ring, replacing the global button focus ring. */
+.app-select-trigger:focus {
+  outline: 2px solid var(--color-h-c5cfb6);
+  outline-offset: 2px;
+}
+
+/* Buttons get a global hover brightness; native selects do not. */
+.app-select-trigger:hover {
+  filter: none;
+}
+
+.app-select-popup {
+  z-index: 60;
+  min-width: var(--anchor-width);
+  max-width: min(440px, var(--available-width));
+  max-height: min(264px, var(--available-height));
+  overflow-y: auto;
+  background: var(--color-h-ffffff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 45px var(--color-h-39513320);
+  padding: 6px;
+}
+
+.app-select-option {
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.app-select-option[data-highlighted] {
+  background: var(--color-h-f9f8f7);
+}
+
+.app-select-option[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
