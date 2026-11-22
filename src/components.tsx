@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import type { Requirement, Status } from "./domain";
+import { AppSelect } from "./components/AppSelect";
 export function Badge({ status }: { status: string }) {
   return (
     <span className={`badge ${status.toLowerCase().replaceAll(" ", "-")}`}>
@@ -296,12 +297,11 @@ export function FilterBar({
       <div className="filter-right">
         <span>{count} results</span>
         <SlidersHorizontal size={16} />
-        <select
-          aria-label="Filter by status"
+        <AppSelect
+          ariaLabel="Filter by status"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          {(
+          onChange={setStatus}
+          options={
             statuses ?? [
               "All statuses",
               "Compliant",
@@ -311,10 +311,8 @@ export function FilterBar({
               "Expired",
               "Pending review",
             ]
-          ).map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
+          }
+        />
       </div>
     </div>
   );
