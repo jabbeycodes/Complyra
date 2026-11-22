@@ -48,8 +48,10 @@
   outline-offset: 2px;
 }
 
-/* Buttons get a global hover brightness; native selects do not. */
-.app-select-trigger:hover {
+/* Buttons get a global hover brightness; native selects do not. The
+   :not(:disabled) matches the global button:hover:not(:disabled)
+   specificity so this override actually wins. */
+.app-select-trigger:hover:not(:disabled) {
   filter: none;
 }
 
