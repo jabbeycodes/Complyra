@@ -11,9 +11,7 @@ import {
   LibraryBig,
   ListChecks,
   ListTodo,
-  LogOut,
   MessageSquare,
-  Monitor,
   Search,
   Users,
   Wallet,
@@ -40,6 +38,7 @@ import {
 } from "./bottomNav";
 import BottomNavPill from "./BottomNavPill";
 import MobileSheet from "./MobileSheet";
+import MobileAccountMenu from "./MobileAccountMenu";
 import {
   centralHour,
   greetingForHour,
@@ -533,69 +532,19 @@ export default function MobileShell({
             )}
           </button>
           <div className="msh-avatar-wrap">
-            <button
-              type="button"
-              className="msh-avatar-button"
-              aria-label={`Account menu for ${session.fullName}`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((value) => !value)}
-            >
-              {initialsOf(session.fullName)}
-            </button>
-            {menuOpen && (
-              <>
-                <button
-                  type="button"
-                  className="msh-menu-backdrop"
-                  aria-label="Close account menu"
-                  onClick={() => setMenuOpen(false)}
-                />
-                <div className="msh-menu" role="menu">
-                  <p className="msh-menu-head">
-                    <strong>{session.fullName}</strong>
-                    <small>
-                      {roleLabel(session.roleKey, session.jobTitle)} ·{" "}
-                      {session.agencyName}
-                    </small>
-                  </p>
-                  {/* Batch 59: no Switch home when there is only one
-                      home to switch to. */}
-                  {sites.length > 1 && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setView("sites");
-                    }}
-                  >
-                    Switch home
-                  </button>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onDesktopView({ view, siteId: scopedSite?.id ?? null });
-                    }}
-                  >
-                    <Monitor size={17} aria-hidden="true" /> Desktop view
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onSignOut();
-                    }}
-                  >
-                    <LogOut size={17} aria-hidden="true" /> Sign out
-                  </button>
-                </div>
-              </>
-            )}
+            <MobileAccountMenu
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              fullName={session.fullName}
+              initials={initialsOf(session.fullName)}
+              roleLine={`${roleLabel(session.roleKey, session.jobTitle)} · ${session.agencyName}`}
+              canSwitchHome={sites.length > 1}
+              onSwitchHome={() => setView("sites")}
+              onDesktopView={() =>
+                onDesktopView({ view, siteId: scopedSite?.id ?? null })
+              }
+              onSignOut={onSignOut}
+            />
           </div>
         </div>
       </header>

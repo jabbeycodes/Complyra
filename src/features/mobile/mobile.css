@@ -133,6 +133,22 @@
   flex-direction: column;
 }
 
+/* Slice 6 (UI SDK Menu): the SDK renders the content in place but
+   as a top-layer popover, which changes three computed values vs
+   the hand-rolled in-flow menu: the UA popover stylesheet paints
+   the element's own text color (canvastext) instead of the
+   inherited shell color and gives it a medium solid border the
+   old menu never had, and anchored sizing resolves the
+   shrink-to-fit width to the content's preferred width instead
+   of the 248px min-width floor the wrap-constrained absolute
+   menu computed to. Pin all three back to the pre-migration
+   values. */
+.msh-menu[data-slot="menu-content"] {
+  color: var(--text);
+  border: 0;
+  max-width: 248px;
+}
+
 .msh-menu-head {
   margin: 0;
   padding: 10px 12px;
