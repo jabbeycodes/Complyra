@@ -686,12 +686,12 @@ describe("Choice migration (slice 9)", () => {
     const { container, root } = await mount(<Picker />);
     const [u1, u2] = buttons(container);
     assert.equal(u1.className, "msh-row msh-sched-pick selected");
-    assert.ok(u1.textContent.includes("Selected"));
-    assert.ok(u2.textContent.includes("Overlaps another shift"));
+    assert.ok((u1.textContent ?? "").includes("Selected"));
+    assert.ok((u2.textContent ?? "").includes("Overlaps another shift"));
     await click(u2);
     assert.equal(u2.className, "msh-row msh-sched-pick selected");
-    assert.ok(u2.textContent.includes("Selected"));
-    assert.ok(!u1.textContent.includes("Selected"));
+    assert.ok((u2.textContent ?? "").includes("Selected"));
+    assert.ok(!(u1.textContent ?? "").includes("Selected"));
     await unmount(root, container);
   });
 
@@ -700,17 +700,17 @@ describe("Choice migration (slice 9)", () => {
       <OneTimeSecret value="temp-pass-123" />,
     );
     const toggle = buttons(container).find((b) =>
-      /Show|Hide/.test(b.textContent),
+      /Show|Hide/.test(b.textContent ?? ""),
     )!;
     assert.equal(toggle.getAttribute("aria-pressed"), "false");
-    assert.ok(toggle.textContent.includes("Show"));
-    assert.ok(!container.textContent.includes("temp-pass-123"), "masked");
+    assert.ok((toggle.textContent ?? "").includes("Show"));
+    assert.ok(!(container.textContent ?? "").includes("temp-pass-123"), "masked");
     await click(toggle);
     assert.equal(toggle.getAttribute("aria-pressed"), "true");
-    assert.ok(toggle.textContent.includes("Hide"));
-    assert.ok(container.textContent.includes("temp-pass-123"), "revealed");
+    assert.ok((toggle.textContent ?? "").includes("Hide"));
+    assert.ok((container.textContent ?? "").includes("temp-pass-123"), "revealed");
     await click(toggle);
-    assert.ok(!container.textContent.includes("temp-pass-123"), "re-masked");
+    assert.ok(!(container.textContent ?? "").includes("temp-pass-123"), "re-masked");
     await unmount(root, container);
   });
 });
