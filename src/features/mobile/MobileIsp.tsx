@@ -19,6 +19,7 @@ import {
   canSeeShiftNotes,
 } from "../../data/permissions";
 import SignatureAdoption from "../signatures/SignatureAdoption";
+import { AppSelect } from "../../components/AppSelect";
 import { useIspData } from "../isp/useIspData";
 import MobilePeopleList from "./MobilePeopleList";
 import MobileSiteNotes from "./MobileSiteNotes";
@@ -284,10 +285,9 @@ function EntryForm({
         </label>
         <label className="msh-field">
           <span>Shift</span>
-          <select
+          <AppSelect
             value={shift}
-            onChange={(event) => {
-              const next = event.target.value;
+            onChange={(next) => {
               setShift(next);
               if (!initial) {
                 const clocks = clocksFromShiftLabel(next);
@@ -297,13 +297,11 @@ function EntryForm({
                 }
               }
             }}
-          >
-            {shiftOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            options={shiftOptions.map((option) => ({
+              value: option,
+              label: option,
+            }))}
+          />
         </label>
         <div className="msh-field-pair">
           <label className="msh-field">
@@ -343,16 +341,14 @@ function EntryForm({
         </label>
         <label className="msh-field">
           <span>Waiver service</span>
-          <select
+          <AppSelect
             value={waiverService}
-            onChange={(event) => setWaiverService(event.target.value)}
-          >
-            {waiverServiceNames().map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => setWaiverService(next)}
+            options={waiverServiceNames().map((name) => ({
+              value: name,
+              label: name,
+            }))}
+          />
         </label>
       </section>
 

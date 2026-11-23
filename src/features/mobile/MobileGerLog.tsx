@@ -12,6 +12,7 @@ import {
   type GerSeverity,
 } from "../../data/ger";
 import { centralNowHhmm, centralTodayIso, formatIsoDay } from "./mar";
+import { AppSelect } from "../../components/AppSelect";
 import {
   GER_STATUS_LABELS,
   newGerDraft,
@@ -300,17 +301,15 @@ function GerReportForm({
       >
         <label className="msh-field">
           <span>Individual</span>
-          <select
+          <AppSelect
             value={draft.individualId}
-            onChange={(event) => set({ individualId: event.target.value })}
+            onChange={(next) => set({ individualId: next })}
             required
-          >
-            {people.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
+            options={people.map((person) => ({
+              value: person.id,
+              label: person.name,
+            }))}
+          />
         </label>
         <fieldset className="msh-fieldset">
           <legend>Other Individuals involved (optional)</legend>
@@ -352,33 +351,29 @@ function GerReportForm({
         <div className="msh-field-pair">
           <label className="msh-field">
             <span>Event type</span>
-            <select
+            <AppSelect
               value={draft.eventType}
-              onChange={(event) =>
-                set({ eventType: event.target.value as GerEventType })
+              onChange={(next) =>
+                set({ eventType: next as GerEventType })
               }
-            >
-              {GER_EVENT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
+              options={GER_EVENT_TYPES.map((type) => ({
+                value: type,
+                label: type,
+              }))}
+            />
           </label>
           <label className="msh-field">
             <span>Severity</span>
-            <select
+            <AppSelect
               value={draft.severity}
-              onChange={(event) =>
-                set({ severity: event.target.value as GerSeverity })
+              onChange={(next) =>
+                set({ severity: next as GerSeverity })
               }
-            >
-              {GER_SEVERITIES.map((severity) => (
-                <option key={severity} value={severity}>
-                  {severity}
-                </option>
-              ))}
-            </select>
+              options={GER_SEVERITIES.map((severity) => ({
+                value: severity,
+                label: severity,
+              }))}
+            />
           </label>
         </div>
         <label className="msh-field">

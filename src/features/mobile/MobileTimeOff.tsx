@@ -12,6 +12,7 @@ import {
   type LeaveType,
 } from "../../data/hr";
 import { createSupabaseBrowserClient } from "../../data/index";
+import { AppSelect } from "../../components/AppSelect";
 import { emitHrEvent } from "../notifications/useNotifications";
 import {
   timeOffCancelledPayload,
@@ -331,16 +332,14 @@ function RequestForm({
       <strong>Request time off</strong>
       <label className="msh-field">
         <span>Type</span>
-        <select
+        <AppSelect
           value={kind}
-          onChange={(event) => setKind(event.target.value as LeaveType)}
-        >
-          {LEAVE_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {LEAVE_TYPE_LABELS[type]}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => setKind(next as LeaveType)}
+          options={LEAVE_TYPES.map((type) => ({
+            value: type,
+            label: LEAVE_TYPE_LABELS[type],
+          }))}
+        />
       </label>
       <label className="msh-field">
         <span>First day</span>

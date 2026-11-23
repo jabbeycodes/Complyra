@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Wallet } from "lucide-react";
 import { Empty, formatDate } from "../../components";
 import PrintBrandHeader from "../../components/PrintBrandHeader";
+import { AppSelect } from "../../components/AppSelect";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -780,17 +781,17 @@ export default function MobilePersonalSpending({
                       <>
                         <label className="ps-field">
                           <span>Second staff member</span>
-                          <select
+                          <AppSelect
                             value={secondStaffId}
-                            onChange={(e) => setSecondStaffId(e.target.value)}
-                          >
-                            <option value="">Choose one…</option>
-                            {secondStaffChoices.map((member) => (
-                              <option key={member.id} value={member.id}>
-                                {member.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(next) => setSecondStaffId(next)}
+                            options={[
+                              { value: "", label: "Choose one…" },
+                              ...secondStaffChoices.map((member) => ({
+                                value: member.id,
+                                label: member.name,
+                              })),
+                            ]}
+                          />
                         </label>
                         <label className="ps-field">
                           <span>

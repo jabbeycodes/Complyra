@@ -1,9 +1,12 @@
 import {
   Select,
   SelectContent,
+  SelectGroup,
+  SelectGroupLabel,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  type ListData,
 } from "@ui-sdk/react/select";
 import { ChevronDown } from "lucide-react";
 import "./AppSelect.css";
@@ -14,10 +17,21 @@ export type AppSelectOption = {
   disabled?: boolean;
 };
 
+// A labelled group of options — the SDK rendering of a native
+// <optgroup> (slice 11c, for MobileMar's Record type select). Group
+// structure is user-visible semantics, so it is preserved, never
+// flattened into the surrounding list.
+export type AppSelectGroup = {
+  label: string;
+  options: (string | AppSelectOption)[];
+};
+
+export type AppSelectEntry = string | AppSelectOption | AppSelectGroup;
+
 type AppSelectProps = {
   value: string;
   onChange: (next: string) => void;
-  options: (string | AppSelectOption)[];
+  options: AppSelectEntry[];
   ariaLabel?: string;
   className?: string;
   id?: string;
@@ -26,6 +40,14 @@ type AppSelectProps = {
   disabled?: boolean;
   placeholder?: string;
 };
+
+function isGroup(entry: AppSelectEntry): entry is AppSelectGroup {
+  return typeof entry === "object" && "options" in entry;
+}
+
+function normalizeOption(option: string | AppSelectOption): AppSelectOption {
+  return typeof option === "string" ? { value: option, label: option } : option;
+}
 
 // Shared replacement for native <select> (UI SDK slice 11 pilot). The
 // trigger carries the platform's select styling (AppSelect.css); the
@@ -44,12 +66,30 @@ export function AppSelect({
   disabled,
   placeholder,
 }: AppSelectProps) {
-  const normalized: AppSelectOption[] = options.map((option) =>
-    typeof option === "string" ? { value: option, label: option } : option,
+  const flat: AppSelectOption[] = options.flatMap((entry) =>
+    isGroup(entry) ? entry.options.map(normalizeOption) : [normalizeOption(entry)],
+  );
+  // The root items carry the same structure as data so the trigger can
+  // resolve a grouped item's label before the list first opens.
+  const items: ListData = options.map((entry) =>
+    isGroup(entry)
+      ? { type: "group", label: entry.label, items: entry.options.map(normalizeOption) }
+      : normalizeOption(entry),
+  );
+  const renderItem = (option: AppSelectOption) => (
+    <SelectItem
+      key={option.value}
+      value={option.value}
+      label={option.label}
+      disabled={option.disabled}
+      className="app-select-option"
+    >
+      {option.label}
+    </SelectItem>
   );
   return (
     <Select
-      items={normalized}
+      items={items}
       value={value}
       onValueChange={(next) => {
         if (next != null) onChange(next);
@@ -66,7 +106,7 @@ export function AppSelect({
         <span className="app-select-value-stack">
           <SelectValue placeholder={placeholder} />
           <span className="app-select-sizer" aria-hidden="true">
-            {normalized.reduce(
+            {flat.reduce(
               (longest, o) => (o.label.length > longest.length ? o.label : longest),
               "",
             )}
@@ -90,17 +130,18 @@ export function AppSelect({
           event.preventDefault();
         }}
       >
-        {normalized.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            label={option.label}
-            disabled={option.disabled}
-            className="app-select-option"
-          >
-            {option.label}
-          </SelectItem>
-        ))}
+        {options.map((entry) =>
+          isGroup(entry) ? (
+            <SelectGroup key={entry.label} className="app-select-group">
+              <SelectGroupLabel className="app-select-group-label">
+                {entry.label}
+              </SelectGroupLabel>
+              {entry.options.map((option) => renderItem(normalizeOption(option)))}
+            </SelectGroup>
+          ) : (
+            renderItem(normalizeOption(entry))
+          ),
+        )}
       </SelectContent>
     </Select>
   );

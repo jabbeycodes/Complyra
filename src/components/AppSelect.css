@@ -158,3 +158,77 @@
     flex: none;
   }
 }
+
+/* Group headings in the popup (slice 11c): the SDK rendering of a
+   native <optgroup> label — a non-selectable bold heading row in the
+   popup's own type scale. There is no in-page native equivalent to
+   measure against (the OS popup cannot be captured), so the heading
+   follows the popup's option rows: same inset, one step bolder. */
+.app-select-group-label {
+  padding: 9px 10px 3px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Mobile shell (slice 11c) — additive scoped rules; the native rules
+   they mirror in mobile.css / personalSpending.css are untouched. A
+   trigger inside an .msh-field label field reproduces .msh-field
+   select declaration-for-declaration: full width, 50px floor, 10px
+   12px padding, 12px radius, --border edge, white field, 16px/400
+   text in the label's colour. */
+.msh-field .app-select-trigger {
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--white);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+/* The health and shared-entry sheets run their fields a touch taller
+   (.msh-health-sheet / .mq-sheet .msh-field select: min-height 54px). */
+.msh-health-sheet .msh-field .app-select-trigger,
+.mq-sheet .msh-field .app-select-trigger {
+  min-height: 54px;
+}
+
+/* Personal Spending's close-month form: .personal-spending .ps-field
+   select — 40px floor, 8px 10px padding, 6px radius, inherited size
+   at weight 400. */
+.personal-spending .ps-field .app-select-trigger {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--text);
+}
+
+/* Width-capped contexts (the PR #298 CI lesson, applied by design):
+   in .msh-field and .ps-field the native control is capped at every
+   viewport width (width:100% / flex stretch) and the UA clips its
+   text internally. A capped trigger must clip the same way — the
+   value stack shrinks below its widest-label min-content and the
+   chevron holds its size — scoped to exactly these capped contexts
+   so uncapped triggers (FilterBar, desktop hub) keep sizing to
+   their widest label. */
+.msh-field .app-select-value-stack,
+.personal-spending .ps-field .app-select-value-stack {
+  min-width: 0;
+}
+.msh-field .app-select-value-stack > *,
+.personal-spending .ps-field .app-select-value-stack > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msh-field .app-select-trigger > svg,
+.personal-spending .ps-field .app-select-trigger > svg {
+  flex: none;
+}

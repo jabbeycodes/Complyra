@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { formatDate } from "../../components";
+import { AppSelect } from "../../components/AppSelect";
 import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import {
@@ -699,16 +700,14 @@ function MenuLogSheet({
           </label>
           <label className="msh-field">
             <span>Meal</span>
-            <select
+            <AppSelect
               value={mealSlot}
-              onChange={(event) => setMealSlot(event.target.value as MealSlot)}
-            >
-              {MEAL_SLOTS.map((slot) => (
-                <option key={slot} value={slot}>
-                  {mealSlotLabel(slot)}
-                </option>
-              ))}
-            </select>
+              onChange={(next) => setMealSlot(next as MealSlot)}
+              options={MEAL_SLOTS.map((slot) => ({
+                value: slot,
+                label: mealSlotLabel(slot),
+              }))}
+            />
           </label>
           <label className="msh-field">
             <span>Food eaten</span>
@@ -721,18 +720,16 @@ function MenuLogSheet({
           </label>
           <label className="msh-field">
             <span>Amount eaten</span>
-            <select
+            <AppSelect
               value={amountEaten}
-              onChange={(event) =>
-                setAmountEaten(event.target.value as AmountEaten)
+              onChange={(next) =>
+                setAmountEaten(next as AmountEaten)
               }
-            >
-              {AMOUNT_EATEN_OPTIONS.map((amount) => (
-                <option key={amount} value={amount}>
-                  {amountEatenLabel(amount)}
-                </option>
-              ))}
-            </select>
+              options={AMOUNT_EATEN_OPTIONS.map((amount) => ({
+                value: amount,
+                label: amountEatenLabel(amount),
+              }))}
+            />
           </label>
           <label className="msh-field">
             <span>Note (optional)</span>
@@ -1212,16 +1209,17 @@ function DrillLogSheet({
           {needsSleep && (
             <label className="msh-field">
               <span>Awake / sleep</span>
-              <select
+              <AppSelect
                 value={awakeOrSleep}
-                onChange={(event) =>
-                  setAwakeOrSleep(event.target.value as "awake" | "sleep" | "")
+                onChange={(next) =>
+                  setAwakeOrSleep(next as "awake" | "sleep" | "")
                 }
-              >
-                <option value="">Select</option>
-                <option value="awake">Awake</option>
-                <option value="sleep">Sleep</option>
-              </select>
+                options={[
+                  { value: "", label: "Select" },
+                  { value: "awake", label: "Awake" },
+                  { value: "sleep", label: "Sleep" },
+                ]}
+              />
             </label>
           )}
           {error && (

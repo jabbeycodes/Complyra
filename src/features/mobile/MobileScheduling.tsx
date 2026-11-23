@@ -4,6 +4,7 @@ import type { ComplyraApi } from "../../data/localApi";
 import type { SessionUser } from "../../data/types";
 import type { HrShift, HrTimeOffRequest } from "../../data/hr";
 import { createHrStore } from "../../data/hrStore";
+import { AppSelect } from "../../components/AppSelect";
 import { can } from "../../data/status";
 import { canEditSiteReview } from "../../data/siteReview";
 import {
@@ -191,20 +192,18 @@ export default function MobileScheduling({
       {sites.length > 1 ? (
         <label className="msh-field">
           <span>House</span>
-          <select
+          <AppSelect
             value={siteId ?? ""}
-            onChange={(event) => {
-              setSiteId(event.target.value);
+            onChange={(next) => {
+              setSiteId(next);
               setNotice("");
             }}
-            aria-label="House"
-          >
-            {sites.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
+            ariaLabel="House"
+            options={sites.map((row) => ({
+              value: row.id,
+              label: row.name,
+            }))}
+          />
         </label>
       ) : (
         site && <p className="msh-section-note">{site.name} · week coverage</p>
